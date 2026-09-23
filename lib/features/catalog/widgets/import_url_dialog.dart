@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
@@ -137,12 +138,41 @@ class _ImportUrlDialogState extends ConsumerState<ImportUrlDialog> {
     final url = _controller.text.trim();
     if (url.isEmpty) return;
 
-    // JanitorAI links open the catalog card instead of extracting from here:
-    // the card handles the public-vs-closed decision, the Lorebooks tab, and the
-    // toggle-gated local extraction (its Import button). Other hosts keep the
-    // DataCat path below.
-    if (_isJanitorUrl(url)) {
+    // Catalog-hosted links open the catalog card instead of extracting from
+    // here: the card handles the public-vs-closed decision, the Lorebooks tab,
+    // and the toggle-gated local extraction (its Import button). Other hosts
+    // keep the DataCat path below.
+    final host = Uri.tryParse(url)?.host.toLowerCase() ?? '';
+    if (_isJanitorHost(host)) {
       await _openJanitorCard(url);
+      return;
+    }
+    if (_isJannyHost(host)) {
+      await _openJannyCard(url);
+      return;
+    }
+    if (_isChubHost(host)) {
+      await _openChubCard(url);
+      return;
+    }
+
+    // These sources have no browsable catalog countertab in Glaze: their URL
+    // is resolved with a source-specific fetch and imported straight into the
+    // library, no preview sheet.
+    if (_isPygmalionHost(host)) {
+      await _importPygmalion(url);
+      return;
+    }
+    if (_isRisuHost(host)) {
+      await _importRisu(url);
+      return;
+    }
+    if (_isPerchanceHost(host)) {
+      await _importPerchance(url);
+      return;
+    }
+    if (_isAiccHost(host)) {
+      await _importAicc(url);
       return;
     }
 
@@ -221,10 +251,30 @@ class _ImportUrlDialogState extends ConsumerState<ImportUrlDialog> {
     }
   }
 
-  bool _isJanitorUrl(String url) {
-    final host = Uri.tryParse(url)?.host.toLowerCase() ?? '';
-    return host == 'janitorai.com' || host.endsWith('.janitorai.com');
-  }
+  bool _isJanitorHost(String host) =>
+      host == 'janitorai.com' || host.endsWith('.janitorai.com');
+
+  bool _isJannyHost(String host) =>
+      host == 'jannyai.com' || host.endsWith('.jannyai.com');
+
+  bool _isChubHost(String host) =>
+      host == 'chub.ai' ||
+      host.endsWith('.chub.ai') ||
+      host == 'characterhub.org' ||
+      host.endsWith('.characterhub.org');
+
+  bool _isPygmalionHost(String host) =>
+      host == 'pygmalion.chat' || host.endsWith('.pygmalion.chat');
+
+  bool _isRisuHost(String host) =>
+      host == 'realm.risuai.net' || host.endsWith('.risuai.net');
+
+  bool _isPerchanceHost(String host) =>
+      host == 'perchance.org' || host.endsWith('.perchance.org');
+
+  bool _isAiccHost(String host) =>
+      host == 'aicharactercards.com' ||
+      host.endsWith('.aicharactercards.com');
 
   bool _isSaucepanCompanionUrl(String url) {
     final host = Uri.tryParse(url)?.host.toLowerCase() ?? '';
@@ -261,6 +311,274 @@ class _ImportUrlDialogState extends ConsumerState<ImportUrlDialog> {
         });
       }
     }
+  }
+
+  // ── Source-specific URL import (no catalog card) ─────────────────────────
+  //
+  // Sources Glaze does not browse: the URL is resolved with a source-specific
+  // fetch and the character goes straight into the library, no preview sheet.
+
+  static const _pygmalionApi =
+      'https://server.pygmalion.chat/api/export/character/';
+  static const _risuApi = 'https://realm.risuai.net/api/v1/download/png-v3/';
+  static const _aiccApi =
+      'https://aicharactercards.com/wp-json/pngapi/v1/image/';
+  static const _perchanceApi = 'https://user.uploads.dev/file/';
+
+  /// Pygmalion export: `…/api/export/character/{uuid}/v2` returns a V2 card
+  /// whose `data.avatar` is the portrait URL.
+  Future<void> _importPygmalion(String url) async {
+    final id = _uuidRe.firstMatch(url)?.group(0);
+    if (id == null) {
+      setState(() => _error = 'error_character_id_not_found'.tr());
+      return;
+    }
+    await _runProviderImport(() async {
+      final jsonData = await _downloadJson('$_pygmalionApi$id/v2');
+      final character = jsonData['character'];
+      if (character is! Map) {
+        throw const FormatException('Pygmalion returned no character');
+      }
+      final card = character.cast<String, dynamic>();
+      final data = card['data'] is Map
+          ? (card['data'] as Map).cast<String, dynamic>()
+          : card;
+      final avatar = data['avatar'];
+      await _importCharacterData(
+        _characterDataFromV2(data),
+        avatarUrl: avatar is String && avatar.isNotEmpty ? avatar : null,
+      );
+    });
+  }
+
+  /// RisuAI's download endpoint serves a PNG card with the JSON embedded.
+  Future<void> _importRisu(String url) async {
+    final id = _risuId(url);
+    if (id == null) {
+      setState(() => _error = 'error_character_id_not_found'.tr());
+      return;
+    }
+    await _runProviderImport(() async {
+      final bytes = await _downloadBytes('$_risuApi$id?non_commercial=true');
+      await _importCardBytes(bytes, 'card.png');
+    });
+  }
+
+  /// AICharacterCards serves the card PNG at
+  /// `/wp-json/pngapi/v1/image/{author}/{character}`.
+  Future<void> _importAicc(String url) async {
+    final path = _aiccPath(url);
+    if (path == null) {
+      setState(() => _error = 'error_character_id_not_found'.tr());
+      return;
+    }
+    await _runProviderImport(() async {
+      final bytes = await _downloadBytes('$_aiccApi$path');
+      await _importCardBytes(bytes, 'card.png');
+    });
+  }
+
+  /// Perchance serves a gzipped character blob; the V2 card is assembled from
+  /// its fields (mirrors SillyTavern's `downloadPerchanceCharacter`).
+  Future<void> _importPerchance(String url) async {
+    final slug = _perchanceSlug(url);
+    if (slug == null) {
+      setState(() => _error = 'error_character_id_not_found'.tr());
+      return;
+    }
+    await _runProviderImport(() async {
+      final gz = await _downloadBytes(
+        '$_perchanceApi$slug',
+        headers: const {'User-Agent': 'Glaze'},
+      );
+      final parsed = jsonDecode(utf8.decode(gzip.decode(gz)));
+      final character = parsed is Map ? parsed['addCharacter'] : null;
+      if (character is! Map) {
+        throw const FormatException('Perchance returned no character');
+      }
+      final pc = character.cast<String, dynamic>();
+      final name = (pc['name'] ?? '').toString().trim();
+
+      // The avatar is either a `data:image/...` URL (saved as bytes) or a real
+      // URL the catalog importer downloads for us.
+      final avatar = pc['avatar'];
+      final avatarUrl = avatar is Map ? avatar['url'] as String? : null;
+      List<int>? avatarBytes;
+      String? resolvedAvatarUrl;
+      if (avatarUrl != null && avatarUrl.startsWith('data:image/')) {
+        final comma = avatarUrl.indexOf(',');
+        if (comma > 0) {
+          avatarBytes = base64Decode(avatarUrl.substring(comma + 1));
+        }
+      } else {
+        resolvedAvatarUrl = avatarUrl;
+      }
+
+      await _importCharacterData(
+        CharacterData(
+          name: name.isEmpty ? 'Unnamed Perchance Character' : name,
+          description: (pc['roleInstruction'] ?? '') as String,
+          personality: (pc['reminderMessage'] ?? '') as String,
+          creator: (pc['metaTitle'] ?? '') as String,
+          creatorNotes: (pc['metaDescription'] ?? '') as String,
+        ),
+        avatarUrl: resolvedAvatarUrl,
+        avatarBytes: avatarBytes,
+      );
+    });
+  }
+
+  /// Runs a no-preview import with the shared loading/error UI around [body].
+  /// On success [body] closes the dialog; on failure the error is shown.
+  Future<void> _runProviderImport(Future<void> Function() body) async {
+    setState(() {
+      _loading = true;
+      _error = null;
+      _phase = 'extracting locally';
+    });
+    try {
+      await body();
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = formatError(e);
+        });
+      }
+    }
+  }
+
+  /// Imports a PNG/JSON card file through the same on-device importer the file
+  /// picker uses, then persists it (character, lorebook, gallery).
+  Future<void> _importCardBytes(Uint8List bytes, String fileName) async {
+    final importer = await ref.read(characterImporterProvider.future);
+    final result = await importer.importFromBytes(bytes, fileName);
+    if (!mounted) return;
+    final persisted = await ref
+        .read(characterImportPersistenceCoordinatorProvider)
+        .persist(result);
+    if (persisted case CharacterImportPersistenceFailure()) {
+      persisted.rethrowError();
+    }
+    if (mounted) {
+      Navigator.pop(context);
+      GlazeToast.show(context, 'Imported ${result.character.name}');
+    }
+  }
+
+  /// Imports structured card data (a source whose JSON we normalize ourselves)
+  /// and closes the dialog on success.
+  Future<void> _importCharacterData(
+    CharacterData data, {
+    String? avatarUrl,
+    List<int>? avatarBytes,
+  }) async {
+    await ref.read(catalogProvider.notifier).importCharacter(
+          DownloadedCharacter(
+            charData: data,
+            avatarUrl: avatarUrl,
+            avatarBytes: avatarBytes,
+          ),
+        );
+    if (mounted) {
+      Navigator.pop(context);
+      GlazeToast.show(context, 'Imported ${data.name}');
+    }
+  }
+
+  /// Maps a Character Card V2 `data` block onto [CharacterData].
+  CharacterData _characterDataFromV2(Map<String, dynamic> data) {
+    String s(dynamic v) => v == null ? '' : v.toString();
+    List<String> list(dynamic v) =>
+        v is List ? v.map((e) => e.toString()).toList() : const [];
+    return CharacterData(
+      name: s(data['name']).isEmpty ? 'Unknown' : s(data['name']),
+      description: s(data['description']),
+      personality: s(data['personality']),
+      scenario: s(data['scenario']),
+      firstMes: s(data['first_mes']),
+      mesExample: s(data['mes_example']),
+      creatorNotes: s(data['creator_notes']),
+      systemPrompt: s(data['system_prompt']),
+      postHistoryInstructions: s(data['post_history_instructions']),
+      alternateGreetings: list(data['alternate_greetings']),
+      tags: list(data['tags']),
+      creator: s(data['creator']),
+      creatorId: s(data['creator_id']),
+      characterBook: data['character_book'],
+    );
+  }
+
+  Future<Uint8List> _downloadBytes(
+    String url, {
+    Map<String, String>? headers,
+  }) async {
+    final dio = Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 15),
+        receiveTimeout: const Duration(seconds: 30),
+      ),
+    );
+    final res = await dio.get<List<int>>(
+      url,
+      options: Options(
+        responseType: ResponseType.bytes,
+        headers: headers,
+        validateStatus: (s) => s != null && s >= 200 && s < 300,
+      ),
+    );
+    return Uint8List.fromList(res.data ?? const []);
+  }
+
+  Future<Map<String, dynamic>> _downloadJson(String url) async {
+    final dio = Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 15),
+        receiveTimeout: const Duration(seconds: 30),
+      ),
+    );
+    final res = await dio.get<dynamic>(
+      url,
+      options: Options(
+        responseType: ResponseType.json,
+        validateStatus: (s) => s != null && s >= 200 && s < 300,
+      ),
+    );
+    final data = res.data;
+    if (data is Map) return data.cast<String, dynamic>();
+    throw const FormatException('Unexpected response from source');
+  }
+
+  /// Id from a RisuAI `…/character/{id}` URL. Risu ids are hex strings, not
+  /// necessarily dashed UUIDs, so the path segment is read as-is.
+  String? _risuId(String url) {
+    final segments =
+        Uri.tryParse(url)?.pathSegments.where((s) => s.isNotEmpty).toList() ??
+            const [];
+    final i = segments.indexOf('character');
+    if (i < 0 || i + 1 >= segments.length) return null;
+    final id = segments[i + 1];
+    return id.isEmpty ? null : id;
+  }
+
+  /// `author/character` from an AICharacterCards URL (last two path segments).
+  String? _aiccPath(String url) {
+    final segments =
+        Uri.tryParse(url)?.pathSegments.where((s) => s.isNotEmpty).toList() ??
+            const [];
+    if (segments.length < 2) return null;
+    return '${segments[segments.length - 2]}/${segments.last}';
+  }
+
+  /// Gzipped file slug from a Perchance `?data=Name~{slug}.gz` URL.
+  String? _perchanceSlug(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return null;
+    final source = uri.queryParameters['data'] ?? url;
+    final idx = source.indexOf('~');
+    if (idx < 0 || idx + 1 >= source.length) return null;
+    final slug = source.substring(idx + 1).split('&').first;
+    return slug.isEmpty ? null : slug;
   }
 
   /// PNG file signature — first 8 bytes of every PNG.
@@ -388,7 +706,46 @@ class _ImportUrlDialogState extends ConsumerState<ImportUrlDialog> {
       setState(() => _error = 'error_character_id_not_found'.tr());
       return;
     }
-    final item = CatalogItem(id: id, name: '', slug: _janitorSlug(url, id));
+    await _openCatalogCard(
+      CatalogItem(id: id, name: '', slug: _janitorSlug(url, id)),
+      CatalogProvider.janitor,
+    );
+  }
+
+  /// Opens the JannyAI catalog card for a `…/characters/{id}_{slug}` link.
+  Future<void> _openJannyCard(String url) async {
+    final parsed = _jannyRef(url);
+    if (parsed == null) {
+      setState(() => _error = 'error_character_id_not_found'.tr());
+      return;
+    }
+    await _openCatalogCard(
+      CatalogItem(id: parsed.$1, name: '', slug: parsed.$2, source: 'janny'),
+      CatalogProvider.janny,
+    );
+  }
+
+  /// Opens the Chub catalog card for a `…/characters/{creator}/{name}` link.
+  /// Lorebook links are not a catalog card, so they fall through.
+  Future<void> _openChubCard(String url) async {
+    final fullPath = _chubFullPath(url);
+    if (fullPath == null) {
+      setState(() => _error = 'error_character_id_not_found'.tr());
+      return;
+    }
+    await _openCatalogCard(
+      CatalogItem(id: fullPath, name: '', fullPath: fullPath, source: 'chub'),
+      CatalogProvider.chub,
+    );
+  }
+
+  /// Closes this dialog and opens the catalog card for [item], mirroring a tap
+  /// in the catalog grid (preview + Import FAB + provider-specific tabs). The
+  /// card itself decides how to fetch and import the character.
+  Future<void> _openCatalogCard(
+    CatalogItem item,
+    CatalogProvider provider,
+  ) async {
     // The root navigator's context outlives this dialog, so the card sheet and
     // any post-import navigation keep a valid context after we pop.
     final rootContext = Navigator.of(context, rootNavigator: true).context;
@@ -401,10 +758,7 @@ class _ImportUrlDialogState extends ConsumerState<ImportUrlDialog> {
       isScrollControlled: true,
       useRootNavigator: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => CatalogDetailLauncher(
-        item: item,
-        provider: CatalogProvider.janitor,
-      ),
+      builder: (_) => CatalogDetailLauncher(item: item, provider: provider),
     );
     if (!rootContext.mounted ||
         importedCharId == null ||
@@ -416,5 +770,41 @@ class _ImportUrlDialogState extends ConsumerState<ImportUrlDialog> {
     rootContext.go(
       '/characters?open=${Uri.encodeQueryComponent(importedCharId)}',
     );
+  }
+
+  /// Character id and optional slug from a JannyAI `…/characters/{id}_{slug}`
+  /// URL. The id is whatever precedes the first `_`; JannyAI ids are not UUIDs.
+  (String, String?)? _jannyRef(String url) {
+    final segments =
+        Uri.tryParse(url)?.pathSegments.where((s) => s.isNotEmpty).toList() ??
+            const [];
+    final ci = segments.indexOf('characters');
+    if (ci < 0 || ci + 1 >= segments.length) return null;
+    final last = segments[ci + 1];
+    final idx = last.indexOf('_');
+    if (idx <= 0) return (last, null);
+    final id = last.substring(0, idx);
+    final slug = last.substring(idx + 1);
+    if (id.isEmpty) return null;
+    return (id, slug.isEmpty ? null : slug);
+  }
+
+  /// `creator/name` from a Chub/CharacterHub `…/characters/{creator}/{name}`
+  /// URL. Null for lorebook links, which have no catalog card.
+  String? _chubFullPath(String url) {
+    final segments =
+        Uri.tryParse(url)?.pathSegments.where((s) => s.isNotEmpty).toList() ??
+            const [];
+    if (segments.isEmpty) return null;
+    final ci = segments.indexOf('characters');
+    if (ci < 0) {
+      // A `…/lorebooks/{creator}/{name}` link is not a character card.
+      if (segments.contains('lorebooks')) return null;
+      return segments.length >= 2
+          ? '${segments[segments.length - 2]}/${segments.last}'
+          : null;
+    }
+    if (segments.length < ci + 3) return null;
+    return '${segments[ci + 1]}/${segments[ci + 2]}';
   }
 }
