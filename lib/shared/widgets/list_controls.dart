@@ -1,5 +1,7 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
+import '../state/preset_sort.dart';
 import '../theme/app_colors.dart';
 import 'glass_surface.dart';
 import 'glaze_bottom_sheet.dart';
@@ -298,6 +300,100 @@ class GlazeReorderToggleButton extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// Opens the sort-mode picker shared by every preset list.
+///
+/// Each list keeps its own stored [PresetSortMode]; [onSelect] is handed the
+/// picked mode. [onDisarm] runs when the new mode is not [PresetSortMode.manual]
+/// so a list that was armed for dragging drops the arm — its chip is about to
+/// disappear and no order exists to drag into.
+void showPresetSortPicker(
+  BuildContext context, {
+  required PresetSortMode current,
+  required ValueChanged<PresetSortMode> onSelect,
+  VoidCallback? onDisarm,
+}) {
+  showGlazePickerSheet(
+    context,
+    title: 'sort_by'.tr(),
+    items: [
+      for (final mode in PresetSortMode.values)
+        GlazePickerItem(
+          label: mode.label,
+          icon: mode.icon,
+          hint: mode.hint,
+          isActive: mode == current,
+          value: mode,
+        ),
+    ],
+    onSelect: (v) {
+      final mode = v as PresetSortMode;
+      if (mode == current) return;
+      if (mode != PresetSortMode.manual) onDisarm?.call();
+      onSelect(mode);
+    },
+  );
+}
+
+/// The sort chip and — while the list is in the manual mode — the drag toggle,
+/// as one row. Shared by the Presets screen, the preset switcher sheet and the
+/// API presets sheet, so all three read the same and never re-implement the
+/// picker.
+class PresetSortControls extends StatelessWidget {
+  final PresetSortMode mode;
+  final bool armed;
+  final VoidCallback onToggleReorder;
+
+  /// Runs when a non-manual mode is picked: the arm has nothing left to drag.
+  final VoidCallback onDisarm;
+  final ValueChanged<PresetSortMode> onSelect;
+
+  /// Extra chips placed to the right of the sort control (e.g. an add button).
+  final List<Widget> trailing;
+
+  const PresetSortControls({
+    super.key,
+    required this.mode,
+    required this.armed,
+    required this.onToggleReorder,
+    required this.onDisarm,
+    required this.onSelect,
+    this.trailing = const [],
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final row = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Only the manually ordered list has an order to drag rows into.
+        if (mode == PresetSortMode.manual) ...[
+          GlazeReorderToggleButton(
+            armed: armed,
+            tooltip: 'sort_reorder'.tr(),
+            onTap: onToggleReorder,
+          ),
+          const SizedBox(width: 8),
+        ],
+        GlazeSortIconChip(
+          icon: mode.icon,
+          tooltip: mode.label,
+          onTap: () => showPresetSortPicker(
+            context,
+            current: mode,
+            onDisarm: onDisarm,
+            onSelect: onSelect,
+          ),
+        ),
+        ...trailing,
+      ],
+    );
+
+    // One backdrop capture for the row instead of one per chip: these are plain
+    // siblings that never overlap. See [GlassBackdropGroup].
+    return GlassBackdropGroup(child: row);
   }
 }
 

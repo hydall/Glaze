@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 
@@ -10,6 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/platform/wallpaper.dart';
 import '../../../core/services/file_export_service.dart';
 import '../../../shared/shell/nav_height_provider.dart';
+import '../../../shared/state/preset_sort.dart';
 import '../../../shared/theme/built_in_themes.dart';
 import '../../../shared/theme/theme_font_provider.dart';
 import '../../../shared/theme/theme_preset.dart';
@@ -23,7 +25,9 @@ import '../../../shared/widgets/swipe_tab_switcher.dart';
 import '../../../shared/widgets/tab_slide_switcher.dart';
 import '../../../shared/widgets/glaze_error_dialog.dart';
 import '../../../shared/widgets/glaze_toast.dart';
+import '../../../shared/widgets/list_controls.dart';
 import 'theme_editor_screen.dart';
+import 'theme_preset_sort.dart';
 
 class ThemePresetScreen extends ConsumerStatefulWidget {
   const ThemePresetScreen({super.key});
@@ -108,23 +112,42 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
   Widget _buildMyThemesList(
     BuildContext context,
     ThemeSettings theme,
-    double bottomPad,
+    double padBottom,
   ) {
-    final presets = theme.presets;
     final activeId = theme.activePreset.id;
+    final sortState =
+        ref.watch(themePresetSortProvider).value ?? const PresetSortState();
+    final presets = sortThemePresets(theme.presets, sortState);
     return ListView(
-      padding: EdgeInsets.only(bottom: bottomPad + 60),
+      padding: EdgeInsets.only(bottom: padBottom + 60),
       children: [
         _buildFontToggle(context),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Text(
-            'theme_all_themes'.tr(),
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: context.cs.onSurfaceVariant,
-            ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'theme_all_themes'.tr(),
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: context.cs.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              GlazeSortIconChip(
+                icon: sortState.mode.icon,
+                tooltip: sortState.mode.label,
+                onTap: () => showPresetSortPicker(
+                  context,
+                  current: sortState.mode,
+                  onSelect: (mode) => unawaited(
+                    ref.read(themePresetSortProvider.notifier).setMode(mode),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
         const SizedBox(height: 8),

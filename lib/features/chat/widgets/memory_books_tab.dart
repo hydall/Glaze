@@ -10,8 +10,6 @@ import '../../../core/utils/error_format.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/state/lorebook_embedding_provider.dart';
 import '../../../core/state/memory_settings_provider.dart';
-import '../../../shared/theme/app_colors.dart';
-import '../../../shared/widgets/glass_surface.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_error_dialog.dart';
 import '../../../shared/widgets/glaze_filter_chip_bar.dart';
@@ -28,6 +26,7 @@ import 'memory/memory_books_controls.dart';
 import 'memory/memory_books_toolbar.dart';
 import 'memory/memory_draft_card.dart';
 import 'memory/memory_entry_card.dart';
+import 'memory/memory_list.dart';
 import 'memory/memory_tab_store.dart';
 import 'memory_entry_editor_sheet.dart';
 import 'memory_generation_settings_sheet.dart';
@@ -39,6 +38,21 @@ enum _EntryFilter { all, active, needsRebuild }
 
 /// The same for drafts — the three states a draft is actually triaged by.
 enum _DraftFilter { all, ready, needsGeneration, failed }
+
+/// One row of the cross-tab search results: an approved entry or a draft, so
+/// the two can be ordered together and rendered through one list body.
+class _SearchHit {
+  final MemoryEntry? entry;
+  final MemoryDraft? draft;
+
+  const _SearchHit.entry(MemoryEntry this.entry) : draft = null;
+  const _SearchHit.draft(MemoryDraft this.draft) : entry = null;
+
+  bool get isEntry => entry != null;
+  String get id => entry?.id ?? draft!.id;
+  String get title => entry?.title ?? draft!.title;
+  int get createdAt => entry?.createdAt ?? draft!.createdAt;
+}
 
 /// What the host sheet drives from its own chrome: the settings button in the
 /// header and the extended FAB over the list. The tab owns the controller, so
@@ -487,23 +501,31 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
     );
   }
 
-  /// Search results: one list across both tabs, approved memories first and
-  /// then the drafts, each row saying which it is under its title. Searching
-  /// for a memory you half remember is not a question about which tab it ended
-  /// up on, so the tab filters and the batch panel stay out of it.
+  /// Search results: one list across both tabs, approved memories and then the
+  /// drafts, each row saying which it is under its title. Searching for a
+  /// memory you half remember is not a question about which tab it ended up on,
+  /// so the tab filters and the batch panel stay out of it.
   Widget _buildSearchResults(
     List<MemoryEntry> entries,
     List<MemoryDraft> drafts,
   ) {
-    final vectorAvailable = ref.watch(vectorSearchAvailableProvider);
-    final visibleEntries = entries
-        .where((entry) => _matchesQuery(entry.title, entry.content, entry.keys))
-        .toList();
-    final visibleDrafts = drafts
-        .where((draft) => _matchesQuery(draft.title, draft.content, draft.keys))
-        .toList();
-    final empty = visibleEntries.isEmpty && visibleDrafts.isEmpty;
-    return ListView(
+    final hits = <_SearchHit>[
+      for (final entry in entries)
+        if (_matchesQuery(entry.title, entry.content, entry.keys))
+          _SearchHit.entry(entry),
+      for (final draft in drafts)
+        if (_matchesQuery(draft.title, draft.content, draft.keys))
+          _SearchHit.draft(draft),
+    ];
+    return MemoryListBody<_SearchHit>(
+      scrollable: true,
+      items: hits,
+      idOf: (hit) => hit.id,
+      nameOf: (hit) => hit.title,
+      createdAtOf: (hit) => hit.createdAt,
+      emptyMessage: entries.isEmpty && drafts.isEmpty
+          ? 'memory_books_empty_approved'.tr()
+          : 'memory_books_empty_filtered'.tr(),
       padding: EdgeInsets.fromLTRB(
         16,
         8,
@@ -512,29 +534,9 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
         // bottom of this list.
         MediaQuery.paddingOf(context).bottom + 88,
       ),
-      children: [
-        if (empty)
-          _buildEmpty(
-            entries.isEmpty && drafts.isEmpty
-                ? 'memory_books_empty_approved'.tr()
-                : 'memory_books_empty_filtered'.tr(),
-          )
-        else ...[
-          ...visibleEntries.map(
-            (entry) => MemoryEntryCard(
-              key: ValueKey('entry-${entry.id}'),
-              entry: entry,
-              embeddingStatus: vectorAvailable
-                  ? _embeddingStatuses[entry.id]
-                  : null,
-              showStatus: true,
-              onEdit: () => _editEntry(entry),
-              onDelete: () => _deleteEntry(entry.id),
-            ),
-          ),
-          ...visibleDrafts.map(_buildDraftCard),
-        ],
-      ],
+      rowBuilder: (context, hit) => hit.isEntry
+          ? _buildEntryCard(hit.entry!, keyPrefix: 'entry-')
+          : _buildDraftCard(hit.draft!),
     );
   }
 
@@ -560,7 +562,6 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
   }
 
   Widget _buildApprovedTab(List<MemoryEntry> entries) {
-    final vectorAvailable = ref.watch(vectorSearchAvailableProvider);
     final visible = entries
         .where(
           (entry) =>
@@ -568,30 +569,15 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
               _matchesQuery(entry.title, entry.content, entry.keys),
         )
         .toList();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (visible.isEmpty)
-          _buildEmpty(
-            entries.isEmpty
-                ? 'memory_books_empty_approved'.tr()
-                : 'memory_books_empty_filtered'.tr(),
-          )
-        else
-          ...visible.map(
-            (entry) => MemoryEntryCard(
-              key: ValueKey(entry.id),
-              entry: entry,
-              // No index badge while semantic search is off in the API —
-              // there is nothing to be indexed against.
-              embeddingStatus: vectorAvailable
-                  ? _embeddingStatuses[entry.id]
-                  : null,
-              onEdit: () => _editEntry(entry),
-              onDelete: () => _deleteEntry(entry.id),
-            ),
-          ),
-      ],
+    return MemoryListBody<MemoryEntry>(
+      items: visible,
+      idOf: (entry) => entry.id,
+      nameOf: (entry) => entry.title,
+      createdAtOf: (entry) => entry.createdAt ?? 0,
+      emptyMessage: entries.isEmpty
+          ? 'memory_books_empty_approved'.tr()
+          : 'memory_books_empty_filtered'.tr(),
+      rowBuilder: (context, entry) => _buildEntryCard(entry),
     );
   }
 
@@ -603,18 +589,34 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
               _matchesQuery(draft.title, draft.content, draft.keys),
         )
         .toList();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (visible.isEmpty)
-          _buildEmpty(
-            drafts.isEmpty
-                ? 'memory_books_empty_scan_drafts'.tr()
-                : 'memory_books_empty_filtered'.tr(),
-          )
-        else
-          ...visible.map(_buildDraftCard),
-      ],
+    return MemoryListBody<MemoryDraft>(
+      items: visible,
+      idOf: (draft) => draft.id,
+      nameOf: (draft) => draft.title,
+      createdAtOf: (draft) => draft.createdAt,
+      emptyMessage: drafts.isEmpty
+          ? 'memory_books_empty_scan_drafts'.tr()
+          : 'memory_books_empty_filtered'.tr(),
+      rowBuilder: (context, draft) => _buildDraftCard(draft),
+    );
+  }
+
+  /// One approved entry row, shared by the approved tab and the search results.
+  /// The key prefix keeps an approved draft (which keeps its id as an entry)
+  /// from colliding with the draft row it came from in the combined search list.
+  Widget _buildEntryCard(MemoryEntry entry, {String keyPrefix = ''}) {
+    final vectorAvailable = ref.watch(vectorSearchAvailableProvider);
+    return MemoryEntryCard(
+      key: ValueKey('$keyPrefix${entry.id}'),
+      entry: entry,
+      // No index badge while semantic search is off in the API — there is
+      // nothing to be indexed against.
+      embeddingStatus: vectorAvailable
+          ? _embeddingStatuses[entry.id]
+          : null,
+      showStatus: keyPrefix.isNotEmpty,
+      onEdit: () => _editEntry(entry),
+      onDelete: () => _deleteEntry(entry.id),
     );
   }
 
@@ -633,27 +635,6 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
       onApprove: () => _approveDraft(draft.id),
       onEdit: () => _editDraft(draft),
       onDelete: () => _deleteDraft(draft.id),
-    );
-  }
-
-  Widget _buildEmpty(String message) {
-    return GlassSurface(
-      borderRadius: BorderRadius.circular(16),
-      border: Border.all(color: context.cs.outlineVariant),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Center(
-          child: Text(
-            message,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 13,
-              height: 1.4,
-              color: context.cs.onSurfaceVariant,
-            ),
-          ),
-        ),
-      ),
     );
   }
 

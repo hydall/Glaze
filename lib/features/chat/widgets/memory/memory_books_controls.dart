@@ -4,7 +4,7 @@ import '../../../../core/platform/haptics.dart';
 import '../../../../shared/theme/app_colors.dart';
 import '../../../../shared/widgets/glass_surface.dart';
 import '../../../../shared/widgets/glaze_bottom_sheet.dart';
-import '../requests/inspector_surface.dart';
+import '../../../../shared/widgets/glaze_list_item.dart';
 
 /// Shared Glaze-styled building blocks for the memory-books sheet.
 ///
@@ -158,9 +158,8 @@ class MemoryRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InspectorPlaque(
+    return GlazeListItem(
       margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.fromLTRB(12, 10, 8, 12),
       accent: accent,
       onTap: onTap == null
           ? null
