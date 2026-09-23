@@ -23,6 +23,15 @@ class GlassSurface extends ConsumerWidget {
   final BorderRadius borderRadius;
   final Color? tint;
   final BoxBorder? border;
+
+  /// Paints [border] *over* the child instead of behind it.
+  ///
+  /// The surface's decoration is a background one, so a child that fills the
+  /// surface edge to edge — a cover image, a full-bleed gradient — simply
+  /// paints the frame away. Set this on those surfaces so their border (and,
+  /// with it, any selected/active highlight riding on it) stays visible.
+  final bool borderOnTop;
+
   final List<BoxShadow>? boxShadow;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
@@ -73,6 +82,7 @@ class GlassSurface extends ConsumerWidget {
     required this.borderRadius,
     this.tint,
     this.border,
+    this.borderOnTop = false,
     this.boxShadow,
     this.onTap,
     this.onLongPress,
@@ -139,11 +149,12 @@ class GlassSurface extends ConsumerWidget {
         ? 0.0
         : preset.elementBlur;
 
+    final backgroundBorder = borderOnTop ? null : border;
     final filled = DecoratedBox(
       decoration: BoxDecoration(
         color: fillColor,
         borderRadius: borderRadius,
-        border: border,
+        border: backgroundBorder,
         boxShadow: boxShadow,
       ),
       // The foreground content is isolated in its own compositing layer so that
@@ -191,6 +202,20 @@ class GlassSurface extends ConsumerWidget {
           )
         : filled;
 
+    // Drawn last, on top of the child, when the caller asked for it. Borders
+    // paint inside their box, so this covers exactly the same pixels the
+    // background border would have.
+    final framed = (borderOnTop && border != null)
+        ? DecoratedBox(
+            position: DecorationPosition.foreground,
+            decoration: BoxDecoration(
+              borderRadius: borderRadius,
+              border: border,
+            ),
+            child: withNoise,
+          )
+        : withNoise;
+
     final sample = (backdropSample && !batterySaver && blur > 0)
         ? CardBackdrop.of(context)
         : null;
@@ -209,14 +234,14 @@ class GlassSurface extends ConsumerWidget {
       child: blur > 0
           ? RepaintBoundary(
               child: sample != null
-                  ? CardBackdropSample(data: sample, child: withNoise)
+                  ? CardBackdropSample(data: sample, child: framed)
                   : BackdropFilter(
                       filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
                       backdropGroupKey: groupKey,
-                      child: withNoise,
+                      child: framed,
                     ),
             )
-          : withNoise,
+          : framed,
     );
 
     final hasTapHandler = onTap != null || onLongPress != null;
