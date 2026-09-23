@@ -7,6 +7,7 @@ import '../utils/cast_helpers.dart';
 import '../models/character.dart';
 import '../models/persona.dart';
 import '../models/preset.dart';
+import '../models/preset_block_groups.dart';
 import '../models/chat_message.dart';
 import '../models/lorebook.dart';
 import 'macro_engine.dart';
@@ -158,7 +159,10 @@ String _latestLedgerText(List<ChatMessage> history, String role) => history
 PromptResult _buildPromptOnce(PromptPayload payload) {
   if (payload.preset == null) return buildFallbackPrompt(payload);
 
-  final preset = payload.preset!;
+  // A disabled folder takes its blocks out of the prompt. Resolve that into
+  // the blocks' own enabled flags once, up front, and the rest of assembly
+  // needs to know nothing about folders.
+  final preset = resolvePresetFolders(payload.preset!);
   final char = payload.character;
   final persona = payload.persona;
 

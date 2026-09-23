@@ -18,8 +18,22 @@ class PresetBlockRow extends StatelessWidget {
   final int index;
   final bool isLast;
   final VoidCallback onEdit;
-  final ValueChanged<bool> onToggle;
+
+  /// Null renders a spacer instead of the switch — used by the folder's own
+  /// header prompt row, whose enabled state is the folder's switch.
+  final ValueChanged<bool>? onToggle;
+  final VoidCallback? onStash;
   final bool draggable;
+
+  /// Extra left inset for rows nested inside a folder.
+  final double indent;
+
+  /// Block id handed to the folder drop targets. Non-null makes the role icon
+  /// a long-press drag handle for moving the block in or out of a folder.
+  final String? moveDragData;
+
+  /// Replaces the switch entirely — a pick-one folder passes its radio glyph.
+  final Widget? trailing;
 
   const PresetBlockRow({
     super.key,
@@ -27,8 +41,12 @@ class PresetBlockRow extends StatelessWidget {
     required this.index,
     required this.isLast,
     required this.onEdit,
-    required this.onToggle,
+    this.onToggle,
+    this.onStash,
     this.draggable = true,
+    this.indent = 0,
+    this.moveDragData,
+    this.trailing,
   });
 
   @override
@@ -66,11 +84,14 @@ class PresetBlockRow extends StatelessWidget {
                 ),
               )
             else
-              const SizedBox(width: 30, height: 44),
-            Icon(
-              presetBlockRoleIcon(block.role),
-              size: 16,
-              color: context.cs.onSurface.withValues(alpha: 0.6),
+              SizedBox(width: 30.0 + indent, height: 44),
+            _moveHandle(
+              context,
+              Icon(
+                presetBlockRoleIcon(block.role),
+                size: 16,
+                color: context.cs.onSurface.withValues(alpha: 0.6),
+              ),
             ),
             const SizedBox(width: 8),
             if (block.isStatic) ...[
@@ -144,19 +165,50 @@ class PresetBlockRow extends StatelessWidget {
               const SizedBox(width: 36),
             Padding(
               padding: const EdgeInsets.only(right: 12),
-              child: Transform.scale(
-                scale: 0.8,
-                alignment: Alignment.centerRight,
-                child: Switch(
-                  value: block.enabled,
-                  onChanged: onToggle,
-                  activeThumbColor: context.cs.primary,
-                ),
-              ),
+              child:
+                  trailing ??
+                  (onToggle == null
+                      ? const SizedBox(width: 40, height: 44)
+                      : Transform.scale(
+                          scale: 0.8,
+                          alignment: Alignment.centerRight,
+                          child: Switch(
+                            value: block.enabled,
+                            onChanged: onToggle,
+                            activeThumbColor: context.cs.primary,
+                          ),
+                        )),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  /// Makes [child] a long-press drag handle carrying the block's id, so the
+  /// folder rows can accept it as a drop.
+  Widget _moveHandle(BuildContext context, Widget child) {
+    final data = moveDragData;
+    if (data == null) return child;
+    return LongPressDraggable<String>(
+      data: data,
+      feedback: Material(
+        color: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: context.cs.surface,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: context.cs.primary),
+          ),
+          child: Text(
+            block.name,
+            style: TextStyle(color: context.cs.onSurface),
+          ),
+        ),
+      ),
+      childWhenDragging: Opacity(opacity: 0.25, child: child),
+      child: Tooltip(message: 'studio_move_block'.tr(), child: child),
     );
   }
 }

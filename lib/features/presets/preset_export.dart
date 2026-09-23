@@ -27,11 +27,15 @@ Future<void> exportPreset(BuildContext context, Preset preset) async {
   }
 }
 
-/// Writes [preset] to a JSON file and returns the saved path. Split out of
-/// [exportPreset] so bulk export can report one summary instead of a toast per
-/// file.
-Future<String> savePresetJson(Preset preset) async {
-  final exportJson = <String, dynamic>{
+/// The preset as it is written to disk.
+///
+/// SillyTavern-shaped: `prompts` is the flat block list every frontend reads.
+/// Folders ride along additively — a separate `block_folders` list plus a
+/// `folder` id on the prompts that belong to one — so a frontend that knows
+/// nothing about them still reads the same preset, and an importer only ever
+/// sees the folders the file declares.
+Map<String, dynamic> presetExportJson(Preset preset) {
+  return <String, dynamic>{
     'name': preset.name,
     if (preset.author != null && preset.author!.isNotEmpty)
       'author': preset.author,
@@ -47,6 +51,10 @@ Future<String> savePresetJson(Preset preset) async {
             if (b.depth != null) 'depth': b.depth,
             if (b.appendToLastMessage) 'appendToLastMessage': true,
             if (b.sendEmptyBlock) 'sendEmptyBlock': true,
+            // Folder membership is an explicit reference into
+            // `block_folders`; other frontends ignore the extra key and read
+            // the preset as the flat prompt list it still is.
+            if (b.folderId != null) 'folder': b.folderId,
           },
         )
         .toList(),
@@ -71,9 +79,28 @@ Future<String> savePresetJson(Preset preset) async {
           },
         )
         .toList(),
+    // Folders are declared here and nowhere else — never derived from block
+    // names — so an importer that skips this key simply gets no folders.
+    if (preset.blockFolders.isNotEmpty)
+      'block_folders': preset.blockFolders
+          .map(
+            (f) => <String, dynamic>{
+              'id': f.id,
+              'name': f.name,
+              'enabled': f.enabled,
+              'exclusive': f.exclusive,
+            },
+          )
+          .toList(),
     'reasoning': preset.reasoningEnabled,
   };
+}
 
+/// Writes [preset] to a JSON file and returns the saved path. Split out of
+/// [exportPreset] so bulk export can report one summary instead of a toast per
+/// file.
+Future<String> savePresetJson(Preset preset) async {
+  final exportJson = presetExportJson(preset);
   final encoded = const JsonEncoder.withIndent('  ').convert(exportJson);
   final safeName = preset.name.replaceAll(RegExp(r'[^\w\s-]'), '').trim();
   return FileExportService.export(

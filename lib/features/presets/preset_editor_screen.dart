@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/llm/tokenizer.dart';
 import '../../core/models/preset.dart';
+import '../../core/models/preset_block_groups.dart';
 import '../../core/models/preset_folder.dart';
 import '../../core/services/featured_presets.dart';
 import '../../core/services/preset_defaults.dart';
@@ -17,14 +18,17 @@ import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_scaffold.dart';
 import '../../shared/widgets/glaze_toast.dart';
-import '../../shared/widgets/sheet_view.dart';
+import '../../shared/widgets/folder_name_dialog.dart';
 import '../../shared/widgets/generic_editor.dart';
 import '../../shared/widgets/help_tip.dart';
+import '../../shared/widgets/sheet_view.dart';
 import 'preset_cover_service.dart';
 import 'preset_deletion.dart';
 import 'preset_image.dart';
 import 'preset_list_provider.dart';
 import 'preset_export.dart';
+import '../studio/widgets/studio_preset_options_sheet.dart';
+import 'widgets/preset_block_group_row.dart';
 import 'widgets/preset_block_row.dart';
 import 'widgets/preset_dashboard_card.dart';
 import 'widgets/preset_options_sheet.dart';
@@ -193,6 +197,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
   late String _author = widget.preset?.author ?? '';
   late String? _imagePath = widget.preset?.imagePath;
   late List<PresetBlock> _blocks;
+  late List<PresetBlockFolder> _blockFolders;
   late List<PresetRegex> _regexes;
   late bool _parseInlineReasoning = widget.preset?.reasoningEnabled ?? false;
   // Read from the preset on every save before, which is the same thing as
@@ -231,6 +236,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
   void initState() {
     super.initState();
     _blocks = List.from(widget.preset?.blocks ?? defaultPresetBlocks());
+    _blockFolders = List.from(widget.preset?.blockFolders ?? const []);
     _regexes = List.from(widget.preset?.regexes ?? []);
     _reconcileAuthorsNoteEnabled();
     _reconcileSummaryEnabled();
@@ -284,6 +290,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
       author: _author.trim().isEmpty ? null : _author.trim(),
       imagePath: _imagePath,
       blocks: _blocks,
+      blockFolders: _blockFolders,
       regexes: _regexes,
       reasoningEnabled: _parseInlineReasoning,
       reasoningStart: _parseInlineReasoning ? _reasoningStartCtrl.text : null,
@@ -479,9 +486,11 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
       imagePath: _imagePath,
     );
 
-    final activeBlocks = _blocks.where((b) => !b.isStashed).toList();
+    final activeBlocks = _activeBlocks;
     final stashedCount = _blocks.length - activeBlocks.length;
-    final tokens = activeBlocks
+    // A disabled folder takes its blocks out of the prompt, so they must not
+    // be counted either.
+    final tokens = applyPresetFolderEnablement(activeBlocks, _blockFolders)
         .where((b) => b.enabled && b.content.isNotEmpty)
         .fold(0, (sum, b) => sum + estimateTokens(b.content));
 
@@ -523,54 +532,290 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
   }
 
   Widget _buildBlockList(List<PresetBlock> activeBlocks) {
-    return ReorderableListView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      padding: EdgeInsets.zero,
-      buildDefaultDragHandles: false,
-      itemCount: activeBlocks.length,
-      // TODO: migrate to onReorderItem (newIndex semantics differ — see Flutter changelog).
-      // ignore: deprecated_member_use
-      onReorder: (oldIndex, newIndex) {
-        setState(() {
+    final rows = groupPresetBlocks(activeBlocks, _blockFolders);
+    // The outer target catches a block dragged off its folder: dropping it
+    // anywhere but on another folder takes it out of the one it is in.
+    return DragTarget<String>(
+      onWillAcceptWithDetails: (details) =>
+          findPresetFolderForBlock(activeBlocks, _blockFolders, details.data) !=
+          null,
+      onAcceptWithDetails: (details) => _moveBlockOutOfFolder(details.data),
+      builder: (context, candidates, _) => ReorderableListView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        padding: EdgeInsets.zero,
+        buildDefaultDragHandles: false,
+        itemCount: rows.length,
+        // TODO: migrate to onReorderItem (newIndex semantics differ — see Flutter changelog).
+        // ignore: deprecated_member_use
+        onReorder: (oldIndex, newIndex) {
           if (newIndex > oldIndex) newIndex -= 1;
-          final reordered = List<PresetBlock>.from(activeBlocks);
-          final item = reordered.removeAt(oldIndex);
-          reordered.insert(newIndex, item);
-          var activeIndex = 0;
-          for (var i = 0; i < _blocks.length; i++) {
-            if (!_blocks[i].isStashed) {
-              _blocks[i] = reordered[activeIndex++];
-            }
-          }
-        });
-        _scheduleSave();
-      },
-      itemBuilder: (_, i) {
-        final block = activeBlocks[i];
-        final sourceIndex = _blocks.indexWhere((b) => b.id == block.id);
-        return PresetBlockRow(
-          key: ValueKey(block.id),
-          block: block,
-          index: i,
-          isLast: i == activeBlocks.length - 1,
-          onEdit: () => _openBlockEditor(sourceIndex),
-          onToggle: (v) {
-            setState(() {
-              _blocks[sourceIndex] = _blocks[sourceIndex].copyWith(enabled: v);
-            });
-            _scheduleSave();
-            // Author's Note enable is one entity for the chat — mirror it onto
-            // the session note and every other preset's block.
-            if (block.id == 'authors_note') {
-              syncAuthorsNoteEnabled(ref, charId: widget.charId, enabled: v);
-            } else if (block.id == 'summary') {
-              syncSummaryEnabled(ref, charId: widget.charId, enabled: v);
-            }
-          },
-        );
-      },
+          final reordered = [...rows];
+          reordered.insert(newIndex, reordered.removeAt(oldIndex));
+          _writeActiveBlocks(flattenPresetBlockGroups(reordered));
+        },
+        itemBuilder: (_, i) => _buildBlockRow(rows, i),
+      ),
     );
+  }
+
+  Widget _buildBlockRow(List<PresetBlockGroup> rows, int index) {
+    final row = rows[index];
+    final isLast = index == rows.length - 1;
+    if (row.isFolder) {
+      final folder = row.folder!;
+      return PresetBlockGroupRow(
+        key: ValueKey('folder_${folder.id}'),
+        group: row,
+        // An empty folder is drawn after the block rows and owns no slot in
+        // the block order, so there is nothing to drag it through.
+        dragIndex: row.children.isEmpty ? null : index,
+        isLast: isLast,
+        onToggleFolder: (enabled) => _toggleFolder(folder, enabled),
+        onOptions: () => _showFolderOptions(folder),
+      onEdit: _openBlockEditorFor,
+      onToggleBlock: _setBlockEnabled,
+        onSelectBlock: (blockId) => _selectFolderBlock(folder, blockId),
+        onStash: (block) => _stashBlock(block.id),
+        onMoveBlockIn: (blockId) => _moveBlockIntoFolder(blockId, folder),
+      );
+    }
+    final block = row.standalone!;
+    return PresetBlockRow(
+      key: ValueKey(block.id),
+      block: block,
+      index: index,
+      isLast: isLast,
+      moveDragData: _blockFolders.isEmpty ? null : block.id,
+      onEdit: () => _openBlockEditorFor(block),
+      onToggle: (enabled) => _setBlockEnabled(block, enabled),
+      onStash: block.isStatic ? null : () => _stashBlock(block.id),
+    );
+  }
+
+  // ─── Block list actions ──────────────────────────────────────────────────
+
+  List<PresetBlock> get _activeBlocks =>
+      _blocks.where((b) => !b.isStashed).toList();
+
+  /// Writes a reordered active list back into the non-stashed slots of
+  /// [_blocks], so stashed blocks keep the positions they were archived at.
+  void _writeActiveBlocks(List<PresetBlock> nextActive) {
+    if (nextActive.length != _activeBlocks.length) return;
+    setState(() {
+      var next = 0;
+      for (var i = 0; i < _blocks.length; i++) {
+        if (!_blocks[i].isStashed) _blocks[i] = nextActive[next++];
+      }
+    });
+    _scheduleSave();
+  }
+
+  void _openBlockEditorFor(PresetBlock block) {
+    final index = _blocks.indexWhere((b) => b.id == block.id);
+    if (index == -1) return;
+    _openBlockEditor(index);
+  }
+
+  void _setBlockEnabled(PresetBlock block, bool enabled) {
+    final index = _blocks.indexWhere((b) => b.id == block.id);
+    if (index == -1) return;
+    setState(() {
+      _blocks[index] = _blocks[index].copyWith(enabled: enabled);
+    });
+    _scheduleSave();
+    // Author's Note enable is one entity for the chat — mirror it onto
+    // the session note and every other preset's block.
+    if (block.id == 'authors_note') {
+      syncAuthorsNoteEnabled(ref, charId: widget.charId, enabled: enabled);
+    } else if (block.id == 'summary') {
+      syncSummaryEnabled(ref, charId: widget.charId, enabled: enabled);
+    }
+  }
+
+  void _toggleFolder(PresetBlockFolder folder, bool enabled) {
+    setState(() {
+      _blockFolders = togglePresetBlockFolder(
+        _blockFolders,
+        folder.id,
+        enabled,
+      );
+    });
+    _scheduleSave();
+  }
+
+  void _moveBlockIntoFolder(String blockId, PresetBlockFolder folder) {
+    _writeActiveBlocks(
+      movePresetBlockIntoFolder(
+        blocks: _activeBlocks,
+        blockId: blockId,
+        folder: folder,
+      ),
+    );
+  }
+
+  void _selectFolderBlock(PresetBlockFolder folder, String blockId) {
+    _writeActiveBlocks(
+      selectExclusivePresetBlock(
+        blocks: _activeBlocks,
+        folderId: folder.id,
+        blockId: blockId,
+      ),
+    );
+  }
+
+  /// Rename, selection mode and delete for one folder.
+  void _showFolderOptions(PresetBlockFolder folder) {
+    GlazeBottomSheet.show<void>(
+      context,
+      title: folder.name,
+      items: [
+        BottomSheetItem(
+          icon: Icons.edit_outlined,
+          label: 'action_rename'.tr(),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            _renameFolder(folder);
+          },
+        ),
+        BottomSheetItem(
+          icon: folder.exclusive ? Icons.checklist : Icons.radio_button_checked,
+          label: folder.exclusive
+              ? 'preset_folder_mode_checklist'.tr()
+              : 'preset_folder_mode_pick_one'.tr(),
+          hint: folder.exclusive
+              ? null
+              : 'preset_folder_mode_pick_one_hint'.tr(),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            _setFolderExclusive(folder, !folder.exclusive);
+          },
+        ),
+        BottomSheetItem(
+          icon: Icons.delete_outline,
+          label: 'action_delete'.tr(),
+          isDestructive: true,
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            unawaited(_deleteFolder(folder));
+          },
+        ),
+      ],
+    );
+  }
+
+  void _setFolderExclusive(PresetBlockFolder folder, bool exclusive) {
+    final next = setPresetFolderExclusive(
+      folders: _blockFolders,
+      blocks: _blocks,
+      folderId: folder.id,
+      exclusive: exclusive,
+    );
+    setState(() {
+      _blockFolders = next.folders;
+      _blocks = List.of(next.blocks);
+    });
+    _scheduleSave();
+  }
+
+  void _moveBlockOutOfFolder(String blockId) {
+    _writeActiveBlocks(
+      movePresetBlockOutOfFolder(blocks: _activeBlocks, blockId: blockId),
+    );
+  }
+
+  void _renameFolder(PresetBlockFolder folder) {
+    GlazeBottomSheet.show<void>(
+      context,
+      title: 'folder_rename_title'.tr(),
+      child: FolderNameDialog(
+        initialName: folder.name,
+        confirmLabel: 'action_rename'.tr(),
+        onSubmit: (name) {
+          setState(() {
+            _blockFolders = renamePresetBlockFolder(
+              _blockFolders,
+              folder.id,
+              name,
+            );
+          });
+          _scheduleSave();
+        },
+      ),
+    );
+  }
+
+  Future<void> _deleteFolder(PresetBlockFolder folder) async {
+    final confirmed = await confirmStudioDelete(
+      context,
+      title: 'folder_delete_title'.tr(),
+      description: 'preset_block_folder_delete_confirm'.tr(args: [folder.name]),
+    );
+    if (!confirmed || !mounted) return;
+    setState(() {
+      _blocks = clearPresetFolderMembership(_blocks, folder.id);
+      _blockFolders = _blockFolders
+          .where((f) => f.id != folder.id)
+          .toList(growable: false);
+    });
+    _scheduleSave();
+  }
+
+  /// Which kind of folder to create — the two the agentic editor has: a
+  /// checklist, or a pick-one where the blocks become radio options.
+  void _chooseFolderKind() {
+    GlazeBottomSheet.show<void>(
+      context,
+      title: 'folder_create_title'.tr(),
+      items: [
+        BottomSheetItem(
+          icon: Icons.checklist,
+          label: 'preset_folder_mode_checklist'.tr(),
+          hint: 'preset_folder_mode_checklist_hint'.tr(),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            _nameAndCreateFolder(exclusive: false);
+          },
+        ),
+        BottomSheetItem(
+          icon: Icons.radio_button_checked,
+          label: 'preset_folder_mode_pick_one'.tr(),
+          hint: 'preset_folder_mode_pick_one_hint'.tr(),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            _nameAndCreateFolder(exclusive: true);
+          },
+        ),
+      ],
+    );
+  }
+
+  void _nameAndCreateFolder({required bool exclusive}) {
+    GlazeBottomSheet.show<void>(
+      context,
+      title: 'folder_create_title'.tr(),
+      child: FolderNameDialog(
+        confirmLabel: 'action_create'.tr(),
+        onSubmit: (name) => _createFolder(name, exclusive: exclusive),
+      ),
+    );
+  }
+
+  /// A folder is metadata on the preset, not a block: creating one adds no
+  /// prompt text and changes nothing about what is sent until blocks are
+  /// dragged into it.
+  void _createFolder(String name, {required bool exclusive}) {
+    setState(() {
+      _blockFolders = [
+        ..._blockFolders,
+        PresetBlockFolder(
+          id: generateId(),
+          name: name.trim(),
+          exclusive: exclusive,
+        ),
+      ];
+    });
+    _scheduleSave();
   }
 
   // ─── Advanced settings ───────────────────────────────────────────────────
@@ -815,6 +1060,14 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
           },
         ),
         BottomSheetItem(
+          icon: Icons.create_new_folder_outlined,
+          label: 'folder_new'.tr(),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            _chooseFolderKind();
+          },
+        ),
+        BottomSheetItem(
           icon: Icons.content_copy_outlined,
           label: 'action_copy_from_preset'.tr(),
           onTap: () {
@@ -1015,6 +1268,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
       author: _author.trim().isEmpty ? null : _author.trim(),
       imagePath: _imagePath,
       blocks: _blocks,
+      blockFolders: _blockFolders,
       regexes: _regexes,
       reasoningEnabled: _parseInlineReasoning,
       reasoningStart: _parseInlineReasoning ? _reasoningStartCtrl.text : null,

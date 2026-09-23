@@ -1047,6 +1047,49 @@ Consequences:
 - A block containing only `{{setvar::...}}`, `{{memory}}`, or another macro that resolves empty does not create an accidental blank message. Setvar accounting remains as described in INV-PS5.
 - Two places stay trim-based on purpose, because neither emits a block as its own message: `applyAppendToLastMessage` (INV-PS9) joins block text into an existing user message, where whitespace would only add blank lines; and lorebook attribution reporting, which maps rendered entries back to snapshots.
 
+### INV-PS11: Preset folders are declared, never inferred
+
+A chat preset's folders are data the preset carries: `Preset.blockFolders`
+lists them (`id`, `name`, `enabled`, `exclusive`) and a block joins one by
+naming it in `PresetBlock.folderId`. Folders are **never** derived from a block's name or
+content — no marker, prefix, or divider prompt creates one — so a preset
+imported from another frontend stays the flat block list it is, and no import
+path invents grouping.
+
+Rules (`lib/core/models/preset_block_groups.dart`):
+
+1. A block whose `folderId` names a folder the preset does not declare is
+   top-level. A hand-edited or partially copied JSON therefore degrades to a
+   plain list instead of hiding blocks.
+2. The flat block order stays authoritative for placement: a folder is drawn
+   where its first block sits and owns every block naming it; a folder with no
+   blocks yet is drawn after the block rows and cannot be dragged, having no
+   slot in the order.
+3. A disabled folder takes its blocks out of the prompt.
+   `applyPresetFolderEnablement()` resolves that into the blocks' own `enabled`
+   flags **once** — `resolvePresetFolders()` at the top of `_buildPromptOnce()`
+   (`lib/core/llm/prompt_builder.dart`) and in `presetOnlyTokenCount()`
+   (`lib/core/llm/preset_macro_attribution.dart`). Nothing downstream of those
+   two points knows folders exist.
+4. Toggling a folder writes the folder only, never its blocks, so re-enabling
+   it restores the per-block selection it had. Deleting a folder drops the
+   declaration and clears the references; the blocks stay in the preset.
+5. `exclusive` is the folder's kind, and it is the only difference between the
+   two: a checklist folder toggles each block on its own, a pick-one folder
+   holds at most one enabled block and offers radios. The one-enabled rule is
+   kept wherever membership or the kind changes —
+   `selectExclusivePresetBlock()` when the pick moves,
+   `movePresetBlockIntoFolder()` when a block joins a folder that already has
+   its pick (it arrives disabled), and `setPresetFolderExclusive()` when a
+   checklist becomes pick-one (the first enabled block stays picked). Nothing
+   in prompt assembly special-cases it: exclusivity is an editing rule over the
+   same per-block `enabled` flags.
+6. On the wire (`savePresetJson` / `parseSillyTavernPreset`) folders are a
+   separate top-level `block_folders` list plus a `folder` id on a prompt
+   entry. Both are additive: a frontend that ignores them reads the same
+   prompts it always did, and an importer that skips `block_folders` gets a
+   preset with no folders rather than a broken one.
+
 ---
 
 ## 6. Stream vs Non-Stream Parity
