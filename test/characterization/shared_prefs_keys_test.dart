@@ -51,12 +51,14 @@ void main() {
             // `batterySaver` used to default to true; it is the *resolved*
             // value of `batterySaverMode` now, and under the System default it
             // starts off until the platform says otherwise.
+            // `dialogGrouping` groups dialogs by character out of the box.
             if (entry.key == 'enterToSend' ||
                 entry.key == 'showOurPicks' ||
                 entry.key == 'openCardAfterImport' ||
                 entry.key == 'hapticFeedback' ||
                 entry.key == 'messageVibration' ||
-                entry.key == 'confirmMessageDelete') {
+                entry.key == 'confirmMessageDelete' ||
+                entry.key == 'dialogGrouping') {
               expect(
                 _getBoolDefault(defaults, entry.key),
                 isTrue,

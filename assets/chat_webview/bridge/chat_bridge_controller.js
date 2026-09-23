@@ -19,6 +19,7 @@ import { parseImageResultElement, parseImagePendingPayload } from '../formatter/
 const CARET_REVEAL_GUTTER_PX = 12;
 import { ICON } from '../renderer/icon_library.js';
 import { applyTypingPhase } from '../renderer/typing_phase.js';
+import { retryFailedLocalImages } from '../renderer/local_image_retry.js';
 
 /* Id of the virtual typing placeholder. It is not a persisted message: Flutter
  * owns one constant id for it and the page keeps it pinned to the tail, so a
@@ -169,6 +170,9 @@ export class Bridge {
         if (existingImg) existingImg.remove();
         avatar.textContent = (newName.charAt(0) || '?').toUpperCase();
       }
+      // The avatar may have been created here rather than in the section
+      // build, so it is wired for a retry the same way.
+      retryFailedLocalImages(avatar);
     });
   }
 
@@ -2159,6 +2163,7 @@ export class Bridge {
       const wrapper = document.createElement('span');
       wrapper.innerHTML = sanitizeExtBlockHtml(this._renderExtBlockImageHtml(imgMatch[1]));
       body.appendChild(wrapper.firstElementChild);
+      retryFailedLocalImages(body);
       return;
     }
 
@@ -2179,6 +2184,7 @@ export class Bridge {
     htmlEl.className = 'ext-block-content';
     htmlEl.innerHTML = sanitizeExtBlockHtml(html);
     body.appendChild(htmlEl);
+    retryFailedLocalImages(body);
   }
 
   /**

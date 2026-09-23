@@ -617,6 +617,10 @@ class _ToolTile extends StatelessWidget {
     return GlassSurface(
       onTap: onTap,
       borderRadius: BorderRadius.circular(16),
+      // The artwork fills the card edge to edge, so a border painted behind it
+      // is invisible — and the accent frame is the whole point on those cards.
+      // Over art it is drawn on top instead.
+      borderOnTop: _hasArtworkFrame,
       border: _hasArtworkFrame
           ? Border.all(
               color: context.cs.primary.withValues(alpha: 0.5),

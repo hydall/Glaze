@@ -39,6 +39,7 @@ async function attach(page, count, { hidden = false } = {}) {
       return {
         className: wrap.className,
         images: images.length,
+        loading: images.map((img) => img.loading),
         toggles: wrap.querySelectorAll('.image-ctx-toggle').length,
         display: style.display,
         columns: style.gridTemplateColumns,
@@ -120,6 +121,16 @@ test('more attachments than the grid can lay out are dropped', async ({ page }) 
 
   expect(built.images).toBe(4);
   expect(built.className).toContain('count-4');
+});
+
+test('attachments load eagerly, not lazily', async ({ page }) => {
+  // An attachment sits at the bottom edge of the WebView, where the viewport
+  // keeps resizing around the input bar. A lazy image there can be evaluated
+  // while the row is still off-screen and never come back for it, so the
+  // picture shows as a broken tag.
+  const built = await attach(page, 3);
+
+  expect(built.loading).toEqual(['eager', 'eager', 'eager']);
 });
 
 test('the whole block carries one eye toggle, whatever the count', async ({ page }) => {
