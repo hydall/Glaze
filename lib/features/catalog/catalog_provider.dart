@@ -132,7 +132,7 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
   CatalogNotifier(this._ref, {this._fetchOverride})
     : super(const CatalogState()) {
     _loadSavedState();
-    // If the active provider gets disabled on the Third-Party providers screen,
+    // If the active provider gets disabled on the content providers screen,
     // fall back to an enabled one so the catalog never shows a hidden source.
     _ref.listen<List<CatalogProvider>>(enabledCatalogProvidersProvider, (
       _,
@@ -251,8 +251,8 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
   /// the persisted value is the new shape from then on.
   CatalogFilters _migrated(CatalogProvider provider, CatalogFilters filters) =>
       provider == CatalogProvider.datacat
-          ? DatacatSort.migrate(filters)
-          : filters;
+      ? DatacatSort.migrate(filters)
+      : filters;
 
   Future<void> _saveState() async {
     final prefs = await _ref.read(sharedPreferencesProvider.future);
@@ -420,8 +420,7 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
             (items.isNotEmpty &&
                 (state.results.length + items.length) < (result.total)),
         page: state.page + 1,
-        nextOffset:
-            result.nextOffset ?? state.nextOffset + items.length,
+        nextOffset: result.nextOffset ?? state.nextOffset + items.length,
         loading: false,
       );
     } catch (e) {
@@ -580,9 +579,7 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
   void resetFilters() {
     final defaultSort =
         providerSortDefaults[state.activeProvider] ?? 'trending';
-    state = state.copyWith(
-      filters: CatalogFilters(sort: defaultSort),
-    );
+    state = state.copyWith(filters: CatalogFilters(sort: defaultSort));
     _saveState();
     search(reset: true);
   }

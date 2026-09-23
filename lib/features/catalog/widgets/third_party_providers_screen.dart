@@ -19,7 +19,7 @@ import 'janitor_source_settings.dart';
 import 'provider_logo.dart';
 import 'saucepan_login_sheet.dart';
 
-/// Opens the Third-Party providers screen as a full-screen pushed route on the
+/// Opens the content providers screen as a full-screen pushed route on the
 /// root navigator, so it works identically from the menu and from the catalog
 /// provider picker (which live in different shell branches).
 Future<void> openThirdPartyProvidersScreen(BuildContext context) {
@@ -28,10 +28,10 @@ Future<void> openThirdPartyProvidersScreen(BuildContext context) {
   );
 }
 
-/// Lists the five third-party sources (JanitorAI, Janny, Datacat, Chub,
-/// Saucepan), each as a group that can be toggled on/off. Disabling a group
-/// hides that provider from the catalog and collapses its per-provider settings
-/// (e.g. the account login for JanitorAI and Saucepan).
+/// Lists the five content sources (JanitorAI, Janny, Datacat, Chub, Saucepan),
+/// each as a group that can be toggled on/off. Disabling a group hides that
+/// provider from the catalog and collapses its per-provider settings (e.g. the
+/// account login for JanitorAI and Saucepan).
 class ThirdPartyProvidersScreen extends ConsumerWidget {
   const ThirdPartyProvidersScreen({super.key});
 

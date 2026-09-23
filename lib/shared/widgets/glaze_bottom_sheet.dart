@@ -38,6 +38,12 @@ class BottomSheetItem {
   final bool centered;
   final List<BottomSheetAction> actions;
 
+  /// Optional label for a run of consecutive items. When it changes from one
+  /// item to the next, a small section header is rendered above the new run, so
+  /// one sheet can present several labelled groups (e.g. DataCat's sort field
+  /// and its time window) without splitting into separate sheets.
+  final String? section;
+
   const BottomSheetItem({
     required this.label,
     this.icon,
@@ -48,6 +54,7 @@ class BottomSheetItem {
     this.hint,
     this.centered = false,
     this.actions = const [],
+    this.section,
   });
 }
 
@@ -1005,6 +1012,16 @@ class _Header extends StatelessWidget {
   }
 }
 
+/// A run of consecutive [BottomSheetItem]s sharing a [BottomSheetItem.section].
+/// The indices are the items' positions in the original list, so a filtered or
+/// scroll-targeted row keeps its place inside its own group.
+class _ItemsGroup {
+  final String? section;
+  final List<int> indices = [];
+
+  _ItemsGroup(this.section);
+}
+
 class _ItemsList extends StatelessWidget {
   final List<BottomSheetItem> items;
 
@@ -1026,53 +1043,92 @@ class _ItemsList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // The separator rides *above* its row, so the topmost surviving row must
-    // drop it — otherwise a filtered list opens with a stray hairline.
-    var firstVisible = -1;
+    // Consecutive items sharing a [section] form one group; items with no
+    // section land in a single unlabelled group, which is the common case.
+    // Each group renders as its own card under its own label, the way the
+    // settings screens stack [MenuGroup]s.
+    final groups = <_ItemsGroup>[];
     for (var i = 0; i < items.length; i++) {
-      if (_isVisible(i)) {
-        firstVisible = i;
-        break;
+      final section = items[i].section;
+      if (groups.isEmpty || groups.last.section != section) {
+        groups.add(_ItemsGroup(section));
       }
+      groups.last.indices.add(i);
     }
-    return _SheetReveal(
-      visible: firstVisible >= 0,
-      animate: animateFilter,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        child: Container(
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.06),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-            borderRadius: BorderRadius.circular(16),
+
+    final groupWidgets = <Widget>[];
+    for (final group in groups) {
+      // First visible row of the group, so the topmost surviving row drops its
+      // separator — otherwise a filtered list opens with a stray hairline.
+      var firstVisible = -1;
+      for (final i in group.indices) {
+        if (_isVisible(i)) {
+          firstVisible = i;
+          break;
+        }
+      }
+
+      final rows = <Widget>[];
+      for (final i in group.indices) {
+        final isVisible = _isVisible(i);
+        rows.add(
+          _SheetReveal(
+            visible: isVisible,
+            animate: animateFilter,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (isVisible && i != firstVisible)
+                  Divider(
+                    height: 1,
+                    thickness: 1,
+                    color: Colors.white.withValues(alpha: 0.06),
+                  ),
+                KeyedSubtree(
+                  key: i == scrollToIndex ? scrollTargetKey : null,
+                  child: _ItemRow(item: items[i]),
+                ),
+              ],
+            ),
           ),
-          clipBehavior: Clip.antiAlias,
+        );
+      }
+
+      groupWidgets.add(
+        _SheetReveal(
+          visible: firstVisible >= 0,
+          animate: animateFilter,
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              for (int i = 0; i < items.length; i++)
-                _SheetReveal(
-                  visible: _isVisible(i),
-                  animate: animateFilter,
+              if (group.section != null) _SheetSectionLabel(group.section!),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.06),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.1),
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  clipBehavior: Clip.antiAlias,
                   child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (i != firstVisible)
-                        Divider(
-                          height: 1,
-                          thickness: 1,
-                          color: Colors.white.withValues(alpha: 0.06),
-                        ),
-                      KeyedSubtree(
-                        key: i == scrollToIndex ? scrollTargetKey : null,
-                        child: _ItemRow(item: items[i]),
-                      ),
-                    ],
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: rows,
                   ),
                 ),
+              ),
             ],
           ),
         ),
-      ),
+      );
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: groupWidgets,
     );
   }
 }
@@ -1337,6 +1393,31 @@ class _ItemLabel extends StatelessWidget {
       );
     }
     return Text(item.label, style: TextStyle(fontSize: 16, color: color));
+  }
+}
+
+/// Small uppercase label above a run of [BottomSheetItem]s that share a
+/// [BottomSheetItem.section]. Mirrors the filter sheet's section captions so a
+/// grouped picker reads the same as every other sectioned sheet.
+class _SheetSectionLabel extends StatelessWidget {
+  final String label;
+
+  const _SheetSectionLabel(this.label);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      child: Text(
+        label.toUpperCase(),
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: context.cs.onSurfaceVariant,
+          letterSpacing: 0.6,
+        ),
+      ),
+    );
   }
 }
 

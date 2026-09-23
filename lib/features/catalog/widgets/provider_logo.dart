@@ -4,7 +4,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import '../catalog_models.dart';
 import '../third_party_providers_provider.dart';
 
-/// Bundled brand mark for each third-party source, kept in the service's own
+/// Bundled brand mark for each content source, kept in the service's own
 /// colours (raster where the source only publishes one, vector where it does).
 const Map<ThirdPartyProvider, String> _providerLogoAssets = {
   ThirdPartyProvider.janitor: 'assets/logos/providers/janitor.png',
@@ -37,11 +37,6 @@ class ProviderLogo extends StatelessWidget {
     if (asset.endsWith('.svg')) {
       return SvgPicture.asset(asset, width: size, height: size);
     }
-    return Image.asset(
-      asset,
-      width: size,
-      height: size,
-      fit: BoxFit.contain,
-    );
+    return Image.asset(asset, width: size, height: size, fit: BoxFit.contain);
   }
 }

@@ -8,8 +8,10 @@ import '../catalog_models.dart';
 import '../catalog_provider.dart';
 import '../third_party_providers_provider.dart';
 import 'catalog_filter_sheet.dart';
+import 'datacat/datacat_sort_sheet.dart';
 import 'provider_logo.dart';
 import 'third_party_providers_screen.dart';
+
 import 'package:easy_localization/easy_localization.dart';
 
 class CatalogControls extends ConsumerWidget {
@@ -44,17 +46,10 @@ class CatalogControls extends ConsumerWidget {
           'tokens_asc': 'catalog_sort_janny_tokens_asc'.tr(),
           'relevant': 'catalog_sort_janny_relevant'.tr(),
         },
-        // The five sort fields the Client API accepts. The time window used
-        // to be baked into these labels (`score_week`); it is its own chip
-        // now, so every field can be combined with every window instead of
-        // only the four pairings the old list happened to name.
-        CatalogProvider.datacat => {
-          'fresh': 'catalog_sort_datacat_fresh'.tr(),
-          'score': 'catalog_sort_datacat_score'.tr(),
-          'chat_count': 'catalog_sort_datacat_chat_count'.tr(),
-          'messages_per_chat': 'catalog_sort_datacat_messages_per_chat'.tr(),
-          'first_published': 'catalog_sort_datacat_first_published'.tr(),
-        },
+        // The five sort fields the Client API accepts. The time window is a
+        // second choice in the same picker, so every field can be combined with
+        // every window instead of only the four pairings the old labels named.
+        CatalogProvider.datacat => datacatSortOptions(),
         CatalogProvider.chub => {
           'timeline': 'catalog_sort_chub_timeline'.tr(),
           'popular': 'catalog_sort_chub_popular'.tr(),
@@ -65,23 +60,6 @@ class CatalogControls extends ConsumerWidget {
           'updated': 'catalog_sort_chub_updated'.tr(),
         },
       };
-
-  /// Labels for the DataCat time-window chip.
-  static Map<String, String> get windowOptions => {
-    'all': 'catalog_window_all'.tr(),
-    'week': 'catalog_window_week'.tr(),
-    '24h': 'catalog_window_24h'.tr(),
-  };
-
-  static const Map<String, IconData> _windowIcons = {
-    'all': Icons.all_inclusive_rounded,
-    'week': Icons.date_range_rounded,
-    '24h': Icons.local_fire_department_rounded,
-  };
-
-  /// Whether this provider can express a time window. Only DataCat can: every
-  /// other source folds the window into its sort key.
-  static bool supportsWindow(CatalogProvider p) => p == CatalogProvider.datacat;
 
   /// Whether this provider can filter by token count. DataCat's API takes no
   /// token bounds, so the slider is hidden there rather than quietly ignored.
@@ -123,12 +101,16 @@ class CatalogControls extends ConsumerWidget {
   }
 
   String _currentSortLabel() {
+    if (state.activeProvider == CatalogProvider.datacat) {
+      return datacatSortOptions()[state.filters.sort] ?? state.filters.sort;
+    }
     final opts = sortOptionsForProvider(state.activeProvider);
     return opts[state.filters.sort] ?? state.filters.sort;
   }
 
   // Icon per sort-mode key, shared across providers since the same key
-  // (e.g. 'latest', 'popular') always carries the same meaning.
+  // (e.g. 'latest', 'popular') always carries the same meaning. DataCat's own
+  // fields live with its combined picker in [datacat_sort_sheet.dart].
   static const Map<String, IconData> _sortIcons = {
     'trending': Icons.trending_up_rounded,
     'trending_week': Icons.trending_up_rounded,
@@ -140,11 +122,6 @@ class CatalogControls extends ConsumerWidget {
     'tokens_desc': Icons.arrow_downward_rounded,
     'tokens_asc': Icons.arrow_upward_rounded,
     'relevant': Icons.auto_awesome_rounded,
-    'fresh': Icons.new_releases_rounded,
-    'score': Icons.star_rounded,
-    'chat_count': Icons.chat_bubble_rounded,
-    'messages_per_chat': Icons.forum_rounded,
-    'first_published': Icons.event_available_rounded,
     'rating': Icons.thumb_up_rounded,
     'updated': Icons.update_rounded,
     'timeline': Icons.timeline_rounded,
@@ -153,11 +130,20 @@ class CatalogControls extends ConsumerWidget {
   static IconData sortIconForKey(String key) =>
       _sortIcons[key] ?? Icons.sort_rounded;
 
-  IconData _currentSortIcon() => sortIconForKey(state.filters.sort);
+  IconData _currentSortIcon() {
+    if (state.activeProvider == CatalogProvider.datacat) {
+      return datacatSortIconFor(state.filters.sort);
+    }
+    return sortIconForKey(state.filters.sort);
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final enabledProviders = ref.watch(enabledCatalogProvidersProvider);
+    // The DataCat chip shows the window as its text, so resolve its label once.
+    final datacatWindowLabel = state.activeProvider == CatalogProvider.datacat
+        ? datacatWindowOptions()[state.filters.window] ?? state.filters.window
+        : '';
     final row = Row(
       children: [
         GlazeDropdownChip(
@@ -203,50 +189,43 @@ class CatalogControls extends ConsumerWidget {
             ),
           ),
         ),
-        if (supportsWindow(state.activeProvider)) ...[
+        if (state.activeProvider == CatalogProvider.datacat) ...[
           const SizedBox(width: 8),
+          // One chip for the whole listing order: the sort field's icon and the
+          // time window's text, both edited in the same sheet.
           GlazeActionChip(
-            icon: _windowIcons[state.filters.window] ??
-                Icons.all_inclusive_rounded,
-            label: windowOptions[state.filters.window],
-            tooltip: 'catalog_window_title'.tr(),
+            icon: _currentSortIcon(),
+            label: datacatWindowLabel,
+            tooltip: '${_currentSortLabel()} · $datacatWindowLabel',
+            onTap: () => showDatacatSortSheet(
+              context,
+              filters: state.filters,
+              onSort: notifier.setSort,
+              onWindow: notifier.setWindow,
+            ),
+          ),
+        ] else ...[
+          const SizedBox(width: 8),
+          GlazeSortIconChip(
+            icon: _currentSortIcon(),
+            tooltip: _currentSortLabel(),
             onTap: () => showGlazePickerSheet(
               context,
-              title: 'catalog_window_title'.tr(),
-              items: windowOptions.entries
+              title: 'sort_by'.tr(),
+              items: sortOptionsForProvider(state.activeProvider).entries
                   .map(
                     (e) => GlazePickerItem(
                       label: e.value,
-                      isActive: e.key == state.filters.window,
+                      isActive: e.key == state.filters.sort,
                       value: e.key,
-                      icon: _windowIcons[e.key],
+                      icon: sortIconForKey(e.key),
                     ),
                   )
                   .toList(),
-              onSelect: (v) => notifier.setWindow(v as String),
+              onSelect: (v) => notifier.setSort(v as String),
             ),
           ),
         ],
-        const SizedBox(width: 8),
-        GlazeSortIconChip(
-          icon: _currentSortIcon(),
-          tooltip: _currentSortLabel(),
-          onTap: () => showGlazePickerSheet(
-            context,
-            title: 'sort_by'.tr(),
-            items: sortOptionsForProvider(state.activeProvider).entries
-                .map(
-                  (e) => GlazePickerItem(
-                    label: e.value,
-                    isActive: e.key == state.filters.sort,
-                    value: e.key,
-                    icon: sortIconForKey(e.key),
-                  ),
-                )
-                .toList(),
-            onSelect: (v) => notifier.setSort(v as String),
-          ),
-        ),
       ],
     );
 
@@ -257,7 +236,7 @@ class CatalogControls extends ConsumerWidget {
 }
 
 /// Gear button pinned to the provider-picker sheet header; opens the
-/// Third-Party providers screen where sources can be enabled/disabled.
+/// content providers screen where sources can be enabled/disabled.
 class _SettingsGearButton extends StatelessWidget {
   final VoidCallback onTap;
 
