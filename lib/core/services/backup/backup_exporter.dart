@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:archive/archive_io.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -31,6 +31,17 @@ class BackupExporter {
   //  12 — added complete Agent Ops reconciliation and recovery provenance.
   //  13 — Collector journals use three-reconciliation batches.
   static const int schemaVersion = 13;
+
+  /// Rows fetched per page while serializing a table. The whole table is never
+  /// materialized at once — `chat_sessions` stores every message of every chat
+  /// and can be hundreds of MB, which previously caused an out-of-memory crash.
+  static const int _tablePageSize = 500;
+
+  /// Table files up to this size are deflate-compressed in memory. Larger ones
+  /// are stored uncompressed and streamed straight from the staging file, so a
+  /// multi-GB table cannot exhaust RAM (the archive encoder buffers a whole
+  /// compressed entry in memory).
+  static const int _compressInMemoryBytes = 4 * 1024 * 1024;
 
   static const List<String> tableNames = [
     'characters',
@@ -89,27 +100,43 @@ class BackupExporter {
   BackupExporter(this._db, this._imageStorage);
 
   Future<String> export() async {
+    final tempFile = await buildArchive(Directory.systemTemp);
+    final filename = p.basename(tempFile.path);
+    try {
+      return await FileExportService.exportFile(
+        sourcePath: tempFile.path,
+        filename: filename,
+        subfolder: 'backup',
+      );
+    } finally {
+      try {
+        await tempFile.delete();
+      } catch (_) {}
+    }
+  }
+
+  /// Builds the `.glz` archive inside [directory] and returns the file.
+  ///
+  /// Split out from [export] so tests can exercise the full serialization
+  /// without going through the platform save/share dialog.
+  @visibleForTesting
+  Future<File> buildArchive(Directory directory) async {
     final now = DateTime.now();
     final filename =
         'Glaze_backup_${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}_'
         '${now.hour.toString().padLeft(2, '0')}-${now.minute.toString().padLeft(2, '0')}-${now.second.toString().padLeft(2, '0')}.glz';
 
-    final tempFile = File('${Directory.systemTemp.path}/$filename');
+    final tempFile = File(p.join(directory.path, filename));
+    final stagingDir = await Directory.systemTemp.createTemp(
+      'glaze_backup_staging_',
+    );
     final encoder = ZipFileEncoder();
     encoder.create(tempFile.path);
 
     try {
-      await _writeZip(encoder);
+      await _writeZip(encoder, stagingDir);
       await encoder.close();
-      final path = await FileExportService.exportFile(
-        sourcePath: tempFile.path,
-        filename: filename,
-        subfolder: 'backup',
-      );
-      try {
-        await tempFile.delete();
-      } catch (_) {}
-      return path;
+      return tempFile;
     } catch (e) {
       try {
         await encoder.close();
@@ -118,10 +145,14 @@ class BackupExporter {
         await tempFile.delete();
       } catch (_) {}
       rethrow;
+    } finally {
+      try {
+        await stagingDir.delete(recursive: true);
+      } catch (_) {}
     }
   }
 
-  Future<void> _writeZip(ZipFileEncoder encoder) async {
+  Future<void> _writeZip(ZipFileEncoder encoder, Directory stagingDir) async {
     // 1. manifest.json
     final manifest = <String, dynamic>{
       '_isGlazeBackup': true,
@@ -134,12 +165,12 @@ class BackupExporter {
     final manifestBytes = utf8.encode(jsonEncode(manifest));
     encoder.addArchiveFile(ArchiveFile.bytes('manifest.json', manifestBytes));
 
-    // 2. tables/<name>.jsonl — streamed per row.
+    // 2. tables/<name>.jsonl — paged out to a staging file, then streamed
+    // into the archive so peak RAM stays bounded regardless of table size.
     for (final tableName in tableNames) {
-      final bytes = await _streamTableAsNdjson(tableName);
-      encoder.addArchiveFile(
-        ArchiveFile.bytes('tables/$tableName.jsonl', bytes),
-      );
+      final staged = File(p.join(stagingDir.path, '$tableName.jsonl'));
+      await _writeTableAsNdjson(tableName, staged);
+      await _addStagedTable(encoder, staged, 'tables/$tableName.jsonl');
     }
 
     // 3. preferences.json
@@ -213,27 +244,64 @@ class BackupExporter {
     }
   }
 
-  /// Serializes a table to NDJSON bytes. Loads the table fully into memory
-  /// (Drift doesn't support true row-streaming), but does so one table at
-  /// a time, so peak RAM is bounded by the largest single table instead of
-  /// the whole database.
-  Future<List<int>> _streamTableAsNdjson(String tableName) async {
-    final builder = BytesBuilder(copy: false);
+  /// Serializes a table to NDJSON on disk, one page of rows at a time.
+  ///
+  /// Drift doesn't support true row-streaming, so we page with LIMIT/OFFSET
+  /// over a stable `rowid` order. Peak RAM is bounded by [_tablePageSize] rows
+  /// plus the largest single row, instead of the entire table.
+  Future<void> _writeTableAsNdjson(String tableName, File out) async {
     final orderBy = tableName == 'lorebook_use_acceptance_records'
-        ? " ORDER BY CASE acceptance_kind WHEN 'variation' THEN 0 ELSE 1 END, accepted_at, acceptance_id"
-        : '';
-    final rows = await _db
-        .customSelect('SELECT * FROM $tableName$orderBy')
-        .get();
-    for (final row in rows) {
-      try {
-        final data = row.data;
-        builder.add(utf8.encode(jsonEncode(data)));
-        builder.add([0x0A]); // '\n'
-      } catch (_) {
-        // skip unserializable rows
+        ? " ORDER BY CASE acceptance_kind WHEN 'variation' THEN 0 ELSE 1 END, accepted_at, acceptance_id, rowid"
+        : ' ORDER BY rowid';
+    final sink = out.openWrite();
+    try {
+      var offset = 0;
+      while (true) {
+        final rows = await _db
+            .customSelect(
+              'SELECT * FROM $tableName$orderBy LIMIT $_tablePageSize OFFSET $offset',
+            )
+            .get();
+        if (rows.isEmpty) break;
+        for (final row in rows) {
+          try {
+            sink.add(utf8.encode(jsonEncode(row.data)));
+            sink.add(const [0x0A]); // '\n'
+          } catch (_) {
+            // skip unserializable rows
+          }
+        }
+        offset += rows.length;
+        if (rows.length < _tablePageSize) break;
+        await sink.flush();
       }
+    } finally {
+      await sink.close();
     }
-    return builder.takeBytes();
+  }
+
+  /// Adds a staged table file to the archive. Small files are compressed in
+  /// memory; large ones are added as a stored (uncompressed) streaming entry
+  /// so the encoder never has to hold the whole file in RAM.
+  Future<void> _addStagedTable(
+    ZipFileEncoder encoder,
+    File file,
+    String archiveName,
+  ) async {
+    final length = await file.length();
+    if (length <= _compressInMemoryBytes) {
+      final bytes = await file.readAsBytes();
+      encoder.addArchiveFile(ArchiveFile.bytes(archiveName, bytes));
+      return;
+    }
+    final archiveFile = ArchiveFile.stream(
+      archiveName,
+      InputFileStream(file.path),
+    );
+    archiveFile.compression = CompressionType.none;
+    archiveFile.lastModTime =
+        (await file.lastModified()).millisecondsSinceEpoch ~/ 1000;
+    archiveFile.mode = (await file.stat()).mode;
+    encoder.addArchiveFile(archiveFile);
   }
 }
