@@ -134,11 +134,11 @@ abstract class AppSettings with _$AppSettings {
     @Default(false) bool disableSwipeRegeneration,
     @Default(false) bool allowMessageScripts,
 
-    /// Whether a message in the middle of a chat may be deleted — in bulk
-    /// selection or from its action menu — instead of only a trailing run that
-    /// reaches the last message. Off by default: deleting mid-history breaks
-    /// the prompt context, so it is an explicit opt-in.
-    @Default(false) bool allowMiddleMessageDelete,
+    /// Whether deleting one or more chat messages asks for confirmation first.
+    /// On by default: a delete also rolls back Studio trackers, MemoryBook
+    /// entries and other data derived from the deleted point onward, so the
+    /// user confirms before it happens. Off restores the old immediate delete.
+    @Default(true) bool confirmMessageDelete,
     @Default('en') String language,
     @Default(false) bool virtualKeyboardSend,
     @Default(true) bool showOurPicks,
@@ -211,7 +211,7 @@ abstract final class AppSettingsPreferences {
     'hideTooltips',
     'disableSwipeRegeneration',
     'allowMessageScripts',
-    'allowMiddleMessageDelete',
+    'confirmMessageDelete',
     'language',
     'virtualKeyboardSend',
     'showOurPicks',
@@ -256,9 +256,9 @@ abstract final class AppSettingsPreferences {
       allowMessageScripts:
           _coerceBool(prefs.get('allowMessageScripts')) ??
           defaults.allowMessageScripts,
-      allowMiddleMessageDelete:
-          _coerceBool(prefs.get('allowMiddleMessageDelete')) ??
-          defaults.allowMiddleMessageDelete,
+      confirmMessageDelete:
+          _coerceBool(prefs.get('confirmMessageDelete')) ??
+          defaults.confirmMessageDelete,
       language: supportedAppLanguages.contains(savedLanguage)
           ? savedLanguage!
           : defaults.language,
@@ -321,7 +321,7 @@ abstract final class AppSettingsPreferences {
       'hideTooltips': normalized.hideTooltips,
       'disableSwipeRegeneration': normalized.disableSwipeRegeneration,
       'allowMessageScripts': normalized.allowMessageScripts,
-      'allowMiddleMessageDelete': normalized.allowMiddleMessageDelete,
+      'confirmMessageDelete': normalized.confirmMessageDelete,
       'language': normalized.language,
       'virtualKeyboardSend': normalized.virtualKeyboardSend,
       'showOurPicks': normalized.showOurPicks,
@@ -430,7 +430,7 @@ abstract final class AppSettingsPreferences {
     hideTooltips: values['hideTooltips'] as bool,
     disableSwipeRegeneration: values['disableSwipeRegeneration'] as bool,
     allowMessageScripts: values['allowMessageScripts'] as bool,
-    allowMiddleMessageDelete: values['allowMiddleMessageDelete'] as bool,
+    confirmMessageDelete: values['confirmMessageDelete'] as bool,
     language: values['language'] as String,
     virtualKeyboardSend: values['virtualKeyboardSend'] as bool,
     showOurPicks: values['showOurPicks'] as bool,

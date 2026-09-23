@@ -215,6 +215,7 @@ class ChatMessageService {
     final checkpointRepo = _ref.read(
       ledgerReconciliationCheckpointRepoProvider,
     );
+    final infoBlocksRepo = _ref.read(infoBlocksRepoProvider);
     final chatRepo = _ref.read(chatRepoProvider);
     final updated = plan.session;
     final invalidatedMessageIds = plan.invalidatedMessageIds;
@@ -264,6 +265,10 @@ class ChatMessageService {
       await knowledgeRepo.retractForMessages(session.id, invalidatedMessageIds);
       await memoryBookRepo.deleteForMessages(session.id, invalidatedMessageIds);
       await snapshotRepo.deleteForMessages(session.id, invalidatedMessageIds);
+      await infoBlocksRepo.deleteByMessageIds(
+        session.id,
+        invalidatedMessageIds,
+      );
       await _deleteManifestProvenanceForMessages(
         sessionId: session.id,
         messageIds: invalidatedMessageIds,
@@ -302,6 +307,13 @@ class ChatMessageService {
           .deleteBySource('chat_message', session.id);
     } catch (e) {
       debugPrint('[ChatMessageService] failed to clear message index: $e');
+    }
+
+    // ExtBlock panels are keyed by message id. The transaction deleted the
+    // rows for every invalidated message; reload the provider so a deleted
+    // message's panel cannot be re-rendered from the in-memory cache.
+    if (invalidatedMessageIds.isNotEmpty) {
+      await _ref.read(infoBlocksProvider(session.id).notifier).refresh();
     }
 
     final durable = await chatRepo.getById(session.id) ?? updated;

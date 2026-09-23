@@ -186,6 +186,24 @@ class InfoBlocksRepository extends DatabaseAccessor<AppDatabase>
         .go();
   }
 
+  /// Deletes every block anchored to any of [messageIds] in one statement.
+  ///
+  /// Used when messages are removed from the middle of a chat: their generated
+  /// ExtBlocks no longer have an owner, so they are dropped with one pass
+  /// instead of a per-message call. Cloud sync uploads info blocks as a
+  /// per-session payload, so the next session upload drops the removed rows —
+  /// no deletion tombstone is recorded here.
+  Future<void> deleteByMessageIds(
+    String sessionId,
+    Set<String> messageIds,
+  ) async {
+    if (messageIds.isEmpty) return;
+    await (delete(infoBlocks)
+          ..where((tbl) => tbl.sessionId.equals(sessionId))
+          ..where((tbl) => tbl.messageId.isIn(messageIds)))
+        .go();
+  }
+
   Future<void> deleteSwipeAndShift({
     required String sessionId,
     required String messageId,

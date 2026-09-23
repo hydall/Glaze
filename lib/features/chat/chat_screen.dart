@@ -32,6 +32,7 @@ import '../../shared/shell/desktop/desktop_layout_provider.dart'
     show isDesktopLayout;
 import 'widgets/chat_column_width.dart';
 import 'widgets/message_actions.dart';
+import 'widgets/message_delete_confirmation.dart';
 import 'widgets/game_time_seed_dialog.dart';
 import '../../shared/theme/theme_font_provider.dart';
 import '../../shared/theme/theme_preset.dart';
@@ -1736,6 +1737,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                   context: context,
                                   ref: ref,
                                   charId: widget.charId,
+                                  sessionId: widget.state.session?.id,
                                   content: content,
                                   messageIndex: index,
                                   messageId: messageId,
@@ -1747,9 +1749,6 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                   isLast:
                                       index == widget.state.messages.length - 1,
                                   isGenerating: widget.state.isGenerating,
-                                  allowMiddleDelete:
-                                      appSettings?.allowMiddleMessageDelete ??
-                                      false,
                                   isHidden:
                                       widget.state.messages[index].isHidden,
                                   canDeleteSwipe:
@@ -2271,13 +2270,9 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                         .allSelectedHidden(
                                           widget.state.messages,
                                         );
-                                    final allowMiddleDelete =
-                                        appSettings?.allowMiddleMessageDelete ??
-                                        false;
                                     final canDeleteSelected = _selectionCtrl
                                         .canDeleteSelection(
                                           widget.state.messages,
-                                          allowMiddle: allowMiddleDelete,
                                         );
                                     return ChatInputBar(
                                       key: ValueKey(widget.state.session?.id),
@@ -2340,6 +2335,15 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                         if (mounted) setState(() {});
                                       },
                                       onDeleteSelected: () async {
+                                        if (!await confirmMessageDeletion(
+                                          context,
+                                          ref,
+                                          sessionId:
+                                              widget.state.session?.id,
+                                        )) {
+                                          return;
+                                        }
+                                        if (!mounted || !context.mounted) return;
                                         // deleteSelected drops the selection
                                         // synchronously; rebuild before
                                         // awaiting so the toolbar closes with
@@ -2350,7 +2354,6 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                               ref,
                                               widget.charId,
                                               widget.state.messages,
-                                              allowMiddle: allowMiddleDelete,
                                             );
                                         if (mounted) setState(() {});
                                         await pending;

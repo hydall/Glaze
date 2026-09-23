@@ -91,4 +91,47 @@ void main() {
       expect(recent, isEmpty);
     });
   });
+
+  group('InfoBlocksRepository.deleteByMessageIds', () {
+    test('drops every block of the listed messages and keeps the rest',
+        () async {
+      await repo.insert(_block(id: 'a', messageId: 'm1', name: 'Status', createdAt: 100));
+      await repo.insert(_block(id: 'b', messageId: 'm2', name: 'Status', createdAt: 200));
+      await repo.insert(_block(id: 'c', messageId: 'm3', name: 'Status', createdAt: 300));
+
+      await repo.deleteByMessageIds('s1', {'m2', 'm3'});
+
+      final remaining = await repo.getBySessionId('s1');
+      expect(remaining.map((b) => b.id).toList(), ['a']);
+    });
+
+    test('is a no-op for an empty set', () async {
+      await repo.insert(_block(id: 'a', messageId: 'm1', name: 'Status', createdAt: 100));
+
+      await repo.deleteByMessageIds('s1', const {});
+
+      expect((await repo.getBySessionId('s1')).map((b) => b.id), ['a']);
+    });
+
+    test('does not touch another session', () async {
+      await repo.insert(_block(id: 'a', messageId: 'm1', name: 'Status', createdAt: 100));
+      await repo.insert(
+        InfoBlock(
+          id: 'other',
+          sessionId: 's2',
+          messageId: 'm1',
+          blockId: 'cfg-Status',
+          blockName: 'Status',
+          blockType: 'infoblock',
+          content: 'other session',
+          createdAt: 100,
+        ),
+      );
+
+      await repo.deleteByMessageIds('s1', {'m1'});
+
+      expect((await repo.getBySessionId('s1')), isEmpty);
+      expect((await repo.getBySessionId('s2')).map((b) => b.id), ['other']);
+    });
+  });
 }
