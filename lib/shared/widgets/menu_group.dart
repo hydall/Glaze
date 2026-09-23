@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
 import '../../core/platform/haptics.dart';
 import '../theme/app_colors.dart';
 import '../shell/shell_header_provider.dart';
@@ -214,12 +215,17 @@ class MenuGroup extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hasItems = items.isNotEmpty;
     final body = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (header != null) _buildHeader(context),
+        if (header != null) _buildHeader(context, hasItems: hasItems),
         ...items,
-        const SizedBox(height: 6),
+        // The trailing gap only separates the last row from the card's bottom
+        // edge. An items-less group (the Catalog master switch, say) has no
+        // row to separate from, and its header already carries the matching
+        // bottom padding — the gap would only pad the hint's own line twice.
+        if (hasItems) const SizedBox(height: 6),
       ],
     );
 
@@ -266,10 +272,15 @@ class MenuGroup extends StatelessWidget {
     );
   }
 
-  Widget _buildHeader(BuildContext context) {
+  Widget _buildHeader(BuildContext context, {required bool hasItems}) {
     final isAccentCaps = headerVariant == MenuGroupHeaderVariant.accentCaps;
+    // With rows below, the header only needs a hairline gap before them, and
+    // the hint sits tight under the title. Without rows the header *is* the
+    // group, so it takes a full bottom pad to mirror the 16pt top — otherwise
+    // the description ends up a few pixels from the card's edge.
+    final bottomPad = hasItems ? (description != null ? 2.0 : 4.0) : 16.0;
     return Padding(
-      padding: EdgeInsets.fromLTRB(16, 16, 8, description != null ? 2 : 4),
+      padding: EdgeInsets.fromLTRB(16, 16, 8, bottomPad),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

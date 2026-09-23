@@ -14,7 +14,7 @@ import 'provider_logo.dart';
 /// DataCat's scraped copy.
 ///
 /// Shared because both places that own these settings must offer exactly the
-/// same choices: the Third-Party providers screen (JanitorAI group) and the
+/// same choices: the content providers screen (JanitorAI group) and the
 /// extraction settings sheet reachable from the lorebook capture flow.
 List<Widget> janitorSourceMenuItems(
   BuildContext context,
