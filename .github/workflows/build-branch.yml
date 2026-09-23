@@ -250,7 +250,24 @@ jobs:
           rm -f keytool.log
           echo "Keystore OK - alias \"$KEY_ALIAS\" is readable."
 
-      - name: Build APK (arm64 only)
+      # Build both ARM ABIs, twice: one universal APK for anyone who does not
+      # know (or care) what an ABI is, plus the per-ABI pair that is about half
+      # the size for people who do. Both cover exactly the same devices.
+      #
+      # Why both ABIs at all: an arm64-only APK still *installs* on a 32-bit
+      # phone — the dependency AARs contribute armeabi-v7a objects, so the
+      # installer finds a supported ABI — and then dies at launch with
+      # "Could not find 'libflutter.so'. Looked for: [armeabi-v7a], but only
+      # found: [arm64-v8a]". Samsung's Galaxy A13 (SM-A135 Exynos 850 and
+      # SM-A136 Dimensity 700) runs 32-bit Android 13 despite 64-bit silicon,
+      # so a fat build is the only thing that makes it run.
+      #
+      # `--split-debug-info` keeps the Dart debug sections out of the APKs, so
+      # each split APK stays under Telegram's 50 MB Bot API upload limit; the
+      # universal one is over it, and telegram_post.sh announces it with a link
+      # to this run instead of failing. The symbols are uploaded below, so a
+      # stack trace from this build is still readable with `flutter symbolize`.
+      - name: Build APKs (universal + per-ABI)
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
@@ -260,30 +277,40 @@ jobs:
           # suffix and the launcher label, so the three channels co-install.
           # Signing is unaffected — all channels use the same keystore above.
           BUILD_CHANNEL: ${{ needs.metadata.outputs.build_channel }}
-        # `--split-debug-info` keeps the Dart debug sections out of the APK.
-        # It is what gets the file under Telegram's 50 MB Bot API upload limit,
-        # which the developer DMs need: over it, the build is only announced
-        # with a link to this run, and the point of that toggle is to hand
-        # someone the file. The symbols are uploaded below, so a stack trace
-        # from this build is still readable with `flutter symbolize`.
-        run: >
-          flutter build apk --release --no-pub --target-platform android-arm64
-          --split-debug-info=build/symbols
-          "--dart-define=APP_VERSION=${{ needs.metadata.outputs.version }}"
-          "--dart-define=BUILD_DATE=${{ needs.metadata.outputs.build_date }}"
-          "--dart-define=BUILD_BRANCH=${{ needs.metadata.outputs.build_branch }}"
-          "--dart-define=BUILD_COMMIT=${{ needs.metadata.outputs.git_sha }}"
-          "--dart-define=BUILD_CHANNEL=${{ needs.metadata.outputs.build_channel }}"
-          "--dart-define=DATACAT_CLIENT_ID=${{ vars.DATACAT_CLIENT_ID }}"
+        run: |
+          set -euo pipefail
+          DEFINES=(
+            "--dart-define=APP_VERSION=${{ needs.metadata.outputs.version }}"
+            "--dart-define=BUILD_DATE=${{ needs.metadata.outputs.build_date }}"
+            "--dart-define=BUILD_BRANCH=${{ needs.metadata.outputs.build_branch }}"
+            "--dart-define=BUILD_COMMIT=${{ needs.metadata.outputs.git_sha }}"
+            "--dart-define=BUILD_CHANNEL=${{ needs.metadata.outputs.build_channel }}"
+            "--dart-define=DATACAT_CLIENT_ID=${{ vars.DATACAT_CLIENT_ID }}"
+          )
+          # Universal: one file that runs on every ARM phone, 32- and 64-bit.
+          flutter build apk --release --no-pub \
+            --target-platform android-arm,android-arm64 \
+            --split-debug-info=build/symbols "${DEFINES[@]}"
+          # Per-ABI: same coverage, roughly half the download, for people who
+          # pick their ABI (or use an updater that picks it for them).
+          flutter build apk --release --no-pub --split-per-abi \
+            --target-platform android-arm,android-arm64 \
+            --split-debug-info=build/symbols "${DEFINES[@]}"
 
-      - name: Rename APK
-        run: mv build/app/outputs/flutter-apk/app-release.apk "build/app/outputs/flutter-apk/${{ needs.metadata.outputs.file_slug }}.apk"
+      - name: Rename APKs
+        run: |
+          set -euo pipefail
+          OUT=build/app/outputs/flutter-apk
+          NAME="${{ needs.metadata.outputs.file_slug }}"
+          mv "$OUT/app-release.apk"             "$OUT/$NAME.apk"
+          mv "$OUT/app-armeabi-v7a-release.apk" "$OUT/$NAME-armeabi-v7a.apk"
+          mv "$OUT/app-arm64-v8a-release.apk"   "$OUT/$NAME-arm64-v8a.apk"
 
-      - name: Upload APK
+      - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
           name: Glaze-release-APK
-          path: "build/app/outputs/flutter-apk/${{ needs.metadata.outputs.file_slug }}.apk"
+          path: "build/app/outputs/flutter-apk/${{ needs.metadata.outputs.file_slug }}*.apk"
 
       - name: Upload debug symbols
         # Deliberately not named `Glaze-release-*`: the notify job collects the
