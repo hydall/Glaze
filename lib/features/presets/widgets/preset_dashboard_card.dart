@@ -23,6 +23,11 @@ class PresetCard extends StatelessWidget {
       child: GlassSurface(
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: context.cs.outline),
+        // The dashboard's cover band bleeds to the card's edges, and a border
+        // painted behind the child is simply covered by it — the frame would
+        // break wherever the art sits. Sections whose child is padded look the
+        // same either way, so this holds for every card.
+        borderOnTop: true,
         child: child,
       ),
     );
