@@ -45,6 +45,9 @@ class DesktopPopupAction {
 class DesktopPopupEntry {
   final String label;
   final IconData? icon;
+
+  /// Arbitrary leading widget, shown instead of [icon].
+  final Widget? iconWidget;
   final Color? iconColor;
   final String? hint;
   final bool isDestructive;
@@ -55,6 +58,7 @@ class DesktopPopupEntry {
     required this.label,
     required this.onTap,
     this.icon,
+    this.iconWidget,
     this.iconColor,
     this.hint,
     this.isDestructive = false,
@@ -310,7 +314,14 @@ class _PopupRow extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
           child: Row(
             children: [
-              if (entry.icon != null) ...[
+              if (entry.iconWidget != null) ...[
+                SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: Center(child: entry.iconWidget),
+                ),
+                const SizedBox(width: 10),
+              ] else if (entry.icon != null) ...[
                 Icon(entry.icon, size: 18, color: entry.iconColor ?? color),
                 const SizedBox(width: 10),
               ],

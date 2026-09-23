@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../shared/widgets/list_controls.dart';
 import '../../../shared/widgets/menu_group.dart';
 import '../../settings/app_settings_provider.dart';
+import '../third_party_providers_provider.dart';
+import 'provider_logo.dart';
 
 /// The three "where does this come from" choices of the JanitorAI flow, as menu
 /// rows: the closed lorebook, the catalog card, and the closed character
@@ -70,9 +72,10 @@ String janitorSourceLabel(ExtractionSource source) => switch (source) {
   ExtractionSource.datacat => 'janitor_source_datacat'.tr(),
 };
 
-IconData _sourceIcon(ExtractionSource source) => switch (source) {
+IconData? _sourceIcon(ExtractionSource source) => switch (source) {
   ExtractionSource.local => Icons.devices_rounded,
-  ExtractionSource.datacat => Icons.pets_outlined,
+  // DataCat carries its real logo, so it needs no material glyph.
+  ExtractionSource.datacat => null,
 };
 
 Widget _sourceItem(
@@ -97,6 +100,9 @@ Widget _sourceItem(
             label: janitorSourceLabel(s),
             hint: hints[s],
             icon: _sourceIcon(s),
+            iconWidget: s == ExtractionSource.datacat
+                ? ProviderLogo(provider: ThirdPartyProvider.datacat, size: 20)
+                : null,
             isActive: s == value,
             value: s,
           ),

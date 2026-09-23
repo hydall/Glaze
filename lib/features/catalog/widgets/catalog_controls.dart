@@ -8,6 +8,7 @@ import '../catalog_models.dart';
 import '../catalog_provider.dart';
 import '../third_party_providers_provider.dart';
 import 'catalog_filter_sheet.dart';
+import 'provider_logo.dart';
 import 'third_party_providers_screen.dart';
 import 'package:easy_localization/easy_localization.dart';
 
@@ -161,6 +162,7 @@ class CatalogControls extends ConsumerWidget {
       children: [
         GlazeDropdownChip(
           label: providerLabel(state.activeProvider),
+          leading: ProviderLogo.catalog(provider: state.activeProvider),
           onTap: () => showGlazePickerSheet(
             context,
             title: 'blacklist_glossary_chip'.tr(),
@@ -170,6 +172,7 @@ class CatalogControls extends ConsumerWidget {
                     label: providerLabel(p),
                     isActive: p == state.activeProvider,
                     value: p,
+                    iconWidget: ProviderLogo.catalog(provider: p, size: 20),
                   ),
                 )
                 .toList(),

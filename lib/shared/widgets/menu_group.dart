@@ -191,6 +191,10 @@ class MenuGroup extends StatelessWidget {
   final MenuGroupHeaderVariant headerVariant;
   final IconData? headerIcon;
 
+  /// Arbitrary widget shown in place of [headerIcon], for a branded mark that
+  /// cannot be expressed as an [IconData] (e.g. a source's SVG logo).
+  final Widget? headerIconWidget;
+
   /// Kept for call-site compatibility; no longer affects visual style.
   // ignore: avoid_unused_constructor_parameters
   final bool compact;
@@ -204,6 +208,7 @@ class MenuGroup extends StatelessWidget {
     required this.items,
     this.headerVariant = MenuGroupHeaderVariant.standard,
     this.headerIcon,
+    this.headerIconWidget,
     this.compact = false,
   });
 
@@ -274,7 +279,14 @@ class MenuGroup extends StatelessWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (headerIcon != null) ...[
+                    if (headerIconWidget != null) ...[
+                      SizedBox(
+                        width: isAccentCaps ? 16 : 18,
+                        height: isAccentCaps ? 16 : 18,
+                        child: Center(child: headerIconWidget),
+                      ),
+                      const SizedBox(width: 8),
+                    ] else if (headerIcon != null) ...[
                       Icon(
                         headerIcon,
                         size: isAccentCaps ? 16 : 18,
