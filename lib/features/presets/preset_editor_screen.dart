@@ -573,8 +573,8 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
         isLast: isLast,
         onToggleFolder: (enabled) => _toggleFolder(folder, enabled),
         onOptions: () => _showFolderOptions(folder),
-        onEdit: _openBlockEditor,
-        onToggleBlock: _setBlockEnabled,
+      onEdit: _openBlockEditorFor,
+      onToggleBlock: _setBlockEnabled,
         onSelectBlock: (blockId) => _selectFolderBlock(folder, blockId),
         onStash: (block) => _stashBlock(block.id),
         onMoveBlockIn: (blockId) => _moveBlockIntoFolder(blockId, folder),
@@ -587,7 +587,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
       index: index,
       isLast: isLast,
       moveDragData: _blockFolders.isEmpty ? null : block.id,
-      onEdit: () => _openBlockEditor(block),
+      onEdit: () => _openBlockEditorFor(block),
       onToggle: (enabled) => _setBlockEnabled(block, enabled),
       onStash: block.isStatic ? null : () => _stashBlock(block.id),
     );
@@ -611,12 +611,10 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
     _scheduleSave();
   }
 
-  void _openBlockEditor(PresetBlock block) {
+  void _openBlockEditorFor(PresetBlock block) {
     final index = _blocks.indexWhere((b) => b.id == block.id);
     if (index == -1) return;
-    _saveScrollOffset();
-    setState(() => _expandedBlockIndex = index);
-    widget.onEditingBlockChanged?.call(true);
+    _openBlockEditor(index);
   }
 
   void _setBlockEnabled(PresetBlock block, bool enabled) {
