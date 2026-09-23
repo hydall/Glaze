@@ -215,11 +215,17 @@ class InfoBlockService {
         userName: personaModel?.name ?? persona ?? 'User',
         cancelToken: cancelToken,
         onStreamUpdate: onStreamUpdate,
-        // Diagnostic identity only — never serialized into the provider body.
+        // Diagnostic label only — never serialized into the provider body.
         // Without it an ext block request lands in the capture log unlabeled,
         // unlike every other stage (chat, cleaner, ledger, summary). The
         // `callId` / `pipelineRunId` pair is what the outcome row joins on:
         // without them the model's reply is captured but never shown.
+        //
+        // `agentId` is what the inspector prints for the step (the way a Studio
+        // shard shows its readable agent id), so it carries the block's *name*,
+        // not its id: a UUID there told the reader nothing. Identity stays in
+        // `callId`, and the name is frozen at send time so history keeps
+        // reading right after the block is renamed or deleted.
         captureContext: LlmCaptureContext(
           stage: 'extblock.${blockConfig.type.name}',
           sessionId: sessionId,
@@ -227,7 +233,7 @@ class InfoBlockService {
           pipelineRunId: 'extblock:$sessionId:$messageId#$swipeId',
           callId: callId,
           logicalCallId: callId,
-          agentId: blockConfig.id,
+          agentId: blockConfig.name,
           relatedArtifactId: messageId,
           attempt: 1,
         ),
