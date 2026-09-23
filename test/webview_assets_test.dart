@@ -76,6 +76,7 @@ void main() {
       _rendererAsset('markdown.js'),
       _rendererAsset('message_document.js'),
       _rendererAsset('image_embed.js'),
+      _rendererAsset('local_image_retry.js'),
       _rendererAsset('message_template.js'),
       rendererMessageJs,
     ].join('\n');
@@ -1503,12 +1504,31 @@ void main() {
       );
     });
 
-    test('a failed generated image re-requests itself', () {
-      expect(rendererJs, contains('export function retryFailedLocalImages('));
+    test('a failed local image re-requests itself', () {
+      // One bounded retry serves every locally served picture, not just the
+      // generated one — an ext-block card or an avatar has no renderer to
+      // rebuild it, so a single lost loopback fetch would stay broken.
+      expect(
+        _rendererAsset('local_image_retry.js'),
+        contains('export function retryFailedLocalImages('),
+      );
       expect(rendererJs, contains('retryFailedLocalImages(root)'));
-      expect(rendererJs, contains("querySelectorAll('img.imggen-result')"));
+      expect(rendererJs, contains('__glaze_file__'));
       // A fresh query string keeps a cached failure from being replayed.
       expect(rendererJs, contains('__glaze_retry='));
+    });
+
+    test('avatars, attachments and ext-block cards are covered too', () {
+      // The message body pass only sees the shadow root, so the light-DOM
+      // pictures are wired where they are inserted.
+      expect(rendererMessageJs, contains('retryFailedLocalImages(section)'));
+      expect(bridgeControllerJs, contains('retryFailedLocalImages(body)'));
+      // An attachment at the viewport edge is evaluated while off-screen like
+      // the generated and ext-block images, so it loads eagerly as well.
+      expect(
+        _rendererAsset('image_embed.js'),
+        contains("img.loading = 'eager'"),
+      );
     });
   });
 

@@ -4,15 +4,10 @@ import { inspectBlockedAtRules, reportCssErrors } from './css_diagnostics.js';
 import { isolateImgGenPlaceholders } from './imggen_placeholder.js';
 import { sanitizeMessageHtml } from '../bridge/html_sanitizer.js';
 import { hoistStyleImports, installMessageDocument } from './message_document.js';
+import { retryFailedLocalImages } from './local_image_retry.js';
 
 /** Cheap pre-sanitize probe for an embedded `<script>` in formatted HTML. */
 const SCRIPT_TAG = /<script\b/i;
-
-/** How many times a generated image may re-request itself after a failure. */
-const LOCAL_IMAGE_RETRY_LIMIT = 2;
-
-/** Backoff before the first retry; later attempts scale with the attempt. */
-const LOCAL_IMAGE_RETRY_DELAY_MS = 350;
 
 /**
  * Tell Flutter that a message wanted to run JS while execution is off, so the
@@ -119,36 +114,6 @@ export function writeShadowContent({
   } catch (e) {
     root.textContent = text || '';
     console.error('Formatter error:', e);
-  }
-}
-
-/**
- * Re-requests a generated image that failed to load.
- *
- * Generated images are served by the app's own loopback file server, and that
- * fetch can lose a race the picture itself is not to blame for — the file
- * server is still answering an aborted request from the render this one
- * replaced, or the app is mid-resize as the reply settles. The browser never
- * retries a failed <img>, so a message keeps the broken tag until something
- * re-renders it. A couple of delayed attempts with a fresh query string (the
- * file server reads only `path`, and a new URL sidesteps a cached failure)
- * turn that into a picture that simply arrives a moment later.
- */
-export function retryFailedLocalImages(root) {
-  for (const img of root.querySelectorAll('img.imggen-result')) {
-    if (img.dataset.retryWired) continue;
-    img.dataset.retryWired = '1';
-    img.addEventListener('error', () => {
-      const source = img.dataset.src || '';
-      if (!source) return;
-      const attempt = Number(img.dataset.retryAttempt || '0') + 1;
-      if (attempt > LOCAL_IMAGE_RETRY_LIMIT) return;
-      img.dataset.retryAttempt = String(attempt);
-      setTimeout(() => {
-        const separator = source.includes('?') ? '&' : '?';
-        img.src = `${source}${separator}__glaze_retry=${attempt}`;
-      }, LOCAL_IMAGE_RETRY_DELAY_MS * attempt);
-    });
   }
 }
 

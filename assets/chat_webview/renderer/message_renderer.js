@@ -2,6 +2,7 @@ import { reportCssErrors } from './css_diagnostics.js';
 import { ICON } from './icon_library.js';
 import { createImageAttachments, setImageAttachmentHidden } from './image_embed.js';
 import { isolateImgGenPlaceholders } from './imggen_placeholder.js';
+import { retryFailedLocalImages } from './local_image_retry.js';
 import { writeShadowContent } from './markdown.js';
 import { sanitizeMessageHtml } from '../bridge/html_sanitizer.js';
 import { rewriteTargetSelectors } from './target_toggle.js';
@@ -212,6 +213,10 @@ if (messageData.isEditing) classes.push('editing');
     /* --- Footer --- */
     stack.appendChild(this._createFooter(messageData));
     section.appendChild(stack);
+
+    // Avatars and attachments are the message's light-DOM pictures, so the
+    // body's own pass (writeShadowContent) never sees them.
+    retryFailedLocalImages(section);
 
     return section;
   }
