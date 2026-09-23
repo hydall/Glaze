@@ -899,7 +899,7 @@
   "desc_confirm_message_delete": "Asks for confirmation before deleting messages. On by default: a delete also rolls back agent tracker state and MemoryBook entries for that part of the chat.",
   "delete_messages_title": "Delete messages?",
   "delete_messages_warning_base": "The selected messages will be removed.",
-  "delete_messages_warning_agents": " The agents' trackers will be rolled back or deleted for the removed message and for every message after it.",
+  "delete_messages_warning_agents": " Tracker data will be cleared for the removed message and the ones after it. Consider hiding the message instead.",
   "delete_messages_warning_memory": " MemoryBook entries tied to those messages will be removed.",
   "delete_messages_warning_confirm": " Confirm?",
   "delete_messages_confirm": "Delete",
