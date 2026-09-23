@@ -26,7 +26,15 @@ enum ComposerAction {
 
   /// Wraps the caret / selection in a pair of asterisks — the markdown
   /// emphasis marker — with the caret left between them.
-  asterisk('asterisk', Icons.star_border, 'composer_action_asterisk'),
+  ///
+  /// Wears the `**` token rather than an icon, matching the fullscreen editor's
+  /// format bar: a star glyph would name the button after the wrong character.
+  asterisk(
+    'asterisk',
+    Icons.star_border,
+    'composer_action_asterisk',
+    glyph: '**',
+  ),
 
   /// Same, for a pair of double quotes.
   quote('quote', Icons.format_quote, 'composer_action_quote');
@@ -35,7 +43,11 @@ enum ComposerAction {
   final IconData icon;
   final String labelKey;
 
-  const ComposerAction(this.id, this.icon, this.labelKey);
+  /// A short text token to draw in place of [icon], for a button that stands
+  /// for characters it types rather than for a feature to open.
+  final String? glyph;
+
+  const ComposerAction(this.id, this.icon, this.labelKey, {this.glyph});
 
   String get label => labelKey.tr();
 

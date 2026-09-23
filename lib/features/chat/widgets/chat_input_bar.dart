@@ -26,6 +26,7 @@ import '../hidden_composer_actions_provider.dart';
 import '../quick_replies_provider.dart';
 import '../services/drawer_item_launcher.dart';
 import '../state/chat_drawer_editing_provider.dart';
+import 'action_glyph.dart';
 import 'chat_blur_region_tracker.dart';
 import 'magic_drawer_catalog.dart';
 import 'magic_drawer_widgets.dart';
@@ -729,6 +730,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
 
     final button = _CircleBtn(
       icon: resolved.icon,
+      glyph: resolved.glyph,
       // Edit mode is for arranging the row, not for firing it: a tap that both
       // reorders and sends would be a trap.
       onTap: editing ? null : resolved.onTap,
@@ -797,6 +799,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
             // rect into the WebView would only chase it.
             child: _CircleBtn(
               icon: resolved.icon,
+              glyph: resolved.glyph,
               color: resolved.color,
               batterySaver: widget.batterySaver,
             ),
@@ -834,6 +837,9 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     // the drawer button on desktop. The button falls back to impersonation
     // rather than wearing a glyph that does nothing.
     final emptyAction = emptyPin == null ? null : _resolvePin(emptyPin);
+    // The insert actions' text token only belongs on the empty branch: once
+    // there is something to send the button is the send (or stop) glyph again.
+    final idle = !isGenerating && !hasContent;
 
     final button = _SendBtn(
       icon: isGenerating
@@ -843,6 +849,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
                 ? Icons.check_rounded
                 : Icons.send_rounded)
           : (emptyAction?.icon ?? Icons.account_circle_rounded),
+      glyph: idle ? emptyAction?.glyph : null,
       batterySaver: widget.batterySaver,
       onTap: editing && !isGenerating && !hasContent
           ? null
@@ -1006,6 +1013,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
         }
         return _ResolvedPin(
           icon: action.icon,
+          glyph: action.glyph,
           onTap: () => _insertSurround(token),
         );
     }
@@ -1480,13 +1488,16 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
 /// builder free of the three-way switch that produces it.
 class _ResolvedPin {
   final IconData icon;
+
+  /// Short text token to draw instead of [icon] — the insert actions' `**`.
+  final String? glyph;
   final VoidCallback? onTap;
 
   /// Active-state tint (the drawer button while the drawer is open, guidance
   /// while the field is up); null leaves the button in the accent colour.
   final Color? color;
 
-  const _ResolvedPin({required this.icon, this.onTap, this.color});
+  const _ResolvedPin({required this.icon, this.glyph, this.onTap, this.color});
 }
 
 /// The strip of queued attachments above the input. A single image keeps the
@@ -1587,6 +1598,9 @@ class _AttachedImageThumb extends StatelessWidget {
 
 class _CircleBtn extends ConsumerStatefulWidget {
   final IconData icon;
+
+  /// Short text token drawn in place of [icon] for the insert actions.
+  final String? glyph;
   final VoidCallback? onTap;
   final Color? color;
   final bool batterySaver;
@@ -1610,6 +1624,7 @@ class _CircleBtn extends ConsumerStatefulWidget {
 
   const _CircleBtn({
     required this.icon,
+    this.glyph,
     this.onTap,
     this.color,
     this.batterySaver = false,
@@ -1677,8 +1692,9 @@ class _CircleBtnState extends ConsumerState<_CircleBtn>
             tint: context.cs.surface,
             border: _uiBorder(context, preset),
             child: Center(
-              child: Icon(
-                widget.icon,
+              child: ActionGlyph(
+                icon: widget.icon,
+                glyph: widget.glyph,
                 color: widget.color ?? context.cs.primary,
                 size: 20,
               ),
@@ -1695,10 +1711,19 @@ class _CircleBtnState extends ConsumerState<_CircleBtn>
 
 class _SendBtn extends StatefulWidget {
   final IconData icon;
+
+  /// Short text token drawn in place of [icon] when the empty composer's slot
+  /// is assigned to an insert action.
+  final String? glyph;
   final VoidCallback? onTap;
   final bool batterySaver;
 
-  const _SendBtn({required this.icon, this.onTap, this.batterySaver = false});
+  const _SendBtn({
+    required this.icon,
+    this.glyph,
+    this.onTap,
+    this.batterySaver = false,
+  });
 
   @override
   State<_SendBtn> createState() => _SendBtnState();
@@ -1758,9 +1783,10 @@ class _SendBtnState extends State<_SendBtn>
                   child: child,
                 ),
               ),
-              child: Icon(
-                widget.icon,
-                key: ValueKey(widget.icon),
+              child: ActionGlyph(
+                key: ValueKey(widget.glyph ?? widget.icon),
+                icon: widget.icon,
+                glyph: widget.glyph,
                 color: Colors.black,
                 size: 20,
               ),
