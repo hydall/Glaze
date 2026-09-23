@@ -249,7 +249,18 @@ jobs:
           rm -f keytool.log
           echo "Keystore OK - alias \"$KEY_ALIAS\" is readable."
 
-      - name: Build APK (arm64 only)
+      # Build both ARM ABIs, twice: one universal APK for anyone who does not
+      # know (or care) what an ABI is, plus the per-ABI pair that is about half
+      # the size for people who do. Both cover exactly the same devices.
+      #
+      # Why both ABIs at all: an arm64-only APK still *installs* on a 32-bit
+      # phone — the dependency AARs contribute armeabi-v7a objects, so the
+      # installer finds a supported ABI — and then dies at launch with
+      # "Could not find 'libflutter.so'. Looked for: [armeabi-v7a], but only
+      # found: [arm64-v8a]". Samsung's Galaxy A13 (SM-A135 Exynos 850 and
+      # SM-A136 Dimensity 700) runs 32-bit Android 13 despite 64-bit silicon,
+      # so a fat build is the only thing that makes it run.
+      - name: Build APKs (universal + per-ABI)
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
@@ -259,22 +270,37 @@ jobs:
           # suffix and the launcher label, so the three channels co-install.
           # Signing is unaffected — all channels use the same keystore above.
           BUILD_CHANNEL: ${{ needs.metadata.outputs.build_channel }}
-        run: >
-          flutter build apk --release --no-pub --target-platform android-arm64
-          "--dart-define=APP_VERSION=${{ needs.metadata.outputs.version }}"
-          "--dart-define=BUILD_DATE=${{ needs.metadata.outputs.build_date }}"
-          "--dart-define=BUILD_BRANCH=${{ needs.metadata.outputs.build_branch }}"
-          "--dart-define=BUILD_COMMIT=${{ needs.metadata.outputs.git_sha }}"
-          "--dart-define=BUILD_CHANNEL=${{ needs.metadata.outputs.build_channel }}"
+        run: |
+          set -euo pipefail
+          DEFINES=(
+            "--dart-define=APP_VERSION=${{ needs.metadata.outputs.version }}"
+            "--dart-define=BUILD_DATE=${{ needs.metadata.outputs.build_date }}"
+            "--dart-define=BUILD_BRANCH=${{ needs.metadata.outputs.build_branch }}"
+            "--dart-define=BUILD_COMMIT=${{ needs.metadata.outputs.git_sha }}"
+            "--dart-define=BUILD_CHANNEL=${{ needs.metadata.outputs.build_channel }}"
+          )
+          # Universal: one file that runs on every ARM phone, 32- and 64-bit.
+          flutter build apk --release --no-pub \
+            --target-platform android-arm,android-arm64 "${DEFINES[@]}"
+          # Per-ABI: same coverage, roughly half the download, for people who
+          # pick their ABI (or use an updater that picks it for them).
+          flutter build apk --release --no-pub --split-per-abi \
+            --target-platform android-arm,android-arm64 "${DEFINES[@]}"
 
-      - name: Rename APK
-        run: mv build/app/outputs/flutter-apk/app-release.apk "build/app/outputs/flutter-apk/${{ needs.metadata.outputs.tag_name }}.apk"
+      - name: Rename APKs
+        run: |
+          set -euo pipefail
+          OUT=build/app/outputs/flutter-apk
+          NAME="${{ needs.metadata.outputs.tag_name }}"
+          mv "$OUT/app-release.apk"             "$OUT/$NAME.apk"
+          mv "$OUT/app-armeabi-v7a-release.apk" "$OUT/$NAME-armeabi-v7a.apk"
+          mv "$OUT/app-arm64-v8a-release.apk"   "$OUT/$NAME-arm64-v8a.apk"
 
-      - name: Upload APK artifact
+      - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
           name: Glaze-release-APK
-          path: "build/app/outputs/flutter-apk/${{ needs.metadata.outputs.tag_name }}.apk"
+          path: "build/app/outputs/flutter-apk/${{ needs.metadata.outputs.tag_name }}*.apk"
 
   # ── windows ────────────────────────────────────────────────────────────────
   build-windows:
@@ -656,6 +682,13 @@ jobs:
             else
               RELEASE_NOTES="Release ${{ needs.metadata.outputs.tag_name }}"
             fi
+          fi
+          # Spell out which Android file to grab: the bare tag is the universal
+          # build that runs on any phone, the suffixed ones are per-ABI and
+          # roughly half the size.
+          if [ "${{ github.event.inputs.build_android }}" = "true" ]; then
+            TAG="${{ needs.metadata.outputs.tag_name }}"
+            RELEASE_NOTES="$RELEASE_NOTES"$'\n\n'"## Android"$'\n\n'"- \`$TAG.apk\` — universal, runs on any phone (32- and 64-bit)"$'\n'"- \`$TAG-arm64-v8a.apk\` / \`$TAG-armeabi-v7a.apk\` — smaller, pick your device's ABI"
           fi
           echo "notes<<DELIM" >> $GITHUB_OUTPUT
           echo "$RELEASE_NOTES"  >> $GITHUB_OUTPUT
