@@ -16,6 +16,7 @@ import 'chub_login_sheet.dart';
 import 'datacat/datacat_account_sheet.dart';
 import 'janitor_login_sheet.dart';
 import 'janitor_source_settings.dart';
+import 'provider_logo.dart';
 import 'saucepan_login_sheet.dart';
 
 /// Opens the Third-Party providers screen as a full-screen pushed route on the
@@ -80,7 +81,7 @@ class ThirdPartyProvidersScreen extends ConsumerWidget {
   }) {
     return MenuGroup(
       header: _label(p),
-      headerIcon: _icon(p),
+      headerIconWidget: ProviderLogo(provider: p),
       description: _description(p),
       headerTrailing: _GroupSwitch(
         value: enabled,
@@ -191,14 +192,6 @@ class ThirdPartyProvidersScreen extends ConsumerWidget {
     ThirdPartyProvider.datacat => 'Datacat',
     ThirdPartyProvider.chub => 'Chub',
     ThirdPartyProvider.saucepan => 'Saucepan',
-  };
-
-  IconData _icon(ThirdPartyProvider p) => switch (p) {
-    ThirdPartyProvider.janitor => Icons.cleaning_services_outlined,
-    ThirdPartyProvider.janny => Icons.auto_awesome_outlined,
-    ThirdPartyProvider.datacat => Icons.pets_outlined,
-    ThirdPartyProvider.chub => Icons.explore_outlined,
-    ThirdPartyProvider.saucepan => Icons.ramen_dining_outlined,
   };
 
   String _description(ThirdPartyProvider p) => switch (p) {

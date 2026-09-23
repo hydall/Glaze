@@ -27,6 +27,10 @@ class BottomSheetAction {
 class BottomSheetItem {
   final String label;
   final IconData? icon;
+
+  /// Arbitrary leading widget, shown instead of [icon]. For a branded mark
+  /// (an SVG logo) that cannot be expressed as an [IconData].
+  final Widget? iconWidget;
   final Color? iconColor;
   final VoidCallback onTap;
   final bool isDestructive;
@@ -37,6 +41,7 @@ class BottomSheetItem {
   const BottomSheetItem({
     required this.label,
     this.icon,
+    this.iconWidget,
     this.iconColor,
     required this.onTap,
     this.isDestructive = false,
@@ -260,6 +265,7 @@ class GlazeBottomSheet {
             DesktopPopupEntry(
               label: item.label,
               icon: item.icon,
+              iconWidget: item.iconWidget,
               iconColor: item.iconColor,
               hint: item.hint,
               isDestructive: item.isDestructive,
@@ -1102,7 +1108,14 @@ class _ItemRowState extends State<_ItemRow> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         child: Row(
           children: [
-            if (item.icon != null) ...[
+            if (item.iconWidget != null) ...[
+              SizedBox(
+                width: 22,
+                height: 22,
+                child: Center(child: item.iconWidget),
+              ),
+              const SizedBox(width: 16),
+            ] else if (item.icon != null) ...[
               Icon(
                 item.icon,
                 size: 22,
@@ -1249,7 +1262,14 @@ class _ItemCardRowState extends State<_ItemCardRow> {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           child: Row(
             children: [
-              if (item.icon != null) ...[
+              if (item.iconWidget != null) ...[
+                SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: Center(child: item.iconWidget),
+                ),
+                const SizedBox(width: 16),
+              ] else if (item.icon != null) ...[
                 Icon(
                   item.icon,
                   size: 22,

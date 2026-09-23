@@ -23,6 +23,17 @@ extension ThirdPartyProviderX on ThirdPartyProvider {
   };
 }
 
+/// Reverse of [ThirdPartyProviderX.catalogProvider]: every browse provider has
+/// exactly one third-party counterpart (there is no Saucepan catalog feed).
+extension CatalogProviderX on CatalogProvider {
+  ThirdPartyProvider get thirdPartyProvider => switch (this) {
+    CatalogProvider.janitor => ThirdPartyProvider.janitor,
+    CatalogProvider.janny => ThirdPartyProvider.janny,
+    CatalogProvider.datacat => ThirdPartyProvider.datacat,
+    CatalogProvider.chub => ThirdPartyProvider.chub,
+  };
+}
+
 /// Holds the set of DISABLED third-party providers (a provider absent from the
 /// set is enabled). Persisted so the choice survives launches; defaults to
 /// janitor enabled (all others disabled).

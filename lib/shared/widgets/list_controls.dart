@@ -14,6 +14,10 @@ class GlazePickerItem {
   /// treatment (icon shown only while active).
   final IconData? icon;
 
+  /// Arbitrary leading widget, used instead of [icon] when the option carries
+  /// a branded mark (e.g. a source's SVG logo) rather than a font glyph.
+  final Widget? iconWidget;
+
   /// Secondary line under [label], explaining what the option does.
   final String? hint;
 
@@ -22,6 +26,7 @@ class GlazePickerItem {
     required this.isActive,
     required this.value,
     this.icon,
+    this.iconWidget,
     this.hint,
   });
 }
@@ -45,14 +50,16 @@ void showGlazePickerSheet(
         onSelect(item.value);
       }
 
+      final hasLeading = item.icon != null || item.iconWidget != null;
       return BottomSheetItem(
         icon: item.icon ?? (item.isActive ? Icons.check_rounded : null),
+        iconWidget: item.iconWidget,
         iconColor: item.icon != null
             ? (item.isActive ? context.cs.primary : context.cs.onSurfaceVariant)
             : context.cs.primary,
         label: item.label,
         hint: item.hint,
-        actions: item.icon != null && item.isActive
+        actions: hasLeading && item.isActive
             ? [
                 BottomSheetAction(
                   icon: Icons.check_rounded,
@@ -73,10 +80,15 @@ class GlazeDropdownChip extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
 
+  /// Optional leading glyph — e.g. the active option's brand mark, mirroring
+  /// how [GlazeSortIconChip] carries the active sort mode's icon.
+  final Widget? leading;
+
   const GlazeDropdownChip({
     super.key,
     required this.label,
     required this.onTap,
+    this.leading,
   });
 
   @override
@@ -94,6 +106,14 @@ class GlazeDropdownChip extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
+                if (leading != null) ...[
+                  SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: Center(child: leading),
+                  ),
+                  const SizedBox(width: 6),
+                ],
                 Text(
                   label,
                   style: TextStyle(
