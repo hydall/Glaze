@@ -28,7 +28,12 @@ export function createImageAttachments(sources, hidden, icon) {
     const img = document.createElement('img');
     img.src = src;
     img.alt = 'attachment';
-    img.loading = 'lazy';
+    // loading="eager" (not "lazy"): an attachment sits at the bottom edge of
+    // the WebView, where Android/iOS keep resizing the viewport around the
+    // input bar. A lazy image there can be evaluated while the row is still
+    // off-screen and never come back for it, so the picture shows as a broken
+    // tag — the same reasoning as the generated and ext-block images.
+    img.loading = 'eager';
     wrap.appendChild(img);
   }
 
