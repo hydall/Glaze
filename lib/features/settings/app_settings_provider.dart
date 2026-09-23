@@ -118,7 +118,7 @@ abstract class AppSettings with _$AppSettings {
     @Default(false) bool hideMessageId,
     @Default(false) bool hideGenerationTime,
     @Default(false) bool hideTokenCount,
-    @Default(false) bool groupDialogs,
+    @Default(true) bool groupDialogs,
 
     /// The resolved answer the whole app reads: whether the reduced UI is on
     /// right now. Derived from [batterySaverMode] — under [BatterySaverMode
