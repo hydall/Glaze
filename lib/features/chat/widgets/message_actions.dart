@@ -6,11 +6,13 @@ import 'package:go_router/go_router.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../chat_provider.dart';
 import '../editing_message_provider.dart';
+import 'message_delete_confirmation.dart';
 
 void showMessageContextMenu({
   required BuildContext context,
   required WidgetRef ref,
   required String charId,
+  required String? sessionId,
   required String content,
   required int messageIndex,
   required String messageId,
@@ -19,7 +21,6 @@ void showMessageContextMenu({
   required bool isError,
   required bool isLast,
   required bool isGenerating,
-  required bool allowMiddleDelete,
   required bool isHidden,
   required bool canDeleteSwipe,
   required bool canDeleteAgentSwipe,
@@ -144,14 +145,24 @@ void showMessageContextMenu({
                 .deleteActiveAgentSwipe(messageIndex);
           },
         ),
-      if ((isLast || allowMiddleDelete) && !isGenerating)
+      if (!isGenerating)
         BottomSheetItem(
           icon: Icons.delete,
           label: 'Delete',
           isDestructive: true,
-          onTap: () {
+          onTap: () async {
             Navigator.of(context, rootNavigator: true).pop();
-            ref.read(chatProvider(charId).notifier).deleteMessage(messageIndex);
+            if (!await confirmMessageDeletion(
+              context,
+              ref,
+              sessionId: sessionId,
+            )) {
+              return;
+            }
+            if (!context.mounted) return;
+            await ref
+                .read(chatProvider(charId).notifier)
+                .deleteMessage(messageIndex);
           },
         ),
     ],

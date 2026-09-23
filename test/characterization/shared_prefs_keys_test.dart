@@ -18,7 +18,7 @@ void main() {
       'hideTooltips': bool,
       'disableSwipeRegeneration': bool,
       'allowMessageScripts': bool,
-      'allowMiddleMessageDelete': bool,
+      'confirmMessageDelete': bool,
       'language': String,
       'virtualKeyboardSend': bool,
       'showOurPicks': bool,
@@ -55,7 +55,8 @@ void main() {
                 entry.key == 'showOurPicks' ||
                 entry.key == 'openCardAfterImport' ||
                 entry.key == 'hapticFeedback' ||
-                entry.key == 'messageVibration') {
+                entry.key == 'messageVibration' ||
+                entry.key == 'confirmMessageDelete') {
               expect(
                 _getBoolDefault(defaults, entry.key),
                 isTrue,
@@ -306,8 +307,8 @@ bool _getBoolDefault(AppSettings s, String key) {
       return s.hideTooltips;
     case 'disableSwipeRegeneration':
       return s.disableSwipeRegeneration;
-    case 'allowMiddleMessageDelete':
-      return s.allowMiddleMessageDelete;
+    case 'confirmMessageDelete':
+      return s.confirmMessageDelete;
     case 'virtualKeyboardSend':
       return s.virtualKeyboardSend;
     case 'showOurPicks':

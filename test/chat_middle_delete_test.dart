@@ -18,53 +18,41 @@ void main() {
   group('ChatMessageSelectionController.canDeleteSelection', () {
     test('rejects an empty selection', () {
       final ctrl = ChatMessageSelectionController();
-      expect(
-        ctrl.canDeleteSelection(_messages(3), allowMiddle: false),
-        isFalse,
-      );
-      expect(ctrl.canDeleteSelection(_messages(3), allowMiddle: true), isFalse);
+      expect(ctrl.canDeleteSelection(_messages(3)), isFalse);
     });
 
     test('allows deleting only the last message', () {
       final ctrl = ChatMessageSelectionController()..updateSelection(['m2']);
-      expect(ctrl.canDeleteSelection(_messages(3), allowMiddle: false), isTrue);
+      expect(ctrl.canDeleteSelection(_messages(3)), isTrue);
     });
 
     test('allows a trailing run that starts before the end', () {
       final ctrl = ChatMessageSelectionController()
         ..updateSelection(['m1', 'm2']);
-      expect(ctrl.canDeleteSelection(_messages(3), allowMiddle: false), isTrue);
+      expect(ctrl.canDeleteSelection(_messages(3)), isTrue);
     });
 
-    test('rejects a lone message in the middle', () {
+    test('allows a lone message in the middle', () {
       final ctrl = ChatMessageSelectionController()..updateSelection(['m1']);
-      expect(
-        ctrl.canDeleteSelection(_messages(3), allowMiddle: false),
-        isFalse,
-      );
+      expect(ctrl.canDeleteSelection(_messages(3)), isTrue);
     });
 
-    test('rejects a selection with a gap after it', () {
+    test('allows a selection with a gap after it', () {
       final ctrl = ChatMessageSelectionController()
         ..updateSelection(['m0', 'm2']);
-      expect(
-        ctrl.canDeleteSelection(_messages(3), allowMiddle: false),
-        isFalse,
-      );
+      expect(ctrl.canDeleteSelection(_messages(3)), isTrue);
     });
 
-    test('rejects a run that stops short of the last message', () {
+    test('allows a run that stops short of the last message', () {
       final ctrl = ChatMessageSelectionController()
         ..updateSelection(['m0', 'm1']);
-      expect(
-        ctrl.canDeleteSelection(_messages(3), allowMiddle: false),
-        isFalse,
-      );
+      expect(ctrl.canDeleteSelection(_messages(3)), isTrue);
     });
 
-    test('allowMiddle lifts the restriction', () {
-      final ctrl = ChatMessageSelectionController()..updateSelection(['m1']);
-      expect(ctrl.canDeleteSelection(_messages(3), allowMiddle: true), isTrue);
+    test('rejects a selection of unknown ids', () {
+      final ctrl = ChatMessageSelectionController()
+        ..updateSelection(['missing']);
+      expect(ctrl.canDeleteSelection(_messages(3)), isFalse);
     });
   });
 

@@ -27,25 +27,16 @@ class ChatMessageSelectionController {
 
   /// Whether the current selection is allowed to be deleted.
   ///
-  /// With [allowMiddle] off, only a trailing run can go: every message from the
-  /// earliest selected one to the last message must be selected, with no gaps
-  /// and nothing left unselected after it. [allowMiddle] lifts the restriction
-  /// and allows any selection, including one in the middle of the chat.
-  bool canDeleteSelection(
-    List<ChatMessage> messages, {
-    required bool allowMiddle,
-  }) {
+  /// Any selection is deletable, including a lone message in the middle of the
+  /// chat or a run that stops short of the end. Removing messages mid-history
+  /// also rolls back Studio trackers, MemoryBook entries and other state
+  /// derived from that point on, so the UI confirms the delete rather than
+  /// restricting which messages can be picked.
+  bool canDeleteSelection(List<ChatMessage> messages) {
     if (selectedMessageIds.isEmpty || messages.isEmpty) return false;
-    if (allowMiddle) return true;
-    final selectedIndices = selectedMessageIds
-        .map((id) => messages.indexWhere((m) => m.id == id))
-        .where((idx) => idx >= 0)
-        .toList();
-    if (selectedIndices.isEmpty) return false;
-    final earliest = selectedIndices.reduce((a, b) => a < b ? a : b);
-    final lastIndex = messages.length - 1;
-    if (earliest > lastIndex) return false;
-    return selectedIndices.length == lastIndex - earliest + 1;
+    return selectedMessageIds.any(
+      (id) => messages.any((message) => message.id == id),
+    );
   }
 
   Future<void> hideSelected(
@@ -64,9 +55,8 @@ class ChatMessageSelectionController {
 
   /// Deletes every selected message and leaves selection mode.
   ///
-  /// Refuses a selection that [canDeleteSelection] rejects — a middle message
-  /// with middle deletion disabled — so the restriction holds even if a caller
-  /// bypasses the hidden toolbar button.
+  /// Refuses only an empty selection. Any set of messages may go, including a
+  /// middle one; the caller owns the confirmation prompt.
   ///
   /// Deliberately not `async`: the indices are resolved and the selection is
   /// dropped synchronously, so a caller that rebuilds before awaiting the
@@ -76,10 +66,9 @@ class ChatMessageSelectionController {
   Future<void> deleteSelected(
     WidgetRef ref,
     String charId,
-    List<ChatMessage> messages, {
-    bool allowMiddle = false,
-  }) {
-    if (!canDeleteSelection(messages, allowMiddle: allowMiddle)) {
+    List<ChatMessage> messages,
+  ) {
+    if (!canDeleteSelection(messages)) {
       return Future<void>.value();
     }
     final indices = selectedMessageIds
