@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/glaze_list_item.dart';
 import '../../lorebooks/lorebook_editor_screen.dart';
 
 /// Vue-parity "Triggered Items" sheet: grouped cards for the lorebook
@@ -152,86 +153,19 @@ class _TriggeredCard extends StatelessWidget {
       );
     }
 
-    final content = Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      child: Row(
-        children: [
-          Container(
-            width: 32,
-            height: 32,
-            decoration: BoxDecoration(
-              color: context.cs.primary.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(icon, size: 18, color: context.cs.primary),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        e.name.isNotEmpty ? e.name : 'Unnamed Script',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                          color: context.cs.onSurface,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    ?badge,
-                  ],
-                ),
-                if (sublabel.isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    sublabel,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: context.cs.onSurfaceVariant,
-                      fontFamily: isRegex ? 'monospace' : null,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ],
-            ),
-          ),
-          if (onTap != null) ...[
-            const SizedBox(width: 8),
-            Icon(
+    return GlazeListItem(
+      leading: GlazeListIcon(icon: icon),
+      title: e.name.isNotEmpty ? e.name : 'Unnamed Script',
+      subtitle: sublabel,
+      badge: badge,
+      trailing: onTap == null
+          ? null
+          : Icon(
               Icons.chevron_right,
               size: 20,
               color: context.cs.onSurfaceVariant.withValues(alpha: 0.6),
             ),
-          ],
-        ],
-      ),
-    );
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        color: Colors.white.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(12),
-          child: Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-            ),
-            child: content,
-          ),
-        ),
-      ),
+      onTap: onTap,
     );
   }
 }

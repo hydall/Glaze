@@ -5,6 +5,7 @@ import '../../../../../core/services/memory_prompt_presets.dart';
 import '../../../../../shared/theme/app_colors.dart';
 import '../../../../../shared/widgets/list_controls.dart';
 import '../../../../../shared/widgets/menu_group.dart';
+import '../../../../../shared/widgets/prompt_preset_list.dart';
 import 'memory_settings_draft.dart';
 
 /// Capture — when a draft is created and what prompt writes it. The part of
@@ -199,26 +200,14 @@ class MemoryCaptureSections {
   }
 
   void _pickPrompt(BuildContext context) {
-    showGlazePickerSheet(
+    showPromptPresetPicker(
       context,
       title: 'memory_prompt_choose'.tr(),
-      items: [
-        for (final preset in MemoryPromptPresets.builtIn)
-          GlazePickerItem(
-            label: preset.label,
-            isActive: preset.key == draft.promptPreset,
-            value: preset.key,
-          ),
-        for (final preset in customPrompts)
-          GlazePickerItem(
-            label: preset.label,
-            hint: 'memory_custom_label'.tr(),
-            isActive: preset.key == draft.promptPreset,
-            value: preset.key,
-          ),
-      ],
-      onSelect: (value) {
-        draft.promptPreset = value as String;
+      builtIn: MemoryPromptPresets.builtIn,
+      custom: customPrompts,
+      activeKey: draft.promptPreset,
+      onPick: (preset) {
+        draft.promptPreset = preset.key;
         onChanged();
       },
     );

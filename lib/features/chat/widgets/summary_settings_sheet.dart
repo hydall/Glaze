@@ -339,30 +339,16 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
   /// template itself, so a preset is a starting point rather than a binding —
   /// edit it afterwards and the picker simply reads "custom".
   void _pickPreset() {
-    showGlazePickerSheet(
+    showPromptPresetPicker(
       context,
       title: 'summary_prompt_preset_label'.tr(),
-      items: [
-        for (final preset in SummaryPromptPresets.all(_customPrompts))
-          GlazePickerItem(
-            label: preset.label,
-            hint: _excerpt(preset.prompt),
-            isActive:
-                SummaryPromptPresets.match(
-                  _promptCtrl.text,
-                  _customPrompts,
-                )?.key ==
-                preset.key,
-            value: preset.key,
-          ),
-      ],
-      onSelect: (value) {
-        final preset = SummaryPromptPresets.all(
-          _customPrompts,
-        ).where((p) => p.key == value).firstOrNull;
-        if (preset == null) return;
-        setState(() => _promptCtrl.text = preset.prompt);
-      },
+      builtIn: SummaryPromptPresets.builtIn,
+      custom: _customPrompts,
+      activeKey: SummaryPromptPresets.match(
+        _promptCtrl.text,
+        _customPrompts,
+      )?.key,
+      onPick: (preset) => setState(() => _promptCtrl.text = preset.prompt),
     );
   }
 
@@ -386,11 +372,6 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
     );
     if (!mounted || result == null) return;
     setState(() => _customPrompts = result);
-  }
-
-  static String _excerpt(String prompt) {
-    final flat = prompt.trim().replaceAll(RegExp(r'\s+'), ' ');
-    return flat.length <= 90 ? flat : '${flat.substring(0, 90)}…';
   }
 
   static String _roleLabel(String role) => switch (role) {

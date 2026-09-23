@@ -7,6 +7,7 @@ import '../state/preset_sort.dart';
 import '../theme/app_colors.dart';
 import 'glass_surface.dart';
 import 'glaze_bottom_sheet.dart';
+import 'glaze_list_item.dart';
 import 'list_controls.dart';
 
 /// The preset dropdown shared by every screen that runs on a named preset.
@@ -50,13 +51,34 @@ class PresetSwitcherEntry {
   final String? sublabel;
   final bool isActive;
 
+  /// Whether the row is picked while the sheet is multi-selecting. Ignored when
+  /// the sheet has no [PresetSwitcherSelection].
+  final bool isSelected;
+
+  /// Leading glyph, overriding the default radio/check treatment (used while
+  /// selecting, so a picked row shows a check mark).
+  final IconData? icon;
+
+  /// Branded mark shown instead of [icon] when the row is not selecting.
+  final String? faviconUrl;
+
   /// What alphabetical sorting compares. Defaults to [label].
   final String? sortName;
 
   /// When the preset was created, for "date added" sorting.
   final int createdAt;
   final List<PresetSwitcherAction> menu;
+
+  /// Runs on tap. Whether the sheet closes first depends on [closeOnTap].
   final VoidCallback onSelect;
+
+  /// A long press that does not reorder — multi-select, for a list that has
+  /// one. Null while dragging is armed, where the drag listener owns it.
+  final VoidCallback? onLongPress;
+
+  /// Whether tapping closes the switcher. False while multi-selecting, where a
+  /// tap toggles the row in place.
+  final bool closeOnTap;
 
   const PresetSwitcherEntry({
     required this.id,
@@ -64,9 +86,26 @@ class PresetSwitcherEntry {
     required this.onSelect,
     this.sublabel,
     this.isActive = false,
+    this.isSelected = false,
+    this.icon,
+    this.faviconUrl,
     this.sortName,
     this.createdAt = 0,
     this.menu = const [],
+    this.onLongPress,
+    this.closeOnTap = true,
+  });
+}
+
+/// Multi-select chrome for a switcher that has one. The header swaps the sort
+/// and menu controls for [header] while [isActive] is true.
+class PresetSwitcherSelection {
+  final bool Function(WidgetRef ref) isActive;
+  final Widget Function(BuildContext context, WidgetRef ref) header;
+
+  const PresetSwitcherSelection({
+    required this.isActive,
+    required this.header,
   });
 }
 
@@ -95,64 +134,93 @@ class PresetSwitcher {
     required PresetSwitcherEntriesBuilder entriesBuilder,
     List<PresetSwitcherAction> menu = const [],
     PresetSwitcherSort? sort,
+    PresetSwitcherSelection? selection,
+    PresetSwitcherAction? addAction,
   }) async {
     await GlazeBottomSheet.show<void>(
       context,
       title: title,
-      headerAction: _Header(menu: menu, sort: sort),
-      cardsBuilder: (context, ref) {
-        final entries = entriesBuilder(context, ref);
-        final sortState = sort == null
-            ? const PresetSortState()
-            : ref.watch(sort.sort).value ?? const PresetSortState();
-        final sorted = sort == null
-            ? entries
-            : sortPresetItems(
-                entries,
-                sortState,
-                idOf: (e) => e.id,
-                nameOf: (e) => e.sortName ?? e.label,
-                createdAtOf: (e) => e.createdAt,
-              );
-        final reordering =
-            sort != null &&
-            sortState.mode == PresetSortMode.manual &&
-            ref.watch(sort.reorderArmed);
+      headerAction: _Header(
+        menu: menu,
+        sort: sort,
+        selection: selection,
+        addAction: addAction,
+      ),
+      // A plain child list of the shared row, not the sheet's own card list:
+      // the API and External Blocks switchers must read exactly like the
+      // prompt-preset list.
+      child: Consumer(
+        builder: (context, ref, _) {
+          final entries = entriesBuilder(context, ref);
+          final sortState = sort == null
+              ? const PresetSortState()
+              : ref.watch(sort.sort).value ?? const PresetSortState();
+          final sorted = sort == null
+              ? entries
+              : sortPresetItems(
+                  entries,
+                  sortState,
+                  idOf: (e) => e.id,
+                  nameOf: (e) => e.sortName ?? e.label,
+                  createdAtOf: (e) => e.createdAt,
+                );
+          final reordering =
+              sort != null &&
+              sortState.mode == PresetSortMode.manual &&
+              ref.watch(sort.reorderArmed);
 
-        return BottomSheetCards(
-          items: [
-            for (final entry in sorted)
-              BottomSheetCardItem(
-                id: entry.id,
-                label: entry.label,
-                sublabel: entry.sublabel,
-                icon: entry.isActive
-                    ? Icons.radio_button_checked_rounded
-                    : Icons.radio_button_unchecked_rounded,
-                isActive: entry.isActive,
-                actions: [
-                  // One overflow button, never a row of loose icons: a preset's
-                  // actions are all one tap away and none of them is a
-                  // mis-tap's reach from selecting the preset.
-                  if (entry.menu.isNotEmpty)
-                    BottomSheetAction(
-                      icon: Icons.more_vert_rounded,
-                      color: context.cs.onSurfaceVariant,
+          Widget row(PresetSwitcherEntry entry) {
+            return GlazeListItem(
+              leading: _SwitcherLeading(entry: entry),
+              title: entry.label,
+              subtitle: entry.sublabel,
+              isActive: entry.isActive,
+              onTap: () {
+                if (entry.closeOnTap) {
+                  Navigator.of(context, rootNavigator: true).pop();
+                }
+                entry.onSelect();
+              },
+              onLongPress: entry.onLongPress,
+              // One overflow button, never a row of loose icons: a preset's
+              // actions are all one tap away and none of them is a mis-tap's
+              // reach from selecting the preset.
+              trailing: entry.menu.isEmpty
+                  ? null
+                  : GlazeListMenuButton(
+                      tooltip: entry.label,
                       onTap: () => _showMenu(context, entry.label, entry.menu),
                     ),
-                ],
-                onTap: () {
-                  Navigator.of(context, rootNavigator: true).pop();
-                  entry.onSelect();
-                },
-              ),
-          ],
-          onReorder: reordering
-              ? (oldIndex, newIndex) =>
-                    _onReorder(ref, sort, sorted, oldIndex, newIndex)
-              : null,
-        );
-      },
+            );
+          }
+
+          final Widget list = reordering
+              ? ReorderableListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  padding: EdgeInsets.zero,
+                  buildDefaultDragHandles: false,
+                  itemCount: sorted.length,
+                  onReorderItem: (oldIndex, newIndex) =>
+                      _onReorder(ref, sort, sorted, oldIndex, newIndex),
+                  itemBuilder: (_, i) => ReorderableDelayedDragStartListener(
+                    key: ValueKey(sorted[i].id),
+                    index: i,
+                    child: row(sorted[i]),
+                  ),
+                )
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [for (final entry in sorted) row(entry)],
+                );
+
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: list,
+          );
+        },
+      ),
     );
     if (sort != null && context.mounted) {
       // The armed drag belongs to the open sheet, not to the screen behind it.
@@ -206,39 +274,105 @@ class PresetSwitcher {
   }
 }
 
-/// Sort control plus the list's own overflow menu, in the switcher's header.
+/// The 32 px leading tile of a switcher row: the entry's own glyph, a brand
+/// favicon when it has one, or the radio/check mark of the active state.
+class _SwitcherLeading extends StatelessWidget {
+  final PresetSwitcherEntry entry;
+
+  const _SwitcherLeading({required this.entry});
+
+  @override
+  Widget build(BuildContext context) {
+    final icon =
+        entry.icon ??
+        (entry.isActive
+            ? Icons.radio_button_checked_rounded
+            : Icons.radio_button_unchecked_rounded);
+    final favicon = entry.faviconUrl;
+    return Container(
+      width: 32,
+      height: 32,
+      decoration: BoxDecoration(
+        color: context.cs.primary.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      alignment: Alignment.center,
+      child: favicon != null && !entry.isActive
+          ? ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: Image.network(
+                favicon,
+                width: 20,
+                height: 20,
+                errorBuilder: (_, _, _) =>
+                    Icon(icon, size: 18, color: context.cs.primary),
+              ),
+            )
+          : Icon(icon, size: 18, color: context.cs.primary),
+    );
+  }
+}
+
+/// Sort control, multi-select chrome and the list's own overflow menu, in the
+/// switcher's header.
 class _Header extends ConsumerWidget {
-  const _Header({required this.menu, required this.sort});
+  const _Header({
+    required this.menu,
+    required this.sort,
+    this.selection,
+    this.addAction,
+  });
 
   final List<PresetSwitcherAction> menu;
   final PresetSwitcherSort? sort;
+  final PresetSwitcherSelection? selection;
+  final PresetSwitcherAction? addAction;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Multi-select owns the header while it is on: the sort and add controls
+    // would only compete with the bulk actions.
+    final sel = selection;
+    if (sel != null && sel.isActive(ref)) {
+      return sel.header(context, ref);
+    }
+
     final sortState = sort == null
         ? null
         : ref.watch(sort!.sort).value ?? const PresetSortState();
     final armed = sort == null ? false : ref.watch(sort!.reorderArmed);
 
-    final row = Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (sortState != null) ...[
-          // Only the manually ordered list has an order to drag rows into.
-          if (sortState.mode == PresetSortMode.manual) ...[
-            GlazeReorderToggleButton(
-              armed: armed,
-              tooltip: 'sort_reorder'.tr(),
-              onTap: () => ref.read(sort!.reorderArmed.notifier).state = !armed,
+    if (sortState == null) {
+      final buttons = <Widget>[
+        if (addAction != null) _actionIcon(context, addAction!),
+        if (menu.isNotEmpty)
+          IconButton(
+            icon: Icon(Icons.more_vert_rounded, color: context.cs.primary),
+            tooltip: 'preset_switcher_menu'.tr(),
+            onPressed: () => PresetSwitcher._showMenu(
+              context,
+              'preset_switcher_menu'.tr(),
+              menu,
             ),
-            const SizedBox(width: 8),
-          ],
-          GlazeSortIconChip(
-            icon: sortState.mode.icon,
-            tooltip: sortState.mode.label,
-            onTap: () => _showSortPicker(context, ref, sortState.mode),
           ),
-        ],
+      ];
+      if (buttons.isEmpty) return const SizedBox.shrink();
+      return GlassBackdropGroup(
+        child: Row(mainAxisSize: MainAxisSize.min, children: buttons),
+      );
+    }
+
+    return PresetSortControls(
+      mode: sortState.mode,
+      armed: armed,
+      onToggleReorder: () =>
+          ref.read(sort!.reorderArmed.notifier).state = !armed,
+      // Another mode has no order to drag rows into: the toggle goes away, so
+      // it must not stay armed behind it.
+      onDisarm: () => ref.read(sort!.reorderArmed.notifier).state = false,
+      onSelect: (mode) => ref.read(sort!.sort.notifier).setMode(mode),
+      trailing: [
+        if (addAction != null) _actionIcon(context, addAction!),
         if (menu.isNotEmpty)
           IconButton(
             icon: Icon(Icons.more_vert_rounded, color: context.cs.primary),
@@ -251,39 +385,17 @@ class _Header extends ConsumerWidget {
           ),
       ],
     );
-
-    // One backdrop capture for the row instead of one per chip: these are plain
-    // siblings that never overlap. See [GlassBackdropGroup].
-    return GlassBackdropGroup(child: row);
   }
 
-  void _showSortPicker(
-    BuildContext context,
-    WidgetRef ref,
-    PresetSortMode current,
-  ) {
-    showGlazePickerSheet(
-      context,
-      title: 'sort_by'.tr(),
-      items: [
-        for (final mode in PresetSortMode.values)
-          GlazePickerItem(
-            label: mode.label,
-            icon: mode.icon,
-            hint: mode.hint,
-            isActive: mode == current,
-            value: mode,
-          ),
-      ],
-      onSelect: (v) {
-        final mode = v as PresetSortMode;
-        if (mode == current) return;
-        // Another mode has no order to drag rows into: the toggle goes away, so
-        // it must not stay armed behind it.
-        if (mode != PresetSortMode.manual) {
-          ref.read(sort!.reorderArmed.notifier).state = false;
+  Widget _actionIcon(BuildContext context, PresetSwitcherAction action) {
+    return IconButton(
+      icon: Icon(action.icon, color: context.cs.primary),
+      tooltip: action.label,
+      onPressed: () {
+        if (action.closesSwitcher) {
+          Navigator.of(context, rootNavigator: true).pop();
         }
-        ref.read(sort!.sort.notifier).setMode(mode);
+        action.onTap();
       },
     );
   }

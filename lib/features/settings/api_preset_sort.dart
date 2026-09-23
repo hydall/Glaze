@@ -37,7 +37,7 @@ String apiPresetSortName(ApiConfig config) =>
 /// creation time. Presets that arrived through an import bring ids of their own
 /// with no stamp to read; they fall behind the timestamped ones, in the order
 /// the repository returned them.
-int _createdAt(ApiConfig config) => int.tryParse(config.id) ?? 0;
+int apiPresetCreatedAt(ApiConfig config) => int.tryParse(config.id) ?? 0;
 
 List<ApiConfig> sortApiConfigs(
   List<ApiConfig> configs,
@@ -47,5 +47,5 @@ List<ApiConfig> sortApiConfigs(
   state,
   idOf: (c) => c.id,
   nameOf: apiPresetSortName,
-  createdAtOf: _createdAt,
+  createdAtOf: apiPresetCreatedAt,
 );

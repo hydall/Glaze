@@ -763,29 +763,16 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
   }
 
   void _showSortPicker(BuildContext context, PresetSortMode current) {
-    showGlazePickerSheet(
+    showPresetSortPicker(
       context,
-      title: 'sort_by'.tr(),
-      items: [
-        for (final mode in PresetSortMode.values)
-          GlazePickerItem(
-            label: mode.label,
-            icon: mode.icon,
-            hint: mode.hint,
-            isActive: mode == current,
-            value: mode,
-          ),
-      ],
-      onSelect: (v) {
-        // Another mode has no order to drag rows into: the toggle goes away,
-        // so it must not stay armed behind it.
-        if (v != PresetSortMode.manual && _reorderArmed && mounted) {
-          setState(() => _reorderArmed = false);
-        }
-        unawaited(
-          ref.read(presetSortProvider.notifier).setMode(v as PresetSortMode),
-        );
+      current: current,
+      // Another mode has no order to drag rows into: the toggle goes away, so
+      // it must not stay armed behind it.
+      onDisarm: () {
+        if (_reorderArmed && mounted) setState(() => _reorderArmed = false);
       },
+      onSelect: (mode) =>
+          unawaited(ref.read(presetSortProvider.notifier).setMode(mode)),
     );
   }
 
