@@ -95,7 +95,10 @@ function block(placeholder) {
  * [store] collects the regions; the caller puts them back into the tree once
  * the markdown passes are done.
  */
-export function protectRegions(text, { store, inReasoning = false }) {
+export function protectRegions(
+  text,
+  { store, inReasoning = false, isUser = false },
+) {
   let out = text;
 
   // `<think>` is the model's own panel, not part of the reply's flow. Both
@@ -122,6 +125,7 @@ export function protectRegions(text, { store, inReasoning = false }) {
 
   out = extractImageBlocks(out, {
     inReasoning,
+    isUser,
     hold: (imageBlock) => block(store.hold({ kind: 'image', block: imageBlock })),
     // Tags a reasoning block only talks about stay the text the model wrote:
     // nothing here loads, spins or generates (INV-IG11).

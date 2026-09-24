@@ -302,6 +302,21 @@ asked for the picture, and the only spelling a model may see or write:
 A tag inside a reasoning block is still left alone (INV-IG11): the reduction
 reads the message through `scanImageBlocks()` like everything else.
 
+### INV-IG13: An image tag in a user message is never a block
+
+Only an assistant message is ever generated from. A user message that carries
+`[IMG:GEN…]` — a person spelling out an example, or a note about the tag — is
+the human's own text, and the formatter renders it as exactly that.
+
+Left as a block it becomes a placeholder that can never resolve, yet
+`bridge.isGeneratingImage` is one flag for the whole chat: while any other
+message's image generation is live, that phantom flips to "Generating image…"
+with a stop button, and stopping it cancels the unrelated generation the user
+was waiting on. `Formatter.format` already receives `isUser`, so
+`protectRegions` forwards it to `extractImageBlocks`, where every image spelling
+is kept as literal text — the same treatment a tag inside reasoning gets
+(INV-IG11).
+
 ### INV-IG7: Regenerating an image never adds a message swipe
 
 `ImageRecoveryService` resets the retried blocks through
