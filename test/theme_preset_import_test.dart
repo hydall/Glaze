@@ -78,4 +78,50 @@ void main() {
       throwsA(isA<FormatException>()),
     );
   });
+
+  group('built-in accent migration', () {
+    Future<void> seed(Map<String, dynamic> defaultPreset) async {
+      SharedPreferences.setMockInitialValues({
+        'theme_presets': jsonEncode([defaultPreset]),
+      });
+      storage = ThemePresetStorage(await SharedPreferences.getInstance());
+    }
+
+    test('moves a legacy built-in accent to the current default', () async {
+      await seed({
+        'id': 'default',
+        'name': 'Default',
+        'accentColor': '#7996CE',
+      });
+
+      final presets = await storage.loadAll();
+      expect(
+        presets.firstWhere((p) => p.id == 'default').accentColor,
+        '#C42A4A',
+      );
+      expect(
+        presets.firstWhere((p) => p.id == 'material_you').accentColor,
+        '#C42A4A',
+      );
+
+      final persisted = (await SharedPreferences.getInstance())
+          .getString('theme_presets');
+      expect(persisted, contains('#C42A4A'));
+      expect(persisted, isNot(contains('7996CE')));
+    });
+
+    test('leaves a user-customised built-in accent alone', () async {
+      await seed({
+        'id': 'default',
+        'name': 'Default',
+        'accentColor': '#123456',
+      });
+
+      final presets = await storage.loadAll();
+      expect(
+        presets.firstWhere((p) => p.id == 'default').accentColor,
+        '#123456',
+      );
+    });
+  });
 }

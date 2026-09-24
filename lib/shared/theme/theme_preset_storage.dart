@@ -30,6 +30,13 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
     return ThemePresetStorage(prefs);
   }
 
+  /// Accent the built-in themes carried before the cherry rebrand. Matching on
+  /// exactly this value lets the migration bump an untouched built-in without
+  /// overwriting a theme the user changed by hand.
+  static const _legacyDefaultAccent = '#7996CE';
+
+  bool _builtinsChanged = false;
+
   @override
   Future<List<ThemePreset>> loadAll() async {
     final raw = _prefs.getString(_presetsKey);
@@ -39,7 +46,15 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
       final presets = list
           .map((e) => themePresetFromStoredJson(e as Map<String, dynamic>))
           .toList();
-      return _withBuiltins(presets);
+      _builtinsChanged = false;
+      final merged = _withBuiltins(presets);
+      // The built-ins are written to storage on first run and kept as-is
+      // afterwards, so a rebrand of the default accent would never reach an
+      // install that already had a copy. Persist the re-accent once.
+      if (_builtinsChanged) {
+        await saveAll(merged);
+      }
+      return merged;
     } catch (_) {
       return _withBuiltins([]);
     }
@@ -48,17 +63,41 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
   /// Guarantee the built-in standard themes are always present and pinned to
   /// the top of the list (Default first, then Material You). Existing user
   /// copies of a built-in id are kept as-is so customised fonts/effects
-  /// survive a reload.
+  /// survive a reload — only an accent still sitting on the pre-rebrand default
+  /// is moved to the current one.
   List<ThemePreset> _withBuiltins(List<ThemePreset> presets) {
     final result = List<ThemePreset>.from(presets);
-    if (!result.any((p) => p.id == 'default')) {
-      result.insert(0, _defaultPreset);
-    }
-    if (!result.any((p) => p.id == kMaterialYouPresetId)) {
-      final defaultIdx = result.indexWhere((p) => p.id == 'default');
-      result.insert(defaultIdx + 1, _materialYouPreset);
-    }
+    _seedOrReaccent(result, 'default', _defaultPreset, 0);
+    final defaultIdx = result.indexWhere((p) => p.id == 'default');
+    _seedOrReaccent(
+      result,
+      kMaterialYouPresetId,
+      _materialYouPreset,
+      defaultIdx + 1,
+    );
     return result;
+  }
+
+  void _seedOrReaccent(
+    List<ThemePreset> presets,
+    String id,
+    ThemePreset builtin,
+    int insertAt,
+  ) {
+    final idx = presets.indexWhere((p) => p.id == id);
+    if (idx == -1) {
+      presets.insert(insertAt, builtin);
+      _builtinsChanged = true;
+      return;
+    }
+    final existing = presets[idx];
+    if (existing.accentColor.toUpperCase() != _legacyDefaultAccent) return;
+    if (existing.accentColor.toUpperCase() ==
+        builtin.accentColor.toUpperCase()) {
+      return;
+    }
+    presets[idx] = existing.copyWith(accentColor: builtin.accentColor);
+    _builtinsChanged = true;
   }
 
   @override
