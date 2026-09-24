@@ -212,5 +212,51 @@ void main() {
       expect(restored.routmyMirror, RoutMyMirror.ru);
       expect(restored.routmyModels.single.id, 'openai/gpt-image-2');
     });
+
+    test('round-trips the custom size fields of every provider', () {
+      const settings = ImageGenSettings(
+        openaiSize: customImageSizeOption,
+        openaiCustomWidth: 1536,
+        openaiCustomHeight: 640,
+        geminiImageSize: customImageSizeOption,
+        geminiCustomWidth: 800,
+        geminiCustomHeight: 600,
+        routmyImageSize: customImageSizeOption,
+        routmyCustomWidth: 1200,
+        routmyCustomHeight: 900,
+        xai: XaiImageSettings(
+          resolution: customImageSizeOption,
+          customWidth: 111,
+          customHeight: 222,
+        ),
+        openrouter: OpenRouterImageSettings(
+          imageSize: customImageSizeOption,
+          customWidth: 333,
+          customHeight: 444,
+        ),
+        electronhub: ElectronHubImageSettings(
+          size: customImageSizeOption,
+          customWidth: 555,
+          customHeight: 666,
+        ),
+        a1111: A1111ImageSettings(customSize: true, width: 700, height: 800),
+        novelai: NovelAIImageSettings(
+          customSize: true,
+          width: 832,
+          height: 1216,
+        ),
+        comfyui: ComfyUiImageSettings(
+          customSize: true,
+          width: 512,
+          height: 768,
+        ),
+      );
+
+      final restored = ImageGenSettingsCodec.fromJson(
+        ImageGenSettingsCodec.toJson(settings),
+      );
+
+      expect(restored, settings);
+    });
   });
 }

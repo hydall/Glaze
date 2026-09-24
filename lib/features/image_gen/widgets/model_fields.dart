@@ -141,6 +141,7 @@ List<Widget> buildRoutmyModelFields(
               onSelected: (v) {
                 final seedreamSize =
                     v == seedreamModel &&
+                        size != customImageSizeOption &&
                         !RoutMyConstants.seedreamImageSizes.contains(size)
                     ? '2K'
                     : size;
@@ -173,15 +174,25 @@ List<Widget> buildRoutmyModelFields(
     ),
     MenuSelectorItem(
       label: 'Resolution',
-      currentValue: size,
+      currentValue: size == customImageSizeOption
+          ? customImageSizeOption
+          : size,
       onTap: () => showOptions<String>(
         title: 'Resolution',
-        items: availableImageSizes,
-        labelBuilder: (v) => v,
+        items: [...availableImageSizes, customImageSizeOption],
+        labelBuilder: (v) =>
+            v == customImageSizeOption ? 'imggen_size_custom'.tr() : v,
         isSelected: (v) => size == v,
         onSelected: (v) => onUpdate(s.copyWith(routmyImageSize: v)),
       ),
     ),
+    if (size == customImageSizeOption)
+      ...rows.imageGenCustomSizeFields(
+        width: s.routmyCustomWidth,
+        height: s.routmyCustomHeight,
+        onWidthChanged: (v) => onUpdate(s.copyWith(routmyCustomWidth: v)),
+        onHeightChanged: (v) => onUpdate(s.copyWith(routmyCustomHeight: v)),
+      ),
     if (model != seedreamModel)
       MenuSelectorItem(
         label: 'Quality',
@@ -220,15 +231,25 @@ List<Widget> buildOpenaiModelFields(
     ),
     MenuSelectorItem(
       label: 'Image Size',
-      currentValue: s.openaiSize,
+      currentValue: s.openaiSize == customImageSizeOption
+          ? customImageSizeOption
+          : s.openaiSize,
       onTap: () => showOptions<String>(
         title: 'Image Size',
-        items: OpenAIConstants.sizes,
-        labelBuilder: (v) => v,
+        items: [...OpenAIConstants.sizes, customImageSizeOption],
+        labelBuilder: (v) =>
+            v == customImageSizeOption ? 'imggen_size_custom'.tr() : v,
         isSelected: (v) => s.openaiSize == v,
         onSelected: (v) => onUpdate(s.copyWith(openaiSize: v)),
       ),
     ),
+    if (s.openaiSize == customImageSizeOption)
+      ...rows.imageGenCustomSizeFields(
+        width: s.openaiCustomWidth,
+        height: s.openaiCustomHeight,
+        onWidthChanged: (v) => onUpdate(s.copyWith(openaiCustomWidth: v)),
+        onHeightChanged: (v) => onUpdate(s.copyWith(openaiCustomHeight: v)),
+      ),
     MenuSelectorItem(
       label: 'Quality',
       currentValue: s.openaiQuality == 'hd' ? 'HD' : 'Standard',
@@ -271,14 +292,24 @@ List<Widget> buildGeminiModelFields(
     ),
     MenuSelectorItem(
       label: 'Resolution',
-      currentValue: s.geminiImageSize,
+      currentValue: s.geminiImageSize == customImageSizeOption
+          ? customImageSizeOption
+          : s.geminiImageSize,
       onTap: () => showOptions<String>(
         title: 'Resolution',
-        items: GeminiConstants.imageSizes,
-        labelBuilder: (v) => v,
+        items: [...GeminiConstants.imageSizes, customImageSizeOption],
+        labelBuilder: (v) =>
+            v == customImageSizeOption ? 'imggen_size_custom'.tr() : v,
         isSelected: (v) => s.geminiImageSize == v,
         onSelected: (v) => onUpdate(s.copyWith(geminiImageSize: v)),
       ),
     ),
+    if (s.geminiImageSize == customImageSizeOption)
+      ...rows.imageGenCustomSizeFields(
+        width: s.geminiCustomWidth,
+        height: s.geminiCustomHeight,
+        onWidthChanged: (v) => onUpdate(s.copyWith(geminiCustomWidth: v)),
+        onHeightChanged: (v) => onUpdate(s.copyWith(geminiCustomHeight: v)),
+      ),
   ];
 }

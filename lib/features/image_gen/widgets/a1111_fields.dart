@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 import '../../../shared/widgets/menu_group.dart';
@@ -34,17 +35,45 @@ List<Widget> buildA1111ModelFields(
     ),
     MenuSelectorItem(
       label: 'Resolution',
-      currentValue: '${config.width}x${config.height}',
+      currentValue: config.customSize
+          ? customImageSizeOption
+          : '${config.width}x${config.height}',
       onTap: () => showOptions<(String, int, int, String)>(
         title: 'Resolution',
-        items: A1111Constants.resolutionPresets,
-        labelBuilder: (preset) => preset.$4,
-        isSelected: (preset) =>
-            config.width == preset.$2 && config.height == preset.$3,
-        onSelected: (preset) =>
-            update(config.copyWith(width: preset.$2, height: preset.$3)),
+        items: [
+          ...A1111Constants.resolutionPresets,
+          A1111Constants.customResolutionPreset,
+        ],
+        labelBuilder: (preset) => preset.$1 == customImageSizeOption
+            ? 'imggen_size_custom'.tr()
+            : preset.$4,
+        isSelected: (preset) => preset.$1 == customImageSizeOption
+            ? config.customSize
+            : !config.customSize &&
+                  config.width == preset.$2 &&
+                  config.height == preset.$3,
+        onSelected: (preset) {
+          if (preset.$1 == customImageSizeOption) {
+            update(config.copyWith(customSize: true));
+          } else {
+            update(
+              config.copyWith(
+                width: preset.$2,
+                height: preset.$3,
+                customSize: false,
+              ),
+            );
+          }
+        },
       ),
     ),
+    if (config.customSize)
+      ...rows.imageGenCustomSizeFields(
+        width: config.width,
+        height: config.height,
+        onWidthChanged: (v) => update(config.copyWith(width: v)),
+        onHeightChanged: (v) => update(config.copyWith(height: v)),
+      ),
     MenuSelectorItem(
       label: 'Sampler',
       currentValue: config.sampler,

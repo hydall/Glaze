@@ -190,7 +190,12 @@ class ImageGenDispatcher {
       // The configured size wins; a per-tag aspect ratio maps to the size the
       // model family understands.
       size:
-          _sizeForAspect(instructionAspectRatio, model) ?? settings.openaiSize,
+          _sizeForAspect(instructionAspectRatio, model) ??
+          _effectiveSize(
+            settings.openaiSize,
+            settings.openaiCustomWidth,
+            settings.openaiCustomHeight,
+          ),
       quality: settings.openaiQuality,
       referenceImages: _imagesOf(references),
       cancelToken: cancelToken,
@@ -216,11 +221,17 @@ class ImageGenDispatcher {
         config.aspectRatio,
       ),
       // The tag writes `1K` / `2K`; xAI spells them lowercase.
-      resolution: _validOverride(
-        instructionImageSize?.toLowerCase(),
-        XaiConstants.resolutions,
-        config.resolution,
-      ),
+      resolution: config.resolution == customImageSizeOption
+          ? _effectiveSize(
+              config.resolution,
+              config.customWidth,
+              config.customHeight,
+            )
+          : _validOverride(
+              instructionImageSize?.toLowerCase(),
+              XaiConstants.resolutions,
+              config.resolution,
+            ),
       quality: config.quality,
       references: references,
       cancelToken: cancelToken,
@@ -245,7 +256,9 @@ class ImageGenDispatcher {
       apiKey: config.apiKey,
       model: config.model,
       prompt: prompt,
-      size: _sizeForAspect(instructionAspectRatio, config.model) ?? config.size,
+      size:
+          _sizeForAspect(instructionAspectRatio, config.model) ??
+          _effectiveSize(config.size, config.customWidth, config.customHeight),
       quality: config.quality,
       referenceImages: _imagesOf(references),
       cancelToken: cancelToken,
@@ -284,10 +297,12 @@ class ImageGenDispatcher {
       // Gemini 2.5 Flash Image has no imageSize parameter.
       imageSize: caps.imageSizes == null
           ? null
-          : _validOverride(
-              instructionImageSize,
-              caps.imageSizes!,
-              settings.geminiImageSize,
+          : _resolveSize(
+              override: instructionImageSize,
+              allowed: caps.imageSizes!,
+              configured: settings.geminiImageSize,
+              width: settings.geminiCustomWidth,
+              height: settings.geminiCustomHeight,
             ),
       referenceImages: references.take(caps.maxReferences).toList(),
       cancelToken: cancelToken,
@@ -317,10 +332,12 @@ class ImageGenDispatcher {
       ),
       imageSize: caps.imageSizes == null
           ? ''
-          : _validOverride(
-              instructionImageSize,
-              caps.imageSizes!,
-              config.imageSize,
+          : _resolveSize(
+              override: instructionImageSize,
+              allowed: caps.imageSizes!,
+              configured: config.imageSize,
+              width: config.customWidth,
+              height: config.customHeight,
             ),
       references: references,
       cancelToken: cancelToken,
@@ -348,10 +365,12 @@ class ImageGenDispatcher {
         RoutMyConstants.aspectRatios,
         settings.routmyAspectRatio,
       ),
-      imageSize: _validOverride(
-        instructionImageSize,
-        RoutMyConstants.imageSizes,
-        settings.routmyImageSize,
+      imageSize: _resolveSize(
+        override: instructionImageSize,
+        allowed: RoutMyConstants.imageSizes,
+        configured: settings.routmyImageSize,
+        width: settings.routmyCustomWidth,
+        height: settings.routmyCustomHeight,
       ),
       quality: settings.routmyQuality,
       referenceImages: images,
@@ -386,4 +405,26 @@ class ImageGenDispatcher {
     final value = override?.trim();
     return value != null && allowed.contains(value) ? value : fallback;
   }
+
+  /// The effective size: a valid per-tag override wins, then the manual
+  /// `{width}x{height}` when the picker is on the "Custom" entry, then the
+  /// configured preset.
+  static String _resolveSize({
+    required String? override,
+    required List<String> allowed,
+    required String configured,
+    required int width,
+    required int height,
+  }) {
+    final value = override?.trim();
+    if (value != null && value.isNotEmpty && allowed.contains(value)) {
+      return value;
+    }
+    return _effectiveSize(configured, width, height);
+  }
+
+  /// Expands the "Custom" sentinel into `{width}x{height}`; any other value
+  /// passes through unchanged.
+  static String _effectiveSize(String configured, int width, int height) =>
+      configured == customImageSizeOption ? '${width}x$height' : configured;
 }

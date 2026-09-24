@@ -47,6 +47,37 @@ void showImageGenOptions<T>(
   );
 }
 
+/// The two numeric fields shown when a size / resolution picker's "Custom"
+/// entry is selected. An unparseable entry keeps the previous value, and the
+/// result is clamped so a typo cannot ask a provider for a giant canvas.
+List<Widget> imageGenCustomSizeFields({
+  required int width,
+  required int height,
+  required ValueChanged<int> onWidthChanged,
+  required ValueChanged<int> onHeightChanged,
+}) {
+  return [
+    ImageGenTextFieldItem(
+      label: 'imggen_width'.tr(),
+      value: width.toString(),
+      hint: '1024',
+      onChanged: (v) => onWidthChanged(_clampSize(v, width)),
+    ),
+    ImageGenTextFieldItem(
+      label: 'imggen_height'.tr(),
+      value: height.toString(),
+      hint: '1024',
+      onChanged: (v) => onHeightChanged(_clampSize(v, height)),
+    ),
+  ];
+}
+
+int _clampSize(String raw, int fallback) {
+  final parsed = int.tryParse(raw.trim());
+  if (parsed == null) return fallback;
+  return parsed.clamp(64, 8192);
+}
+
 /// Refresh button rendered as the suffix of a model field; shows a spinner
 /// while the model list is being fetched.
 class ImageGenFetchButton extends StatelessWidget {

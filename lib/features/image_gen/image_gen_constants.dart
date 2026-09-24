@@ -13,6 +13,11 @@ const routmyMaxInjectedReferenceImages = 10;
 /// a single request. Providers narrow it further via their capability tables.
 const maxGenerationReferenceImages = 10;
 
+/// Sentinel size value shown as the last entry of every size / resolution
+/// picker. Picking it swaps the preset list for the manual width / height
+/// fields; the request then carries `{width}x{height}`.
+const customImageSizeOption = 'Custom';
+
 /// Default critical instruction prefixed to a prompt whenever at least one
 /// reference image is sent. Editable and switchable off in settings.
 const defaultReferenceInstruction =
@@ -213,8 +218,12 @@ class XaiConstants {
     return aspectRatios.contains(normalized) ? normalized : '1:1';
   }
 
-  static String normalizeResolution(String? value) =>
-      (value ?? '').trim().toLowerCase() == '2k' ? '2k' : '1k';
+  static String normalizeResolution(String? value) {
+    final normalized = (value ?? '').trim().toLowerCase();
+    // A manual `{width}x{height}` resolution is passed through untouched.
+    if (normalized.contains('x')) return normalized;
+    return normalized == '2k' ? '2k' : '1k';
+  }
 
   static String normalizeQuality(String? value) =>
       (value ?? '').trim().toLowerCase() == 'low' ? 'low' : 'medium';
@@ -351,6 +360,10 @@ class NovelAIConstants {
     ('Large portrait · 1024x1536', 1024, 1536),
     ('Large landscape · 1536x1024', 1536, 1024),
   ];
+
+  /// The "Custom" entry appended to [resolutionPresets] in the picker. Its
+  /// zero size marks it as the manual width / height choice.
+  static const customResolutionPreset = ('Custom', 0, 0);
 
   /// (id, label, wire index). The wire `ucPreset` is 0-3; the preset text is
   /// merged into `negative_prompt` by the client, matching the web UI. `none`
@@ -684,6 +697,10 @@ class A1111Constants {
     ('1920x1088', 1920, 1088, '1920x1088 (16:9, 1080p)'),
     ('1088x1920', 1088, 1920, '1088x1920 (9:16, 1080p)'),
   ];
+
+  /// The "Custom" entry appended to [resolutionPresets] in the picker. Its
+  /// zero size marks it as the manual width / height choice.
+  static const customResolutionPreset = ('Custom', 0, 0, 'Custom');
 }
 
 /// ComfyUI (`/prompt` → `/history/{id}` → `/view`).
