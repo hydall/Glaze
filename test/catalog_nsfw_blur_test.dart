@@ -55,6 +55,7 @@ void main() {
       ),
     );
     expect(find.byType(ImageFiltered), findsNothing);
+    expect(find.byType(ClipRect), findsNothing);
 
     await tester.pumpWidget(
       const Directionality(
@@ -63,5 +64,8 @@ void main() {
       ),
     );
     expect(find.byType(ImageFiltered), findsOneWidget);
+    // The blur is clipped to the image's own box, so it cannot smear over the
+    // card's info block or the preview's gradient.
+    expect(find.byType(ClipRect), findsOneWidget);
   });
 }
