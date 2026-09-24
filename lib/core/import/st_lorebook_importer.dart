@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../llm/glaze_matcher.dart';
+import '../services/character_book_converter.dart';
 import '../utils/id_generator.dart';
 import '../utils/time_helpers.dart';
 import '../models/lorebook.dart';
@@ -161,7 +162,63 @@ String _bookDescription(Map<String, dynamic> json) {
   return description is String ? description : '';
 }
 
+/// The embedded lorebook of a character card, if this file is one.
+///
+/// A Character Card V2/V3 envelope keeps the book under `data.character_book`;
+/// a bare book object carries it at `character_book`. Either way the entries
+/// live *inside* that book, not at the file's top level, so the plain World Info
+/// reader below would import the card as an empty book.
+Map<String, dynamic>? _embeddedCharacterBook(Map<String, dynamic> json) {
+  final data = json['data'];
+  final nested = data is Map ? data['character_book'] : null;
+  final book = nested ?? json['character_book'];
+  return book is Map ? Map<String, dynamic>.from(book) : null;
+}
+
+bool _hasEntries(Map<String, dynamic> json) {
+  final entries = json['entries'];
+  return (entries is List && entries.isNotEmpty) ||
+      (entries is Map && entries.isNotEmpty);
+}
+
+/// Pulls a card's embedded book in as a standalone, globally-enabled lorebook.
+///
+/// The entry mapping runs through [convertCharacterBook] — the same reader the
+/// character import uses — so an entry's keys, position, scan depth, whole-word
+/// and probability flags come out identical to importing the character itself.
+STLorebookImportResult _importEmbeddedCharacterBook(
+  Map<String, dynamic> book,
+  String nameOverride,
+) {
+  final converted = convertCharacterBook(book, 'st_import');
+  final explicitName = (book['name'] as String?)?.trim() ?? '';
+  final fallbackName = nameOverride.replaceAll('.json', '');
+  final lorebook = Lorebook(
+    id: generateId(),
+    name: explicitName.isNotEmpty ? explicitName : fallbackName,
+    enabled: true,
+    activationScope: 'global',
+    entries: converted.entries,
+    settings: converted.settings,
+    updatedAt: currentTimestampSeconds(),
+  );
+  return STLorebookImportResult(
+    lorebook: lorebook,
+    entryCount: lorebook.entries.length,
+  );
+}
+
 STLorebookImportResult importSTLorebook(Map<String, dynamic> json, {String nameOverride = 'Imported'}) {
+  // A character card is not a World Info file. When the file has no top-level
+  // entries of its own, read its embedded `character_book` instead of reporting
+  // an empty import.
+  if (!_hasEntries(json)) {
+    final embedded = _embeddedCharacterBook(json);
+    if (embedded != null) {
+      return _importEmbeddedCharacterBook(embedded, nameOverride);
+    }
+  }
+
   final entriesRaw = json['entries'] ?? <dynamic>[];
 
   List<dynamic> normalizedEntries;
