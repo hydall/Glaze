@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 import '../../../shared/widgets/menu_group.dart';
@@ -48,15 +49,27 @@ List<Widget> buildOpenRouterModelFields(
     if (caps.imageSizes != null)
       MenuSelectorItem(
         label: 'Resolution',
-        currentValue: config.imageSize,
+        currentValue: config.imageSize == customImageSizeOption
+            ? customImageSizeOption
+            : config.imageSize,
         onTap: () => showOptions<String>(
           title: 'Resolution',
-          items: caps.imageSizes!,
-          labelBuilder: (v) => v,
+          items: [...caps.imageSizes!, customImageSizeOption],
+          labelBuilder: (v) =>
+              v == customImageSizeOption ? 'imggen_size_custom'.tr() : v,
           isSelected: (v) => config.imageSize == v,
           onSelected: (v) =>
               onUpdate(s.copyWith(openrouter: config.copyWith(imageSize: v))),
         ),
+      ),
+    if (caps.imageSizes != null && config.imageSize == customImageSizeOption)
+      ...rows.imageGenCustomSizeFields(
+        width: config.customWidth,
+        height: config.customHeight,
+        onWidthChanged: (v) =>
+            onUpdate(s.copyWith(openrouter: config.copyWith(customWidth: v))),
+        onHeightChanged: (v) =>
+            onUpdate(s.copyWith(openrouter: config.copyWith(customHeight: v))),
       ),
   ];
 }
@@ -87,16 +100,28 @@ List<Widget> buildElectronHubModelFields(
     ),
     MenuSelectorItem(
       label: 'Image Size',
-      currentValue: config.size,
+      currentValue: config.size == customImageSizeOption
+          ? customImageSizeOption
+          : config.size,
       onTap: () => showOptions<String>(
         title: 'Image Size',
-        items: ElectronHubConstants.sizes,
-        labelBuilder: (v) => v,
+        items: [...ElectronHubConstants.sizes, customImageSizeOption],
+        labelBuilder: (v) =>
+            v == customImageSizeOption ? 'imggen_size_custom'.tr() : v,
         isSelected: (v) => config.size == v,
         onSelected: (v) =>
             onUpdate(s.copyWith(electronhub: config.copyWith(size: v))),
       ),
     ),
+    if (config.size == customImageSizeOption)
+      ...rows.imageGenCustomSizeFields(
+        width: config.customWidth,
+        height: config.customHeight,
+        onWidthChanged: (v) =>
+            onUpdate(s.copyWith(electronhub: config.copyWith(customWidth: v))),
+        onHeightChanged: (v) =>
+            onUpdate(s.copyWith(electronhub: config.copyWith(customHeight: v))),
+      ),
     MenuSelectorItem(
       label: 'Quality',
       currentValue: config.quality == 'hd' ? 'HD' : 'Standard',

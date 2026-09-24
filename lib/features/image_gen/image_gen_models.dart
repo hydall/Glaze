@@ -90,6 +90,8 @@ abstract class XaiImageSettings with _$XaiImageSettings {
     @Default('1:1') String aspectRatio,
     @Default('1k') String resolution,
     @Default('medium') String quality,
+    @Default(1024) int customWidth,
+    @Default(1024) int customHeight,
   }) = _XaiImageSettings;
 }
 
@@ -129,6 +131,8 @@ abstract class OpenRouterImageSettings with _$OpenRouterImageSettings {
     @Default('google/gemini-2.5-flash-image') String model,
     @Default('1:1') String aspectRatio,
     @Default('1K') String imageSize,
+    @Default(1024) int customWidth,
+    @Default(1024) int customHeight,
   }) = _OpenRouterImageSettings;
 }
 
@@ -140,6 +144,8 @@ abstract class ElectronHubImageSettings with _$ElectronHubImageSettings {
     @Default('gpt-image-1') String model,
     @Default('1024x1024') String size,
     @Default('standard') String quality,
+    @Default(1024) int customWidth,
+    @Default(1024) int customHeight,
   }) = _ElectronHubImageSettings;
 }
 
@@ -152,6 +158,7 @@ abstract class A1111ImageSettings with _$A1111ImageSettings {
     @Default('') String model,
     @Default(512) int width,
     @Default(512) int height,
+    @Default(false) bool customSize,
     @Default(20) int steps,
     @Default(7.0) double cfgScale,
     @Default('Euler a') String sampler,
@@ -185,6 +192,7 @@ abstract class NovelAIImageSettings with _$NovelAIImageSettings {
     @Default(0.0) double cfgRescale,
     @Default(832) int width,
     @Default(1216) int height,
+    @Default(false) bool customSize,
     @Default(-1) int seed,
     @Default('') String negativePrompt,
     @Default('light') String ucPreset,
@@ -229,6 +237,7 @@ abstract class ComfyUiImageSettings with _$ComfyUiImageSettings {
     @Default(1) int clipSkip,
     @Default(512) int width,
     @Default(512) int height,
+    @Default(false) bool customSize,
     @Default('') String promptPrefix,
     @Default('') String negativePrompt,
   }) = _ComfyUiImageSettings;
@@ -265,8 +274,12 @@ abstract class ImageGenSettings with _$ImageGenSettings {
     @Default('') String customModel,
     @Default('1024x1024') String openaiSize,
     @Default('standard') String openaiQuality,
+    @Default(1024) int openaiCustomWidth,
+    @Default(1024) int openaiCustomHeight,
     @Default('1:1') String geminiAspectRatio,
     @Default('1K') String geminiImageSize,
+    @Default(1024) int geminiCustomWidth,
+    @Default(1024) int geminiCustomHeight,
     @Default('') String naisteraApiKey,
     @Default('grok') String naisteraModel,
     @Default('1:1') String naisteraAspectRatio,
@@ -280,6 +293,8 @@ abstract class ImageGenSettings with _$ImageGenSettings {
     @Default('google/gemini-3.1-flash-image-preview') String routmyModel,
     @Default('1:1') String routmyAspectRatio,
     @Default('1K') String routmyImageSize,
+    @Default(1024) int routmyCustomWidth,
+    @Default(1024) int routmyCustomHeight,
     @Default('standard') String routmyQuality,
 
     /// Which rout.my host to call — the global one by default, the RU mirror

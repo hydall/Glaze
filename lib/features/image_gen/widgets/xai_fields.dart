@@ -66,16 +66,29 @@ List<Widget> buildXaiModelFields(
     ),
     MenuSelectorItem(
       label: 'imggen_image_size'.tr(),
-      currentValue: config.resolution.toUpperCase(),
+      currentValue: config.resolution == customImageSizeOption
+          ? customImageSizeOption
+          : config.resolution.toUpperCase(),
       onTap: () => showOptions<String>(
         title: 'imggen_image_size'.tr(),
-        items: XaiConstants.resolutions,
-        labelBuilder: (v) => v.toUpperCase(),
+        items: [...XaiConstants.resolutions, customImageSizeOption],
+        labelBuilder: (v) => v == customImageSizeOption
+            ? 'imggen_size_custom'.tr()
+            : v.toUpperCase(),
         isSelected: (v) => config.resolution == v,
         onSelected: (v) =>
             onUpdate(s.copyWith(xai: config.copyWith(resolution: v))),
       ),
     ),
+    if (config.resolution == customImageSizeOption)
+      ...rows.imageGenCustomSizeFields(
+        width: config.customWidth,
+        height: config.customHeight,
+        onWidthChanged: (v) =>
+            onUpdate(s.copyWith(xai: config.copyWith(customWidth: v))),
+        onHeightChanged: (v) =>
+            onUpdate(s.copyWith(xai: config.copyWith(customHeight: v))),
+      ),
     if (XaiConstants.supportsQuality(config.model))
       MenuSelectorItem(
         label: 'imggen_quality'.tr(),
