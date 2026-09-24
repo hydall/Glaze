@@ -45,6 +45,7 @@ import '../../shared/widgets/tab_slide_switcher.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/image_viewer.dart';
+import '../../shared/widgets/nsfw_blur.dart';
 import '../../shared/widgets/sheet_view.dart';
 import '../../shared/widgets/colored_markdown.dart';
 import '../../shared/widgets/variation_chip.dart';
@@ -165,9 +166,14 @@ class CharacterDetailScreen extends ConsumerStatefulWidget {
   final Character? previewCharacter;
   final String? previewAvatarUrl;
 
+  /// Preview-only: draw the hero image and the images inside the bio through a
+  /// blur. Set by the catalog when the global blur setting is on and this is an
+  /// adult row; it changes nothing about the character or the import.
+  final bool previewBlurNsfwImages;
+
   /// External URL of the character's source page (e.g. its Janitor page).
-  /// When set in preview mode, an "open in browser" button replaces the
-  /// three-dots actions menu in the floating header.
+  /// When set in preview mode, an "open in browser" button appears in the
+  /// floating header, next to the three-dots menu a blurred preview adds.
   final String? previewSourceUrl;
 
   /// External URL of the creator's profile page. When set, tapping the
@@ -218,6 +224,7 @@ class CharacterDetailScreen extends ConsumerStatefulWidget {
     required this.charId,
     this.previewCharacter,
     this.previewAvatarUrl,
+    this.previewBlurNsfwImages = false,
     this.previewSourceUrl,
     this.previewAuthorUrl,
     this.janitorReviewCharId,
@@ -239,6 +246,14 @@ class CharacterDetailScreen extends ConsumerStatefulWidget {
 
 class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
   int _activeTabIndex = 0;
+
+  /// Whether the reader has revealed the adult imagery for this preview view.
+  /// The blur setting still applies to the grid and to the next preview; this
+  /// only lifts it here, and the sheet's menu can put it back.
+  bool _nsfwRevealed = false;
+
+  /// The blur actually painted: the setting's answer unless revealed here.
+  bool get _blurNsfwActive => widget.previewBlurNsfwImages && !_nsfwRevealed;
 
   /// Owns the body's scroll so we can drive lazy comment paging from the
   /// near-bottom position (see [_onScroll]).
@@ -341,6 +356,30 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
     final uri = Uri.tryParse(url);
     if (uri == null) return;
     await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  /// The preview sheet's three-dots menu. Today it holds one action: lift (or
+  /// restore) the blur on this adult preview's imagery for this view only.
+  void _openPreviewActionsMenu() {
+    final rootNav = Navigator.of(context, rootNavigator: true);
+    final revealed = _nsfwRevealed;
+    GlazeBottomSheet.show<void>(
+      context,
+      items: [
+        BottomSheetItem(
+          icon: revealed
+              ? Icons.visibility_off_outlined
+              : Icons.visibility_outlined,
+          label: (revealed ? 'catalog_nsfw_reblur' : 'catalog_nsfw_unblur')
+              .tr(),
+          onTap: () {
+            rootNav.pop();
+            if (!mounted) return;
+            setState(() => _nsfwRevealed = !revealed);
+          },
+        ),
+      ],
+    );
   }
 
   /// Opens the character editor stacked ABOVE this detail sheet.
@@ -800,6 +839,7 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
             _HeroSection(
               character: char,
               previewAvatarUrl: widget.previewAvatarUrl,
+              blurNsfw: _blurNsfwActive,
               // An in-app creator screen wins over the external link: the
               // author line is the same affordance either way, it just lands
               // somewhere better when the source has a page for it.
@@ -855,7 +895,10 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _InfoTab(character: char),
+            _InfoTab(
+              character: char,
+              blurNsfwImages: _blurNsfwActive,
+            ),
             if (_hasDatacatCommunity) ...[
               _TabSectionHeader(
                 icon: Icons.forum_outlined,
@@ -925,13 +968,23 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
                   icon: Icons.more_vert_rounded,
                   onTap: _openActionsMenu,
                 )
-              else if (widget.isPreview &&
-                  char != null &&
-                  widget.previewSourceUrl != null)
-                _DetailHeaderButton(
-                  icon: Icons.open_in_new_rounded,
-                  onTap: () => _openExternal(widget.previewSourceUrl!),
-                ),
+              else if (widget.isPreview && char != null) ...[
+                // The blur can be lifted for this view from the same
+                // three-dots menu a library character uses.
+                if (widget.previewBlurNsfwImages)
+                  _DetailHeaderButton(
+                    icon: Icons.more_vert_rounded,
+                    onTap: _openPreviewActionsMenu,
+                  ),
+                if (widget.previewBlurNsfwImages &&
+                    widget.previewSourceUrl != null)
+                  const SizedBox(width: 8),
+                if (widget.previewSourceUrl != null)
+                  _DetailHeaderButton(
+                    icon: Icons.open_in_new_rounded,
+                    onTap: () => _openExternal(widget.previewSourceUrl!),
+                  ),
+              ],
             ],
           ),
         ),
@@ -1103,6 +1156,10 @@ class _DetailHeaderButtonState extends ConsumerState<_DetailHeaderButton>
 class _HeroSection extends StatelessWidget {
   final Character character;
   final String? previewAvatarUrl;
+
+  /// Draw the hero image through [NsfwBlur]. Only ever set on an adult catalog
+  /// preview while the blur setting is on.
+  final bool blurNsfw;
   final String? authorUrl;
   final void Function(String url)? onOpenAuthor;
 
@@ -1115,6 +1172,7 @@ class _HeroSection extends StatelessWidget {
   const _HeroSection({
     required this.character,
     this.previewAvatarUrl,
+    this.blurNsfw = false,
     this.authorUrl,
     this.onOpenAuthor,
     this.variationLabel,
@@ -1154,7 +1212,7 @@ class _HeroSection extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            _buildImage(),
+            NsfwBlur(enabled: blurNsfw, child: _buildImage()),
             const DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
@@ -1467,7 +1525,8 @@ class _TabSectionHeader extends StatelessWidget {
 
 class _InfoTab extends StatelessWidget {
   final Character character;
-  const _InfoTab({required this.character});
+  final bool blurNsfwImages;
+  const _InfoTab({required this.character, this.blurNsfwImages = false});
 
   @override
   Widget build(BuildContext context) {
@@ -1502,7 +1561,7 @@ class _InfoTab extends StatelessWidget {
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-            child: _BioMarkdown(notes),
+            child: _BioMarkdown(notes, blurImages: blurNsfwImages),
           ),
         ],
         if (tags.isEmpty && !hasNotes)
@@ -1528,7 +1587,8 @@ class _InfoTab extends StatelessWidget {
 /// this keeps alignment out of its parser (worst case: a run isn't centred).
 class _BioMarkdown extends StatelessWidget {
   final String notes;
-  const _BioMarkdown(this.notes);
+  final bool blurImages;
+  const _BioMarkdown(this.notes, {this.blurImages = false});
 
   TextAlign? _mapAlign(String a) {
     switch (a) {
@@ -1554,7 +1614,8 @@ class _BioMarkdown extends StatelessWidget {
           await launchUrl(uri, mode: LaunchMode.externalApplication);
         }
       },
-      imageBuilder: _bioImageBuilder,
+      imageBuilder: (context, url, width, height) =>
+          _bioImageBuilder(context, url, width, height, blur: blurImages),
       // A custom inlineComponents list replaces gpt_markdown's built-in inline
       // set, so emphasis parsers are listed explicitly. LinkedImageMd MUST come
       // before LinkMd (see its doc). Colours are left null so emphasis inherits
@@ -1603,21 +1664,27 @@ class _BioMarkdown extends StatelessWidget {
 }
 
 /// Shared image renderer for bio markdown: network (`http`/`https`), `data:`
-/// URIs, and local files. Used by every bio segment's `GptMarkdown`.
+/// URIs, and local files. Used by every bio segment's `GptMarkdown`. When
+/// [blur] is set (an adult catalog preview with the blur setting on), the image
+/// is drawn through [NsfwBlur] before it is clipped.
 Widget _bioImageBuilder(
   BuildContext context,
   String url,
   double? width,
-  double? height,
-) {
+  double? height, {
+  bool blur = false,
+}) {
   if (url.startsWith('http://') || url.startsWith('https://')) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
-      child: CachedNetworkImage(
-        imageUrl: url,
-        width: width,
-        height: height,
-        fit: BoxFit.contain,
+      child: NsfwBlur(
+        enabled: blur,
+        child: CachedNetworkImage(
+          imageUrl: url,
+          width: width,
+          height: height,
+          fit: BoxFit.contain,
+        ),
       ),
     );
   }
@@ -1628,11 +1695,14 @@ Widget _bioImageBuilder(
         final bytes = Uri.parse(url).data!.contentAsBytes();
         return ClipRRect(
           borderRadius: BorderRadius.circular(8),
-          child: Image.memory(
-            bytes,
-            width: width,
-            height: height,
-            fit: BoxFit.contain,
+          child: NsfwBlur(
+            enabled: blur,
+            child: Image.memory(
+              bytes,
+              width: width,
+              height: height,
+              fit: BoxFit.contain,
+            ),
           ),
         );
       } catch (_) {}
@@ -1642,11 +1712,14 @@ Widget _bioImageBuilder(
   if (file.existsSync()) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
-      child: Image.file(
-        file,
-        width: width,
-        height: height,
-        fit: BoxFit.contain,
+      child: NsfwBlur(
+        enabled: blur,
+        child: Image.file(
+          file,
+          width: width,
+          height: height,
+          fit: BoxFit.contain,
+        ),
       ),
     );
   }

@@ -23,6 +23,7 @@ import '../services/janitor_provider.dart';
 import '../services/janitor_public_lorebook.dart';
 import '../services/janitor_webview_proxy.dart';
 import '../services/janny_provider.dart';
+import '../third_party_providers_provider.dart';
 import 'datacat_phase_label.dart';
 import 'janitor_login_sheet.dart';
 import 'janitor_lorebook_capture_sheet.dart';
@@ -526,10 +527,16 @@ class _CatalogDetailLauncherState
     final char = _toCharacter(downloaded);
     final avatarUrl =
         downloaded.avatarUrl ?? widget.item.avatarUrl;
+    // Adult imagery on this row with the blur setting on: the hero image and
+    // the images inside the bio are drawn blurred. Results and imports are
+    // untouched, and the sheet's menu can reveal them for this view.
+    final blurNsfwImages =
+        ref.watch(blurNsfwImagesProvider) && shouldBlurNsfwItem(widget.item);
     return CharacterDetailScreen(
       charId: char.id,
       previewCharacter: char,
       previewAvatarUrl: avatarUrl,
+      previewBlurNsfwImages: blurNsfwImages,
       previewSourceUrl: _sourceUrl(),
       previewAuthorUrl: _authorUrl(),
       // Only JanitorAI exposes a comments/reviews endpoint keyed by character id.

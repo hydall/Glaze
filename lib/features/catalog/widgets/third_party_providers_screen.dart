@@ -40,6 +40,7 @@ class ThirdPartyProvidersScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final disabled = ref.watch(thirdPartyProvidersProvider);
     final catalogEnabled = ref.watch(catalogMasterEnabledProvider);
+    final blurNsfw = ref.watch(blurNsfwImagesProvider);
     final topPad = MediaQuery.of(context).padding.top + 74.0;
     final bottomPad = MediaQuery.of(context).padding.bottom + 20.0;
 
@@ -71,6 +72,16 @@ class ThirdPartyProvidersScreen extends ConsumerWidget {
                 label: 'catalog_onboarding_replay'.tr(),
                 subtitle: 'catalog_onboarding_replay_hint'.tr(),
                 onTap: () => replayCatalogOnboarding(context),
+              ),
+              // One switch for every source: a display choice only, it covers
+              // the main image and the images in the bio of an adult row and
+              // never removes a character from the results.
+              MenuSwitchItem(
+                label: 'catalog_blur_nsfw'.tr(),
+                description: 'catalog_blur_nsfw_desc'.tr(),
+                value: blurNsfw,
+                onChanged: (v) =>
+                    ref.read(blurNsfwImagesProvider.notifier).setBlurring(v),
               ),
             ],
           ),
