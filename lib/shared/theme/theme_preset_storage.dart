@@ -157,7 +157,7 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
     if (settings.isEmpty) {
       throw const FormatException('Moonlit Echoes theme has no settings');
     }
-    final accent = _cssColor(settings['customThemeColor']) ?? '#7996CE';
+    final accent = _cssColor(settings['customThemeColor']) ?? '#C42A4A';
     final ui = _cssColor(settings['customTopBarColor']);
     final text = _cssColor(settings['customThemeColor2']);
     final userBubble = _cssColorWithAlpha(settings['customBgColor1']);
@@ -201,7 +201,7 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
       name: json['name'] as String,
       author: 'SillyTavern',
       themeMode: _guessThemeModeFromCss(json['blur_tint_color']),
-      accentColor: quote ?? border?.hex ?? '#7996CE',
+      accentColor: quote ?? border?.hex ?? '#C42A4A',
       uiColor: ui?.hex,
       bgColor: _cssColor(json['chat_tint_color']),
       elementOpacity: ui?.alpha ?? 0.8,
@@ -340,7 +340,7 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
     final accent =
         _hexOrNull(userBubbleInt) ??
         _hexOrNull(_asInt(console['sendColor'])) ??
-        '#7996CE';
+        '#C42A4A';
     final bgImage = _resolveBackgroundImage(
       background['image'] as String?,
       archive,
@@ -612,7 +612,7 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
 final _defaultPreset = ThemePreset(
   id: 'default',
   name: 'Default',
-  accentColor: '#7996CE',
+  accentColor: '#C42A4A',
   bgDim: 0.15,
   elementOpacity: 0.8,
   elementBlur: 12,
@@ -633,7 +633,7 @@ final _defaultPreset = ThemePreset(
 final _materialYouPreset = ThemePreset(
   id: kMaterialYouPresetId,
   name: 'Material You',
-  accentColor: '#7996CE',
+  accentColor: '#C42A4A',
   bgDim: 0.15,
   elementOpacity: 0.8,
   elementBlur: 12,

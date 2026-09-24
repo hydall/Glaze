@@ -28,13 +28,13 @@ import 'widgets/chat_layout_picker.dart';
 // ─── Palette (mirrors Glaze JS PRESET_COLORS / PRESET_UI_COLORS) ──────────────
 
 const _presetColors = [
-  '#7996CE', '#E0555D', '#4BB34B', '#FFA000',
+  '#C42A4A', '#E0555D', '#4BB34B', '#FFA000',
   '#8858C9', '#333333', '#007AFF', '#FF2D55',
   '#FFFFFF', '#000000', '#19191A', '#B0B8C1',
 ];
 
 const _presetUiColors = [
-  '#FFFFFF', '#19191A', '#7996CE', '#E0555D',
+  '#FFFFFF', '#19191A', '#C42A4A', '#E0555D',
   '#4BB34B', '#FFA000', '#8858C9', '#333333',
 ];
 
@@ -47,7 +47,7 @@ Color _hex(String hex) {
   final clean = hex.replaceFirst('#', '');
   if (clean.length == 6) return Color(int.parse('FF$clean', radix: 16));
   if (clean.length == 8) return Color(int.parse(clean, radix: 16));
-  return const Color(0xFF7996CE);
+  return const Color(0xFFC42A4A);
 }
 
 String _toHex(Color c) {
@@ -287,7 +287,7 @@ class _GeneralTab extends StatelessWidget {
               allowNull: false,
               showPreviewOverlay: false,
               onChanged: (v) =>
-                  onUpdate((p) => p.copyWith(accentColor: v ?? '#7996CE')),
+                  onUpdate((p) => p.copyWith(accentColor: v ?? '#C42A4A')),
             ),
           ],
         ),
@@ -1879,7 +1879,7 @@ class _ColorPickerSheetState extends ConsumerState<_ColorPickerSheet> {
   @override
   void initState() {
     super.initState();
-    _committedHex = widget.current ?? '#7996CE';
+    _committedHex = widget.current ?? '#C42A4A';
     _lastCustomHex = _committedHex;
     _hexCtrl = TextEditingController(text: _committedHex);
     final currentColor = _hex(_committedHex);
@@ -1975,7 +1975,7 @@ class _ColorPickerSheetState extends ConsumerState<_ColorPickerSheet> {
   /// gradient stop, depending on the current mode.
   void _sink(String hex) {
     if (_gradientMode) {
-      final c = _parseHexSafe(hex) ?? const Color(0xFF7996CE);
+      final c = _parseHexSafe(hex) ?? const Color(0xFFC42A4A);
       if (_activeStop == 0) {
         _gColor1 = c;
       } else {
@@ -2114,7 +2114,7 @@ class _ColorPickerSheetState extends ConsumerState<_ColorPickerSheet> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final currentColor = _parseHexSafe(_committedHex) ?? const Color(0xFF7996CE);
+    final currentColor = _parseHexSafe(_committedHex) ?? const Color(0xFFC42A4A);
     final isAutoSelected = widget.allowNull && _hexCtrl.text.trim().isEmpty;
     final primaryPalette = widget.palette.skip(1).take(5).toList();
     return GlazeBottomSheetFrame(
@@ -2467,7 +2467,7 @@ class _ColorPickerSheetState extends ConsumerState<_ColorPickerSheet> {
                                   TextField(
                                     controller: _hexCtrl,
                                     decoration: InputDecoration(
-                                      hintText: '#7996CE',
+                                      hintText: '#C42A4A',
                                       labelText: 'theme_hex_color'.tr(),
                                       errorText: _error,
                                       prefixText:

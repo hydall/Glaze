@@ -11,7 +11,7 @@
   --text-gray: #9aa0b0;
   --text-dark-gray: #c5cbd6;
 
-  --vk-blue: #7996CE;
+  --vk-blue: #C42A4A;
   --vk-blue-rgb: 121, 150, 206;
   --ui-bg-rgb: 30, 30, 46;
   --element-opacity: 0.8;
@@ -19,16 +19,16 @@
 
   --char-bubble-color-rgb: 60, 70, 100;
   --user-bubble-color-rgb: 121, 150, 206;
-  --char-quote-color: #7996CE;
+  --char-quote-color: #C42A4A;
   --char-italic-color: #aaaaaa;
   --user-quote-color: #b8c8e8;
   --user-italic-color: #cccccc;
   --char-text-color: #e0e0e0;
   --user-text-color: #ffffff;
 
-  --quote-color: #7996CE;
+  --quote-color: #C42A4A;
   --italic-color: #aaaaaa;
-  --primary-color: #7996CE;
+  --primary-color: #C42A4A;
   --error-color: #ff453a;
   --border-color: rgba(255, 255, 255, 0.1);
 
@@ -338,7 +338,7 @@
   line-height: 1;
   cursor: pointer;
   font-family: inherit;
-  color: var(--primary-color, #7996CE);
+  color: var(--primary-color, #C42A4A);
   background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
   backdrop-filter: blur(var(--element-blur, 12px));
   -webkit-backdrop-filter: blur(var(--element-blur, 12px));
@@ -461,7 +461,7 @@
   background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
   backdrop-filter: blur(var(--element-blur, 12px));
   -webkit-backdrop-filter: blur(var(--element-blur, 12px));
-  color: var(--primary-color, #7996CE);
+  color: var(--primary-color, #C42A4A);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -931,7 +931,7 @@
    sweep it away with the timing chrome. */
 .msg-continuing {
   font-size: 11px;
-  color: var(--primary-color, #7996CE);
+  color: var(--primary-color, #C42A4A);
   display: inline-flex;
   align-items: center;
   animation: msg-continuing-pulse 1.4s ease-in-out infinite;
@@ -1165,7 +1165,7 @@
   field-sizing: content;
   overscroll-behavior: contain;
 }
-.edit-textarea:focus { border-color: var(--primary-color, #7996CE); }
+.edit-textarea:focus { border-color: var(--primary-color, #C42A4A); }
 .message-section.editing .msg-reasoning,
 .message-section.editing .msg-studio-outputs { display: none !important; }
 

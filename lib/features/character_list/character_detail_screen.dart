@@ -56,8 +56,8 @@ import 'widgets/character_hiding_onboarding_sheet.dart';
 
 // ─── Colour tokens ─────────────────────────────────────────────────────────
 
-const _kAccentDim = Color(0x1F7996CE);
-const _kAccentBorder = Color(0x337996CE);
+const _kAccentDim = Color(0x1FC42A4A);
+const _kAccentBorder = Color(0x33C42A4A);
 const _kNsfw = Color(0xFFFF4444);
 const _kNsfwBg = Color(0x33FF4444);
 const _kNsfwBorder = Color(0x4DFF4444);
@@ -1416,7 +1416,7 @@ class _HeroPlaceholder extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ColoredBox(
-      color: const Color(0x147996CE),
+      color: const Color(0x14C42A4A),
       child: Center(
         child: Text(
           name.isNotEmpty ? name[0].toUpperCase() : '?',

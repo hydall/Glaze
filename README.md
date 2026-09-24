@@ -4,7 +4,7 @@
 
 # Glaze
 
-[![Download](https://img.shields.io/github/v/release/hydall/Glaze?include_prereleases&label=download&color=7996CE)](https://github.com/hydall/Glaze/releases/latest)
+[![Download](https://img.shields.io/github/v/release/hydall/Glaze?include_prereleases&label=download&color=C42A4A)](https://github.com/hydall/Glaze/releases/latest)
 [![Discord](https://img.shields.io/badge/Discord-Join-5865F2?style=flat&logo=discord&logoColor=white)](https://discord.gg/jnGhd7p6Ht)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-FFDD00?style=flat&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/hydall)
 

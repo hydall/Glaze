@@ -33,7 +33,7 @@ export const SHADOW_STYLE = `
   }
   .glaze-message .chat-quote,
   .glaze-message .chat-quote-text {
-    color: var(--current-quote-color, var(--quote-color, #7996CE));
+    color: var(--current-quote-color, var(--quote-color, #C42A4A));
   }
   .glaze-message .font-color-block .chat-quote,
   .glaze-message .font-color-block .chat-quote-text,
@@ -42,7 +42,7 @@ export const SHADOW_STYLE = `
     color: var(--current-italic-color, var(--italic-color, #888));
     font-style: italic;
   }
-  .glaze-message a { color: var(--primary-color, #7996CE); text-decoration: underline; }
+  .glaze-message a { color: var(--primary-color, #C42A4A); text-decoration: underline; }
   .glaze-message img { max-width: 100%; height: auto; border-radius: 8px; margin: 8px 0; }
   /* Media Chromium lays out at a fixed intrinsic width. An audio element is
      300px wide by default, which is wider than a bubble gets on a phone (88%
@@ -60,7 +60,7 @@ export const SHADOW_STYLE = `
     min-width: 0;
   }
   .glaze-message .chat-quote-unclosed {
-    color: var(--current-quote-color, var(--quote-color, #7996CE));
+    color: var(--current-quote-color, var(--quote-color, #C42A4A));
     opacity: 0.7;
   }
   .glaze-message .glaze-hc,
@@ -68,9 +68,9 @@ export const SHADOW_STYLE = `
   .glaze-message .glaze-cg,
   .glaze-message .glaze-grad { font-weight: inherit; }
   .glaze-message .glaze-bg { color: #fff; }
-  .glaze-message .glaze-mark { color: var(--current-quote-color, var(--quote-color, #7996CE)); }
+  .glaze-message .glaze-mark { color: var(--current-quote-color, var(--quote-color, #C42A4A)); }
   .glaze-message .glaze-active { background: #ffeb3b; color: #000; padding: 2px 4px; border-radius: 4px; }
-  .glaze-message .glaze-accent { color: var(--primary-color, #7996CE); font-weight: 600; font-style: normal; }
+  .glaze-message .glaze-accent { color: var(--primary-color, #C42A4A); font-weight: 600; font-style: normal; }
   .glaze-message hr {
     border: 0;
     border-top: 1px solid var(--border-color, rgba(255,255,255,0.1));
@@ -457,6 +457,6 @@ export const SHADOW_STYLE = `
     line-height: 1.6;
     field-sizing: content;
   }
-  .edit-textarea:focus { border-color: var(--primary-color, #7996CE); }
+  .edit-textarea:focus { border-color: var(--primary-color, #C42A4A); }
   .message-section.editing .msg-reasoning { display: none; }
 `;
