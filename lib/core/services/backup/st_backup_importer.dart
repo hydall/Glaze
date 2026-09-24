@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../db/app_db.dart';
 import '../../db/repositories/character_repo.dart';
@@ -105,7 +106,7 @@ class StBackupImporter {
     _cancel.check();
 
     onProgress?.call('Importing personas...');
-    await _importPersonas(zip, result);
+    await _importPersonas(zip, charNameToId, result);
     _cancel.check();
 
     onProgress?.call('Finalizing...');
@@ -354,7 +355,11 @@ class StBackupImporter {
     return ChatImportResult(messages: messages, userName: userName);
   }
 
-  Future<void> _importPersonas(Archive zip, StImportResult result) async {
+  Future<void> _importPersonas(
+    Archive zip,
+    Map<String, String> charNameToId,
+    StImportResult result,
+  ) async {
     final settingsFile = zip.files.firstWhere(
       (f) => f.isFile && f.name.toLowerCase().endsWith('settings.json'),
       orElse: () => ArchiveFile('', 0, <int>[]),
@@ -384,6 +389,11 @@ class StBackupImporter {
         (pu['persona_descriptions'] as Map<String, dynamic>?) ??
             (settings['persona_descriptions'] as Map<String, dynamic>?) ??
             {};
+
+    // SillyTavern identifies a persona by its avatar filename; Glaze mints a
+    // new id, so remember the mapping to translate the selections below.
+    final avatarToPersonaId = <String, String>{};
+    final characterConnections = <String, String>{};
 
     for (final entry in personasMap.entries) {
       _cancel.check();
@@ -420,11 +430,85 @@ class StBackupImporter {
           avatarPath: avatarPath,
           createdAt: currentTimestampSeconds(),
         ));
+        avatarToPersonaId[avatarFilename] = id;
         result.personas++;
+
+        // A persona locks itself to characters through `connections`; carry
+        // those over so the same persona is selected for the same cards.
+        if (descData is Map<String, dynamic>) {
+          final connections = descData['connections'];
+          if (connections is List) {
+            for (final connection in connections) {
+              if (connection is! Map) continue;
+              final type = connection['type'];
+              if (type != null && type != 'character') continue;
+              final rawId = connection['id'];
+              if (rawId is! String || rawId.isEmpty) continue;
+              final charKey = rawId.replaceAll(
+                RegExp(r'\.png$', caseSensitive: false),
+                '',
+              );
+              final glazeCharId = charNameToId[charKey];
+              if (glazeCharId != null) {
+                characterConnections[glazeCharId] = id;
+              }
+            }
+          }
+        }
       } catch (e) {
         result.errors.add('Persona ${entry.key}: $e');
       }
     }
+
+    await _restoreActiveSelections(settings, pu, avatarToPersonaId,
+        characterConnections);
+  }
+
+  /// Applies the active persona saved by SillyTavern: the globally selected
+  /// one (`user_avatar`, or its fallback `default_persona`) plus the
+  /// per-character locks, so Glaze opens on the same persona the source did.
+  Future<void> _restoreActiveSelections(
+    Map<String, dynamic> settings,
+    Map<String, dynamic> powerUser,
+    Map<String, String> avatarToPersonaId,
+    Map<String, String> characterConnections,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+
+    final activeAvatar = _firstMappedAvatar(
+      [
+        settings['user_avatar'],
+        powerUser['default_persona'],
+      ],
+      avatarToPersonaId,
+    );
+    if (activeAvatar != null) {
+      await prefs.setString('activePersonaId', activeAvatar);
+    }
+
+    if (characterConnections.isNotEmpty) {
+      await prefs.setString(
+        'personaConnections',
+        jsonEncode({
+          'character': characterConnections,
+          'chat': <String, String>{},
+        }),
+      );
+    }
+  }
+
+  /// Returns the Glaze persona id for the first SillyTavern avatar filename in
+  /// [candidates] that maps to an imported persona.
+  String? _firstMappedAvatar(
+    List<Object?> candidates,
+    Map<String, String> avatarToPersonaId,
+  ) {
+    for (final candidate in candidates) {
+      if (candidate is! String || candidate.isEmpty) continue;
+      final id = avatarToPersonaId[candidate];
+      if (id != null) return id;
+    }
+    return null;
   }
 
   String _uniqueId() =>
