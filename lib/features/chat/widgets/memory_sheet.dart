@@ -14,6 +14,7 @@ import 'memory/memory_tab_store.dart';
 import 'memory_books_tab.dart';
 import 'summary_settings_sheet.dart';
 import 'summary_tab.dart';
+import '../../../shared/widgets/glaze_sheet.dart';
 
 /// Tabs of the Memory sheet, in display order.
 enum MemoryTab { summary, books }
@@ -194,7 +195,7 @@ Future<void> showMemorySheet(
   String charId, {
   MemoryTab? initialTab,
 }) {
-  return showModalBottomSheet<void>(
+  return showGlazeSheet<void>(
     context: context,
     useRootNavigator: true,
     isScrollControlled: true,

@@ -32,6 +32,7 @@ import 'reference_library_section.dart';
 import 'rows.dart' as rows;
 import 'style_library_sheet.dart';
 import 'xai_fields.dart';
+import '../../../shared/widgets/glaze_sheet.dart';
 
 class ImageGenSheet extends ConsumerStatefulWidget {
   const ImageGenSheet({super.key, this.charId});
@@ -407,7 +408,7 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
   }
 
   void _openStyleLibrary() {
-    showModalBottomSheet<void>(
+    showGlazeSheet<void>(
       context: context,
       isScrollControlled: true,
       useRootNavigator: true,
@@ -417,7 +418,7 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
   }
 
   void _openComfyUiWorkflows() {
-    showModalBottomSheet<void>(
+    showGlazeSheet<void>(
       context: context,
       isScrollControlled: true,
       useRootNavigator: true,

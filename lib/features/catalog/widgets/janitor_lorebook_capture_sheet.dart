@@ -36,6 +36,7 @@ import 'datacat_phase_label.dart';
 import 'janitor_build_widgets.dart';
 import 'janitor_extraction_settings_sheet.dart';
 import 'janitor_lorebooks_tab.dart';
+import '../../../shared/widgets/glaze_sheet.dart';
 
 /// Glossary term the help tip beside the sheet title opens.
 const String _kHelpTermExtraction = 'janitor-extraction';
@@ -67,7 +68,7 @@ Future<void> showJanitorLorebookCaptureSheet(
   String? characterId,
   ExtractionResult? initialExtraction,
 }) {
-  return showModalBottomSheet<void>(
+  return showGlazeSheet<void>(
     context: context,
     useRootNavigator: true,
     isScrollControlled: true,
@@ -1703,7 +1704,7 @@ void showJanitorPromptPreviewSheet(
   BuildContext context,
   List<Map<String, String>> messages,
 ) {
-  showModalBottomSheet<void>(
+  showGlazeSheet<void>(
     context: context,
     useRootNavigator: true,
     isScrollControlled: true,

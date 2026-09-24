@@ -50,6 +50,7 @@ import 'character_editor_screen.dart';
 import '../character_gallery/widgets/character_gallery_view.dart';
 import 'widgets/character_variations_sheet.dart';
 import 'widgets/character_hiding_onboarding_sheet.dart';
+import '../../shared/widgets/glaze_sheet.dart';
 
 // ─── Colour tokens ─────────────────────────────────────────────────────────
 
@@ -119,7 +120,7 @@ class _CharacterDetailSheetLauncherState
     if (isSubRoute) return;
     String? navTarget;
     try {
-      navTarget = await showModalBottomSheet<String>(
+      navTarget = await showGlazeSheet<String>(
         context: context,
         isScrollControlled: true,
         useRootNavigator: true,

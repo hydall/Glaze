@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/state/character_provider.dart' show kRevealHiddenTapCount;
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/glaze_sheet.dart';
 
 /// SharedPreferences flag: has the one-time "characters are now hidden"
 /// explainer already been shown? Kept out of [character_provider.dart] so the
@@ -31,7 +32,7 @@ Future<void> maybeShowCharacterHidingOnboarding(BuildContext context) async {
   await prefs.setBool(_kHidingOnboardingShownKey, true);
   if (!context.mounted) return;
 
-  await showModalBottomSheet<void>(
+  await showGlazeSheet<void>(
     context: context,
     useRootNavigator: true,
     useSafeArea: true,
@@ -42,6 +43,7 @@ Future<void> maybeShowCharacterHidingOnboarding(BuildContext context) async {
     isDismissible: false,
     enableDrag: false,
     isScrollControlled: true,
+    windowContentSized: true,
     builder: (_) => const _CharacterHidingOnboardingSheet(),
   );
 }

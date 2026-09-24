@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/services/onboarding_service.dart';
 import '../backup/backup_screen.dart';
 import '../cloud_sync/widgets/sync_sheet.dart';
+import '../../shared/widgets/glaze_sheet.dart';
 
 /// Openers for the More tab destinations that are sheets rather than routes.
 ///
@@ -10,7 +11,7 @@ import '../cloud_sync/widgets/sync_sheet.dart';
 /// to reach them, and a search hit must open exactly what the menu row opens.
 
 Future<void> openBackupsSheet(BuildContext context) =>
-    showModalBottomSheet<void>(
+    showGlazeSheet<void>(
       context: context,
       useRootNavigator: true,
       useSafeArea: true,
@@ -21,7 +22,7 @@ Future<void> openBackupsSheet(BuildContext context) =>
     );
 
 Future<void> openCloudSyncSheet(BuildContext context) =>
-    showModalBottomSheet<void>(
+    showGlazeSheet<void>(
       context: context,
       useRootNavigator: true,
       useSafeArea: true,

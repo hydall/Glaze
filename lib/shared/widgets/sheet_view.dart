@@ -9,6 +9,7 @@ import 'card_backdrop.dart';
 import 'glass_surface.dart';
 import 'glaze_background.dart';
 import 'glaze_scaffold.dart';
+import 'glaze_sheet.dart';
 import 'top_edge_blur.dart';
 
 /// Corner radius of a modal sheet's top edge, kept constant at every height so
@@ -654,6 +655,13 @@ class _SheetViewState extends ConsumerState<SheetView>
     // and the sheet has to follow it the whole way up and back down.
     _kbLift = _kbAnchored ? bottomInset : 0;
 
+    // Desktop sheet window: fill the frame the host gives us, with no drag
+    // handle (there is nowhere to drag it to), the corner radius owned by the
+    // window and the title bar handed to the host via [DetachedShellHost].
+    if (GlazeSheetWindowScope.of(context)) {
+      return _buildWindow(context, bottomInset, batterySaver);
+    }
+
     if (!_inModalSheet) {
       if (_hasHeader) {
         _measureHeader();
@@ -880,6 +888,32 @@ class _SheetViewState extends ConsumerState<SheetView>
             );
           },
         ),
+      ),
+    );
+  }
+
+  /// Body for a sheet hosted inside a desktop window. The window owns the size
+  /// and corner radius, so this fills the slot and lets the chrome-drawing host
+  /// render the title/actions row; only the tabs / [headerBottom] / body remain.
+  Widget _buildWindow(
+    BuildContext context,
+    double bottomInset,
+    bool batterySaver,
+  ) {
+    if (_hasHeader) {
+      _measureHeader();
+    }
+    // pop(), not maybePop(): matches the route branch — a body that blocks the
+    // pop handles the back event in [onBack] itself.
+    final backHandler = widget.onBack ?? () => Navigator.of(context).pop();
+    return PopScope(
+      canPop: widget.canPop,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        backHandler();
+      },
+      child: SizedBox.expand(
+        child: _sheetContent(context, bottomInset, batterySaver, opaque: true),
       ),
     );
   }

@@ -27,6 +27,7 @@ import '../presets/preset_image.dart';
 import '../presets/preset_list_provider.dart';
 import 'tools_layout_service.dart';
 import 'tools_tile_models.dart';
+import '../../shared/widgets/glaze_sheet.dart';
 
 class PersonaInfo {
   final String name;
@@ -243,7 +244,7 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
   }
 
   /// Opens the same External Blocks sheet as chat Quick Access.
-  Future<void> _openExtBlocks() => showModalBottomSheet<void>(
+  Future<void> _openExtBlocks() => showGlazeSheet<void>(
     context: context,
     useRootNavigator: true,
     backgroundColor: Colors.transparent,
@@ -272,7 +273,7 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
       case 'regex':
         _openTool(context, ref, id);
       case 'stats':
-        showModalBottomSheet<void>(
+        showGlazeSheet<void>(
           context: context,
           isScrollControlled: true,
           useRootNavigator: true,
@@ -280,7 +281,7 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
           builder: (_) => const ChatStatsSheet(initialCharId: ''),
         );
       case 'image-gen':
-        showModalBottomSheet<void>(
+        showGlazeSheet<void>(
           context: context,
           isScrollControlled: true,
           useRootNavigator: true,

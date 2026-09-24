@@ -25,6 +25,7 @@ import '../services/extraction_status.dart';
 import '../services/saucepan_extractor.dart';
 import 'catalog_detail_launcher.dart';
 import 'datacat_phase_label.dart';
+import '../../../shared/widgets/glaze_sheet.dart';
 
 class ImportUrlDialog extends ConsumerStatefulWidget {
   const ImportUrlDialog({super.key});
@@ -756,7 +757,7 @@ class _ImportUrlDialogState extends ConsumerState<ImportUrlDialog> {
         ref.read(appSettingsProvider).value?.openCardAfterImport ?? true;
     Navigator.pop(context);
 
-    final importedCharId = await showModalBottomSheet<String>(
+    final importedCharId = await showGlazeSheet<String>(
       context: rootContext,
       isScrollControlled: true,
       useRootNavigator: true,

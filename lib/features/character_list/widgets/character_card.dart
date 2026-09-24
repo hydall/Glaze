@@ -24,6 +24,7 @@ import '../../../shared/utils/variant_label.dart';
 import '../../../core/llm/character_tokens.dart';
 import '../character_selection_provider.dart';
 import 'add_to_folder_sheet.dart';
+import '../../../shared/widgets/glaze_sheet.dart';
 
 class CharacterCard extends ConsumerStatefulWidget {
   final Character character;
@@ -422,7 +423,7 @@ class _CharacterCardState extends ConsumerState<CharacterCard>
   }
 
   void _showDetailSheet(BuildContext context) async {
-    final result = await showModalBottomSheet<String>(
+    final result = await showGlazeSheet<String>(
       context: context,
       isScrollControlled: true,
       useRootNavigator: true,
@@ -532,7 +533,7 @@ class _CharacterCardState extends ConsumerState<CharacterCard>
           label: 'action_add_to_folder'.tr(),
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
-            showModalBottomSheet<void>(
+            showGlazeSheet<void>(
               context: context,
               isScrollControlled: true,
               useRootNavigator: true,

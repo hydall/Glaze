@@ -17,6 +17,7 @@ import '../../../shared/widgets/sheet_view.dart';
 import '../../presets/preset_list_provider.dart';
 import '../chat_provider.dart';
 import '../chat_session_service.dart';
+import '../../../shared/widgets/glaze_sheet.dart';
 
 /// Keeps the Author's Note enable state in sync across its homes. The note is
 /// one entity for the chat: its `enabled` (and content) live on the session and
@@ -472,7 +473,7 @@ Future<void> showAuthorsNoteSheet(
   String? charId, {
   String? presetId,
 }) {
-  return showModalBottomSheet<void>(
+  return showGlazeSheet<void>(
     context: context,
     useRootNavigator: true,
     isScrollControlled: true,

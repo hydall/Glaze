@@ -12,6 +12,7 @@ import '../../chat/bridge/chat_webview_environment.dart';
 import '../catalog_provider.dart';
 import '../janitor_account_provider.dart';
 import '../services/janitor_webview_proxy.dart';
+import '../../../shared/widgets/glaze_sheet.dart';
 
 /// Entry point for the menu's "JanitorAI Account" item. When a session already
 /// exists, shows a small log-out / cancel sheet instead of the login WebView;
@@ -54,7 +55,7 @@ Future<void> openJanitorAccountSheet(BuildContext context, WidgetRef ref) async 
 /// account session (if any) is active for catalog requests. On a successful
 /// sign-in the sheet refreshes the catalog itself, so callers don't need to.
 Future<void> showJanitorLoginSheet(BuildContext context) {
-  return showModalBottomSheet<void>(
+  return showGlazeSheet<void>(
     context: context,
     isScrollControlled: true,
     useRootNavigator: true,
@@ -131,12 +132,17 @@ class _JanitorLoginSheetState extends ConsumerState<JanitorLoginSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final height = MediaQuery.of(context).size.height * 0.92;
+    final inWindow = GlazeSheetWindowScope.of(context);
+    final height = inWindow
+        ? double.infinity
+        : MediaQuery.of(context).size.height * 0.92;
     return Container(
       height: height,
       decoration: BoxDecoration(
         color: context.cs.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: inWindow
+            ? BorderRadius.circular(16)
+            : const BorderRadius.vertical(top: Radius.circular(20)),
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(

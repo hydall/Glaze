@@ -43,6 +43,7 @@ import 'character_selection_provider.dart';
 import 'filtered_characters_provider.dart';
 import 'widgets/import_progress_dialog.dart';
 import 'widgets/widgets.dart';
+import '../../shared/widgets/glaze_sheet.dart';
 
 class CharacterListScreen extends ConsumerStatefulWidget {
   final String? initialCharacterId;
@@ -334,7 +335,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
       if (!mounted) return;
       _lastOpenedInitialCharacterId = charId;
 
-      final result = await showModalBottomSheet<String>(
+      final result = await showGlazeSheet<String>(
         context: context,
         isScrollControlled: true,
         useRootNavigator: true,
@@ -891,7 +892,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     }
     final allTags = tagSet.toList()..sort();
 
-    showModalBottomSheet<void>(
+    showGlazeSheet<void>(
       context: context,
       isScrollControlled: true,
       useRootNavigator: true,
@@ -1244,7 +1245,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     CharacterSelectionState selection,
   ) {
     final ids = {...selection.ids};
-    showModalBottomSheet<void>(
+    showGlazeSheet<void>(
       context: context,
       isScrollControlled: true,
       useRootNavigator: true,

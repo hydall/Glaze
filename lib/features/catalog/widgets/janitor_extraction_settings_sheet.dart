@@ -13,6 +13,7 @@ import '../janitor_account_provider.dart';
 import '../services/janitor_lorebook_rebuilder.dart';
 import 'janitor_login_sheet.dart';
 import 'janitor_source_settings.dart';
+import '../../../shared/widgets/glaze_sheet.dart';
 
 /// Settings for the JanitorAI extraction flow, opened from the gear in the
 /// lorebook capture sheet's header.
@@ -23,7 +24,7 @@ import 'janitor_source_settings.dart';
 /// flow means a failed build can be corrected where it failed, instead of in
 /// the app's settings screen two navigations away.
 Future<void> showJanitorExtractionSettingsSheet(BuildContext context) {
-  return showModalBottomSheet<void>(
+  return showGlazeSheet<void>(
     context: context,
     useRootNavigator: true,
     isScrollControlled: true,

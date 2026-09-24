@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../shared/widgets/sheet_view.dart';
 import '../providers/extension_presets_provider.dart';
 import '../screens/preset_editor/sections/permissions_section.dart';
+import '../../../shared/widgets/glaze_sheet.dart';
 
 /// What a preset's blocks are allowed to reach, opened from the panel.
 ///
@@ -17,7 +18,7 @@ class ExtBlocksPermissionsSheet extends ConsumerWidget {
   final String presetId;
 
   static Future<void> show(BuildContext context, String presetId) {
-    return showModalBottomSheet<void>(
+    return showGlazeSheet<void>(
       context: context,
       useRootNavigator: true,
       backgroundColor: Colors.transparent,

@@ -13,6 +13,7 @@ import '../../../shared/widgets/sheet_view.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/glaze_spinner.dart';
+import '../../shared/widgets/glaze_sheet.dart';
 
 class PersonaConnectionsSheet extends ConsumerStatefulWidget {
   final String personaId;
@@ -223,7 +224,7 @@ class _PersonaConnectionsSheetState
 }
 
 void showPersonaConnections(BuildContext context, String personaId) {
-  showModalBottomSheet<void>(
+  showGlazeSheet<void>(
     context: context,
     useRootNavigator: true,
     isScrollControlled: true,

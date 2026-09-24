@@ -8,6 +8,7 @@ import '../../../shared/widgets/glaze_toast.dart';
 import '../../../core/llm/tokenizer.dart';
 import '../services/catalog_error_labels.dart';
 import '../services/janitor_extractor.dart';
+import '../../../shared/widgets/glaze_sheet.dart';
 
 /// Dev tool: extract a JanitorAI character's **hidden card** + **closed
 /// lorebook** via the webview proxy and save both to the Glaze DB.
@@ -16,7 +17,7 @@ import '../services/janitor_extractor.dart';
 /// URL → Run (capture + separate) → preview → Save (import character + rebuild
 /// the lorebook with the active LLM).
 void showJanitorExtractSheet(BuildContext context) {
-  showModalBottomSheet<void>(
+  showGlazeSheet<void>(
     context: context,
     useRootNavigator: true,
     useSafeArea: true,

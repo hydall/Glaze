@@ -38,6 +38,7 @@ import '../settings/app_settings_provider.dart';
 import '../chat/widgets/authors_note_sheet.dart';
 import '../chat/widgets/memory_sheet.dart';
 import '../regex/regex_sheet.dart';
+import '../../shared/widgets/glaze_sheet.dart';
 
 /// The two buttons that act on the prompt block whose editor is open, handed
 /// to whichever chrome is hosting [PresetEditorBody] so it can draw them in its
@@ -1318,7 +1319,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
     _saveTimer?.cancel();
     await _performSave();
     if (!mounted) return;
-    await showModalBottomSheet<void>(
+    await showGlazeSheet<void>(
       context: context,
       useRootNavigator: true,
       useSafeArea: true,

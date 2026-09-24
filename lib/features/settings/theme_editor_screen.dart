@@ -24,6 +24,7 @@ import '../../shared/widgets/menu_group.dart';
 import 'app_settings_provider.dart';
 import 'theme_preview.dart';
 import 'widgets/chat_layout_picker.dart';
+import '../../shared/widgets/glaze_sheet.dart';
 
 // ─── Palette (mirrors Glaze JS PRESET_COLORS / PRESET_UI_COLORS) ──────────────
 
@@ -2929,7 +2930,7 @@ Future<void> _pickGoogleFont(
   required bool isUi,
   required ThemePreset preset,
 }) async {
-  final selected = await showModalBottomSheet<String>(
+  final selected = await showGlazeSheet<String>(
     context: context,
     useRootNavigator: true,
     isScrollControlled: true,

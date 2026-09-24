@@ -13,6 +13,7 @@ import 'provider_logo.dart';
 import 'third_party_providers_screen.dart';
 
 import 'package:easy_localization/easy_localization.dart';
+import '../../../shared/widgets/glaze_sheet.dart';
 
 class CatalogControls extends ConsumerWidget {
   final CatalogState state;
@@ -174,7 +175,7 @@ class CatalogControls extends ConsumerWidget {
         const Spacer(),
         GlazeFilterIconButton(
           count: _activeFilterCount(),
-          onTap: () => showModalBottomSheet<void>(
+          onTap: () => showGlazeSheet<void>(
             context: context,
             isScrollControlled: true,
             useRootNavigator: true,

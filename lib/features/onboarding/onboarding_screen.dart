@@ -19,6 +19,7 @@ import '../../shared/shell/desktop/desktop_layout_provider.dart';
 import 'onboarding_models.dart';
 import 'widgets/onboarding_desktop_wizard.dart';
 import 'widgets/onboarding_widgets.dart';
+import '../../shared/widgets/glaze_sheet.dart';
 
 // ---------------------------------------------------------------------------
 // Flow widget
@@ -146,7 +147,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   }
 
   void _openSheet(Widget sheet) {
-    showModalBottomSheet<void>(
+    showGlazeSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,

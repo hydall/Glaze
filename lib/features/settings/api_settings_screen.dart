@@ -38,6 +38,7 @@ import 'widgets/connection_status.dart';
 import '../../shared/widgets/menu_group.dart';
 import '../../shared/widgets/preset_switcher.dart';
 import '../../shared/widgets/extra_request_parameters_editor.dart';
+import '../../shared/widgets/glaze_sheet.dart';
 
 /// A section of the API screen a caller can open it *on*.
 enum ApiSettingsSection {
@@ -2447,7 +2448,7 @@ Future<void> showApiSettingsSheet(
   BuildContext context, {
   ApiSettingsSection? focusSection,
 }) {
-  return showModalBottomSheet<void>(
+  return showGlazeSheet<void>(
     context: context,
     useRootNavigator: true,
     isScrollControlled: true,

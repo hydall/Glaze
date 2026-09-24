@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/sheet_view.dart';
+import '../../../shared/widgets/glaze_sheet.dart';
 
 /// Sheet helpers for editing / deleting an ext-block from the chat WebView's
 /// ext-blocks panel. Extracted from `chat_webview_widget.dart` so the widget
@@ -18,7 +19,7 @@ class ExtBlockDialogs {
     required String blockName,
     required String initialContent,
   }) {
-    return showModalBottomSheet<String>(
+    return showGlazeSheet<String>(
       context: context,
       isScrollControlled: true,
       useRootNavigator: true,

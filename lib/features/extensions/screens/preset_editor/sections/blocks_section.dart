@@ -4,11 +4,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../../core/utils/id_generator.dart';
 import '../../../../../shared/theme/app_colors.dart';
+import '../../../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../../../shared/widgets/menu_group.dart';
 import '../../../models/block_config.dart';
 import '../../../models/extension_preset.dart';
 import '../../../providers/extension_presets_provider.dart';
 import '../block_edit_dialog.dart';
+import '../../../../../shared/widgets/glaze_sheet.dart';
 
 class BlocksSection extends ConsumerWidget {
   const BlocksSection({required this.preset, super.key});
@@ -162,27 +164,19 @@ class _BlockTile extends ConsumerWidget {
     ExtensionPreset preset,
     BlockConfig block,
   ) {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: context.cs.surfaceContainerHigh,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.delete_outline, color: Colors.red),
-              title: Text('blocks_delete_block'.tr()),
-              onTap: () {
-                Navigator.pop(ctx);
-                _deleteBlock(ref, preset, block);
-              },
-            ),
-          ],
+    GlazeBottomSheet.show<void>(
+      context,
+      items: [
+        BottomSheetItem(
+          label: 'blocks_delete_block'.tr(),
+          icon: Icons.delete_outline,
+          isDestructive: true,
+          onTap: () {
+            Navigator.pop(context);
+            _deleteBlock(ref, preset, block);
+          },
         ),
-      ),
+      ],
     );
   }
 
@@ -237,7 +231,7 @@ void editBlockSheet(
   ExtensionPreset preset,
   BlockConfig block,
 ) {
-  showModalBottomSheet<void>(
+  showGlazeSheet<void>(
     context: context,
     isScrollControlled: true,
     useRootNavigator: true,

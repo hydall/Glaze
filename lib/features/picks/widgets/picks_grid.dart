@@ -11,6 +11,7 @@ import '../../../shared/widgets/glaze_spinner.dart';
 import '../picks_models.dart';
 import '../picks_provider.dart';
 import 'picks_detail_launcher.dart';
+import '../../../shared/widgets/glaze_sheet.dart';
 
 class PicksGrid extends ConsumerWidget {
   final double topPadding;
@@ -777,7 +778,7 @@ class _PicksCharacterCardState extends ConsumerState<_PicksCharacterCard> {
   }
 
   void _openDetail() {
-    showModalBottomSheet<void>(
+    showGlazeSheet<void>(
       context: context,
       isScrollControlled: true,
       useRootNavigator: true,
