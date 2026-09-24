@@ -1,6 +1,7 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
+import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_scaffold.dart';
 import '../../shared/widgets/menu_group.dart';
 
@@ -261,23 +262,19 @@ class _MenuGroupDemoScreenState extends State<MenuGroupDemoScreen> {
   }
 
   void _pickEffort() {
-    showModalBottomSheet<void>(
-      context: context,
-      builder: (_) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: ['Low', 'Medium', 'High', 'Auto'].map((e) {
-            return ListTile(
-              title: Text(e),
-              trailing: e == _effort ? const Icon(Icons.check) : null,
-              onTap: () {
-                setState(() => _effort = e);
-                Navigator.pop(context);
-              },
-            );
-          }).toList(),
-        ),
-      ),
+    GlazeBottomSheet.show<void>(
+      context,
+      items: [
+        for (final e in ['Low', 'Medium', 'High', 'Auto'])
+          BottomSheetItem(
+            label: e,
+            icon: e == _effort ? Icons.check : null,
+            onTap: () {
+              setState(() => _effort = e);
+              Navigator.pop(context);
+            },
+          ),
+      ],
     );
   }
 }

@@ -6,6 +6,7 @@ import '../../../shared/widgets/glaze_tab_bar.dart';
 import '../../../shared/widgets/sheet_view.dart';
 import 'tokenizer_sheet.dart';
 import 'requests/request_timeline_view.dart';
+import '../../../shared/widgets/glaze_sheet.dart';
 
 /// Unified diagnostics surface: Context (the token budget) and Requests (what
 /// the chat sent, and what went into it). Both answer the same question — "what
@@ -135,7 +136,7 @@ Future<void> showPromptInspectorSheet(
   String charId, {
   String initialTabId = PromptInspectorSheet._tabContext,
 }) {
-  return showModalBottomSheet<void>(
+  return showGlazeSheet<void>(
     context: context,
     useRootNavigator: true,
     isScrollControlled: true,

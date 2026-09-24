@@ -17,6 +17,7 @@ import '../../../shared/widgets/sheet_view.dart';
 import '../../presets/preset_list_provider.dart';
 import '../../settings/api_settings_screen.dart';
 import 'custom_prompt_manager_sheet.dart';
+import '../../../shared/widgets/glaze_sheet.dart';
 
 /// Everything about the summary except the summary itself.
 ///
@@ -44,7 +45,7 @@ class SummarySettingsSheet extends ConsumerStatefulWidget {
     required String charId,
     required String sessionId,
   }) {
-    return showModalBottomSheet<void>(
+    return showGlazeSheet<void>(
       context: context,
       useRootNavigator: true,
       isScrollControlled: true,

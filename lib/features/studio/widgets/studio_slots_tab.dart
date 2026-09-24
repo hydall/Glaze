@@ -18,6 +18,7 @@ import '../../settings/api_list_provider.dart';
 import '../../settings/widgets/api_slot_group.dart';
 import '../studio_injection_points.dart';
 import 'studio_slot_settings_dialog.dart';
+import '../../../shared/widgets/glaze_sheet.dart';
 
 /// The "Agents" tab of the API settings sheet: which API connection and which
 /// model each Studio stage runs on.
@@ -358,7 +359,7 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
     final presetConfig = apiConfigId.isEmpty
         ? ref.read(activeApiConfigProvider)
         : configs.where((c) => c.id == apiConfigId).firstOrNull;
-    final updated = await showModalBottomSheet<StudioSlotSettings>(
+    final updated = await showGlazeSheet<StudioSlotSettings>(
       context: context,
       isScrollControlled: true,
       useRootNavigator: true,

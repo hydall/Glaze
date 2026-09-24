@@ -13,6 +13,7 @@ import '../state/agent_ops_tab_provider.dart';
 import 'agentic_collector_tab.dart';
 import 'agentic_reconciler_tab.dart';
 import 'agentic_snapshots_tab.dart';
+import '../../../shared/widgets/glaze_sheet.dart';
 
 class AgenticOperationsLogDialog extends ConsumerStatefulWidget {
   final String? sessionId;
@@ -32,7 +33,7 @@ class AgenticOperationsLogDialog extends ConsumerStatefulWidget {
     String? sessionId,
     String? characterId,
   }) {
-    return showModalBottomSheet<String>(
+    return showGlazeSheet<String>(
       context: context,
       useRootNavigator: true,
       isScrollControlled: true,

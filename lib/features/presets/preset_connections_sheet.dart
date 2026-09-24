@@ -14,6 +14,7 @@ import '../../shared/widgets/help_tip.dart';
 import '../../shared/widgets/sheet_view.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import 'preset_list_provider.dart';
+import '../../shared/widgets/glaze_sheet.dart';
 
 class PresetConnectionsSheet extends ConsumerStatefulWidget {
   final String presetId;
@@ -213,7 +214,7 @@ class _PresetConnectionsSheetState
 }
 
 void showPresetConnections(BuildContext context, String presetId) {
-  showModalBottomSheet<void>(
+  showGlazeSheet<void>(
     context: context,
     useRootNavigator: true,
     isScrollControlled: true,

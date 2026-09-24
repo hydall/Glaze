@@ -18,6 +18,7 @@ import 'memory/settings/memory_capture_tab.dart';
 import 'memory/settings/memory_retrieval_tab.dart';
 import 'memory/settings/memory_selection_tab.dart';
 import 'memory/settings/memory_settings_draft.dart';
+import '../../../shared/widgets/glaze_sheet.dart';
 
 /// Memory generation settings.
 ///
@@ -62,7 +63,7 @@ class MemoryGenerationSettingsSheet extends ConsumerStatefulWidget {
     required MemoryBookSettings settings,
     String? sessionId,
   }) {
-    return showModalBottomSheet<MemorySettingsSheetResult>(
+    return showGlazeSheet<MemorySettingsSheetResult>(
       context: context,
       useRootNavigator: true,
       isScrollControlled: true,

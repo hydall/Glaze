@@ -24,6 +24,7 @@ import 'catalog_card_grid.dart';
 import 'catalog_controls.dart';
 import 'catalog_detail_launcher.dart';
 import 'catalog_onboarding_sheet.dart';
+import '../../../shared/widgets/glaze_sheet.dart';
 
 class CatalogGrid extends ConsumerWidget {
   final double topPadding;
@@ -189,7 +190,7 @@ class CatalogGrid extends ConsumerWidget {
     CatalogItem item,
     CatalogProvider provider,
   ) async {
-    final importedCharId = await showModalBottomSheet<String>(
+    final importedCharId = await showGlazeSheet<String>(
       context: context,
       isScrollControlled: true,
       useRootNavigator: true,

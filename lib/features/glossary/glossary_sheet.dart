@@ -10,6 +10,7 @@ import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/sheet_view.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../settings/app_settings_provider.dart';
+import '../../shared/widgets/glaze_sheet.dart';
 
 /// Bottom-sheet glossary viewer — port of `GlossarySheet.vue`.
 ///
@@ -31,7 +32,7 @@ class GlossarySheet extends ConsumerStatefulWidget {
     String? initialTerm,
     bool startExpanded = false,
   }) {
-    return showModalBottomSheet<void>(
+    return showGlazeSheet<void>(
       context: context,
       useRootNavigator: true,
       useSafeArea: true,

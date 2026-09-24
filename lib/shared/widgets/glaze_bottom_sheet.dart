@@ -8,6 +8,7 @@ import '../../core/platform/haptics.dart';
 import '../theme/app_colors.dart';
 import '../../features/settings/app_settings_provider.dart';
 import 'glass_surface.dart';
+import 'glaze_sheet.dart';
 import 'top_edge_blur.dart';
 
 // ── Data models ───────────────────────────────────────────────────────────────
@@ -290,7 +291,7 @@ class GlazeBottomSheet {
       );
     }
 
-    return showModalBottomSheet<T>(
+    return showGlazeSheet<T>(
       context: context,
       useRootNavigator: true,
       useSafeArea: true,
@@ -299,6 +300,11 @@ class GlazeBottomSheet {
       enableDrag: !locked,
       isDismissible: isDismissible,
       isScrollControlled: true,
+      // Desktop: the same content opens as a centered window rather than a
+      // band sliding in from the bottom. It sizes to its content and supplies
+      // its own header, so the window adds no title bar.
+      windowContentSized: true,
+      windowChrome: false,
       builder: (_) => _GlazeBottomSheetContent(
         title: title,
         headerAction: headerAction,
@@ -344,8 +350,10 @@ class GlazeBottomSheetFrame extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final cap =
-        maxHeight ?? MediaQuery.of(context).size.height * maxHeightFactor;
+    final inWindow = GlazeSheetWindowScope.of(context);
+    final cap = inWindow
+        ? double.infinity
+        : (maxHeight ?? MediaQuery.of(context).size.height * maxHeightFactor);
     return ConstrainedBox(
       constraints: BoxConstraints(maxHeight: cap),
       // Solid, not glass. The sheet's tint is composited against the surface
@@ -356,13 +364,17 @@ class GlazeBottomSheetFrame extends ConsumerWidget {
       child: FlatBackdrop(
         color: context.cs.surface,
         child: GlassSurface(
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          border: Border(top: BorderSide(color: context.cs.outlineVariant)),
+          borderRadius: inWindow
+              ? BorderRadius.circular(16)
+              : const BorderRadius.vertical(top: Radius.circular(24)),
+          border: inWindow
+              ? Border.all(color: context.cs.outlineVariant)
+              : Border(top: BorderSide(color: context.cs.outlineVariant)),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (showHandle) _HandleBar(),
+              if (showHandle && !inWindow) _HandleBar(),
               Flexible(fit: FlexFit.loose, child: child),
             ],
           ),
@@ -597,17 +609,24 @@ class _GlazeBottomSheetContentState
         !_hasMatch(sessionsVisible) &&
         !_hasMatch(cardItemsVisible);
 
+    final inWindow = GlazeSheetWindowScope.of(context);
     final sheetBody = ConstrainedBox(
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.of(context).size.height * 0.95,
-      ),
+      constraints: inWindow
+          ? const BoxConstraints()
+          : BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.95,
+            ),
       // Solid, as [GlazeBottomSheetFrame] is: the fill is resolved against the
       // surface colour instead of blending over the dimmed screen every frame.
       child: FlatBackdrop(
         color: context.cs.surface,
         child: GlassSurface(
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          border: Border(top: BorderSide(color: context.cs.outlineVariant)),
+          borderRadius: inWindow
+              ? BorderRadius.circular(16)
+              : const BorderRadius.vertical(top: Radius.circular(24)),
+          border: inWindow
+              ? Border.all(color: context.cs.outlineVariant)
+              : Border(top: BorderSide(color: context.cs.outlineVariant)),
           child: Stack(
             children: [
               TopEdgeBlur(
@@ -726,7 +745,7 @@ class _GlazeBottomSheetContentState
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      _HandleBar(),
+                      if (!inWindow) _HandleBar(),
                       if (_hasHeader)
                         _Header(
                           title: widget.title,

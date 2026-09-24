@@ -14,6 +14,7 @@ import '../../services/datacat/datacat_creators.dart';
 import '../../services/datacat/datacat_models.dart';
 import '../catalog_card_grid.dart';
 import '../catalog_detail_launcher.dart';
+import '../../../../shared/widgets/glaze_sheet.dart';
 
 /// Opens [creatorRef]'s page on the root navigator, so it works the same from
 /// the catalog and from a character preview — those live in different shell
@@ -149,7 +150,7 @@ class _DatacatCreatorScreenState extends ConsumerState<DatacatCreatorScreen> {
   }
 
   Future<void> _openCharacter(CatalogItem item) async {
-    await showModalBottomSheet<String>(
+    await showGlazeSheet<String>(
       context: context,
       isScrollControlled: true,
       useRootNavigator: true,

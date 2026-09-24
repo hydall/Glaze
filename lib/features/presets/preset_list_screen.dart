@@ -50,6 +50,7 @@ import 'widgets/preset_filter_sheet.dart';
 import 'widgets/preset_folders_section.dart';
 import 'widgets/preset_options_sheet.dart';
 import 'widgets/preset_small_badge.dart';
+import '../../shared/widgets/glaze_sheet.dart';
 
 /// Nominal height of one preset row (card + the gap below it). Only used to
 /// estimate the scroll offset of the active preset before its row is laid out;
@@ -813,7 +814,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
   }
 
   void _showFilterSheet(BuildContext context) {
-    showModalBottomSheet<void>(
+    showGlazeSheet<void>(
       context: context,
       isScrollControlled: true,
       useRootNavigator: true,
@@ -1223,7 +1224,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     bool clearSelectionWhenDone = false,
   }) {
     if (targets.isEmpty) return;
-    showModalBottomSheet<void>(
+    showGlazeSheet<void>(
       context: context,
       isScrollControlled: true,
       useRootNavigator: true,

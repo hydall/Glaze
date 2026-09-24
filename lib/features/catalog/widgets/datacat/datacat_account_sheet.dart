@@ -17,6 +17,7 @@ import '../../../chat/bridge/chat_webview_environment.dart';
 import '../../datacat_account_provider.dart';
 import '../../services/datacat/datacat_account.dart';
 import '../../services/datacat/datacat_models.dart';
+import '../../../../shared/widgets/glaze_sheet.dart';
 
 /// Entry point for the "DataCat account" row. Offers to unlink when an account
 /// is already linked, and starts the device flow when it is not.
@@ -49,7 +50,7 @@ Future<void> openDatacatAccountSheet(BuildContext context, WidgetRef ref) async 
 
 /// Opens the link sheet. Resolves to true once an account is linked.
 Future<bool> showDatacatLinkSheet(BuildContext context) async {
-  final linked = await showModalBottomSheet<bool>(
+  final linked = await showGlazeSheet<bool>(
     context: context,
     isScrollControlled: true,
     useRootNavigator: true,

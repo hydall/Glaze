@@ -26,6 +26,7 @@ import '../widgets/authors_note_sheet.dart';
 import '../widgets/memory_sheet.dart';
 import '../widgets/prompt_inspector_sheet.dart';
 import '../widgets/session_picker_sheet.dart';
+import '../../../shared/widgets/glaze_sheet.dart';
 
 /// Opens the sheet behind a Tools-tab card, by card id.
 ///
@@ -60,7 +61,7 @@ class DrawerItemLauncher {
       case 'sessions':
         await _showSessionsSheet(context);
       case 'char-card':
-        final result = await showModalBottomSheet<String>(
+        final result = await showGlazeSheet<String>(
           context: context,
           isScrollControlled: true,
           useRootNavigator: true,
@@ -73,7 +74,7 @@ class DrawerItemLauncher {
           context.go(result);
         }
       case 'lorebooks':
-        await showModalBottomSheet<void>(
+        await showGlazeSheet<void>(
           context: context,
           useRootNavigator: true,
           backgroundColor: Colors.transparent,
@@ -82,7 +83,7 @@ class DrawerItemLauncher {
           builder: (_) => const LorebookListScreen(),
         );
       case 'regex':
-        await showModalBottomSheet<void>(
+        await showGlazeSheet<void>(
           context: context,
           useRootNavigator: true,
           backgroundColor: Colors.transparent,
@@ -91,7 +92,7 @@ class DrawerItemLauncher {
           builder: (_) => const RegexSheet(),
         );
       case 'api':
-        await showModalBottomSheet<void>(
+        await showGlazeSheet<void>(
           context: context,
           useRootNavigator: true,
           backgroundColor: Colors.transparent,
@@ -100,7 +101,7 @@ class DrawerItemLauncher {
           builder: (_) => const ApiSettingsScreen(),
         );
       case 'presets':
-        await showModalBottomSheet<void>(
+        await showGlazeSheet<void>(
           context: context,
           useRootNavigator: true,
           backgroundColor: Colors.transparent,
@@ -109,7 +110,7 @@ class DrawerItemLauncher {
           builder: (_) => PresetListScreen(charId: charId),
         );
       case 'personas':
-        await showModalBottomSheet<void>(
+        await showGlazeSheet<void>(
           context: context,
           useRootNavigator: true,
           isScrollControlled: true,
@@ -117,7 +118,7 @@ class DrawerItemLauncher {
           builder: (_) => const PersonaListScreen(),
         );
       case 'image-gen':
-        await showModalBottomSheet<void>(
+        await showGlazeSheet<void>(
           context: context,
           useRootNavigator: true,
           isScrollControlled: true,
@@ -129,7 +130,7 @@ class DrawerItemLauncher {
       case 'glossary':
         await GlossarySheet.show(context);
       case 'ext-blocks':
-        await showModalBottomSheet<void>(
+        await showGlazeSheet<void>(
           context: context,
           useRootNavigator: true,
           backgroundColor: Colors.transparent,

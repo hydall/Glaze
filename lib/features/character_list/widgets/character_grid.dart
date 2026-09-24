@@ -16,6 +16,7 @@ import '../character_detail_screen.dart';
 import '../character_sort.dart';
 import 'character_card.dart';
 import 'randomizing_card_overlay.dart';
+import '../../../shared/widgets/glaze_sheet.dart';
 
 class CharacterGrid extends StatelessWidget {
   final List<Character> characters;
@@ -87,7 +88,7 @@ class CharacterGrid extends StatelessWidget {
     final pool = _randomPool();
     if (pool.isEmpty) return;
     final picked = pool[Random().nextInt(pool.length)];
-    final result = await showModalBottomSheet<String>(
+    final result = await showGlazeSheet<String>(
       context: context,
       isScrollControlled: true,
       useRootNavigator: true,

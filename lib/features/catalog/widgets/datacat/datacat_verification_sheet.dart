@@ -14,6 +14,7 @@ import '../../../../shared/widgets/sheet_view.dart';
 import '../../../chat/bridge/chat_webview_environment.dart';
 import '../../services/datacat/datacat_models.dart';
 import '../../services/datacat/datacat_verification.dart';
+import '../../../../shared/widgets/glaze_sheet.dart';
 
 /// A transfer lease for [characterId], asking the user to verify if needed.
 ///
@@ -29,7 +30,7 @@ Future<String?> ensureDatacatLease(
   if (existing != null) return existing;
 
   if (!context.mounted) return null;
-  return showModalBottomSheet<String>(
+  return showGlazeSheet<String>(
     context: context,
     isScrollControlled: true,
     useRootNavigator: true,

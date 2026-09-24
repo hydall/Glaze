@@ -15,6 +15,7 @@ import '../../chat/bridge/chat_webview_environment.dart';
 import '../chub_account_provider.dart';
 import '../services/chub_provider.dart';
 import '../services/chub_session.dart';
+import '../../../shared/widgets/glaze_sheet.dart';
 
 /// Menu entry point for the "Chub Account" item. When a key is already stored
 /// it offers a log-out sheet; otherwise it opens the login sheet.
@@ -49,7 +50,7 @@ Future<void> openChubAccountSheet(BuildContext context, WidgetRef ref) async {
 /// Opens the Chub login sheet. The user can sign in through the site's own
 /// WebView (which captures the key automatically) or paste a key by hand.
 Future<void> showChubLoginSheet(BuildContext context) {
-  return showModalBottomSheet<void>(
+  return showGlazeSheet<void>(
     context: context,
     isScrollControlled: true,
     useRootNavigator: true,
@@ -122,12 +123,17 @@ class _ChubLoginSheetState extends ConsumerState<ChubLoginSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final height = MediaQuery.of(context).size.height * 0.92;
+    final inWindow = GlazeSheetWindowScope.of(context);
+    final height = inWindow
+        ? double.infinity
+        : MediaQuery.of(context).size.height * 0.92;
     return Container(
       height: height,
       decoration: BoxDecoration(
         color: context.cs.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: inWindow
+            ? BorderRadius.circular(16)
+            : const BorderRadius.vertical(top: Radius.circular(20)),
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(

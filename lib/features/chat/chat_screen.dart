@@ -80,6 +80,7 @@ import 'widgets/webview_callbacks.dart';
 import '../../core/models/chat_message.dart';
 import '../../core/state/db_provider.dart';
 import 'widgets/session_lifecycle_tracker.dart';
+import '../../shared/widgets/glaze_sheet.dart';
 
 String _chatWebViewThemeSyncKey(ThemePreset preset, String chatLayout) {
   return [
@@ -596,7 +597,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   /// user picks an action inside it (edit / gallery / open chat), which we
   /// forward to GoRouter.
   Future<void> _showCharacterCard(String charId) async {
-    final navTarget = await showModalBottomSheet<String>(
+    final navTarget = await showGlazeSheet<String>(
       context: context,
       isScrollControlled: true,
       useRootNavigator: true,
@@ -1187,7 +1188,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
         buttonText: 'persona_required_select'.tr(),
         onButtonTap: () {
           Navigator.of(context, rootNavigator: true).pop();
-          showModalBottomSheet<void>(
+          showGlazeSheet<void>(
             context: context,
             useRootNavigator: true,
             isScrollControlled: true,
@@ -1214,7 +1215,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
         buttonText: 'api_required_select'.tr(),
         onButtonTap: () {
           Navigator.of(context, rootNavigator: true).pop();
-          showModalBottomSheet<void>(
+          showGlazeSheet<void>(
             context: context,
             useRootNavigator: true,
             isScrollControlled: true,
