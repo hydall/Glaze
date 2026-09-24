@@ -16,6 +16,11 @@ abstract class CatalogItem with _$CatalogItem {
     String? creator,
     String? creatorId,
     @Default(false) bool nsfw,
+
+    /// Chub's stricter adult rating ("not safe for life"). Only Chub sets it;
+    /// the blur setting treats it like [nsfw] because its images are the ones
+    /// a reader most wants covered at a glance.
+    @Default(false) bool nsfl,
     String? slug,
     String? source,
     String? fullPath,

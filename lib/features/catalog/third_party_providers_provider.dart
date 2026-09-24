@@ -130,3 +130,40 @@ final catalogVisibleProvider = Provider<bool>((ref) {
   if (!ref.watch(catalogMasterEnabledProvider)) return false;
   return ref.watch(enabledCatalogProvidersProvider).isNotEmpty;
 });
+
+/// Whether adult catalog images are blurred. Purely a display choice: it never
+/// removes a character from the results, it draws the card image and the images
+/// inside the preview's bio through a blur instead, for every provider alike.
+/// Persisted so the choice survives launches; off by default.
+class BlurNsfwImagesNotifier extends Notifier<bool> {
+  static const _key = 'gz_blur_nsfw_images';
+
+  @override
+  bool build() {
+    _load();
+    return false;
+  }
+
+  Future<void> _load() async {
+    final prefs = await SharedPreferences.getInstance();
+    final stored = prefs.getBool(_key);
+    if (stored != null && stored != state) state = stored;
+  }
+
+  Future<void> setBlurring(bool blur) async {
+    if (blur == state) return;
+    state = blur;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_key, blur);
+  }
+}
+
+final blurNsfwImagesProvider =
+    NotifierProvider<BlurNsfwImagesNotifier, bool>(
+      BlurNsfwImagesNotifier.new,
+    );
+
+/// Whether [item]'s images should render blurred: the global blur setting is on
+/// and the row is adult (NSFW or NSFL). The provider does not matter — the
+/// setting covers every catalog source.
+bool shouldBlurNsfwItem(CatalogItem item) => item.nsfw || item.nsfl;

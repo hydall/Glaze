@@ -210,6 +210,7 @@ CatalogItem _normalizeNode(Map<String, dynamic> node) {
   final fullPath = (node['fullPath'] ?? node['full_path'] ?? '') as String;
   final creator = fullPath.split('/').first;
   final isNsfw = (node['nsfw'] ?? node['is_nsfw']) as bool? ?? false;
+  final isNsfl = (node['nsfl'] ?? node['is_nsfl']) as bool? ?? false;
   final topics = (node['topics'] as List?)?.cast<String>() ?? [];
   final isTopicNsfw = topics.any((t) => t.toLowerCase() == 'nsfw');
   final cleanTopics = topics.where((t) {
@@ -228,6 +229,7 @@ CatalogItem _normalizeNode(Map<String, dynamic> node) {
     creator: creator,
     creatorId: creator,
     nsfw: isNsfw || isTopicNsfw,
+    nsfl: isNsfl,
     source: 'chub',
     fullPath: fullPath,
   );
