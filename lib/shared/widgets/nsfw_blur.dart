@@ -28,13 +28,20 @@ class NsfwBlur extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!enabled) return child;
-    return ImageFiltered(
-      imageFilter: ui.ImageFilter.blur(
-        sigmaX: sigma,
-        sigmaY: sigma,
-        tileMode: ui.TileMode.clamp,
+    // `ImageFiltered` paints the blurred result outside the child's bounds, and
+    // the parent `Stack`/`AspectRatio` boxes around these images do not clip
+    // unless a child actually overflows — so the smear would ride over a card's
+    // info block and a preview's gradient. Clipping to the child's own box keeps
+    // the blur where the image is.
+    return ClipRect(
+      child: ImageFiltered(
+        imageFilter: ui.ImageFilter.blur(
+          sigmaX: sigma,
+          sigmaY: sigma,
+          tileMode: ui.TileMode.clamp,
+        ),
+        child: child,
       ),
-      child: child,
     );
   }
 }
