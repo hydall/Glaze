@@ -279,10 +279,18 @@ function renderError(block, at) {
  * tag that must stay literal text (a tag inside a reasoning block never
  * generates — INV-IG11).
  */
-export function extractImageBlocks(text, { hold, inert, inReasoning }) {
+export function extractImageBlocks(text, { hold, inert, inReasoning, isUser = false }) {
   let out = text;
 
+  // A user message is written by the human and Glaze never generates from its
+  // tags. Left as a block it would render a placeholder that can never resolve,
+  // and while any other generation runs it would show as live with a stop
+  // button that cancels that unrelated generation. The tags stay the text that
+  // was typed, the same policy reasoning blocks get.
+  const literal = isUser ? inert : null;
+
   out = out.replace(IIG_ELEMENT_REGEX, (match) => {
+    if (literal) return literal(match);
     const parsed = parseImageResultElement(match);
     if (!parsed) {
       // Still waiting for its picture: render the loading placeholder in the
@@ -308,6 +316,7 @@ export function extractImageBlocks(text, { hold, inert, inReasoning }) {
   // otherwise only the src payload is consumed and the empty <img> stays
   // behind as a broken-image icon.
   out = out.replace(IMG_SRC_GEN_ELEMENT_REGEX, (match) => {
+    if (literal) return literal(match);
     const pending = parseImagePendingElement(match);
     if (!pending) return match;
     if (inReasoning) return inert(match);
@@ -315,11 +324,13 @@ export function extractImageBlocks(text, { hold, inert, inReasoning }) {
   });
 
   out = out.replace(/\[IMG:GEN(?::(.*?))?\]/g, (match, instruction) => {
+    if (literal) return literal(match);
     if (inReasoning) return inert(match);
     return hold({ type: 'gen', instruction: instruction || '' });
   });
 
-  out = out.replace(/\[IMG:RESULT:(.*?)\]/g, (_match, payload) => {
+  out = out.replace(/\[IMG:RESULT:(.*?)\]/g, (match, payload) => {
+    if (literal) return literal(match);
     const parsed = parseImageResultPayload(payload);
     return hold({
       type: 'result',
@@ -330,7 +341,10 @@ export function extractImageBlocks(text, { hold, inert, inReasoning }) {
     });
   });
 
-  out = out.replace(/\[IMG:ERROR:(.*?)\]/g, (_match, data) => hold({ type: 'error', data }));
+  out = out.replace(/\[IMG:ERROR:(.*?)\]/g, (match, data) => {
+    if (literal) return literal(match);
+    return hold({ type: 'error', data });
+  });
 
   return out;
 }
