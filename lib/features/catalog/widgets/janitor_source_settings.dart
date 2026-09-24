@@ -8,14 +8,13 @@ import '../../settings/app_settings_provider.dart';
 import '../third_party_providers_provider.dart';
 import 'provider_logo.dart';
 
-/// The three "where does this come from" choices of the JanitorAI flow, as menu
-/// rows: the closed lorebook, the catalog card, and the closed character
-/// definition. Each is independently either the local Janitor.AI session or
-/// DataCat's scraped copy.
+/// The single "where does this come from" choice of the JanitorAI flow, as a
+/// menu row: the catalog card, its closed definition and its closed lorebooks
+/// all come from either the local Janitor.AI session or DataCat's scraped copy.
 ///
-/// Shared because both places that own these settings must offer exactly the
-/// same choices: the content providers screen (JanitorAI group) and the
-/// extraction settings sheet reachable from the lorebook capture flow.
+/// Shared because both places that own this setting must offer exactly the same
+/// choice: the content providers screen (JanitorAI group) and the extraction
+/// settings sheet reachable from the lorebook capture flow.
 List<Widget> janitorSourceMenuItems(
   BuildContext context,
   WidgetRef ref,
@@ -27,40 +26,16 @@ List<Widget> janitorSourceMenuItems(
   return [
     _sourceItem(
       context,
-      label: 'janitor_source_lorebooks'.tr(),
-      description: 'janitor_source_lorebooks_desc'.tr(),
-      value: settings.janitorLorebookSource,
+      label: 'janitor_source_label'.tr(),
+      description: 'janitor_source_label_desc'.tr(),
+      value: settings.janitorSource,
       // DataCat first: it needs no account, and it is the default.
       order: const [ExtractionSource.datacat, ExtractionSource.local],
       hints: {
-        ExtractionSource.datacat: 'janitor_source_lorebooks_datacat_hint'.tr(),
-        ExtractionSource.local: 'janitor_source_lorebooks_local_hint'.tr(),
+        ExtractionSource.datacat: 'janitor_source_datacat_hint'.tr(),
+        ExtractionSource.local: 'janitor_source_local_hint'.tr(),
       },
-      onSelect: (v) => save(settings.copyWith(janitorLorebookSource: v)),
-    ),
-    _sourceItem(
-      context,
-      label: 'janitor_source_cards'.tr(),
-      description: 'janitor_source_cards_desc'.tr(),
-      value: settings.janitorCardSource,
-      order: const [ExtractionSource.local, ExtractionSource.datacat],
-      hints: {
-        ExtractionSource.local: 'janitor_source_cards_local_hint'.tr(),
-        ExtractionSource.datacat: 'janitor_source_cards_datacat_hint'.tr(),
-      },
-      onSelect: (v) => save(settings.copyWith(janitorCardSource: v)),
-    ),
-    _sourceItem(
-      context,
-      label: 'janitor_source_characters'.tr(),
-      description: 'janitor_source_characters_desc'.tr(),
-      value: settings.janitorCharacterSource,
-      order: const [ExtractionSource.local, ExtractionSource.datacat],
-      hints: {
-        ExtractionSource.local: 'janitor_source_characters_local_hint'.tr(),
-        ExtractionSource.datacat: 'janitor_source_characters_datacat_hint'.tr(),
-      },
-      onSelect: (v) => save(settings.copyWith(janitorCharacterSource: v)),
+      onSelect: (v) => save(settings.copyWith(janitorSource: v)),
     ),
   ];
 }

@@ -32,6 +32,7 @@ import '../services/janitor_provider.dart';
 import '../services/janitor_public_lorebook.dart';
 import '../services/janitor_separate.dart';
 import '../services/janitor_webview_proxy.dart';
+import 'datacat_phase_label.dart';
 import 'janitor_build_widgets.dart';
 import 'janitor_extraction_settings_sheet.dart';
 import 'janitor_lorebooks_tab.dart';
@@ -206,17 +207,17 @@ class _JanitorLorebookCaptureState
   List<PublicLorebook> get _downloadableBooks =>
       downloadablePublicBooks(_public);
 
-  /// Where closed lorebooks are recovered from ("Extract lorebooks with").
-  ExtractionSource get _lorebookSource =>
-      ref.watch(appSettingsProvider).value?.janitorLorebookSource ??
-      const AppSettings().janitorLorebookSource;
+  /// Where closed lorebooks are recovered from ("Extract JanitorAI cards with").
+  ExtractionSource get _source =>
+      ref.watch(appSettingsProvider).value?.janitorSource ??
+      const AppSettings().janitorSource;
 
   /// Whether local closed-lorebook extraction is currently possible: the
   /// lorebook source is Local, an account is signed in, and no capture is
   /// already running.
   bool get _canRebuild {
     final loggedIn = ref.watch(janitorAccountProvider).isLoggedIn;
-    final local = _lorebookSource == ExtractionSource.local;
+    final local = _source == ExtractionSource.local;
     return loggedIn && local && !_proxyForbidden && !_extracting;
   }
 
@@ -731,7 +732,7 @@ class _JanitorLorebookCaptureState
   bool get _hasFlow =>
       !_loadingPublic &&
       _closedBooks.isNotEmpty &&
-      _lorebookSource == ExtractionSource.local;
+      _source == ExtractionSource.local;
 
   /// Which stage of the closed-lorebook flow is on screen, derived from what
   /// has been produced so far rather than tracked separately.
@@ -844,7 +845,7 @@ class _JanitorLorebookCaptureState
           savedAllTotal: _savedAllTotal,
         ),
         if (closed.isNotEmpty)
-          ...switch (_lorebookSource) {
+          ...switch (_source) {
             ExtractionSource.local => _closedSection(cs, closed),
             ExtractionSource.datacat => _datacatSection(cs, closed),
           },
@@ -1052,7 +1053,9 @@ class _JanitorLorebookCaptureState
       final res = await datacatExtractAndPoll(
         widget.args.sourceUrl,
         onPhaseChange: (p) {
-          if (mounted && p.trim().isNotEmpty) setState(() => _datacatPhase = p);
+          if (mounted && p.trim().isNotEmpty) {
+            setState(() => _datacatPhase = datacatPhaseLabel(p));
+          }
         },
       );
       if (!mounted) return;
@@ -1127,7 +1130,7 @@ class _JanitorLorebookCaptureState
   /// inside the button.
   Widget _buildExtractStatus(ColorScheme cs) {
     final loggedIn = ref.watch(janitorAccountProvider).isLoggedIn;
-    final local = _lorebookSource == ExtractionSource.local;
+    final local = _source == ExtractionSource.local;
     // Proxies forbidden outranks the other two: switching the source or logging
     // in would not make the capture possible.
     final hint = _proxyForbidden

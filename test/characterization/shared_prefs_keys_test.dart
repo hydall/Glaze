@@ -28,9 +28,7 @@ void main() {
       'openCardAfterImport': bool,
       'hapticFeedback': bool,
       'messageVibration': bool,
-      'janitorLorebookSource': String,
-      'janitorCardSource': String,
-      'janitorCharacterSource': String,
+      'janitorSource': String,
       'lorebookBuildPrompt': String,
       'lorebookBuildPromptJs': String,
       'useStandardRandomizer': bool,
@@ -75,14 +73,9 @@ void main() {
           case String:
             if (entry.key == 'language') {
               expect(defaults.language, 'en');
-            } else if (entry.key == 'janitorLorebookSource') {
-              expect(defaults.janitorLorebookSource, ExtractionSource.datacat);
-            } else if (entry.key == 'janitorCardSource') {
-              // The card itself is read locally by default: only the WebView
-              // proxy can see a card restricted to logged-in visitors.
-              expect(defaults.janitorCardSource, ExtractionSource.local);
-            } else if (entry.key == 'janitorCharacterSource') {
-              expect(defaults.janitorCharacterSource, ExtractionSource.datacat);
+            } else if (entry.key == 'janitorSource') {
+              // DataCat by default: it needs no Janitor.AI account.
+              expect(defaults.janitorSource, ExtractionSource.datacat);
             } else if (entry.key == 'batterySaverMode') {
               expect(defaults.batterySaverMode, BatterySaverMode.system);
             }
