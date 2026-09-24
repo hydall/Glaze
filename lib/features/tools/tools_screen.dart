@@ -951,7 +951,7 @@ class _AvatarGradientPlaceholder extends StatelessWidget {
     return Container(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
-          colors: [Color(0xFF66CCFF), Color(0xFF7996CE)],
+          colors: [Color(0xFF66CCFF), Color(0xFFC42A4A)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),

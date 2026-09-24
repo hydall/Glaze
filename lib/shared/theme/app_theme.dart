@@ -103,7 +103,7 @@ ColorScheme _buildColorScheme(ThemePreset preset, {required bool isDark}) {
 
 /// Seed used by the "Material You" theme when the system does not provide a
 /// dynamic palette (non-Android platforms, older Android).
-const _materialYouFallbackSeed = Color(0xFF7996CE);
+const _materialYouFallbackSeed = Color(0xFFC42A4A);
 
 /// Resolve the Material 3 [ColorScheme] for the built-in "Material You" theme.
 /// On Android [dynamicScheme] is the system palette; everywhere else (or when

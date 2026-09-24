@@ -330,7 +330,7 @@ class _AuthorsSection extends StatelessWidget {
           name: 'hydall',
           role: 'about_role_hydall'.tr(),
           initial: 'H',
-          accentColor: const Color(0xFF7996CE),
+          accentColor: const Color(0xFFC42A4A),
           imageAsset: 'assets/hydall.jpg',
         ),
         _AuthorTile(

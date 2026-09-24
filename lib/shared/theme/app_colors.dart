@@ -27,14 +27,14 @@ class GlazeColors extends ThemeExtension<GlazeColors> {
   });
 
   static const dark = GlazeColors(
-    accent: Color(0xFF7996CE),
-    userBubble: Color(0xFF7996CE),
+    accent: Color(0xFFC42A4A),
+    userBubble: Color(0xFFC42A4A),
     charBubble: Color(0xFF1E1E1E),
   );
 
   static const light = GlazeColors(
-    accent: Color(0xFF7996CE),
-    userBubble: Color(0xFF7996CE),
+    accent: Color(0xFFC42A4A),
+    userBubble: Color(0xFFC42A4A),
     charBubble: Color(0xFFEEEEF0),
   );
 

@@ -9,7 +9,7 @@ Color requestFamilyColor(BuildContext context, RequestStageFamily family) {
   final dark = Theme.of(context).brightness == Brightness.dark;
   Color pick(int onDark, int onLight) => Color(dark ? onDark : onLight);
   return switch (family) {
-    RequestStageFamily.main => pick(0xFF7996CE, 0xFF3F5C96),
+    RequestStageFamily.main => pick(0xFFC42A4A, 0xFF3F5C96),
     RequestStageFamily.agent => pick(0xFFC084FC, 0xFF7C3AED),
     RequestStageFamily.cleaner => pick(0xFF4ADE80, 0xFF16A34A),
     RequestStageFamily.ledger => pick(0xFF22D3EE, 0xFF0E7490),

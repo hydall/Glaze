@@ -682,7 +682,7 @@ class _RandomizingCardOverlayState extends State<RandomizingCardOverlay>
         return Color(int.parse('FF${col.replaceFirst('#', '')}', radix: 16));
       } catch (_) {}
     }
-    return const Color(0xFF7996CE);
+    return const Color(0xFFC42A4A);
   }
 }
 
@@ -924,7 +924,7 @@ class HoloCard extends StatelessWidget {
         return Color(int.parse('FF${c.replaceFirst('#', '')}', radix: 16));
       } catch (_) {}
     }
-    return const Color(0xFF7996CE);
+    return const Color(0xFFC42A4A);
   }
 
   /// Resolved portrait path (thumbnail preferred — smaller/faster to decode for

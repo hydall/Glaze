@@ -18,7 +18,7 @@ abstract class ThemePreset with _$ThemePreset {
     required String name,
     @Default('') String author,
     @Default('dark') String themeMode,
-    @Default('#7996CE') String accentColor,
+    @Default('#C42A4A') String accentColor,
     @Default(0) double bgBlur,
     @Default(0.8) double elementOpacity,
     @Default(12) double elementBlur,
@@ -199,7 +199,7 @@ Color _parseHex(String hex) {
   if (clean.length == 8) {
     return Color(int.parse(clean, radix: 16));
   }
-  return const Color(0xFF7996CE);
+  return const Color(0xFFC42A4A);
 }
 
 Color? _parseNullableHex(String? hex) {

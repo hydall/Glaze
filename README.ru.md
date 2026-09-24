@@ -4,7 +4,7 @@
 
 # Glaze
 
-[![Download](https://img.shields.io/github/v/release/hydall/Glaze?include_prereleases&label=download&color=7996CE)](https://github.com/hydall/Glaze/releases/latest)
+[![Download](https://img.shields.io/github/v/release/hydall/Glaze?include_prereleases&label=download&color=C42A4A)](https://github.com/hydall/Glaze/releases/latest)
 [![Discord](https://img.shields.io/badge/Discord-Join-5865F2?style=flat&logo=discord&logoColor=white)](https://discord.gg/jnGhd7p6Ht)
 [![Telegram](https://img.shields.io/badge/Telegram-2CA5E0?style=flat&logo=telegram&logoColor=white)](https://t.me/glazeapp)
 [![Boosty](https://img.shields.io/badge/Boosty-F15F2C?style=flat&logo=boosty&logoColor=white)](https://boosty.to/hydall)

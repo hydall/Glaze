@@ -316,7 +316,7 @@ class _AvatarFallback extends StatelessWidget {
       height: size,
       alignment: Alignment.center,
       decoration: const BoxDecoration(
-        color: Color(0x147996CE),
+        color: Color(0x14C42A4A),
         shape: BoxShape.circle,
       ),
       child: Text(
