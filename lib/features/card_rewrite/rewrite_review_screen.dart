@@ -674,20 +674,6 @@ class _JobActions extends ConsumerWidget {
                   color: context.cs.onSurfaceVariant,
                 ),
               ),
-              if (failed && !automated)
-                OutlinedButton.icon(
-                  key: const Key('rewrite-retry-button'),
-                  onPressed: () => _retry(context, ref),
-                  icon: const Icon(Icons.refresh_rounded, size: 18),
-                  label: Text('rewrite_retry'.tr()),
-                ),
-              if (generating && !automated)
-                OutlinedButton.icon(
-                  key: const Key('rewrite-resume-button'),
-                  onPressed: () => _resume(context, ref),
-                  icon: const Icon(Icons.play_arrow_rounded, size: 18),
-                  label: Text('rewrite_resume'.tr()),
-                ),
               if (canReplaceAutomated) ...[
                 OutlinedButton.icon(
                   key: const Key('rewrite-regenerate-button'),
@@ -725,31 +711,6 @@ class _JobActions extends ConsumerWidget {
     await ref.read(rewriteReviewUiProvider(jobId).notifier).cancelJob(job.id);
     if (context.mounted) {
       GlazeToast.show(context, 'rewrite_cancel_requested'.tr());
-    }
-  }
-
-  Future<void> _resume(BuildContext context, WidgetRef ref) async {
-    final kind = await ref
-        .read(rewriteReviewUiProvider(jobId).notifier)
-        .resumeGenerating(job);
-    if (!context.mounted) return;
-    GlazeToast.show(context, switch (kind) {
-      'started' => 'rewrite_resume_started'.tr(),
-      'resumeUnavailable' => 'rewrite_resume_unavailable'.tr(),
-      _ => 'rewrite_resume_failed'.tr(namedArgs: {'result': kind}),
-    });
-  }
-
-  Future<void> _retry(BuildContext context, WidgetRef ref) async {
-    final result = await ref
-        .read(rewriteReviewUiProvider(jobId).notifier)
-        .retry(job);
-    if (context.mounted) {
-      GlazeToast.show(
-        context,
-        (result == 'updated' ? 'rewrite_retry_started' : 'rewrite_retry_result')
-            .tr(namedArgs: {'result': result}),
-      );
     }
   }
 

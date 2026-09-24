@@ -319,33 +319,22 @@ class RewriteReviewController extends Notifier<RewriteReviewUiState> {
   }
 
   Future<void> cancelJob(String jobId) async {
-    await ref.read(manualRewriteServiceProvider).cancelJob(jobId);
-  }
-
-  /// Re-attaches a stranded `generating` manual job after process restart.
-  /// The service's request-key idempotency guarantees this joins a live run or
-  /// adopts the durable row without creating another job.
-  Future<String> resumeGenerating(RewriteJobRow job) async {
-    if (job.status != 'generating' || isAutomatedEvolutionJob(job)) {
-      return 'invalidState';
+    final repo = ref.read(manualRewriteJobRepoProvider);
+    for (var round = 0; round < 3; round++) {
+      final job = await repo.readJob(jobId);
+      if (job == null) return;
+      if (job.status != 'generating' &&
+          job.status != 'pending' &&
+          job.status != 'failed') {
+        return;
+      }
+      final outcome = await repo.cancel(
+        jobId: jobId,
+        expectedVersion: job.version,
+      );
+      if (outcome.isUpdated) return;
+      if (outcome.kind != 'staleVersion') return;
     }
-    final request = parseRewriteJobRequest(job.requestJson);
-    final requestKey = job.requestKey;
-    if (request == null || requestKey == null || requestKey.isEmpty) {
-      return 'resumeUnavailable';
-    }
-    unawaited(
-      ref
-          .read(manualRewriteServiceProvider)
-          .run(
-            requestKey: requestKey,
-            chatSessionId: job.chatSessionId,
-            characterId: job.characterId,
-            field: request.field,
-            instruction: request.instruction,
-          ),
-    );
-    return 'started';
   }
 
   Future<CardEvolutionDeleteOutcome> deleteAutomatedProposal(
@@ -383,34 +372,6 @@ class RewriteReviewController extends Notifier<RewriteReviewUiState> {
       if (ref.mounted) state = state.copyWith(busy: false);
     }
   }
-
-  /// `failed → generating` retry, then re-attaches the writer lane using the
-  /// job's original durable request. Returns a typed kind; `retryUnavailable`
-  /// when the job lacks the data needed to re-attach (legacy keyless job or
-  /// an unreadable request payload).
-  Future<String> retry(RewriteJobRow job) async {
-    final request = parseRewriteJobRequest(job.requestJson);
-    final requestKey = job.requestKey;
-    if (request == null || requestKey == null || requestKey.isEmpty) {
-      return 'retryUnavailable';
-    }
-    final outcome = await ref
-        .read(manualRewriteJobRepoProvider)
-        .retry(jobId: job.id, expectedVersion: job.version);
-    if (!outcome.isUpdated) return outcome.kind;
-    unawaited(
-      ref
-          .read(manualRewriteServiceProvider)
-          .run(
-            requestKey: requestKey,
-            chatSessionId: job.chatSessionId,
-            characterId: job.characterId,
-            field: request.field,
-            instruction: request.instruction,
-          ),
-    );
-    return 'updated';
-  }
 }
 
 final rewriteReviewUiProvider =
@@ -419,30 +380,6 @@ final rewriteReviewUiProvider =
       RewriteReviewUiState,
       String
     >(RewriteReviewController.new);
-
-/// Typed view of a job's durable request payload (`{field, instruction}`).
-typedef RewriteJobRequest = ({CardRewriteField field, String instruction});
-
-RewriteJobRequest? parseRewriteJobRequest(String requestJson) {
-  try {
-    final json = jsonDecode(requestJson);
-    if (json is! Map) return null;
-    final wireName = json['field'];
-    final instruction = json['instruction'];
-    if (wireName is! String) return null;
-    CardRewriteField? field;
-    for (final candidate in CardRewriteField.values) {
-      if (candidate.wireName == wireName) field = candidate;
-    }
-    if (field == null) return null;
-    return (
-      field: field,
-      instruction: instruction is String ? instruction : '',
-    );
-  } catch (_) {
-    return null;
-  }
-}
 
 bool isAutomatedEvolutionJob(RewriteJobRow job) {
   try {

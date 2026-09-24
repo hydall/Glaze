@@ -8,7 +8,6 @@ void main() {
     'agent_ops_',
     'prompt_inspector_studio_',
     'card_rewriter_studio_',
-    'rewrite_resume',
     // Prompt Inspector surfaces added alongside Agent Ops: the Requests tab and
     // the context coverage card. Same contract — both locales, same
     // placeholders, present in the generated keys.

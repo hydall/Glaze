@@ -12,7 +12,7 @@ import 'card_evolution_diagnostics.dart';
 import 'card_rewrite_prompt_builder.dart';
 import 'card_rewriter_contracts.dart';
 import 'durable_writer_call_runner.dart';
-import 'manual_rewrite_service.dart';
+import 'card_rewrite_writer_contracts.dart';
 import 'writer_context_consolidator.dart';
 
 /// Owns durable Card Evolution writer claims, checkpoints, and cancellation.

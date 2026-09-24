@@ -820,6 +820,12 @@ class ManualRewriteJobRepo {
     }
   }
 
+  /// One-shot read of a job row, used by cancellation to obtain the version
+  /// for the next CAS transition.
+  Future<RewriteJobRow?> readJob(String jobId) => (_db.select(
+    _db.rewriteJobs,
+  )..where((row) => row.id.equals(jobId))).getSingleOrNull();
+
   /// Read-side aggregate watcher keyed by job id: job row plus each operation
   /// joined with its current immutable revision snapshot and evidence count.
   Stream<ManualRewriteJobSnapshot?> watchJob(String jobId) {

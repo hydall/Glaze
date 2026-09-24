@@ -16,7 +16,7 @@ import '../../utils/id_generator.dart';
 import '../../utils/time_helpers.dart';
 import 'card_evolution_diagnostics.dart';
 import 'card_rewrite_prompt_builder.dart';
-import 'manual_rewrite_service.dart';
+import 'card_rewrite_writer_contracts.dart';
 import 'observation_response_parser.dart';
 
 typedef CardEvolutionWriterContinuation =

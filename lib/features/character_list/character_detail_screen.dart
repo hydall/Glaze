@@ -28,10 +28,6 @@ import '../../core/utils/html_to_markdown.dart';
 import '../../core/utils/platform_paths.dart';
 import '../../core/state/character_provider.dart';
 import '../../core/state/chat_session_ops_provider.dart';
-import '../../core/state/card_rewriter_providers.dart';
-import '../../core/state/db_provider.dart';
-import '../../core/services/card_rewriter/card_rewriter_contracts.dart';
-import '../../core/utils/id_generator.dart';
 import '../../features/chat/chat_actions_service.dart';
 import '../../features/chat/widgets/session_picker_sheet.dart';
 import '../../shared/theme/app_colors.dart';
@@ -382,15 +378,6 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
           },
         ),
         BottomSheetItem(
-          icon: Icons.auto_fix_high_outlined,
-          label: 'rewrite_entry'.tr(),
-          hint: 'rewrite_entry_hint'.tr(),
-          onTap: () {
-            rootNav.pop();
-            _startRewrite();
-          },
-        ),
-        BottomSheetItem(
           icon: isHidden
               ? Icons.visibility_outlined
               : Icons.visibility_off_outlined,
@@ -446,78 +433,6 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
         ),
       ],
     );
-  }
-
-  Future<void> _startRewrite() async {
-    final sessions = await ref
-        .read(chatSessionOpsProvider.notifier)
-        .getSessionMetadataByCharacter(widget.charId);
-    if (!mounted) return;
-    if (sessions.isEmpty) {
-      GlazeToast.show(context, 'rewrite_no_sessions'.tr());
-      return;
-    }
-    final sessionId = await GlazeBottomSheet.show<String>(
-      context,
-      title: 'rewrite_choose_session'.tr(),
-      items: [
-        for (final session in sessions)
-          BottomSheetItem(
-            icon: Icons.chat_bubble_outline_rounded,
-            label: 'session_name'.tr(
-              namedArgs: {'id': '${session.sessionIndex + 1}'},
-            ),
-            hint:
-                '${session.messageCount} ${'count_messages'.plural(session.messageCount)}',
-            onTap: () => Navigator.of(
-              context,
-              rootNavigator: true,
-            ).pop(session.sessionId),
-          ),
-      ],
-    );
-    if (!mounted || sessionId == null) return;
-    final instruction = await GlazeBottomSheet.show<String>(
-      context,
-      title: 'rewrite_instruction_title'.tr(),
-      input: BottomSheetInput(
-        placeholder: 'rewrite_instruction_hint'.tr(),
-        confirmLabel: 'rewrite_start'.tr(),
-        onConfirm: (value) =>
-            Navigator.of(context, rootNavigator: true).pop(value),
-      ),
-    );
-    if (!mounted || instruction == null) return;
-    final requestKey = 'rewrite-${generateId()}';
-    final created = await ref
-        .read(manualRewriteJobRepoProvider)
-        .createOrGet(
-          requestKey: requestKey,
-          chatSessionId: sessionId,
-          characterId: widget.charId,
-          requestJson: jsonEncode({
-            'field': CardRewriteField.description.wireName,
-            'instruction': instruction,
-          }),
-        );
-    unawaited(
-      ref
-          .read(manualRewriteServiceProvider)
-          .run(
-            requestKey: requestKey,
-            chatSessionId: sessionId,
-            characterId: widget.charId,
-            field: CardRewriteField.description,
-            instruction: instruction,
-          ),
-    );
-    if (!mounted) return;
-    // Return a route to the imperative sheet launcher. It closes the detail
-    // sheet before GoRouter installs the durable review route on the root.
-    Navigator.of(
-      context,
-      rootNavigator: true,
-    ).pop<String>('/character/${widget.charId}/rewrite/${created.job.id}');
   }
 
   void _confirmDelete(BuildContext context) async {

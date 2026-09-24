@@ -11,7 +11,7 @@ import 'card_evolution_collector_coordinator.dart';
 import 'card_evolution_writer_coordinator.dart';
 import 'card_evolution_diagnostics.dart';
 import 'durable_writer_call_runner.dart';
-import 'manual_rewrite_service.dart';
+import 'card_rewrite_writer_contracts.dart';
 import 'writer_context_consolidator.dart';
 
 const _writerLeaseSeconds = 600;
