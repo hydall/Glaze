@@ -8,7 +8,6 @@ import '../llm/aux_llm_client.dart';
 import '../models/api_config.dart';
 import '../models/card_rewriter_settings.dart';
 import '../models/studio_pipeline_overrides.dart';
-import '../services/card_rewriter/manual_rewrite_service.dart';
 import '../services/card_rewriter/automated_card_evolution_service.dart';
 import 'active_studio_preset_provider.dart';
 import 'db_provider.dart';
@@ -27,36 +26,6 @@ final cardRewriterSettingsProvider = Provider<CardRewriterSettings>((ref) {
     ref.watch(pipelineSettingsProvider),
     ref.watch(studioPresetProvider).value,
   );
-});
-
-/// Phase-4B writer lane: the manual card-rewrite LLM orchestration service.
-///
-/// Wired here (not in `db_provider.dart`) because model resolution reads
-/// `apiListProvider`, which itself imports `db_provider.dart`.
-///
-/// Its dedicated API/model slot is persisted on the active Studio preset (see
-/// [cardRewriterSettingsProvider]). It always fails explicitly when the
-/// selected API preset is absent; it never falls back to the active chat
-/// configuration.
-final manualRewriteServiceProvider = Provider<ManualRewriteService>((ref) {
-  final settings = ref.watch(cardRewriterSettingsProvider);
-  final service = ManualRewriteService(
-    db: ref.watch(appDbProvider),
-    jobRepo: ref.watch(manualRewriteJobRepoProvider),
-    characterRepo: ref.watch(characterRepoProvider),
-    canonLoader: ref.watch(effectiveCanonContextLoaderProvider),
-    resolveModel: () async {
-      await ref.read(apiListProvider.future);
-      final apiConfigs = ref.read(apiListProvider).value ?? const <ApiConfig>[];
-      return CardRewriteSlotResolver.resolve(
-        apiConfigs: apiConfigs,
-        apiConfigId: settings.apiConfigId,
-        modelOverride: settings.modelOverride,
-      );
-    },
-  );
-  ref.onDispose(service.dispose);
-  return service;
 });
 
 final automatedCardEvolutionServiceProvider =

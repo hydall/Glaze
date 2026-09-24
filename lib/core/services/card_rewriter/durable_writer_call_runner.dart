@@ -15,7 +15,7 @@ import '../../utils/time_helpers.dart';
 import 'card_evolution_diagnostics.dart';
 import 'card_rewrite_operation_parser.dart';
 import 'card_rewriter_contracts.dart';
-import 'manual_rewrite_service.dart';
+import 'card_rewrite_writer_contracts.dart';
 
 /// Runs one durable Card Evolution writer checkpoint from preparation through
 /// parsing and completion while preserving claim ownership.

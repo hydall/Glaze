@@ -18,7 +18,7 @@ final class CardRewriteModelNotConfigured implements Exception {
 }
 
 /// Resolves the DEDICATED card-rewrite API-config slot to an [AuxApiConfig]
-/// for the manual rewrite writer lane (`ManualRewriteService`).
+/// for the card-rewrite writer lanes.
 ///
 /// Follows [StudioSlotResolver]'s fail-explicitness with one hardened rule:
 /// there is NO silent fallback to the active chat config. A card rewrite is
