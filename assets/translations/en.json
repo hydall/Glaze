@@ -1557,6 +1557,7 @@
   "catalog_blur_nsfw_desc": "Draw adult characters' main image and the images in their bio blurred, from every source. Hides nothing from the results.",
   "catalog_nsfw_unblur": "Remove blur",
   "catalog_nsfw_reblur": "Blur again",
+  "catalog_open_source": "Open on source",
   "catalog_onboarding_welcome_title": "Characters from across the web",
   "catalog_onboarding_welcome_body": "Glaze can browse several third-party character catalogs right inside the app. Turn on the ones you want and search them from the Catalog tab.",
   "catalog_onboarding_sources_title": "Choose your catalogs",

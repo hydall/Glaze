@@ -354,26 +354,38 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
     await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
-  /// The preview sheet's three-dots menu. Today it holds one action: lift (or
-  /// restore) the blur on this adult preview's imagery for this view only.
+  /// The preview sheet's three-dots menu: open the character on its source
+  /// site, and lift (or restore) the blur on this adult preview's imagery for
+  /// this view only.
   void _openPreviewActionsMenu() {
     final rootNav = Navigator.of(context, rootNavigator: true);
     final revealed = _nsfwRevealed;
+    final sourceUrl = widget.previewSourceUrl;
     GlazeBottomSheet.show<void>(
       context,
       items: [
-        BottomSheetItem(
-          icon: revealed
-              ? Icons.visibility_off_outlined
-              : Icons.visibility_outlined,
-          label: (revealed ? 'catalog_nsfw_reblur' : 'catalog_nsfw_unblur')
-              .tr(),
-          onTap: () {
-            rootNav.pop();
-            if (!mounted) return;
-            setState(() => _nsfwRevealed = !revealed);
-          },
-        ),
+        if (sourceUrl != null)
+          BottomSheetItem(
+            icon: Icons.open_in_new_rounded,
+            label: 'catalog_open_source'.tr(),
+            onTap: () {
+              rootNav.pop();
+              _openExternal(sourceUrl);
+            },
+          ),
+        if (widget.previewBlurNsfwImages)
+          BottomSheetItem(
+            icon: revealed
+                ? Icons.visibility_off_outlined
+                : Icons.visibility_outlined,
+            label: (revealed ? 'catalog_nsfw_reblur' : 'catalog_nsfw_unblur')
+                .tr(),
+            onTap: () {
+              rootNav.pop();
+              if (!mounted) return;
+              setState(() => _nsfwRevealed = !revealed);
+            },
+          ),
       ],
     );
   }
@@ -883,23 +895,14 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
                   icon: Icons.more_vert_rounded,
                   onTap: _openActionsMenu,
                 )
-              else if (widget.isPreview && char != null) ...[
-                // The blur can be lifted for this view from the same
-                // three-dots menu a library character uses.
-                if (widget.previewBlurNsfwImages)
-                  _DetailHeaderButton(
-                    icon: Icons.more_vert_rounded,
-                    onTap: _openPreviewActionsMenu,
-                  ),
-                if (widget.previewBlurNsfwImages &&
-                    widget.previewSourceUrl != null)
-                  const SizedBox(width: 8),
-                if (widget.previewSourceUrl != null)
-                  _DetailHeaderButton(
-                    icon: Icons.open_in_new_rounded,
-                    onTap: () => _openExternal(widget.previewSourceUrl!),
-                  ),
-              ],
+              else if (widget.isPreview &&
+                  char != null &&
+                  (widget.previewBlurNsfwImages ||
+                      widget.previewSourceUrl != null))
+                _DetailHeaderButton(
+                  icon: Icons.more_vert_rounded,
+                  onTap: _openPreviewActionsMenu,
+                ),
             ],
           ),
         ),
@@ -1476,7 +1479,13 @@ class _InfoTab extends StatelessWidget {
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-            child: _BioMarkdown(notes, blurImages: blurNsfwImages),
+            child: _BioMarkdown(
+              notes,
+              // Rebuild the markdown when the blur is toggled so the image
+              // builder is re-run instead of keeping the blurred subtree.
+              key: ValueKey('bio-blur-$blurNsfwImages'),
+              blurImages: blurNsfwImages,
+            ),
           ),
         ],
         if (tags.isEmpty && !hasNotes)
@@ -1503,7 +1512,7 @@ class _InfoTab extends StatelessWidget {
 class _BioMarkdown extends StatelessWidget {
   final String notes;
   final bool blurImages;
-  const _BioMarkdown(this.notes, {this.blurImages = false});
+  const _BioMarkdown(this.notes, {super.key, this.blurImages = false});
 
   TextAlign? _mapAlign(String a) {
     switch (a) {
