@@ -22,9 +22,10 @@ Future<void> pumpLocalized(
   Widget child, {
   Locale locale = const Locale('ru'),
   List<Override> overrides = const [],
+  Map<String, Object> prefs = const {},
   Size surfaceSize = const Size(412, 900),
 }) async {
-  SharedPreferences.setMockInitialValues({});
+  SharedPreferences.setMockInitialValues(prefs);
   await EasyLocalization.ensureInitialized();
   await tester.binding.setSurfaceSize(surfaceSize);
   addTearDown(() => tester.binding.setSurfaceSize(null));

@@ -24,6 +24,7 @@ import '../services/datacat_provider.dart';
 import '../services/extraction_status.dart';
 import '../services/saucepan_extractor.dart';
 import 'catalog_detail_launcher.dart';
+import 'datacat_phase_label.dart';
 
 class ImportUrlDialog extends ConsumerStatefulWidget {
   const ImportUrlDialog({super.key});
@@ -96,7 +97,9 @@ class _ImportUrlDialogState extends ConsumerState<ImportUrlDialog> {
                 Expanded(
                   child: Text(
                     _phase != null
-                        ? 'Phase: $_phase'
+                        ? 'catalog_phase_label'.tr(
+                            namedArgs: {'phase': _phase!},
+                          )
                         : 'catalog_extracting'.tr(),
                     style: TextStyle(
                       color: context.cs.onSurfaceVariant,
@@ -202,7 +205,7 @@ class _ImportUrlDialogState extends ConsumerState<ImportUrlDialog> {
       final result = await datacatExtractAndPoll(
         url,
         onPhaseChange: (phase) {
-          if (mounted) setState(() => _phase = phase);
+          if (mounted) setState(() => _phase = datacatPhaseLabel(phase));
         },
       );
 
@@ -289,7 +292,7 @@ class _ImportUrlDialogState extends ConsumerState<ImportUrlDialog> {
     setState(() {
       _loading = true;
       _error = null;
-      _phase = 'extracting locally';
+      _phase = 'catalog_extracting_locally'.tr();
     });
     try {
       final result =
@@ -434,7 +437,7 @@ class _ImportUrlDialogState extends ConsumerState<ImportUrlDialog> {
     setState(() {
       _loading = true;
       _error = null;
-      _phase = 'extracting locally';
+      _phase = 'catalog_extracting_locally'.tr();
     });
     try {
       await body();

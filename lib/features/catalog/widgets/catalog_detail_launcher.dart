@@ -23,6 +23,7 @@ import '../services/janitor_provider.dart';
 import '../services/janitor_public_lorebook.dart';
 import '../services/janitor_webview_proxy.dart';
 import '../services/janny_provider.dart';
+import 'datacat_phase_label.dart';
 import 'janitor_login_sheet.dart';
 import 'janitor_lorebook_capture_sheet.dart';
 import 'janitor_refused_sheet.dart';
@@ -131,7 +132,7 @@ class _CatalogDetailLauncherState
     );
   }
 
-  /// The JanitorAI card, from whichever source "Load character cards with"
+  /// The JanitorAI card, from whichever source "Extract JanitorAI cards with"
   /// points at.
   ///
   /// The card and the metadata are two different things: the metadata
@@ -140,7 +141,7 @@ class _CatalogDetailLauncherState
   /// both paths — best effort in DataCat mode, where a proxy failure must not
   /// cost us a card DataCat can serve anyway.
   Future<DownloadedCharacter> _fetchJanitorCard() async {
-    final datacatFirst = _cardSource == ExtractionSource.datacat;
+    final datacatFirst = _source == ExtractionSource.datacat;
     // The restriction that sent us to DataCat, and the metadata failure we are
     // tolerating — kept apart because only the first one ends in the login
     // notice.
@@ -160,7 +161,13 @@ class _CatalogDetailLauncherState
     }
 
     if (datacatFirst || hidden != null) {
-      final card = await _datacatCard();
+      // A card we could not read because we are anonymous is exactly what
+      // DataCat is for: name that reason instead of the generic opening line.
+      final card = await _datacatCard(
+        openingLabel: hidden != null
+            ? 'catalog_datacat_anonymous_fallback'.tr()
+            : null,
+      );
       if (card != null) return card;
       // Hidden from us here AND unknown to DataCat: the card exists, we simply
       // may not see it. Say that instead of an HTTP status.
@@ -171,14 +178,10 @@ class _CatalogDetailLauncherState
     // DataCat mode with nothing on either side — surface the proxy's own error.
     if (meta == null) throw metaError ?? const _JanitorLoginRequired();
 
-    final result = janitorCharacterFromMeta(meta);
-    // A closed definition leaves the hampter card empty — only the public
-    // blurb, no prompt. With character extraction pointed at DataCat nothing
-    // local will ever fill it in, so read the card from DataCat's scraped copy.
-    if (!_definitionPublic && _characterSource == ExtractionSource.datacat) {
-      return await _datacatCard() ?? result;
-    }
-    return result;
+    // The card as the proxy has it. A closed definition leaves it empty (only
+    // the public blurb, no prompt); DataCat mode already had its chance above
+    // and had no copy, so there is nothing left to fill it in with.
+    return janitorCharacterFromMeta(meta);
   }
 
   /// Reads `/hampter/characters/{id}` through the WebView proxy and records what
@@ -205,26 +208,19 @@ class _CatalogDetailLauncherState
 
   /// Whether importing should run the local JanitorAI extraction (proxy capture
   /// + LLM lorebook rebuild) instead of a plain catalog import: only for a
-  /// JanitorAI character whose definition is closed, when "Extract characters
-  /// with" is set to Local.
+  /// JanitorAI character whose definition is closed, when the source is Local.
   bool get _useLocalExtraction {
     if (widget.provider != CatalogProvider.janitor) return false;
     if (_definitionPublic) return false;
-    return _characterSource == ExtractionSource.local;
+    return _source == ExtractionSource.local;
   }
 
   AppSettings? get _settings => ref.read(appSettingsProvider).value;
 
-  ExtractionSource get _cardSource =>
-      _settings?.janitorCardSource ?? const AppSettings().janitorCardSource;
-
-  ExtractionSource get _characterSource =>
-      _settings?.janitorCharacterSource ??
-      const AppSettings().janitorCharacterSource;
-
-  ExtractionSource get _lorebookSource =>
-      _settings?.janitorLorebookSource ??
-      const AppSettings().janitorLorebookSource;
+  /// Where the card, its closed definition and its closed lorebooks all come
+  /// from ("Extract JanitorAI cards with").
+  ExtractionSource get _source =>
+      _settings?.janitorSource ?? const AppSettings().janitorSource;
 
   /// [_datacatCard]'s answer, kept so the two questions it can be asked in one
   /// load ("is the card here at all?" and "does it carry the closed prompt?")
@@ -239,13 +235,15 @@ class _CatalogDetailLauncherState
   /// hence the phase text), and anything that fails or comes back without a
   /// prompt leaves the hampter card in place rather than making the preview an
   /// error.
-  Future<DownloadedCharacter?> _datacatCard() async {
+  Future<DownloadedCharacter?> _datacatCard({String? openingLabel}) async {
     if (_datacatTried) return _datacatResult;
     _datacatTried = true;
     final url = _sourceUrl();
     if (url == null) return null;
     if (mounted) {
-      setState(() => _loadPhase = 'catalog_datacat_card_phase'.tr());
+      setState(
+        () => _loadPhase = openingLabel ?? 'catalog_datacat_card_phase'.tr(),
+      );
     }
     try {
       final res = await datacatExtractAndPoll(
@@ -253,7 +251,9 @@ class _CatalogDetailLauncherState
         // DataCat reports its own phase names, and sends an empty one between
         // steps — keep the opening line rather than blanking the label.
         onPhaseChange: (p) {
-          if (mounted && p.trim().isNotEmpty) setState(() => _loadPhase = p);
+          if (mounted && p.trim().isNotEmpty) {
+            setState(() => _loadPhase = datacatPhaseLabel(p));
+          }
         },
       );
       final data = res.charData;
@@ -462,7 +462,7 @@ class _CatalogDetailLauncherState
   bool _capturesLocally(CatalogImportMode mode) =>
       mode == CatalogImportMode.lorebooks
           ? widget.provider == CatalogProvider.janitor &&
-                _lorebookSource == ExtractionSource.local
+                _source == ExtractionSource.local
           : _useLocalExtraction;
 
   /// The refusal standing in the way of a capture-backed import, if any: the

@@ -26,9 +26,7 @@ void main() {
       openCardAfterImport: false,
       hapticFeedback: false,
       messageVibration: false,
-      janitorLorebookSource: ExtractionSource.local,
-      janitorCardSource: ExtractionSource.datacat,
-      janitorCharacterSource: ExtractionSource.local,
+      janitorSource: ExtractionSource.local,
       lorebookBuildPrompt: 'closed prompt',
       lorebookBuildPromptJs: 'script prompt',
       useStandardRandomizer: true,
@@ -66,46 +64,73 @@ void main() {
     },
   );
 
-  group('legacy extractJanitorLocally migration', () {
-    test('the opt-in carries over to the lorebook and character sources', () {
+  group('legacy JanitorAI source migration', () {
+    test('the pre-split opt-in carries over as Local', () {
       SharedPreferences.setMockInitialValues({'extractJanitorLocally': true});
       return SharedPreferences.getInstance().then((prefs) {
-        final settings = AppSettingsPreferences.read(prefs);
-        expect(settings.janitorLorebookSource, ExtractionSource.local);
-        expect(settings.janitorCharacterSource, ExtractionSource.local);
-        // Card loading was never governed by the old toggle, so it keeps its
-        // own default.
-        expect(settings.janitorCardSource, ExtractionSource.local);
+        expect(
+          AppSettingsPreferences.read(prefs).janitorSource,
+          ExtractionSource.local,
+        );
       });
     });
 
-    test('the opt-in being off carries over as DataCat', () async {
+    test('the pre-split opt-in being off carries over as DataCat', () async {
       SharedPreferences.setMockInitialValues({'extractJanitorLocally': false});
       final prefs = await SharedPreferences.getInstance();
-      final settings = AppSettingsPreferences.read(prefs);
-      expect(settings.janitorLorebookSource, ExtractionSource.datacat);
-      expect(settings.janitorCharacterSource, ExtractionSource.datacat);
+      expect(
+        AppSettingsPreferences.read(prefs).janitorSource,
+        ExtractionSource.datacat,
+      );
     });
 
-    test('an explicit new value outranks the legacy key', () async {
+    test('a Local split source outranks its own DataCat default', () async {
       SharedPreferences.setMockInitialValues({
-        'extractJanitorLocally': true,
+        'janitorCardSource': 'local',
+        'janitorCharacterSource': 'local',
         'janitorLorebookSource': 'datacat',
       });
       final prefs = await SharedPreferences.getInstance();
-      final settings = AppSettingsPreferences.read(prefs);
-      expect(settings.janitorLorebookSource, ExtractionSource.datacat);
-      expect(settings.janitorCharacterSource, ExtractionSource.local);
+      expect(
+        AppSettingsPreferences.read(prefs).janitorSource,
+        ExtractionSource.local,
+      );
     });
 
-    test('an unknown source name falls back to the default', () async {
+    test('all-DataCat split sources merge to DataCat', () async {
+      // The card source was Local by default and so carries no choice of its
+      // own; the extraction and lorebook defaults are DataCat.
       SharedPreferences.setMockInitialValues({
-        'janitorCardSource': 'not-a-source',
+        'janitorCardSource': 'local',
+        'janitorCharacterSource': 'datacat',
+        'janitorLorebookSource': 'datacat',
       });
       final prefs = await SharedPreferences.getInstance();
       expect(
-        AppSettingsPreferences.read(prefs).janitorCardSource,
-        const AppSettings().janitorCardSource,
+        AppSettingsPreferences.read(prefs).janitorSource,
+        ExtractionSource.datacat,
+      );
+    });
+
+    test('an explicit new value outranks the legacy keys', () async {
+      SharedPreferences.setMockInitialValues({
+        'janitorSource': 'local',
+        'extractJanitorLocally': false,
+        'janitorCharacterSource': 'datacat',
+      });
+      final prefs = await SharedPreferences.getInstance();
+      expect(
+        AppSettingsPreferences.read(prefs).janitorSource,
+        ExtractionSource.local,
+      );
+    });
+
+    test('an unknown source name falls back to the default', () async {
+      SharedPreferences.setMockInitialValues({'janitorSource': 'not-a-source'});
+      final prefs = await SharedPreferences.getInstance();
+      expect(
+        AppSettingsPreferences.read(prefs).janitorSource,
+        const AppSettings().janitorSource,
       );
     });
   });

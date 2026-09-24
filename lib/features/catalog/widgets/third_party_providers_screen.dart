@@ -12,6 +12,7 @@ import '../datacat_account_provider.dart';
 import '../janitor_account_provider.dart';
 import '../saucepan_account_provider.dart';
 import '../third_party_providers_provider.dart';
+import 'catalog_onboarding_sheet.dart';
 import 'chub_login_sheet.dart';
 import 'datacat/datacat_account_sheet.dart';
 import 'janitor_login_sheet.dart';
@@ -64,7 +65,14 @@ class ThirdPartyProvidersScreen extends ConsumerWidget {
               onChanged: (v) =>
                   ref.read(catalogMasterEnabledProvider.notifier).setEnabled(v),
             ),
-            items: const [],
+            items: [
+              MenuItem(
+                icon: Icons.school_outlined,
+                label: 'catalog_onboarding_replay'.tr(),
+                subtitle: 'catalog_onboarding_replay_hint'.tr(),
+                onTap: () => replayCatalogOnboarding(context),
+              ),
+            ],
           ),
           for (final p in ThirdPartyProvider.values)
             _providerGroup(context, ref, p, enabled: !disabled.contains(p)),
