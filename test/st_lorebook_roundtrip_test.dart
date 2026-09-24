@@ -172,4 +172,139 @@ void main() {
       expect(result.lorebook.entries.single.position, 'lorebooksMacro');
     });
   });
+
+  group('character cards imported as lorebooks', () {
+    // The card's entries live under `data.character_book`, so reading only the
+    // top level imported the whole card as an empty book.
+    final card = <String, dynamic>{
+      'spec': 'chara_card_v3',
+      'spec_version': '3.0',
+      'data': {
+        'name': 'Miroslav',
+        'character_book': {
+          'name': 'SATURIC: Mraid',
+          'entries': [
+            {
+              'id': 0,
+              'name': 'FAMILY_FATHER',
+              'comment': 'FAMILY_FATHER',
+              'keys': ['отец', 'Денис'],
+              'content': 'Father is an engineer near Tula.',
+              'enabled': true,
+              'constant': false,
+              'position': 'before_char',
+              'insertion_order': 1,
+              'extensions': {
+                'scan_depth': 2,
+                'match_whole_words': true,
+                'probability': 80,
+              },
+            },
+            {
+              'id': 1,
+              'name': 'FAMILY_MOTHER',
+              'keys': ['мать'],
+              'content': 'Mother left.',
+              'insertion_order': 2,
+              'extensions': {'position': 4, 'depth': 4},
+            },
+          ],
+        },
+      },
+    };
+
+    test('reads the embedded book instead of an empty top level', () {
+      final result = importSTLorebook(card, nameOverride: 'card.json');
+
+      expect(result.entryCount, 2);
+      expect(result.lorebook.name, 'SATURIC: Mraid');
+      expect(result.lorebook.enabled, isTrue);
+      expect(result.lorebook.activationScope, 'global');
+      expect(result.lorebook.activationTargetId, isNull);
+    });
+
+    test('maps the entry fields like the character import does', () {
+      final first = importSTLorebook(card).lorebook.entries.first;
+
+      expect(first.comment, 'FAMILY_FATHER');
+      expect(first.keys, ['отец', 'Денис']);
+      expect(first.content, 'Father is an engineer near Tula.');
+      expect(first.enabled, isTrue);
+      expect(first.order, 1);
+      expect(first.position, 'worldInfoBefore');
+      expect(first.scanDepth, 2);
+      expect(first.matchWholeWords, isTrue);
+      expect(first.probability, 80);
+    });
+
+    test('falls back to the picked file name for an unnamed book', () {
+      final unnamed = <String, dynamic>{
+        'spec': 'chara_card_v2',
+        'data': {
+          'character_book': {
+            'entries': [
+              {'keys': ['k'], 'content': 'c'},
+            ],
+          },
+        },
+      };
+      final result = importSTLorebook(unnamed, nameOverride: 'silent.json');
+      expect(result.lorebook.name, 'silent');
+      expect(result.entryCount, 1);
+    });
+
+    test('a real World Info file still reads its own top-level entries', () {
+      final result = importSTLorebook({
+        'name': 'World',
+        'entries': {
+          '0': {'key': ['k'], 'content': 'c'},
+        },
+        'character_book': {
+          'entries': [
+            {'keys': ['ignored'], 'content': 'should not win'},
+          ],
+        },
+      });
+      expect(result.lorebook.name, 'World');
+      expect(result.entryCount, 1);
+      expect(result.lorebook.entries.single.keys, ['k']);
+    });
+
+    test('several picks import side by side, each as its own book', () {
+      // The Lorebooks tab's multi-select imports one picked file at a time;
+      // every card must land as a separate book, not overwrite the previous.
+      final books = [
+        importSTLorebook(_cardNamed('First', ['a', 'b'])).lorebook,
+        importSTLorebook(_cardNamed('Second', ['c'])).lorebook,
+        importSTLorebook(_cardNamed('Third', ['d', 'e', 'f'])).lorebook,
+      ];
+
+      expect(books.map((b) => b.id).toSet(), hasLength(3));
+      expect(books.map((b) => b.name), ['First', 'Second', 'Third']);
+      expect(books.map((b) => b.entries.length), [2, 1, 3]);
+      expect(
+        books.every((b) => b.enabled && b.activationScope == 'global'),
+        isTrue,
+      );
+    });
+  });
 }
+
+Map<String, dynamic> _cardNamed(String name, List<String> keys) => {
+  'spec': 'chara_card_v3',
+  'spec_version': '3.0',
+  'data': {
+    'name': '$name (character)',
+    'character_book': {
+      'name': name,
+      'entries': [
+        for (final key in keys)
+          {
+            'keys': [key],
+            'content': 'content for $key',
+            'insertion_order': 1,
+          },
+      ],
+    },
+  },
+};
