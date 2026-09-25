@@ -597,6 +597,10 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
       showRouteBackground: false,
       title: isEdit ? 'regex_editor'.tr() : 'menu_regex'.tr(),
       showBack: isEdit || widget.startExpanded,
+      // A back gesture while the editor is open must return to the list, not
+      // tear the whole sheet down. Hand it to [_goBack] until the list is
+      // showing, exactly like the header's back button.
+      canPop: !isEdit,
       onBack: isEdit ? _goBack : _goBackFromList,
       body: AnimatedSwitcher(
         duration: const Duration(milliseconds: 280),

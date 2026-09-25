@@ -56,6 +56,18 @@ class _PromptInspectorSheetState extends ConsumerState<PromptInspectorSheet> {
   /// sheet read as one broken level.
   bool _detailOpen = false;
 
+  /// Reaches the Requests timeline so a back gesture can close its drill-down
+  /// instead of dismissing the inspector from under it.
+  final _timelineKey = GlobalKey<RequestTimelineViewState>();
+
+  void _handleBack() {
+    if (_detailOpen) {
+      _timelineKey.currentState?.closeDetail();
+      return;
+    }
+    Navigator.of(context).pop();
+  }
+
   static const _order = [
     PromptInspectorSheet._tabContext,
     PromptInspectorSheet._tabRequests,
@@ -84,7 +96,10 @@ class _PromptInspectorSheetState extends ConsumerState<PromptInspectorSheet> {
       title: 'prompt_inspector_title'.tr(),
       showBack: true,
       startExpanded: true,
-      onBack: () => Navigator.of(context).maybePop(),
+      // While a request is open, back closes it rather than the whole
+      // inspector; the Requests tab owns that level.
+      canPop: !_detailOpen,
+      onBack: _handleBack,
       // Glaze's segmented control instead of SheetView's plain tab pills, so
       // the inspector matches the tab strip used by the rest of the app.
       headerBottom: _detailOpen
@@ -109,6 +124,7 @@ class _PromptInspectorSheetState extends ConsumerState<PromptInspectorSheet> {
         embedded: true,
       ),
       _ => RequestTimelineView(
+        key: _timelineKey,
         charId: widget.charId,
         initialCoverage: _initialCoverage,
         onDetailChanged: (open) {
