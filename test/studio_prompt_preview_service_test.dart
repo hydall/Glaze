@@ -32,6 +32,7 @@ void main() {
     endpoint: 'https://example.test/v1?key=secret',
     apiKey: 'top-secret',
     model: 'test-model',
+    omitTemperature: false,
   );
   const session = ChatSession(
     id: 'session',

@@ -107,7 +107,7 @@ class ApiConfigs extends Table {
   TextColumn get apiKey => text().nullable()();
   TextColumn get model => text().nullable()();
   TextColumn get mode => text().withDefault(const Constant('chat'))();
-  IntColumn get maxTokens => integer().withDefault(const Constant(8000))();
+  IntColumn get maxTokens => integer().withDefault(const Constant(1500))();
   IntColumn get contextSize => integer().withDefault(const Constant(32000))();
   TextColumn get historyTrimMode =>
       text().withDefault(const Constant('sliding'))();
@@ -115,8 +115,8 @@ class ApiConfigs extends Table {
       integer().withDefault(const Constant(85))();
   IntColumn get historyTrimStepPercent =>
       integer().withDefault(const Constant(30))();
-  RealColumn get temperature => real().withDefault(const Constant(0.7))();
-  RealColumn get topP => real().withDefault(const Constant(0.9))();
+  RealColumn get temperature => real().withDefault(const Constant(1.0))();
+  RealColumn get topP => real().withDefault(const Constant(1.0))();
   IntColumn get topK => integer().withDefault(const Constant(0))();
   RealColumn get frequencyPenalty => real().withDefault(const Constant(0.0))();
   RealColumn get presencePenalty => real().withDefault(const Constant(0.0))();
@@ -137,13 +137,13 @@ class ApiConfigs extends Table {
   TextColumn get reasoningTagStart => text().nullable()();
   TextColumn get reasoningTagEnd => text().nullable()();
   BoolColumn get omitTemperature =>
-      boolean().withDefault(const Constant(false))();
-  BoolColumn get omitTopP => boolean().withDefault(const Constant(false))();
-  BoolColumn get omitTopK => boolean().withDefault(const Constant(false))();
+      boolean().withDefault(const Constant(true))();
+  BoolColumn get omitTopP => boolean().withDefault(const Constant(true))();
+  BoolColumn get omitTopK => boolean().withDefault(const Constant(true))();
   BoolColumn get omitFrequencyPenalty =>
-      boolean().withDefault(const Constant(false))();
+      boolean().withDefault(const Constant(true))();
   BoolColumn get omitPresencePenalty =>
-      boolean().withDefault(const Constant(false))();
+      boolean().withDefault(const Constant(true))();
   BoolColumn get omitReasoning =>
       boolean().withDefault(const Constant(false))();
   BoolColumn get omitReasoningEffort =>

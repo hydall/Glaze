@@ -382,10 +382,10 @@ class JsApiConfigImporter extends BackupHelpers {
             ),
             model: Value(model),
             mode: Value(mode),
-            maxTokens: Value(toInt(preset['max_tokens']) ?? 8000),
+            maxTokens: Value(toInt(preset['max_tokens']) ?? 1500),
             contextSize: Value(toInt(preset['context']) ?? 32000),
-            temperature: Value(toDouble(preset['temp']) ?? 0.7),
-            topP: Value(toDouble(preset['topp']) ?? 0.9),
+            temperature: Value(toDouble(preset['temp']) ?? 1.0),
+            topP: Value(toDouble(preset['topp']) ?? 1.0),
             topK: Value(toInt(preset['top_k']) ?? 0),
             frequencyPenalty: Value(
               toDouble(preset['frequency_penalty']) ?? 0.0,
@@ -416,6 +416,16 @@ class JsApiConfigImporter extends BackupHelpers {
               preset['omit_temperature'] as bool? ?? false,
             ),
             omitTopP: Value(preset['omit_top_p'] as bool? ?? false),
+            // The legacy import carries sampling values; they must keep being
+            // sent, so the switches are written explicitly instead of leaning
+            // on the table defaults (which now ship off).
+            omitTopK: Value(preset['omit_top_k'] as bool? ?? false),
+            omitFrequencyPenalty: Value(
+              preset['omit_frequency_penalty'] as bool? ?? false,
+            ),
+            omitPresencePenalty: Value(
+              preset['omit_presence_penalty'] as bool? ?? false,
+            ),
             omitReasoning: Value(preset['omit_reasoning'] as bool? ?? false),
             omitReasoningEffort: Value(
               preset['omit_reasoning_effort'] as bool? ?? false,

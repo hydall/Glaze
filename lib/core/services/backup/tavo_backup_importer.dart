@@ -278,14 +278,14 @@ class TavoBackupImporter {
         if (seen.contains(dedupKey)) continue;
         seen.add(dedupKey);
 
-        final temperature = (params['temperature'] as num?)?.toDouble() ?? 0.7;
-        final topP = (params['top_p'] as num?)?.toDouble() ?? 0.9;
+        final temperature = (params['temperature'] as num?)?.toDouble() ?? 1.0;
+        final topP = (params['top_p'] as num?)?.toDouble() ?? 1.0;
         final topK = (params['top_k'] as num?)?.toInt() ?? 0;
         final frequencyPenalty =
             (params['frequency_penalty'] as num?)?.toDouble() ?? 0.0;
         final presencePenalty =
             (params['presence_penalty'] as num?)?.toDouble() ?? 0.0;
-        final maxTokens = (params['max_tokens'] as num?)?.toInt() ?? 8000;
+        final maxTokens = (params['max_tokens'] as num?)?.toInt() ?? 1500;
         final contextSize =
             (params['context_length'] as num?)?.toInt() ?? 32000;
 
@@ -306,6 +306,13 @@ class TavoBackupImporter {
             topK: topK,
             frequencyPenalty: frequencyPenalty,
             presencePenalty: presencePenalty,
+            // The imported connection's sampling is meant to be used, so the
+            // switches are off rather than inheriting the new table defaults.
+            omitTemperature: false,
+            omitTopP: false,
+            omitTopK: false,
+            omitFrequencyPenalty: false,
+            omitPresencePenalty: false,
             stream: true,
           ),
         );

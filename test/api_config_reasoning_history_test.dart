@@ -21,9 +21,9 @@ void main() {
 
     expect(config.reasoningHistoryCount, 0);
     expect(config.showNativeReasoning, isTrue);
-    expect(config.omitTopK, isFalse);
-    expect(config.omitFrequencyPenalty, isFalse);
-    expect(config.omitPresencePenalty, isFalse);
+    expect(config.omitTopK, isTrue);
+    expect(config.omitFrequencyPenalty, isTrue);
+    expect(config.omitPresencePenalty, isTrue);
   });
 
   test('legacy omitReasoning controls the initial visibility default', () {
