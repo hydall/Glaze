@@ -735,7 +735,10 @@ export class Bridge {
     } else {
       this._keepingPlaceholderLast(() => this._renderAndAppend(msg));
     }
-    this.virtualList.scrollToBottom();
+    // No scroll of its own: `virtualList.append` already follows the end when
+    // the reader is parked there (or when a send armed the pending follow), and
+    // a second call here re-pinned the list a frame later — the extra step a
+    // send showed.
     this._imgGenTimer.ensureRunning();
   }
 
@@ -827,7 +830,6 @@ export class Bridge {
       // itself, and it outlives the run that produced it.
       if (msg.id === STREAMING_ID && this._placeholderActive) {
         this._renderAndAppend(msg);
-        this.virtualList.scrollToBottom();
       }
       return;
     }
