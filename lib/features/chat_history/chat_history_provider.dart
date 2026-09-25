@@ -113,6 +113,22 @@ final chatHistoryProvider =
       ChatHistoryNotifier.new,
     );
 
+/// Sessions belonging to one character, derived from [chatHistoryProvider].
+///
+/// The history provider is warmed at startup and kept alive, so a picker that
+/// reads this renders from memory instead of waiting on its own DB query — the
+/// reason the session list used to lag when opened from a character sheet or
+/// the tools tab.
+final characterSessionInfosProvider =
+    Provider.family<List<ChatSessionInfo>, String>((ref, charId) {
+      final sessions = ref.watch(chatHistoryProvider).value;
+      if (sessions == null) return const <ChatSessionInfo>[];
+      return [
+        for (final session in sessions)
+          if (session.characterId == charId) session,
+      ];
+    });
+
 class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
   StreamSubscription<dynamic>? _sub;
   StreamSubscription<dynamic>? _charactersSub;
