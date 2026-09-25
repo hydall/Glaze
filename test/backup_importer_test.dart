@@ -1532,5 +1532,136 @@ void main() {
         } catch (_) {}
       }
     });
+
+    test('restores the active persona from settings.json user_avatar',
+        () async {
+      final archive = Archive()
+        ..addFile(
+          ArchiveFile.bytes('User Avatars/Alice.png', Uint8List.fromList([1])),
+        )
+        ..addFile(
+          ArchiveFile.bytes(
+            'settings.json',
+            utf8.encode(
+              jsonEncode({
+                'user_avatar': 'Alice.png',
+                'power_user': {
+                  'personas': {'Alice.png': 'Alice', 'Bob.png': 'Bob'},
+                  'persona_descriptions': {
+                    'Alice.png': {'description': 'Alice desc'},
+                  },
+                },
+              }),
+            ),
+          ),
+        );
+
+      final result = await _importArchive(archive, db, imageStorage);
+
+      expect(result.errors, isEmpty);
+      expect(result.personas, 2);
+      final alice = (await db.select(db.personas).get())
+          .firstWhere((p) => p.name == 'Alice');
+
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('activePersonaId'), equals(alice.personaId));
+    });
+
+    test('falls back to default_persona and restores character connections',
+        () async {
+      final archive = Archive()
+        ..addFile(
+          ArchiveFile.bytes('characters/Seraphina.png', _characterPng('Seraphina')),
+        )
+        ..addFile(
+          ArchiveFile.bytes('User Avatars/Alice.png', Uint8List.fromList([1])),
+        )
+        ..addFile(
+          ArchiveFile.bytes(
+            'settings.json',
+            utf8.encode(
+              jsonEncode({
+                'power_user': {
+                  'default_persona': 'Alice.png',
+                  'personas': {'Alice.png': 'Alice'},
+                  'persona_descriptions': {
+                    'Alice.png': {
+                      'description': 'Alice desc',
+                      'connections': [
+                        {'type': 'character', 'id': 'Seraphina.png'},
+                        {'type': 'group', 'id': 'some-group-id'},
+                      ],
+                    },
+                  },
+                },
+              }),
+            ),
+          ),
+        );
+
+      final result = await _importArchive(archive, db, imageStorage);
+
+      expect(result.errors, isEmpty);
+      final persona = (await db.select(db.personas).get()).single;
+      final character = (await db.select(db.characters).get()).single;
+
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('activePersonaId'), equals(persona.personaId));
+
+      final connections =
+          jsonDecode(prefs.getString('personaConnections')!) as Map<String, dynamic>;
+      final characterConnections =
+          connections['character'] as Map<String, dynamic>;
+      expect(characterConnections[character.charId], equals(persona.personaId));
+      expect(characterConnections, hasLength(1));
+    });
   });
+}
+
+Future<StImportResult> _importArchive(
+  Archive archive,
+  AppDatabase db,
+  ImageStorageService imageStorage,
+) async {
+  final fixturePath =
+      '${Directory.systemTemp.path}/st_persona_${DateTime.now().microsecondsSinceEpoch}.zip';
+  File(fixturePath).writeAsBytesSync(ZipEncoder().encode(archive));
+
+  try {
+    return await StBackupImporter(db, imageStorage).importFromFile(fixturePath);
+  } finally {
+    try {
+      File(fixturePath).deleteSync();
+    } catch (_) {}
+  }
+}
+
+/// Minimal PNG carrying a `chara` tEXt chunk, enough for the importer's text
+/// extractor (the CRC is left zeroed and the bytes are never decoded as an
+/// image).
+Uint8List _characterPng(String name) {
+  final card = base64Encode(
+    utf8.encode(
+      jsonEncode({
+        'spec': 'chara_card_v2',
+        'spec_version': '2.0',
+        'data': {'name': name, 'description': 'description'},
+      }),
+    ),
+  );
+  final textData = <int>[...utf8.encode('chara'), 0, ...utf8.encode(card)];
+  final length = textData.length;
+  return Uint8List.fromList([
+    137, 80, 78, 71, 13, 10, 26, 10,
+    (length >> 24) & 0xff,
+    (length >> 16) & 0xff,
+    (length >> 8) & 0xff,
+    length & 0xff,
+    ...utf8.encode('tEXt'),
+    ...textData,
+    0, 0, 0, 0,
+    0, 0, 0, 0,
+    ...utf8.encode('IEND'),
+    0, 0, 0, 0,
+  ]);
 }
