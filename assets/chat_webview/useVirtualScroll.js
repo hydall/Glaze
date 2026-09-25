@@ -448,8 +448,19 @@ class UseVirtualScroll {
     // call on every streamed chunk.
     smartScroll() {
         if (!this._pinnedToBottom) return;
+        this._pinToBottom();
+    }
+
+    // Park the list at the end in the current frame. Unlike scrollToBottom() it
+    // rebuilds nothing and waits for no frame: the caller has just written the
+    // rows, so reading scrollHeight flushes layout and the pin lands against
+    // the geometry the reader will get. An append that instead waited a frame
+    // painted the new bubble below the fold and then snapped it up, which is
+    // the jump a send read as.
+    _pinToBottom() {
         if (this.items.length === 0) return;
         this.isProgrammaticScrolling = true;
+        this._pinnedToBottom = true;
         this.container.scrollTop = this.container.scrollHeight;
         // Remember where the follow parked so the scroll event it queues is
         // recognised as ours even if the next chunk grows the list before that
@@ -761,22 +772,20 @@ class UseVirtualScroll {
         this.cache.invalidate();
         this.cache.pruneStale();
 
+        let followBottom = false;
         if (type === 'append') {
             // Only follow a newly appended message when the user is actually
             // parked at the end — the same gate the streaming auto-follow uses,
-            // so a reader who scrolled up is not yanked back down. (A message
-            // the user just sent scrolls down through appendMessage() /
-            // pendingScrollToBottom, which is independent of this.)
+            // so a reader who scrolled up is not yanked back down. A send arms
+            // `_scrollToBottomPending` (see pendingScrollToBottom) to force the
+            // follow even though the reader may have been up when they sent.
             const wasAtBottom = this._pinnedToBottom && this.isNearBottom(100);
             if (wasAtBottom || this._scrollToBottomPending) {
+                followBottom = true;
                 this.renderEnd = newLen;
                 const vh = this.container.clientHeight || 800;
                 const estInView = Math.max(20, Math.ceil(vh / this.estimateHeight) + this.getBuffer());
                 this.renderStart = Math.max(0, newLen - estInView);
-                
-                setTimeout(() => {
-                    if (this.mounted) this.scrollToBottom('auto');
-                }, 50);
             } else {
                 if (newLen > this.renderEnd) this.renderEnd = newLen;
             }
@@ -788,6 +797,15 @@ class UseVirtualScroll {
         
         this.updateSpacers();
         this.renderDOM();
+        // One pin, in the frame the row landed in. The old path stacked a
+        // `setTimeout(…, 50)` follow on top of an immediate `scrollToBottom()`,
+        // and a batch append added a third call from the bridge: each rebuilt
+        // the window and re-pinned, so the list stepped down in visible
+        // increments instead of settling once.
+        if (followBottom) {
+            this._scrollToBottomPending = false;
+            this._pinToBottom();
+        }
         // Adding or dropping a row moves every spacer under a scroll position
         // that did not move with it. A delete out of a long chat can push the
         // mounted rows clean off the viewport, and nothing scrolls afterwards
