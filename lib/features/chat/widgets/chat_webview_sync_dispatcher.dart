@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:collection/collection.dart';
 
 import '../../../core/models/chat_message.dart';
+import '../../../core/models/preset.dart';
 import '../bridge/chat_bridge_controller.dart';
 import '../bridge/chat_overlay_blur_region.dart';
 import 'chat_message_sync.dart'
@@ -109,12 +110,19 @@ class ChatWebViewSyncState {
     );
   }
 
-  /// Set when the display-regex list changed while the bridge was still
-  /// initializing, i.e. after the initializer read the list it painted with.
-  /// The messages on screen were rewritten with the older list, and only a
-  /// re-render fixes that — pushing the new list to the controller does not
-  /// touch what is already in the DOM.
-  bool regexContextStale = false;
+  /// The display-regex list the initializer painted the first frame with —
+  /// recorded right before its `setMessages`, so it is the list the batch's
+  /// message maps were built from.
+  ///
+  /// The post-init check compares this against the provider's latest value: a
+  /// list that changed *after* the paint means the DOM holds the old rewrite
+  /// and only a re-render fixes it, while the list's own first load does not —
+  /// the initializer awaits it, so the paint already carries it. The old
+  /// boolean deferred on any change while the bridge was initializing and so
+  /// fired on that first load too, which forced a second full render of every
+  /// first open (a duplicate first-chat render that a large chat shows as a
+  /// reload).
+  List<PresetRegex>? paintedDisplayRegexes;
 
   /// Invalidates async streaming work when generation or session ownership
   /// changes. Callers capture the value and re-check it after every await.

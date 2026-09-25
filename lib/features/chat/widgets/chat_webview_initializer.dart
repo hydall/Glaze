@@ -120,7 +120,7 @@ class ChatWebViewInitInput {
 /// account for persona/character resolution that may have raced
 /// with the first identity call).
 class ChatWebViewInitializer {
-  const ChatWebViewInitializer({
+  ChatWebViewInitializer({
     required this.ref,
     required this.bridge,
     required this.input,
@@ -135,6 +135,13 @@ class ChatWebViewInitializer {
   final VoidCallback onReady;
   final Future<void> Function() onSyncExtBlockPanels;
   final Future<void> Function() applyTheme;
+
+  /// The display-regex list the first paint was mapped with, captured right
+  /// before [run]'s `setMessages`. The widget reads it afterwards to tell a
+  /// list that changed *after* the paint (the DOM is stale, re-render) from
+  /// the list's own first load (the paint carries it, re-rendering again is a
+  /// duplicate first render). Null until that point is reached.
+  List<PresetRegex>? paintedDisplayRegexes;
 
   /// Run the full init sequence. [onReady] is called synchronously
   /// after the last `await` completes, before the ext-block sync.
@@ -260,6 +267,10 @@ class ChatWebViewInitializer {
     if (!input.isGenerating && !input.isSendPending) {
       await bridge.retireTypingPlaceholder();
     }
+    // Captured before the maps are built so it is exactly the list the batch
+    // was rewritten with; the widget compares it against the provider once the
+    // bridge is ready.
+    paintedDisplayRegexes = bridge.displayRegexes;
     await bridge.setMessages(
       input.messages,
       visibleStartIndex: input.visibleStartIndex,

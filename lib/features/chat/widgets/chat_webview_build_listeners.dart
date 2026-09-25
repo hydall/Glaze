@@ -97,16 +97,16 @@ class ChatWebViewBuildListeners {
       final oldList = prev?.value ?? const <PresetRegex>[];
       final newList = next.value ?? const <PresetRegex>[];
       if (b == null || !ready()) {
-        // Not a drop. The initializer has already read the list it paints the
-        // chat with, so a change that lands in this window used to be lost for
-        // the rest of the session: the controller was updated on the next
-        // build, but nothing re-rendered the messages it had already written.
-        if (_regexListChanged(oldList, newList)) {
-          syncState.regexContextStale = true;
-        }
+        // Defer to the post-init check in [ChatWebViewWidget], which compares
+        // the list the initializer actually painted with against the latest
+        // value. This branch must not flag every change by itself: the
+        // initializer *awaits* this provider, so its first resolution is not a
+        // stale render — the paint carries it. Treating it as one forced a
+        // second full render of every first open, which a large chat shows as
+        // a reload.
         return;
       }
-      if (_regexListChanged(oldList, newList)) {
+      if (displayRegexListsDiffer(oldList, newList)) {
         final character = ref.read(characterByIdProvider(charId));
         final effectivePersona = ref.read(
           effectivePersonaForChatProvider((
@@ -403,11 +403,27 @@ class ChatWebViewBuildListeners {
     return false;
   }
 
-  static bool _regexListChanged(List<PresetRegex> a, List<PresetRegex> b) {
-    if (a.length != b.length) return true;
-    for (int i = 0; i < a.length; i++) {
-      if (a[i].id != b[i].id || a[i].disabled != b[i].disabled) return true;
-    }
-    return false;
-  }
 }
+
+/// True when the two display-regex lists differ in a way a rendered message can
+/// show: which scripts run. A script swapped for a different one with the same
+/// id, or re-enabled, changes the rewrite and must force a re-render.
+bool displayRegexListsDiffer(List<PresetRegex> a, List<PresetRegex> b) {
+  if (a.length != b.length) return true;
+  for (int i = 0; i < a.length; i++) {
+    if (a[i].id != b[i].id || a[i].disabled != b[i].disabled) return true;
+  }
+  return false;
+}
+
+/// Whether the post-init re-render is needed for the display-regex context.
+///
+/// Only a list that moved *after* the initializer's paint leaves the DOM
+/// rewritten by an older list. The list's own first load is already in the
+/// paint — the initializer awaits the provider — so it must not count as a
+/// change. A null [painted] means the initializer never reached its paint (it
+/// will have failed and the view rebuilt), so there is nothing to correct.
+bool displayRegexResyncNeeded(
+  List<PresetRegex>? painted,
+  List<PresetRegex> latest,
+) => painted != null && displayRegexListsDiffer(painted, latest);
