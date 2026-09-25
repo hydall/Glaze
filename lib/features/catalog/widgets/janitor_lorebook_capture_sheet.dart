@@ -781,6 +781,15 @@ class _JanitorLorebookCaptureState
         ],
       ),
       startExpanded: true,
+      // Past the first stage a back gesture steps back one stage — the same
+      // move the strip's arrow makes — instead of closing the running flow.
+      // While a stage is busy the gesture is held, as the arrow is, so a
+      // capture or a build in flight is never torn down by an accidental back.
+      canPop: _phase == _Phase.collect,
+      onBack: () {
+        if (_building || _extracting) return;
+        _stepBack();
+      },
       actions: [
         SheetViewAction(
           icon: const Icon(Icons.tune_rounded, size: 20),

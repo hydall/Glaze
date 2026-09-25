@@ -50,16 +50,24 @@ class RequestTimelineView extends ConsumerStatefulWidget {
   final bool initialCoverage;
 
   @override
-  ConsumerState<RequestTimelineView> createState() =>
-      _RequestTimelineViewState();
+  ConsumerState<RequestTimelineView> createState() => RequestTimelineViewState();
 }
 
-class _RequestTimelineViewState extends ConsumerState<RequestTimelineView> {
+/// Public so the inspector that hosts it can close a drill-down it opened with
+/// [RequestTimelineView.onDetailChanged] — the system back gesture reaches the
+/// inspector, not the timeline, and the inspector must be able to unwind this
+/// level the way the detail's own back button does.
+class RequestTimelineViewState extends ConsumerState<RequestTimelineView> {
   PromptCaptureView? _openCapture;
   late bool _openPreview = widget.initialCoverage;
   final Set<String> _expandedGroups = {};
 
   bool get _inDetail => _openCapture != null || _openPreview;
+
+  /// Leaves the open detail view, if any, and tells the inspector about it.
+  void closeDetail() {
+    if (_inDetail) _close();
+  }
 
   @override
   void initState() {

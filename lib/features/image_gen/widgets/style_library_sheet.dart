@@ -228,6 +228,9 @@ class _StyleLibrarySheetState extends State<StyleLibrarySheet> {
     return SheetView(
       title: isEditing ? editing.name : 'imggen_styles'.tr(),
       showBack: isEditing,
+      // A back gesture leaves the inline style editor instead of closing the
+      // whole library, matching the header's back button.
+      canPop: !isEditing,
       onBack: _closeEditor,
       actions: isEditing
           ? const []

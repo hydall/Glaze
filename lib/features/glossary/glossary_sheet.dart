@@ -245,6 +245,10 @@ class _GlossarySheetState extends ConsumerState<GlossarySheet> {
           showBack:
               _view != _View.categories ||
               ModalRoute.of(context) is! ModalBottomSheetRoute,
+          // A back gesture steps out of the terms list or the article one level
+          // at a time, the way the header's back button does, instead of
+          // dismissing the whole sheet from underneath the reader.
+          canPop: _view == _View.categories,
           onBack: _goBack,
           startExpanded: widget.startExpanded,
           headerBottom: showSearch ? _buildSearchBar(context) : null,
