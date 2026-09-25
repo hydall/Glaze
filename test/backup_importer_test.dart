@@ -79,6 +79,13 @@ void main() {
       expect(c.contextSize, equals(16000));
       expect(c.temperature, closeTo(0.8, 0.01));
       expect(c.topP, closeTo(0.95, 0.01));
+      // Imported sampling must actually be sent, so the omit switches are
+      // written off rather than inheriting the new table default.
+      expect(c.omitTemperature, isFalse);
+      expect(c.omitTopP, isFalse);
+      expect(c.omitTopK, isFalse);
+      expect(c.omitFrequencyPenalty, isFalse);
+      expect(c.omitPresencePenalty, isFalse);
     });
 
     test('imports provider profiles with service profile map', () async {

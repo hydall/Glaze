@@ -210,13 +210,22 @@ class MigrationService {
           endpoint: json['endpoint'] as String? ?? '',
           apiKey: json['key'] as String? ?? '',
           model: json['model'] as String? ?? '',
-          maxTokens: _toInt(json['max_tokens']) ?? 8000,
+          maxTokens: _toInt(json['max_tokens']) ?? 1500,
           contextSize: _toInt(json['context']) ?? 32000,
-          temperature: _toDouble(json['temp']) ?? 0.7,
-          topP: _toDouble(json['topp']) ?? 0.9,
+          temperature: _toDouble(json['temp']) ?? 1.0,
+          topP: _toDouble(json['topp']) ?? 1.0,
           topK: _toInt(json['top_k']) ?? 0,
           frequencyPenalty: _toDouble(json['frequency_penalty']) ?? 0.0,
           presencePenalty: _toDouble(json['presence_penalty']) ?? 0.0,
+          // An imported preset keeps its sampling: the legacy connection sent
+          // these values, so the omit switches start off unless the source
+          // carried one explicitly.
+          omitTemperature: json['omit_temperature'] as bool? ?? false,
+          omitTopP: json['omit_top_p'] as bool? ?? false,
+          omitTopK: json['omit_top_k'] as bool? ?? false,
+          omitFrequencyPenalty:
+              json['omit_frequency_penalty'] as bool? ?? false,
+          omitPresencePenalty: json['omit_presence_penalty'] as bool? ?? false,
           stream: json['stream'] as bool? ?? true,
         );
         await _apiRepo.put(config);

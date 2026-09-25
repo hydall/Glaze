@@ -1025,7 +1025,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
           label: 'label_max_tokens'.tr(),
           helpTerm: 'max-tokens',
           controller: _maxTokensCtrl,
-          placeholder: '8000',
+          placeholder: '1500',
           keyboardType: TextInputType.number,
         ),
         MenuFieldItem(
