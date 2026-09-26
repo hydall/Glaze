@@ -39,6 +39,35 @@ Future<void> openSaucepanAccountSheet(
   );
 }
 
+/// Prompts for a Saucepan login before a URL import can run. The companion
+/// definition is pulled with the account's token, so there is nothing to import
+/// without one. Returns true once the user is signed in, so the caller can go
+/// ahead with the extraction.
+Future<bool> showSaucepanLoginRequiredSheet(
+  BuildContext context,
+  WidgetRef ref,
+) async {
+  var wantsLogin = false;
+  await GlazeBottomSheet.show<void>(
+    context,
+    title: 'Saucepan',
+    bigInfo: BottomSheetBigInfo(
+      icon: Icons.ramen_dining_outlined,
+      description:
+          'Importing a Saucepan companion reads its definition with your '
+          'Saucepan account, so you need to sign in first.',
+      buttonText: 'Log in',
+      onButtonTap: () {
+        wantsLogin = true;
+        Navigator.of(context, rootNavigator: true).pop();
+      },
+    ),
+  );
+  if (!wantsLogin || !context.mounted) return false;
+  await showSaucepanLoginSheet(context);
+  return ref.read(saucepanAccountProvider).isLoggedIn;
+}
+
 /// Opens the Saucepan login form as a modal sheet.
 Future<void> showSaucepanLoginSheet(BuildContext context) {
   return GlazeBottomSheet.show<void>(

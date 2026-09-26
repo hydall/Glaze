@@ -31,12 +31,14 @@ typedef ExtractionStatusReading = ({
 /// The status endpoint does not say *why* a run came back empty, so this says
 /// what is known — it finished, there is nothing to import — and for Saucepan
 /// adds the one reason that accounts for it: the remote extractor is asked for
-/// public definitions only, so a companion whose definition is restricted to
-/// vetted providers produces a run that completes with nothing in it.
+/// public definitions only, so a companion whose definition is closed to
+/// third-party clients produces a run that completes with nothing in it. That
+/// is not a temporary limitation: Glaze does not plan to read closed
+/// definitions.
 String extractionFinishedEmptyMessage({required bool isSaucepan}) => isSaucepan
-    ? 'The extraction finished without a character. Saucepan companions whose '
-          'definition is only readable by vetted providers cannot be imported '
-          'yet — only open-definition companions work.'
+    ? 'The extraction finished without a character. Saucepan companions with a '
+          'closed definition cannot be imported, and Glaze does not plan to '
+          'support them.'
     : 'The extraction finished without a character.';
 
 String? _asString(Object? value) =>

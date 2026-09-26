@@ -4,11 +4,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'catalog_models.dart';
 
-/// The five third-party sources the user can enable/disable from the
-/// "Third-Party providers" screen: the four catalog browse providers plus
-/// Saucepan (a companion-extraction account, not a browse source). Disabling
-/// one hides it from the catalog provider picker and hides its settings block
-/// on the screen.
+/// The five third-party sources listed on the "Third-Party providers" screen:
+/// the four catalog browse providers that can be enabled/disabled, plus
+/// Saucepan (a companion-extraction account, not a browse source). Disabling a
+/// browse provider hides it from the catalog picker and collapses its settings
+/// block; Saucepan is always on and has no toggle.
 enum ThirdPartyProvider { janitor, janny, datacat, chub, saucepan }
 
 extension ThirdPartyProviderX on ThirdPartyProvider {
@@ -36,14 +36,16 @@ extension CatalogProviderX on CatalogProvider {
 
 /// Holds the set of DISABLED third-party providers (a provider absent from the
 /// set is enabled). Persisted so the choice survives launches; defaults to
-/// janitor enabled (all others disabled).
+/// janitor enabled (all others disabled). Saucepan is never in the set — it is
+/// always on, since it backs local companion extraction rather than a browsable
+/// catalog.
 class ThirdPartyProvidersNotifier extends Notifier<Set<ThirdPartyProvider>> {
   static const _key = 'gz_disabled_third_party_providers';
 
   @override
   Set<ThirdPartyProvider> build() {
     _load();
-    return {ThirdPartyProvider.janny, ThirdPartyProvider.datacat, ThirdPartyProvider.chub, ThirdPartyProvider.saucepan};
+    return {ThirdPartyProvider.janny, ThirdPartyProvider.datacat, ThirdPartyProvider.chub};
   }
 
   Future<void> _load() async {
@@ -55,14 +57,21 @@ class ThirdPartyProvidersNotifier extends Notifier<Set<ThirdPartyProvider>> {
       final match = ThirdPartyProvider.values.firstWhereOrNull(
         (p) => p.name == name,
       );
-      if (match != null) disabled.add(match);
+      // A stored value from before Saucepan became always-on must not disable
+      // it now.
+      if (match != null && match != ThirdPartyProvider.saucepan) {
+        disabled.add(match);
+      }
     }
     state = disabled;
   }
 
-  bool isEnabled(ThirdPartyProvider p) => !state.contains(p);
+  bool isEnabled(ThirdPartyProvider p) =>
+      p == ThirdPartyProvider.saucepan || !state.contains(p);
 
   Future<void> setEnabled(ThirdPartyProvider p, bool enabled) async {
+    // Saucepan is always on; there is no toggle for it.
+    if (p == ThirdPartyProvider.saucepan) return;
     final next = {...state};
     if (enabled) {
       if (!next.remove(p)) return; // already enabled
