@@ -8,6 +8,7 @@
 #include "in_app_webview.h"
 
 #include <dlfcn.h>
+#include <fcntl.h>
 #include <linux/limits.h>
 #include <unistd.h>
 
@@ -1252,10 +1253,6 @@ void InAppWebView::OnWpePlatformBufferRendered(WPEBuffer* buffer) {
   WPEBuffer* previous_buffer = nullptr;
   bool buffer_handled = false;
   
-  // Track EGL import failures to avoid repeated attempts
-  // Static because if EGL fails once, it will likely keep failing (e.g., no GPU)
-  static bool egl_import_failed_permanently = false;
-  
   {
     std::lock_guard<std::mutex> lock(wpe_buffer_mutex_);
     
@@ -1280,29 +1277,22 @@ void InAppWebView::OnWpePlatformBufferRendered(WPEBuffer* buffer) {
     bool is_dma_buf = WPE_IS_BUFFER_DMA_BUF(buffer);
     bool is_shm = WPE_IS_BUFFER_SHM(buffer);
     
-    // === Priority 1: Try EGL image import (zero-copy, best performance) ===
-    // Only attempt EGL for DMA-BUF buffers (SHM buffers cannot be imported via EGL)
-    // Skip if previous EGL attempts failed
-    if (egl_display_ != nullptr && 
-        is_dma_buf && !egl_import_failed_permanently) {
-      GError* error = nullptr;
-      void* egl_image = wpe_buffer_import_to_egl_image(buffer, &error);
-      
-      if (egl_image != nullptr) {
-        current_egl_image_ = egl_image;
-        current_buffer_width_ = buf_width;
-        current_buffer_height_ = buf_height;
-        buffer_handled = true;
-      } else {
-        // Mark EGL as permanently failed so we don't keep trying
-        // This is common in VMs or software-only environments
-        egl_import_failed_permanently = true;
-        if (error != nullptr) {
-          g_clear_error(&error);
-        }
-      }
+    // GLAZE PATCH: in zero-copy mode the DMA-BUF is handed to the Flutter
+    // texture as-is and imported there, on the EGL display of Flutter's own
+    // GL context (see GetCurrentDmaBuf). Upstream imported it here with
+    // wpe_buffer_import_to_egl_image, which creates the EGLImage on the
+    // headless WPE display; binding that image in Flutter's context (another
+    // EGLDisplay) samples as black on Mesa. Upstream also took that path with
+    // the pixel-buffer texture, which then never got any pixels (a blank
+    // WebView). Without zero-copy, a DMA-BUF now falls through to the pixel
+    // import below.
+    if (is_dma_buf && skip_pixel_readback_) {
+      current_buffer_width_ = buf_width;
+      current_buffer_height_ = buf_height;
+      ++current_buffer_serial_;
+      buffer_handled = true;
     }
-    
+
     // === Priority 2: Direct SHM buffer access (no GBM required) ===
     // WPEBufferSHM provides direct pixel access without requiring GBM device
     if (!buffer_handled && is_shm) {
@@ -3640,6 +3630,50 @@ bool InAppWebView::GetDmaBufFd(int* fd, uint32_t* stride, uint32_t* width, uint3
   return false;
 #else
   // WPEPlatform uses a different rendering model
+  return false;
+#endif
+}
+
+bool InAppWebView::GetCurrentDmaBuf(DmaBufFrame* out) const {
+#ifdef HAVE_WPE_PLATFORM
+  if (out == nullptr) {
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(wpe_buffer_mutex_);
+  if (current_buffer_ == nullptr || !WPE_IS_BUFFER_DMA_BUF(current_buffer_)) {
+    return false;
+  }
+
+  WPEBufferDMABuf* dmabuf = WPE_BUFFER_DMA_BUF(current_buffer_);
+  const uint32_t n_planes = wpe_buffer_dma_buf_get_n_planes(dmabuf);
+  if (n_planes == 0 || n_planes > DmaBufFrame::kMaxPlanes) {
+    return false;
+  }
+
+  DmaBufFrame frame;
+  frame.fourcc = wpe_buffer_dma_buf_get_format(dmabuf);
+  frame.width = current_buffer_width_;
+  frame.height = current_buffer_height_;
+  frame.n_planes = n_planes;
+  frame.modifier = wpe_buffer_dma_buf_get_modifier(dmabuf);
+  frame.serial = current_buffer_serial_;
+  for (uint32_t i = 0; i < n_planes; i++) {
+    // Dup'ed so the import on the raster thread cannot race WPE closing the
+    // buffer's own fds once the next frame releases it.
+    frame.fds[i] = fcntl(wpe_buffer_dma_buf_get_fd(dmabuf, i), F_DUPFD_CLOEXEC, 0);
+    frame.offsets[i] = wpe_buffer_dma_buf_get_offset(dmabuf, i);
+    frame.strides[i] = wpe_buffer_dma_buf_get_stride(dmabuf, i);
+    if (frame.fds[i] < 0) {
+      for (uint32_t j = 0; j < i; j++) {
+        close(frame.fds[j]);
+      }
+      return false;
+    }
+  }
+  *out = frame;
+  return true;
+#else
+  (void)out;
   return false;
 #endif
 }

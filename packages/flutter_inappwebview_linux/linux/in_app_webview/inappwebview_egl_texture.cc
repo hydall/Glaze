@@ -2,6 +2,7 @@
 
 #include <epoxy/egl.h>
 #include <epoxy/gl.h>
+#include <unistd.h>
 
 #include "../utils/gl_context.h"
 #include "../utils/log.h"
@@ -62,6 +63,13 @@ struct _InAppWebViewEGLTexture {
   gboolean extension_checked;
   gboolean extension_available;
 
+  // GLAZE PATCH: EGLImage imported from the WebView's DMA-BUF on the EGL
+  // display of Flutter's GL context, and the frame it came from.
+  EGLImageKHR dmabuf_image;
+  EGLDisplay dmabuf_image_display;
+  uint64_t dmabuf_serial;
+  gboolean dmabuf_import_failed;
+
   // Mutex to protect frame data access
   GMutex mutex;
 };
@@ -104,6 +112,136 @@ static gboolean check_egl_image_extension(InAppWebViewEGLTexture* self) {
   return self->extension_available;
 }
 
+// GLAZE PATCH: imports the WebView's current DMA-BUF frame on the EGL display
+// of the GL context Flutter has current, binds it to texture_id and fills the
+// out params. An EGLImage has to be created on the display of the context that
+// samples it; upstream created it on WPE's headless display, which renders
+// black. Returns FALSE when there is no DMA-BUF frame or it cannot be imported
+// here; after a failed import the WebView is switched to copying pixels so the
+// pixel-buffer fallback below gets frames.
+static gboolean import_current_dmabuf(InAppWebViewEGLTexture* self, uint32_t* target,
+                                      uint32_t* name, uint32_t* out_width,
+                                      uint32_t* out_height) {
+  if (self->dmabuf_import_failed || self->webview == nullptr) {
+    return FALSE;
+  }
+
+  flutter_inappwebview_plugin::WebViewType::DmaBufFrame frame;
+  if (!self->webview->GetCurrentDmaBuf(&frame)) {
+    return FALSE;
+  }
+
+  auto close_fds = [&frame]() {
+    for (uint32_t i = 0; i < frame.n_planes; i++) {
+      close(frame.fds[i]);
+    }
+  };
+
+  if (self->dmabuf_image != EGL_NO_IMAGE_KHR && frame.serial == self->dmabuf_serial) {
+    close_fds();
+    *target = GL_TEXTURE_2D;
+    *name = self->texture_id;
+    *out_width = self->texture_width;
+    *out_height = self->texture_height;
+    return TRUE;
+  }
+
+  EGLDisplay display = eglGetCurrentDisplay();
+  if (display == EGL_NO_DISPLAY || !check_egl_image_extension(self)) {
+    // Flutter is not rendering through EGL (e.g. GLX), nothing to import on.
+    close_fds();
+    g_warning("[flutter_inappwebview] no EGL display for DMA-BUF import, "
+              "falling back to pixel copies");
+    self->dmabuf_import_failed = TRUE;
+    self->webview->SetSkipPixelReadback(false);
+    return FALSE;
+  }
+
+  static const EGLint kFdAttrs[] = {EGL_DMA_BUF_PLANE0_FD_EXT, EGL_DMA_BUF_PLANE1_FD_EXT,
+                                    EGL_DMA_BUF_PLANE2_FD_EXT, EGL_DMA_BUF_PLANE3_FD_EXT};
+  static const EGLint kOffsetAttrs[] = {
+      EGL_DMA_BUF_PLANE0_OFFSET_EXT, EGL_DMA_BUF_PLANE1_OFFSET_EXT,
+      EGL_DMA_BUF_PLANE2_OFFSET_EXT, EGL_DMA_BUF_PLANE3_OFFSET_EXT};
+  static const EGLint kPitchAttrs[] = {EGL_DMA_BUF_PLANE0_PITCH_EXT, EGL_DMA_BUF_PLANE1_PITCH_EXT,
+                                       EGL_DMA_BUF_PLANE2_PITCH_EXT, EGL_DMA_BUF_PLANE3_PITCH_EXT};
+  static const EGLint kModLoAttrs[] = {
+      EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT, EGL_DMA_BUF_PLANE1_MODIFIER_LO_EXT,
+      EGL_DMA_BUF_PLANE2_MODIFIER_LO_EXT, EGL_DMA_BUF_PLANE3_MODIFIER_LO_EXT};
+  static const EGLint kModHiAttrs[] = {
+      EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT, EGL_DMA_BUF_PLANE1_MODIFIER_HI_EXT,
+      EGL_DMA_BUF_PLANE2_MODIFIER_HI_EXT, EGL_DMA_BUF_PLANE3_MODIFIER_HI_EXT};
+  // DRM_FORMAT_MOD_INVALID: the buffer carries no explicit modifier.
+  constexpr uint64_t kModifierInvalid = 0x00ffffffffffffffULL;
+
+  EGLint attrs[6 + 10 * 4 + 1];
+  int n = 0;
+  attrs[n++] = EGL_WIDTH;
+  attrs[n++] = static_cast<EGLint>(frame.width);
+  attrs[n++] = EGL_HEIGHT;
+  attrs[n++] = static_cast<EGLint>(frame.height);
+  attrs[n++] = EGL_LINUX_DRM_FOURCC_EXT;
+  attrs[n++] = static_cast<EGLint>(frame.fourcc);
+  for (uint32_t i = 0; i < frame.n_planes; i++) {
+    attrs[n++] = kFdAttrs[i];
+    attrs[n++] = frame.fds[i];
+    attrs[n++] = kOffsetAttrs[i];
+    attrs[n++] = static_cast<EGLint>(frame.offsets[i]);
+    attrs[n++] = kPitchAttrs[i];
+    attrs[n++] = static_cast<EGLint>(frame.strides[i]);
+    if (frame.modifier != kModifierInvalid) {
+      attrs[n++] = kModLoAttrs[i];
+      attrs[n++] = static_cast<EGLint>(frame.modifier & 0xffffffff);
+      attrs[n++] = kModHiAttrs[i];
+      attrs[n++] = static_cast<EGLint>(frame.modifier >> 32);
+    }
+  }
+  attrs[n++] = EGL_NONE;
+
+  EGLImageKHR image =
+      eglCreateImageKHR(display, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, nullptr, attrs);
+  // The EGLImage holds its own references to the buffer.
+  close_fds();
+
+  if (image == EGL_NO_IMAGE_KHR) {
+    // g_warning rather than errorLog: release builds should still say why
+    // the WebView went to the slower path.
+    g_warning("[flutter_inappwebview] DMA-BUF import failed (EGL error 0x%x), "
+              "falling back to pixel copies",
+              eglGetError());
+    self->dmabuf_import_failed = TRUE;
+    self->webview->SetSkipPixelReadback(false);
+    return FALSE;
+  }
+
+  if (!self->texture_initialized) {
+    glGenTextures(1, &self->texture_id);
+    self->texture_initialized = TRUE;
+  }
+  glBindTexture(GL_TEXTURE_2D, self->texture_id);
+  self->glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, static_cast<GLeglImageOES>(image));
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glBindTexture(GL_TEXTURE_2D, 0);
+
+  // The texture keeps the new image's storage; the previous image can go.
+  if (self->dmabuf_image != EGL_NO_IMAGE_KHR) {
+    eglDestroyImageKHR(self->dmabuf_image_display, self->dmabuf_image);
+  }
+  self->dmabuf_image = image;
+  self->dmabuf_image_display = display;
+  self->dmabuf_serial = frame.serial;
+  self->texture_width = frame.width;
+  self->texture_height = frame.height;
+
+  *target = GL_TEXTURE_2D;
+  *name = self->texture_id;
+  *out_width = frame.width;
+  *out_height = frame.height;
+  return TRUE;
+}
+
 // Populate callback - called by Flutter to get the OpenGL texture
 static gboolean inappwebview_egl_texture_populate(FlTextureGL* texture, uint32_t* target,
                                                   uint32_t* name, uint32_t* out_width,
@@ -138,6 +276,12 @@ static gboolean inappwebview_egl_texture_populate(FlTextureGL* texture, uint32_t
     g_set_error(error, g_quark_from_static_string("InAppWebViewEGLTexture"), 1,
                 "No EGL/GL context current - will retry");
     return FALSE;
+  }
+
+  if (import_current_dmabuf(self, target, name, out_width, out_height)) {
+    self->has_new_frame = FALSE;
+    g_mutex_unlock(&self->mutex);
+    return TRUE;
   }
 
   // Use the EGL image that was set via inappwebview_egl_texture_set_egl_image()
@@ -287,6 +431,12 @@ static void inappwebview_egl_texture_dispose(GObject* object) {
   self->default_texture_initialized = FALSE;
   self->current_egl_image = nullptr;
 
+  // Destroying an EGLImage needs its display, not a current context.
+  if (self->dmabuf_image != EGL_NO_IMAGE_KHR) {
+    eglDestroyImageKHR(self->dmabuf_image_display, self->dmabuf_image);
+    self->dmabuf_image = EGL_NO_IMAGE_KHR;
+  }
+
   g_mutex_unlock(&self->mutex);
   g_mutex_clear(&self->mutex);
 
@@ -315,6 +465,10 @@ static void inappwebview_egl_texture_init(InAppWebViewEGLTexture* self) {
   self->glEGLImageTargetTexture2DOES = nullptr;
   self->extension_checked = FALSE;
   self->extension_available = FALSE;
+  self->dmabuf_image = EGL_NO_IMAGE_KHR;
+  self->dmabuf_image_display = EGL_NO_DISPLAY;
+  self->dmabuf_serial = 0;
+  self->dmabuf_import_failed = FALSE;
   g_mutex_init(&self->mutex);
 }
 

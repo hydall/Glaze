@@ -305,8 +305,27 @@ class InAppWebView {
   // The EGL image is owned by WPE and remains valid until the next frame.
   void* GetCurrentEglImage(uint32_t* out_width, uint32_t* out_height) const;
 
+  // GLAZE PATCH: the current frame's DMA-BUF, for the GL texture to import
+  // on its own EGL display. The fds are dup'ed; the caller closes them.
+  // `serial` changes with every new frame.
+  struct DmaBufFrame {
+    static constexpr uint32_t kMaxPlanes = 4;
+    uint32_t fourcc = 0;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    uint32_t n_planes = 0;
+    int fds[kMaxPlanes] = {-1, -1, -1, -1};
+    uint32_t offsets[kMaxPlanes] = {0, 0, 0, 0};
+    uint32_t strides[kMaxPlanes] = {0, 0, 0, 0};
+    uint64_t modifier = 0;
+    uint64_t serial = 0;
+  };
+  bool GetCurrentDmaBuf(DmaBufFrame* out) const;
+
   // Skip pixel readback - when using zero-copy EGL texture mode, we don't need
   // to read pixels back to CPU. This improves performance and avoids GL context issues.
+  // GLAZE PATCH: also called from Flutter's raster thread to fall back to the
+  // pixel import when the GL texture cannot import a DMA-BUF.
   void SetSkipPixelReadback(bool skip) { skip_pixel_readback_ = skip; }
 
   // Frame available callback (called when new frame is ready)
@@ -478,6 +497,7 @@ class InAppWebView {
   void* current_egl_image_ = nullptr;     // EGL image created from current buffer
   uint32_t current_buffer_width_ = 0;     // Width of current buffer
   uint32_t current_buffer_height_ = 0;    // Height of current buffer
+  uint64_t current_buffer_serial_ = 0;    // GLAZE PATCH: bumped per DMA-BUF frame
   gulong buffer_rendered_handler_ = 0;    // Signal handler ID for buffer-rendered
   gulong scale_changed_handler_ = 0;      // Signal handler ID for notify::scale-factor
   mutable std::mutex wpe_buffer_mutex_;   // Mutex for thread-safe buffer access
@@ -522,7 +542,7 @@ class InAppWebView {
   
   // Flag to skip pixel readback when using zero-copy EGL texture mode
   // When true, OnExportDmaBuf won't call ReadPixelsFromEglImage
-  bool skip_pixel_readback_ = false;
+  std::atomic<bool> skip_pixel_readback_{false};
 
   // View dimensions
   int width_ = 800;
