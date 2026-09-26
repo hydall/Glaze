@@ -423,7 +423,7 @@ class _InAppWebViewEngineController implements JsEngineController {
   }) async {
     _controller.addJavaScriptHandler(
       handlerName: handlerName,
-      callback: callback,
+      callback: (JavaScriptHandlerFunctionData data) => callback(data.args),
     );
   }
 
