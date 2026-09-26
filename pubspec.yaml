@@ -78,3 +78,9 @@ flutter:
       fonts:
         - asset: assets/fonts/InterVariable.ttf
 
+
+dependency_overrides:
+  # Vendored copy of the Linux WebView backend with a frame-import fix; see
+  # packages/flutter_inappwebview_linux/GLAZE_PATCHES.md.
+  flutter_inappwebview_linux:
+    path: packages/flutter_inappwebview_linux
