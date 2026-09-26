@@ -26,7 +26,7 @@ on:
         default: true
         type: boolean
       build_linux:
-        description: 'Linux (DEB + pacman + AppImage + tar.zst)'
+        description: 'Linux (pacman + tar.zst)'
         required: false
         default: true
         type: boolean
@@ -535,7 +535,30 @@ jobs:
     needs: metadata
     if: ${{ github.event.inputs.build_linux == 'true' }}
     runs-on: ubuntu-latest
+    # flutter_inappwebview's Linux backend needs WPE WebKit at build time, and
+    # Arch ships it in its official repos while Ubuntu does not package it at
+    # all — so the whole job runs in an Arch container. Everything that touches
+    # Flutter runs as an unprivileged `builder` user: makepkg refuses to run as
+    # root, and keeping one owner for the SDK, pub cache and workspace avoids
+    # permission clashes between steps.
+    container: archlinux:latest
+    env:
+      PUB_CACHE: /home/builder/.pub-cache
     steps:
+      - name: Install Arch build dependencies
+        # base-devel brings makepkg/fakeroot for the pacman package. wpewebkit is
+        # the WebView engine; wpebackend-fdo is the plugin's fallback backend in
+        # case the distro build lacks the headless WPEPlatform. gstreamer and
+        # gst-plugins-base-libs provide the pkg-config modules audioplayers_linux
+        # requires. The rest is the Flutter Linux desktop toolchain.
+        run: |
+          pacman -Syu --noconfirm --needed \
+            base-devel git curl unzip zip xz which zstd \
+            clang cmake ninja pkgconf gtk3 libsecret wayland libepoxy \
+            gstreamer gst-plugins-base-libs \
+            wpewebkit wpebackend-fdo
+          useradd -m builder
+
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.ref_name }}
@@ -562,48 +585,32 @@ jobs:
             echo "GDRIVE_REDIRECT_NATIVE=com.hydall.glaze://oauth/gdrive"
           } >> .env
 
-      - name: Install Linux dependencies
-        # pacman-package-manager brings makepkg, which the packaging script uses
-        # for the Arch/CachyOS package. libgstreamer1.0-dev and
-        # libgstreamer-plugins-base1.0-dev provide the gstreamer-1.0 /
-        # gstreamer-audio-1.0 pkg-config modules that audioplayers_linux's
-        # CMakeLists requires — without them CMake configure fails before
-        # Flutter even starts compiling. The rest is the standard Flutter Linux
-        # desktop toolchain.
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y clang cmake git ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev pacman-package-manager libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
-
-          # pacman-package-manager on Ubuntu ships no alpm database at its
-          # dbpath (/var/lib/pacman/), so makepkg's dependency check fails with
-          # "could not create database" on a fresh runner. makepkg refuses to
-          # run as root, so the directory has to be created and owned by the
-          # runner user here, ahead of time.
-          sudo mkdir -p /var/lib/pacman
-          sudo chown -R "$(id -u):$(id -g)" /var/lib/pacman
-
       - name: Install Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.44.9'
-          channel: 'stable'
-          cache: true
+        # subosito/flutter-action targets the stock runner image; a plain clone
+        # of the pinned tag behaves the same inside the container.
+        run: |
+          git clone --depth 1 --branch 3.44.9 https://github.com/flutter/flutter.git /home/builder/flutter
+          echo "/home/builder/flutter/bin" >> "$GITHUB_PATH"
 
       - name: Cache pub
         uses: actions/cache@v4
         with:
-          path: ~/.pub-cache
-          key: pub-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
-          restore-keys: pub-${{ runner.os }}-
+          path: /home/builder/.pub-cache
+          key: pub-arch-${{ hashFiles('pubspec.lock') }}
+          restore-keys: pub-arch-
+
+      - name: Hand the workspace to the build user
+        run: chown -R builder:builder "$GITHUB_WORKSPACE" /home/builder
 
       - name: Install dependencies
-        run: flutter pub get
+        run: runuser -u builder -- env HOME=/home/builder PATH="$PATH" flutter pub get
 
       - name: Generate code
-        run: dart run build_runner build --delete-conflicting-outputs
+        run: runuser -u builder -- env HOME=/home/builder PATH="$PATH" dart run build_runner build --delete-conflicting-outputs
 
       - name: Build Linux packages (release)
         run: >
+          runuser -u builder -- env HOME=/home/builder PATH="$PATH"
           ./scripts/build_linux_packages.sh
           "--dart-define=APP_VERSION=${{ needs.metadata.outputs.version }}"
           "--dart-define=BUILD_DATE=${{ needs.metadata.outputs.build_date }}"
@@ -621,27 +628,13 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          DEB=(build/linux/deb/*.deb)
           PKG=(build/linux/arch/*.pkg.tar.zst)
-          APPIMG=(build/linux/appimage/*.AppImage)
           TARZST=(build/linux/tarzst/*.tar.zst)
-
-          if [ ${#DEB[@]} -gt 0 ]; then
-            mv "${DEB[0]}" "build/linux/deb/${SLUG}-linux.deb"
-          else
-            echo "::warning::No .deb was produced — dpkg-deb missing or the build failed."
-          fi
 
           if [ ${#PKG[@]} -gt 0 ]; then
             mv "${PKG[0]}" "build/linux/arch/${SLUG}-linux.pkg.tar.zst"
           else
             echo "::warning::No pacman package was produced — makepkg missing or the build failed."
-          fi
-
-          if [ ${#APPIMG[@]} -gt 0 ]; then
-            mv "${APPIMG[0]}" "build/linux/appimage/${SLUG}-linux.AppImage"
-          else
-            echo "::warning::No AppImage was produced — linuxdeploy missing or the build failed."
           fi
 
           if [ ${#TARZST[@]} -gt 0 ]; then
@@ -650,28 +643,16 @@ jobs:
             echo "::warning::No .tar.zst was produced — zstd missing or the build failed."
           fi
 
-          if [ ${#DEB[@]} -eq 0 ] && [ ${#PKG[@]} -eq 0 ] && [ ${#APPIMG[@]} -eq 0 ] && [ ${#TARZST[@]} -eq 0 ]; then
+          if [ ${#PKG[@]} -eq 0 ] && [ ${#TARZST[@]} -eq 0 ]; then
             echo "::error::build_linux_packages.sh produced no package at all."
             exit 1
           fi
-
-      - name: Upload DEB artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Glaze-release-DEB
-          path: "build/linux/deb/${{ needs.metadata.outputs.file_slug }}-linux.deb"
 
       - name: Upload Pacman artifact
         uses: actions/upload-artifact@v4
         with:
           name: Glaze-release-Pacman
           path: "build/linux/arch/${{ needs.metadata.outputs.file_slug }}-linux.pkg.tar.zst"
-
-      - name: Upload AppImage artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Glaze-release-AppImage
-          path: "build/linux/appimage/${{ needs.metadata.outputs.file_slug }}-linux.AppImage"
 
       - name: Upload tar.zst artifact
         uses: actions/upload-artifact@v4
