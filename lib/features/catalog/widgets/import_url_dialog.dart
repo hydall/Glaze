@@ -25,6 +25,7 @@ import '../services/extraction_status.dart';
 import '../services/saucepan_extractor.dart';
 import 'catalog_detail_launcher.dart';
 import 'datacat_phase_label.dart';
+import 'saucepan_login_sheet.dart';
 import '../../../shared/widgets/glaze_sheet.dart';
 
 class ImportUrlDialog extends ConsumerStatefulWidget {
@@ -180,11 +181,14 @@ class _ImportUrlDialogState extends ConsumerState<ImportUrlDialog> {
       return;
     }
 
-    // Saucepan companion links extract LOCALLY (on-device fragment reassembly)
-    // when the user has configured a Saucepan token; otherwise they fall through
-    // to the remote DataCat path below.
-    if (_isSaucepanCompanionUrl(url) &&
-        ref.read(saucepanAccountProvider).isLoggedIn) {
+    // Saucepan companion links always extract LOCALLY (on-device fragment
+    // reassembly), which needs the account's token. Without one, ask for a
+    // login first rather than silently falling through to the remote path.
+    if (_isSaucepanCompanionUrl(url)) {
+      if (!ref.read(saucepanAccountProvider).isLoggedIn) {
+        final loggedIn = await showSaucepanLoginRequiredSheet(context, ref);
+        if (!mounted || !loggedIn) return;
+      }
       await _extractSaucepanLocal(url);
       return;
     }
@@ -286,9 +290,9 @@ class _ImportUrlDialogState extends ConsumerState<ImportUrlDialog> {
     return isHost && parseCompanionId(url) != null;
   }
 
-  /// Extracts a Saucepan companion on-device (no browser) and imports it. Used
-  /// only when a Saucepan token is configured — otherwise the remote DataCat
-  /// path handles saucepan.ai links.
+  /// Extracts a Saucepan companion on-device (no browser) and imports it.
+  /// Reached only with a Saucepan token; an open definition reassembles from
+  /// the account's fragments, a closed one surfaces as a [SaucepanException].
   Future<void> _extractSaucepanLocal(String url) async {
     setState(() {
       _loading = true;

@@ -211,7 +211,8 @@ void main() {
   group('what the reader is told', () {
     test('a Saucepan failure names the reason that accounts for it', () {
       final message = extractionFinishedEmptyMessage(isSaucepan: true);
-      expect(message, contains('vetted providers'));
+      expect(message, contains('closed definition'));
+      expect(message, contains('does not plan'));
       expect(message, isNot(contains('timed out')));
     });
 

@@ -30,9 +30,10 @@ Future<void> openThirdPartyProvidersScreen(BuildContext context) {
 }
 
 /// Lists the five content sources (JanitorAI, Janny, Datacat, Chub, Saucepan),
-/// each as a group that can be toggled on/off. Disabling a group hides that
-/// provider from the catalog and collapses its per-provider settings (e.g. the
-/// account login for JanitorAI and Saucepan).
+/// each as a group. The four browse providers can be toggled on/off: disabling
+/// one hides it from the catalog and collapses its per-provider settings.
+/// Saucepan has no toggle — it is always on and only backs URL import, so its
+/// account settings are always shown.
 class ThirdPartyProvidersScreen extends ConsumerWidget {
   const ThirdPartyProvidersScreen({super.key});
 
@@ -98,18 +99,24 @@ class ThirdPartyProvidersScreen extends ConsumerWidget {
     ThirdPartyProvider p, {
     required bool enabled,
   }) {
+    // Saucepan is always on: it is not a browse source, so it has no
+    // enable/disable switch and its account settings are always visible.
+    final toggleable = p != ThirdPartyProvider.saucepan;
     return MenuGroup(
       header: _label(p),
       headerIconWidget: ProviderLogo(provider: p),
       description: _description(p),
-      headerTrailing: _GroupSwitch(
-        value: enabled,
-        onChanged: (v) =>
-            ref.read(thirdPartyProvidersProvider.notifier).setEnabled(p, v),
-      ),
+      headerTrailing: toggleable
+          ? _GroupSwitch(
+              value: enabled,
+              onChanged: (v) => ref
+                  .read(thirdPartyProvidersProvider.notifier)
+                  .setEnabled(p, v),
+            )
+          : null,
       items: [
         // Per-provider settings are only shown while the group is enabled.
-        if (enabled) ..._settingsFor(context, ref, p),
+        if (enabled || !toggleable) ..._settingsFor(context, ref, p),
       ],
     );
   }
