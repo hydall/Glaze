@@ -19,7 +19,15 @@ export class MessageUpdateBatcher {
     this._pending.clear();
     this._rafScheduled = false;
     for (const [id, fn] of batch) {
-      fn(id);
+      // One message's update throwing must not drop the rest of the frame's
+      // updates. The end of a generation enqueues several in one batch, so a
+      // single bad map (a reasoning reply stamping its clock, say) used to
+      // abort the loop and leave every later message in the batch unrendered.
+      try {
+        fn(id);
+      } catch (e) {
+        console.error('Message update failed:', id, e);
+      }
     }
   }
 

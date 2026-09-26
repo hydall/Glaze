@@ -906,7 +906,12 @@ if (messageData.isEditing) classes.push('editing');
         if (msg.gameTime) {
           if (!clock) {
             clock = this._createGameTimeBlock(msg.gameTime);
-            const wrapper = stack.querySelector('.msg-transition-wrapper');
+            // The reasoning panel nests its own `.msg-transition-wrapper`, so a
+            // plain descendant query matches that one first and insertBefore
+            // throws (the node is not a direct child of the stack) whenever a
+            // reasoning message is stamped with a clock. Scope to the stack's
+            // own body wrapper: the clock belongs between reasoning and body.
+            const wrapper = stack.querySelector(':scope > .msg-transition-wrapper');
             stack.insertBefore(clock, wrapper || null);
           } else {
             clock.textContent = `⏱ ${msg.gameTime}`;
