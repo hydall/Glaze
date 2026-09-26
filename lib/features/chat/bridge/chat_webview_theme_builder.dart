@@ -74,6 +74,7 @@ class ChatWebViewThemeBuilder {
       'bg-color': _colorHex(cs.surface),
       'text-color': _colorHex(cs.onSurface),
       'ui-bg-rgb': _colorRgb(cs.surface),
+      'vk-blue': _colorHex(primary),
       'vk-blue-rgb': _colorRgb(primary),
       'primary-rgb': _colorRgb(primary),
       'user-bubble-color-rgb': _colorRgb(glaze.userBubble),
