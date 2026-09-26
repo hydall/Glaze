@@ -39,7 +39,7 @@ dependencies:
   photo_manager: ^3.10.0
   flex_color_scheme: ^8.4.0
   dynamic_color: ^1.7.0
-  flutter_inappwebview: ^6.1.5
+  flutter_inappwebview: 6.2.0-beta.3
   easy_localization: ^3.0.7
   audioplayers: ^6.1.0
   sensors_plus: ^6.1.1
