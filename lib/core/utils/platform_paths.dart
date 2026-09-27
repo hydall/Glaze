@@ -109,22 +109,31 @@ String relativeGlazeFilePath(String path) {
 /// Two characters minimum, so a Windows drive letter is not read as one.
 final RegExp _urlSchemeRegex = RegExp(r'^[a-zA-Z][a-zA-Z0-9+.-]+:');
 
-/// Returns the on-disk path to the 512px thumbnail JPG for a stored avatar
-/// path when that thumbnail exists, otherwise the resolved full-resolution
-/// avatar path (or `null` when there is no avatar).
+/// Extensions a generated list/card thumbnail can carry, most-preferred first.
+///
+/// Transparent portraits are stored as PNG so their cut-out survives; opaque
+/// art stays a smaller JPEG. Both are valid on disk, so path resolution checks
+/// them in this order.
+const List<String> kThumbnailExtensions = ['png', 'jpg'];
+
+/// Returns the on-disk path to the generated list/card thumbnail for a stored
+/// avatar path when one exists, otherwise the resolved full-resolution avatar
+/// path (or `null` when there is no avatar).
 ///
 /// Lists (character grid, folder cards, chat history) should prefer this over
-/// [resolveGlazeFilePath] so that scrolling decodes small square JPGs instead
-/// of the multi-megabyte source PNGs — the latter causes visible jank and
-/// delayed "pop-in" the first time each card scrolls into view.
+/// [resolveGlazeFilePath] so that scrolling decodes small JPG/PNG thumbnails
+/// instead of the multi-megabyte source PNGs — the latter causes visible jank
+/// and delayed "pop-in" the first time each card scrolls into view.
 String? resolveGlazeThumbnailPath(String? avatarPath) {
   final resolved = resolveGlazeFilePath(avatarPath);
   if (resolved == null || resolved.isEmpty) return resolved;
   final name = p.basenameWithoutExtension(resolved);
-  // avatars/<id>.png -> <base>/thumbnails/<id>.jpg
+  // avatars/<id>.png -> <base>/thumbnails/<id>.png (transparent) or .jpg
   final base = p.dirname(p.dirname(resolved));
-  final thumb = p.join(base, 'thumbnails', '$name.jpg');
-  if (File(thumb).existsSync()) return thumb;
+  for (final ext in kThumbnailExtensions) {
+    final thumb = p.join(base, 'thumbnails', '$name.$ext');
+    if (File(thumb).existsSync()) return thumb;
+  }
   return resolved;
 }
 

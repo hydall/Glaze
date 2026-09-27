@@ -554,8 +554,10 @@ class CharactersNotifier extends AsyncNotifier<List<Character>> {
           if (await avatar.exists()) await avatar.delete();
           final name = p.basenameWithoutExtension(resolved);
           final dir = p.dirname(p.dirname(resolved));
-          final thumb = File(p.join(dir, 'thumbnails', '$name.jpg'));
-          if (await thumb.exists()) await thumb.delete();
+          for (final ext in kThumbnailExtensions) {
+            final thumb = File(p.join(dir, 'thumbnails', '$name.$ext'));
+            if (await thumb.exists()) await thumb.delete();
+          }
         }
       }
       if (character.gallery.isNotEmpty) {
