@@ -182,6 +182,15 @@ Future<void> initChatWebViewEnvironment() async {
     _janitorWebViewUserAgent = await _deriveMobileJanitorWebViewUA();
     return;
   }
+  if (defaultTargetPlatform == TargetPlatform.linux) {
+    // WPE WebKit also puts a `file://` page on an opaque origin, so the
+    // chat's ES module imports fail. The Linux bundle keeps assets under
+    // `data/flutter_assets` like Windows, so serve them from disk.
+    await getAppDataDir();
+    await _startChatWebViewLocalFileServer();
+    await _startChatWebViewAssetServer();
+    return;
+  }
   if (defaultTargetPlatform != TargetPlatform.windows) return;
   if (_chatWebViewEnvironment != null) return;
 
@@ -228,7 +237,7 @@ Future<void> _startChatWebViewAssetServer() async {
 }
 
 /// Loopback server for approved Glaze media files. It intentionally uses a
-/// different origin from the iOS/Windows chat asset server.
+/// different origin from the iOS/Windows/Linux chat asset server.
 Future<void> _startChatWebViewLocalFileServer() async {
   if (_chatWebViewLocalFileServer != null) return;
 
@@ -506,7 +515,7 @@ Directory _glazeDataDirectory() {
     final root = chatWebViewAndroidFileRoot;
     if (root != null && root.isNotEmpty) return Directory(root);
   }
-  if (Platform.isIOS) {
+  if (Platform.isIOS || Platform.isLinux) {
     final root = cachedAppDataDir;
     if (root != null && root.isNotEmpty) return Directory(root);
   }

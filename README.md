@@ -58,7 +58,7 @@ Download the latest release from the [Releases](https://github.com/hydall/Glaze/
 - **Android** — Install the APK directly on your device.
 - **iOS** — Sideload the IPA using [AltStore](https://altstore.io/) or a similar tool. App Store distribution is not yet available.
 - **Windows** — Download the Windows build and run it directly on your PC.
-- **Linux** — Download the published AppImage, the `.tar.zst` archive, or the DEB or pacman package when available for the release.
+- **Linux** — Install the pacman package on Arch-based distros (it pulls in WPE WebKit), or unpack the `.tar.zst` archive on another rolling distro with WPE WebKit installed. Ubuntu and Debian are not supported yet: they do not package WPE WebKit.
 - **macOS** — Buildable from source, but not currently published as a prebuilt release.
 
 Backups from **SillyTavern** (`.zip`) can be imported via **Menu → Backups**.

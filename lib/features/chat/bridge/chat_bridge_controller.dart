@@ -416,12 +416,14 @@ class ChatBridgeController {
       final spec = entry.value;
       _controller.addJavaScriptHandler(
         handlerName: name,
-        callback: (args) => _dispatch(name, spec, args),
+        callback: (JavaScriptHandlerFunctionData data) =>
+            _dispatch(name, spec, data.args),
       );
     }
     _controller.addJavaScriptHandler(
       handlerName: 'glazeBridge',
-      callback: (args) async {
+      callback: (JavaScriptHandlerFunctionData data) async {
+        final args = data.args;
         final raw = args.isNotEmpty ? args.first : const <String, dynamic>{};
         final request = raw is Map<String, dynamic>
             ? raw

@@ -124,19 +124,24 @@ selector.
 
 | Workflow | File | Produces |
 |----------|------|----------|
-| *Build (Branch)* | `.github/workflows/build-branch.yml` | Dev build of any branch — APK, Windows ZIP, IPA, Linux DEB + pacman package as run artifacts |
+| *Build (Branch)* | `.github/workflows/build-branch.yml` | Dev build of any branch — APK, Windows ZIP, IPA, Linux pacman package + `.tar.zst` as run artifacts |
 | *Build Release (Publish)* | `.github/workflows/build-release.yml` | The same set, plus a tagged GitHub Release carrying them as assets |
 
 **Platform selection.** Each workflow has an *Android (APK)* / *Windows (ZIP)* /
-*iOS (IPA)* / *Linux (DEB + pacman)* checkbox, all on by default. An unchecked
+*iOS (IPA)* / *Linux (pacman + tar.zst)* checkbox, all on by default. An unchecked
 platform does not build at all, so it costs no runner time and is absent from the
 release and the Telegram post. Unchecking every platform leaves nothing to do and
 the run stops after the metadata job.
 
-The Linux job produces two packages from `scripts/build_linux_packages.sh` — a
-`.deb` (dpkg-deb) and an Arch/CachyOS `.pkg.tar.zst` (makepkg). A format whose
-tooling is missing is skipped with a warning rather than failing the job; the run
-only fails when neither package comes out.
+The Linux job runs in an `archlinux:latest` container, because the
+`flutter_inappwebview` Linux backend needs WPE WebKit at build time and Arch is
+where it is packaged (Ubuntu does not ship it). It produces two packages from
+`scripts/build_linux_packages.sh`: an Arch/CachyOS `.pkg.tar.zst` (makepkg) that
+depends on `wpewebkit`, and a portable `.tar.zst` of the bundle for other rolling
+distros with WPE WebKit installed. DEB and AppImage are not built: a binary built
+against Arch's glibc does not start on Ubuntu/Debian LTS, and neither ships WPE
+WebKit. A format whose tooling is missing is skipped with a warning rather than
+failing the job; the run only fails when neither package comes out.
 
 **Telegram delivery.** `post_to_telegram` announces the build in the public
 group and replies to that announcement with each selected file;

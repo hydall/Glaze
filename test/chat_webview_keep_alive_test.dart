@@ -20,6 +20,12 @@ void main() {
       expect(chatWebViewKeepAliveForPlatform(), isNull);
     });
 
+    test('does not attach keepAlive on Linux', () {
+      debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+
+      expect(chatWebViewKeepAliveForPlatform(), isNull);
+    });
+
     test('reuses app-start preload keepAlive on mobile', () {
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
 
