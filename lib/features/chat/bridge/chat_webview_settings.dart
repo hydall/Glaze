@@ -21,14 +21,18 @@ void setChatWebViewAndroidFileRoot(String root) {
 
 /// Value for [InAppWebViewSettings.transparentBackground].
 ///
-/// On Windows, `flutter_inappwebview_windows` 0.6.x inverts this flag in native
-/// code (true leaves an opaque white WebView2 surface). Pass `false` there so
-/// WebView2 gets a transparent default background and the Flutter stack behind
-/// the chat WebView is visible. See flutter_inappwebview issue #2735.
-bool chatWebViewTransparentBackground() {
-  if (defaultTargetPlatform == TargetPlatform.windows) return false;
-  return true;
-}
+/// Every platform wants a transparent WebView so the Flutter stack behind the
+/// chat — custom background, dim, and the chromeless glass the page mirrors —
+/// shows through the page's transparent `html, body`.
+///
+/// `flutter_inappwebview_windows` 0.6.x used to invert the flag natively: it
+/// made the WebView2 surface transparent only when this was `false`, which is
+/// why Windows used to pass `false` here (flutter_inappwebview issue #2735).
+/// `0.7.0-beta.3`, shipped with the 6.2.0-beta.3 upgrade that added the Linux
+/// backend, fixed the inversion — `true` now means transparent — so the old
+/// `false` on Windows left WebView2 on its opaque white default and the chat
+/// painted on a white box. Always `true` from here on.
+bool chatWebViewTransparentBackground() => true;
 
 /// Value for [InAppWebViewSettings.allowFileAccessFromFileURLs].
 ///
