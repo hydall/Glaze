@@ -61,8 +61,8 @@ Duration timeoutForPayload(int payloadBytes, {Duration? base, Duration? cap}) {
 
 /// Long-lived isolate worker that runs buildPrompt off the main thread.
 ///
-/// The isolate loads its own o200k_base tokenizer once at startup and
-/// maintains a persistent token cache across requests.
+/// The isolate loads its own copy of the active tokenizer (see
+/// [setTokenizer]) and maintains a persistent token cache across requests.
 class PromptWorker {
   /// Overridden by queue timeout tests.
   static Duration requestTimeout = const Duration(seconds: 60);
@@ -72,6 +72,20 @@ class PromptWorker {
 
   static PromptWorker? _instance;
   static Completer<PromptWorker>? _initGuard;
+
+  /// The tokenizer the isolate should count with. Kept statically so a
+  /// respawned isolate (after a timeout) comes back counting the same way.
+  static TokenizerKind _tokenizer = TokenizerKind.approx;
+
+  /// Points the worker at [kind], whose cache must already exist. Applies to
+  /// requests queued after this call; a worker that is not running yet picks
+  /// it up when it starts.
+  static Future<void> setTokenizer(TokenizerKind kind) async {
+    _tokenizer = kind;
+    final worker = _instance;
+    if (worker == null) return;
+    await worker._send('setTokenizer', kind.id);
+  }
 
   Isolate? _isolate;
   ReceivePort? _commandPort;
@@ -107,7 +121,7 @@ class PromptWorker {
   static Future<PromptWorker> _create() async {
     final worker = PromptWorker._();
     await worker._spawnIsolate();
-    await worker._send('init', null);
+    await worker._send('init', _tokenizer.id);
     return worker;
   }
 
@@ -228,7 +242,7 @@ class PromptWorker {
       // Preloading must complete before retained requests are dispatched.
       await _send(
         'init',
-        null,
+        _tokenizer.id,
         addFirst: true,
         timeout: const Duration(seconds: 60),
       );
@@ -359,7 +373,10 @@ void _isolateEntryPoint(List<dynamic> args) {
     try {
       switch (command) {
         case 'init':
-          await preloadO200kBaseInIsolate(appSupportPath);
+        case 'setTokenizer':
+          final kind =
+              TokenizerKind.fromId(data as String?) ?? TokenizerKind.approx;
+          await activateTokenizer(kind, appSupportPath);
           responseSendPort.send([id, 'ok']);
 
         case 'buildPrompt':

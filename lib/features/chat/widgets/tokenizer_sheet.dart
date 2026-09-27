@@ -13,6 +13,9 @@ import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/sheet_view.dart';
 import '../../../shared/widgets/glass_surface.dart';
 import '../../settings/api_settings_screen.dart';
+import '../../settings/tokenizer_labels.dart';
+import '../../settings/tokenizer_provider.dart';
+import '../../../core/llm/tokenizer.dart';
 import '../chat_provider.dart';
 import '../state/cached_token_breakdown.dart';
 import '../state/token_breakdown_cache.dart';
@@ -219,6 +222,12 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
       },
     );
 
+    // A different tokenizer makes every number on screen stale; app-level
+    // listeners already dropped the cached breakdowns.
+    ref.listen(tokenizerStatusProvider.select((s) => s.active), (prev, next) {
+      if (prev != null && prev != next && !_loading) _calculate();
+    });
+
     final contextSize = _contextSize ?? 4096;
     final bd = _breakdown;
     final used = bd?.totalTokens ?? 0;
@@ -314,6 +323,8 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
             remaining: remaining,
             historyFill: historyFill,
           ),
+          const SizedBox(height: 12),
+          _buildTokenizerTile(context),
           const SizedBox(height: 24),
           TokenizerLayout(breakdown: bd, contextSize: contextSize),
           if (bd.cutoffIndex > 0) ...[
@@ -352,6 +363,28 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+extension on _TokenizerSheetState {
+  Widget _buildTokenizerTile(BuildContext context) {
+    final status = ref.watch(tokenizerStatusProvider);
+    final setting = ref.watch(
+      activeApiConfigProvider.select((c) => c?.tokenizer ?? kTokenizerAuto),
+    );
+    final pending = status.requested != status.active;
+    return TokenizerInfoTile(
+      activeLabel: tokenizerLabel(status.active),
+      pendingLabel: pending ? tokenizerLabel(status.requested) : null,
+      isAuto: TokenizerKind.fromId(setting) == null,
+      downloading: pending && status.phase == TokenizerPhase.downloading,
+      failed: pending && status.phase == TokenizerPhase.failed,
+      onRetry: () => ref.read(tokenizerStatusProvider.notifier).retry(),
+      onOpenSettings: () => showApiSettingsSheet(
+        context,
+        focusSection: ApiSettingsSection.context,
       ),
     );
   }

@@ -115,7 +115,8 @@ lib/
 │   │   ├── stream_accumulator.dart   # Parses inline <think…> tags from stream
 │   │   ├── response_normalizer.dart  # Extracts content from non-streaming response body
 │   │   ├── summary_service.dart      # Reads/writes summaries, triggers LLM regeneration
-│   │   ├── tokenizer.dart            # estimateTokens() with LRU cache, base64 stripping
+│   │   ├── tokenizer.dart            # estimateTokens() with the active tokenizer (per isolate), cache, base64 stripping
+│   │   ├── tokenizers/               # HF tokenizer.json BPE engine, binary cache codec, download store, model → tokenizer mapping
 │   │   ├── macro_engine.dart         # SillyTavern-compatible macro replacement engine
 │   │   ├── memory_formatting.dart    # Shared formatMemoryItems / formatMemoryRange helpers
 │   │   ├── vector_math.dart          # cosineSimilarity, findTopK, findTopKMulti, BLOB helpers

@@ -24,6 +24,9 @@ import 'core/services/preset_seeder.dart';
 import 'features/chat_history/chat_history_provider.dart';
 import 'features/settings/api_list_provider.dart';
 import 'features/settings/app_settings_provider.dart';
+import 'features/settings/tokenizer_provider.dart';
+import 'features/chat/state/cached_token_breakdown.dart';
+import 'features/chat/state/token_breakdown_cache.dart';
 import 'shared/widgets/desktop_popup.dart';
 import 'shared/theme/theme_font_provider.dart';
 import 'core/services/onboarding_service.dart';
@@ -183,7 +186,10 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
         ref.read(ledgerReconciliationLeaseRepoProvider).clearProcessOrphans,
       );
       await _runStartupStep('dotenv', () => dotenv.load(fileName: '.env'));
-      await _runStartupStep('tokenizer', preloadO200kBase);
+      await _runStartupStep(
+        'tokenizer',
+        ref.read(tokenizerStatusProvider.notifier).restore,
+      );
       await _runStartupStep('prompt worker', PromptWorker.ensureInitialized);
       await _runStartupStep(
         'chat webview environment',
@@ -239,10 +245,32 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
     unawaited(
       ref.read(sessionLorebookEmbeddingWorkerProvider).recoverAndDrain(),
     );
+    _syncTokenizerWithConnection();
     _updateChecks = AutomaticUpdateCheckController(
       check: (presentedUpdateIds) =>
           checkAndShowUpdateOnStartup(presentedUpdateIds: presentedUpdateIds),
     )..start();
+  }
+
+  /// Follows the active connection's tokenizer (downloading it on first use),
+  /// and drops token breakdowns counted with the previous one.
+  void _syncTokenizerWithConnection() {
+    _warmSubs.add(
+      ref.listenManual<TokenizerKind?>(requestedTokenizerProvider, (_, next) {
+        if (next == null) return;
+        unawaited(ref.read(tokenizerStatusProvider.notifier).activate(next));
+      }, fireImmediately: true),
+    );
+    _warmSubs.add(
+      ref.listenManual<TokenizerKind>(
+        tokenizerStatusProvider.select((status) => status.active),
+        (previous, next) {
+          if (previous == null || previous == next) return;
+          TokenBreakdownCache.invalidate();
+          ref.invalidate(cachedTokenBreakdownProvider);
+        },
+      ),
+    );
   }
 
   void _listenNotificationNavigation() {

@@ -107,6 +107,7 @@ class ApiConfigRepo implements SyncApiConfigStore {
     promptPostProcessing: c.promptPostProcessing,
     firstChunkTimeoutMs: c.firstChunkTimeoutMs,
     useSystemInstruction: c.useSystemInstruction,
+    tokenizer: c.tokenizer,
     extraRequestParameters:
         (jsonDecode(c.extraRequestParametersJson) as List<dynamic>)
             .map(
@@ -169,6 +170,7 @@ class ApiConfigRepo implements SyncApiConfigStore {
     promptPostProcessing: Value(m.promptPostProcessing),
     firstChunkTimeoutMs: Value(m.firstChunkTimeoutMs),
     useSystemInstruction: Value(m.useSystemInstruction),
+    tokenizer: Value(m.tokenizer),
     extraRequestParametersJson: Value(
       jsonEncode(
         m.extraRequestParameters.map((value) => value.toJson()).toList(),

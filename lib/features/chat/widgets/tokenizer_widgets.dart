@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/llm/context_calculator.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 
 final kSourceMeta = <String, SourceMeta>{
   'preset': SourceMeta(
@@ -411,6 +412,121 @@ class TokenizerLayout extends StatelessWidget {
 
   String _rowTokenText(TokenBreakdown bd, BarRow row) {
     return '${row.tokens}';
+  }
+}
+
+/// Which tokenizer the numbers above were counted with.
+///
+/// Counts differ by 10–30% between model families, so the inspector says whose
+/// vocabulary it used — and, while a new one downloads, that it is still
+/// counting with the previous one.
+class TokenizerInfoTile extends StatelessWidget {
+  /// Name of the tokenizer counting right now.
+  final String activeLabel;
+
+  /// Name of the tokenizer the connection asks for, when it is not the active
+  /// one yet (downloading or failed); null once they agree.
+  final String? pendingLabel;
+
+  final bool isAuto;
+  final bool downloading;
+  final bool failed;
+  final VoidCallback? onRetry;
+  final VoidCallback? onOpenSettings;
+
+  const TokenizerInfoTile({
+    super.key,
+    required this.activeLabel,
+    required this.isAuto,
+    this.pendingLabel,
+    this.downloading = false,
+    this.failed = false,
+    this.onRetry,
+    this.onOpenSettings,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = failed ? _cutoffAccent : context.cs.onSurfaceVariant;
+    final pending = pendingLabel;
+    final String? note;
+    if (downloading && pending != null) {
+      note = 'tokenizer_inspector_downloading'.tr(args: [pending, activeLabel]);
+    } else if (failed && pending != null) {
+      note = 'tokenizer_inspector_failed'.tr(args: [pending, activeLabel]);
+    } else {
+      note = null;
+    }
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 8, 6, 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.03),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: accent.withValues(alpha: 0.2)),
+      ),
+      child: Row(
+        children: [
+          if (downloading)
+            const GlazeSpinner(size: 16)
+          else
+            Icon(Icons.token_outlined, size: 18, color: accent),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text.rich(
+                  TextSpan(
+                    children: [
+                      TextSpan(
+                        text: '${'label_tokenizer'.tr()}: ',
+                        style: TextStyle(color: context.cs.onSurfaceVariant),
+                      ),
+                      TextSpan(
+                        text: pending ?? activeLabel,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: context.cs.onSurface,
+                        ),
+                      ),
+                      if (isAuto)
+                        TextSpan(
+                          text: ' · ${'tokenizer_auto'.tr()}',
+                          style: TextStyle(color: context.cs.onSurfaceVariant),
+                        ),
+                    ],
+                  ),
+                  style: const TextStyle(fontSize: 13),
+                ),
+                if (note != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    note,
+                    style: TextStyle(fontSize: 12, color: accent),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (failed && onRetry != null)
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.refresh, size: 18),
+              color: accent,
+              tooltip: 'action_retry'.tr(),
+              onPressed: onRetry,
+            ),
+          if (onOpenSettings != null)
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.settings_outlined, size: 18),
+              color: context.cs.onSurfaceVariant,
+              tooltip: 'context_open_api_settings'.tr(),
+              onPressed: onOpenSettings,
+            ),
+        ],
+      ),
+    );
   }
 }
 

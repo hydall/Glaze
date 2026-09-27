@@ -174,6 +174,7 @@ class ApiConfigs extends Table {
       boolean().withDefault(const Constant(true))();
   TextColumn get extraRequestParametersJson =>
       text().withDefault(const Constant('[]'))();
+  TextColumn get tokenizer => text().withDefault(const Constant('auto'))();
 
   @override
   Set<Column> get primaryKey => {configId};
