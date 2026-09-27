@@ -33,6 +33,37 @@ void main() {
     });
   });
 
+  group('chat WebView background policy', () {
+    tearDown(() {
+      debugDefaultTargetPlatformOverride = null;
+    });
+
+    test('keeps the WebView transparent on Windows too', () {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+
+      // flutter_inappwebview_windows >= 0.7.0 fixed the inverted flag: `false`
+      // now leaves WebView2 on its opaque white default, so the chat used to
+      // paint on a white box.
+      expect(chatWebViewTransparentBackground(), isTrue);
+    });
+
+    test('keeps the WebView transparent on every other platform', () {
+      for (final platform in const [
+        TargetPlatform.android,
+        TargetPlatform.iOS,
+        TargetPlatform.macOS,
+        TargetPlatform.linux,
+      ]) {
+        debugDefaultTargetPlatformOverride = platform;
+        expect(
+          chatWebViewTransparentBackground(),
+          isTrue,
+          reason: '$platform',
+        );
+      }
+    });
+  });
+
   group('chat WebView file access policy', () {
     tearDown(() {
       debugDefaultTargetPlatformOverride = null;
