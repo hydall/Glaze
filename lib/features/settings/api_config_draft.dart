@@ -1,6 +1,7 @@
 import '../../core/llm/converters/prompt_post_processing.dart';
 import '../../core/llm/converters/reasoning_effort.dart';
 import '../../core/llm/history_trim.dart';
+import '../../core/llm/tokenizers/tokenizer_kind.dart';
 import '../../core/llm/transport/llm_protocol.dart';
 import '../../core/models/api_config.dart';
 
@@ -98,6 +99,9 @@ class ApiConfigDraft {
     return values.copyWith(
       protocol: protocol,
       historyTrimMode: HistoryTrimMode.normalize(values.historyTrimMode),
+      tokenizer: TokenizerKind.fromId(values.tokenizer) == null
+          ? kTokenizerAuto
+          : values.tokenizer,
       providerId: protocol == LlmProtocol.customChatCompletion
           ? 'custom_chat_completion'
           : values.providerId,
@@ -188,6 +192,7 @@ class ApiConfigDraft {
       historyTrimMode: normalized.historyTrimMode,
       historyTrimTriggerPercent: normalized.historyTrimTriggerPercent,
       historyTrimStepPercent: normalized.historyTrimStepPercent,
+      tokenizer: normalized.tokenizer,
       omitTemperature: normalized.omitTemperature,
       omitTopP: normalized.omitTopP,
       omitTopK: normalized.omitTopK,

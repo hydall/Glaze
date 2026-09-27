@@ -17,6 +17,7 @@ import '../../core/services/api_connection_tester.dart';
 import '../chat/state/token_breakdown_cache.dart';
 import '../chat/state/cached_token_breakdown.dart';
 import '../../core/llm/history_trim.dart';
+import '../../core/llm/tokenizer.dart';
 import '../../core/models/api_config.dart';
 import '../../core/models/extra_request_parameter.dart';
 import '../../core/state/shared_prefs_provider.dart';
@@ -34,6 +35,8 @@ import '../studio/widgets/studio_slots_tab.dart';
 import 'api_list_provider.dart';
 import 'api_preset_selection_provider.dart';
 import 'api_preset_sort.dart';
+import 'tokenizer_labels.dart';
+import 'tokenizer_provider.dart';
 import 'widgets/connection_status.dart';
 import '../../shared/widgets/menu_group.dart';
 import '../../shared/widgets/preset_switcher.dart';
@@ -132,6 +135,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   String _cacheControlTtl = 'off';
   String _cacheBreakpointMode = 'depth';
   String _historyTrimMode = HistoryTrimMode.sliding;
+  String _tokenizer = kTokenizerAuto;
   int _historyTrimTriggerPercent = kDefaultHistoryTrimTriggerPercent;
   int _historyTrimStepPercent = kDefaultHistoryTrimStepPercent;
 
@@ -399,6 +403,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       _cacheControlTtl = values.cacheControlTtl;
       _cacheBreakpointMode = values.cacheBreakpointMode;
       _historyTrimMode = HistoryTrimMode.normalize(values.historyTrimMode);
+      _tokenizer = values.tokenizer;
       _historyTrimTriggerPercent = values.historyTrimTriggerPercent;
       _historyTrimStepPercent = values.historyTrimStepPercent;
       _sessionIdMode = values.sessionIdMode;
@@ -482,6 +487,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
         cacheControlTtl: _cacheControlTtl,
         cacheBreakpointMode: _cacheBreakpointMode,
         historyTrimMode: _historyTrimMode,
+        tokenizer: _tokenizer,
         historyTrimTriggerPercent: _historyTrimTriggerPercent,
         historyTrimStepPercent: _historyTrimStepPercent,
         sessionIdMode: _sessionIdMode,
@@ -1035,6 +1041,85 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
           placeholder: '32000',
           keyboardType: TextInputType.number,
         ),
+        // Auto follows the model field as it is typed, not the saved row.
+        ListenableBuilder(
+          listenable: _modelCtrl,
+          builder: (context, _) => _buildTokenizerSelector(),
+        ),
+      ],
+    );
+  }
+
+  /// What `auto` resolves to for the model and protocol being edited.
+  TokenizerKind get _autoTokenizer => resolveTokenizerKind(
+    setting: kTokenizerAuto,
+    model: _modelCtrl.text,
+    protocol: _protocol,
+  );
+
+  Widget _buildTokenizerSelector() {
+    final explicit = TokenizerKind.fromId(_tokenizer);
+    final effective = explicit ?? _autoTokenizer;
+    final status = ref.watch(tokenizerStatusProvider);
+    final String description;
+    if (status.requested == effective &&
+        status.phase == TokenizerPhase.downloading) {
+      description = 'tokenizer_status_downloading'.tr();
+    } else if (status.requested == effective &&
+        status.phase == TokenizerPhase.failed) {
+      description = 'tokenizer_status_failed'.tr(
+        args: [tokenizerLabel(status.active)],
+      );
+    } else {
+      description = 'desc_tokenizer'.tr();
+    }
+    return MenuSelectorItem(
+      label: 'label_tokenizer'.tr(),
+      helpTerm: 'token-estimate',
+      currentValue: explicit == null
+          ? 'tokenizer_auto_value'.tr(args: [tokenizerLabel(effective)])
+          : tokenizerLabel(explicit),
+      description: description,
+      onTap: _openTokenizerSelector,
+    );
+  }
+
+  void _openTokenizerSelector() {
+    final explicit = TokenizerKind.fromId(_tokenizer);
+    void choose(String value) {
+      Navigator.of(context, rootNavigator: true).pop();
+      setState(() => _tokenizer = value);
+      _scheduleSave();
+      // Picking the tokenizer that just failed to download again does not
+      // change the connection's request, so nothing else would retry it.
+      final status = ref.read(tokenizerStatusProvider);
+      final picked = TokenizerKind.fromId(value) ?? _autoTokenizer;
+      if (status.phase == TokenizerPhase.failed && status.requested == picked) {
+        unawaited(ref.read(tokenizerStatusProvider.notifier).retry());
+      }
+    }
+
+    GlazeBottomSheet.show<void>(
+      context,
+      title: 'label_tokenizer'.tr(),
+      items: [
+        BottomSheetItem(
+          label: 'tokenizer_auto'.tr(),
+          hint: 'tokenizer_auto_hint'.tr(
+            args: [tokenizerLabel(_autoTokenizer)],
+          ),
+          icon: explicit == null ? Icons.check : null,
+          iconColor: context.cs.primary,
+          onTap: () => choose(kTokenizerAuto),
+        ),
+        for (final kind in TokenizerKind.values)
+          BottomSheetItem(
+            label: tokenizerLabel(kind),
+            hint: tokenizerModelsHint(kind),
+            icon: explicit == kind ? Icons.check : null,
+            iconColor: context.cs.primary,
+            onTap: () => choose(kind.id),
+          ),
       ],
     );
   }

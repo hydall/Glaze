@@ -4,8 +4,9 @@ import 'prompt_worker.dart';
 
 /// Runs buildPrompt in a persistent background isolate.
 ///
-/// The isolate maintains its own o200k_base tokenizer and a persistent
-/// token cache, so repeated calls are fast (cached history tokens).
+/// The isolate maintains its own copy of the active tokenizer and a
+/// persistent token cache, so repeated calls are fast (cached history
+/// tokens).
 Future<PromptResult> buildPromptInIsolate(
   PromptPayload payload, {
   PromptWorkerPriority priority = PromptWorkerPriority.foreground,

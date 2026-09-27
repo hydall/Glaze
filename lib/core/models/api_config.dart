@@ -80,6 +80,10 @@ abstract class ApiConfig with _$ApiConfig {
     @Default(true) bool useSystemInstruction,
     @Default(<ExtraRequestParameter>[])
     List<ExtraRequestParameter> extraRequestParameters,
+
+    /// Which tokenizer counts this connection's prompts: `auto` (picked from
+    /// [model]) or a `TokenizerKind.id`.
+    @Default('auto') String tokenizer,
   }) = _ApiConfig;
 
   factory ApiConfig.fromJson(Map<String, dynamic> json) =>

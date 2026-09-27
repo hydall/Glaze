@@ -9,6 +9,10 @@ extension _AppDatabaseUpgradeV136 on AppDatabase {
     // flags on. SQLite cannot change a column default in place, so rebuild the
     // table to adopt them. Existing rows keep their stored values — only
     // inserts that leave a column out pick up the new defaults.
+    //
+    // The rebuild copies every column the current schema declares, so columns
+    // added after v136 must exist before it runs.
+    await _ensureApiConfigTokenizerColumn(m);
     await m.alterTable(TableMigration(apiConfigs));
   }
 }

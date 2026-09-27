@@ -235,6 +235,8 @@ Migration history:
   reconciliation mutual exclusion across processes.
 - v131: normalized saved LLM and embedding endpoints to their concrete request
   URLs.
+- v137: added `api_configs.tokenizer` TEXT DEFAULT 'auto' (per-connection
+  tokenizer choice). The v136 table rebuild adds it first on older databases.
 
 ---
 
