@@ -411,7 +411,7 @@ lib/
 │   │   ├── shell_screen.dart         # Bottom nav shell (GoRouter StatefulNavigationShell)
 │   │   ├── nav_height_provider.dart  # navHeightProvider: nav bar height for layout
 │   │   ├── shell_header_provider.dart
-│   │   └── desktop/                  # Desktop (≥768px) three-column layout
+│   │   └── desktop/                  # Desktop three-column layout (≥768px wide, or any tablet-sized screen)
 │   │       ├── desktop_shell.dart    # Shell wrapper; left/center/right columns
 │   │       ├── desktop_layout_provider.dart
 │   │       ├── desktop_left_sidebar.dart  # Chat list + nav (replaces bottom nav)
@@ -433,7 +433,7 @@ GoRouter lives in `router.dart`, not `app.dart`. Shell tabs and overlay routes:
 
 | Route | Screen |
 |-------|--------|
-| `/` | `ChatHistoryScreen` (mobile); redirects to `/characters` on desktop (width ≥ 768, non-mobile force) |
+| `/` | `ChatHistoryScreen` (mobile); redirects to `/characters` on desktop (window ≥ 768 wide or a tablet-sized screen, non-mobile force) |
 | `/characters` | `CharacterListScreen` |
 | `/tools` (+ nested `api`, `personas`, `presets`, `regex`, `lorebooks`, `lorebooks/settings`, `embeddings`) | `ToolsScreen` |
 | `/menu` (+ `settings`, `themes`, `about`, `glossary`) | `MenuScreen` — the header search filters the tab's nested settings; `settings` is one flat screen of themed groups with its own header search, and takes `?highlight=<row id>` so a hit deep-links to the row (`features/menu/search/`) |

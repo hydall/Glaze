@@ -130,7 +130,7 @@ GoRouter buildRouter(
   redirect: (context, state) {
     if (state.matchedLocation == '/') {
       final forceMobile = isForceMobile?.call() ?? false;
-      if (!forceMobile && MediaQuery.sizeOf(context).width >= 768) {
+      if (!forceMobile && isDesktopViewportSize(MediaQuery.sizeOf(context))) {
         return '/characters';
       }
     }

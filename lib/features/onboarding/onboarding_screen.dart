@@ -160,7 +160,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   /// no `DesktopScope` to read here — apply the shell's own rule directly
   /// (see `DesktopShell.build`).
   bool _isDesktop(BuildContext context) =>
-      MediaQuery.sizeOf(context).width >= 768 &&
+      isDesktopViewportSize(MediaQuery.sizeOf(context)) &&
       !ref.watch(forceMobileLayoutProvider);
 
   @override

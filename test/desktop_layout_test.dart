@@ -72,45 +72,51 @@ void main() {
   });
 
   group('desktop breakpoint', () {
-    testWidgets('DesktopScope reports desktop above the breakpoint', (
-      tester,
-    ) async {
-      late bool wide;
-      late bool narrow;
-
+    Future<bool> reportsDesktop(WidgetTester tester, Size size) async {
+      late bool isDesktop;
       await tester.pumpWidget(
         MaterialApp(
-          home: Column(
-            children: [
-              SizedBox(
-                width: kDesktopWidthBreakpoint + 100,
-                child: DesktopDetection(
-                  child: Builder(
-                    builder: (context) {
-                      wide = isDesktopLayout(context);
-                      return const SizedBox();
-                    },
-                  ),
+          home: Center(
+            child: SizedBox(
+              width: size.width,
+              height: size.height,
+              child: DesktopDetection(
+                child: Builder(
+                  builder: (context) {
+                    isDesktop = isDesktopLayout(context);
+                    return const SizedBox();
+                  },
                 ),
               ),
-              SizedBox(
-                width: kDesktopWidthBreakpoint - 100,
-                child: DesktopDetection(
-                  child: Builder(
-                    builder: (context) {
-                      narrow = isDesktopLayout(context);
-                      return const SizedBox();
-                    },
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
         ),
       );
+      return isDesktop;
+    }
 
-      expect(wide, isTrue);
-      expect(narrow, isFalse);
+    testWidgets('desktop layout kicks in for wide windows and tablets', (
+      tester,
+    ) async {
+      // Phone held upright: narrow, and not tablet-sized either.
+      expect(await reportsDesktop(tester, const Size(400, 800)), isFalse);
+      // Desktop window.
+      expect(
+        await reportsDesktop(
+          tester,
+          const Size(kDesktopWidthBreakpoint + 100, 600),
+        ),
+        isTrue,
+      );
+      // 11" tablet held upright: below the width breakpoint, but its shortest
+      // side hits the tablet cutoff, so it must get the desktop layout.
+      expect(
+        await reportsDesktop(
+          tester,
+          const Size(kTabletShortestSideBreakpoint, 960),
+        ),
+        isTrue,
+      );
     });
   });
 

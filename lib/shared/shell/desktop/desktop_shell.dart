@@ -82,7 +82,9 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
-        final isDesktop = width >= kDesktopWidthBreakpoint && !forceMobile;
+        final isDesktop =
+            isDesktopViewportSize(Size(width, constraints.maxHeight)) &&
+            !forceMobile;
 
         if (!isDesktop) {
           return DesktopScope(isDesktop: false, child: widget.child);
