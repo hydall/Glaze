@@ -1100,6 +1100,7 @@
   "imggen_comfyui_invalid": "Некорректный JSON воркфлоу",
   "imggen_comfyui_import": "Импортировать API-воркфлоу",
   "imggen_comfyui_imported": "Воркфлоу импортирован",
+  "imggen_comfyui_reset_params": "Сбросить к параметрам воркфлоу",
   "imggen_styles": "Стили",
   "imggen_style_active": "Активный стиль",
   "imggen_style_none": "Нет",

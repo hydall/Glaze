@@ -1,8 +1,10 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
+import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/menu_group.dart';
 import '../image_gen_models.dart';
+import '../services/comfyui_workflow_params.dart';
 import 'model_fields.dart';
 import 'rows.dart' as rows;
 
@@ -51,12 +53,37 @@ List<Widget> buildComfyUiModelFields(
   final activeWorkflow = config.activeWorkflow;
 
   return [
-    MenuSelectorItem(
-      label: 'imggen_comfyui_workflow'.tr(),
-      description: 'imggen_comfyui_workflow_desc'.tr(),
-      currentValue:
-          activeWorkflow?.name ?? 'imggen_comfyui_workflow_default'.tr(),
-      onTap: onManageWorkflows,
+    Row(
+      children: [
+        Expanded(
+          child: MenuSelectorItem(
+            label: 'imggen_comfyui_workflow'.tr(),
+            description: 'imggen_comfyui_workflow_desc'.tr(),
+            currentValue:
+                activeWorkflow?.name ?? 'imggen_comfyui_workflow_default'.tr(),
+            onTap: onManageWorkflows,
+          ),
+        ),
+        if (activeWorkflow != null)
+          Builder(
+            builder: (context) => Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: IconButton(
+                icon: Icon(
+                  Icons.restart_alt,
+                  size: 20,
+                  color: context.cs.onSurfaceVariant,
+                ),
+                tooltip: 'imggen_comfyui_reset_params'.tr(),
+                onPressed: () => update(
+                  ComfyUiWorkflowParams.read(
+                    activeWorkflow.json,
+                  ).applyTo(config),
+                ),
+              ),
+            ),
+          ),
+      ],
     ),
     rows.ImageGenTextFieldItem(
       label: 'Checkpoint',
