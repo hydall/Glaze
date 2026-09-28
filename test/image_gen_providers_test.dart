@@ -415,5 +415,90 @@ void main() {
         ),
       );
     });
+
+    test('injects the prompt into a token-less combined encoder node', () {
+      // TextEncodeQwenImage21 keeps both prompts in one node referenced by the
+      // sampler's positive and negative inputs.
+      const json = r'''
+{
+  "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "m.safetensors"}},
+  "5": {
+    "class_type": "TextEncodeQwenImage21",
+    "inputs": {
+      "prompt": "a neon shop sign that reads QWEN IMAGE",
+      "negative_prompt": "",
+      "resolution": 1024
+    }
+  },
+  "7": {
+    "class_type": "KSampler",
+    "inputs": {"positive": ["5", 0], "negative": ["5", 1]}
+  }
+}
+''';
+      final settings = ComfyUiImageSettings(
+        workflows: const [ComfyUiWorkflow(id: 'w', name: 'w', json: json)],
+        activeWorkflowId: 'w',
+        negativePrompt: 'lowres',
+      );
+
+      final workflow = ComfyUiImageProvider.buildWorkflow(
+        settings,
+        prompt: 'a cat',
+      );
+
+      final inputs = (workflow['5'] as Map)['inputs'] as Map;
+      expect(inputs['prompt'], 'a cat');
+      expect(inputs['negative_prompt'], 'lowres');
+      expect(inputs['resolution'], 1024);
+    });
+
+    test('injects the prompt into separate positive/negative text nodes', () {
+      const json = r'''
+{
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {"clip": ["1", 1], "text": "baked positive"}
+  },
+  "7": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {"clip": ["1", 1], "text": "baked negative"}
+  },
+  "3": {
+    "class_type": "KSampler",
+    "inputs": {"positive": ["6", 0], "negative": ["7", 0]}
+  }
+}
+''';
+      final settings = ComfyUiImageSettings(
+        workflows: const [ComfyUiWorkflow(id: 'w', name: 'w', json: json)],
+        activeWorkflowId: 'w',
+        negativePrompt: 'lowres',
+      );
+
+      final workflow = ComfyUiImageProvider.buildWorkflow(
+        settings,
+        prompt: 'a cat',
+      );
+
+      expect(((workflow['6'] as Map)['inputs'] as Map)['text'], 'a cat');
+      expect(((workflow['7'] as Map)['inputs'] as Map)['text'], 'lowres');
+    });
+
+    test('leaves token-based workflows on the substitution path', () {
+      final settings = ComfyUiImageSettings(
+        activeWorkflowId: '',
+        negativePrompt: 'lowres',
+      );
+
+      final workflow = ComfyUiImageProvider.buildWorkflow(
+        settings,
+        prompt: 'a cat',
+      );
+
+      // Node 9 of the shipped default graph has no prompt token to touch.
+      expect(((workflow['6'] as Map)['inputs'] as Map)['text'], 'a cat');
+      expect(((workflow['7'] as Map)['inputs'] as Map)['text'], 'lowres');
+    });
   });
 }
