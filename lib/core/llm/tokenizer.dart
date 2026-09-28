@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 
+import 'inline_media.dart';
 import 'tokenizers/bpe_tokenizer.dart';
 import 'tokenizers/tokenizer_codec.dart';
 import 'tokenizers/tokenizer_kind.dart';
@@ -72,10 +73,12 @@ void _setActive(BpeTokenizer? tokenizer, TokenizerKind kind) {
 }
 
 /// Estimate token count for [text] with the active tokenizer, memoized.
+/// Inline base64 media is counted as the placeholder the request carries
+/// instead (see [stripInlineMedia]).
 /// Falls back to ~4 chars/token while no tokenizer is loaded.
 int estimateTokens(String text, {bool useCache = true}) {
   if (text.isEmpty) return 0;
-  final cleaned = _stripBase64Media(text);
+  final cleaned = stripInlineMedia(text);
   if (cleaned.isEmpty) return 0;
 
   final tokenizer = _active;
@@ -112,18 +115,3 @@ String _cacheKey(String text) {
 }
 
 void clearTokenCache() => _tokenCache.clear();
-
-/// Strips base64-encoded images/data URIs from text before token counting,
-/// since they inflate char count but are not sent to the LLM.
-String _stripBase64Media(String text) {
-  if (text.length < 256) return text;
-  var result = text.replaceAllMapped(
-    RegExp(r'<img\s+src="data:image/[^"]{256,}?"\s*/?>'),
-    (_) => '',
-  );
-  result = result.replaceAllMapped(
-    RegExp(r'data:image/[^;]+;base64,[A-Za-z0-9+/=]{256,}'),
-    (_) => '',
-  );
-  return result;
-}

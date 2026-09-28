@@ -1,5 +1,6 @@
 import '../../features/image_gen/services/image_tag_markup.dart';
 import '../models/chat_message.dart';
+import 'inline_media.dart';
 import 'macro_engine.dart';
 
 class HistoryAssembler {
@@ -152,12 +153,16 @@ class PromptMessage {
     return null;
   }
 
+  /// The request shape. Base64 media inlined in the text is replaced by a
+  /// placeholder: the model cannot see it, and `estimateTokens` — which the
+  /// context budget trims by — does not count it either.
   Map<String, dynamic> toApiMap() {
-    if (!hasImage) return {'role': role, 'content': content};
+    final text = stripInlineMedia(content);
+    if (!hasImage) return {'role': role, 'content': text};
     return {
       'role': role,
       'content': [
-        if (content.isNotEmpty) {'type': 'text', 'text': content},
+        if (text.isNotEmpty) {'type': 'text', 'text': text},
         for (final path in imagePaths)
           if (path.isNotEmpty)
             {
