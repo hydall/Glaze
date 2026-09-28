@@ -205,6 +205,11 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
     bool hasPanel,
   ) {
     final widths = _fitSidebars(availableWidth, hasPanel);
+    // The app draws edge-to-edge, so the status bar floats over the content.
+    // Inset the desktop chrome by its height — on a tablet held in landscape it
+    // would otherwise cover the header row. [GlazeBackground] stays full-bleed
+    // behind the inset.
+    final topInset = MediaQuery.paddingOf(context).top;
     return Focus(
       autofocus: true,
       canRequestFocus: false,
@@ -212,35 +217,38 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
       onKeyEvent: _handleEscape,
       child: DesktopFileDrop(
         child: GlazeBackground(
-          child: Stack(
-            children: [
-              Row(
-                children: [
-                  DesktopLeftSidebar(
-                    currentView: _currentView(context),
-                    width: widths.left,
-                  ),
-                  Expanded(
-                    child: RepaintBoundary(
-                      child: Stack(
-                        children: [
-                          widget.child,
-                          Positioned(
-                            top: 0,
-                            left: 0,
-                            right: 0,
-                            child: _DesktopHeader(),
-                          ),
-                        ],
+          child: Padding(
+            padding: EdgeInsets.only(top: topInset),
+            child: Stack(
+              children: [
+                Row(
+                  children: [
+                    DesktopLeftSidebar(
+                      currentView: _currentView(context),
+                      width: widths.left,
+                    ),
+                    Expanded(
+                      child: RepaintBoundary(
+                        child: Stack(
+                          children: [
+                            widget.child,
+                            Positioned(
+                              top: 0,
+                              left: 0,
+                              right: 0,
+                              child: _DesktopHeader(),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                  DesktopRightSidebar(width: widths.right),
-                ],
-              ),
-              // Floating window overlay
-              const DesktopWindowView(),
-            ],
+                    DesktopRightSidebar(width: widths.right),
+                  ],
+                ),
+                // Floating window overlay
+                const DesktopWindowView(),
+              ],
+            ),
           ),
         ),
       ),

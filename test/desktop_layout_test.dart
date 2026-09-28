@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -73,21 +74,17 @@ void main() {
 
   group('desktop breakpoint', () {
     Future<bool> reportsDesktop(WidgetTester tester, Size size) async {
+      await tester.binding.setSurfaceSize(size);
+      addTearDown(() => tester.binding.setSurfaceSize(null));
       late bool isDesktop;
       await tester.pumpWidget(
         MaterialApp(
-          home: Center(
-            child: SizedBox(
-              width: size.width,
-              height: size.height,
-              child: DesktopDetection(
-                child: Builder(
-                  builder: (context) {
-                    isDesktop = isDesktopLayout(context);
-                    return const SizedBox();
-                  },
-                ),
-              ),
+          home: DesktopDetection(
+            child: Builder(
+              builder: (context) {
+                isDesktop = isDesktopLayout(context);
+                return const SizedBox.expand();
+              },
             ),
           ),
         ),
@@ -95,28 +92,42 @@ void main() {
       return isDesktop;
     }
 
-    testWidgets('desktop layout kicks in for wide windows and tablets', (
-      tester,
-    ) async {
-      // Phone held upright: narrow, and not tablet-sized either.
+    testWidgets('touch devices use desktop only in landscape', (tester) async {
+      // Phone held upright.
       expect(await reportsDesktop(tester, const Size(400, 800)), isFalse);
-      // Desktop window.
-      expect(
-        await reportsDesktop(
-          tester,
-          const Size(kDesktopWidthBreakpoint + 100, 600),
-        ),
-        isTrue,
-      );
-      // 11" tablet held upright: below the width breakpoint, but its shortest
-      // side hits the tablet cutoff, so it must get the desktop layout.
+      // A tablet upright stays on the phone layout even when its width clears
+      // the breakpoint on paper.
+      expect(await reportsDesktop(tester, const Size(800, 1280)), isFalse);
+      // Rotating the tablet to landscape turns on the desktop layout…
+      expect(await reportsDesktop(tester, const Size(1280, 800)), isTrue);
+      // …and the 11" tablet's own portrait size is below the breakpoint anyway.
       expect(
         await reportsDesktop(
           tester,
           const Size(kTabletShortestSideBreakpoint, 960),
         ),
-        isTrue,
+        isFalse,
       );
+    });
+
+    testWidgets('desktop windows keep the width rule in portrait', (
+      tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      try {
+        // A wide window is desktop regardless of shape.
+        expect(
+          await reportsDesktop(
+            tester,
+            const Size(kDesktopWidthBreakpoint + 100, 600),
+          ),
+          isTrue,
+        );
+        // A tall window on a portrait monitor is still desktop, not a tablet.
+        expect(await reportsDesktop(tester, const Size(900, 1400)), isTrue);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
     });
   });
 
