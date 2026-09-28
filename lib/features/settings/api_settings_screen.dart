@@ -43,6 +43,13 @@ import '../../shared/widgets/preset_switcher.dart';
 import '../../shared/widgets/extra_request_parameters_editor.dart';
 import '../../shared/widgets/glaze_sheet.dart';
 
+/// The factory values every reset affordance on this screen restores.
+///
+/// A plain [ApiConfig] with nothing but an id carries every `@Default` the
+/// model declares, so the numbers live in one place — the model — instead of
+/// being copied into each row as a literal.
+const _apiDefaults = ApiConfig(id: '');
+
 /// A section of the API screen a caller can open it *on*.
 enum ApiSettingsSection {
   /// The context-window form on the LLM tab.
@@ -1027,19 +1034,37 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
             },
           ),
         ],
-        MenuFieldItem(
-          label: 'label_max_tokens'.tr(),
-          helpTerm: 'max-tokens',
-          controller: _maxTokensCtrl,
-          placeholder: '1500',
-          keyboardType: TextInputType.number,
+        ValueListenableBuilder<TextEditingValue>(
+          valueListenable: _maxTokensCtrl,
+          builder: (context, value, _) => MenuFieldItem(
+            label: 'label_max_tokens'.tr(),
+            helpTerm: 'max-tokens',
+            controller: _maxTokensCtrl,
+            placeholder: '${_apiDefaults.maxTokens}',
+            keyboardType: TextInputType.number,
+            onReset: value.text.trim() != '${_apiDefaults.maxTokens}'
+                ? () {
+                    _maxTokensCtrl.text = '${_apiDefaults.maxTokens}';
+                    _scheduleSave();
+                  }
+                : null,
+          ),
         ),
-        MenuFieldItem(
-          label: 'label_context_size'.tr(),
-          helpTerm: 'context-size',
-          controller: _contextSizeCtrl,
-          placeholder: '32000',
-          keyboardType: TextInputType.number,
+        ValueListenableBuilder<TextEditingValue>(
+          valueListenable: _contextSizeCtrl,
+          builder: (context, value, _) => MenuFieldItem(
+            label: 'label_context_size'.tr(),
+            helpTerm: 'context-size',
+            controller: _contextSizeCtrl,
+            placeholder: '${_apiDefaults.contextSize}',
+            keyboardType: TextInputType.number,
+            onReset: value.text.trim() != '${_apiDefaults.contextSize}'
+                ? () {
+                    _contextSizeCtrl.text = '${_apiDefaults.contextSize}';
+                    _scheduleSave();
+                  }
+                : null,
+          ),
         ),
         // Auto follows the model field as it is typed, not the saved row.
         ListenableBuilder(
@@ -1178,6 +1203,13 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
               setState(() => _temperature = v);
               _scheduleSave();
             },
+            onReset:
+                !_omitTemperature && _temperature != _apiDefaults.temperature
+                ? () {
+                    setState(() => _temperature = _apiDefaults.temperature);
+                    _scheduleSave();
+                  }
+                : null,
           ),
         ..._samplingItems(),
       ],
@@ -1235,6 +1267,16 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
               _scheduleSave();
             },
             onTap: _openReasoningEffortSelector,
+            onReset:
+                !_omitReasoningEffort &&
+                    _reasoningEffort != _apiDefaults.reasoningEffort
+                ? () {
+                    setState(
+                      () => _reasoningEffort = _apiDefaults.reasoningEffort,
+                    );
+                    _scheduleSave();
+                  }
+                : null,
           ),
       ],
     );
@@ -1268,6 +1310,12 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
             setState(() => _topP = v);
             _scheduleSave();
           },
+          onReset: !_omitTopP && _topP != _apiDefaults.topP
+              ? () {
+                  setState(() => _topP = _apiDefaults.topP);
+                  _scheduleSave();
+                }
+              : null,
         ),
       if (_supportsTopK && !_hideSamplingWhileReasoningAnthropic)
         MenuRangeItem(
@@ -1288,6 +1336,12 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
             setState(() => _topK = v.round());
             _scheduleSave();
           },
+          onReset: !_omitTopK && _topK != _apiDefaults.topK
+              ? () {
+                  setState(() => _topK = _apiDefaults.topK);
+                  _scheduleSave();
+                }
+              : null,
         ),
       if (_supportsFrequencyPenalty)
         MenuRangeItem(
@@ -1307,6 +1361,16 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
             setState(() => _frequencyPenalty = v);
             _scheduleSave();
           },
+          onReset:
+              !_omitFrequencyPenalty &&
+                  _frequencyPenalty != _apiDefaults.frequencyPenalty
+              ? () {
+                  setState(
+                    () => _frequencyPenalty = _apiDefaults.frequencyPenalty,
+                  );
+                  _scheduleSave();
+                }
+              : null,
         ),
       if (_supportsPresencePenalty)
         MenuRangeItem(
@@ -1326,6 +1390,16 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
             setState(() => _presencePenalty = v);
             _scheduleSave();
           },
+          onReset:
+              !_omitPresencePenalty &&
+                  _presencePenalty != _apiDefaults.presencePenalty
+              ? () {
+                  setState(
+                    () => _presencePenalty = _apiDefaults.presencePenalty,
+                  );
+                  _scheduleSave();
+                }
+              : null,
         ),
     ];
   }

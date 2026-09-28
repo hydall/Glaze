@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -586,6 +587,11 @@ class MenuFieldItem extends StatelessWidget {
   /// Renders [helper] as a warning instead of a neutral caption.
   final bool helperIsError;
 
+  /// When non-null, a reset button is drawn to the left of the field and calls
+  /// this to restore the default value. The caller passes it only while the
+  /// field actually differs from that default.
+  final VoidCallback? onReset;
+
   const MenuFieldItem({
     super.key,
     required this.label,
@@ -602,6 +608,7 @@ class MenuFieldItem extends StatelessWidget {
     this.description,
     this.helper,
     this.helperIsError = false,
+    this.onReset,
   });
 
   @override
@@ -645,43 +652,53 @@ class MenuFieldItem extends StatelessWidget {
             ),
           ],
           const SizedBox(height: 6),
-          TextField(
-            controller: controller,
-            obscureText: obscure,
-            keyboardType: keyboardType,
-            inputFormatters: inputFormatters,
-            onChanged: onChanged,
-            maxLines: maxLines,
-            style: TextStyle(color: context.cs.onSurface, fontSize: 15),
-            decoration: InputDecoration(
-              hintText: placeholder,
-              hintStyle: TextStyle(
-                color: context.cs.onSurfaceVariant.withValues(alpha: 0.4),
-              ),
-              filled: true,
-              fillColor: context.inputFill,
-              suffixIcon: suffix,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: context.cs.outlineVariant),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: context.cs.outlineVariant),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(
-                  color: context.cs.primary.withValues(alpha: 0.5),
-                  width: 1.5,
+          Row(
+            children: [
+              if (onReset != null) ...[
+                _ResetToDefaultButton(onPressed: onReset!),
+                const SizedBox(width: 6),
+              ],
+              Expanded(
+                child: TextField(
+                  controller: controller,
+                  obscureText: obscure,
+                  keyboardType: keyboardType,
+                  inputFormatters: inputFormatters,
+                  onChanged: onChanged,
+                  maxLines: maxLines,
+                  style: TextStyle(color: context.cs.onSurface, fontSize: 15),
+                  decoration: InputDecoration(
+                    hintText: placeholder,
+                    hintStyle: TextStyle(
+                      color: context.cs.onSurfaceVariant.withValues(alpha: 0.4),
+                    ),
+                    filled: true,
+                    fillColor: context.inputFill,
+                    suffixIcon: suffix,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: context.cs.outlineVariant),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: context.cs.outlineVariant),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(
+                        color: context.cs.primary.withValues(alpha: 0.5),
+                        width: 1.5,
+                      ),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 13,
+                    ),
+                    isDense: true,
+                  ),
                 ),
               ),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 14,
-                vertical: 13,
-              ),
-              isDense: true,
-            ),
+            ],
           ),
           if (helper != null && helper!.isNotEmpty) ...[
             const SizedBox(height: 6),
@@ -724,6 +741,11 @@ class MenuRangeItem extends StatefulWidget {
   final ValueChanged<bool>? onIncludedChanged;
   final ValueChanged<double> onChanged;
 
+  /// When non-null, a reset button is drawn to the left of the value field and
+  /// calls this to restore the default. The caller passes it only while the
+  /// parameter is enabled and its value actually differs from that default.
+  final VoidCallback? onReset;
+
   const MenuRangeItem({
     super.key,
     required this.label,
@@ -739,6 +761,7 @@ class MenuRangeItem extends StatefulWidget {
     this.unit,
     this.included,
     this.onIncludedChanged,
+    this.onReset,
   }) : assert(
          (included == null) == (onIncludedChanged == null),
          'included and onIncludedChanged must be provided together',
@@ -854,6 +877,10 @@ class _MenuRangeItemState extends State<MenuRangeItem> {
                   ],
                 ),
               ),
+              if (widget.onReset != null) ...[
+                _ResetToDefaultButton(onPressed: widget.onReset!, size: 16),
+                const SizedBox(width: 2),
+              ],
               AnimatedCrossFade(
                 duration: _toggleDuration,
                 sizeCurve: Curves.easeInOut,
@@ -1116,6 +1143,11 @@ class MenuSelectorItem extends StatelessWidget {
   /// Muted hint under the label — same role as [MenuFieldItem.description].
   final String? description;
 
+  /// When non-null, a reset button is drawn to the left of the selector and
+  /// calls this to restore the default. The caller passes it only while the
+  /// parameter is enabled and its value actually differs from that default.
+  final VoidCallback? onReset;
+
   const MenuSelectorItem({
     super.key,
     required this.label,
@@ -1125,6 +1157,7 @@ class MenuSelectorItem extends StatelessWidget {
     this.onIncludedChanged,
     required this.onTap,
     this.description,
+    this.onReset,
   }) : assert(
          (included == null) == (onIncludedChanged == null),
          'included and onIncludedChanged must be provided together',
@@ -1178,39 +1211,89 @@ class MenuSelectorItem extends StatelessWidget {
               ),
             ],
             const SizedBox(height: 6),
-            // Same box as [MenuFieldItem]'s text field — fill, radius, border
-            // and metrics. Without the outline a selector read as a different
-            // kind of control from the fields it sits between.
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              constraints: const BoxConstraints(minHeight: 48),
-              decoration: BoxDecoration(
-                color: context.inputFill,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: context.cs.outlineVariant),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      currentValue,
-                      style: TextStyle(
-                        color: isIncluded
-                            ? context.cs.onSurface
-                            : context.cs.onSurface.withValues(alpha: 0.4),
-                        fontSize: 15,
-                      ),
+            Row(
+              children: [
+                if (onReset != null) ...[
+                  _ResetToDefaultButton(onPressed: onReset!),
+                  const SizedBox(width: 6),
+                ],
+                // Same box as [MenuFieldItem]'s text field — fill, radius,
+                // border and metrics. Without the outline a selector read as a
+                // different kind of control from the fields it sits between.
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                    constraints: const BoxConstraints(minHeight: 48),
+                    decoration: BoxDecoration(
+                      color: context.inputFill,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: context.cs.outlineVariant),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            currentValue,
+                            style: TextStyle(
+                              color: isIncluded
+                                  ? context.cs.onSurface
+                                  : context.cs.onSurface.withValues(alpha: 0.4),
+                              fontSize: 15,
+                            ),
+                          ),
+                        ),
+                        Icon(
+                          Icons.keyboard_arrow_down_rounded,
+                          color: context.cs.onSurfaceVariant.withValues(
+                            alpha: 0.5,
+                          ),
+                          size: 22,
+                        ),
+                      ],
                     ),
                   ),
-                  Icon(
-                    Icons.keyboard_arrow_down_rounded,
-                    color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
-                    size: 22,
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Restores a single setting to its factory value.
+///
+/// Sits immediately left of the control it belongs to and is only built while
+/// the current value differs from the default — the caller decides that and
+/// passes [MenuFieldItem.onReset] / [MenuRangeItem.onReset] /
+/// [MenuSelectorItem.onReset] only for the rows that can be reset.
+class _ResetToDefaultButton extends StatelessWidget {
+  final VoidCallback onPressed;
+  final double size;
+
+  const _ResetToDefaultButton({required this.onPressed, this.size = 18});
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'reset_to_default'.tr(),
+      child: InkResponse(
+        onTap: () {
+          Haptics.selectionClick();
+          onPressed();
+        },
+        radius: 18,
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: Icon(
+            Icons.undo_rounded,
+            size: size,
+            color: context.cs.primary,
+          ),
         ),
       ),
     );
