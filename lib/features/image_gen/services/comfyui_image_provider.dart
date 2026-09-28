@@ -97,6 +97,11 @@ class ComfyUiImageProvider {
   /// Each token is replaced where SillyTavern replaces it — the quoted
   /// `"%token%"` form — with the JSON encoding of the value, so a numeric
   /// placeholder lands as a number and a string one stays quoted.
+  ///
+  /// A graph exported straight from ComfyUI carries a literal prompt and no
+  /// `%prompt%` token, so substitution would be a no-op and every request would
+  /// reuse that baked-in text. When the prompt token is absent, the prompt node
+  /// the sampler is wired to is found and overwritten instead.
   static Map<String, dynamic> buildWorkflow(
     ComfyUiImageSettings settings, {
     required String prompt,
@@ -135,7 +140,104 @@ class ComfyUiImageProvider {
     if (decoded is! Map<String, dynamic>) {
       throw const FormatException('ComfyUI workflow must be a JSON object');
     }
+
+    if (!raw.contains('"%prompt%"')) {
+      _injectText(
+        decoded,
+        prompt: values['prompt']! as String,
+        negativePrompt: values['negative_prompt']! as String,
+      );
+    }
     return decoded;
+  }
+
+  /// Writes [prompt] / [negativePrompt] into the text nodes a sampler is wired
+  /// to, for graphs that carry no prompt token.
+  ///
+  /// The sampler's `positive` / `negative` links are the only reliable way to
+  /// tell the conditioning nodes apart across the many encoder classes
+  /// (`CLIPTextEncode`, `TextEncodeQwenImage21`, `T5TextEncode`, …). A combined
+  /// node that carries both prompts (like `TextEncodeQwenImage21`) is reached
+  /// for either role and gets its `prompt` / `negative_prompt` fields set.
+  static void _injectText(
+    Map<String, dynamic> workflow, {
+    required String prompt,
+    required String negativePrompt,
+  }) {
+    final positive = <String>{};
+    final negative = <String>{};
+    for (final node in workflow.values) {
+      final inputs = _inputsOf(node);
+      if (inputs == null) continue;
+      _addReference(positive, inputs['positive']);
+      _addReference(negative, inputs['negative']);
+    }
+
+    // No sampler wiring to follow — fall back to the first node that carries a
+    // prompt field so a minimal graph still receives the scene.
+    if (positive.isEmpty && negative.isEmpty) {
+      for (final node in workflow.values) {
+        if (_writePrompt(node, prompt, negativePrompt)) break;
+      }
+      return;
+    }
+
+    for (final id in positive) {
+      _writeField(workflow[id], 'positive', prompt);
+    }
+    for (final id in negative) {
+      _writeField(workflow[id], 'negative', negativePrompt);
+    }
+  }
+
+  static Map<String, dynamic>? _inputsOf(Object? node) {
+    if (node is! Map) return null;
+    final inputs = node['inputs'];
+    return inputs is Map ? inputs.cast<String, dynamic>() : null;
+  }
+
+  static void _addReference(Set<String> target, Object? reference) {
+    if (reference is List && reference.isNotEmpty) {
+      target.add(reference.first.toString());
+    }
+  }
+
+  /// Sets the field matching [role] on [node]: `prompt` / `text` for the
+  /// positive side, `negative_prompt` / `text` for the negative one.
+  static bool _writeField(Object? node, String role, String value) {
+    final inputs = _inputsOf(node);
+    if (inputs == null) return false;
+    final keys = role == 'negative'
+        ? const ['negative_prompt', 'text']
+        : const ['prompt', 'text'];
+    for (final key in keys) {
+      if (inputs[key] is String) {
+        inputs[key] = value;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Writes whichever prompt fields [node] exposes; used when the graph has no
+  /// sampler links. A lone `text` field counts as the positive prompt.
+  static bool _writePrompt(Object? node, String prompt, String negativePrompt) {
+    final inputs = _inputsOf(node);
+    if (inputs == null) return false;
+    var wrote = false;
+    if (inputs['prompt'] is String) {
+      inputs['prompt'] = prompt;
+      wrote = true;
+    }
+    if (inputs['negative_prompt'] is String) {
+      inputs['negative_prompt'] = negativePrompt;
+      wrote = true;
+    }
+    if (!wrote && inputs['text'] is String) {
+      inputs['text'] = prompt;
+      wrote = true;
+    }
+    return wrote;
   }
 
   Future<Map<String, dynamic>> _awaitHistory({
