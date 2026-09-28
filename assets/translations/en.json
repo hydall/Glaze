@@ -415,6 +415,7 @@
   "composer_empty_action_hint": "Drop a card from the Actions tab here to change what the send button does while the message box is empty",
   "composer_empty_action_reset": "Restore the default action (impersonate)",
   "btn_reset": "Reset",
+  "reset_to_default": "Reset to default",
   "stat_messages": "Messages",
   "stat_gen_time": "Generation Time",
   "notification_generating": "Generating response...",
