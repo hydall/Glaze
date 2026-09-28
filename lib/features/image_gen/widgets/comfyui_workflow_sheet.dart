@@ -11,6 +11,7 @@ import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/menu_group.dart';
 import '../../../shared/widgets/sheet_view.dart';
 import '../image_gen_models.dart';
+import '../services/comfyui_workflow_params.dart';
 
 /// Workflow library for ComfyUI.
 ///
@@ -40,7 +41,16 @@ class _ComfyUiWorkflowSheetState extends State<ComfyUiWorkflowSheet> {
     widget.onUpdate(next);
   }
 
-  void _select(String id) => _update(_settings.copyWith(activeWorkflowId: id));
+  /// Pulls the sampler parameters out of the active workflow into the settings,
+  /// so selecting or importing a graph makes the fields show what it will run.
+  ComfyUiImageSettings _withParams(ComfyUiImageSettings next) {
+    final json = next.activeWorkflowJson;
+    if (json.isEmpty) return next;
+    return ComfyUiWorkflowParams.read(json).applyTo(next);
+  }
+
+  void _select(String id) =>
+      _update(_withParams(_settings.copyWith(activeWorkflowId: id)));
 
   Future<void> _import() async {
     final result = await FilePicker.pickFiles(
@@ -67,9 +77,11 @@ class _ComfyUiWorkflowSheetState extends State<ComfyUiWorkflowSheet> {
         json: text,
       );
       _update(
-        _settings.copyWith(
-          workflows: [..._settings.workflows, workflow],
-          activeWorkflowId: workflow.id,
+        _withParams(
+          _settings.copyWith(
+            workflows: [..._settings.workflows, workflow],
+            activeWorkflowId: workflow.id,
+          ),
         ),
       );
       if (mounted) GlazeToast.show(context, 'imggen_comfyui_imported'.tr());
@@ -89,9 +101,11 @@ class _ComfyUiWorkflowSheetState extends State<ComfyUiWorkflowSheet> {
     );
     if (!mounted || result == null) return;
     _update(
-      _settings.copyWith(
-        workflows: [..._settings.workflows, result],
-        activeWorkflowId: result.id,
+      _withParams(
+        _settings.copyWith(
+          workflows: [..._settings.workflows, result],
+          activeWorkflowId: result.id,
+        ),
       ),
     );
   }
@@ -104,14 +118,16 @@ class _ComfyUiWorkflowSheetState extends State<ComfyUiWorkflowSheet> {
     );
     if (!mounted || result == null) return;
     _update(
-      _settings.copyWith(
-        workflows: [
-          for (final entry in _settings.workflows)
-            if (entry.id == workflow.id)
-              result.copyWith(id: workflow.id)
-            else
-              entry,
-        ],
+      _withParams(
+        _settings.copyWith(
+          workflows: [
+            for (final entry in _settings.workflows)
+              if (entry.id == workflow.id)
+                result.copyWith(id: workflow.id)
+              else
+                entry,
+          ],
+        ),
       ),
     );
   }

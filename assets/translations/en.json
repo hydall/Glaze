@@ -1093,6 +1093,7 @@
   "imggen_comfyui_invalid": "Invalid workflow JSON",
   "imggen_comfyui_import": "Import API workflow",
   "imggen_comfyui_imported": "Workflow imported",
+  "imggen_comfyui_reset_params": "Reset to the workflow's parameters",
   "imggen_styles": "Styles",
   "imggen_style_active": "Active style",
   "imggen_style_none": "None",
