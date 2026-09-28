@@ -115,8 +115,7 @@ lib/
 │   │   ├── stream_accumulator.dart   # Parses inline <think…> tags from stream
 │   │   ├── response_normalizer.dart  # Extracts content from non-streaming response body
 │   │   ├── summary_service.dart      # Reads/writes summaries, triggers LLM regeneration
-│   │   ├── tokenizer.dart            # estimateTokens() with the active tokenizer (per isolate), cache, base64 stripping
-│   │   ├── tokenizers/               # HF tokenizer.json BPE engine, binary cache codec, download store, model → tokenizer mapping
+│   │   ├── tokenizer.dart            # estimateTokens() with LRU cache, base64 stripping
 │   │   ├── macro_engine.dart         # SillyTavern-compatible macro replacement engine
 │   │   ├── memory_formatting.dart    # Shared formatMemoryItems / formatMemoryRange helpers
 │   │   ├── vector_math.dart          # cosineSimilarity, findTopK, findTopKMulti, BLOB helpers
@@ -411,7 +410,7 @@ lib/
 │   │   ├── shell_screen.dart         # Bottom nav shell (GoRouter StatefulNavigationShell)
 │   │   ├── nav_height_provider.dart  # navHeightProvider: nav bar height for layout
 │   │   ├── shell_header_provider.dart
-│   │   └── desktop/                  # Desktop three-column layout (≥768px wide, or any tablet-sized screen)
+│   │   └── desktop/                  # Desktop three-column layout (≥768px wide, landscape on tablets)
 │   │       ├── desktop_shell.dart    # Shell wrapper; left/center/right columns
 │   │       ├── desktop_layout_provider.dart
 │   │       ├── desktop_left_sidebar.dart  # Chat list + nav (replaces bottom nav)
@@ -433,7 +432,7 @@ GoRouter lives in `router.dart`, not `app.dart`. Shell tabs and overlay routes:
 
 | Route | Screen |
 |-------|--------|
-| `/` | `ChatHistoryScreen` (mobile); redirects to `/characters` on desktop (window ≥ 768 wide or a tablet-sized screen, non-mobile force) |
+| `/` | `ChatHistoryScreen` (mobile); redirects to `/characters` on desktop (window ≥ 768 wide and, on a tablet, landscape; non-mobile force) |
 | `/characters` | `CharacterListScreen` |
 | `/tools` (+ nested `api`, `personas`, `presets`, `regex`, `lorebooks`, `lorebooks/settings`, `embeddings`) | `ToolsScreen` |
 | `/menu` (+ `settings`, `themes`, `about`, `glossary`) | `MenuScreen` — the header search filters the tab's nested settings; `settings` is one flat screen of themed groups with its own header search, and takes `?highlight=<row id>` so a hit deep-links to the row (`features/menu/search/`) |

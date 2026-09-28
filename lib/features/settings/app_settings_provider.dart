@@ -156,9 +156,10 @@ abstract class AppSettings with _$AppSettings {
     /// the default — and is dragged directly by the chat column's edge grips.
     @Default(900) double chatMaxWidth,
 
-    /// Desktop (>=768px wide, or any tablet-sized screen in either orientation)
-    /// three-column layout is the default, matching the legacy Vue app. This
-    /// switch forces the phone layout back on for users who prefer it.
+    /// Desktop (>=768px wide) three-column layout is the default on wide
+    /// windows and on a tablet held in landscape; a tablet in portrait keeps the
+    /// phone layout. This switch forces the phone layout back on for users who
+    /// prefer it.
     @Default(false) bool forceMobileLayout,
     @Default(false) bool addBlockAtTop,
     @Default(true) bool openCardAfterImport,
