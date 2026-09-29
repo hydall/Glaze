@@ -285,6 +285,50 @@ void main() {
     });
   });
 
+  group('withoutInjected', () {
+    test('takes the recovered lore back out of its own field only', () {
+      const scenario = 'You meet Anna at the library.\n$_loreA';
+      final scan = scanInjectedFields(
+        capture: PromptFields.fromPayload(payload(scenario: scenario)),
+        probe: PromptFields.fromPayload(payload()),
+      );
+
+      expect(
+        withoutInjected(scenario, InjectionField.scenario, scan),
+        'You meet Anna at the library.',
+      );
+      expect(
+        withoutInjected(scenario, InjectionField.persona, scan),
+        scenario,
+      );
+    });
+
+    test('an always-on entry recovered from the probe leaves the card', () {
+      const persona = 'Anna is a librarian.\n$_loreA\nShe is thirty.';
+      final probe = PromptFields.fromPayload(payload(persona: persona));
+      final scan = scanInjectedFields(
+        capture: probe,
+        probe: probe,
+        clean: PromptFields.fromMeta({
+          'personality': 'Anna is a librarian.\nShe is thirty.',
+        }),
+      );
+
+      expect(
+        withoutInjected(persona, InjectionField.persona, scan),
+        'Anna is a librarian.\nShe is thirty.',
+      );
+    });
+
+    test('an empty scan leaves the text alone', () {
+      expect(
+        withoutInjected('Anna.\n\n\n\nBob.', InjectionField.persona,
+            InjectionScan.none),
+        'Anna.\n\n\n\nBob.',
+      );
+    });
+  });
+
   group('PromptFields', () {
     test('reads the injectable fields out of a captured payload', () {
       final fields = PromptFields.fromPayload(payload());
