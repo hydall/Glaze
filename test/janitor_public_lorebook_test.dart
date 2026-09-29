@@ -87,6 +87,34 @@ void main() {
       expect(second.probability, 50);
     });
 
+    // Janitor's editor offers placement default / personality / scenario /
+    // example_dialogs and placementPosition before / after.
+    test('a card-field placement lands on the same side of the card', () {
+      Map<String, dynamic> entry(String? placement, String? side) => {
+            'key': ['k'],
+            'content': 'Lore placed as $placement/$side.',
+            'placement': ?placement,
+            'placementPosition': ?side,
+          };
+      final book = convertJanitorScript([
+        entry(null, null),
+        entry('default', 'before'),
+        entry('personality', 'before'),
+        entry('scenario', 'after'),
+      ], name: 'Placed');
+
+      expect(book.entries.map((e) => e.position), [
+        'worldInfoAfter',
+        'worldInfoAfter',
+        'worldInfoBefore',
+        'worldInfoAfter',
+      ]);
+      final tavern = janitorScriptToTavernJson([
+        entry('personality', 'before'),
+      ])['entries'] as Map;
+      expect((tavern['0'] as Map)['position'], 0);
+    });
+
     test('scopes to a character when characterId is given', () {
       final book = convertJanitorScript(_entries(),
           name: 'World Lore', characterId: 'char-1');

@@ -401,6 +401,22 @@ String _mapPosition(dynamic pos) {
   return 'worldInfoAfter';
 }
 
+/// Where a JanitorAI entry's `placement` puts it, as a position token, or null
+/// for the entry's own block (`"default"` / absent).
+///
+/// JanitorAI entries carry no `position`. Instead `placement` can write the
+/// entry into a card field — `personality`, `scenario` or `example_dialogs` —
+/// with `placementPosition` saying `before` or `after` that field's text.
+/// Nothing in Glaze injects into a field, so the nearest slot is the same side
+/// of the character definition.
+String? _placementPosition(Map<String, dynamic> e) {
+  final placement = e['placement'];
+  if (placement == null || placement == 'default') return null;
+  return e['placementPosition'] == 'before'
+      ? 'worldInfoBefore'
+      : 'worldInfoAfter';
+}
+
 /// Map JanitorAI's native entry shape → Glaze [LorebookEntry]. Tolerant of the
 /// loose field names JanitorAI / SillyTavern use (`key`/`keys`/`keysRaw`, …).
 LorebookEntry _toEntry(Map<String, dynamic> e, int index) {
@@ -426,7 +442,7 @@ LorebookEntry _toEntry(Map<String, dynamic> e, int index) {
     content: content,
     enabled: e['enabled'] != false && e['disable'] != true,
     constant: e['constant'] == true,
-    position: _mapPosition(e['position']),
+    position: _mapPosition(e['position'] ?? _placementPosition(e)),
     order: _asOrder(e),
     selectiveLogic: selectiveLogic,
     probability: probability,
@@ -508,7 +524,7 @@ Map<String, dynamic> _tavernEntry(Map<String, dynamic> e, int uid) {
     'constant': constant,
     'selective': !constant,
     'order': _asOrder(e),
-    'position': _tavernPosition(e['position']),
+    'position': _tavernPosition(e['position'] ?? _placementPosition(e)),
     'disable': e['enabled'] == false || e['disable'] == true,
     'displayIndex': uid,
     'addMemo': true,

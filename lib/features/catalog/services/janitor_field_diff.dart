@@ -5,7 +5,11 @@
 /// [separate] can only isolate what sits *outside* `<...Persona>` /
 /// `<Scenario>` / `<Example...>`: it drops those blocks whole, so anything a
 /// lorebook wrote inside them goes with them. Advanced (Nine API) scripts write
-/// there routinely, and the first message never reaches the separator at all —
+/// there routinely, and so does a plain `lorebook` book: every entry has a
+/// `placement` (`default` / `personality` / `scenario` / `example_dialogs`)
+/// and a `placementPosition` (`before` / `after`), and anything but `default`
+/// writes the entry into that field instead of a block of its own. The first
+/// message never reaches the separator at all —
 /// it is an assistant turn, not part of the system message.
 ///
 /// The recovery is a diff, not a guess. Every capture sends two messages: a bare
@@ -236,4 +240,27 @@ InjectionScan scanInjectedFields({
     }
   }
   return InjectionScan(blocks);
+}
+
+/// [text] with every line [scan] recovered from [field] taken back out.
+///
+/// What the scan reports goes into the lorebook, so it has no business staying
+/// in the imported card as well — the entry would reach the prompt twice, once
+/// always-on. Matched by line with the same folding the scan compares by: the
+/// blocks are made of whole field lines, but may have had public-lorebook text
+/// cut out of them since, so a match on the whole block would miss.
+String withoutInjected(String text, InjectionField field, InjectionScan scan) {
+  final injected = <String>{
+    for (final block in scan.blocks)
+      if (block.field == field)
+        for (final line in block.text.split('\n'))
+          if (_fold(line).isNotEmpty) _fold(line),
+  };
+  if (injected.isEmpty || text.isEmpty) return text;
+  return text
+      .split('\n')
+      .where((line) => !injected.contains(_fold(line)))
+      .join('\n')
+      .replaceAll(RegExp(r'\n{3,}'), '\n\n')
+      .trim();
 }

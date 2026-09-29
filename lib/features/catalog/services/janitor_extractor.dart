@@ -221,12 +221,6 @@ class JanitorExtractor {
             userName: capture.bakedUserName,
           );
 
-      final card = macro(rawCard);
-      final scenario = macro(extractScenario(payload).isNotEmpty
-          ? extractScenario(payload)
-          : (meta?['scenario'] ?? '').toString());
-      final example = macro(extractExample(payload));
-
       // Lore a script wrote INTO the character's own fields never reaches the
       // separator (it drops those blocks whole, and never reads the first
       // message at all). Recover it by diffing the captured prompt against the
@@ -254,6 +248,25 @@ class JanitorExtractor {
           .where((t) => t.isNotEmpty)
           .join('\n\n');
 
+      // The imported card comes from the "." probe, not the trigger send: the
+      // trigger exists to fire as many entries as it can, and every one of them
+      // that wrote into a field would otherwise be imported as part of the
+      // character. Whatever the scan still recovered from the probe (the
+      // always-on entries of a public definition) goes to the lorebook, so it
+      // is taken out of the card too.
+      final cardSource = probePayload ?? payload;
+      final capturedScenario = extractScenario(cardSource);
+      final card = withoutInjected(
+          macro(extractCard(cardSource)), InjectionField.persona, scan);
+      final scenario = withoutInjected(
+          macro(capturedScenario.isNotEmpty
+              ? capturedScenario
+              : (meta?['scenario'] ?? '').toString()),
+          InjectionField.scenario,
+          scan);
+      final example = withoutInjected(
+          macro(extractExample(cardSource)), InjectionField.example, scan);
+
       // Greetings, best source first: the chat object the capture created (it
       // carries them verbatim even when a closed card withholds them from
       // /hampter/characters), then the catalog metadata, then the assistant turn
@@ -265,7 +278,7 @@ class JanitorExtractor {
           ...capture.greetings.skip(1).map(macro),
           if (meta?['first_message'] is String) macro(meta!['first_message'] as String),
           ...greetingList(meta?['first_messages']).map(macro),
-          macro(extractFirstMessage(payload)),
+          macro(extractFirstMessage(cardSource)),
         ],
       );
       final firstMes = normalized.firstMes;
