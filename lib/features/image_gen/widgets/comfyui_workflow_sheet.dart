@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/menu_group.dart';
@@ -349,18 +350,18 @@ class _WorkflowEditorState extends State<_WorkflowEditor> {
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text('btn_cancel'.tr()),
+              GlazeActionButton(
+                icon: Icons.close,
+                label: 'btn_cancel'.tr(),
+                onTap: () => Navigator.pop(context),
+                tone: GlazeActionTone.neutral,
               ),
               const SizedBox(width: 8),
-              FilledButton(
-                style: FilledButton.styleFrom(
-                  backgroundColor: context.cs.primary,
-                  foregroundColor: Colors.black,
-                ),
-                onPressed: _save,
-                child: Text('btn_save'.tr()),
+              GlazeActionButton(
+                icon: Icons.check,
+                label: 'btn_save'.tr(),
+                onTap: _save,
+                tone: GlazeActionTone.primary,
               ),
             ],
           ),

@@ -22,6 +22,7 @@ import '../../shared/shell/nav_retap_provider.dart';
 import '../../shared/shell/shell_header_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glass_surface.dart';
+import '../../shared/widgets/glaze_action_button.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/glaze_tab_bar.dart';
@@ -771,14 +772,13 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
                         style: TextStyle(color: context.cs.onSurfaceVariant),
                       ),
                       if (_filters.isActive)
-                        TextButton(
-                          onPressed: () => setState(
-                            () => _filters = const CharacterListFilters(),
+                        GlazeActionButton(
+                          icon: Icons.filter_alt_off_rounded,
+                          label: 'catalog_clear_tags'.tr(
+                            namedArgs: {'count': '${_filters.activeCount}'},
                           ),
-                          child: Text(
-                            'catalog_clear_tags'.tr(
-                              namedArgs: {'count': '${_filters.activeCount}'},
-                            ),
+                          onTap: () => setState(
+                            () => _filters = const CharacterListFilters(),
                           ),
                         ),
                     ],

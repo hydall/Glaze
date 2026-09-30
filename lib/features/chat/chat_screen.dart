@@ -1224,10 +1224,12 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
         return true;
       }
       if (!mounted) return false;
-      final result = await showDialog<GameTimeSeedResult>(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => const GameTimeSeedDialog(),
+      final result = await GlazeBottomSheet.show<GameTimeSeedResult>(
+        context,
+        title: 'game_time_seed_title'.tr(),
+        isDismissible: false,
+        locked: true,
+        child: const GameTimeSeedDialog(),
       );
       if (result == null) return false;
       if (!isCurrentSession()) return false;

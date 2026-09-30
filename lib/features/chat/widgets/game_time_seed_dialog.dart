@@ -2,6 +2,8 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../shared/widgets/glaze_action_button.dart';
+
 /// Result of the first-message game time seeding dialog.
 class GameTimeSeedResult {
   const GameTimeSeedResult({required this.time, required this.date});
@@ -63,9 +65,9 @@ class _GameTimeSeedDialogState extends State<GameTimeSeedDialog> {
     }
     final hour = int.parse(timeMatch.group(1)!).toString().padLeft(2, '0');
     final minute = timeMatch.group(2)!;
-    Navigator.of(
-      context,
-    ).pop(GameTimeSeedResult(time: '$hour:$minute', date: dateRaw));
+    Navigator.of(context, rootNavigator: true).pop(
+      GameTimeSeedResult(time: '$hour:$minute', date: dateRaw),
+    );
   }
 
   @override
@@ -73,9 +75,9 @@ class _GameTimeSeedDialogState extends State<GameTimeSeedDialog> {
     final cs = Theme.of(context).colorScheme;
     return PopScope(
       canPop: false,
-      child: AlertDialog(
-        title: Text('game_time_seed_title'.tr()),
-        content: Column(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+        child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -118,14 +120,18 @@ class _GameTimeSeedDialogState extends State<GameTimeSeedDialog> {
                   style: TextStyle(color: cs.error, fontSize: 13),
                 ),
               ),
+            const SizedBox(height: 16),
+            Align(
+              alignment: Alignment.centerRight,
+              child: GlazeActionButton(
+                icon: Icons.check_rounded,
+                label: 'game_time_seed_confirm'.tr(),
+                tone: GlazeActionTone.primary,
+                onTap: _submit,
+              ),
+            ),
           ],
         ),
-        actions: [
-          FilledButton(
-            onPressed: _submit,
-            child: Text('game_time_seed_confirm'.tr()),
-          ),
-        ],
       ),
     );
   }

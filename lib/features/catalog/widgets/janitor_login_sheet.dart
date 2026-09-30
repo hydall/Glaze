@@ -6,6 +6,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../../chat/bridge/chat_webview_environment.dart';
@@ -17,7 +18,10 @@ import '../../../shared/widgets/glaze_sheet.dart';
 /// Entry point for the menu's "JanitorAI Account" item. When a session already
 /// exists, shows a small log-out / cancel sheet instead of the login WebView;
 /// otherwise opens the WebView so the user can sign in.
-Future<void> openJanitorAccountSheet(BuildContext context, WidgetRef ref) async {
+Future<void> openJanitorAccountSheet(
+  BuildContext context,
+  WidgetRef ref,
+) async {
   if (!ref.read(janitorAccountProvider).isLoggedIn) {
     await showJanitorLoginSheet(context);
     return;
@@ -154,8 +158,9 @@ class _JanitorLoginSheetState extends ConsumerState<JanitorLoginSheet> {
           ),
           Expanded(
             child: InAppWebView(
-              initialUrlRequest:
-                  URLRequest(url: WebUri(JanitorLoginSheet._loginUrl)),
+              initialUrlRequest: URLRequest(
+                url: WebUri(JanitorLoginSheet._loginUrl),
+              ),
               initialSettings: InAppWebViewSettings(
                 javaScriptEnabled: true,
                 domStorageEnabled: true,
@@ -171,8 +176,8 @@ class _JanitorLoginSheetState extends ConsumerState<JanitorLoginSheet> {
               ),
               webViewEnvironment:
                   defaultTargetPlatform == TargetPlatform.windows
-                      ? chatWebViewEnvironment
-                      : null,
+                  ? chatWebViewEnvironment
+                  : null,
               // Claim vertical (and horizontal) drags so the WebView scrolls
               // instead of the enclosing modal sheet eating the gesture.
               gestureRecognizers: {
@@ -233,19 +238,14 @@ class _Header extends StatelessWidget {
           if (busy)
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 12),
-              child: SizedBox(
-                width: 18,
-                height: 18,
-                child: GlazeSpinner(),
-              ),
+              child: SizedBox(width: 18, height: 18, child: GlazeSpinner()),
             )
           else
-            TextButton(
-              onPressed: onLogout,
-              child: Text(
-                'janitor_auth_logout'.tr(),
-                style: TextStyle(color: context.cs.error),
-              ),
+            GlazeActionButton(
+              icon: Icons.logout_rounded,
+              label: 'janitor_auth_logout'.tr(),
+              tone: GlazeActionTone.destructive,
+              onTap: onLogout,
             ),
         ],
       ),

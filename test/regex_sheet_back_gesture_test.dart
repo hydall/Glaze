@@ -10,6 +10,7 @@ import 'package:glaze_flutter/core/state/db_provider.dart';
 import 'package:glaze_flutter/features/presets/preset_list_provider.dart';
 import 'package:glaze_flutter/features/regex/regex_sheet.dart';
 import 'package:glaze_flutter/features/settings/app_settings_provider.dart';
+import 'package:glaze_flutter/shared/widgets/list_controls.dart';
 
 /// Serves one preset with one script and swallows the debounced save, so the
 /// sheet never reaches the database.
@@ -79,23 +80,23 @@ void main() {
     await tester.tap(find.text('Open'));
     await tester.pumpAndSettle();
 
-    // The list is showing: the add FAB belongs to it.
-    expect(find.byType(FloatingActionButton), findsOneWidget);
+    // The list is showing: the add button belongs to it.
+    expect(find.byType(GlazeActionChip), findsOneWidget);
 
-    // Open the script's editor — the FAB goes away with the list.
+    // Open the script's editor — the add button goes away with the list.
     await tester.tap(find.text('Script'));
     await tester.pumpAndSettle();
-    expect(find.byType(FloatingActionButton), findsNothing);
+    expect(find.byType(GlazeActionChip), findsNothing);
 
     // First back unwinds to the list instead of dismissing the sheet.
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
-    expect(find.byType(FloatingActionButton), findsOneWidget);
+    expect(find.byType(GlazeActionChip), findsOneWidget);
 
     // Nothing left inside — now back closes the sheet itself.
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
-    expect(find.byType(FloatingActionButton), findsNothing);
+    expect(find.byType(GlazeActionChip), findsNothing);
     expect(find.text('Script'), findsNothing);
 
     // Unmount the scope while the fake clock can still run drift's stream

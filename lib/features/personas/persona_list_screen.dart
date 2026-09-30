@@ -22,6 +22,7 @@ import '../../core/utils/id_generator.dart';
 import '../../core/utils/time_helpers.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/generic_editor.dart';
+import '../../shared/widgets/glaze_action_button.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_scaffold.dart';
 import '../../shared/widgets/glaze_toast.dart';
@@ -141,9 +142,12 @@ class _PersonaListScreenState extends ConsumerState<PersonaListScreen> {
                 children: [
                   Text('no_results'.tr()),
                   const SizedBox(height: 8),
-                  FilledButton.tonal(
-                    onPressed: () => _showEditor(context),
-                    child: Text("${'create_new'.tr()} ${'tab_personas'.tr()}"),
+                  GlazeActionButton(
+                    icon: Icons.add_rounded,
+                    label:
+                        "${'create_new'.tr()} ${'tab_personas'.tr()}",
+                    tone: GlazeActionTone.primary,
+                    onTap: () => _showEditor(context),
                   ),
                 ],
               ),

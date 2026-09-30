@@ -5,7 +5,12 @@ import '../../../core/models/memory_graph.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/state/memory_agent_providers.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
+import '../../../shared/widgets/glaze_tab_bar.dart';
+import '../../../shared/widgets/menu_group.dart';
+import '../../../shared/widgets/swipe_tab_switcher.dart';
+import '../../../shared/widgets/tab_slide_switcher.dart';
 
 class MemoryGraphPanel extends ConsumerStatefulWidget {
   final String sessionId;
@@ -16,22 +21,9 @@ class MemoryGraphPanel extends ConsumerStatefulWidget {
   ConsumerState<MemoryGraphPanel> createState() => _MemoryGraphPanelState();
 }
 
-class _MemoryGraphPanelState extends ConsumerState<MemoryGraphPanel>
-    with SingleTickerProviderStateMixin {
-  late final TabController _tabController;
+class _MemoryGraphPanelState extends ConsumerState<MemoryGraphPanel> {
+  int _tabIndex = 0;
   bool _rebuilding = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _tabController = TabController(length: 1, vsync: this);
-  }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -50,19 +42,12 @@ class _MemoryGraphPanelState extends ConsumerState<MemoryGraphPanel>
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const Spacer(),
-                  if (_rebuilding)
-                    const Padding(
-                      padding: EdgeInsets.only(right: 8),
-                      child: SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: GlazeSpinner(),
-                      ),
-                    ),
-                  FilledButton.tonalIcon(
-                    onPressed: _rebuilding ? null : _rebuildGraph,
-                    icon: const Icon(Icons.refresh, size: 18),
-                    label: const Text('Rebuild'),
+                  GlazeActionButton(
+                    icon: Icons.refresh,
+                    label: 'Rebuild',
+                    tone: GlazeActionTone.primary,
+                    busy: _rebuilding,
+                    onTap: _rebuildGraph,
                   ),
                   const SizedBox(width: 8),
                   IconButton(
@@ -72,14 +57,29 @@ class _MemoryGraphPanelState extends ConsumerState<MemoryGraphPanel>
                 ],
               ),
             ),
-            TabBar(
-              controller: _tabController,
-              tabs: const [Tab(text: 'Entities')],
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: GlazeTabBar(
+                tabs: const [
+                  GlazeTabItem(
+                    label: 'Entities',
+                    icon: Icons.account_tree_outlined,
+                  ),
+                ],
+                activeIndex: _tabIndex,
+                onChanged: (index) => setState(() => _tabIndex = index),
+              ),
             ),
+            const SizedBox(height: 8),
             Expanded(
-              child: TabBarView(
-                controller: _tabController,
-                children: [_entitiesTab()],
+              child: SwipeTabSwitcher(
+                index: _tabIndex,
+                length: 1,
+                onChanged: (index) => setState(() => _tabIndex = index),
+                child: TabSlideSwitcher(
+                  index: _tabIndex,
+                  child: _entitiesTab(),
+                ),
               ),
             ),
           ],
@@ -103,37 +103,40 @@ class _MemoryGraphPanelState extends ConsumerState<MemoryGraphPanel>
             child: Text('No entities extracted yet. Run Rebuild to populate.'),
           );
         }
-        return ListView.builder(
-          itemCount: entities.length,
-          itemBuilder: (context, index) {
-            final e = entities[index];
-            return ListTile(
-              leading: Icon(
-                e.entityType == 'character'
-                    ? Icons.person_outline
-                    : Icons.place_outlined,
-                size: 20,
-                color: context.cs.primary,
-              ),
-              title: Text(e.name),
-              subtitle: Text(
-                '${e.entityType} · salience ${e.salienceAvg.toStringAsFixed(2)} · ${e.mentionCount} mentions'
-                '${e.aliases.isNotEmpty ? " · aliases: ${e.aliases.join(", ")}" : ""}',
-                style: const TextStyle(fontSize: 12),
-              ),
-              trailing: e.status == 'active'
-                  ? null
-                  : Text(
-                      e.status,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: e.status == 'deceased'
-                            ? Colors.red
-                            : context.cs.onSurfaceVariant,
-                      ),
+        return ListView(
+          padding: const EdgeInsets.fromLTRB(0, 4, 0, 12),
+          children: [
+            MenuGroup(
+              items: [
+                for (final e in entities)
+                  MenuItem(
+                    iconWidget: Icon(
+                      e.entityType == 'character'
+                          ? Icons.person_outline
+                          : Icons.place_outlined,
+                      size: 20,
+                      color: context.cs.primary,
                     ),
-            );
-          },
+                    label: e.name,
+                    subtitle:
+                        '${e.entityType} · salience ${e.salienceAvg.toStringAsFixed(2)} · ${e.mentionCount} mentions'
+                        '${e.aliases.isNotEmpty ? " · aliases: ${e.aliases.join(", ")}" : ""}',
+                    trailing: e.status == 'active'
+                        ? null
+                        : Text(
+                            e.status,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: e.status == 'deceased'
+                                  ? Colors.red
+                                  : context.cs.onSurfaceVariant,
+                            ),
+                          ),
+                    onTap: () {},
+                  ),
+              ],
+            ),
+          ],
         );
       },
     );

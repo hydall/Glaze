@@ -6,6 +6,7 @@ import '../../../core/models/extra_request_parameter.dart';
 import '../../../core/models/pipeline_settings.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/extra_request_parameters_editor.dart';
+import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/menu_group.dart';
 import '../../../shared/widgets/sheet_view.dart';
@@ -546,9 +547,12 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
             _buildReasoningGroup(),
           ],
           const SizedBox(height: 16),
-          FilledButton(
-            onPressed: _save,
-            child: Text('studio_slot_settings_save'.tr()),
+          GlazeActionButton(
+            icon: Icons.check,
+            label: 'studio_slot_settings_save'.tr(),
+            onTap: _save,
+            tone: GlazeActionTone.primary,
+            expand: true,
           ),
         ],
       ),

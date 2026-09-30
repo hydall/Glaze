@@ -20,6 +20,7 @@ import '../../shared/widgets/swipe_tab_switcher.dart';
 import '../../shared/widgets/tab_slide_switcher.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glass_surface.dart';
+import '../../shared/widgets/list_controls.dart';
 import '../../shared/widgets/menu_group.dart';
 import 'app_settings_provider.dart';
 import 'theme_preview.dart';
@@ -1247,12 +1248,13 @@ class _FontSizeRow extends StatelessWidget {
                 child: Text(label, style: TextStyle(fontSize: 15, color: context.cs.onSurfaceVariant, fontWeight: FontWeight.w400)),
               ),
               const Spacer(),
-              TextButton(
-                onPressed: () => onChanged(_isSystem ? 14.0 : 'system'),
-                child: Text(
-                  _isSystem ? 'theme_system_font_size'.tr() : '${_numVal.toInt()}px',
-                  style: TextStyle(color: context.cs.primary),
-                ),
+              GlazeActionChip(
+                icon: Icons.text_fields_rounded,
+                label: _isSystem
+                    ? 'theme_system_font_size'.tr()
+                    : '${_numVal.toInt()}px',
+                tooltip: label,
+                onTap: () => onChanged(_isSystem ? 14.0 : 'system'),
               ),
             ],
           ),
@@ -3008,16 +3010,16 @@ class _GoogleFontPickerSheetState extends State<_GoogleFontPickerSheet> {
                   ),
                 ),
                 Flexible(
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: filtered.length,
-                    itemBuilder: (_, i) {
-                      final font = filtered[i];
-                      return ListTile(
-                        title: Text(font, style: TextStyle(color: cs.onSurface)),
-                        onTap: () => Navigator.pop(context, font),
-                      );
-                    },
+                  child: SingleChildScrollView(
+                    child: MenuGroup(
+                      items: [
+                        for (final font in filtered)
+                          MenuItem(
+                            label: font,
+                            onTap: () => Navigator.pop(context, font),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               ],

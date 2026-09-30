@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/services/card_rewriter/card_rewriter_contracts.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_expansion_tile.dart';
 
 /// Immutable transition + evidence read-out for one operation.
 ///
@@ -28,124 +29,112 @@ class RewriteEvidenceAccordion extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = context.cs;
     final transition = snapshot.transition;
-    return Theme(
-      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-      child: ExpansionTile(
-        dense: true,
-        tilePadding: EdgeInsets.zero,
-        childrenPadding: const EdgeInsets.only(bottom: 4),
-        leading: Icon(
-          Icons.history_edu_outlined,
-          size: 16,
+    return GlazeExpansionTile(
+      leading: Icon(
+        Icons.history_edu_outlined,
+        size: 16,
+        color: cs.onSurfaceVariant,
+      ),
+      title: Text(
+        'rewrite_evidence_title'.tr(namedArgs: {'count': '$evidenceCount'}),
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
           color: cs.onSurfaceVariant,
         ),
-        title: Text(
-          'rewrite_evidence_title'.tr(
-            namedArgs: {'count': '$evidenceCount'},
+      ),
+      childrenPadding: const EdgeInsets.only(bottom: 4),
+      children: [
+        _row(
+          context,
+          icon: Icons.format_quote_outlined,
+          label: 'rewrite_evidence_claim'.tr(),
+          value: transition.canonicalClaim,
+        ),
+        _row(
+          context,
+          icon: Icons.output_outlined,
+          label: 'rewrite_evidence_destination'.tr(),
+          value: transition.promotionDestination.isEmpty
+              ? '—'
+              : transition.promotionDestination,
+        ),
+        _row(
+          context,
+          icon: Icons.public_outlined,
+          label: 'rewrite_evidence_scope'.tr(),
+          value: transition.chatSessionId == null
+              ? 'rewrite_evidence_scope_global'.tr()
+              : transition.chatSessionId!,
+        ),
+        _row(
+          context,
+          icon: Icons.tag,
+          label: 'rewrite_evidence_transition_id'.tr(),
+          value: transition.id,
+          mono: true,
+        ),
+        _row(
+          context,
+          icon: Icons.link_outlined,
+          label: 'rewrite_evidence_facts'.tr(
+            namedArgs: {'count': '${transition.factIds.length}'},
           ),
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: cs.onSurfaceVariant,
+          value: '',
+        ),
+        const SizedBox(height: 6),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            'rewrite_evidence_affected_keys'.tr(),
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: cs.onSurfaceVariant,
+            ),
           ),
         ),
-        iconColor: cs.onSurfaceVariant,
-        collapsedIconColor: cs.onSurfaceVariant,
-        children: [
-          _row(
-            context,
-            icon: Icons.format_quote_outlined,
-            label: 'rewrite_evidence_claim'.tr(),
-            value: transition.canonicalClaim,
-          ),
-          _row(
-            context,
-            icon: Icons.output_outlined,
-            label: 'rewrite_evidence_destination'.tr(),
-            value: transition.promotionDestination.isEmpty
-                ? '—'
-                : transition.promotionDestination,
-          ),
-          _row(
-            context,
-            icon: Icons.public_outlined,
-            label: 'rewrite_evidence_scope'.tr(),
-            value: transition.chatSessionId == null
-                ? 'rewrite_evidence_scope_global'.tr()
-                : transition.chatSessionId!,
-          ),
-          _row(
-            context,
-            icon: Icons.tag,
-            label: 'rewrite_evidence_transition_id'.tr(),
-            value: transition.id,
-            mono: true,
-          ),
-          _row(
-            context,
-            icon: Icons.link_outlined,
-            label: 'rewrite_evidence_facts'.tr(
-              namedArgs: {'count': '${transition.factIds.length}'},
-            ),
-            value: '',
-          ),
-          const SizedBox(height: 6),
+        const SizedBox(height: 6),
+        if (transition.affectedTrackerKeys.isEmpty)
           Align(
             alignment: Alignment.centerLeft,
             child: Text(
-              'rewrite_evidence_affected_keys'.tr(),
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: cs.onSurfaceVariant,
-              ),
+              'rewrite_evidence_no_keys'.tr(),
+              style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
             ),
-          ),
-          const SizedBox(height: 6),
-          if (transition.affectedTrackerKeys.isEmpty)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                'rewrite_evidence_no_keys'.tr(),
-                style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
-              ),
-            )
-          else
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                for (final key in transition.affectedTrackerKeys)
-                  _TrackerKeyChip(
-                    keyName: key,
-                    locked: lockedKeys.contains(key),
-                  ),
-              ],
-            ),
-          const SizedBox(height: 8),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          )
+        else
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
             children: [
-              Icon(
-                Icons.lock_outline_rounded,
-                size: 12,
-                color: cs.onSurfaceVariant,
-              ),
-              const SizedBox(width: 4),
-              Expanded(
-                child: Text(
-                  'rewrite_evidence_immutable_note'.tr(),
-                  style: TextStyle(
-                    fontSize: 11,
-                    height: 1.4,
-                    color: cs.onSurfaceVariant,
-                  ),
-                ),
-              ),
+              for (final key in transition.affectedTrackerKeys)
+                _TrackerKeyChip(keyName: key, locked: lockedKeys.contains(key)),
             ],
           ),
-        ],
-      ),
+        const SizedBox(height: 8),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              Icons.lock_outline_rounded,
+              size: 12,
+              color: cs.onSurfaceVariant,
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                'rewrite_evidence_immutable_note'.tr(),
+                style: TextStyle(
+                  fontSize: 11,
+                  height: 1.4,
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 

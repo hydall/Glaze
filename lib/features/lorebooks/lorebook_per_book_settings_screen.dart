@@ -5,8 +5,11 @@ import '../../../core/llm/lorebook_embedding_text.dart';
 import '../../../core/models/lorebook.dart';
 import '../../../core/state/lorebook_embedding_provider.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_scaffold.dart';
 import '../../../shared/widgets/help_tip.dart';
+import '../../../shared/widgets/list_controls.dart';
+import 'widgets/lorebook_option_sheet.dart';
 
 class LorebookPerBookSettingsScreen extends ConsumerStatefulWidget {
   final LorebookSettings? settings;
@@ -48,34 +51,19 @@ class _LorebookPerBookSettingsScreenState
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: context.cs.surface,
+    return GlazeScaffold(
+      title: 'title_lorebook_settings'.tr(),
+      onBack: () => _pop(context),
+      actions: [
+        GlazeActionButton(
+          icon: Icons.undo_rounded,
+          label: 'lorebook_reset_to_global'.tr(),
+          tone: GlazeActionTone.neutral,
+          onTap: _hasCustom ? _resetToGlobal : null,
+        ),
+      ],
       body: Column(
         children: [
-          SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-              child: GlazeAppBar(
-                title: 'title_lorebook_settings'.tr(),
-                leading: BackButton(onPressed: () => _pop(context)),
-                actions: [
-                  TextButton(
-                    onPressed: _hasCustom ? _resetToGlobal : null,
-                    child: Text(
-                      'lorebook_reset_to_global'.tr(),
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: _hasCustom
-                            ? context.cs.primary
-                            : context.cs.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
           if (!_hasCustom)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -147,12 +135,11 @@ class _LorebookPerBookSettingsScreenState
                 _DropdownField<String>(
                   label: 'label_match_whole_words'.tr(),
                   value: _settings.matchWholeWords ?? '',
-                  items: [
-                    DropdownMenuItem(value: '', child: Text('match_global'.tr())),
-                    DropdownMenuItem(value: 'false', child: Text('off'.tr())),
-                    DropdownMenuItem(value: 'true', child: Text('on'.tr())),
-                    DropdownMenuItem(
-                        value: 'glaze', child: Text('match_whole_words_glaze'.tr())),
+                  options: [
+                    LorebookOption('', 'match_global'.tr()),
+                    LorebookOption('false', 'off'.tr()),
+                    LorebookOption('true', 'on'.tr()),
+                    LorebookOption('glaze', 'match_whole_words_glaze'.tr()),
                   ],
                   onChanged: (v) => _update(
                       _settings.copyWith(matchWholeWords: v.isEmpty ? null : v)),
@@ -187,22 +174,22 @@ class _LorebookPerBookSettingsScreenState
                           )
                           ? _settings.embeddingTarget
                           : LorebookEmbeddingTarget.content,
-                      items: [
-                        DropdownMenuItem(
-                          value: LorebookEmbeddingTarget.content,
-                          child: Text('target_content'.tr()),
+                      options: [
+                        LorebookOption(
+                          LorebookEmbeddingTarget.content,
+                          'target_content'.tr(),
                         ),
-                        DropdownMenuItem(
-                          value: LorebookEmbeddingTarget.comment,
-                          child: Text('target_comment'.tr()),
+                        LorebookOption(
+                          LorebookEmbeddingTarget.comment,
+                          'target_comment'.tr(),
                         ),
-                        DropdownMenuItem(
-                          value: LorebookEmbeddingTarget.keys,
-                          child: Text('target_keys'.tr()),
+                        LorebookOption(
+                          LorebookEmbeddingTarget.keys,
+                          'target_keys'.tr(),
                         ),
-                        DropdownMenuItem(
-                          value: LorebookEmbeddingTarget.both,
-                          child: Text('target_comment_and_content'.tr()),
+                        LorebookOption(
+                          LorebookEmbeddingTarget.both,
+                          'target_comment_and_content'.tr(),
                         ),
                       ],
                       onChanged: (v) =>
@@ -416,18 +403,22 @@ class _NumberFieldState extends State<_NumberField> {
 class _DropdownField<T> extends StatelessWidget {
   final String label;
   final T value;
-  final List<DropdownMenuItem<T>> items;
+  final List<LorebookOption<T>> options;
   final ValueChanged<T> onChanged;
 
   const _DropdownField({
     required this.label,
     required this.value,
-    required this.items,
+    required this.options,
     required this.onChanged,
   });
 
   @override
   Widget build(BuildContext context) {
+    final current = options.firstWhere(
+      (o) => o.value == value,
+      orElse: () => options.first,
+    );
     return Row(
       children: [
         Expanded(
@@ -436,25 +427,20 @@ class _DropdownField<T> extends StatelessWidget {
                   TextStyle(color: context.cs.onSurfaceVariant, fontSize: 14)),
         ),
         const SizedBox(width: 8),
-        Flexible(
-          flex: 2,
-          child: DropdownButtonFormField<T>(
-            initialValue: value,
-            items: items,
-            isExpanded: true,
-            onChanged: (v) {
-              if (v != null) onChanged(v);
-            },
-            style: TextStyle(color: context.cs.onSurface, fontSize: 13),
-            dropdownColor: context.cs.surface,
-            decoration: InputDecoration(
-              isDense: true,
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              filled: true,
-              fillColor: Colors.white.withValues(alpha: 0.05),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-            ),
+        GlazeDropdownChip(
+          label: current.label,
+          onTap: () => showGlazePickerSheet(
+            context,
+            title: label,
+            items: [
+              for (final option in options)
+                GlazePickerItem(
+                  label: option.label,
+                  isActive: option.value == value,
+                  value: option.value,
+                ),
+            ],
+            onSelect: (v) => onChanged(v as T),
           ),
         ),
       ],

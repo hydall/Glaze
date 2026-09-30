@@ -33,7 +33,7 @@ void main() {
 
     test('enabling requires an explicit warning confirmation', () {
       final block = handler();
-      expect(block, contains('showDialog<bool>'));
+      expect(block, contains('GlazeBottomSheet.show<bool>'));
       expect(block, contains("'message_scripts_warning_title'.tr()"));
       expect(block, contains("'message_scripts_warning_desc'.tr()"));
       expect(block, contains('confirmed != true'));
@@ -43,7 +43,7 @@ void main() {
     test('disabling does not require confirmation', () {
       final block = handler();
       final off = block.indexOf('allowMessageScripts: false');
-      final dialog = block.indexOf('showDialog<bool>');
+      final dialog = block.indexOf('GlazeBottomSheet.show<bool>');
       expect(off, isNonNegative);
       expect(dialog, isNonNegative);
       // The "off" path returns before the dialog is ever built.

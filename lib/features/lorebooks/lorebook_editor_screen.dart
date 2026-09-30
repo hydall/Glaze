@@ -19,10 +19,13 @@ import '../../core/utils/time_helpers.dart';
 import '../../features/settings/api_list_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glass_surface.dart';
+import '../../shared/widgets/glaze_action_button.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
+import '../../shared/widgets/glaze_scaffold.dart';
 import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/glaze_toast.dart';
+import '../../shared/widgets/list_controls.dart';
 import '../../shared/widgets/menu_group.dart';
 import '../../shared/widgets/sheet_view.dart';
 import 'lorebook_connections_sheet.dart';
@@ -983,105 +986,17 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
   }
 
   void _showTestDialog() {
-    final testCtrl = TextEditingController();
-    showDialog<void>(
-      context: context,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setDialogState) {
-            return AlertDialog(
-              backgroundColor: context.cs.surfaceContainerHighest,
-              title: Text(
-                'btn_test_connection'.tr(),
-                style: TextStyle(color: context.cs.onSurface),
-              ),
-              content: SizedBox(
-                width: 400,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    TextField(
-                      controller: testCtrl,
-                      keyboardType: TextInputType.multiline,
-                      textInputAction: TextInputAction.newline,
-                      style: TextStyle(color: context.cs.onSurface),
-                      decoration: InputDecoration(
-                        hintText: 'placeholder_search_lore'.tr(),
-                        hintStyle: TextStyle(
-                          color: context.cs.onSurfaceVariant.withValues(
-                            alpha: 0.5,
-                          ),
-                        ),
-                        filled: true,
-                        fillColor: Colors.white.withValues(alpha: 0.05),
-                      ),
-                      maxLines: 3,
-                      minLines: 1,
-                      onChanged: (_) => setDialogState(() {}),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'label_entries'.tr(),
-                      style: TextStyle(
-                        color: context.cs.onSurfaceVariant,
-                        fontSize: 12,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    ..._matchEntries(testCtrl.text).map(
-                      (e) => Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2),
-                        child: Row(
-                          children: [
-                            const Icon(
-                              Icons.check_circle,
-                              size: 14,
-                              color: Colors.green,
-                            ),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                e.comment.isNotEmpty
-                                    ? e.comment
-                                    : e.keys.join(', '),
-                                style: TextStyle(
-                                  color: context.cs.onSurface,
-                                  fontSize: 13,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    if (testCtrl.text.isNotEmpty &&
-                        _matchEntries(testCtrl.text).isEmpty)
-                      Text(
-                        'no_results'.tr(),
-                        style: TextStyle(
-                          color: context.cs.onSurfaceVariant,
-                          fontSize: 13,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: Text(
-                    'btn_close'.tr(),
-                    style: TextStyle(color: context.cs.onSurfaceVariant),
-                  ),
-                ),
-              ],
-            );
-          },
-        );
-      },
+    GlazeBottomSheet.show<void>(
+      context,
+      title: 'btn_test_connection'.tr(),
+      child: _MatchPreview(match: _matchEntries),
+      items: [
+        BottomSheetItem(
+          label: 'btn_close'.tr(),
+          centered: true,
+          onTap: () => Navigator.of(context, rootNavigator: true).pop(),
+        ),
+      ],
     );
   }
 
@@ -1115,9 +1030,8 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
       }
       final lb = _findLorebook(list);
       if (lb == null) {
-        return Scaffold(
-          backgroundColor: context.cs.surface,
-          appBar: AppBar(title: Text('no_results'.tr())),
+        return GlazeScaffold(
+          title: 'no_results'.tr(),
           body: Center(child: Text('no_lorebooks'.tr())),
         );
       }
@@ -1168,13 +1082,10 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
               ),
             ],
       floatingActionButton: isEntries
-          ? FloatingActionButton(
-              // Disable the Hero so this FAB doesn't collide with the list
-              // screen's FAB (default tags clash during the push transition).
-              heroTag: null,
-              backgroundColor: context.cs.primary,
-              onPressed: _addEntryMenu,
-              child: const Icon(Icons.add, color: Colors.black),
+          ? GlazeActionChip(
+              icon: Icons.add,
+              tooltip: 'lorebook_new_entry'.tr(),
+              onTap: _addEntryMenu,
             )
           : null,
       body: isEntries ? _entriesBody() : _editBody(),
@@ -1327,9 +1238,12 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
             ),
           ),
           const SizedBox(width: 8),
-          OutlinedButton(
-            onPressed: _isIndexing ? null : _indexEntries,
-            child: Text('btn_index_all'.tr()),
+          GlazeActionButton(
+            icon: Icons.auto_fix_high,
+            label: 'btn_index_all'.tr(),
+            tone: GlazeActionTone.neutral,
+            busy: _isIndexing,
+            onTap: _indexEntries,
           ),
         ],
       ),
@@ -1715,20 +1629,15 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        SizedBox(
-                          width: double.infinity,
-                          child: FilledButton(
-                            style: FilledButton.styleFrom(
-                              backgroundColor: context.cs.primary,
-                              foregroundColor: Colors.black,
-                            ),
-                            onPressed: _eIndexing ? null : _indexSingleEntry,
-                            child: Text(
-                              _eIndexing
-                                  ? 'btn_indexing'.tr()
-                                  : 'btn_index_entry'.tr(),
-                            ),
-                          ),
+                        GlazeActionButton(
+                          icon: Icons.auto_fix_high,
+                          label: _eIndexing
+                              ? 'btn_indexing'.tr()
+                              : 'btn_index_entry'.tr(),
+                          tone: GlazeActionTone.primary,
+                          expand: true,
+                          busy: _eIndexing,
+                          onTap: _indexSingleEntry,
                         ),
                         if (_embeddingStatuses[_entries[_editIndex].id] != null)
                           Padding(
@@ -1843,6 +1752,98 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
     'lorebooksMacro' => 'pos_lorebooks_macro'.tr(),
     _ => 'match_global'.tr(),
   };
+}
+
+/// Live keyword-match preview for the "test connection" sheet: type text and
+/// see which entries would activate. Stateful so the list follows the field.
+class _MatchPreview extends StatefulWidget {
+  final List<LorebookEntry> Function(String) match;
+
+  const _MatchPreview({required this.match});
+
+  @override
+  State<_MatchPreview> createState() => _MatchPreviewState();
+}
+
+class _MatchPreviewState extends State<_MatchPreview> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final matches = widget.match(_controller.text);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            controller: _controller,
+            keyboardType: TextInputType.multiline,
+            textInputAction: TextInputAction.newline,
+            style: TextStyle(color: context.cs.onSurface),
+            decoration: InputDecoration(
+              hintText: 'placeholder_search_lore'.tr(),
+              hintStyle: TextStyle(
+                color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
+              ),
+              filled: true,
+              fillColor: Colors.white.withValues(alpha: 0.05),
+            ),
+            maxLines: 3,
+            minLines: 1,
+            onChanged: (_) => setState(() {}),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'label_entries'.tr(),
+            style: TextStyle(color: context.cs.onSurfaceVariant, fontSize: 12),
+          ),
+          const SizedBox(height: 4),
+          ...matches.map(
+            (e) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.check_circle,
+                    size: 14,
+                    color: Colors.green,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      e.comment.isNotEmpty ? e.comment : e.keys.join(', '),
+                      style: TextStyle(
+                        color: context.cs.onSurface,
+                        fontSize: 13,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_controller.text.isNotEmpty && matches.isEmpty)
+            Text(
+              'no_results'.tr(),
+              style: TextStyle(
+                color: context.cs.onSurfaceVariant,
+                fontSize: 13,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 // ── Entry row ────────────────────────────────────────────────────────────────

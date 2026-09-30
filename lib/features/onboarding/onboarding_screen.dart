@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/theme/theme_provider.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../shared/widgets/glaze_scaffold.dart';
 import '../../core/services/generation_notification_service.dart';
 import '../../core/services/onboarding_service.dart';
 import '../backup/backup_screen.dart';
@@ -170,9 +171,14 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     final topPad = MediaQuery.of(context).padding.top;
     final bottomPad = MediaQuery.of(context).padding.bottom;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF0D0D0E),
-      body: Stack(
+    return GlazeScaffold(
+      showBackground: false,
+      hideHeader: true,
+      showBack: false,
+      extendBodyBehindHeader: true,
+      body: ColoredBox(
+        color: const Color(0xFF0D0D0E),
+        child: Stack(
         children: [
           // ── Scrollable content ──
           Positioned.fill(
@@ -299,15 +305,21 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
           ),
         ],
       ),
+      ),
     );
   }
 
   /// The wide-window flow: the same slides, laid out as the Vue wizard.
   Widget _buildDesktop(BuildContext context) {
     final slide = _slides[_currentSlide];
-    return Scaffold(
-      backgroundColor: const Color(0xFF0D0D0E),
-      body: AnimatedSwitcher(
+    return GlazeScaffold(
+      showBackground: false,
+      hideHeader: true,
+      showBack: false,
+      extendBodyBehindHeader: true,
+      body: ColoredBox(
+        color: const Color(0xFF0D0D0E),
+        child: AnimatedSwitcher(
         duration: const Duration(milliseconds: 320),
         switchInCurve: Curves.easeOutCubic,
         switchOutCurve: Curves.easeInCubic,
@@ -341,6 +353,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
             onSkip: _isLastSlide ? null : _confirmSkipOnboarding,
           ),
         ),
+      ),
       ),
     );
   }

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/utils/time_formatter.dart';
+import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../../chat_history/chat_history_provider.dart';
@@ -332,14 +333,11 @@ class _SessionPickerEmptyState extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 24),
-          FilledButton.icon(
-            style: FilledButton.styleFrom(
-              backgroundColor: context.cs.primary,
-              foregroundColor: Colors.black,
-            ),
-            onPressed: () => _showCreateMenu(context),
-            icon: const Icon(Icons.add, size: 20),
-            label: Text('btn_create'.tr()),
+          GlazeActionButton(
+            icon: Icons.add,
+            label: 'btn_create'.tr(),
+            tone: GlazeActionTone.primary,
+            onTap: () => _showCreateMenu(context),
           ),
         ],
       ),

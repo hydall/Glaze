@@ -8,9 +8,10 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
-import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_toast.dart';
+import '../../../shared/widgets/list_controls.dart';
 import '../../chat/bridge/chat_webview_environment.dart';
 import '../chub_account_provider.dart';
 import '../services/chub_provider.dart';
@@ -88,10 +89,7 @@ class _ChubLoginSheetState extends ConsumerState<ChubLoginSheet> {
     super.initState();
     // chub.ai is a SPA: a successful login can store the token without a full
     // navigation, so poll alongside the navigation callbacks.
-    _poll = Timer.periodic(
-      const Duration(seconds: 1),
-      (_) => _capture(),
-    );
+    _poll = Timer.periodic(const Duration(seconds: 1), (_) => _capture());
   }
 
   @override
@@ -168,8 +166,8 @@ class _ChubLoginSheetState extends ConsumerState<ChubLoginSheet> {
                     ),
                     webViewEnvironment:
                         defaultTargetPlatform == TargetPlatform.windows
-                            ? chatWebViewEnvironment
-                            : null,
+                        ? chatWebViewEnvironment
+                        : null,
                     // Claim drags so the WebView scrolls instead of the sheet.
                     gestureRecognizers: {
                       Factory<VerticalDragGestureRecognizer>(
@@ -225,9 +223,11 @@ class _Header extends StatelessWidget {
             ),
           ),
           if (!manual)
-            TextButton(
-              onPressed: onManual,
-              child: Text('chub_login_manual'.tr()),
+            GlazeActionChip(
+              icon: Icons.keyboard_rounded,
+              label: 'chub_login_manual'.tr(),
+              tooltip: 'chub_login_manual'.tr(),
+              onTap: onManual,
             ),
         ],
       ),
@@ -289,28 +289,13 @@ class _ChubKeyFormState extends ConsumerState<_ChubKeyForm> {
           const SizedBox(height: 16),
           _field(cs, _key, 'chub_key_hint'.tr(), enabled: !_busy),
           const SizedBox(height: 16),
-          SizedBox(
-            height: 48,
-            child: ElevatedButton(
-              onPressed: _busy ? null : _save,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: cs.primary,
-                foregroundColor: cs.onPrimary,
-              ),
-              child: _busy
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: GlazeSpinner(color: Colors.white),
-                    )
-                  : Text(
-                      'chub_key_save'.tr(),
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-            ),
+          GlazeActionButton(
+            icon: Icons.save_rounded,
+            label: 'chub_key_save'.tr(),
+            tone: GlazeActionTone.primary,
+            expand: true,
+            busy: _busy,
+            onTap: _save,
           ),
           if (_error != null) ...[
             const SizedBox(height: 12),
@@ -341,8 +326,10 @@ class _ChubKeyFormState extends ConsumerState<_ChubKeyForm> {
         hintStyle: TextStyle(color: cs.onSurfaceVariant, fontSize: 14),
         filled: true,
         fillColor: cs.surfaceContainerHighest,
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 12,
+        ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide.none,

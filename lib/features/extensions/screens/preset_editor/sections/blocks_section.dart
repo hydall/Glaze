@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../../core/utils/id_generator.dart';
 import '../../../../../shared/theme/app_colors.dart';
+import '../../../../../shared/widgets/glaze_action_button.dart';
 import '../../../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../../../shared/widgets/menu_group.dart';
 import '../../../models/block_config.dart';
@@ -59,10 +60,12 @@ class BlocksSection extends ConsumerWidget {
         ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: OutlinedButton.icon(
-            onPressed: () => _addBlock(context, ref, preset),
-            icon: const Icon(Icons.add),
-            label: Text('add_block'.tr()),
+          child: GlazeActionButton(
+            icon: Icons.add,
+            label: 'add_block'.tr(),
+            onTap: () => _addBlock(context, ref, preset),
+            tone: GlazeActionTone.neutral,
+            expand: true,
           ),
         ),
       ],

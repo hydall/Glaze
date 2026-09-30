@@ -8,6 +8,7 @@ import '../../../core/llm/studio_controller_ontology.dart';
 import '../../../core/state/pipeline_settings_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/glaze_filter_chip_bar.dart';
 
 /// One agent inside the block list, rendered under the header of the stage it
 /// runs in and above the blocks addressed to that stage. Same row geometry as
@@ -172,19 +173,11 @@ class StudioPostContextSetting extends ConsumerWidget {
             style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant),
           ),
           const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 4,
-            children: [
-              for (final value in const [1, 2, 3, 5])
-                ChoiceChip(
-                  label: Text('$value'),
-                  selected: current == value,
-                  visualDensity: VisualDensity.compact,
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  onSelected: (_) => unawaited(_save(ref, value)),
-                ),
-            ],
+          GlazeFilterChipBar<int>(
+            current: current,
+            options: const [1, 2, 3, 5],
+            labelBuilder: (value) => '$value',
+            onSelected: (value) => unawaited(_save(ref, value)),
           ),
         ],
       ),

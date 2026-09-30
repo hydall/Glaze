@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/state/character_provider.dart' show kRevealHiddenTapCount;
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_sheet.dart';
 
@@ -166,22 +167,16 @@ class _CharacterHidingOnboardingSheetState
                 ),
               ),
               const SizedBox(height: 22),
-              FilledButton(
-                onPressed:
-                    _canClose ? () => Navigator.of(context).pop() : null,
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size.fromHeight(48),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
-                child: Text(
-                  _canClose
-                      ? 'char_hiding_onboarding_dismiss'.tr()
-                      : 'char_hiding_onboarding_dismiss_countdown'.tr(
-                          namedArgs: {'seconds': '$_remaining'},
-                        ),
-                ),
+              GlazeActionButton(
+                icon: Icons.check_rounded,
+                label: _canClose
+                    ? 'char_hiding_onboarding_dismiss'.tr()
+                    : 'char_hiding_onboarding_dismiss_countdown'.tr(
+                        namedArgs: {'seconds': '$_remaining'},
+                      ),
+                tone: GlazeActionTone.primary,
+                expand: true,
+                onTap: _canClose ? () => Navigator.of(context).pop() : null,
               ),
             ],
           ),
