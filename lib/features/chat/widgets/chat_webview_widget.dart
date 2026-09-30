@@ -639,7 +639,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     GlazeErrorDialog.show(
       context,
       message,
-      prefix: 'error_chat_view_load_failed'.tr(),
+      prefix: "${'error_chat_view_load_failed'.tr()}: ",
     );
   }
 
