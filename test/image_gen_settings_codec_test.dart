@@ -39,7 +39,14 @@ void main() {
           cfgScale: 6.5,
           denoise: 0.8,
         ),
-        styles: [ImageStyle(id: 's1', name: 'Anime', value: 'anime')],
+        styles: [
+          ImageStyle(
+            id: 's1',
+            name: 'Anime',
+            value: 'anime',
+            negativePrompt: 'lowres, bad anatomy',
+          ),
+        ],
         activeStyleId: 's1',
         references: [
           ReferenceImage(

@@ -1105,6 +1105,7 @@
   "imggen_style_add": "New style",
   "imggen_style_name": "Name",
   "imggen_style_value": "Style",
+  "imggen_style_negative": "Negative prompt",
   "imggen_style_empty": "Empty style",
   "imggen_style_delete": "Delete",
   "imggen_style_default_name": "Style {}",

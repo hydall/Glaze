@@ -57,6 +57,17 @@ String resolveEffectiveStyle(String? tagStyle, ImageGenSettings settings) {
   return (tagStyle ?? '').trim();
 }
 
+/// The active style's negative prompt appended to [base] — the provider's own
+/// negative stays as the base and the style adds to it. Returns [base]
+/// unchanged when no style is active or it carries no negative prompt.
+String resolveEffectiveNegativePrompt(String base, ImageGenSettings settings) {
+  final styleNegative = settings.activeStyle?.negativePrompt.trim() ?? '';
+  if (styleNegative.isEmpty) return base;
+  final trimmedBase = base.trim();
+  if (trimmedBase.isEmpty) return styleNegative;
+  return '$trimmedBase, $styleNegative';
+}
+
 /// Text block describing every matched library reference, so the model can
 /// keep characters and items visually consistent.
 String buildReferenceDescriptionsBlock(List<Map<String, String>> references) {

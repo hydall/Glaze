@@ -13,14 +13,20 @@ class ImageStyleIo {
   const ImageStyleIo._();
 
   static const kind = 'glaze-image-styles';
-  static const version = 1;
+  static const version = 2;
 
   static String encode(List<ImageStyle> styles) =>
       const JsonEncoder.withIndent('  ').convert({
         'kind': kind,
         'version': version,
         'styles': styles
-            .map((style) => {'name': style.name, 'value': style.value})
+            .map(
+              (style) => {
+                'name': style.name,
+                'value': style.value,
+                'negativePrompt': style.negativePrompt,
+              },
+            )
             .toList(),
       });
 
@@ -70,12 +76,15 @@ class ImageStyleIo {
       final map = Map<String, dynamic>.from(entry);
       final value = (map['value'] as String? ?? '').trim();
       final name = (map['name'] as String? ?? '').trim();
-      if (value.isEmpty && name.isEmpty) continue;
+      final negative =
+          (map['negativePrompt'] ?? map['negative']) as String? ?? '';
+      if (value.isEmpty && name.isEmpty && negative.trim().isEmpty) continue;
       styles.add(
         ImageStyle(
           id: newStyleId(),
           name: name.isEmpty ? 'Style ${styles.length + 1}' : name,
           value: value,
+          negativePrompt: negative.trim(),
         ),
       );
     }
