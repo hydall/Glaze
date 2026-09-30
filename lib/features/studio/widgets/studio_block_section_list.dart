@@ -9,6 +9,8 @@ import '../../../core/models/studio_config.dart';
 import '../../../core/models/studio_preset_block_groups.dart';
 import '../../../core/models/studio_preset_block_reorder.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/list_controls.dart';
+import '../../../shared/widgets/menu_group.dart';
 import '../studio_injection_points.dart';
 import '../studio_preset_stats.dart';
 import 'studio_agent_row.dart';
@@ -453,34 +455,38 @@ class _StudioLedgerPromptInjectionSetting extends StatelessWidget {
   final LedgerPromptInjectionMode value;
   final ValueChanged<LedgerPromptInjectionMode> onChanged;
 
+  void _openSelector(BuildContext context) {
+    showGlazePickerSheet(
+      context,
+      title: 'studio_ledger_prompt_injection'.tr(),
+      items: [
+        GlazePickerItem(
+          label: 'studio_ledger_prompt_injection_gap_filler'.tr(),
+          isActive: value == LedgerPromptInjectionMode.gapFiller,
+          value: LedgerPromptInjectionMode.gapFiller,
+        ),
+        GlazePickerItem(
+          label: 'studio_ledger_prompt_injection_legacy'.tr(),
+          isActive: value == LedgerPromptInjectionMode.legacy,
+          value: LedgerPromptInjectionMode.legacy,
+        ),
+      ],
+      onSelect: (next) => onChanged(next as LedgerPromptInjectionMode),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-    child: DropdownButtonFormField<LedgerPromptInjectionMode>(
-      initialValue: value == LedgerPromptInjectionMode.gapFiller
-          ? LedgerPromptInjectionMode.gapFiller
-          : LedgerPromptInjectionMode.legacy,
-      decoration: InputDecoration(
-        labelText: 'studio_ledger_prompt_injection'.tr(),
-        helperText: value == LedgerPromptInjectionMode.gapFiller
-            ? 'studio_ledger_prompt_injection_gap_filler_desc'.tr()
-            : 'studio_ledger_prompt_injection_legacy_desc'.tr(),
-        helperMaxLines: 3,
-        border: const OutlineInputBorder(),
-      ),
-      items: [
-        DropdownMenuItem(
-          value: LedgerPromptInjectionMode.gapFiller,
-          child: Text('studio_ledger_prompt_injection_gap_filler'.tr()),
-        ),
-        DropdownMenuItem(
-          value: LedgerPromptInjectionMode.legacy,
-          child: Text('studio_ledger_prompt_injection_legacy'.tr()),
-        ),
-      ],
-      onChanged: (next) {
-        if (next != null) onChanged(next);
-      },
+    child: MenuSelectorItem(
+      label: 'studio_ledger_prompt_injection'.tr(),
+      description: value == LedgerPromptInjectionMode.gapFiller
+          ? 'studio_ledger_prompt_injection_gap_filler_desc'.tr()
+          : 'studio_ledger_prompt_injection_legacy_desc'.tr(),
+      currentValue: value == LedgerPromptInjectionMode.gapFiller
+          ? 'studio_ledger_prompt_injection_gap_filler'.tr()
+          : 'studio_ledger_prompt_injection_legacy'.tr(),
+      onTap: () => _openSelector(context),
     ),
   );
 }

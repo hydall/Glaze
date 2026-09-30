@@ -117,8 +117,9 @@ class GlazeScaffold extends StatelessWidget {
     // page, emptying the root navigator and closing the app. GoRouter's match
     // list is updated synchronously on `go` (a top-level route reports false),
     // while genuinely pushed routes still report true so the iOS swipe-back
-    // keeps working there.
-    final navigatorCanPop = GoRouter.of(context).canPop();
+    // keeps working there. A screen pumped without a router (a focused widget
+    // test) has no stack to consult, so it reads as unpoppable.
+    final navigatorCanPop = GoRouter.maybeOf(context)?.canPop() ?? false;
 
     final header = SafeArea(
       bottom: false,

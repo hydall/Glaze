@@ -1,6 +1,7 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
+import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/sheet_view.dart';
 import '../../../shared/widgets/glaze_sheet.dart';
@@ -121,7 +122,13 @@ class _ExtBlockEditSheetState extends State<_ExtBlockEditSheet> {
             ),
           ),
           const SizedBox(height: 16),
-          FilledButton(onPressed: _save, child: Text('btn_save'.tr())),
+          GlazeActionButton(
+            icon: Icons.check_rounded,
+            label: 'btn_save'.tr(),
+            tone: GlazeActionTone.primary,
+            expand: true,
+            onTap: _save,
+          ),
         ],
       ),
     );

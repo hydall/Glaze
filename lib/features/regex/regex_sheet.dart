@@ -29,6 +29,7 @@ import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/glass_surface.dart';
+import '../../shared/widgets/list_controls.dart';
 import '../../shared/widgets/menu_group.dart';
 import '../../shared/widgets/sheet_view.dart';
 
@@ -680,11 +681,10 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
       ),
       floatingActionButton: isEdit
           ? null
-          : FloatingActionButton.small(
-              onPressed: () => _showAddMenu(context),
-              backgroundColor: context.cs.primary,
-              foregroundColor: Colors.black,
-              child: const Icon(Icons.add),
+          : GlazeActionChip(
+              icon: Icons.add,
+              tooltip: 'action_add_script'.tr(),
+              onTap: () => _showAddMenu(context),
             ),
     );
   }

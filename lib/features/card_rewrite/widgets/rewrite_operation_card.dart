@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../../core/db/repositories/manual_rewrite_job_repo.dart';
 import '../../../core/services/card_rewriter/card_rewriter_contracts.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_action_button.dart';
 import 'rewrite_anchored_diff_pane.dart';
 import 'rewrite_evidence_accordion.dart';
 
@@ -233,17 +234,11 @@ class RewriteOperationCard extends StatelessWidget {
                 Row(
                   children: [
                     if (editPermitted(interactionsEnabled, reviewable))
-                      TextButton.icon(
-                        onPressed: onEdit,
-                        icon: const Icon(Icons.edit_outlined, size: 16),
-                        label: Text(
-                          'rewrite_btn_edit'.tr(),
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                        style: TextButton.styleFrom(
-                          visualDensity: VisualDensity.compact,
-                          foregroundColor: cs.primary,
-                        ),
+                      GlazeActionButton(
+                        icon: Icons.edit_outlined,
+                        label: 'rewrite_btn_edit'.tr(),
+                        tone: GlazeActionTone.primary,
+                        onTap: onEdit,
                       ),
                     const Spacer(),
                   ],

@@ -5,7 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/utils/error_format.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
-import '../../../shared/widgets/glaze_spinner.dart';
+import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../saucepan_account_provider.dart';
 
@@ -164,20 +164,24 @@ class _SaucepanLoginFormState extends ConsumerState<_SaucepanLoginForm> {
             const SizedBox(height: 10),
             _field(cs, _password, 'Password', obscure: true, enabled: !_busy),
             const SizedBox(height: 16),
-            _primaryButton(cs, 'Log in', _busy ? null : _login),
+            _primaryButton('Log in', _busy ? null : _login),
             const SizedBox(height: 8),
-            TextButton(
-              onPressed: _busy ? null : () => setState(() => _useToken = true),
-              child: const Text('Use a bearer token instead'),
+            GlazeActionButton(
+              icon: Icons.key_rounded,
+              label: 'Use a bearer token instead',
+              expand: true,
+              onTap: _busy ? null : () => setState(() => _useToken = true),
             ),
           ] else ...[
             _field(cs, _token, 'Bearer token', enabled: !_busy),
             const SizedBox(height: 16),
-            _primaryButton(cs, 'Save token', _busy ? null : _saveToken),
+            _primaryButton('Save token', _busy ? null : _saveToken),
             const SizedBox(height: 8),
-            TextButton(
-              onPressed: _busy ? null : () => setState(() => _useToken = false),
-              child: const Text('Log in with handle instead'),
+            GlazeActionButton(
+              icon: Icons.login_rounded,
+              label: 'Log in with handle instead',
+              expand: true,
+              onTap: _busy ? null : () => setState(() => _useToken = false),
             ),
           ],
           if (_error != null) ...[
@@ -217,26 +221,14 @@ class _SaucepanLoginFormState extends ConsumerState<_SaucepanLoginForm> {
     );
   }
 
-  Widget _primaryButton(ColorScheme cs, String label, VoidCallback? onTap) {
-    return SizedBox(
-      height: 48,
-      child: ElevatedButton(
-        onPressed: onTap,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: cs.primary,
-          foregroundColor: cs.onPrimary,
-        ),
-        child: _busy
-            ? const SizedBox(
-                width: 18,
-                height: 18,
-                child:
-                    GlazeSpinner(color: Colors.white),
-              )
-            : Text(label,
-                style:
-                    const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-      ),
+  Widget _primaryButton(String label, VoidCallback? onTap) {
+    return GlazeActionButton(
+      icon: Icons.login_rounded,
+      label: label,
+      tone: GlazeActionTone.primary,
+      expand: true,
+      busy: _busy,
+      onTap: onTap,
     );
   }
 }

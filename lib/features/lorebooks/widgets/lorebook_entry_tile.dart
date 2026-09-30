@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/models/lorebook.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/menu_group.dart';
 
 class LorebookEntryBadge extends StatelessWidget {
   final String label;
@@ -49,66 +50,51 @@ class LorebookEntryTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 6),
-      color: Colors.white.withValues(alpha: 0.03),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(10),
-        side: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
-      ),
-      child: ListTile(
-        dense: true,
-        leading: Switch(
-          value: entry.enabled,
-          onChanged: (_) => onToggle(),
-          activeThumbColor: context.cs.primary,
-        ),
-        title: Text(
-          entry.comment.isNotEmpty
+    return MenuGroup(
+      items: [
+        MenuItem(
+          label: entry.comment.isNotEmpty
               ? entry.comment
               : (entry.keys.isNotEmpty ? entry.keys.join(', ') : 'Entry'),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            color: entry.enabled
-                ? context.cs.onSurface
-                : context.cs.onSurfaceVariant,
-          ),
-        ),
-        subtitle: Text(
-          '${entry.keys.length} keys | order ${entry.order}${entry.constant ? ' | constant' : ''}',
-          style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant),
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (entry.constant)
-              const LorebookEntryBadge(label: 'const', color: Colors.purple),
-            if (entry.vectorSearch) ...[
-              const LorebookEntryBadge(label: 'vec', color: Colors.cyan),
-              if (embeddingStatus == 'indexed')
-                const LorebookEntryBadge(label: 'idx', color: Colors.green),
-              if (embeddingStatus == 'error')
-                Tooltip(
-                  message: embeddingError ?? 'Error',
-                  child: LorebookEntryBadge(
-                    label: embeddingError ?? 'err',
-                    color: Colors.orange,
+          subtitle:
+              '${entry.keys.length} keys | order ${entry.order}${entry.constant ? ' | constant' : ''}',
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (entry.constant)
+                const LorebookEntryBadge(label: 'const', color: Colors.purple),
+              if (entry.vectorSearch) ...[
+                const LorebookEntryBadge(label: 'vec', color: Colors.cyan),
+                if (embeddingStatus == 'indexed')
+                  const LorebookEntryBadge(label: 'idx', color: Colors.green),
+                if (embeddingStatus == 'error')
+                  Tooltip(
+                    message: embeddingError ?? 'Error',
+                    child: LorebookEntryBadge(
+                      label: embeddingError ?? 'err',
+                      color: Colors.orange,
+                    ),
                   ),
-                ),
+              ],
+              const SizedBox(width: 4),
+              Switch(
+                value: entry.enabled,
+                onChanged: (_) => onToggle(),
+                activeThumbColor: context.cs.primary,
+              ),
+              IconButton(
+                icon: const Icon(Icons.edit_outlined, size: 18),
+                onPressed: onEdit,
+              ),
+              IconButton(
+                icon: const Icon(Icons.delete_outline, size: 18),
+                onPressed: onDelete,
+              ),
             ],
-            IconButton(
-              icon: const Icon(Icons.edit_outlined, size: 18),
-              onPressed: onEdit,
-            ),
-            IconButton(
-              icon: const Icon(Icons.delete_outline, size: 18),
-              onPressed: onDelete,
-            ),
-          ],
+          ),
+          onTap: onEdit,
         ),
-        onTap: onEdit,
-      ),
+      ],
     );
   }
 }

@@ -13,6 +13,7 @@ import '../chat/chat_session_service.dart';
 import '../chat_history/chat_history_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glass_surface.dart';
+import '../../shared/widgets/glaze_action_button.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_scaffold.dart';
 import '../../shared/widgets/glaze_spinner.dart';
@@ -280,9 +281,10 @@ class _OperationItem extends ConsumerWidget {
     ManualRewriteOperationView view,
     CardRewriteOperationSnapshot snapshot,
   ) async {
-    final value = await showDialog<String>(
-      context: context,
-      builder: (_) => _EditDialog(
+    final value = await GlazeBottomSheet.show<String>(
+      context,
+      title: 'rewrite_edit_title'.tr(),
+      child: _EditSheet(
         initial: snapshot.patches.map((p) => p.value).join('\n\n'),
       ),
     );
@@ -368,8 +370,11 @@ class _LorebookOperationItem extends ConsumerWidget {
                     ),
                   ),
                   if (reviewable && enabled) ...[
-                    TextButton(
-                      onPressed: canApprove
+                    GlazeActionButton(
+                      icon: Icons.check_rounded,
+                      label: 'rewrite_btn_approve'.tr(),
+                      tone: GlazeActionTone.primary,
+                      onTap: canApprove
                           ? () async {
                               final result = await controller.decide(
                                 view,
@@ -380,17 +385,19 @@ class _LorebookOperationItem extends ConsumerWidget {
                               }
                             }
                           : null,
-                      child: Text('rewrite_btn_approve'.tr()),
                     ),
-                    TextButton(
-                      onPressed: () async {
+                    const SizedBox(width: 4),
+                    GlazeActionButton(
+                      icon: Icons.close_rounded,
+                      label: 'rewrite_btn_reject'.tr(),
+                      tone: GlazeActionTone.destructive,
+                      onTap: () async {
                         final result = await controller.decide(
                           view,
                           'rejected',
                         );
                         if (context.mounted) _showOutcome(context, result);
                       },
-                      child: Text('rewrite_btn_reject'.tr()),
                     ),
                   ],
                 ],
@@ -472,28 +479,25 @@ class _ApplyFooter extends ConsumerWidget {
               Text(
                 'rewrite_apply_summary'.tr(namedArgs: {'count': '$approved'}),
               ),
-              TextButton.icon(
-                onPressed: canApproveAll
-                    ? () => _approveAll(context, ref)
-                    : null,
-                icon: const Icon(Icons.done_all_rounded),
-                label: Text('rewrite_approve_all'.tr()),
+              GlazeActionButton(
+                icon: Icons.done_all_rounded,
+                label: 'rewrite_approve_all'.tr(),
+                onTap: canApproveAll ? () => _approveAll(context, ref) : null,
               ),
               if (approved == 0)
-                TextButton.icon(
-                  onPressed: enabled
+                GlazeActionButton(
+                  icon: Icons.close_rounded,
+                  label: 'rewrite_btn_reject_and_close'.tr(),
+                  tone: GlazeActionTone.destructive,
+                  onTap: enabled
                       ? () => _rejectAndClose(context, ref, hasPending)
                       : null,
-                  icon: const Icon(Icons.close_rounded),
-                  label: Text('rewrite_btn_reject_and_close'.tr()),
-                  style: TextButton.styleFrom(
-                    foregroundColor: context.cs.error,
-                  ),
                 ),
-              FilledButton.icon(
-                onPressed: canApply ? () => _confirm(context, ref) : null,
-                icon: const Icon(Icons.done_all_rounded),
-                label: Text('rewrite_apply'.tr()),
+              GlazeActionButton(
+                icon: Icons.done_all_rounded,
+                label: 'rewrite_apply'.tr(),
+                tone: GlazeActionTone.primary,
+                onTap: canApply ? () => _confirm(context, ref) : null,
               ),
             ],
           ),
@@ -675,30 +679,26 @@ class _JobActions extends ConsumerWidget {
                 ),
               ),
               if (canReplaceAutomated) ...[
-                OutlinedButton.icon(
+                GlazeActionButton(
                   key: const Key('rewrite-regenerate-button'),
-                  onPressed: () => _regenerate(context, ref),
-                  icon: const Icon(Icons.refresh_rounded, size: 18),
-                  label: Text('rewrite_regenerate'.tr()),
+                  icon: Icons.refresh_rounded,
+                  label: 'rewrite_regenerate'.tr(),
+                  onTap: () => _regenerate(context, ref),
                 ),
-                OutlinedButton.icon(
+                GlazeActionButton(
                   key: const Key('rewrite-delete-button'),
-                  onPressed: () => _delete(context, ref),
-                  icon: const Icon(Icons.delete_outline_rounded, size: 18),
-                  label: Text('rewrite_delete'.tr()),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: context.cs.error,
-                  ),
+                  icon: Icons.delete_outline_rounded,
+                  label: 'rewrite_delete'.tr(),
+                  tone: GlazeActionTone.destructive,
+                  onTap: () => _delete(context, ref),
                 ),
               ] else
-                OutlinedButton.icon(
+                GlazeActionButton(
                   key: const Key('rewrite-cancel-button'),
-                  onPressed: () => _cancel(context, ref),
-                  icon: const Icon(Icons.close_rounded, size: 18),
-                  label: Text('rewrite_cancel'.tr()),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: context.cs.error,
-                  ),
+                  icon: Icons.close_rounded,
+                  label: 'rewrite_cancel'.tr(),
+                  tone: GlazeActionTone.destructive,
+                  onTap: () => _cancel(context, ref),
                 ),
             ],
           ),
@@ -767,14 +767,14 @@ class _MessageState extends StatelessWidget {
   );
 }
 
-class _EditDialog extends StatefulWidget {
-  const _EditDialog({required this.initial});
+class _EditSheet extends StatefulWidget {
+  const _EditSheet({required this.initial});
   final String initial;
   @override
-  State<_EditDialog> createState() => _EditDialogState();
+  State<_EditSheet> createState() => _EditSheetState();
 }
 
-class _EditDialogState extends State<_EditDialog> {
+class _EditSheetState extends State<_EditSheet> {
   late final TextEditingController controller = TextEditingController(
     text: widget.initial,
   );
@@ -785,20 +785,41 @@ class _EditDialogState extends State<_EditDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: Text('rewrite_edit_title'.tr()),
-    content: TextField(controller: controller, minLines: 5, maxLines: 12),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.pop(context),
-        child: Text('btn_cancel'.tr()),
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TextField(controller: controller, minLines: 5, maxLines: 12),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: GlazeActionButton(
+                  icon: Icons.close_rounded,
+                  label: 'btn_cancel'.tr(),
+                  onTap: () => Navigator.of(context, rootNavigator: true).pop(),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: GlazeActionButton(
+                  icon: Icons.save_rounded,
+                  label: 'rewrite_save_revision'.tr(),
+                  tone: GlazeActionTone.primary,
+                  onTap: () => Navigator.of(
+                    context,
+                    rootNavigator: true,
+                  ).pop(controller.text),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
-      FilledButton(
-        onPressed: () => Navigator.pop(context, controller.text),
-        child: Text('rewrite_save_revision'.tr()),
-      ),
-    ],
-  );
+    );
+  }
 }
 
 void _showOutcome(BuildContext context, String outcome) {

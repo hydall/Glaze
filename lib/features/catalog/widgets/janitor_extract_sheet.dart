@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_error_block.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_toast.dart';
@@ -59,7 +60,9 @@ class _JanitorExtractSheetState extends ConsumerState<_JanitorExtractSheet> {
       _result = null;
     });
     try {
-      final result = await ref.read(janitorExtractorProvider).extract(
+      final result = await ref
+          .read(janitorExtractorProvider)
+          .extract(
             url,
             onPhase: (p) {
               if (mounted) setState(() => _phase = p);
@@ -88,7 +91,9 @@ class _JanitorExtractSheetState extends ConsumerState<_JanitorExtractSheet> {
       _error = null;
     });
     try {
-      final commit = await ref.read(janitorExtractorProvider).commit(
+      final commit = await ref
+          .read(janitorExtractorProvider)
+          .commit(
             result,
             onPhase: (p) {
               if (mounted) setState(() => _phase = p);
@@ -165,8 +170,10 @@ class _JanitorExtractSheetState extends ConsumerState<_JanitorExtractSheet> {
                 style: TextStyle(fontSize: 14, color: cs.onSurface),
                 decoration: InputDecoration(
                   hintText: 'https://janitorai.com/characters/...',
-                  hintStyle:
-                      TextStyle(color: cs.onSurfaceVariant, fontSize: 14),
+                  hintStyle: TextStyle(
+                    color: cs.onSurfaceVariant,
+                    fontSize: 14,
+                  ),
                   filled: true,
                   fillColor: cs.surfaceContainerHighest,
                   contentPadding: const EdgeInsets.symmetric(
@@ -194,7 +201,9 @@ class _JanitorExtractSheetState extends ConsumerState<_JanitorExtractSheet> {
                       child: Text(
                         _phase ?? 'Working…',
                         style: TextStyle(
-                            color: cs.onSurfaceVariant, fontSize: 13),
+                          color: cs.onSurfaceVariant,
+                          fontSize: 13,
+                        ),
                       ),
                     ),
                   ],
@@ -202,10 +211,7 @@ class _JanitorExtractSheetState extends ConsumerState<_JanitorExtractSheet> {
               ],
               if (_error != null) ...[
                 const SizedBox(height: 12),
-                GlazeErrorBlock(
-                  message: _error!.message,
-                  label: _error!.label,
-                ),
+                GlazeErrorBlock(message: _error!.message, label: _error!.label),
               ],
               if (_result != null && !_busy) ...[
                 const SizedBox(height: 16),
@@ -215,21 +221,22 @@ class _JanitorExtractSheetState extends ConsumerState<_JanitorExtractSheet> {
               Row(
                 children: [
                   Expanded(
-                    child: OutlinedButton(
-                      onPressed: _busy ? null : _run,
-                      child: Text(_result == null ? 'Run' : 'Re-run'),
+                    child: GlazeActionButton(
+                      icon: Icons.play_arrow_rounded,
+                      label: _result == null ? 'Run' : 'Re-run',
+                      expand: true,
+                      onTap: _busy ? null : _run,
                     ),
                   ),
                   if (_result != null) ...[
                     const SizedBox(width: 12),
                     Expanded(
-                      child: ElevatedButton(
-                        onPressed: _busy ? null : _save,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: cs.primary,
-                          foregroundColor: cs.onPrimary,
-                        ),
-                        child: const Text('Save to DB'),
+                      child: GlazeActionButton(
+                        icon: Icons.save_rounded,
+                        label: 'Save to DB',
+                        tone: GlazeActionTone.primary,
+                        expand: true,
+                        onTap: _busy ? null : _save,
                       ),
                     ),
                   ],
@@ -251,8 +258,11 @@ class _Preview extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = context.cs;
     final card = result.character.charData;
-    TextStyle label() =>
-        TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: cs.onSurface);
+    TextStyle label() => TextStyle(
+      fontSize: 12,
+      fontWeight: FontWeight.w600,
+      color: cs.onSurface,
+    );
     TextStyle value() => TextStyle(fontSize: 12, color: cs.onSurfaceVariant);
     return Container(
       padding: const EdgeInsets.all(12),
@@ -265,12 +275,18 @@ class _Preview extends StatelessWidget {
         children: [
           Text('Name: ${card.name}', style: label()),
           const SizedBox(height: 4),
-          Text('Card (description): ${estimateTokens(card.description)} tokens',
-              style: value()),
-          Text('Scenario: ${estimateTokens(card.scenario)} tokens',
-              style: value()),
-          Text('First message: ${estimateTokens(card.firstMes)} tokens',
-              style: value()),
+          Text(
+            'Card (description): ${estimateTokens(card.description)} tokens',
+            style: value(),
+          ),
+          Text(
+            'Scenario: ${estimateTokens(card.scenario)} tokens',
+            style: value(),
+          ),
+          Text(
+            'First message: ${estimateTokens(card.firstMes)} tokens',
+            style: value(),
+          ),
           Text(
             'Closed lorebook: ${result.hasLorebook ? 'extracted content, ${estimateTokens(result.lorebookText)} tokens' : 'none found'}',
             style: value(),

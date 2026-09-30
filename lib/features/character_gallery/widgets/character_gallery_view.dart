@@ -9,10 +9,12 @@ import '../../../shared/widgets/responsive_grid.dart';
 import '../../../core/models/gallery_entry.dart';
 import '../../../core/state/character_provider.dart';
 import '../../../core/utils/platform_paths.dart';
+import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_error_dialog.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_toast.dart';
+import '../../../shared/widgets/list_controls.dart';
 import '../gallery_provider.dart';
 
 /// A character's image gallery: the grid, its import action and the fullscreen
@@ -80,10 +82,11 @@ class CharacterGalleryView extends ConsumerWidget {
               ),
             ),
           const Spacer(),
-          TextButton.icon(
-            onPressed: () => _addImage(context, ref),
-            icon: const Icon(Icons.add_photo_alternate, size: 18),
-            label: Text('action_import'.tr()),
+          GlazeActionChip(
+            icon: Icons.add_photo_alternate,
+            label: 'action_import'.tr(),
+            tooltip: 'action_import'.tr(),
+            onTap: () => _addImage(context, ref),
           ),
         ],
       ),
@@ -107,10 +110,11 @@ class CharacterGalleryView extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: 16),
-          FilledButton.icon(
-            onPressed: () => _addImage(context, ref),
-            icon: const Icon(Icons.add_photo_alternate),
-            label: Text('action_import'.tr()),
+          GlazeActionButton(
+            icon: Icons.add_photo_alternate,
+            label: 'action_import'.tr(),
+            tone: GlazeActionTone.primary,
+            onTap: () => _addImage(context, ref),
           ),
           const SizedBox(height: 24),
         ],

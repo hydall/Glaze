@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../core/services/memory_prompt_presets.dart';
 import '../state/preset_sort.dart';
 import '../theme/app_colors.dart';
+import 'glaze_action_button.dart';
 import 'glaze_bottom_sheet.dart';
 import 'glaze_list_item.dart';
 import 'list_controls.dart';
@@ -124,19 +125,18 @@ class _PromptPresetListState extends State<PromptPresetList> {
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: Text('btn_cancel'.tr()),
+                GlazeActionButton(
+                  icon: Icons.close_rounded,
+                  label: 'btn_cancel'.tr(),
+                  onTap: () => Navigator.pop(context),
                 ),
                 const SizedBox(width: 8),
-                FilledButton(
+                GlazeActionButton(
                   key: const Key('memory_prompt_manager_save'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: context.cs.primary,
-                    foregroundColor: Colors.black,
-                  ),
-                  onPressed: _save,
-                  child: Text('btn_save'.tr()),
+                  icon: Icons.check_rounded,
+                  label: 'btn_save'.tr(),
+                  tone: GlazeActionTone.primary,
+                  onTap: _save,
                 ),
               ],
             ),
@@ -525,19 +525,18 @@ class _PromptEditorState extends State<_PromptEditor> {
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text('btn_cancel'.tr()),
+              GlazeActionButton(
+                icon: Icons.close_rounded,
+                label: 'btn_cancel'.tr(),
+                onTap: () => Navigator.pop(context),
               ),
               const SizedBox(width: 8),
-              FilledButton(
+              GlazeActionButton(
                 key: const Key('memory_prompt_editor_save'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: context.cs.primary,
-                  foregroundColor: Colors.black,
-                ),
-                onPressed: _save,
-                child: Text(isEdit ? 'btn_save'.tr() : 'btn_create'.tr()),
+                icon: isEdit ? Icons.check_rounded : Icons.add_rounded,
+                label: isEdit ? 'btn_save'.tr() : 'btn_create'.tr(),
+                tone: GlazeActionTone.primary,
+                onTap: _save,
               ),
             ],
           ),
@@ -609,17 +608,19 @@ class MemoryPromptPreviewSheet extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text('btn_close'.tr()),
+              GlazeActionButton(
+                icon: Icons.close_rounded,
+                label: 'btn_close'.tr(),
+                onTap: () => Navigator.pop(context),
               ),
               if (allowCopy) ...[
                 const SizedBox(width: 8),
-                FilledButton.icon(
+                GlazeActionButton(
                   key: const Key('memory_prompt_copy_as_new'),
-                  onPressed: () => Navigator.pop(context, true),
-                  icon: const Icon(Icons.copy_rounded, size: 16),
-                  label: Text('memory_prompt_copy_as_new'.tr()),
+                  icon: Icons.copy_rounded,
+                  label: 'memory_prompt_copy_as_new'.tr(),
+                  tone: GlazeActionTone.primary,
+                  onTap: () => Navigator.pop(context, true),
                 ),
               ],
             ],

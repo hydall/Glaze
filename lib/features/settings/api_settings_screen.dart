@@ -23,6 +23,7 @@ import '../../core/models/extra_request_parameter.dart';
 import '../../core/state/shared_prefs_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../shared/widgets/glaze_action_button.dart';
 import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/glaze_tab_bar.dart';
 import '../../shared/widgets/swipe_tab_switcher.dart';
@@ -816,13 +817,13 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 12),
-          FilledButton.tonal(
-            onPressed: () => _createNewPreset(forEmbedding: forEmbedding),
-            child: Text(
-              forEmbedding
-                  ? 'settings_add_embedding_config'.tr()
-                  : 'settings_add_api_config'.tr(),
-            ),
+          GlazeActionButton(
+            icon: Icons.add_rounded,
+            label: forEmbedding
+                ? 'settings_add_embedding_config'.tr()
+                : 'settings_add_api_config'.tr(),
+            tone: GlazeActionTone.primary,
+            onTap: () => _createNewPreset(forEmbedding: forEmbedding),
           ),
         ],
       ),

@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/platform/haptics.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glass_surface.dart';
 import '../chat_provider.dart';
@@ -511,26 +512,25 @@ class _QuickReplyEditFormState extends State<_QuickReplyEditForm> {
           Row(
             children: [
               if (widget.onDelete != null)
-                TextButton.icon(
-                  onPressed: _delete,
-                  icon: const Icon(
-                    Icons.delete_outline,
-                    color: Colors.redAccent,
-                  ),
-                  label: Text(
-                    'btn_delete'.tr(),
-                    style: const TextStyle(color: Colors.redAccent),
-                  ),
+                GlazeActionButton(
+                  icon: Icons.delete_outline,
+                  label: 'btn_delete'.tr(),
+                  tone: GlazeActionTone.destructive,
+                  onTap: _delete,
                 ),
               const Spacer(),
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: Text('btn_cancel'.tr()),
+              GlazeActionButton(
+                icon: Icons.close_rounded,
+                label: 'btn_cancel'.tr(),
+                tone: GlazeActionTone.neutral,
+                onTap: () => Navigator.of(context).pop(),
               ),
               const SizedBox(width: 8),
-              FilledButton(
-                onPressed: _submit,
-                child: Text(widget.isNew ? 'action_add'.tr() : 'btn_save'.tr()),
+              GlazeActionButton(
+                icon: Icons.check_rounded,
+                label: widget.isNew ? 'action_add'.tr() : 'btn_save'.tr(),
+                tone: GlazeActionTone.primary,
+                onTap: _submit,
               ),
             ],
           ),

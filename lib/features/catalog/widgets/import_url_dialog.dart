@@ -13,6 +13,7 @@ import '../../../core/utils/error_format.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_error_block.dart';
+import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../character_list/character_import_persistence_provider.dart';
@@ -117,22 +118,15 @@ class _ImportUrlDialogState extends ConsumerState<ImportUrlDialog> {
             GlazeErrorBlock(message: _error!),
           ],
           const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            height: 48,
-            child: ElevatedButton(
-              onPressed: _loading ? null : _startExtraction,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: context.cs.primary,
-                foregroundColor: context.cs.onPrimary,
-              ),
-              child: Text(
-                _loading
-                    ? 'catalog_importing'.tr()
-                    : 'action_import_by_link'.tr(),
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-              ),
-            ),
+          GlazeActionButton(
+            icon: Icons.download_rounded,
+            label: _loading
+                ? 'catalog_importing'.tr()
+                : 'action_import_by_link'.tr(),
+            tone: GlazeActionTone.primary,
+            expand: true,
+            busy: _loading,
+            onTap: _startExtraction,
           ),
         ],
       ),

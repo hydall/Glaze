@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/platform/haptics.dart';
+import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/menu_group.dart';
 import '../../chat/widgets/message_scripts_prompt_sheet.dart';
 import '../app_settings_provider.dart';
@@ -34,22 +35,25 @@ class ChatGroup extends SettingsGroup {
       await notifierOf(ref).save(settings.copyWith(allowMessageScripts: false));
       return;
     }
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text('message_scripts_warning_title'.tr()),
-        content: Text('message_scripts_warning_desc'.tr()),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: Text('action_cancel'.tr()),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: Text('message_scripts_enable_action'.tr()),
-          ),
-        ],
+    final confirmed = await GlazeBottomSheet.show<bool>(
+      context,
+      title: 'message_scripts_warning_title'.tr(),
+      bigInfo: BottomSheetBigInfo(
+        icon: Icons.warning_amber_rounded,
+        description: 'message_scripts_warning_desc'.tr(),
       ),
+      items: [
+        BottomSheetItem(
+          label: 'message_scripts_enable_action'.tr(),
+          icon: Icons.check_rounded,
+          onTap: () => Navigator.of(context, rootNavigator: true).pop(true),
+        ),
+        BottomSheetItem(
+          label: 'action_cancel'.tr(),
+          icon: Icons.close_rounded,
+          onTap: () => Navigator.of(context, rootNavigator: true).pop(false),
+        ),
+      ],
     );
     if (confirmed != true || !context.mounted) return;
     await markMessageScriptsChoiceMade(ref);

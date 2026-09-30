@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/state/shared_prefs_provider.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../settings/app_settings_provider.dart';
 
@@ -110,27 +111,20 @@ class _MessageScriptsPromptBody extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 22),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            style: FilledButton.styleFrom(
-              minimumSize: const Size.fromHeight(48),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-              ),
-            ),
-            child: Text('message_scripts_detected_enable'.tr()),
+          GlazeActionButton(
+            icon: Icons.check_rounded,
+            label: 'message_scripts_detected_enable'.tr(),
+            tone: GlazeActionTone.primary,
+            expand: true,
+            onTap: () => Navigator.of(context).pop(true),
           ),
           const SizedBox(height: 8),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            style: TextButton.styleFrom(
-              minimumSize: const Size.fromHeight(48),
-              foregroundColor: cs.onSurfaceVariant,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-              ),
-            ),
-            child: Text('message_scripts_detected_keep_off'.tr()),
+          GlazeActionButton(
+            icon: Icons.block_rounded,
+            label: 'message_scripts_detected_keep_off'.tr(),
+            tone: GlazeActionTone.neutral,
+            expand: true,
+            onTap: () => Navigator.of(context).pop(false),
           ),
         ],
       ),

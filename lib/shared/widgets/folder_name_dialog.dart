@@ -2,6 +2,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
+import 'glaze_action_button.dart';
 
 /// Single-field name input for creating or renaming a folder. Shown via
 /// `GlazeBottomSheet.show(title:…, child: FolderNameDialog(...))`.
@@ -71,23 +72,12 @@ class _FolderNameDialogState extends State<FolderNameDialog> {
             onSubmitted: (_) => _submit(),
           ),
           const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            height: 48,
-            child: ElevatedButton(
-              onPressed: _submit,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: context.cs.primary,
-                foregroundColor: context.cs.onPrimary,
-              ),
-              child: Text(
-                widget.confirmLabel,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
+          GlazeActionButton(
+            icon: Icons.check_rounded,
+            label: widget.confirmLabel,
+            tone: GlazeActionTone.primary,
+            expand: true,
+            onTap: _submit,
           ),
         ],
       ),

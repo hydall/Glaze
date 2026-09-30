@@ -2,6 +2,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 import '../../shared/theme/app_colors.dart';
+import '../../shared/widgets/glaze_action_button.dart';
 import '../../shared/widgets/glaze_scaffold.dart';
 import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/menu_group.dart';
@@ -209,16 +210,15 @@ class _SpinnerDemoScreenState extends State<SpinnerDemoScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                FilledButton.icon(
-                  onPressed: () => setState(() => _buttonBusy = !_buttonBusy),
-                  icon: _buttonBusy
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: GlazeSpinner(color: Colors.white),
-                        )
-                      : const Icon(Icons.play_arrow_rounded, size: 18),
-                  label: Text(_buttonBusy ? 'Working…' : 'Tap to toggle'),
+                GestureDetector(
+                  onTap: () => setState(() => _buttonBusy = !_buttonBusy),
+                  child: GlazeActionButton(
+                    icon: Icons.play_arrow_rounded,
+                    label: _buttonBusy ? 'Working…' : 'Tap to toggle',
+                    tone: GlazeActionTone.primary,
+                    busy: _buttonBusy,
+                    onTap: () => setState(() => _buttonBusy = !_buttonBusy),
+                  ),
                 ),
                 const SizedBox(height: 16),
                 Row(

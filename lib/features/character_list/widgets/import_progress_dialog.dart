@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../../core/services/character_bulk_import_service.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glass_surface.dart';
+import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 
 /// Blocking progress card for a mass character import.
@@ -107,16 +108,10 @@ class _ImportProgressContent extends StatelessWidget {
                     ],
                     Align(
                       alignment: Alignment.centerRight,
-                      child: TextButton(
-                        onPressed: onCancel,
-                        child: Text(
-                          'btn_cancel'.tr(),
-                          style: TextStyle(
-                            color: cs.primary,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
+                      child: GlazeActionButton(
+                        icon: Icons.close_rounded,
+                        label: 'btn_cancel'.tr(),
+                        onTap: onCancel,
                       ),
                     ),
                   ],
