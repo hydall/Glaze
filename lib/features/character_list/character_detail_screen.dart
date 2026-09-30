@@ -1566,23 +1566,27 @@ class _BioMarkdown extends StatelessWidget {
   Widget build(BuildContext context) {
     final md = hasHtmlTags(notes) ? htmlToMarkdown(notes) : notes;
     final segments = splitBioAlignment(md);
-    return Container(
-      // JanitorAI's default bio block (`.characterInfoMarkdownContent`):
-      // translucent black panel, faint purple border, rounded, 1rem pad.
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0x7B000000),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0x1A8B5CF6)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          for (var i = 0; i < segments.length; i++) ...[
-            if (i > 0) const SizedBox(height: 8),
-            _segment(context, segments[i]),
+    // The bio is selectable so its text can be copied; gpt_markdown's rich
+    // text only joins a selection when a [SelectionArea] is above it.
+    return SelectionArea(
+      child: Container(
+        // JanitorAI's default bio block (`.characterInfoMarkdownContent`):
+        // translucent black panel, faint purple border, rounded, 1rem pad.
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0x7B000000),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0x1A8B5CF6)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (var i = 0; i < segments.length; i++) ...[
+              if (i > 0) const SizedBox(height: 8),
+              _segment(context, segments[i]),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
