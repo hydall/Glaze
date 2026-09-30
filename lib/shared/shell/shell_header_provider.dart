@@ -179,9 +179,16 @@ class DetachedShellHost extends InheritedWidget {
   /// panels keep their own headers.
   final bool hasChrome;
 
+  /// Pseudo-branch the hosted screens publish their header under when
+  /// [hasChrome] is set, and the one the host's title bar resolves. Each
+  /// desktop floating window passes its own, so windows open side by side do
+  /// not show each other's titles.
+  final int headerBranch;
+
   const DetachedShellHost({
     super.key,
     this.hasChrome = false,
+    this.headerBranch = kDetachedChromeBranch,
     required super.child,
   });
 
@@ -194,9 +201,26 @@ class DetachedShellHost extends InheritedWidget {
   static bool drawsChrome(BuildContext context) =>
       _of(context)?.hasChrome ?? false;
 
+  /// The branch a chrome-drawing host's title bar reads, or null outside one.
+  static int? chromeBranchOf(BuildContext context) {
+    final host = _of(context);
+    return host != null && host.hasChrome ? host.headerBranch : null;
+  }
+
   @override
   bool updateShouldNotify(DetachedShellHost oldWidget) =>
-      oldWidget.hasChrome != hasChrome;
+      oldWidget.hasChrome != hasChrome ||
+      oldWidget.headerBranch != headerBranch;
+}
+
+/// The branch a screen at [context] should publish its header claim under:
+/// [branch] normally, or the host's pseudo-branch when the screen is hosted by
+/// a chrome-drawing [DetachedShellHost] — there the host's title bar is the
+/// header, and the shell branch the screen belongs to on phones is not on
+/// screen at all.
+int shellHeaderBranchFor(BuildContext context, int branch) {
+  final host = context.getInheritedWidgetOfExactType<DetachedShellHost>();
+  return host != null && host.hasChrome ? host.headerBranch : branch;
 }
 
 /// Pseudo-branch under which a screen hosted by a chrome-drawing
@@ -228,7 +252,11 @@ mixin ShellHeaderMixin<T extends ConsumerStatefulWidget> on ConsumerState<T> {
     _registry = ref.read(shellHeaderProvider.notifier);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _registry?.publish(this, headerBranchIndex, buildShellHeader());
+      _registry?.publish(
+        this,
+        shellHeaderBranchFor(context, headerBranchIndex),
+        buildShellHeader(),
+      );
     });
   }
 
@@ -236,7 +264,11 @@ mixin ShellHeaderMixin<T extends ConsumerStatefulWidget> on ConsumerState<T> {
   /// no-ops before the first post-frame publish if the widget is unmounted.
   void refreshShellHeader() {
     if (!mounted) return;
-    _registry?.publish(this, headerBranchIndex, buildShellHeader());
+    _registry?.publish(
+      this,
+      shellHeaderBranchFor(context, headerBranchIndex),
+      buildShellHeader(),
+    );
   }
 
   @override

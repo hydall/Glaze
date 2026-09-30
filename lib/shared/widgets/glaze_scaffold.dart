@@ -244,7 +244,11 @@ class _ShellHeaderPublisherState extends ConsumerState<_ShellHeaderPublisher> {
 
   void _publish() {
     if (!mounted) return;
-    _registry?.publish(this, widget.branchIndex, widget.config);
+    _registry?.publish(
+      this,
+      shellHeaderBranchFor(context, widget.branchIndex),
+      widget.config,
+    );
   }
 
   @override

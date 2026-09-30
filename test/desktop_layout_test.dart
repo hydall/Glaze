@@ -6,9 +6,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:glaze_flutter/shared/shell/desktop/desktop_floating_provider.dart';
 import 'package:glaze_flutter/shared/shell/desktop/desktop_layout_provider.dart';
+import 'package:glaze_flutter/shared/shell/desktop/desktop_window_geometry.dart';
 import 'package:glaze_flutter/shared/shell/desktop/sidebar_resizer.dart';
 import 'package:glaze_flutter/shared/shell/desktop/sidebar_sheet_provider.dart';
 import 'package:glaze_flutter/shared/shell/desktop/sidebar_tool_panels.dart';
+import 'package:glaze_flutter/shared/shell/shell_header_provider.dart';
 import 'package:glaze_flutter/shared/widgets/responsive_grid.dart';
 
 void main() {
@@ -157,34 +159,200 @@ void main() {
     });
   });
 
-  group('floating window stack', () {
-    test('drilling in stays inside the window and pops back', () {
+  group('floating windows', () {
+    ProviderContainer makeContainer() {
       final container = ProviderContainer();
       addTearDown(container.dispose);
-      final controller = container.read(desktopFloatingProvider);
+      return container;
+    }
 
-      expect(controller.isOpen, isFalse);
+    test('drilling in stays inside the window and pops back', () {
+      final container = makeContainer();
+      final windows = container.read(desktopWindowsProvider.notifier);
 
-      controller.open('menu');
-      expect(controller.activeView, 'menu');
-      expect(controller.canGoBack, isFalse);
+      expect(windows.isOpen, isFalse);
 
-      controller.push('settings');
-      expect(controller.activeView, 'settings');
-      expect(controller.canGoBack, isTrue);
+      final id = windows.open('menu');
+      expect(windows.focused?.activeView, 'menu');
+      expect(windows.focused?.canGoBack, isFalse);
 
-      controller.pop();
-      expect(controller.activeView, 'menu');
+      windows.push(id, 'settings');
+      expect(windows.focused?.activeView, 'settings');
+      expect(windows.focused?.canGoBack, isTrue);
+
+      windows.pop(id);
+      expect(windows.focused?.activeView, 'menu');
 
       // Popping the root closes the window rather than leaving it empty.
-      controller.pop();
-      expect(controller.isOpen, isFalse);
+      windows.pop(id);
+      expect(windows.isOpen, isFalse);
+    });
+
+    test('opening a view already on screen raises its window', () {
+      final container = makeContainer();
+      final windows = container.read(desktopWindowsProvider.notifier);
+
+      final menu = windows.open('menu');
+      final about = windows.open('about');
+      expect(container.read(desktopWindowsProvider), hasLength(2));
+      expect(windows.focused?.id, about);
+
+      expect(windows.open('menu'), menu);
+      expect(container.read(desktopWindowsProvider), hasLength(2));
+      expect(windows.focused?.id, menu);
+
+      // …unless a new window is asked for explicitly.
+      windows.open('menu', newWindow: true);
+      expect(container.read(desktopWindowsProvider), hasLength(3));
+    });
+
+    test('windows keep their own stacks and switch focus', () {
+      final container = makeContainer();
+      final windows = container.read(desktopWindowsProvider.notifier);
+
+      final a = windows.open('menu');
+      windows.push(a, 'settings');
+      final b = windows.open('sync');
+      expect(windows.focused?.id, b);
+
+      windows.cycle();
+      expect(windows.focused?.id, a);
+      expect(windows.focused?.activeView, 'settings');
+
+      windows.cycle(backwards: true);
+      expect(windows.focused?.id, b);
+
+      windows.close(b);
+      expect(windows.focused?.id, a);
+    });
+
+    test('minimized windows give up focus and come back on focus', () {
+      final container = makeContainer();
+      final windows = container.read(desktopWindowsProvider.notifier);
+
+      final a = windows.open('menu');
+      final b = windows.open('about');
+      windows.minimize(b);
+      expect(windows.focused?.id, a);
+
+      windows.minimize(a);
+      expect(windows.focused, isNull);
+      expect(windows.isOpen, isTrue);
+
+      windows.focus(b);
+      expect(windows.focused?.id, b);
+      expect(windows.byId(b)?.minimized, isFalse);
+    });
+
+    test('detaching splits the top view into its own window', () {
+      final container = makeContainer();
+      final windows = container.read(desktopWindowsProvider.notifier);
+
+      final a = windows.open('menu');
+      windows.setRect(a, const Rect.fromLTWH(100, 100, 600, 500));
+      expect(windows.detach(a), isNull, reason: 'nothing to split off');
+
+      windows.push(a, 'settings');
+      final b = windows.detach(a)!;
+      expect(windows.byId(a)?.stack, ['menu']);
+      expect(windows.byId(b)?.stack, ['settings']);
+      expect(windows.byId(b)?.rect, const Rect.fromLTWH(132, 132, 600, 500));
+      expect(windows.focused?.id, b);
+    });
+
+    test('a reopened window comes back where it was left', () {
+      final container = makeContainer();
+      final windows = container.read(desktopWindowsProvider.notifier);
+      const rect = Rect.fromLTWH(40, 60, 500, 400);
+
+      final id = windows.open('menu');
+      windows.setRect(id, rect);
+      windows.close(id);
+
+      final reopened = windows.open('menu');
+      expect(windows.byId(reopened)?.rect, rect);
     });
 
     test('every floating view has a phone route to fall back to', () {
       for (final id in desktopFloatingViews.keys) {
         expect(desktopFloatingViews[id], startsWith('/'));
       }
+    });
+
+    test('each window publishes its header under its own branch', () {
+      expect(desktopWindowHeaderBranch(1), isNot(desktopWindowHeaderBranch(2)));
+      expect(desktopWindowHeaderBranch(1), lessThan(kDetachedChromeBranch));
+    });
+  });
+
+  group('window geometry', () {
+    const bounds = Size(1200, 800);
+
+    test('default rect is centered, capped and cascaded', () {
+      final first = defaultWindowRect(bounds, const Size(620, 600));
+      expect(first.center, bounds.center(Offset.zero));
+
+      final second = defaultWindowRect(
+        bounds,
+        const Size(620, 600),
+        cascade: 1,
+      );
+      expect(second.topLeft - first.topLeft, const Offset(28, 28));
+
+      final huge = defaultWindowRect(bounds, const Size(5000, 5000));
+      expect(huge.width, closeTo(bounds.width * 0.92, 0.001));
+      expect(huge.height, closeTo(bounds.height * 0.92, 0.001));
+    });
+
+    test('clamping keeps the title bar reachable', () {
+      final above = clampWindowRect(
+        const Rect.fromLTWH(100, -200, 500, 400),
+        bounds,
+      );
+      expect(above.top, 0);
+
+      final farRight = clampWindowRect(
+        const Rect.fromLTWH(5000, 5000, 500, 400),
+        bounds,
+      );
+      expect(farRight.left, bounds.width - kDesktopWindowGrabMargin);
+      expect(farRight.top, bounds.height - kDesktopWindowTitleBarHeight);
+
+      final farLeft = clampWindowRect(
+        const Rect.fromLTWH(-5000, 100, 500, 400),
+        bounds,
+      );
+      expect(farLeft.right, kDesktopWindowGrabMargin);
+    });
+
+    test('resizing respects the minimum size and the bounds', () {
+      const start = Rect.fromLTWH(100, 100, 600, 500);
+
+      final grown = resizeWindowRect(
+        start,
+        WindowResizeEdge.bottomRight,
+        const Offset(50, 40),
+        bounds,
+      );
+      expect(grown, const Rect.fromLTWH(100, 100, 650, 540));
+
+      final shrunk = resizeWindowRect(
+        start,
+        WindowResizeEdge.topLeft,
+        const Offset(1000, 1000),
+        bounds,
+      );
+      expect(shrunk.size, kDesktopWindowMinSize);
+      expect(shrunk.bottomRight, start.bottomRight);
+
+      final pastEdge = resizeWindowRect(
+        start,
+        WindowResizeEdge.left,
+        const Offset(-1000, 0),
+        bounds,
+      );
+      expect(pastEdge.left, 0);
+      expect(pastEdge.right, start.right);
     });
   });
 

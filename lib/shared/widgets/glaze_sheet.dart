@@ -1,7 +1,9 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../shell/desktop/desktop_layout_provider.dart';
+import '../shell/desktop/desktop_window_geometry.dart';
 import '../shell/shell_header_provider.dart';
 import '../theme/app_colors.dart';
 import 'glass_surface.dart';
@@ -169,7 +171,7 @@ class _GlazeSheetWindowRoute<T> extends PopupRoute<T> {
 /// The window chrome around a desktop sheet's content: centers it, caps its
 /// size and — when [chrome] is set — draws a title bar and publishes it as a
 /// [DetachedShellHost] so a hosted [SheetView] hands its title there.
-class GlazeSheetWindow extends StatelessWidget {
+class GlazeSheetWindow extends StatefulWidget {
   final bool contentSized;
   final bool chrome;
   final String? fallbackTitle;
@@ -186,40 +188,151 @@ class GlazeSheetWindow extends StatelessWidget {
   });
 
   @override
+  State<GlazeSheetWindow> createState() => _GlazeSheetWindowState();
+}
+
+/// A window with [GlazeSheetWindow.chrome] can be dragged by its title bar; a
+/// fixed-height one can also be resized from its edges and maximized
+/// (double-click the title bar). A content-sized window follows its content's
+/// height, so it only moves. Chrome-less windows are short-lived pickers and
+/// stay put.
+class _GlazeSheetWindowState extends State<GlazeSheetWindow> {
+  /// Header pseudo-branches handed out to sheet windows, so a window opened
+  /// over another does not take over the title bar of the one below. Counts
+  /// down from [kDetachedChromeBranch], well clear of the floating windows'
+  /// branches.
+  static int _branchCounter = 0;
+
+  late final int _headerBranch =
+      kDetachedChromeBranch - 1 - (_branchCounter++ % 500);
+
+  /// Where the user moved or resized a fixed-height window to.
+  Rect? _rect;
+  bool _maximized = false;
+
+  /// How far the user dragged a content-sized window off center.
+  Offset _offset = Offset.zero;
+  Offset _moveStart = Offset.zero;
+
+  @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.sizeOf(context);
-    final width = size.width * 0.92 < kGlazeSheetWindowMaxWidth
-        ? size.width * 0.92
-        : kGlazeSheetWindowMaxWidth;
-    final maxHeight = size.height * _kGlazeSheetWindowHeightFactor;
-
-    final Widget framed = chrome
-        ? _WindowFrame(
-            fallbackTitle: fallbackTitle,
-            fallbackActions: fallbackActions,
-            child: child,
-          )
-        : _SheetPanel(child: child);
-
-    final Widget sized = contentSized
-        ? ConstrainedBox(
-            constraints: BoxConstraints(maxHeight: maxHeight),
-            child: framed,
-          )
-        : SizedBox(height: maxHeight, child: framed);
-
     return GlazeSheetWindowScope(
-      contentSized: contentSized,
+      contentSized: widget.contentSized,
       // The route lives on the root navigator, above the shell's [DesktopScope].
       // Re-provide it so a sheet opened from inside this window (a nested
       // GlazeBottomSheet, say) still opens as a window instead of a bottom
       // sheet.
       child: DesktopScope(
         isDesktop: true,
-        child: Center(child: SizedBox(width: width, child: sized)),
+        child: LayoutBuilder(
+          builder: (context, constraints) =>
+              _buildPlaced(context, constraints.biggest),
+        ),
       ),
     );
   }
+
+  Widget _buildPlaced(BuildContext context, Size bounds) {
+    final width = bounds.width * 0.92 < kGlazeSheetWindowMaxWidth
+        ? bounds.width * 0.92
+        : kGlazeSheetWindowMaxWidth;
+    final maxHeight = bounds.height * _kGlazeSheetWindowHeightFactor;
+    final resizable = widget.chrome && !widget.contentSized;
+
+    final Widget framed = widget.chrome
+        ? _WindowFrame(
+            headerBranch: _headerBranch,
+            fallbackTitle: widget.fallbackTitle,
+            fallbackActions: widget.fallbackActions,
+            maximized: _maximized,
+            onToggleMaximize: resizable ? _toggleMaximize : null,
+            child: widget.child,
+          )
+        : _SheetPanel(child: widget.child);
+
+    if (resizable) {
+      final rect = _maximized
+          ? Offset.zero & bounds
+          : clampWindowRect(
+              _rect ??
+                  defaultWindowRect(
+                    bounds,
+                    Size(kGlazeSheetWindowMaxWidth, maxHeight),
+                  ),
+              bounds,
+            );
+      return Stack(
+        children: [
+          DesktopWindowGeometry(
+            rect: rect,
+            bounds: bounds,
+            movable: !_maximized,
+            resizable: !_maximized,
+            onChanged: (rect) => setState(() => _rect = rect),
+            onToggleMaximize: _toggleMaximize,
+            child: framed,
+          ),
+        ],
+      );
+    }
+
+    final sized = SizedBox(
+      width: width,
+      child: widget.contentSized
+          ? ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: maxHeight),
+              child: framed,
+            )
+          : SizedBox(height: maxHeight, child: framed),
+    );
+    if (!widget.chrome) return Center(child: sized);
+
+    return CustomSingleChildLayout(
+      delegate: _OffsetCenterLayout(_offset),
+      child: DesktopWindowMoveScope(
+        onMoveStart: () => _moveStart = _offset,
+        onMoveUpdate: (delta) => setState(() {
+          final raw = _moveStart + delta;
+          // Loose cap only; the layout delegate does the exact clamping once
+          // it knows the window's height.
+          _offset = Offset(
+            raw.dx.clamp(-bounds.width / 2, bounds.width / 2),
+            raw.dy.clamp(-bounds.height / 2, bounds.height / 2),
+          );
+        }),
+        onMoveEnd: () {},
+        child: sized,
+      ),
+    );
+  }
+
+  void _toggleMaximize() => setState(() => _maximized = !_maximized);
+}
+
+/// Centers its child, shifted by [offset] and kept where its title bar stays
+/// reachable (see [clampWindowRect]).
+class _OffsetCenterLayout extends SingleChildLayoutDelegate {
+  final Offset offset;
+
+  const _OffsetCenterLayout(this.offset);
+
+  @override
+  BoxConstraints getConstraintsForChild(BoxConstraints constraints) =>
+      constraints.loosen();
+
+  @override
+  Offset getPositionForChild(Size size, Size childSize) {
+    final centered = Rect.fromCenter(
+      center: size.center(Offset.zero) + offset,
+      width: childSize.width,
+      height: childSize.height,
+    );
+    return clampWindowRect(centered, size, minSize: Size.zero).topLeft;
+  }
+
+  @override
+  bool shouldRelayout(_OffsetCenterLayout oldDelegate) =>
+      offset != oldDelegate.offset;
 }
 
 /// Shadowed, rounded wrapper for a chrome-less window whose content paints its
@@ -256,22 +369,26 @@ class _SheetPanel extends StatelessWidget {
 }
 
 class _WindowFrame extends ConsumerWidget {
+  final int headerBranch;
   final String? fallbackTitle;
   final List<Widget>? fallbackActions;
+  final bool maximized;
+  final VoidCallback? onToggleMaximize;
   final Widget child;
 
   const _WindowFrame({
+    required this.headerBranch,
     this.fallbackTitle,
     this.fallbackActions,
+    this.maximized = false,
+    this.onToggleMaximize,
     required this.child,
   });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final entry = ref.watch(
-      shellHeaderProvider.select(
-        (e) => resolveShellHeader(e, kDetachedChromeBranch),
-      ),
+      shellHeaderProvider.select((e) => resolveShellHeader(e, headerBranch)),
     );
     final title = entry?.config.title ?? fallbackTitle ?? '';
     final actions = <Widget>[
@@ -279,8 +396,10 @@ class _WindowFrame extends ConsumerWidget {
       ...?fallbackActions,
     ];
 
+    final radius = BorderRadius.circular(maximized ? 0 : 16);
+
     return GlassSurface(
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: radius,
       border: Border.all(color: context.cs.outlineVariant),
       boxShadow: [
         BoxShadow(
@@ -290,19 +409,24 @@ class _WindowFrame extends ConsumerWidget {
         ),
       ],
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: radius,
         child: Column(
           children: [
-            _WindowTitleBar(
-              title: title,
-              titleWidget: entry?.config.titleWidget,
-              actions: actions,
-              onClose: () => Navigator.of(context).maybePop(),
+            DesktopWindowMoveArea(
+              child: _WindowTitleBar(
+                title: title,
+                titleWidget: entry?.config.titleWidget,
+                actions: actions,
+                maximized: maximized,
+                onToggleMaximize: onToggleMaximize,
+                onClose: () => Navigator.of(context).maybePop(),
+              ),
             ),
             Divider(height: 1, color: context.cs.outlineVariant),
             Expanded(
               child: DetachedShellHost(
                 hasChrome: true,
+                headerBranch: headerBranch,
                 child: MediaQuery.removePadding(
                   context: context,
                   removeTop: true,
@@ -322,12 +446,16 @@ class _WindowTitleBar extends StatelessWidget {
   final String title;
   final Widget? titleWidget;
   final List<Widget> actions;
+  final bool maximized;
+  final VoidCallback? onToggleMaximize;
   final VoidCallback onClose;
 
   const _WindowTitleBar({
     required this.title,
     this.titleWidget,
     required this.actions,
+    required this.maximized,
+    required this.onToggleMaximize,
     required this.onClose,
   });
 
@@ -352,6 +480,21 @@ class _WindowTitleBar extends StatelessWidget {
                 ),
           ),
           ...actions,
+          if (onToggleMaximize != null)
+            IconButton(
+              icon: Icon(
+                maximized
+                    ? Icons.fullscreen_exit_rounded
+                    : Icons.crop_square_rounded,
+                size: 18,
+              ),
+              color: context.cs.onSurfaceVariant,
+              visualDensity: VisualDensity.compact,
+              tooltip: maximized
+                  ? 'desktop_window_restore'.tr()
+                  : 'desktop_window_maximize'.tr(),
+              onPressed: onToggleMaximize,
+            ),
           IconButton(
             icon: const Icon(Icons.close_rounded, size: 20),
             tooltip: MaterialLocalizations.of(context).closeButtonTooltip,

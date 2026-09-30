@@ -104,7 +104,7 @@ class _DesktopLeftSidebarState extends ConsumerState<DesktopLeftSidebar> {
 
   void _openMenu() {
     if (isDesktopLayout(context)) {
-      ref.read(desktopFloatingProvider).open('menu');
+      ref.read(desktopWindowsProvider.notifier).open('menu');
     } else {
       goShellBranch(context, ref, _menuBranch, fallbackLocation: '/menu');
     }

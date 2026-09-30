@@ -447,7 +447,7 @@ class _SheetViewState extends ConsumerState<SheetView>
   /// floating window), so the window shows this sheet's title and actions
   /// while the sheet itself draws no app-bar row.
   ///
-  /// The claim goes under [kDetachedChromeBranch] rather than a real shell
+  /// The claim goes under the host's pseudo-branch rather than a real shell
   /// branch: the sheet is mounted outside the branch navigators, and the
   /// window resolves that pseudo-branch for exactly this purpose.
   void _publishChromeHeader() {
@@ -462,7 +462,11 @@ class _SheetViewState extends ConsumerState<SheetView>
       );
       return;
     }
-    final signature = _chromeSignature();
+    // Each floating window hands its own pseudo-branch down; a sheet window
+    // uses the shared one.
+    final branch =
+        DetachedShellHost.chromeBranchOf(context) ?? kDetachedChromeBranch;
+    final signature = '$branch|${_chromeSignature()}';
     if (signature == _publishedChromeSignature) return;
     _publishedChromeSignature = signature;
     // Deferred: this runs during the build phase, where modifying a provider
@@ -472,7 +476,7 @@ class _SheetViewState extends ConsumerState<SheetView>
       if (!mounted || _publishedChromeSignature != signature) return;
       registry.publish(
         this,
-        kDetachedChromeBranch,
+        branch,
         ShellHeaderConfig(
           title: widget.title,
           titleWidget: widget.titleWidget,
