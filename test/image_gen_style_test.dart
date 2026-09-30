@@ -5,6 +5,35 @@ import 'package:glaze_flutter/features/image_gen/services/image_style_io.dart';
 
 void main() {
   const anime = ImageStyle(id: 's1', name: 'Anime', value: 'anime, cel shaded');
+  const animeNeg = ImageStyle(
+    id: 's2',
+    name: 'Anime',
+    value: 'anime',
+    negativePrompt: 'lowres, bad hands',
+  );
+
+  group('negative prompt resolution', () {
+    test('appends the active style negative to the provider one', () {
+      const settings = ImageGenSettings(styles: [animeNeg], activeStyleId: 's2');
+      expect(
+        resolveEffectiveNegativePrompt('watermark', settings),
+        'watermark, lowres, bad hands',
+      );
+    });
+
+    test('uses the style negative alone when the provider has none', () {
+      const settings = ImageGenSettings(styles: [animeNeg], activeStyleId: 's2');
+      expect(
+        resolveEffectiveNegativePrompt('', settings),
+        'lowres, bad hands',
+      );
+    });
+
+    test('leaves the provider negative alone without an active style', () {
+      const settings = ImageGenSettings(styles: [animeNeg]);
+      expect(resolveEffectiveNegativePrompt('watermark', settings), 'watermark');
+    });
+  });
 
   group('style resolution', () {
     test('"no style" keeps the style written into the image tag', () {
@@ -121,10 +150,20 @@ void main() {
 
   group('style export / import', () {
     test('round-trips through JSON', () {
-      final decoded = ImageStyleIo.decode(ImageStyleIo.encode(const [anime]));
+      final decoded = ImageStyleIo.decode(
+        ImageStyleIo.encode(const [animeNeg]),
+      );
       expect(decoded.length, 1);
       expect(decoded.single.name, 'Anime');
-      expect(decoded.single.value, 'anime, cel shaded');
+      expect(decoded.single.value, 'anime');
+      expect(decoded.single.negativePrompt, 'lowres, bad hands');
+    });
+
+    test('accepts a hand-written "negative" alias', () {
+      final decoded = ImageStyleIo.decode(
+        '[{"name":"Ink","value":"ink wash","negative":"blurry"}]',
+      );
+      expect(decoded.single.negativePrompt, 'blurry');
     });
 
     test('regenerates ids so imported styles never collide', () {

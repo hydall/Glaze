@@ -114,12 +114,17 @@ abstract class ReferenceImage with _$ReferenceImage {
 
 /// A named prompt style. The active style replaces whatever `style` the model
 /// wrote into the image tag; with no active style the tag's own style wins.
+///
+/// [negativePrompt] is appended to the provider's own negative prompt, so a
+/// style can steer away from artifacts it tends to produce. Providers without a
+/// negative prompt ignore it.
 @freezed
 abstract class ImageStyle with _$ImageStyle {
   const factory ImageStyle({
     required String id,
     required String name,
     @Default('') String value,
+    @Default('') String negativePrompt,
   }) = _ImageStyle;
 }
 

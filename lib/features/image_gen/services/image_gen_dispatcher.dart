@@ -129,13 +129,23 @@ class ImageGenDispatcher {
         );
       case ImageGenApiType.a1111:
         return A1111ImageProvider().generate(
-          settings: settings.a1111,
+          settings: settings.a1111.copyWith(
+            negativePrompt: resolveEffectiveNegativePrompt(
+              settings.a1111.negativePrompt,
+              settings,
+            ),
+          ),
           prompt: prompt,
           cancelToken: cancelToken,
         );
       case ImageGenApiType.novelai:
         return NovelAIImageProvider().generate(
-          settings: settings.novelai,
+          settings: settings.novelai.copyWith(
+            negativePrompt: resolveEffectiveNegativePrompt(
+              settings.novelai.negativePrompt,
+              settings,
+            ),
+          ),
           prompt: prompt,
           references: references,
           instructionAspectRatio: instructionAspectRatio,
@@ -143,7 +153,12 @@ class ImageGenDispatcher {
         );
       case ImageGenApiType.comfyui:
         return ComfyUiImageProvider().generate(
-          settings: settings.comfyui,
+          settings: settings.comfyui.copyWith(
+            negativePrompt: resolveEffectiveNegativePrompt(
+              settings.comfyui.negativePrompt,
+              settings,
+            ),
+          ),
           prompt: prompt,
           cancelToken: cancelToken,
         );

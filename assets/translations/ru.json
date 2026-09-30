@@ -1112,6 +1112,7 @@
   "imggen_style_add": "Новый стиль",
   "imggen_style_name": "Название",
   "imggen_style_value": "Стиль",
+  "imggen_style_negative": "Негативный промпт",
   "imggen_style_empty": "Пустой стиль",
   "imggen_style_delete": "Удалить",
   "imggen_style_default_name": "Стиль {}",
