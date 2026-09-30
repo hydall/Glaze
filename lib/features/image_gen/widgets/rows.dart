@@ -120,6 +120,10 @@ class ImageGenTextFieldItem extends StatefulWidget {
   final ValueChanged<String> onChanged;
   final Widget? suffix;
 
+  /// Shows a clear button while the field has content. Tapping it opens a
+  /// confirmation sheet and wipes the whole field when confirmed.
+  final bool clearable;
+
   const ImageGenTextFieldItem({
     super.key,
     required this.label,
@@ -128,6 +132,7 @@ class ImageGenTextFieldItem extends StatefulWidget {
     this.hint,
     required this.onChanged,
     this.suffix,
+    this.clearable = false,
   });
 
   @override
@@ -160,8 +165,50 @@ class _ImageGenTextFieldItemState extends State<ImageGenTextFieldItem> {
       placeholder: widget.hint,
       obscure: widget.obscure && _obscured,
       onChanged: widget.onChanged,
-      suffix: widget.suffix ?? (widget.obscure ? _revealButton(context) : null),
+      suffix: _suffix(context),
     );
+  }
+
+  Widget? _suffix(BuildContext context) {
+    if (widget.suffix != null) return widget.suffix;
+    if (widget.obscure) return _revealButton(context);
+    if (widget.clearable && widget.value.isNotEmpty) return _clearButton(context);
+    return null;
+  }
+
+  Widget _clearButton(BuildContext context) {
+    return IconButton(
+      icon: Icon(Icons.close, size: 18, color: context.cs.onSurfaceVariant),
+      tooltip: 'common_clear'.tr(),
+      onPressed: _confirmClear,
+    );
+  }
+
+  Future<void> _confirmClear() async {
+    final confirmed = await GlazeBottomSheet.show<bool>(
+      context,
+      title: 'imggen_negative_clear_title'.tr(),
+      bigInfo: BottomSheetBigInfo(
+        icon: Icons.delete_outline,
+        description: 'imggen_negative_clear_desc'.tr(),
+      ),
+      items: [
+        BottomSheetItem(
+          icon: Icons.clear,
+          label: 'common_clear'.tr(),
+          isDestructive: true,
+          onTap: () => Navigator.of(context, rootNavigator: true).pop(true),
+        ),
+        BottomSheetItem(
+          icon: Icons.close,
+          label: 'common_cancel'.tr(),
+          onTap: () => Navigator.of(context, rootNavigator: true).pop(false),
+        ),
+      ],
+    );
+    if (confirmed != true) return;
+    _controller.clear();
+    widget.onChanged('');
   }
 
   Widget _revealButton(BuildContext context) {

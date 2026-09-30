@@ -1125,6 +1125,8 @@
   "imggen_ref_pick_gallery": "Из галереи карточки",
   "imggen_styles_empty": "Стилей пока нет. Нажмите +, чтобы создать.",
   "confirm_discard_changes": "Отменить изменения?",
+  "imggen_negative_clear_title": "Очистить negative prompt?",
+  "imggen_negative_clear_desc": "Всё содержимое поля negative prompt будет удалено.",
   "imggen_generation": "Генерация",
   "imggen_concurrent": "Генерировать картинки одновременно",
   "imggen_concurrent_desc": "Отправлять все теги картинок сообщения сразу. Выключено — картинки генерируются по очереди, каждая с начала до конца.",
