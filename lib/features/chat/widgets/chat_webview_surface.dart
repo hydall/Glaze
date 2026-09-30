@@ -202,6 +202,7 @@ class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
     bridge.onChangeGreeting = callbacks.onChangeGreeting;
     bridge.onHeaderScroll = callbacks.onHeaderScroll;
     bridge.onScrollToBottomVisibility = callbacks.onScrollToBottomVisibility;
+    bridge.onScrollToTopVisibility = callbacks.onScrollToTopVisibility;
     bridge.onRegenerate = callbacks.onRegenerate;
     bridge.onSelectionAction = callbacks.onSelectionAction;
     bridge.onSelectionChange = callbacks.onSelectionChange;

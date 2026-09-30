@@ -2708,6 +2708,49 @@ void main() {
     });
   });
 
+  group('scroll-to-top button (chat_bridge_controller.js)', () {
+    test('visibility is emitted through _sendToFlutter, deduped', () {
+      expect(
+        bridgeControllerJs,
+        contains("this._sendToFlutter('onScrollToTopVisibility'"),
+      );
+      final idx = bridgeControllerJs.indexOf(
+        '_emitScrollToTopVisibility(show) {',
+      );
+      expect(idx, isNot(-1));
+      final body = _extractBlockBody(bridgeControllerJs, idx);
+      expect(body, contains('this._lastScrollToTopShown === show'));
+    });
+
+    test('only a reader scroll arms the latch', () {
+      final idx = bridgeControllerJs.indexOf('const isUserScrollUp = (st) =>');
+      expect(idx, isNot(-1));
+      final tail = bridgeControllerJs.substring(idx, idx + 300);
+      expect(tail, contains('SCROLL_TO_TOP_THRESHOLD_PX'));
+      expect(tail, contains('this._lastUserScrollInputAt'));
+      expect(tail, contains('USER_SCROLL_INPUT_WINDOW_MS'));
+      // Input events mark the tracker, so a layout correction cannot arm it.
+      expect(
+        bridgeControllerJs,
+        contains("['wheel', 'touchstart', 'touchmove', 'keydown']"),
+      );
+    });
+
+    test('showHeader and scrollToTop retire the button', () {
+      final headerIdx = bridgeControllerJs.indexOf('showHeader() {');
+      expect(headerIdx, isNot(-1));
+      final header = _extractBlockBody(bridgeControllerJs, headerIdx);
+      expect(header, contains('this._scrolledUpFromTop = false'));
+      expect(header, contains('this._emitScrollToTopVisibility(false)'));
+
+      final topIdx = bridgeControllerJs.indexOf('scrollToTop() {');
+      expect(topIdx, isNot(-1));
+      final top = _extractBlockBody(bridgeControllerJs, topIdx);
+      expect(top, contains('this.virtualList.scrollToTop()'));
+      expect(top, contains('this._emitScrollToTopVisibility(false)'));
+    });
+  });
+
   // ─── renderMessage always returns array (Phase 3.6) ────────────────────────
   group('renderMessage return type (renderer modules)', () {
     test('renderMessage returns elements array (not conditional)', () {

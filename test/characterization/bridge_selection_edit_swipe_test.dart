@@ -418,6 +418,7 @@ void main() {
       final expectedHandlers = [
         'onLoadMore',
         'onHeaderScroll',
+        'onScrollToTopVisibility',
         'onLinkClick',
         'onImageClick',
         'onMessageContext',

@@ -34,6 +34,7 @@ typedef ImgOptionsCallback =
 typedef ImgVoidCallback = void Function();
 typedef HeaderScrollCallback = void Function(bool hidden);
 typedef ScrollToBottomVisibilityCallback = void Function(bool visible);
+typedef ScrollToTopVisibilityCallback = void Function(bool visible);
 typedef SelectionActionCallback = void Function(String action, String text);
 typedef ImageClickCallback = void Function(String imageUrl);
 typedef SelectionChangeCallback = void Function(List<String> ids);
@@ -103,8 +104,13 @@ class ImageGenCallbacks {
 class ScrollCallbacks {
   final HeaderScrollCallback? onHeaderScroll;
   final ScrollToBottomVisibilityCallback? onScrollToBottomVisibility;
+  final ScrollToTopVisibilityCallback? onScrollToTopVisibility;
 
-  const ScrollCallbacks({this.onHeaderScroll, this.onScrollToBottomVisibility});
+  const ScrollCallbacks({
+    this.onHeaderScroll,
+    this.onScrollToBottomVisibility,
+    this.onScrollToTopVisibility,
+  });
 }
 
 class MiscCallbacks {

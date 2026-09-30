@@ -286,6 +286,10 @@ class MessageBridgeCommands {
     return _host.evalJs('window.bridge?.scrollToBottom($behavior)');
   }
 
+  Future<void> scrollToTop() {
+    return _host.evalJs('window.bridge?.scrollToTop()');
+  }
+
   Future<void> requestScrollToBottomOnAppend() {
     return _host.evalJs('window.bridge?.requestScrollToBottomOnAppend()');
   }

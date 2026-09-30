@@ -332,6 +332,10 @@ class ChatBridgeController {
   void Function(bool hidden)? onHeaderScroll;
   void Function(bool visible)? onScrollToBottomVisibility;
 
+  /// Whether the scroll-to-top button should be on screen. JS arms it once the
+  /// reader scrolls up away from the first message.
+  void Function(bool visible)? onScrollToTopVisibility;
+
   /// A rendered message carried a `<script>` while message script execution is
   /// off. Fired at most once per WebView load so the app can offer to enable
   /// execution.
@@ -483,6 +487,8 @@ class ChatBridgeController {
         onHeaderScroll?.call(v);
       case 'onScrollToBottomVisibility':
         onScrollToBottomVisibility?.call(v);
+      case 'onScrollToTopVisibility':
+        onScrollToTopVisibility?.call(v);
     }
   }
 
@@ -717,6 +723,7 @@ class ChatBridgeController {
       messages.clearAll(keepPlaceholder: keepPlaceholder);
   Future<void> scrollToBottom({bool smooth = false}) =>
       messages.scrollToBottom(smooth: smooth);
+  Future<void> scrollToTop() => messages.scrollToTop();
   Future<void> requestScrollToBottomOnAppend() =>
       messages.requestScrollToBottomOnAppend();
   Future<void> scrollToMessage(String id, {bool highlight = false}) =>

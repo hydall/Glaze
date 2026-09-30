@@ -683,6 +683,69 @@ class _InlineChatSearchField extends ConsumerWidget {
       GoRouterState.of(context).pathParameters['charId'] ?? '';
 }
 
+/// The round glass button floating over the chat that jumps to the top or the
+/// bottom of the message list. One widget so the two jump buttons only differ
+/// in icon, direction and callback.
+class _ChatScrollButton extends StatelessWidget {
+  const _ChatScrollButton({
+    required this.visible,
+    required this.icon,
+    required this.onTap,
+    this.slideFromBelow = true,
+  });
+
+  final bool visible;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  /// Parks the hidden button below its resting spot (scroll-to-bottom) or
+  /// above it (scroll-to-top), so each slides toward the edge it sits nearest.
+  final bool slideFromBelow;
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      ignoring: !visible,
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
+        opacity: visible ? 1 : 0,
+        child: AnimatedSlide(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          offset: visible
+              ? Offset.zero
+              : (slideFromBelow
+                    ? const Offset(0, 0.2)
+                    : const Offset(0, -0.2)),
+          child: GestureDetector(
+            onTap: onTap,
+            child: Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: context.cs.surface.withValues(alpha: 0.9),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.08),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.22),
+                    blurRadius: 18,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: Icon(icon, color: context.cs.primary, size: 26),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _ChatBody extends ConsumerStatefulWidget {
   final String charId;
   final ChatState state;
@@ -765,6 +828,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
 
   final _selectionCtrl = ChatMessageSelectionController();
   bool _showScrollToBottom = false;
+  bool _showScrollToTop = false;
   bool _contextCardExpanded = false;
   bool _showingHistoryRotation = false;
   final GlobalKey<ChatWebViewWidgetState> _webViewStateKey = GlobalKey();
@@ -951,6 +1015,15 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
     }
     if (!mounted) return;
     setState(() => _showScrollToBottom = false);
+  }
+
+  Future<void> _scrollToTop() async {
+    final webViewState = _webViewStateKey.currentState;
+    if (webViewState != null) {
+      await webViewState.scrollToTop();
+    }
+    if (!mounted) return;
+    setState(() => _showScrollToTop = false);
   }
 
   void _showImageViewer(BuildContext context, String imageUrl) {
@@ -1601,6 +1674,11 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
             _showScrollToBottom &&
             !widget.search.showSearch &&
             !isEditingMessage;
+        // JS arms this once the reader scrolls up away from the first message.
+        final showScrollTopBtn =
+            _showScrollToTop &&
+            !widget.search.showSearch &&
+            !isEditingMessage;
 
         final animatedBottomPanelInset =
             panelHeight + (safeBottom * (1 - factor));
@@ -2004,6 +2082,12 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                             }
                             setState(() => _showScrollToBottom = visible);
                           },
+                          onScrollToTopVisibility: (visible) {
+                            if (!mounted || _showScrollToTop == visible) {
+                              return;
+                            }
+                            setState(() => _showScrollToTop = visible);
+                          },
                         ),
                         miscActions: MiscCallbacks(
                           onStop: () {
@@ -2084,49 +2168,26 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                 ),
               ),
             ],
+            // The two jump buttons share the bottom-right corner and stack
+            // when both are on screen. Mirror Vue ChatInput
+            // (`v-if="!isSearchMode"`): both are suppressed while searching.
+            Positioned(
+              right: 16,
+              bottom: messageListBottom + 16 + 44 + 12,
+              child: _ChatScrollButton(
+                visible: showScrollTopBtn,
+                icon: Icons.keyboard_arrow_up_rounded,
+                onTap: _scrollToTop,
+                slideFromBelow: false,
+              ),
+            ),
             Positioned(
               right: 16,
               bottom: messageListBottom + 16,
-              child: IgnorePointer(
-                // Mirror Vue ChatInput (`v-if="!isSearchMode"`): the
-                // scroll-to-bottom button is suppressed while searching.
-                ignoring: !showScrollBtn,
-                child: AnimatedOpacity(
-                  duration: const Duration(milliseconds: 180),
-                  curve: Curves.easeOutCubic,
-                  opacity: showScrollBtn ? 1 : 0,
-                  child: AnimatedSlide(
-                    duration: const Duration(milliseconds: 180),
-                    curve: Curves.easeOutCubic,
-                    offset: showScrollBtn ? Offset.zero : const Offset(0, 0.2),
-                    child: GestureDetector(
-                      onTap: _scrollToBottom,
-                      child: Container(
-                        width: 44,
-                        height: 44,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: context.cs.surface.withValues(alpha: 0.9),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.08),
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.22),
-                              blurRadius: 18,
-                              offset: const Offset(0, 8),
-                            ),
-                          ],
-                        ),
-                        child: Icon(
-                          Icons.keyboard_arrow_down_rounded,
-                          color: context.cs.primary,
-                          size: 26,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
+              child: _ChatScrollButton(
+                visible: showScrollBtn,
+                icon: Icons.keyboard_arrow_down_rounded,
+                onTap: _scrollToBottom,
               ),
             ),
             // Context coverage panel: memory + lorebook for the next prompt.
