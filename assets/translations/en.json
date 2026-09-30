@@ -1118,6 +1118,8 @@
   "imggen_ref_pick_gallery": "From card gallery",
   "imggen_styles_empty": "No styles yet. Tap + to create one.",
   "confirm_discard_changes": "Discard changes?",
+  "imggen_negative_clear_title": "Clear negative prompt?",
+  "imggen_negative_clear_desc": "The whole negative prompt will be erased.",
   "imggen_generation": "Generation",
   "imggen_concurrent": "Generate images simultaneously",
   "imggen_concurrent_desc": "Send every image tag of a message at once. Off — the images are generated one at a time, each finished from start to end before the next one starts.",

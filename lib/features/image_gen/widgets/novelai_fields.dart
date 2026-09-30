@@ -159,6 +159,7 @@ List<Widget> buildNovelAiModelFields(
       label: 'Negative prompt',
       value: config.negativePrompt,
       hint: 'lowres, bad anatomy',
+      clearable: true,
       onChanged: (v) => update(config.copyWith(negativePrompt: v)),
     ),
     MenuSelectorItem(
