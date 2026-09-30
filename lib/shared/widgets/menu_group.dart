@@ -574,6 +574,10 @@ class MenuFieldItem extends StatelessWidget {
   final List<TextInputFormatter>? inputFormatters;
   final ValueChanged<String>? onChanged;
   final int maxLines;
+
+  /// Lines the field keeps even when empty; with a larger [maxLines] the
+  /// field grows with its text up to that many lines before it scrolls.
+  final int? minLines;
   final VoidCallback? onExpand;
 
   /// Muted hint under the label — for legends that would otherwise be crammed
@@ -604,6 +608,7 @@ class MenuFieldItem extends StatelessWidget {
     this.inputFormatters,
     this.onChanged,
     this.maxLines = 1,
+    this.minLines,
     this.onExpand,
     this.description,
     this.helper,
@@ -630,12 +635,15 @@ class MenuFieldItem extends StatelessWidget {
               if (helpTerm != null) HelpTip(term: helpTerm!, size: 14),
               const Spacer(),
               if (onExpand != null)
-                GestureDetector(
-                  onTap: onExpand,
-                  child: Icon(
-                    Icons.open_in_full,
-                    size: 16,
-                    color: context.cs.primary,
+                MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: GestureDetector(
+                    onTap: onExpand,
+                    child: Icon(
+                      Icons.open_in_full,
+                      size: 16,
+                      color: context.cs.primary,
+                    ),
                   ),
                 ),
             ],
@@ -666,6 +674,7 @@ class MenuFieldItem extends StatelessWidget {
                   inputFormatters: inputFormatters,
                   onChanged: onChanged,
                   maxLines: maxLines,
+                  minLines: minLines,
                   style: TextStyle(color: context.cs.onSurface, fontSize: 15),
                   decoration: InputDecoration(
                     hintText: placeholder,

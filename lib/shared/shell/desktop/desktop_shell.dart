@@ -111,7 +111,9 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
   /// Which sidebar entry should read as active, derived from the route (plus
   /// the floating-window state, which does not change the route).
   String _currentView(BuildContext context) {
-    if (ref.watch(desktopFloatingStackProvider).isNotEmpty) return 'menu';
+    if (ref.watch(desktopWindowsProvider).any((w) => !w.minimized)) {
+      return 'menu';
+    }
     final segments = GoRouterState.of(context).uri.pathSegments;
     if (segments.isEmpty) return 'dialogs';
     switch (segments.first) {
@@ -128,19 +130,42 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
     }
   }
 
-  /// Escape closes the topmost desktop overlay, innermost first.
+  /// Desktop keyboard handling for the overlays in this stack.
   ///
-  /// Flutter's default `DismissIntent` only pops modal *routes*; the floating
-  /// window, the glossary popup and the sidebar panel are all plain widgets in
-  /// this stack, so Escape did nothing for them. Mirrors the Vue app's
-  /// hierarchical Escape handler.
-  KeyEventResult _handleEscape(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent ||
-        event.logicalKey != LogicalKeyboardKey.escape) {
+  /// Escape closes the topmost desktop overlay, innermost first. Flutter's
+  /// default `DismissIntent` only pops modal *routes*; the floating windows,
+  /// the glossary popup and the sidebar panel are all plain widgets in this
+  /// stack, so Escape did nothing for them. Mirrors the Vue app's hierarchical
+  /// Escape handler. For the focused floating window it steps back first and
+  /// closes from the window's root.
+  ///
+  /// Ctrl+Tab / Ctrl+Shift+Tab switch between floating windows and Ctrl+W
+  /// closes the focused one.
+  KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
     }
-    if (ref.read(desktopFloatingStackProvider).isNotEmpty) {
-      ref.read(desktopFloatingProvider).pop();
+    final key = event.logicalKey;
+    final keyboard = HardwareKeyboard.instance;
+    final windows = ref.read(desktopWindowsProvider.notifier);
+    final focusedWindow = windows.focused;
+
+    if (keyboard.isControlPressed && windows.isOpen) {
+      if (key == LogicalKeyboardKey.tab) {
+        windows.cycle(backwards: keyboard.isShiftPressed);
+        return KeyEventResult.handled;
+      }
+      if (key == LogicalKeyboardKey.keyW && focusedWindow != null) {
+        windows.close(focusedWindow.id);
+        return KeyEventResult.handled;
+      }
+    }
+
+    if (event is! KeyDownEvent || key != LogicalKeyboardKey.escape) {
+      return KeyEventResult.ignored;
+    }
+    if (focusedWindow != null) {
+      windows.pop(focusedWindow.id);
       return KeyEventResult.handled;
     }
     if (ref.read(glossaryPopupVisibleProvider)) {
@@ -214,7 +239,7 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
       autofocus: true,
       canRequestFocus: false,
       skipTraversal: true,
-      onKeyEvent: _handleEscape,
+      onKeyEvent: _handleKey,
       child: DesktopFileDrop(
         child: GlazeBackground(
           child: Padding(
@@ -245,8 +270,9 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
                     DesktopRightSidebar(width: widths.right),
                   ],
                 ),
-                // Floating window overlay
-                const DesktopWindowView(),
+                // Floating windows. Not modal: presses outside a window fall
+                // through to the columns underneath.
+                const Positioned.fill(child: DesktopWindowView()),
               ],
             ),
           ),

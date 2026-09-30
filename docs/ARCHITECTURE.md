@@ -415,8 +415,9 @@ lib/
 │   │       ├── desktop_layout_provider.dart
 │   │       ├── desktop_left_sidebar.dart  # Chat list + nav (replaces bottom nav)
 │   │       ├── desktop_right_sidebar.dart # Tools / MagicDrawer
-│   │       ├── desktop_window_view.dart
-│   │       ├── desktop_floating_provider.dart
+│   │       ├── desktop_window_view.dart     # Floating windows (non-modal) + switcher dock
+│   │       ├── desktop_floating_provider.dart # Window manager: per-window stack, z-order, geometry
+│   │       ├── desktop_window_geometry.dart   # Move/resize math + drag/resize widgets
 │   │       └── desktop_glossary_popup.dart
 │   ├── theme/                        # ThemePreset, storage, provider, fonts, app_colors, app_theme
 │   ├── utils/
