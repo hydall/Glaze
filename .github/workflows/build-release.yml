@@ -296,11 +296,26 @@ jobs:
           mv "$OUT/app-armeabi-v7a-release.apk" "$OUT/$NAME-armeabi-v7a.apk"
           mv "$OUT/app-arm64-v8a-release.apk"   "$OUT/$NAME-arm64-v8a.apk"
 
-      - name: Upload APK artifacts
+      # Three separate artifacts, one per build, so each can be downloaded on
+      # its own instead of getting a zip with all of them in it. The release and
+      # notify jobs still collect them together with the Glaze-release-* glob.
+      - name: Upload universal APK
         uses: actions/upload-artifact@v4
         with:
-          name: Glaze-release-APK
-          path: "build/app/outputs/flutter-apk/${{ needs.metadata.outputs.tag_name }}*.apk"
+          name: Glaze-release-APK-universal
+          path: "build/app/outputs/flutter-apk/${{ needs.metadata.outputs.tag_name }}.apk"
+
+      - name: Upload arm64-v8a APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Glaze-release-APK-arm64-v8a
+          path: "build/app/outputs/flutter-apk/${{ needs.metadata.outputs.tag_name }}-arm64-v8a.apk"
+
+      - name: Upload armeabi-v7a APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Glaze-release-APK-armeabi-v7a
+          path: "build/app/outputs/flutter-apk/${{ needs.metadata.outputs.tag_name }}-armeabi-v7a.apk"
 
   # ── windows ────────────────────────────────────────────────────────────────
   build-windows:
