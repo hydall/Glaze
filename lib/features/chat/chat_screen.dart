@@ -1676,9 +1676,12 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
             _showScrollToBottom &&
             !widget.search.showSearch &&
             !isEditingMessage;
-        // JS arms this once the reader scrolls up away from the first message.
+        // JS arms this once the reader scrolls up away from the first message;
+        // the header gate takes it away again on a downward scroll, matching
+        // the header's own hide-on-scroll.
         final showScrollTopBtn =
             _showScrollToTop &&
+            !widget.isHeaderHidden &&
             !widget.search.showSearch &&
             !isEditingMessage;
 
@@ -2170,19 +2173,8 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                 ),
               ),
             ],
-            // The two jump buttons share the bottom-right corner and stack
-            // when both are on screen. Mirror Vue ChatInput
-            // (`v-if="!isSearchMode"`): both are suppressed while searching.
-            Positioned(
-              right: 16,
-              bottom: messageListBottom + 16 + 44 + 12,
-              child: _ChatScrollButton(
-                visible: showScrollTopBtn,
-                icon: Icons.keyboard_arrow_up_rounded,
-                onTap: _scrollToTop,
-                slideFromBelow: false,
-              ),
-            ),
+            // The scroll-to-bottom button. Mirror Vue ChatInput
+            // (`v-if="!isSearchMode"`): it is suppressed while searching.
             Positioned(
               right: 16,
               bottom: messageListBottom + 16,
@@ -2287,6 +2279,26 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
               right: 12,
               top: contextCardBottom + 112,
               child: PostGenStatusCard(sessionId: widget.state.session?.id),
+            ),
+            // Scroll-to-top: centred just under the header. It is gated on the
+            // header's own hide-on-scroll (`!widget.isHeaderHidden`), so a
+            // downward scroll takes it away with the header and an upward one
+            // brings it back. Rendered after the status cards so it stays above
+            // them; the centre of those cards is dead space, so it covers no
+            // control. Suppressed while searching, like the bottom button.
+            Positioned(
+              left: 0,
+              right: 0,
+              top: messageListTop + kContextCardHeaderGap,
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: _ChatScrollButton(
+                  visible: showScrollTopBtn,
+                  icon: Icons.keyboard_arrow_up_rounded,
+                  onTap: _scrollToTop,
+                  slideFromBelow: false,
+                ),
+              ),
             ),
             // Bottom panel: drawer + input bar
             Positioned.fill(
