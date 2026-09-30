@@ -58,6 +58,7 @@ class SyncEngine {
   final SyncStudioPresetStore? _studioPresetStore;
   final SyncChatSummaryStore? _chatSummaryStore;
   final SyncCharacterFolderStore? _characterFolderStore;
+  final SyncFolderStore? _folderStore;
   final SyncMemoryGraphStore? _memoryGraphStore;
   final SyncCharacterKnowledgeStore? _characterKnowledgeStore;
   final SyncReconciliationStateStore? _reconciliationStateStore;
@@ -94,6 +95,7 @@ class SyncEngine {
     this._studioPresetStore,
     this._chatSummaryStore,
     this._characterFolderStore,
+    this._folderStore,
     this._memoryGraphStore,
     this._characterKnowledgeStore,
     this._sessionDeletionStore,
@@ -984,6 +986,9 @@ class SyncEngine {
         case 'character_folders':
           if (_characterFolderStore == null) return null;
           return _characterFolderStore.getAll();
+        case 'folders':
+          if (_folderStore == null) return null;
+          return await _folderStore.getAll();
         case 'memory_graph':
           if (_memoryGraphStore == null) return null;
           return _memoryGraphStore.getBySessionId(id);
@@ -1081,6 +1086,11 @@ class SyncEngine {
         case 'character_folders':
           if (_characterFolderStore != null) {
             await _characterFolderStore.applyAll(data);
+          }
+          break;
+        case 'folders':
+          if (_folderStore != null) {
+            await _folderStore.applyAll(data);
           }
           break;
         case 'memory_graph':

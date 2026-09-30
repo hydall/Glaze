@@ -5,8 +5,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/folder.dart';
 import '../models/lorebook.dart';
 import 'db_provider.dart';
+import 'folder_provider.dart';
 import 'shared_prefs_provider.dart';
 
 final lorebooksProvider =
@@ -179,6 +181,10 @@ class LorebooksNotifier extends AsyncNotifier<List<Lorebook>> {
     final repo = ref.read(lorebookRepoProvider);
     await repo.delete(id);
     await ref.read(embeddingRepoProvider).deleteBySourceId(id);
+    // Drop folder membership so folders don't keep a dangling member.
+    await ref
+        .read(folderRepoProvider)
+        .deleteMembersForMember(FolderDomain.lorebook, id);
     // Note: SyncDeletionTracker is intentionally NOT called for lorebooks.
     // Lorebooks are a singleton type: the entire collection is diffed by hash
     // on push. A per-ID tombstone with key 'lorebooks:<id>' would never match

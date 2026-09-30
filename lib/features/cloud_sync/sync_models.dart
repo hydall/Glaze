@@ -238,6 +238,8 @@ String cloudPath(String type, String id) {
       return '$cloudBase/chat_summaries/$id.json';
     case 'character_folders':
       return '$cloudBase/character_folders.json';
+    case 'folders':
+      return '$cloudBase/folders.json';
     case 'memory_graph':
       return '$cloudBase/memory_graphs/$id.json';
     case 'character_knowledge':

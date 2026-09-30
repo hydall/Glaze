@@ -11,10 +11,12 @@ import 'package:go_router/go_router.dart';
 import 'package:easy_localization/easy_localization.dart';
 
 import '../../shared/shell/desktop/sidebar_sheet_provider.dart';
+import '../../core/models/folder.dart';
 import '../../core/models/preset.dart';
 import '../../core/models/studio_regex.dart';
 import '../../core/services/file_export_service.dart';
 import '../../core/state/active_selection_provider.dart';
+import '../../core/state/folder_provider.dart';
 import '../../core/state/global_regex_provider.dart';
 import '../../core/state/studio_feature_provider.dart';
 import '../../core/state/studio_regex_provider.dart';
@@ -22,6 +24,7 @@ import '../../core/utils/id_generator.dart';
 import '../presets/preset_list_provider.dart';
 import '../studio/studio_injection_points.dart';
 import '../../shared/theme/app_colors.dart';
+import '../../shared/widgets/folder_section.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_toast.dart';
@@ -56,6 +59,9 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
   bool _isStudioScript = false;
   Set<String> _activeStudioStages = const {};
   Timer? _saveTimer;
+
+  /// Folder currently browsed inside the Global scripts group, or null.
+  String? _globalFolderId;
 
   @override
   void deactivate() {
@@ -117,6 +123,20 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     } else {
       Navigator.of(context).maybePop();
     }
+  }
+
+  /// Header / gesture back: leaves the editor, then an open Global folder, and
+  /// only then closes the sheet.
+  void _handleBack() {
+    if (_view == 'edit') {
+      _goBack();
+      return;
+    }
+    if (_globalFolderId != null) {
+      setState(() => _globalFolderId = null);
+      return;
+    }
+    _goBackFromList();
   }
 
   String? get _effectivePresetId =>
@@ -215,6 +235,9 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
           .updatePreset(preset.copyWith(regexes: updatedRegexes));
     } else {
       await ref.read(globalRegexProvider.notifier).removeRegex(script.id);
+      await ref
+          .read(folderRepoProvider)
+          .deleteMembersForMember(FolderDomain.regex, script.id);
     }
   }
 
@@ -271,6 +294,19 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
       context,
       title: script.name,
       items: [
+        if (!isPreset && !isStudio)
+          BottomSheetItem(
+            icon: Icons.create_new_folder_outlined,
+            label: 'action_add_to_folder'.tr(),
+            onTap: () {
+              Navigator.of(context, rootNavigator: true).pop();
+              showAddToFolderSheet(
+                context,
+                domain: FolderDomain.regex,
+                targets: [script.id],
+              );
+            },
+          ),
         BottomSheetItem(
           icon: Icons.download_outlined,
           label: 'action_export'.tr(),
@@ -330,6 +366,14 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
             _showDestinationMenu(context, scope: _RegexScope.global);
+          },
+        ),
+        BottomSheetItem(
+          icon: Icons.create_new_folder_rounded,
+          label: 'folder_new'.tr(),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            showCreateFolderDialog(context, ref, FolderDomain.regex);
           },
         ),
       ],
@@ -591,17 +635,27 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     final studioRegexes = studioAsync.value ?? <StudioRegex>[];
 
     final isEdit = _view == 'edit';
+    final regexFolders = ref.watch(foldersProvider(FolderDomain.regex)).value;
+    final globalFolderName = regexFolders
+        ?.where((f) => f.id == _globalFolderId)
+        .firstOrNull
+        ?.name;
 
     return SheetView(
       startExpanded: widget.startExpanded,
       showRouteBackground: false,
-      title: isEdit ? 'regex_editor'.tr() : 'menu_regex'.tr(),
+      title: isEdit
+          ? 'regex_editor'.tr()
+          : _globalFolderId != null
+          ? (globalFolderName ?? 'menu_regex'.tr())
+          : 'menu_regex'.tr(),
       showBack: isEdit || widget.startExpanded,
       // A back gesture while the editor is open must return to the list, not
-      // tear the whole sheet down. Hand it to [_goBack] until the list is
-      // showing, exactly like the header's back button.
-      canPop: !isEdit,
-      onBack: isEdit ? _goBack : _goBackFromList,
+      // tear the whole sheet down — and inside a Global folder it steps back to
+      // the folders. Hand both to [_handleBack], exactly like the header's back
+      // button.
+      canPop: !isEdit && _globalFolderId == null,
+      onBack: _handleBack,
       body: AnimatedSwitcher(
         duration: const Duration(milliseconds: 280),
         transitionBuilder: _buildTransition,
@@ -643,6 +697,23 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     required List<PresetRegex> globalRegexes,
     required List<StudioRegex> studioRegexes,
   }) {
+    final memberships =
+        ref.watch(folderMembershipsProvider(FolderDomain.regex)).value ??
+        FolderMemberships.empty;
+    final folders =
+        ref.watch(foldersProvider(FolderDomain.regex)).value ?? const [];
+    final globalFolderId = _globalFolderId;
+
+    final List<PresetRegex> visibleGlobal;
+    if (globalFolderId != null) {
+      final ids = memberships.membersIn(globalFolderId);
+      visibleGlobal = globalRegexes.where((r) => ids.contains(r.id)).toList();
+    } else {
+      visibleGlobal = globalRegexes
+          .where((r) => memberships.foldersOf(r.id).isEmpty)
+          .toList();
+    }
+
     return Builder(
       key: const ValueKey('regex-list'),
       builder: (innerContext) => ListView(
@@ -661,10 +732,20 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
           MenuGroup(
             header: 'regex_global_scripts'.tr(),
             items: [
-              if (globalRegexes.isEmpty)
+              if (globalFolderId == null && folders.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+                  child: FolderSection(
+                    domain: FolderDomain.regex,
+                    icon: Icons.code_rounded,
+                    onOpenFolder: (id) =>
+                        setState(() => _globalFolderId = id),
+                  ),
+                ),
+              if (visibleGlobal.isEmpty)
                 const _EmptyState()
               else
-                ...globalRegexes.map(
+                ...visibleGlobal.map(
                   (r) => MenuScriptItem(
                     name: r.name,
                     subtitle: r.regex.isNotEmpty ? r.regex : null,

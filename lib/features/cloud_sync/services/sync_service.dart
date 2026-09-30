@@ -39,6 +39,7 @@ class SyncService {
   final SyncStudioPresetStore? _studioPresetStore;
   final SyncChatSummaryStore? _chatSummaryStore;
   final SyncCharacterFolderStore? _characterFolderStore;
+  final SyncFolderStore? _folderStore;
   final SyncMemoryGraphStore? _memoryGraphStore;
   final SyncCharacterKnowledgeStore? _characterKnowledgeStore;
   final SyncSessionLorebookOverlayStore? _sessionLorebookOverlayStore;
@@ -114,6 +115,7 @@ class SyncService {
     this._studioPresetStore,
     this._chatSummaryStore,
     this._characterFolderStore,
+    this._folderStore,
     this._memoryGraphStore,
     this._characterKnowledgeStore,
     this._sessionLorebookOverlayStore,
@@ -154,6 +156,7 @@ class SyncService {
     studioPresetStore: _studioPresetStore,
     chatSummaryStore: _chatSummaryStore,
     characterFolderStore: _characterFolderStore,
+    folderStore: _folderStore,
     memoryGraphStore: _memoryGraphStore,
     characterKnowledgeStore: _characterKnowledgeStore,
     sessionLorebookOverlayStore: _sessionLorebookOverlayStore,
@@ -183,6 +186,7 @@ class SyncService {
     _studioPresetStore,
     _chatSummaryStore,
     _characterFolderStore,
+    _folderStore,
     _memoryGraphStore,
     _characterKnowledgeStore,
     _sessionDeletionStore,

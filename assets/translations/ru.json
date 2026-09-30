@@ -1630,6 +1630,8 @@
   "folder_delete_title": "Удалить папку",
   "folder_delete_confirm": "Удалить эту папку? Персонажи из неё не будут удалены.",
   "folder_empty": "В этой папке нет персонажей",
+  "folder_delete_confirm_items": "Удалить эту папку? Её содержимое не будет удалено.",
+  "folder_empty_items": "В этой папке пусто",
   "folder_favorites": "Избранное",
   "folder_favorites_empty": "Пока нет избранных персонажей",
   "action_add_to_folder": "Добавить в папку",

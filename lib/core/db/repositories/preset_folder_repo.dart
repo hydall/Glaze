@@ -129,6 +129,26 @@ class PresetFolderRepo {
         .go();
   }
 
+  // ── Whole-collection access (cloud sync / backup) ──────────────────────
+
+  Future<List<PresetFolderMemberRow>> getAllMembers() =>
+      _db.select(_db.presetFolderMembers).get();
+
+  Future<void> upsertFolderRaw(PresetFolderRow row) async {
+    await _db.into(_db.presetFolders).insertOnConflictUpdate(row);
+  }
+
+  Future<void> upsertMemberRaw(PresetFolderMemberRow row) async {
+    await _db.into(_db.presetFolderMembers).insertOnConflictUpdate(row);
+  }
+
+  Future<void> deleteAllFoldersAndMembers() async {
+    await _db.transaction(() async {
+      await _db.delete(_db.presetFolderMembers).go();
+      await _db.delete(_db.presetFolders).go();
+    });
+  }
+
   PresetFolder _toModel(PresetFolderRow r) => PresetFolder(
     id: r.folderId,
     name: r.name,

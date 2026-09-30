@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 
 part 'tables/characters_and_chat.dart';
+part 'tables/folders.dart';
 part 'tables/memory.dart';
 part 'tables/ledger.dart';
 part 'tables/canon_and_rewrite.dart';

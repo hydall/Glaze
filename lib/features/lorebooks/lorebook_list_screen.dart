@@ -8,14 +8,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../shared/shell/desktop/sidebar_sheet_provider.dart';
 import '../../core/import/st_lorebook_importer.dart';
+import '../../core/models/folder.dart';
 import '../../core/models/lorebook.dart';
 import '../../core/services/file_export_service.dart';
 import '../../core/services/st_lorebook_exporter.dart';
 import '../../core/utils/id_generator.dart';
 import '../../core/utils/time_helpers.dart';
+import '../../core/state/folder_provider.dart';
 import '../../core/state/lorebook_embedding_provider.dart';
 import '../../core/state/lorebook_provider.dart';
 import '../../shared/theme/app_colors.dart';
+import '../../shared/widgets/folder_section.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
@@ -29,7 +32,7 @@ import 'lorebook_connections_sheet.dart';
 import 'lorebook_editor_screen.dart';
 import 'widgets/lorebook_option_sheet.dart';
 
-class LorebookListScreen extends ConsumerWidget {
+class LorebookListScreen extends ConsumerStatefulWidget {
   /// True when presented as a fullscreen route (`/tools/lorebooks`); false when
   /// hosted inside a modal bottom sheet (e.g. from the chat MagicDrawer). Drives
   /// both the [SheetView] expansion and the back behaviour.
@@ -38,18 +41,63 @@ class LorebookListScreen extends ConsumerWidget {
   const LorebookListScreen({super.key, this.startExpanded = false});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<LorebookListScreen> createState() => _LorebookListScreenState();
+}
+
+class _LorebookListScreenState extends ConsumerState<LorebookListScreen> {
+  /// Folder currently being browsed, or null at the top level.
+  String? _currentFolderId;
+
+  void _openFolder(String id) => setState(() => _currentFolderId = id);
+
+  void _leaveFolder() => setState(() => _currentFolderId = null);
+
+  void _handleBack() {
+    if (_currentFolderId != null) {
+      _leaveFolder();
+      return;
+    }
+    if (widget.startExpanded) {
+      closeExpandedToolScreen(context, ref);
+    } else {
+      Navigator.of(context).maybePop();
+    }
+  }
+
+  String? _folderName(String id) {
+    final folders = ref.watch(foldersProvider(FolderDomain.lorebook)).value;
+    return folders?.where((f) => f.id == id).firstOrNull?.name;
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final lorebooksAsync = ref.watch(lorebooksProvider);
+    final folderId = _currentFolderId;
 
     return SheetView(
-      startExpanded: startExpanded,
+      startExpanded: widget.startExpanded,
       showRouteBackground: false,
       shellBranchIndex: 2,
-      titleWidget: Row(
-        children: [
-          Flexible(
-            child: Text(
-              'menu_lorebooks'.tr(),
+      titleWidget: folderId == null
+          ? Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    'menu_lorebooks'.tr(),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: context.cs.onSurface,
+                    ),
+                  ),
+                ),
+                const HelpTip(term: 'lorebook'),
+              ],
+            )
+          : Text(
+              _folderName(folderId) ?? 'menu_lorebooks'.tr(),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
@@ -58,25 +106,16 @@ class LorebookListScreen extends ConsumerWidget {
                 color: context.cs.onSurface,
               ),
             ),
-          ),
-          const HelpTip(term: 'lorebook'),
-        ],
-      ),
       showBack: true,
-      onBack: () {
-        if (startExpanded) {
-          closeExpandedToolScreen(context, ref);
-        } else {
-          Navigator.of(context).maybePop();
-        }
-      },
+      canPop: folderId == null,
+      onBack: _handleBack,
       floatingActionButton: FloatingActionButton(
         // Disable the Hero so this FAB doesn't collide with the editor's FAB
         // (default tags clash during the push transition → frozen route).
         heroTag: null,
         backgroundColor: context.cs.primary,
         child: const Icon(Icons.add, color: Colors.black),
-        onPressed: () => _openLorebookMenu(context, ref),
+        onPressed: () => _openLorebookMenu(context),
       ),
       actions: [
         // Embedding settings are only reachable while the active API preset
@@ -93,45 +132,79 @@ class LorebookListScreen extends ConsumerWidget {
           ),
       ],
       body: lorebooksAsync.when(
-        data: (lorebooks) => Builder(
-          builder: (context) => ListView(
-            padding: const EdgeInsets.fromLTRB(0, 0, 0, 16).add(
-              EdgeInsets.only(
-                top: MediaQuery.paddingOf(context).top + 16,
-                bottom: MediaQuery.paddingOf(context).bottom,
-              ),
-            ),
-            children: [
-              const _GlobalSettingsSection(),
-              if (lorebooks.isEmpty)
-                _EmptyState(
-                  onCreate: () => _createLorebook(context, ref),
-                  onImport: () => _importSTLorebook(context, ref),
-                )
-              else ...[
-                for (final lb in lorebooks)
-                  _LorebookCard(
-                    lorebook: lb,
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => LorebookEditorScreen(lorebookId: lb.id),
-                      ),
-                    ),
-                    onMore: () => _lorebookMenu(context, ref, lb),
-                    onConnections: () =>
-                        showLorebookConnections(context, lb.id),
-                  ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-                  child: _AddButton(
-                    label: 'btn_add'.tr(),
-                    onTap: () => _openLorebookMenu(context, ref),
-                  ),
+        data: (all) {
+          final memberships =
+              ref.watch(folderMembershipsProvider(FolderDomain.lorebook)).value ??
+              FolderMemberships.empty;
+          final hasFolders =
+              (ref.watch(foldersProvider(FolderDomain.lorebook)).value ??
+                      const [])
+                  .isNotEmpty;
+
+          final List<Lorebook> lorebooks;
+          if (folderId != null) {
+            final ids = memberships.membersIn(folderId);
+            lorebooks = all.where((lb) => ids.contains(lb.id)).toList();
+          } else {
+            lorebooks = all
+                .where((lb) => memberships.foldersOf(lb.id).isEmpty)
+                .toList();
+          }
+
+          return Builder(
+            builder: (context) => ListView(
+              padding: const EdgeInsets.fromLTRB(0, 0, 0, 16).add(
+                EdgeInsets.only(
+                  top: MediaQuery.paddingOf(context).top + 16,
+                  bottom: MediaQuery.paddingOf(context).bottom,
                 ),
+              ),
+              children: [
+                if (folderId == null) ...[
+                  const _GlobalSettingsSection(),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: FolderSection(
+                      domain: FolderDomain.lorebook,
+                      onOpenFolder: _openFolder,
+                      icon: Icons.menu_book_outlined,
+                    ),
+                  ),
+                ],
+                if (lorebooks.isEmpty && !(folderId == null && hasFolders))
+                  _EmptyState(
+                    onCreate: () => _createLorebook(context),
+                    onImport: () => _importSTLorebook(context),
+                  )
+                else ...[
+                  if (lorebooks.isEmpty && folderId != null)
+                    const FolderEmptyState()
+                  else
+                    for (final lb in lorebooks)
+                      _LorebookCard(
+                        lorebook: lb,
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) =>
+                                LorebookEditorScreen(lorebookId: lb.id),
+                          ),
+                        ),
+                        onMore: () => _lorebookMenu(context, lb),
+                        onConnections: () =>
+                            showLorebookConnections(context, lb.id),
+                      ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                    child: _AddButton(
+                      label: 'btn_add'.tr(),
+                      onTap: () => _openLorebookMenu(context),
+                    ),
+                  ),
+                ],
               ],
-            ],
-          ),
-        ),
+            ),
+          );
+        },
         loading: () => const Center(child: GlazeSpinner()),
         error: (e, _) => Center(child: Text('${'title_error'.tr()}: $e')),
       ),
@@ -140,7 +213,7 @@ class LorebookListScreen extends ConsumerWidget {
 
   // ── Create / import / export / delete ────────────────────────────────────
 
-  void _openLorebookMenu(BuildContext context, WidgetRef ref) {
+  void _openLorebookMenu(BuildContext context) {
     GlazeBottomSheet.show<void>(
       context,
       title: 'menu_lorebooks'.tr(),
@@ -150,7 +223,7 @@ class LorebookListScreen extends ConsumerWidget {
           icon: Icons.add,
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
-            _createLorebook(context, ref);
+            _createLorebook(context);
           },
         ),
         BottomSheetItem(
@@ -158,14 +231,22 @@ class LorebookListScreen extends ConsumerWidget {
           icon: Icons.upload_file,
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
-            _importSTLorebook(context, ref);
+            _importSTLorebook(context);
+          },
+        ),
+        BottomSheetItem(
+          icon: Icons.create_new_folder_rounded,
+          label: 'folder_new'.tr(),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            showCreateFolderDialog(context, ref, FolderDomain.lorebook);
           },
         ),
       ],
     );
   }
 
-  void _createLorebook(BuildContext context, WidgetRef ref) {
+  void _createLorebook(BuildContext context) {
     GlazeBottomSheet.show<void>(
       context,
       title: 'new_lorebook'.tr(),
@@ -194,7 +275,7 @@ class LorebookListScreen extends ConsumerWidget {
     );
   }
 
-  Future<void> _importSTLorebook(BuildContext context, WidgetRef ref) async {
+  Future<void> _importSTLorebook(BuildContext context) async {
     final result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['json'],
@@ -302,11 +383,23 @@ class LorebookListScreen extends ConsumerWidget {
     GlazeToast.show(context, summary.toString());
   }
 
-  void _lorebookMenu(BuildContext context, WidgetRef ref, Lorebook lb) {
+  void _lorebookMenu(BuildContext context, Lorebook lb) {
     GlazeBottomSheet.show<void>(
       context,
       title: lb.name,
       items: [
+        BottomSheetItem(
+          label: 'action_add_to_folder'.tr(),
+          icon: Icons.create_new_folder_outlined,
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            showAddToFolderSheet(
+              context,
+              domain: FolderDomain.lorebook,
+              targets: [lb.id],
+            );
+          },
+        ),
         BottomSheetItem(
           label: 'action_export'.tr(),
           icon: Icons.download_outlined,
@@ -321,7 +414,7 @@ class LorebookListScreen extends ConsumerWidget {
           isDestructive: true,
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
-            _deleteLorebook(context, ref, lb);
+            _deleteLorebook(context, lb);
           },
         ),
       ],
@@ -352,7 +445,7 @@ class LorebookListScreen extends ConsumerWidget {
     }
   }
 
-  void _deleteLorebook(BuildContext context, WidgetRef ref, Lorebook lb) {
+  void _deleteLorebook(BuildContext context, Lorebook lb) {
     GlazeBottomSheet.show<void>(
       context,
       title: 'confirm_delete_lorebook'.tr(),
@@ -367,6 +460,9 @@ class LorebookListScreen extends ConsumerWidget {
           centered: true,
           onTap: () {
             ref.read(lorebooksProvider.notifier).deleteLorebook(lb.id);
+            ref
+                .read(folderRepoProvider)
+                .deleteMembersForMember(FolderDomain.lorebook, lb.id);
             Navigator.of(context, rootNavigator: true).pop();
           },
         ),

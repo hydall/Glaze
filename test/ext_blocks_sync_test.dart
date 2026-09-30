@@ -544,6 +544,7 @@ class SyncWorld {
     null,
     null,
     null,
+    null,
     sessionDeletions,
     characterDeletions,
     (_) async {},
