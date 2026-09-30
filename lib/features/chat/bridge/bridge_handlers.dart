@@ -54,6 +54,7 @@ const Map<String, HandlerSpec> bridgeHandlers = {
   'onLoadMore': HandlerSpec(HandlerKind.noArgs),
   'onHeaderScroll': HandlerSpec(HandlerKind.boolArg),
   'onScrollToBottomVisibility': HandlerSpec(HandlerKind.boolArg),
+  'onScrollToTopVisibility': HandlerSpec(HandlerKind.boolArg),
   'onMessageScriptBlocked': HandlerSpec(HandlerKind.noArgs),
   'onLinkClick': HandlerSpec(HandlerKind.stringArg),
   'onImageClick': HandlerSpec(HandlerKind.stringArg),

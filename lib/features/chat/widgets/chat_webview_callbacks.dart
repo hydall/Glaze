@@ -67,6 +67,10 @@ class ChatWebViewCallbacks {
     scrollActions.onScrollToBottomVisibility?.call(visible);
   }
 
+  void onScrollToTopVisibility(bool visible) {
+    scrollActions.onScrollToTopVisibility?.call(visible);
+  }
+
   void onRegenerate(String id, String mode) {
     messageActions.onRegenerate?.call(id, mode);
   }

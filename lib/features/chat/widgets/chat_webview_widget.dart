@@ -769,6 +769,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     bridge.onChangeGreeting = callbacks.onChangeGreeting;
     bridge.onHeaderScroll = callbacks.onHeaderScroll;
     bridge.onScrollToBottomVisibility = callbacks.onScrollToBottomVisibility;
+    bridge.onScrollToTopVisibility = callbacks.onScrollToTopVisibility;
     bridge.onRegenerate = callbacks.onRegenerate;
     bridge.onRerunCleaner = callbacks.onRerunCleaner;
     bridge.onSelectionAction = callbacks.onSelectionAction;
@@ -1444,6 +1445,12 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     final b = _bridge;
     if (b == null) return Future.value();
     return b.scrollToBottom(smooth: smooth);
+  }
+
+  Future<void> scrollToTop() {
+    final b = _bridge;
+    if (b == null) return Future.value();
+    return b.scrollToTop();
   }
 
   /// Arm a one-shot "stick to bottom on the next append" so sending a message

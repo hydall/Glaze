@@ -17,6 +17,15 @@ import { parseImageResultElement, parseImagePendingPayload } from '../formatter/
  * Landing the caret exactly on the input bar's edge reads as though it is
  * still half under it. */
 const CARET_REVEAL_GUTTER_PX = 12;
+/* How far the list must be from the first message before the scroll-to-top
+ * button is worth showing. Mirrors the 100px the scroll-to-bottom button uses
+ * (see emitScrollToBottomVisibility). */
+const SCROLL_TO_TOP_THRESHOLD_PX = 100;
+/* How recently the reader must have touched the list for an upward scroll to
+ * count as theirs. Spacer rewrites and late image heights move scrollTop on
+ * their own; without this the correction after a chat's opening jump read as
+ * the reader scrolling up and put the button on screen unprompted. */
+const USER_SCROLL_INPUT_WINDOW_MS = 1000;
 import { ICON } from '../renderer/icon_library.js';
 import { applyTypingPhase } from '../renderer/typing_phase.js';
 import { retryFailedLocalImages } from '../renderer/local_image_retry.js';
@@ -62,6 +71,15 @@ export class Bridge {
     // so showHeader() can reset them — see showHeader() for why that matters.
     this._headerLastTop = 0;
     this._headerRebaselineUntil = 0;
+    // Scroll-to-top button. `_scrolledUpFromTop` latches once the reader
+    // scrolls up away from the first message; a downward scroll does not take
+    // the button away, only returning to the top does. `_lastScrollToTopShown`
+    // caches the emitted state so a chat open can realign it (see showHeader()).
+    this._scrolledUpFromTop = false;
+    this._lastScrollToTopShown = null;
+    // Last wheel / touch / key event on the list, used to tell a reader's
+    // upward scroll from a layout correction (see USER_SCROLL_INPUT_WINDOW_MS).
+    this._lastUserScrollInputAt = 0;
     this._genTimer = new GenTimer(renderer);
     this._imgGenTimer = new ImgGenTimer();
     this._updateBatcher = new MessageUpdateBatcher();
@@ -382,6 +400,23 @@ export class Bridge {
     // the window setMessages() already uses to suppress load-more.
     this._headerRebaselineUntil = Date.now() + 1000;
     this._sendToFlutter('onHeaderScroll', [false]);
+    // Same carried-over-state problem for the scroll-to-top button: the latch
+    // belongs to the chat being left, so clear it for the fresh one. The
+    // reconciler below is flushed too, so Flutter does not keep a button the
+    // new chat has nothing to scroll. The input timestamp goes with it, so a
+    // gesture from the previous chat cannot arm the button here.
+    this._scrolledUpFromTop = false;
+    this._lastUserScrollInputAt = 0;
+    this._emitScrollToTopVisibility(false);
+  }
+
+  // Emits the scroll-to-top button state, deduped. An instance method (not a
+  // closure in _setupScrollListener) so showHeader() and scrollToTop() can
+  // realign the cached value instead of racing a stale one.
+  _emitScrollToTopVisibility(show) {
+    if (this._lastScrollToTopShown === show) return;
+    this._lastScrollToTopShown = show;
+    this._sendToFlutter('onScrollToTopVisibility', [show]);
   }
 
   _setupScrollListener() {
@@ -394,6 +429,28 @@ export class Bridge {
     // and showHeader() can re-baseline the tracker when a chat opens.
     let ticking = false;
     const container = this.virtualList.container;
+
+    // Reconcile the scroll-to-top button from the current offset. The latch
+    // (`_scrolledUpFromTop`) only turns on from an upward move; this clears it
+    // again at the top and emits, so every path out of updateHeader — including
+    // the early returns — leaves the button consistent with where the list is.
+    const syncScrollToTop = () => {
+      if (container.scrollTop <= SCROLL_TO_TOP_THRESHOLD_PX) {
+        this._scrolledUpFromTop = false;
+      }
+      this._emitScrollToTopVisibility(
+        this._scrolledUpFromTop &&
+          container.scrollTop > SCROLL_TO_TOP_THRESHOLD_PX,
+      );
+    };
+
+    // An upward move only arms the button when the reader made it: one of
+    // these input events has to be behind it. `_headerLastTop` is the offset
+    // the move is compared against, so read it before it is advanced.
+    const isUserScrollUp = (st) =>
+      st > SCROLL_TO_TOP_THRESHOLD_PX &&
+      st < this._headerLastTop - 3 &&
+      Date.now() - this._lastUserScrollInputAt < USER_SCROLL_INPUT_WINDOW_MS;
 
     const emitScrollToBottomVisibility = () => {
       const distanceFromBottom =
@@ -418,6 +475,7 @@ export class Bridge {
       // jump is never mistaken for the user scrolling down.
       if (Date.now() < this._headerRebaselineUntil) {
         this._headerLastTop = st <= 0 ? 0 : st;
+        syncScrollToTop();
         return;
       }
       // Scrolls we caused ourselves are not user intent: the streaming
@@ -436,17 +494,25 @@ export class Bridge {
       // user's — and it is how they detach from the follow in the first place
       // (the flag stays set for ~80ms after the last pin, see smartScroll()).
       if (this._isProgrammaticScroll()) {
-        if (st < this._headerLastTop - 3 && this._headerHidden) {
-          this._headerHidden = false;
-          this._sendToFlutter('onHeaderScroll', [false]);
+        if (st < this._headerLastTop - 3) {
+          if (this._headerHidden) {
+            this._headerHidden = false;
+            this._sendToFlutter('onHeaderScroll', [false]);
+          }
+          // The auto-follow only ever pins downward, so an upward move inside
+          // its window is the reader's — and it is how they detach from the
+          // follow in the first place.
+          if (isUserScrollUp(st)) this._scrolledUpFromTop = true;
         }
         this._headerLastTop = st <= 0 ? 0 : st;
+        syncScrollToTop();
         return;
       }
       // A shrink can clamp scrollTop without leaving room to scroll back up.
       this._ensureHeaderReachable();
       if (st < 0 || st + container.clientHeight > container.scrollHeight) {
         this._headerLastTop = st <= 0 ? 0 : st;
+        syncScrollToTop();
         return;
       }
       if (st > this._headerLastTop + 3 && st > 50) {
@@ -459,7 +525,11 @@ export class Bridge {
           this._headerHidden = false;
           this._sendToFlutter('onHeaderScroll', [false]);
         }
+        // An upward move away from the top is what arms the scroll-to-top
+        // button; a downward one never takes it away, only reaching the top.
+        if (isUserScrollUp(st)) this._scrolledUpFromTop = true;
       }
+      syncScrollToTop();
       this._headerLastTop = st <= 0 ? 0 : st;
     };
 
@@ -483,7 +553,20 @@ export class Bridge {
       emitScrollToBottomVisibility();
     }, { passive: true });
 
+    // A reader's scroll always has one of these in front of it (the Windows
+    // touchpad is replayed as a synthetic wheel — see TrackpadScroll), so the
+    // timestamp is the tell between a real upward scroll and a layout
+    // correction. Passive: none of them preventDefault.
+    for (const type of ['wheel', 'touchstart', 'touchmove', 'keydown']) {
+      container.addEventListener(
+        type,
+        () => { this._lastUserScrollInputAt = Date.now(); },
+        { passive: true },
+      );
+    }
+
     requestAnimationFrame(emitScrollToBottomVisibility);
+    requestAnimationFrame(() => this._emitScrollToTopVisibility(false));
   }
 
   /* ---------- Viewport shrink (soft keyboard) ---------- */
@@ -1105,6 +1188,15 @@ export class Bridge {
       this._sendToFlutter('onScrollToBottomVisibility', [false]);
     });
     return settled;
+  }
+
+  // Jump back to the first message. The button's latch is cleared before the
+  // jump so the (programmatic) scroll does not re-arm it; the header tracker
+  // re-shows a hidden header on the upward move the jump produces.
+  scrollToTop() {
+    this._scrolledUpFromTop = false;
+    this._emitScrollToTopVisibility(false);
+    this.virtualList.scrollToTop();
   }
 
   // Arm a one-shot "stick to bottom on the next append" so that sending a
