@@ -23,7 +23,7 @@ class FlutterBackupImporter extends BackupHelpers {
   /// Table entries larger than this are decompressed to a temp file and read
   /// back from disk instead of being materialised in memory.
   static const int _spillToDiskBytes = 8 * 1024 * 1024;
-  static const int _maxSchemaVersion = 13;
+  static const int _maxSchemaVersion = 14;
 
   @override
   final AppDatabase db;
@@ -135,6 +135,12 @@ class FlutterBackupImporter extends BackupHelpers {
       'character_revision_rows',
       'chat_sessions',
       'lorebooks',
+      'folders',
+      'folder_members',
+      'preset_folders',
+      'preset_folder_members',
+      'character_folders',
+      'character_folder_members',
       'lorebook_use_manifests',
       'lorebook_use_manifest_entries',
       'lorebook_use_acceptance_records',

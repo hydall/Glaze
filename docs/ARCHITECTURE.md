@@ -1226,11 +1226,12 @@ Do not maintain a hand-copied table-by-table inventory here.
 `migrations/upgrade_v2_v50.dart`, `migrations/upgrade_v51_v100.dart`,
 `migrations/upgrade_v101_v131.dart`, and `studio_preset_seed.dart`. The versioned
 files preserve historical upgrades; current schema declarations live behind the
-`tables.dart` barrel in seven domain parts:
+`tables.dart` barrel in eight domain parts:
 
 | Domain part | Ownership |
 |---|---|
 | `tables/characters_and_chat.dart` | Characters, folders, chats, and personas |
+| `tables/folders.dart` | Generic folders + membership for the non-legacy list domains (lorebooks, personas, image styles, regex) |
 | `tables/studio_and_presets.dart` | Studio activation/presets, prompt presets/folders, and API configs |
 | `tables/lorebooks.dart` | Lorebooks, session evolution overlays, immutable use manifests, and acceptance evidence |
 | `tables/memory.dart` | MemoryBook/catalog/legacy graph state, embeddings, and summaries |

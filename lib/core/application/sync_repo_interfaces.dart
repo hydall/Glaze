@@ -113,6 +113,17 @@ abstract class SyncCharacterFolderStore {
   Future<void> applyAll(Map<String, dynamic> data);
 }
 
+/// Generic folders for the non-legacy list domains (lorebooks, personas, image
+/// styles, regex) plus chat/Studio preset folders, synced as one singleton
+/// payload. Character folders travel in their own [SyncCharacterFolderStore].
+///
+/// Each collection is replaced wholesale on apply — folders are small,
+/// last-write-wins state with no merge semantics worth inventing.
+abstract class SyncFolderStore {
+  Future<Map<String, dynamic>> getAll();
+  Future<void> applyAll(Map<String, dynamic> data);
+}
+
 abstract class SyncMemoryGraphStore {
   Future<List<String>> getAllSessionIds();
   Future<Map<String, dynamic>?> getBySessionId(String sessionId);

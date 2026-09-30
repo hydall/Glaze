@@ -30,7 +30,9 @@ class BackupExporter {
   //  11 — added complete Card Rewriter/session-canon provenance.
   //  12 — added complete Agent Ops reconciliation and recovery provenance.
   //  13 — Collector journals use three-reconciliation batches.
-  static const int schemaVersion = 13;
+  //  14 — added generic folders (lorebooks/personas/image styles/regex) and
+  //         preset folders, alongside the existing character folders.
+  static const int schemaVersion = 14;
 
   /// Rows fetched per page while serializing a table. The whole table is never
   /// materialized at once — `chat_sessions` stores every message of every chat
@@ -65,6 +67,10 @@ class BackupExporter {
     'tracker_snapshots',
     'character_folders',
     'character_folder_members',
+    'folders',
+    'folder_members',
+    'preset_folders',
+    'preset_folder_members',
     'memory_catalog_rows',
     'memory_entity_rows',
     'memory_salience_rows',

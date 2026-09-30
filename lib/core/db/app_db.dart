@@ -30,12 +30,15 @@ part 'migrations/upgrade_v134.dart';
 part 'migrations/upgrade_v135.dart';
 part 'migrations/upgrade_v136.dart';
 part 'migrations/upgrade_v137.dart';
+part 'migrations/upgrade_v138.dart';
 
 @DriftDatabase(
   tables: [
     Characters,
     CharacterFolders,
     CharacterFolderMembers,
+    Folders,
+    FolderMembers,
     ChatSessions,
     Presets,
     PresetFolders,
@@ -97,7 +100,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 137;
+  int get schemaVersion => 138;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -139,6 +142,7 @@ class AppDatabase extends _$AppDatabase {
       await _upgradeV135(m, from);
       await _upgradeV136(m, from);
       await _upgradeV137(m, from);
+      await _upgradeV138(m, from);
     },
   );
 

@@ -1623,6 +1623,8 @@
   "folder_delete_title": "Delete folder",
   "folder_delete_confirm": "Delete this folder? The characters in it won't be deleted.",
   "folder_empty": "No characters in this folder",
+  "folder_delete_confirm_items": "Delete this folder? Its contents won't be deleted.",
+  "folder_empty_items": "Nothing in this folder",
   "folder_favorites": "Favorites",
   "folder_favorites_empty": "No favorite characters yet",
   "action_add_to_folder": "Add to folder",

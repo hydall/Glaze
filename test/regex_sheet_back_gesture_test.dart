@@ -1,9 +1,12 @@
+import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/models/preset.dart';
+import 'package:glaze_flutter/core/state/db_provider.dart';
 import 'package:glaze_flutter/features/presets/preset_list_provider.dart';
 import 'package:glaze_flutter/features/regex/regex_sheet.dart';
 import 'package:glaze_flutter/features/settings/app_settings_provider.dart';
@@ -29,7 +32,16 @@ class _StubSettings extends AppSettingsNotifier {
 }
 
 void main() {
-  setUp(() => SharedPreferences.setMockInitialValues({}));
+  late AppDatabase db;
+
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+    // The sheet reads its folder state from the database; an in-memory one
+    // keeps the test off the real data root (and off its background isolate,
+    // whose pending timer trips the test binding's teardown check).
+    db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+  });
 
   testWidgets('a back gesture in the regex editor returns to the list, then '
       'closes the sheet', (tester) async {
@@ -42,6 +54,7 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          appDbProvider.overrideWithValue(db),
           appSettingsProvider.overrideWith(_StubSettings.new),
           presetListProvider.overrideWith(() => _StubPresetList([preset])),
         ],
@@ -84,5 +97,13 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(FloatingActionButton), findsNothing);
     expect(find.text('Script'), findsNothing);
+
+    // Unmount the scope while the fake clock can still run drift's stream
+    // teardown timers, then let them fire: a timer left pending would both
+    // fail the binding's invariant and hang `db.close()` (which awaits them).
+    await tester.pumpWidget(const SizedBox());
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
   });
 }

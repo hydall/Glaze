@@ -4,9 +4,13 @@ import 'dart:io';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/models/folder.dart';
 import '../../../core/services/file_export_service.dart';
+import '../../../core/state/folder_provider.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/folder_section.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/menu_group.dart';
@@ -20,8 +24,9 @@ import '../services/image_style_io.dart';
 /// The list follows the Triggered Items card language — one card per style,
 /// tap to make it active, three-dot menu for edit / export / delete — and the
 /// header's `+` creates a new style and opens it in the editor. Styles can be
-/// exported to and imported from JSON so they can be shared.
-class StyleLibrarySheet extends StatefulWidget {
+/// exported to and imported from JSON so they can be shared. Styles can also be
+/// filed into folders, which use the shared folder layer and navigation.
+class StyleLibrarySheet extends ConsumerStatefulWidget {
   const StyleLibrarySheet({
     super.key,
     required this.settings,
@@ -32,10 +37,10 @@ class StyleLibrarySheet extends StatefulWidget {
   final ValueChanged<ImageGenSettings> onUpdate;
 
   @override
-  State<StyleLibrarySheet> createState() => _StyleLibrarySheetState();
+  ConsumerState<StyleLibrarySheet> createState() => _StyleLibrarySheetState();
 }
 
-class _StyleLibrarySheetState extends State<StyleLibrarySheet> {
+class _StyleLibrarySheetState extends ConsumerState<StyleLibrarySheet> {
   late ImageGenSettings _settings = widget.settings;
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _valueController = TextEditingController();
@@ -43,6 +48,9 @@ class _StyleLibrarySheetState extends State<StyleLibrarySheet> {
   /// Id of the style open in the editor; empty means the list is showing.
   String _editingId = '';
   bool _isForward = true;
+
+  /// Folder currently being browsed, or null at the top level.
+  String? _currentFolderId;
 
   @override
   void dispose() {
@@ -118,6 +126,9 @@ class _StyleLibrarySheetState extends State<StyleLibrarySheet> {
             : _settings.activeStyleId,
       ),
     );
+    ref
+        .read(folderRepoProvider)
+        .deleteMembersForMember(FolderDomain.imageStyle, style.id);
     if (_editingId == style.id) _closeEditor();
   }
 
@@ -134,6 +145,18 @@ class _StyleLibrarySheetState extends State<StyleLibrarySheet> {
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
             _openEditor(style);
+          },
+        ),
+        BottomSheetItem(
+          icon: Icons.create_new_folder_outlined,
+          label: 'action_add_to_folder'.tr(),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            showAddToFolderSheet(
+              context,
+              domain: FolderDomain.imageStyle,
+              targets: [style.id],
+            );
           },
         ),
         BottomSheetItem(
@@ -224,14 +247,26 @@ class _StyleLibrarySheetState extends State<StyleLibrarySheet> {
   Widget build(BuildContext context) {
     final editing = _editing;
     final isEditing = editing != null;
+    final folderId = _currentFolderId;
+    final inFolder = folderId != null;
+
+    final folders = ref.watch(foldersProvider(FolderDomain.imageStyle)).value;
+    final folderName = folders
+        ?.where((f) => f.id == folderId)
+        .firstOrNull
+        ?.name;
 
     return SheetView(
-      title: isEditing ? editing.name : 'imggen_styles'.tr(),
-      showBack: isEditing,
-      // A back gesture leaves the inline style editor instead of closing the
-      // whole library, matching the header's back button.
-      canPop: !isEditing,
-      onBack: _closeEditor,
+      title: isEditing
+          ? editing.name
+          : inFolder
+          ? (folderName ?? 'imggen_styles'.tr())
+          : 'imggen_styles'.tr(),
+      showBack: isEditing || inFolder,
+      // A back gesture leaves the inline style editor — or the open folder —
+      // instead of closing the whole library, matching the header's back button.
+      canPop: !isEditing && !inFolder,
+      onBack: _handleBack,
       actions: isEditing
           ? const []
           : [
@@ -245,6 +280,16 @@ class _StyleLibrarySheetState extends State<StyleLibrarySheet> {
                 tooltip: 'imggen_styles_export'.tr(),
                 onPressed: _exportAll,
               ),
+              if (!inFolder)
+                SheetViewAction(
+                  icon: const Icon(Icons.create_new_folder_outlined),
+                  tooltip: 'folder_new'.tr(),
+                  onPressed: () => showCreateFolderDialog(
+                    context,
+                    ref,
+                    FolderDomain.imageStyle,
+                  ),
+                ),
               SheetViewAction(
                 icon: const Icon(Icons.add),
                 tooltip: 'imggen_style_add'.tr(),
@@ -263,6 +308,16 @@ class _StyleLibrarySheetState extends State<StyleLibrarySheet> {
     );
   }
 
+  void _handleBack() {
+    if (_editingId.isNotEmpty) {
+      _closeEditor();
+      return;
+    }
+    if (_currentFolderId != null) {
+      setState(() => _currentFolderId = null);
+    }
+  }
+
   Widget _buildTransition(Widget child, Animation<double> animation) {
     final dir = _isForward ? 1.0 : -1.0;
     final isEntering = _isForward
@@ -278,6 +333,21 @@ class _StyleLibrarySheetState extends State<StyleLibrarySheet> {
   }
 
   Widget _buildList(BuildContext context) {
+    final folderId = _currentFolderId;
+    final memberships =
+        ref.watch(folderMembershipsProvider(FolderDomain.imageStyle)).value ??
+        FolderMemberships.empty;
+
+    final List<ImageStyle> styles;
+    if (folderId != null) {
+      final ids = memberships.membersIn(folderId);
+      styles = _settings.styles.where((s) => ids.contains(s.id)).toList();
+    } else {
+      styles = _settings.styles
+          .where((s) => memberships.foldersOf(s.id).isEmpty)
+          .toList();
+    }
+
     return Builder(
       key: const ValueKey('style-list'),
       builder: (context) => ListView(
@@ -288,17 +358,24 @@ class _StyleLibrarySheetState extends State<StyleLibrarySheet> {
           ),
         ),
         children: [
+          if (folderId == null)
+            FolderSection(
+              domain: FolderDomain.imageStyle,
+              icon: Icons.palette_outlined,
+              onOpenFolder: (id) => setState(() => _currentFolderId = id),
+            ),
           _StyleGroup(
             title: 'imggen_style_active'.tr(),
             cards: [
-              _StyleCard(
-                icon: Icons.block_outlined,
-                name: 'imggen_style_none'.tr(),
-                sublabel: 'imggen_style_none_desc'.tr(),
-                active: _settings.activeStyleId.isEmpty,
-                onTap: () => _setActive(''),
-              ),
-              for (final style in _settings.styles)
+              if (folderId == null)
+                _StyleCard(
+                  icon: Icons.block_outlined,
+                  name: 'imggen_style_none'.tr(),
+                  sublabel: 'imggen_style_none_desc'.tr(),
+                  active: _settings.activeStyleId.isEmpty,
+                  onTap: () => _setActive(''),
+                ),
+              for (final style in styles)
                 _StyleCard(
                   icon: Icons.palette_outlined,
                   name: style.name,
@@ -311,12 +388,14 @@ class _StyleLibrarySheetState extends State<StyleLibrarySheet> {
                 ),
             ],
           ),
-          if (_settings.styles.isEmpty)
+          if (styles.isEmpty && (folderId != null || _settings.styles.isEmpty))
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 16),
               child: Center(
                 child: Text(
-                  'imggen_styles_empty'.tr(),
+                  folderId != null
+                      ? 'folder_empty_items'.tr()
+                      : 'imggen_styles_empty'.tr(),
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 13,

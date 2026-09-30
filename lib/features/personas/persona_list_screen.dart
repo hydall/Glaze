@@ -6,12 +6,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:easy_localization/easy_localization.dart';
 
 import '../../shared/shell/desktop/sidebar_sheet_provider.dart';
+import '../../core/models/folder.dart';
 import '../../core/models/persona.dart';
 import '../../core/services/persona_character_converter.dart';
 import '../../core/utils/platform_paths.dart';
 import '../../core/state/active_selection_provider.dart';
 import '../../core/state/db_provider.dart';
+import '../../core/state/folder_provider.dart';
 import '../../core/state/shared_prefs_provider.dart';
+import '../../shared/widgets/folder_section.dart';
 import '../../shared/widgets/glaze_spinner.dart';
 import 'persona_connections_sheet.dart';
 import 'persona_list_provider.dart';
@@ -26,88 +29,175 @@ import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/help_tip.dart';
 import '../../shared/widgets/sheet_view.dart';
 
-class PersonaListScreen extends ConsumerWidget {
+class PersonaListScreen extends ConsumerStatefulWidget {
   final bool startExpanded;
   const PersonaListScreen({super.key, this.startExpanded = false});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<PersonaListScreen> createState() => _PersonaListScreenState();
+}
+
+class _PersonaListScreenState extends ConsumerState<PersonaListScreen> {
+  /// Folder currently being browsed, or null at the top level.
+  String? _currentFolderId;
+
+  void _openFolder(String id) => setState(() => _currentFolderId = id);
+
+  void _leaveFolder() => setState(() => _currentFolderId = null);
+
+  void _handleBack() {
+    if (_currentFolderId != null) {
+      _leaveFolder();
+      return;
+    }
+    if (widget.startExpanded) {
+      closeExpandedToolScreen(context, ref);
+    } else {
+      Navigator.of(context).maybePop();
+    }
+  }
+
+  String? _folderName(String id) {
+    final folders = ref.watch(foldersProvider(FolderDomain.persona)).value;
+    return folders?.where((f) => f.id == id).firstOrNull?.name;
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final personas = ref.watch(personaListProvider);
+    final folderId = _currentFolderId;
 
     return SheetView(
-      startExpanded: startExpanded,
+      startExpanded: widget.startExpanded,
       showRouteBackground: false,
-      titleWidget: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            'menu_personas'.tr(),
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              color: context.cs.onSurface,
+      titleWidget: folderId == null
+          ? Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'menu_personas'.tr(),
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: context.cs.onSurface,
+                  ),
+                ),
+                const HelpTip(term: 'persona'),
+              ],
+            )
+          : Text(
+              _folderName(folderId) ?? 'menu_personas'.tr(),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: context.cs.onSurface,
+              ),
             ),
-          ),
-          const HelpTip(term: 'persona'),
-        ],
-      ),
       showBack: true,
-      onBack: startExpanded
-          ? () => closeExpandedToolScreen(context, ref)
-          : () => Navigator.of(context).maybePop(),
+      canPop: folderId == null,
+      onBack: _handleBack,
       actions: [
+        if (folderId == null)
+          SheetViewAction(
+            icon: const Icon(Icons.create_new_folder_outlined, size: 20),
+            tooltip: 'folder_new'.tr(),
+            onPressed: () =>
+                showCreateFolderDialog(context, ref, FolderDomain.persona),
+          ),
         SheetViewAction(
           icon: const Icon(Icons.add, size: 20),
           tooltip: "${'create_new'.tr()} ${'tab_personas'.tr()}",
-          onPressed: () => _showEditor(context, ref),
+          onPressed: () => _showEditor(context),
         ),
       ],
       body: personas.when(
         loading: () => const Center(child: GlazeSpinner()),
         error: (e, _) => Center(child: Text("${'title_error'.tr()}: $e")),
-        data: (list) => list.isEmpty
-            ? Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text('no_results'.tr()),
-                    const SizedBox(height: 8),
-                    FilledButton.tonal(
-                      onPressed: () => _showEditor(context, ref),
-                      child: Text(
-                        "${'create_new'.tr()} ${'tab_personas'.tr()}",
-                      ),
-                    ),
-                  ],
-                ),
-              )
-            : Builder(
-                builder: (context) => ListView.builder(
-                  padding:
-                      EdgeInsets.fromLTRB(
-                        16,
-                        startExpanded ? 16 : 0,
-                        16,
-                        16,
-                      ).add(
-                        EdgeInsets.only(
-                          top: MediaQuery.paddingOf(context).top,
-                          bottom: MediaQuery.paddingOf(context).bottom,
-                        ),
-                      ),
-                  itemCount: list.length,
-                  itemBuilder: (_, i) => _PersonaTile(
-                    persona: list[i],
-                    openEditor: (persona) => _showEditor(context, ref, persona),
+        data: (all) {
+          final memberships =
+              ref.watch(folderMembershipsProvider(FolderDomain.persona)).value ??
+              FolderMemberships.empty;
+          final hasFolders =
+              (ref.watch(foldersProvider(FolderDomain.persona)).value ??
+                      const [])
+                  .isNotEmpty;
+
+          final List<Persona> list;
+          if (folderId != null) {
+            final ids = memberships.membersIn(folderId);
+            list = all.where((p) => ids.contains(p.id)).toList();
+          } else {
+            list = all
+                .where((p) => memberships.foldersOf(p.id).isEmpty)
+                .toList();
+          }
+
+          if (all.isEmpty && !hasFolders) {
+            return Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('no_results'.tr()),
+                  const SizedBox(height: 8),
+                  FilledButton.tonal(
+                    onPressed: () => _showEditor(context),
+                    child: Text("${'create_new'.tr()} ${'tab_personas'.tr()}"),
                   ),
-                ),
+                ],
               ),
+            );
+          }
+
+          return Builder(
+            builder: (context) {
+              final mediaPad = EdgeInsets.only(
+                top: MediaQuery.paddingOf(context).top,
+                bottom: MediaQuery.paddingOf(context).bottom,
+              );
+              final header = <Widget>[
+                if (folderId == null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+                    child: FolderSection(
+                      domain: FolderDomain.persona,
+                      onOpenFolder: _openFolder,
+                      icon: Icons.person_outline,
+                    ),
+                  ),
+              ];
+              final rows = <Widget>[
+                for (final persona in list)
+                  _PersonaTile(
+                    persona: persona,
+                    openEditor: (persona) => _showEditor(context, persona),
+                  ),
+              ];
+              return ListView(
+                padding: EdgeInsets.fromLTRB(
+                  16,
+                  widget.startExpanded ? 16 : 0,
+                  16,
+                  16,
+                ).add(mediaPad),
+                children: [
+                  ...header,
+                  if (list.isEmpty)
+                    const FolderEmptyState()
+                  else
+                    ...rows,
+                ],
+              );
+            },
+          );
+        },
       ),
     );
   }
 
-  void _showEditor(BuildContext context, WidgetRef ref, [Persona? existing]) {
-    Navigator.of(context, rootNavigator: !startExpanded).push(
+  void _showEditor(BuildContext context, [Persona? existing]) {
+    Navigator.of(context, rootNavigator: !widget.startExpanded).push(
       MaterialPageRoute<void>(
         builder: (_) => _PersonaEditorScreen(existing: existing),
       ),
@@ -209,6 +299,18 @@ class _PersonaTile extends ConsumerWidget {
                         onTap: () {
                           Navigator.of(context, rootNavigator: true).pop();
                           openEditor(persona);
+                        },
+                      ),
+                      BottomSheetItem(
+                        label: 'action_add_to_folder'.tr(),
+                        icon: Icons.create_new_folder_outlined,
+                        onTap: () {
+                          Navigator.of(context, rootNavigator: true).pop();
+                          showAddToFolderSheet(
+                            context,
+                            domain: FolderDomain.persona,
+                            targets: [persona.id],
+                          );
                         },
                       ),
                       BottomSheetItem(

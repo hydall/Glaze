@@ -5,8 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/services/backup/backup_exporter.dart';
 
 void main() {
-  test('backup v13 includes Agent Ops authority but excludes diagnostics', () {
-    expect(BackupExporter.schemaVersion, 13);
+  test('backup v14 includes Agent Ops authority but excludes diagnostics', () {
+    expect(BackupExporter.schemaVersion, 14);
     expect(
       BackupExporter.tableNames,
       containsAll(const [

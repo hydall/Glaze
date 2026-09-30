@@ -27,6 +27,7 @@ class SyncManifestBuilder implements SyncManifestProvider {
   final SyncStudioPresetStore? _studioPresetStore;
   final SyncChatSummaryStore? _chatSummaryStore;
   final SyncCharacterFolderStore? _characterFolderStore;
+  final SyncFolderStore? _folderStore;
   final SyncMemoryGraphStore? _memoryGraphStore;
   final SyncCharacterKnowledgeStore? _characterKnowledgeStore;
   final SyncSessionLorebookOverlayStore? _sessionLorebookOverlayStore;
@@ -55,6 +56,7 @@ class SyncManifestBuilder implements SyncManifestProvider {
     this._studioPresetStore,
     this._chatSummaryStore,
     this._characterFolderStore,
+    this._folderStore,
     this._memoryGraphStore,
     this._characterKnowledgeStore,
     this._sessionLorebookOverlayStore,
@@ -679,6 +681,30 @@ class SyncManifestBuilder implements SyncManifestProvider {
     if (_characterFolderStore != null) {
       const type = 'character_folders';
       final data = await _characterFolderStore.getAll();
+      final hash = SyncSerialization.computeSyncHash(data);
+      final key = entryKey(type, type);
+      final prevEntry = previous.entries[key];
+      final cloudEntry = cloudManifest?.entries[key];
+      final updatedAt = _resolveUpdatedAt(
+        hash: hash,
+        prevEntry: prevEntry,
+        cloudEntry: cloudEntry,
+        now: now,
+      );
+
+      entries[key] = SyncManifestEntry(
+        type: type,
+        id: type,
+        path: cloudPath(type, type),
+        updatedAt: updatedAt,
+        hash: hash,
+      );
+    }
+
+    // Generic + preset folders — singleton (all folders + members in one JSON).
+    if (_folderStore != null) {
+      const type = 'folders';
+      final data = await _folderStore.getAll();
       final hash = SyncSerialization.computeSyncHash(data);
       final key = entryKey(type, type);
       final prevEntry = previous.entries[key];
