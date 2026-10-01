@@ -2,8 +2,8 @@
 //
 // The model writes a compact line-based script (see model_spec.txt); this file
 // turns it into walkable rooms with cardboard characters. The player walks
-// with a virtual joystick, looks around by dragging, and taps people and
-// objects to run the script's `on` blocks.
+// by dragging on the left half, looks around by dragging on the right half,
+// and taps people and objects to run the script's `on` blocks.
 //
 // Host API: `VN.load(scriptText, { lang })`. Events go back to the host through
 // `window.flutter_inappwebview.callHandler('vn', json)` when it exists.
@@ -15,14 +15,14 @@
       talk: 'Поговорить', examine: 'Осмотреть', go: 'Перейти', closer: 'Подойди ближе',
       restart: 'Сыграть заново', end: 'Конец', noScene: 'Сцены «%s» нет в сценарии',
       empty: 'В сценарии нет ни одной сцены (строка «# имя»).',
-      help: 'Джойстик — идти · свайп — осмотреться · тап — взаимодействовать',
+      help: 'Слева — идти · справа — осмотреться · тап — взаимодействовать',
       nothing: 'Ничего интересного.', noWebgl: 'WebGL недоступен на этом устройстве.',
     },
     en: {
       talk: 'Talk', examine: 'Examine', go: 'Go', closer: 'Get closer',
       restart: 'Play again', end: 'The End', noScene: 'Scene "%s" is not in the script',
       empty: 'The script has no scenes (a "# name" line).',
-      help: 'Joystick to walk · drag to look · tap to interact',
+      help: 'Drag left to walk · drag right to look · tap to interact',
       nothing: 'Nothing interesting.', noWebgl: 'WebGL is not available on this device.',
     },
   };
@@ -552,7 +552,7 @@
     st.mode = mode;
     document.body.dataset.mode = mode;
     if (mode !== 'say' && mode !== 'choice') { dlg.hidden = true; st.speaking = null; tintChars(); }
-    if (mode !== 'roam') stopJoystick();
+    if (mode !== 'roam') stopMove();
   }
   function fade(on) {
     return new Promise((res) => {
@@ -680,63 +680,48 @@
     } else if (t.link) enter(t.link);
   }
 
-  // ── Controls: floating joystick on the left, drag-to-look, tap to interact ──
-  const joyEl = $('#joy'), knobEl = $('#knob');
-  const joy = { id: null, ox: 0, oy: 0, x: 0, y: 0 };
-  const looks = new Map();
+  // ── Controls: drag on the left half walks, drag on the right half looks,
+  // a tap anywhere interacts (or advances the dialogue) ─────────────────────
+  // A walking finger acts as an invisible stick anchored where it landed.
+  const move = { id: null, x: 0, y: 0 };
+  const pointers = new Map();
   const keys = new Set();
-  const JOY_R = 54;
+  const STICK_R = 70, TAP_SLOP = 12;
 
-  function inJoyZone(x, y) {
-    const r = stageEl.getBoundingClientRect();
-    return x - r.left < r.width * 0.42 && y - r.top > r.height * 0.45;
-  }
-  function placeJoy(x, y) {
-    const r = stageEl.getBoundingClientRect();
-    joyEl.style.left = (x - r.left) + 'px'; joyEl.style.top = (y - r.top) + 'px';
-  }
-  function resetJoy() {
-    joyEl.style.left = ''; joyEl.style.top = '';
-    knobEl.style.transform = ''; joyEl.classList.remove('active');
-  }
-  function stopJoystick() { joy.id = null; joy.x = joy.y = 0; resetJoy(); }
+  function stopMove() { move.id = null; move.x = move.y = 0; }
 
   stageEl.addEventListener('pointerdown', (e) => {
     if (e.target.closest('button')) return;
-    if (st.mode === 'roam' && joy.id === null && inJoyZone(e.clientX, e.clientY)) {
-      joy.id = e.pointerId; joy.ox = e.clientX; joy.oy = e.clientY; joy.x = joy.y = 0;
-      placeJoy(e.clientX, e.clientY); joyEl.classList.add('active');
-    } else {
-      looks.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now(), moved: 0 });
-    }
-    stageEl.setPointerCapture(e.pointerId);
+    const r = stageEl.getBoundingClientRect();
+    const side = e.clientX - r.left < r.width / 2 ? 'move' : 'look';
+    pointers.set(e.pointerId, { side, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now(), moved: 0 });
+    if (side === 'move' && move.id === null) move.id = e.pointerId;
+    try { stageEl.setPointerCapture(e.pointerId); } catch (_) { /* already released */ }
     e.preventDefault();
   });
   stageEl.addEventListener('pointermove', (e) => {
-    if (e.pointerId === joy.id) {
-      let dx = e.clientX - joy.ox, dy = e.clientY - joy.oy;
-      const len = Math.hypot(dx, dy);
-      if (len > JOY_R) { dx = dx / len * JOY_R; dy = dy / len * JOY_R; }
-      joy.x = dx / JOY_R; joy.y = dy / JOY_R;
-      knobEl.style.transform = `translate(${dx}px, ${dy}px)`;
-      return;
-    }
-    const p = looks.get(e.pointerId);
+    const p = pointers.get(e.pointerId);
     if (!p) return;
     const dx = e.clientX - p.x, dy = e.clientY - p.y;
     p.x = e.clientX; p.y = e.clientY; p.moved += Math.abs(dx) + Math.abs(dy);
-    if (st.mode === 'roam' && p.moved > 6) {
+    if (st.mode !== 'roam' || p.moved <= TAP_SLOP / 2) return;
+    if (p.side === 'move' && e.pointerId === move.id) {
+      let vx = e.clientX - p.sx, vy = e.clientY - p.sy;
+      const len = Math.hypot(vx, vy);
+      if (len > STICK_R) { vx = vx / len * STICK_R; vy = vy / len * STICK_R; }
+      move.x = vx / STICK_R; move.y = vy / STICK_R;
+    } else if (p.side === 'look') {
       player.yaw -= dx * 0.0055;
       player.pitch = clamp(player.pitch - dy * 0.0045, -0.85, 0.75);
       st.lookAt = null;
     }
   });
   function endPointer(e) {
-    if (e.pointerId === joy.id) { stopJoystick(); return; }
-    const p = looks.get(e.pointerId);
-    looks.delete(e.pointerId);
+    const p = pointers.get(e.pointerId);
+    pointers.delete(e.pointerId);
+    if (e.pointerId === move.id) stopMove();
     if (!p || e.type === 'pointercancel') return;
-    if (p.moved < 12 && performance.now() - p.t < 450) tap(e.clientX, e.clientY);
+    if (p.moved < TAP_SLOP && performance.now() - p.t < 450) tap(e.clientX, e.clientY);
   }
   stageEl.addEventListener('pointerup', endPointer);
   stageEl.addEventListener('pointercancel', endPointer);
@@ -762,11 +747,6 @@
     const g = pick(x, y);
     if (g) interact(g);
   }
-  $('#act').addEventListener('pointerup', (e) => {
-    e.stopPropagation();
-    if (st.mode === 'say') { advance(); return; }
-    if (st.mode === 'roam' && focused) interact(focused);
-  });
   $('#restart').addEventListener('pointerup', (e) => { e.stopPropagation(); start(); });
 
   addEventListener('keydown', (e) => {
@@ -795,7 +775,7 @@
   }
 
   function walk(dt) {
-    let fx = -joy.y, sx = joy.x;
+    let fx = -move.y, sx = move.x;
     if (keys.has('w') || keys.has('arrowup') || keys.has('ц')) fx += 1;
     if (keys.has('s') || keys.has('arrowdown') || keys.has('ы')) fx -= 1;
     if (keys.has('d') || keys.has('в')) sx += 1;
@@ -832,7 +812,7 @@
       const k = reduce ? 1 : 1 - Math.pow(0.004, dt);
       player.yaw = angleTo(player.yaw, yaw, k); player.pitch += (pitch - player.pitch) * k;
     }
-    camera.position.set(player.x, EYE + (st.mode === 'roam' && (Math.abs(joy.x) + Math.abs(joy.y) > 0.1) && !reduce ? Math.sin(t * 0.011) * 0.025 : 0), player.z);
+    camera.position.set(player.x, EYE + (st.mode === 'roam' && (Math.abs(move.x) + Math.abs(move.y) > 0.1) && !reduce ? Math.sin(t * 0.011) * 0.025 : 0), player.z);
     camera.rotation.set(player.pitch, player.yaw, 0);
 
     const typing = st.mode === 'say' && st.shown < st.full.length;

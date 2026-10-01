@@ -5,10 +5,12 @@ import 'dart:io';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle;
+import 'package:flutter/gestures.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/utils/app_orientation.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/fullscreen_editor.dart';
 import '../../shared/widgets/glass_surface.dart';
@@ -41,11 +43,19 @@ class _VnScreenState extends ConsumerState<VnScreen> {
   @override
   void initState() {
     super.initState();
+    // The game plays in either orientation; the rest of the app keeps its lock.
+    unawaited(SystemChrome.setPreferredOrientations(DeviceOrientation.values));
     if (!_mountNativeView) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) setState(() => _mountNativeView = true);
       });
     }
+  }
+
+  @override
+  void dispose() {
+    unawaited(SystemChrome.setPreferredOrientations(appDefaultOrientations()));
+    super.dispose();
   }
 
   static Future<String> _buildPage() async {
@@ -157,12 +167,18 @@ class _VnScreenState extends ConsumerState<VnScreen> {
                 return InAppWebView(
                   webViewEnvironment: chatWebViewEnvironment,
                   initialData: InAppWebViewInitialData(data: html),
+                  // Every touch belongs to the game. Without this the route's
+                  // and the shell's drag recognizers win the arena and the
+                  // page only ever sees taps.
+                  gestureRecognizers: {
+                    Factory<OneSequenceGestureRecognizer>(
+                      EagerGestureRecognizer.new,
+                    ),
+                  },
                   initialSettings: InAppWebViewSettings(
                     javaScriptEnabled: true,
                     supportZoom: false,
                     disableContextMenu: true,
-                    disableHorizontalScroll: true,
-                    disableVerticalScroll: true,
                     mediaPlaybackRequiresUserGesture: true,
                     isInspectable: kDebugMode,
                   ),

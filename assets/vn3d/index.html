@@ -27,15 +27,7 @@
       background: rgba(14, 15, 23, .8); border: 1px solid rgba(185, 166, 255, .5); color: var(--fg); border-radius: 10px; padding: 4px 12px; font-size: 13px; white-space: nowrap; }
     #help { position: absolute; left: 50%; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); pointer-events: none;
       color: var(--muted); font-size: 12px; white-space: nowrap; opacity: .8; }
-    #joy { position: absolute; left: 96px; top: calc(100% - 120px - env(safe-area-inset-bottom, 0px)); width: 112px; height: 112px; margin: -56px 0 0 -56px;
-      border-radius: 50%; border: 2px solid rgba(255, 255, 255, .22); background: rgba(14, 15, 23, .3); pointer-events: none; opacity: .55; transition: opacity .15s; }
-    #joy.active { opacity: 1; }
-    #knob { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%;
-      background: rgba(185, 166, 255, .55); border: 2px solid rgba(255, 255, 255, .5); }
-    #act { position: absolute; right: 28px; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); width: 76px; height: 76px; border-radius: 50%;
-      border: 2px solid rgba(255, 255, 255, .3); background: rgba(185, 166, 255, .28); color: var(--fg); font-size: 26px; touch-action: none; }
-    body:not([data-mode="roam"]) #joy, body:not([data-mode="roam"]) #act, body:not([data-mode="roam"]) #help,
-    body:not([data-mode="roam"]) #reticle { display: none; }
+    body:not([data-mode="roam"]) #help, body:not([data-mode="roam"]) #reticle { display: none; }
     #dlg { position: absolute; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); max-width: 820px; margin: 0 auto;
       background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px 18px 14px; min-height: 92px; }
     #who { position: absolute; top: -13px; left: 16px; font-weight: 600; font-size: 12px; letter-spacing: .06em; padding: 4px 12px; border-radius: 8px; color: #17132b; background: var(--gold); }
@@ -63,8 +55,6 @@
     <div id="reticle"></div>
     <div id="focus" hidden></div>
     <div id="help"></div>
-    <div id="joy"><div id="knob"></div></div>
-    <button id="act" type="button" aria-label="Interact">✋</button>
     <div id="dlg" hidden>
       <div id="who" hidden></div>
       <div id="line"></div>

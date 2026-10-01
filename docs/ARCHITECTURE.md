@@ -1619,11 +1619,11 @@ cardboard characters.
 
 | Piece | Where | Job |
 |---|---|---|
-| Engine | `assets/vn3d/engine.js` (+ vendored `three.min.js`, r128, MIT) | Parses the script, builds rooms, first-person movement (floating joystick, drag to look, tap or the hand button to interact), dialogue, choices, flags |
+| Engine | `assets/vn3d/engine.js` (+ vendored `three.min.js`, r128, MIT) | Parses the script, builds rooms, first-person movement (drag on the left half walks, drag on the right half looks, a tap interacts; no on-screen buttons), dialogue, choices, flags |
 | Page shell | `assets/vn3d/index.html` | HUD and controls markup; `buildVnPage` inlines three.js and the engine into it |
 | Script language | `assets/vn3d/model_spec.txt` | Sent verbatim as the system message of a generation; the single description of the language |
 | Sample | `assets/vn3d/sample_game.txt` | What the mode plays before anything is generated |
-| Screen | `lib/features/vn/vn_screen.dart` | Own `InAppWebView` loaded from data (no asset server, same on every platform); calls `VN.load(script, {lang})` |
+| Screen | `lib/features/vn/vn_screen.dart` | Own `InAppWebView` loaded from data (no asset server, same on every platform); calls `VN.load(script, {lang})`. Claims every touch with an eager recognizer and leaves `disableHorizontalScroll`/`disableVerticalScroll` off — on Android those swallow move events before the page sees them. Unlocks rotation while open and restores `appDefaultOrientations()` on leave |
 | Generation | `lib/features/vn/services/vn_generator_service.dart` | One non-streaming request on the active API connection; `extractVnScript` drops reasoning and code fences and rejects a reply without a `# scene` line |
 
 The engine never throws on a bad script: an unknown line is skipped, a jump to
