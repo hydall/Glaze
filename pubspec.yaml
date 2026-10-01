@@ -70,6 +70,7 @@ flutter:
     - assets/chat_webview/bridge/
     - assets/chat_webview/formatter/
     - assets/chat_webview/renderer/
+    - assets/vn3d/
     - assets/translations/
     - .env
   fonts:

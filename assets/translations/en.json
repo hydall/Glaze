@@ -3227,5 +3227,17 @@
   "error_token_required": "Paste a bearer token.",
   "error_delete_message_failed": "Failed to delete message: {error}",
   "vector_error_rebuild_cancelled": "Vector rebuild cancelled.",
-  "vector_error_rebuild_failed": "Vector rebuild failed: {error}"
+  "vector_error_rebuild_failed": "Vector rebuild failed: {error}",
+  "vn_title": "3D Novels",
+  "vn_subtitle": "Walk-around story games",
+  "vn_generate": "Generate a game",
+  "vn_premise_hint": "What is the game about?",
+  "vn_generate_confirm": "Generate",
+  "vn_generating": "The model is writing the game…",
+  "vn_script": "Script",
+  "vn_sample": "Sample game",
+  "vn_err_no_api": "Set up an API connection first",
+  "vn_err_incomplete_api": "The active API connection has no endpoint or model",
+  "vn_err_no_scenes": "The model's reply has no scenes. Try again",
+  "vn_err_failed": "Could not generate the game: {}"
 }

@@ -403,6 +403,7 @@ lib/
 │   ├── onboarding/                   # First-run onboarding screen
 │   ├── picks/                        # Featured picks grid + detail launcher
 │   ├── tools/                        # Developer tools screen (tokenizer, coverage, etc.)
+│   ├── vn/                           # 3D visual-novel mode (route `/vn`, engine in `assets/vn3d/`)
 │   ├── dev/                          # Internal UI demos (menu group demo)
 │   └── menu/                         # Sidebar menu + About overlay/screen
 ├── shared/
@@ -439,6 +440,7 @@ GoRouter lives in `router.dart`, not `app.dart`. Shell tabs and overlay routes:
 | `/menu` (+ `settings`, `themes`, `about`, `glossary`) | `MenuScreen` — the header search filters the tab's nested settings; `settings` is one flat screen of themed groups with its own header search, and takes `?highlight=<row id>` so a hit deep-links to the row (`features/menu/search/`) |
 | `/chat/:charId` | `ChatScreen` (query params: `?session=`, `?new=1`, `?msg=`) |
 | `/character/create`, `/character/:charId`, `…/edit`, `…/gallery` | Character CRUD overlays |
+| `/vn` | `VnScreen` — the 3D visual-novel mode, opened from the Tools tile (§ 9.1) |
 | `/sync` | `SyncSheet` |
 | `/extensions`, `/extensions/preset-editor/:presetId` | Extensions screens |
 
@@ -1607,6 +1609,26 @@ snapshot.
 `ChatMessageMapper` adds `blockStatus` (`'running' | 'done' | 'error' | null`) from
 `ChatMessageMapperContext.blockStatusByMessageId`; the WebView renders a `⬡` badge in
 the message header.
+
+
+## 9.1 3D visual novels (`/vn`)
+
+A mode of its own, apart from every chat. The model writes a whole game as a
+short line-based script; a bundled engine turns it into walkable rooms with
+cardboard characters.
+
+| Piece | Where | Job |
+|---|---|---|
+| Engine | `assets/vn3d/engine.js` (+ vendored `three.min.js`, r128, MIT) | Parses the script, builds rooms, first-person movement (floating joystick, drag to look, tap or the hand button to interact), dialogue, choices, flags |
+| Page shell | `assets/vn3d/index.html` | HUD and controls markup; `buildVnPage` inlines three.js and the engine into it |
+| Script language | `assets/vn3d/model_spec.txt` | Sent verbatim as the system message of a generation; the single description of the language |
+| Sample | `assets/vn3d/sample_game.txt` | What the mode plays before anything is generated |
+| Screen | `lib/features/vn/vn_screen.dart` | Own `InAppWebView` loaded from data (no asset server, same on every platform); calls `VN.load(script, {lang})` |
+| Generation | `lib/features/vn/services/vn_generator_service.dart` | One non-streaming request on the active API connection; `extractVnScript` drops reasoning and code fences and rejects a reply without a `# scene` line |
+
+The engine never throws on a bad script: an unknown line is skipped, a jump to
+a missing scene or block shows a toast and returns the player to walking. The
+script is held in memory by `vnProvider`; nothing is persisted yet.
 
 ---
 
