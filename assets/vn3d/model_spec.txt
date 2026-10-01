@@ -8,6 +8,7 @@ no code fences.
 THE SCRIPT LANGUAGE
 
 cast ID "Name" #color        a character (cardboard sprite, color = hair)
+item ID "Name" [description] something the player can carry
 texture ID KIND #base [#accent] [scale]
   KIND: plain planks tiles checker brick stone carpet grass sand concrete
         metal stripes wallpaper panels water. scale 0.25..4, 1 = 3 m tiles.
@@ -38,10 +39,16 @@ Commands inside the intro and `on` blocks:
 ID[emotion]: line            emotion: smile angry sad surprised (optional)
 ? choice text -> KEY         KEY = an `on` block of this scene or a scene
 set flag · unset flag · if [!]flag -> KEY · goto KEY
+give ITEM · take ITEM        put an item in the inventory or take it away
+if [!]has ITEM -> KEY        branch on carrying an item
 move ID x,z · look ID|label · once (rest of block runs only the first time)
 next [what happens next]     the story so far ends here; the next part is
                              written from this point and the player's
                              choices. The note says where the story goes.
+
+Items are how the player carries the story between places: a key found in
+one room opens a door in another (`if !has key -> locked`), a letter given
+to someone changes what they say. Give items for things worth carrying.
 
 IDS: letters, digits and _ only, no spaces. Never reuse a scene id from an
 earlier part for a different scene: new scenes get new ids.

@@ -17,6 +17,7 @@
       empty: 'В сценарии нет ни одной сцены (строка «# имя»).',
       help: 'Слева — идти · справа — осмотреться · тап — взаимодействовать',
       nothing: 'Ничего интересного.', noWebgl: 'WebGL недоступен на этом устройстве.',
+      got: 'Получено: %s', lost: 'Потеряно: %s',
     },
     en: {
       talk: 'Talk', examine: 'Examine', go: 'Go', closer: 'Get closer',
@@ -24,6 +25,7 @@
       empty: 'The script has no scenes (a "# name" line).',
       help: 'Drag left to walk · drag right to look · tap to interact',
       nothing: 'Nothing interesting.', noWebgl: 'WebGL is not available on this device.',
+      got: 'Got: %s', lost: 'Lost: %s',
     },
   };
   let S = STRINGS.ru;
@@ -47,6 +49,8 @@
     location: re(`^location\\s+(${ID})\\s*$`),
     texture: re(`^texture\\s+(${ID})\\s+([a-z]+)\\s+(${HEX})(?:\\s+(${HEX}))?(?:\\s+(${NUM}))?`),
     cast: re(`^cast\\s+(${ID})\\s+"([^"]+)"(?:\\s+(${HEX}))?`),
+    item: re(`^item\\s+(${ID})\\s+"([^"]+)"(?:\\s+(.+))?$`),
+    give: re(`^(give|take)\\s+(${ID})\\s*$`),
     on: re(`^on\\s+(${ID})\\s*$`),
     room: re(`^room\\s+(${NUM})\\s+(${NUM})(.*)$`),
     light: /^light\s+(day|dusk|night)\b/,
@@ -58,7 +62,7 @@
     narr: /^>\s*(.+)$/,
     choice: re(`^\\?\\s*(.+?)\\s*->\\s*(${ID})\\s*$`),
     flag: re(`^(set|unset)\\s+(${ID})\\s*$`),
-    iff: re(`^if\\s+(!?)(${ID})\\s*->\\s*(${ID})\\s*$`),
+    iff: re(`^if\\s+(!?)(?:(has)\\s+)?(${ID})\\s*->\\s*(${ID})\\s*$`),
     goto: re(`^goto\\s+(${ID})\\s*$`),
     move: re(`^move\\s+(${ID})\\s+(${NUM}),\\s*(${NUM})`),
     end: /^end\s*$/,
@@ -97,7 +101,8 @@
     if ((m = l.match(R.narr))) return { op: 'narr', text: m[1] };
     if ((m = l.match(R.choice))) return { op: 'choice', text: m[1], to: m[2] };
     if ((m = l.match(R.flag))) return { op: m[1], f: m[2] };
-    if ((m = l.match(R.iff))) return { op: 'if', not: !!m[1], f: m[2], to: m[3] };
+    if ((m = l.match(R.iff))) return { op: 'if', not: !!m[1], has: !!m[2], f: m[3], to: m[4] };
+    if ((m = l.match(R.give))) return { op: m[1], item: m[2] };
     if ((m = l.match(R.goto))) return { op: 'goto', to: m[1] };
     if ((m = l.match(R.move))) return { op: 'move', id: m[1], x: +m[2], z: +m[3] };
     if (R.end.test(l)) return { op: 'end' };
@@ -111,7 +116,7 @@
   // definition of a cast member, texture, location or scene replaces the
   // earlier one. Each block carries a key so `once` survives a reload.
   function parse(src) {
-    const cast = {}, scenes = {}, locations = {}, textures = {}, order = [], skipped = [];
+    const cast = {}, scenes = {}, locations = {}, textures = {}, items = {}, order = [], skipped = [];
     let cur = null, block = null;
     const blockOf = (key) => { const b = []; b.key = key; return b; };
     String(src || '').split('\n').forEach((raw, i) => {
@@ -136,6 +141,7 @@
         return;
       }
       if ((m = l.match(R.cast))) { cast[m[1]] = { name: m[2], color: m[3] || '#c9c9d6' }; return; }
+      if ((m = l.match(R.item))) { items[m[1]] = { name: m[2], desc: (m[3] || '').trim() }; return; }
       if (cur && !cur.loc && (m = l.match(R.on))) { block = cur.on[m[1]] = blockOf(`${cur.id}/${m[1]}`); return; }
       const c = cur && parseLine(l);
       if (!c) { skipped.push(i + 1); return; }
@@ -143,7 +149,7 @@
       else if (block) block.push(c);
       else skipped.push(i + 1);
     });
-    return { cast, scenes, locations, textures, order, skipped };
+    return { cast, scenes, locations, textures, items, order, skipped };
   }
 
   function clamp(v, a, b) { return Math.max(a, Math.min(b, Number.isFinite(v) ? v : a)); }
@@ -372,7 +378,7 @@
   }
 
   // ── World build ─────────────────────────────────────────────────────────────
-  let game = { cast: {}, scenes: {}, locations: {}, textures: {}, order: [], skipped: [] };
+  let game = { cast: {}, scenes: {}, locations: {}, textures: {}, items: {}, order: [], skipped: [] };
   let world = null, worldSig = '';
   let room = { w: 12, d: 9, wall: '#c8c4ba' };
   const chars = new Map();
@@ -666,10 +672,9 @@
     toastEl.textContent = msg; toastEl.hidden = false;
     clearTimeout(toast.h); toast.h = setTimeout(() => { toastEl.hidden = true; }, 2600);
   }
+  // Flags and items are shown by the host's status window, not here.
   function renderHud() {
     $('#sceneName').textContent = st.scene ? st.scene.id : '—';
-    $('#flags').innerHTML = '';
-    st.flags.forEach((f) => { const s = document.createElement('span'); s.className = 'chip flag'; s.textContent = f; $('#flags').append(s); });
   }
   function setMode(mode) {
     st.mode = mode;
@@ -701,7 +706,10 @@
     } else if (rebuilt) placePlayer();
     renderHud();
     if (willRebuild) await fade(false);
+    if (!resume) note({ k: 'scene', text: sc.id });
     saveSoon();
+    const exits = exitsOf(sc);
+    if (exits.length && !pendingNext) host('near', { state: snapshot(), exits });
     if (resume) setMode('roam'); else run(sc.intro);
   }
   function placePlayer() {
@@ -715,6 +723,16 @@
   let seen = new Set();
   // What the player chose, newest last: the model reads it to write on.
   let log = [];
+  // Items the player carries, in the order they were received.
+  let inv = [];
+  // Everything the player read, newest last: the status window's journal.
+  // Entries: { k: 'scene'|'narr'|'say'|'choice'|'item', who?, text }.
+  let backlog = [];
+  const BACKLOG_MAX = 200;
+  function note(entry) {
+    backlog.push(entry);
+    if (backlog.length > BACKLOG_MAX) backlog.splice(0, backlog.length - BACKLOG_MAX);
+  }
   // Set while the host writes the next part of the story.
   let pendingNext = null;
   // How many parts the host has written; kept on a `next` so the host can
@@ -728,6 +746,8 @@
       flags: [...st.flags],
       seen: [...seen],
       log: log.slice(-60),
+      inv: inv.slice(),
+      backlog: backlog.slice(),
       pos: { x: +player.x.toFixed(2), z: +player.z.toFixed(2), yaw: +player.yaw.toFixed(3) },
       next: pendingNext,
     };
@@ -737,6 +757,16 @@
     if (saveSoon.queued) return;
     saveSoon.queued = true;
     setTimeout(() => { saveSoon.queued = false; host('state', { state: snapshot() }); }, 0);
+  }
+
+  // The `next` hints a scene can reach from its own intro and blocks. A
+  // scene with any is where the current part ends, so the host starts
+  // writing the next one before the player gets there.
+  function exitsOf(sc) {
+    const blocks = [sc.intro].concat(Object.values(handlersOf(sc, 0)));
+    const hints = [];
+    blocks.forEach((b) => b.forEach((c) => { if (c.op === 'next') hints.push(c.hint || ''); }));
+    return hints;
   }
 
   // The story so far ends here: the host writes what comes next and calls
@@ -763,7 +793,21 @@
         case 'set': st.flags.add(c.f); renderHud(); saveSoon(); break;
         case 'unset': st.flags.delete(c.f); renderHud(); saveSoon(); break;
         case 'move': { const o = chars.get(c.id); if (o) { o.tx = c.x; o.tz = c.z; } break; }
-        case 'if': if (st.flags.has(c.f) !== c.not) { jump(c.to); return; } break;
+        case 'if': if ((c.has ? inv.includes(c.f) : st.flags.has(c.f)) !== c.not) { jump(c.to); return; } break;
+        case 'give':
+          if (!inv.includes(c.item)) {
+            inv.push(c.item);
+            const name = itemName(c.item);
+            toast(S.got.replace('%s', name)); note({ k: 'item', text: S.got.replace('%s', name) }); saveSoon();
+          }
+          break;
+        case 'take':
+          if (inv.includes(c.item)) {
+            inv = inv.filter((x) => x !== c.item);
+            const name = itemName(c.item);
+            toast(S.lost.replace('%s', name)); note({ k: 'item', text: S.lost.replace('%s', name) }); saveSoon();
+          }
+          break;
         case 'goto': jump(c.to); return;
         case 'narr': say(null, c.text); return;
         case 'say': say(c.id, c.text, c.emo); return;
@@ -783,6 +827,8 @@
     setMode('roam');
   }
 
+  function itemName(id) { return (game.items[id] && game.items[id].name) || id; }
+
   function lookAtTarget(id) {
     const o = chars.get(id);
     if (o) { st.lookAt = new T3.Vector3(o.tx, 1.45, o.tz); return; }
@@ -797,6 +843,7 @@
     const o = id && chars.get(id);
     st.speaking = o || null;
     if (o) { setEmo(o, emo); lookAtTarget(id); }
+    note(id ? { k: 'say', who: (game.cast[id] || { name: id }).name, text } : { k: 'narr', text });
     if (id) {
       const info = game.cast[id] || { name: id, color: '#f1c56e' };
       who.textContent = info.name; who.style.background = info.color; who.hidden = false; lineEl.className = '';
@@ -821,6 +868,7 @@
         e.stopPropagation();
         if (st.mode !== 'choice') return;
         log.push({ scene: st.scene && st.scene.id, choice: c.text });
+        note({ k: 'choice', text: c.text });
         st.full = ''; saveSoon(); jump(c.to);
       });
       choicesEl.append(b);
@@ -1070,6 +1118,8 @@
     st.flags = new Set(saved && Array.isArray(saved.flags) ? saved.flags : []);
     seen = new Set(saved && Array.isArray(saved.seen) ? saved.seen : []);
     log = saved && Array.isArray(saved.log) ? saved.log.slice(-60) : [];
+    inv = saved && Array.isArray(saved.inv) ? saved.inv.slice() : [];
+    backlog = saved && Array.isArray(saved.backlog) ? saved.backlog.slice(-BACKLOG_MAX) : [];
     pendingNext = (saved && saved.next) || null;
     queuedEnter = null; worldSig = ''; st.full = ''; endEl.hidden = true;
     if (!game.order.length) { disposeWorld(); setMode('idle'); toast(S.empty); renderHud(); return; }

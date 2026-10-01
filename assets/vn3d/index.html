@@ -19,7 +19,6 @@
     .hud { position: absolute; top: 10px; left: 12px; right: 12px; display: flex; gap: 6px; flex-wrap: wrap; pointer-events: none; font-size: 12px; }
     .chip { background: rgba(14, 15, 23, .72); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; color: var(--muted); }
     .chip b { color: var(--fg); font-weight: 500; }
-    .chip.flag { color: var(--gold); border-color: rgba(241, 197, 110, .4); }
     #reticle { position: absolute; left: 50%; top: 50%; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%;
       background: rgba(255, 255, 255, .7); box-shadow: 0 0 0 2px rgba(0, 0, 0, .25); pointer-events: none; transition: transform .15s, background .15s; }
     #reticle.hot { transform: scale(2.4); background: var(--accent); }
@@ -51,7 +50,7 @@
 </head>
 <body data-mode="idle">
   <div id="stage">
-    <div class="hud"><span class="chip"><b id="sceneName">—</b></span><span id="flags" style="display:contents"></span></div>
+    <div class="hud"><span class="chip"><b id="sceneName">—</b></span></div>
     <div id="reticle"></div>
     <div id="focus" hidden></div>
     <div id="help"></div>

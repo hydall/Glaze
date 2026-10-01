@@ -17,8 +17,9 @@ String _task(VnPass pass, VnDocument doc) => switch (pass) {
   VnPass.scenario =>
     'TASK: write the SCENARIO of a long, open-ended story from the idea. '
         'Plain text, no script commands. First line: `title: <short title>`. '
-        'Then: genre and tone; the setting; who the player is (seen in first '
-        'person, never shown); the central conflict or mystery; 4 to 6 arcs '
+        'Then: genre and tone; the setting; who the player is (THE PLAYER '
+        'above when given; seen in first person, never shown); the central '
+        'conflict or mystery; 4 to 6 arcs '
         'the story can grow through; 3 threads to pull on early. The story '
         'must be able to go on for many parts and branch on the player\'s '
         'choices.',
@@ -47,32 +48,52 @@ String _task(VnPass pass, VnDocument doc) => switch (pass) {
               'location lines. Then the scenes (`# id < location`) with '
               'doors (`prop door x,z,deg @scene`) between them. Introduce the '
               'setting and pull on a thread. Choices set flags that matter '
-              'later. Every path ends at `next <where the story goes>`.'
+              'later; give the player an item worth carrying. Characters '
+              'know the player as THE PLAYER describes them. Every path ends '
+              'at `next <where the story goes>`.'
         : 'TASK: write PART ${doc.nextChapterNumber}, continuing exactly '
               'from where the player stopped: 2 to 4 new scenes, the first '
               'one where the player arrives now. First line: `summary: <one '
               'or two sentences>`. Then any new cast, about, texture or '
-              'location lines the part needs. Follow from the choices and '
-              'flags above, keep characters consistent, move an arc forward '
-              'and do not repeat what already happened. Every path ends at '
-              '`next <where the story goes>`.',
+              'location lines the part needs, and `item` lines for new '
+              'items. Follow from the choices, flags and inventory above, '
+              'keep characters consistent, move an arc forward and do not '
+              'repeat what already happened. Every path ends at `next <where '
+              'the story goes>`.',
 };
 
 /// The request for [pass] of [doc].
 ///
-/// [state] is the engine's snapshot when a chapter is asked for by `next`.
+/// [state] is the engine's snapshot when a chapter is asked for: at a `next`,
+/// or ahead of it with the scene's `exits`. [persona] is who the player is.
 List<Map<String, String>> buildVnPassMessages({
   required String spec,
   required VnDocument doc,
   required VnPass pass,
   required String language,
   VnPlayState? state,
+  VnPersona? persona,
 }) {
   final buffer = StringBuffer()
     ..write(
       _section(
         'IDEA',
         doc.premise.isEmpty ? 'Free choice: surprise the player.' : doc.premise,
+      ),
+    )
+    ..write(
+      _section(
+        'THE PLAYER',
+        persona == null
+            ? null
+            : [
+                'Name: ${persona.name}',
+                if (persona.description.isNotEmpty)
+                  persona.description.replaceAll(
+                    RegExp(r'\{\{user\}\}', caseSensitive: false),
+                    persona.name,
+                  ),
+              ].join('\n'),
       ),
     )
     ..write(_section('SCENARIO', doc.setup[VnPass.scenario]));
@@ -99,16 +120,46 @@ List<Map<String, String>> buildVnPassMessages({
       )
       ..write(_section('SCENE IDS ALREADY USED', doc.sceneIds.join(' ')));
     final next = state?.pendingNext;
+    final exits = state?.exits ?? const <String>[];
+    final items = doc.items;
+    final carried = [
+      for (final id in state?.inventory ?? const <String>[])
+        items[id] == null ? id : '$id (${items[id]!.name})',
+    ];
     final lines = <String>[
       if (next != null) 'The player is in scene ${next.scene}.',
       if (next != null && next.hint.isNotEmpty)
         'The last part ended with: ${next.hint}',
+      if (next == null && state?.scene != null)
+        'The player is in scene ${state!.scene}, where the last part ends.',
+      if (next == null && exits.any((e) => e.isNotEmpty))
+        'It ends at one of: ${exits.where((e) => e.isNotEmpty).join(' / ')}',
       'Flags set: ${(state?.flags ?? const []).join(' ').ifEmpty('none')}',
+      'Inventory: ${carried.join(', ').ifEmpty('empty')}',
       if ((state?.choices ?? const []).isNotEmpty)
         'Choices made, oldest first:',
       ...?state?.choices.map((c) => '- $c'),
     ];
-    buffer.write(_section('WHERE THE PLAYER IS', lines.join('\n')));
+    // The last lines read keep the voice and the moment continuous.
+    final journal = state?.journal ?? const <VnJournalEntry>[];
+    buffer
+      ..write(
+        _section(
+          'LAST LINES THE PLAYER READ',
+          [
+            for (final e in journal.skip(
+              journal.length > 25 ? journal.length - 25 : 0,
+            ))
+              switch (e.kind) {
+                'say' => '${e.who}: ${e.text}',
+                'choice' => '(chose) ${e.text}',
+                'scene' => '[${e.text}]',
+                _ => e.text,
+              },
+          ].join('\n'),
+        ),
+      )
+      ..write(_section('WHERE THE PLAYER IS', lines.join('\n')));
   } else {
     if (pass.index > VnPass.characters.index) {
       buffer.write(_section('CHARACTERS', doc.setup[VnPass.characters]));

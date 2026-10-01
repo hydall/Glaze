@@ -27,6 +27,7 @@ import '../../features/cloud_sync/widgets/sync_sheet.dart';
 import '../../features/settings/app_settings_screen.dart';
 import '../../features/settings/theme_preset_screen.dart';
 import '../../features/tools/tools_screen.dart';
+import '../../features/vn/vn_new_screen.dart';
 import '../../features/vn/vn_screen.dart';
 import '../../features/glossary/glossary_sheet.dart';
 import '../../shared/shell/shell_screen.dart';
@@ -358,6 +359,12 @@ GoRouter buildRouter(
               jobId: state.pathParameters['jobId']!,
             ),
           ),
+        ),
+        // Before `/vn/:sessionId`, which would take `new` for an id.
+        GoRoute(
+          path: '/vn/new',
+          pageBuilder: (_, state) =>
+              _adaptivePage(state: state, child: const VnNewScreen()),
         ),
         GoRoute(
           path: '/vn/:sessionId',

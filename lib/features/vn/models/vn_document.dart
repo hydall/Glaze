@@ -18,8 +18,47 @@ import '../../../core/utils/id_generator.dart';
 export '../../../core/models/vn_session_id.dart';
 
 /// [ChatSession.sessionVars] key holding the engine's last snapshot (scene,
-/// flags, `once` blocks, choices, position) as JSON.
+/// flags, `once` blocks, choices, inventory, journal, position) as JSON.
 const String kVnStateVarKey = '__vnState';
+
+/// [ChatSession.sessionVars] key holding the persona the novel was started
+/// with, as `{name, description}` JSON. Copied, not referenced, so editing or
+/// deleting the persona later does not rewrite the story's hero.
+const String kVnPersonaVarKey = '__vnPersona';
+
+/// [ChatSession.sessionVars] key holding a chapter written ahead of the
+/// player: `{chapter, key, body}` JSON, see [vnPrefetchKey].
+const String kVnPrefetchVarKey = '__vnPrefetch';
+
+/// Who the player is in the story.
+class VnPersona {
+  const VnPersona({required this.name, this.description = ''});
+
+  final String name;
+  final String description;
+
+  Map<String, String> toJson() => {
+    'name': name,
+    if (description.isNotEmpty) 'description': description,
+  };
+
+  static VnPersona? fromSessionVars(Map<String, String> vars) {
+    final json = vars[kVnPersonaVarKey];
+    if (json == null || json.isEmpty) return null;
+    try {
+      final m = jsonDecode(json);
+      if (m is! Map) return null;
+      final name = '${m['name'] ?? ''}'.trim();
+      if (name.isEmpty) return null;
+      return VnPersona(
+        name: name,
+        description: '${m['description'] ?? ''}'.trim(),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+}
 
 /// A novel is the only session of its pseudo-character.
 ({String characterId, String sessionId}) newVnIds() {
@@ -208,6 +247,7 @@ class VnDocument {
       final l = lines[i].trim();
       if (l.startsWith('cast ') ||
           l.startsWith('about ') ||
+          l.startsWith('item ') ||
           l.startsWith('texture ')) {
         out.add(l);
       } else if (l.startsWith('location ')) {
@@ -220,6 +260,23 @@ class VnDocument {
       }
     }
     return out.join('\n');
+  }
+
+  /// Items defined anywhere in the script, by id: their names and what they
+  /// are, for the status window.
+  Map<String, ({String name, String description})> get items {
+    final out = <String, ({String name, String description})>{};
+    for (final m in RegExp(
+      r'^\s*item\s+([\p{L}\p{N}_]+)\s+"([^"]+)"(?:\s+(.+))?$',
+      multiLine: true,
+      unicode: true,
+    ).allMatches(script)) {
+      out[m.group(1)!] = (
+        name: m.group(2)!,
+        description: (m.group(3) ?? '').trim(),
+      );
+    }
+    return out;
   }
 
   /// Scene ids used so far, so a new chapter does not reuse one.
@@ -256,6 +313,28 @@ class VnPlayState {
     for (final f in (raw['flags'] as List?) ?? const []) '$f',
   ];
 
+  /// Item ids carried, in the order they were received.
+  List<String> get inventory => [
+    for (final i in (raw['inv'] as List?) ?? const []) '$i',
+  ];
+
+  /// What the player read, oldest first.
+  List<VnJournalEntry> get journal => [
+    for (final e in (raw['backlog'] as List?) ?? const [])
+      if (e is Map)
+        VnJournalEntry(
+          kind: '${e['k'] ?? ''}',
+          who: e['who'] == null ? null : '${e['who']}',
+          text: '${e['text'] ?? ''}',
+        ),
+  ];
+
+  /// The `next` hints of the scene the player is in, when the host asked for
+  /// a chapter ahead of them.
+  List<String> get exits => [
+    for (final e in (raw['exits'] as List?) ?? const []) '$e',
+  ];
+
   /// Choices made, oldest first, as `scene: choice` lines.
   List<String> get choices => [
     for (final e in (raw['log'] as List?) ?? const [])
@@ -275,6 +354,25 @@ class VnPlayState {
     );
   }
 }
+
+/// One line of the journal: a scene entered, a line read, a choice, an item.
+class VnJournalEntry {
+  const VnJournalEntry({required this.kind, this.who, required this.text});
+
+  /// `scene`, `narr`, `say`, `choice` or `item`.
+  final String kind;
+  final String? who;
+  final String text;
+}
+
+/// What a chapter written ahead depends on. A chapter is written from the
+/// flags, the inventory and the choices; when any of them differs at the
+/// `next`, the chapter written ahead no longer follows from the game.
+String vnPrefetchKey(VnPlayState play) => jsonEncode({
+  'flags': [...play.flags]..sort(),
+  'inv': [...play.inventory]..sort(),
+  'choices': play.choices,
+});
 
 /// The snapshot to reopen [doc] from, or null to start at its first scene.
 ///

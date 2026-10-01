@@ -39,6 +39,7 @@ class VnGeneratorService {
     required VnPass pass,
     required String language,
     VnPlayState? state,
+    VnPersona? persona,
     CancelToken? cancelToken,
   }) async {
     await _ref.read(apiListProvider.future);
@@ -65,6 +66,7 @@ class VnGeneratorService {
             pass: pass,
             language: language,
             state: state,
+            persona: persona,
           ),
           stream: false,
         ),

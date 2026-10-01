@@ -15,6 +15,7 @@ import '../../core/utils/app_orientation.dart';
 import '../../shared/widgets/glaze_error_block.dart';
 import '../../shared/widgets/glaze_scaffold.dart';
 import '../../shared/widgets/glaze_spinner.dart';
+import '../../shared/widgets/list_controls.dart';
 import '../chat/bridge/chat_webview_environment.dart';
 import 'models/vn_document.dart';
 import 'services/vn_script.dart';
@@ -22,6 +23,7 @@ import 'vn_labels.dart';
 import 'vn_provider.dart';
 import 'widgets/vn_generating_badge.dart';
 import 'widgets/vn_setup_view.dart';
+import 'widgets/vn_status_sheet.dart';
 import 'widgets/vn_touch_forwarder.dart';
 
 /// One visual novel, opened from the chat list: a walkable first-person game
@@ -242,9 +244,57 @@ class _VnScreenState extends ConsumerState<VnScreen> {
     switch (event['type']) {
       case 'state' when state is Map<String, dynamic>:
         unawaited(_notifier.saveState(state));
+        // A choice made near the end of a part changes what comes next.
+        if (_nearExits != null && _nearScene == state['scene']) {
+          _writeAhead(state);
+        } else {
+          _nearExits = null;
+        }
+      case 'near' when state is Map<String, dynamic>:
+        _nearScene = state['scene'] as String?;
+        _nearExits = event['exits'] as List<dynamic>? ?? const [];
+        _writeAhead(state);
       case 'next' when state is Map<String, dynamic>:
+        _nearExits = null;
         unawaited(_continue(state));
     }
+  }
+
+  // The scene where the current part ends, while the player is in it.
+  String? _nearScene;
+  List<dynamic>? _nearExits;
+
+  void _writeAhead(Map<String, dynamic> state) {
+    unawaited(
+      _notifier.writeAhead(
+        language: _language,
+        snapshot: {...state, 'exits': _nearExits},
+      ),
+    );
+  }
+
+  /// The journal, choices, inventory and chapters. Read live from the engine
+  /// when it is running, else from the last saved place.
+  Future<void> _openStatus() async {
+    final s = ref.read(vnProvider(widget.sessionId)).value;
+    if (s == null) return;
+    Map<String, dynamic>? snapshot;
+    final controller = _controller;
+    if (controller != null && _playedScript != null) {
+      try {
+        final live = await controller
+            .evaluateJavascript(source: 'window.VN && VN.snapshot()')
+            .timeout(const Duration(seconds: 1));
+        if (live is Map) snapshot = Map<String, dynamic>.from(live);
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    await VnStatusSheet.show(
+      context,
+      doc: s.doc,
+      play: snapshot == null ? s.play : VnPlayState(snapshot),
+      persona: s.persona,
+    );
   }
 
   Future<void> _sendInput(List<List<Object>> events) async {
@@ -265,6 +315,14 @@ class _VnScreenState extends ConsumerState<VnScreen> {
           s?.doc.title ??
           'vn_untitled'.tr(),
       onBack: _leave,
+      actions: [
+        if (s != null && s.doc.playable)
+          GlazeActionChip(
+            icon: Icons.menu_book_outlined,
+            tooltip: 'vn_status'.tr(),
+            onTap: () => unawaited(_openStatus()),
+          ),
+      ],
       body: switch (async) {
         AsyncValue(value: final VnState s) when s.doc.playable => _buildGame(s),
         AsyncValue(value: final VnState s) => VnSetupView(

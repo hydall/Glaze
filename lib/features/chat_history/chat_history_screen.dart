@@ -1,6 +1,7 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../shared/shell/header_scroll_hider.dart';
 import '../../shared/shell/nav_height_provider.dart';
@@ -10,7 +11,6 @@ import '../../shared/theme/app_colors.dart';
 
 import '../../shared/widgets/glow_ripple.dart';
 import '../settings/app_settings_provider.dart';
-import '../vn/widgets/vn_new_sheet.dart';
 import 'chat_history_actions.dart';
 import 'chat_history_list.dart';
 import 'chat_history_provider.dart';
@@ -123,7 +123,7 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
               icon: const Icon(Icons.view_in_ar_rounded, size: 22),
               tooltip: 'vn_new'.tr(),
               color: context.cs.primary,
-              onPressed: () => showNewVnSheet(context, ref),
+              onPressed: () => context.push('/vn/new'),
             ),
           ),
         SizedBox(
@@ -284,7 +284,7 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
                   icon: const Icon(Icons.view_in_ar_rounded, size: 20),
                   tooltip: 'vn_new'.tr(),
                   color: context.cs.primary,
-                  onPressed: () => showNewVnSheet(context, ref),
+                  onPressed: () => context.push('/vn/new'),
                 ),
               ],
             ),

@@ -440,7 +440,7 @@ GoRouter lives in `router.dart`, not `app.dart`. Shell tabs and overlay routes:
 | `/menu` (+ `settings`, `themes`, `about`, `glossary`) | `MenuScreen` — the header search filters the tab's nested settings; `settings` is one flat screen of themed groups with its own header search, and takes `?highlight=<row id>` so a hit deep-links to the row (`features/menu/search/`) |
 | `/chat/:charId` | `ChatScreen` (query params: `?session=`, `?new=1`, `?msg=`) |
 | `/character/create`, `/character/:charId`, `…/edit`, `…/gallery` | Character CRUD overlays |
-| `/vn/:sessionId` | `VnScreen` — a 3D visual novel, opened from its row in the chat list (§ 9.1) |
+| `/vn/new`, `/vn/:sessionId` | `VnNewScreen` (persona + idea) and `VnScreen` — a 3D visual novel, opened from its row in the chat list (§ 9.1) |
 | `/sync` | `SyncSheet` |
 | `/extensions`, `/extensions/preset-editor/:presetId` | Extensions screens |
 
@@ -1619,7 +1619,10 @@ which has no character row. It is listed in the chat list with a VN chip and an
 icon avatar, opens `VnScreen` instead of a chat, syncs and backs up like any
 chat, and is skipped by the legacy-backup orphan sweep and by the raw-chat
 vector rebuild. New novels start from the 3D button in the Chats header (and in
-the desktop sidebar).
+the desktop sidebar), which opens `/vn/new` (`VnNewScreen`): the player picks
+the persona they play (copied into `sessionVars['__vnPersona']` and named in
+every pass) and writes the idea in a full-height editor with section buttons
+(genre, setting, hero, characters, tone, opening).
 
 The session's first message is the player's idea (`user`); every later one is
 a pass the model wrote, opening with an `@vn <pass>` header
@@ -1642,6 +1645,22 @@ current dialogue is over. The engine's snapshot (scene, flags, `once` blocks,
 choices, position, an unanswered `next`) is kept in `sessionVars['__vnState']`,
 so a novel reopens where it was left; a `next` answered while the screen was
 closed is resolved by `resumeSnapshot`.
+
+The next chapter is written ahead: entering a scene that holds a `next`, the
+engine sends `near` with the scene's `next` hints, and `writeAhead` asks for
+the chapter in the background and banks it in `sessionVars['__vnPrefetch']`.
+At the `next` the bank is used only if `vnPrefetchKey` (flags, inventory,
+choices) still matches; a request still running with the same key is awaited,
+anything else is cancelled and the chapter is written fresh. A choice made in
+that scene re-asks, at most three times per chapter.
+
+Items: `item ID "Name" [description]` defines one anywhere in the script,
+`give`/`take` change the inventory, `if [!]has ITEM -> KEY` branches on it. The
+engine also keeps a journal of what was read (scenes, narration, lines,
+choices, items; last 200). The header's status button opens `VnStatusSheet`
+with the journal, the choices and flags, the inventory and the chapter
+summaries, read live from `VN.snapshot()`. Continuations get the inventory
+and the last 25 journal lines.
 
 | Piece | Where | Job |
 |---|---|---|

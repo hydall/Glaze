@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -168,6 +169,96 @@ void main() {
     expect(user, contains('The last part ended with: дверь'));
     // The task comes last, after everything it reads.
     expect(user.indexOf('TASK'), greaterThan(user.indexOf('WHERE THE PLAYER')));
+  });
+
+  group('inventory, persona and writing ahead', () {
+    final doc = VnDocument.fromMessages([
+      ..._setup(),
+      _pass(
+        VnPass.chapter,
+        'summary: Ключ.\nitem key "Ржавый ключ" открывает подвал\n'
+        '# one < hall\ngive key\nnext вниз',
+        chapter: 1,
+      ),
+    ]);
+
+    test('items are read from any part and reach the definitions', () {
+      expect(doc.items['key']?.name, 'Ржавый ключ');
+      expect(doc.items['key']?.description, 'открывает подвал');
+      expect(doc.definitions, contains('item key "Ржавый ключ"'));
+    });
+
+    test('a chapter written ahead is keyed on flags, items and choices', () {
+      const a = VnPlayState({
+        'flags': ['b', 'a'],
+        'inv': ['key'],
+        'log': [
+          {'scene': 'one', 'choice': 'x'},
+        ],
+        'pos': {'x': 1},
+      });
+      const sameButMoved = VnPlayState({
+        'flags': ['a', 'b'],
+        'inv': ['key'],
+        'log': [
+          {'scene': 'one', 'choice': 'x'},
+        ],
+        'pos': {'x': 5},
+      });
+      const chose = VnPlayState({
+        'flags': ['a', 'b'],
+        'inv': ['key'],
+        'log': [
+          {'scene': 'one', 'choice': 'x'},
+          {'scene': 'one', 'choice': 'y'},
+        ],
+      });
+      expect(vnPrefetchKey(a), vnPrefetchKey(sameButMoved));
+      expect(vnPrefetchKey(a), isNot(vnPrefetchKey(chose)));
+    });
+
+    test('the persona is kept in the session and named in every pass', () {
+      final vars = {
+        kVnPersonaVarKey: jsonEncode(
+          const VnPersona(
+            name: 'Лис',
+            description: '{{user}} — студент-архивист.',
+          ).toJson(),
+        ),
+      };
+      final persona = VnPersona.fromSessionVars(vars)!;
+      final user = buildVnPassMessages(
+        spec: 'SPEC',
+        doc: VnDocument.fromMessages([_user('idea')]),
+        pass: VnPass.scenario,
+        language: 'Russian',
+        persona: persona,
+      ).last['content']!;
+      expect(user, contains('THE PLAYER\nName: Лис\nЛис — студент-архивист.'));
+    });
+
+    test('a chapter asked for ahead names the exits, items and lines read', () {
+      final user = buildVnPassMessages(
+        spec: 'SPEC',
+        doc: doc,
+        pass: VnPass.chapter,
+        language: 'Russian',
+        state: const VnPlayState({
+          'scene': 'one',
+          'inv': ['key'],
+          'exits': ['вниз', ''],
+          'backlog': [
+            {'k': 'scene', 'text': 'one'},
+            {'k': 'say', 'who': 'Мия', 'text': 'Держи.'},
+            {'k': 'choice', 'text': 'Взять'},
+          ],
+        }),
+      ).last['content']!;
+      expect(user, contains('where the last part ends'));
+      expect(user, contains('It ends at one of: вниз'));
+      expect(user, contains('Inventory: key (Ржавый ключ)'));
+      expect(user, contains('Мия: Держи.\n(chose) Взять'));
+    });
   });
 
   group('buildVnPage', () {
