@@ -802,8 +802,10 @@
   // ── Frame loop ─────────────────────────────────────────────────────────────
   let focused = null, last = performance.now(), frame = 0;
   const center = new T3.Vector2(0, 0);
+  let frameId = 0, stopped = false;
   function tick(t) {
-    requestAnimationFrame(tick);
+    if (stopped) return;
+    frameId = requestAnimationFrame(tick);
     const dt = Math.min(0.05, (t - last) / 1000); last = t; frame++;
     if (st.mode === 'roam') walk(dt);
     if (st.lookAt) {
@@ -875,6 +877,22 @@
       start();
     },
     parse,
+    // Stops the frame loop and hands the GPU context back before the host
+    // destroys the WebView: a WebGL context torn down mid-frame can take the
+    // shared renderer process with it.
+    stop() {
+      if (stopped) return;
+      stopped = true;
+      cancelAnimationFrame(frameId);
+      setMode('idle');
+      disposeWorld();
+      if (renderer) {
+        renderer.dispose();
+        renderer.forceContextLoss();
+        renderer.domElement.remove();
+        renderer = null;
+      }
+    },
     // Interacts with the target whose key or label is [key], as a tap would,
     // ignoring distance. For keyboardless accessibility and automated runs.
     interactWith(key) {
@@ -893,6 +911,6 @@
   });
 
   resize();
-  requestAnimationFrame(tick);
+  frameId = requestAnimationFrame(tick);
   host('ready');
 })();

@@ -9,11 +9,10 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/utils/app_orientation.dart';
-import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/fullscreen_editor.dart';
-import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_scaffold.dart';
 import '../../shared/widgets/glaze_spinner.dart';
@@ -23,6 +22,7 @@ import '../chat/bridge/chat_webview_environment.dart';
 import 'services/vn_generator_service.dart';
 import 'services/vn_script.dart';
 import 'vn_provider.dart';
+import 'widgets/vn_generating_badge.dart';
 
 /// The 3D visual-novel mode: a walkable first-person game the model writes as
 /// a short script, played in its own WebView, apart from any chat.
@@ -37,6 +37,11 @@ class _VnScreenState extends ConsumerState<VnScreen> {
   late final Future<String> _page = _buildPage();
   InAppWebViewController? _controller;
   bool _pageLoaded = false;
+  // Set once the engine has let go of the GPU and the WebView is unmounted.
+  bool _released = false;
+  bool _leaving = false;
+  // Bumped to replace a WebView whose page process died.
+  int _webViewGeneration = 0;
   // WebView2 attaches to a window that already has a frame on screen.
   bool _mountNativeView = !Platform.isWindows;
 
@@ -54,8 +59,57 @@ class _VnScreenState extends ConsumerState<VnScreen> {
 
   @override
   void dispose() {
-    unawaited(SystemChrome.setPreferredOrientations(appDefaultOrientations()));
+    // Already done by [_leave] unless the route was popped some other way
+    // (the iOS edge swipe).
+    if (!_released) {
+      unawaited(
+        SystemChrome.setPreferredOrientations(appDefaultOrientations()),
+      );
+    }
     super.dispose();
+  }
+
+  /// Leaves the mode in an order that does not crash Android: the engine
+  /// hands its WebGL context back, the WebView is unmounted while the route is
+  /// still on screen, the orientation lock comes back, and only then the route
+  /// pops. Destroying a WebView mid-frame while the screen rotates is what
+  /// killed the app.
+  Future<void> _leave() async {
+    if (_leaving) return;
+    _leaving = true;
+    try {
+      await _controller
+          ?.evaluateJavascript(source: 'window.VN && VN.stop();')
+          .timeout(const Duration(seconds: 1));
+    } catch (e) {
+      debugPrint('[VN3D] stop before leaving failed: $e');
+    }
+    if (!mounted) return;
+    setState(() {
+      _released = true;
+      _controller = null;
+      _pageLoaded = false;
+    });
+    await SystemChrome.setPreferredOrientations(appDefaultOrientations());
+    if (!mounted) return;
+    final router = GoRouter.of(context);
+    if (router.canPop()) {
+      router.pop();
+    } else {
+      router.go('/tools');
+    }
+  }
+
+  /// The page process died (the GPU driver, memory pressure). Without a
+  /// handler Android kills the whole app; with one the game just restarts.
+  void _onPageProcessGone() {
+    debugPrint('[VN3D] page process gone, rebuilding the WebView');
+    if (!mounted || _released) return;
+    setState(() {
+      _controller = null;
+      _pageLoaded = false;
+      _webViewGeneration++;
+    });
   }
 
   static Future<String> _buildPage() async {
@@ -79,7 +133,9 @@ class _VnScreenState extends ConsumerState<VnScreen> {
 
   Future<void> _askPremise() async {
     final notifier = ref.read(vnProvider.notifier);
-    final language = context.locale.languageCode == 'en' ? 'English' : 'Russian';
+    final language = context.locale.languageCode == 'en'
+        ? 'English'
+        : 'Russian';
     await GlazeBottomSheet.show<void>(
       context,
       title: 'vn_generate'.tr(),
@@ -137,6 +193,7 @@ class _VnScreenState extends ConsumerState<VnScreen> {
 
     return GlazeScaffold(
       title: 'vn_title'.tr(),
+      onBack: _leave,
       actions: [
         GlazeActionChip(
           icon: Icons.auto_awesome,
@@ -161,10 +218,12 @@ class _VnScreenState extends ConsumerState<VnScreen> {
               future: _page,
               builder: (context, snapshot) {
                 final html = snapshot.data;
+                if (_released) return const SizedBox.shrink();
                 if (html == null || !_mountNativeView) {
                   return const Center(child: GlazeSpinner());
                 }
                 return InAppWebView(
+                  key: ValueKey<int>(_webViewGeneration),
                   webViewEnvironment: chatWebViewEnvironment,
                   initialData: InAppWebViewInitialData(data: html),
                   // Every touch belongs to the game. Without this the route's
@@ -189,6 +248,8 @@ class _VnScreenState extends ConsumerState<VnScreen> {
                       callback: _onEngineEvent,
                     );
                   },
+                  onRenderProcessGone: (_, _) => _onPageProcessGone(),
+                  onWebContentProcessDidTerminate: (_) => _onPageProcessGone(),
                   onLoadStop: (_, _) {
                     _pageLoaded = true;
                     unawaited(_play(ref.read(vnProvider).script));
@@ -197,7 +258,7 @@ class _VnScreenState extends ConsumerState<VnScreen> {
               },
             ),
           ),
-          if (generating) const _GeneratingBadge(),
+          if (generating) const VnGeneratingBadge(),
         ],
       ),
     );
@@ -206,36 +267,5 @@ class _VnScreenState extends ConsumerState<VnScreen> {
   void _onEngineEvent(List<dynamic> args) {
     if (!kDebugMode || args.isEmpty) return;
     debugPrint('[VN3D] ${args.first}');
-  }
-}
-
-class _GeneratingBadge extends StatelessWidget {
-  const _GeneratingBadge();
-
-  @override
-  Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.topCenter,
-      child: Padding(
-        padding: const EdgeInsets.only(top: 12),
-        child: GlassSurface(
-          borderRadius: BorderRadius.circular(16),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const GlazeSpinner(size: 16, strokeWidth: 2),
-                const SizedBox(width: 10),
-                Text(
-                  'vn_generating'.tr(),
-                  style: TextStyle(color: context.cs.onSurface, fontSize: 13),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
   }
 }
