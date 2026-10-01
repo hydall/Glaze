@@ -201,6 +201,34 @@ Three rules follow, and `specs/search_navigation.spec.js` holds them:
 
 ---
 
+## A late height correction holds the reader's place
+
+A reply is not measured once. It reaches the page mid-stream, then reflows long
+after: the body finalises, a reasoning box collapses, an image block appears,
+an `<img>` finishes loading. Each correction rewrites the rows below the one
+that changed, under a `scrollTop` that does not move with them — so in a chat of
+long messages the text under the reader slides down the screen, a screenful at a
+time, while the scrollbar stays put. That is the "chat jumped" a post leaves
+behind when it finishes and again when its picture lands.
+
+The `ResizeObserver` pass therefore offsets `scrollTop` by the growth of every
+re-measured row that sits **before the topmost row crossing the viewport top**
+(the reader's anchor). Two things about *how* that anchor is found matter:
+
+* **it is read from the height cache before the loop writes to it, not from the
+  live DOM after.** The row that grew can itself become the first to cross the
+  viewport — its bottom was above the top edge and now is not — which would hide
+  that it sits above the reader and drop the correction entirely.
+* **a row replaced, not resized, carries no growth to offset.** `update()`
+  writes a `0` sentinel to force a fresh measurement; that transition is skipped.
+
+The offset is skipped while the list is bottom-pinned (the follow owns the
+scroll) and for an editing row (the browser reveals the caret). It writes
+`_lastScrollTop` with the new offset, so the scroll event it queues is not read
+as the reader scrolling. `specs/reading_position.spec.js` holds this.
+
+---
+
 ## State that has to reach the whole chat is written to `items`, not the document
 
 `document.querySelectorAll('.message-section')` is the twenty-odd rows the list

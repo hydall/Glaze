@@ -181,6 +181,7 @@ class UseVirtualScroll {
         this._lastScrollTop = 0;
         this._selfPinTop = null;
         this._smartScrollUnlock = null;
+        this._heightOffsetUnlock = null;
         
         this.visibleIndices = new Set();
         this.realVisibleIndices = new Set();
@@ -610,6 +611,23 @@ class UseVirtualScroll {
     _isMounted(index) {
         const item = this.items[index];
         return !!item && item.el && item.el.parentNode === this.container;
+    }
+
+    /* Index of the topmost rendered row whose bottom crosses the viewport top
+     * — the row the reader's view is anchored to. Derived from the height cache
+     * and `paddingTop` (the pre-change geometry), so it is stable while the
+     * ResizeObserver loop rewrites heights. -1 when no rendered row is in view.
+     * Used to offset `scrollTop` when a row before the anchor is re-measured,
+     * so the reader's text holds its place. */
+    _topVisibleIndexFromCache() {
+        const viewTop = this.container.scrollTop;
+        let top = this.paddingTop;
+        for (let i = this.renderStart; i < this.renderEnd; i++) {
+            const height = this.cache.getHeight(i);
+            if (top + height > viewTop + 1) return i;
+            top += height;
+        }
+        return -1;
     }
 
     /* Mounts a window centred on `index` so the row has a rect to measure. */
@@ -1047,8 +1065,25 @@ class UseVirtualScroll {
             this.resizeObserver = new ResizeObserver((entries) => {
                 if (!this.mounted) return;
                 const wasPinned = this._pinnedToBottom;
+                // A measured height can change a row that sits above what the
+                // reader is looking at — an image settling, a reasoning box
+                // collapsing, a footer badge appearing. The rows below it are
+                // re-laid-out while `scrollTop` stays put, so the text the
+                // reader is on slides down the screen: the jump a post leaves
+                // behind when it finishes or its picture arrives. The reader's
+                // anchor is the topmost row crossing the viewport top; growth
+                // of anything before it is offset from `scrollTop` below so the
+                // anchor keeps its place.
+                //
+                // Read from the cache *before* the loop mutates it: the row
+                // that grew can itself become the first to cross the viewport
+                // (its bottom was above the top edge, and now it is not), which
+                // would hide that it sits above the reader. The pre-change
+                // heights give the anchor the reader actually had.
+                const anchorIndex = this._topVisibleIndexFromCache();
                 let changed = false;
                 let editedRowChanged = false;
+                let anchorDelta = 0;
                 for (const entry of entries) {
                     const idx = parseInt(entry.target.dataset.index);
                     const height = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
@@ -1057,13 +1092,40 @@ class UseVirtualScroll {
                     if (previous == null || Math.abs(previous - height) > 1) {
                         this.cache.setHeight(idx, height);
                         changed = true;
-                        if (entry.target.classList.contains('editing')) {
+                        const isEditing = entry.target.classList.contains('editing');
+                        if (isEditing) {
                             editedRowChanged = true;
+                        }
+                        // `previous > 0` skips the 0 sentinel `update()` writes
+                        // to force a first measurement: that row was replaced,
+                        // not resized, so there is no delta to offset.
+                        if (!isEditing && previous > 0 && anchorIndex >= 0 && idx < anchorIndex) {
+                            anchorDelta += height - previous;
                         }
                     }
                 }
                 if (!changed) return;
                 this.updateSpacers();
+                // Keep the reader parked on the same text when a row above them
+                // grew or shrank. While bottom-pinned the follow below owns the
+                // scroll instead, and an editor lets the browser reveal the
+                // caret, so neither is offset here.
+                if (!wasPinned && anchorDelta !== 0) {
+                    // The bridge's header and scroll-to-top trackers also listen
+                    // to this scroll event. It is a correction, not the reader
+                    // moving, so it is raised as a programmatic scroll for its
+                    // duration — the same way the follow announces itself.
+                    this.isProgrammaticScrolling = true;
+                    this.container.scrollTop += anchorDelta;
+                    // The pin tracker compares against this on the event this
+                    // queues, so our own offset is not read as the reader
+                    // scrolling away.
+                    this._lastScrollTop = this.container.scrollTop;
+                    clearTimeout(this._heightOffsetUnlock);
+                    this._heightOffsetUnlock = setTimeout(() => {
+                        this.isProgrammaticScrolling = false;
+                    }, 80);
+                }
                 // A late height correction (images, fonts, badges) rewrites the
                 // spacers under a scroll position that stays put. In a long
                 // chat that can shift the mounted rows out of the viewport with

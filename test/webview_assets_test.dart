@@ -166,6 +166,30 @@ void main() {
       expect(virtualScrollJs, contains('if (!this._pinnedToBottom) return'));
     });
 
+    test('a late height change keeps an unpinned reader on their anchor', () {
+      expect(
+        virtualScrollJs,
+        contains('_topVisibleIndexFromCache()'),
+        reason:
+            'The anchor has to come from the height cache before the loop '
+            'writes to it: the row that grew can itself become the first to '
+            'cross the viewport, which would hide that it sits above the '
+            'reader and drop the offset entirely.',
+      );
+      expect(
+        virtualScrollJs,
+        contains('if (!wasPinned && anchorDelta !== 0)'),
+        reason:
+            'A still-pinned viewport is owned by the streaming follow, and an '
+            'editing row by the browser caret reveal; only an unpinned reader '
+            'needs scrollTop offset by the growth above them.',
+      );
+      expect(
+        virtualScrollJs,
+        contains('this.container.scrollTop += anchorDelta'),
+      );
+    });
+
     test('the streaming follow detaches on any upward scroll', () {
       final body = _extractBlockBody(
         virtualScrollJs,
