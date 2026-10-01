@@ -12,6 +12,7 @@ import '../../core/utils/id_generator.dart';
 import '../chat/generating_sessions_provider.dart';
 import 'models/vn_document.dart';
 import 'services/vn_generator_service.dart';
+import 'services/vn_sprite_service.dart';
 
 /// One novel: its session, the passes read back from it, and the pass being
 /// written, if any.
@@ -22,6 +23,8 @@ class VnState {
     required this.doc,
     this.writing,
     this.error,
+    this.drawing,
+    this.artError,
   });
 
   final ChatSession session;
@@ -33,6 +36,12 @@ class VnState {
   /// Why the last pass failed; cleared when the next one starts.
   final Object? error;
 
+  /// The name of the character whose sprites are being drawn.
+  final String? drawing;
+
+  /// Why drawing the cast stopped; cleared when it starts again.
+  final Object? artError;
+
   VnPlayState? get play => VnPlayState.fromSessionVars(session.sessionVars);
 
   VnPersona? get persona => VnPersona.fromSessionVars(session.sessionVars);
@@ -43,6 +52,10 @@ class VnState {
     bool clearWriting = false,
     Object? error,
     bool clearError = false,
+    String? drawing,
+    bool clearDrawing = false,
+    Object? artError,
+    bool clearArtError = false,
   }) {
     final next = session ?? this.session;
     return VnState(
@@ -50,6 +63,8 @@ class VnState {
       doc: session == null ? doc : VnDocument.fromMessages(next.messages),
       writing: clearWriting ? null : (writing ?? this.writing),
       error: clearError ? null : (error ?? this.error),
+      drawing: clearDrawing ? null : (drawing ?? this.drawing),
+      artError: clearArtError ? null : (artError ?? this.artError),
     );
   }
 }
@@ -61,6 +76,7 @@ Future<String> createVnSession(
   String premise, {
   VnPersona? persona,
   String? personaId,
+  String? artSize,
 }) async {
   final ids = newVnIds();
   final now = DateTime.now().millisecondsSinceEpoch;
@@ -72,6 +88,7 @@ Future<String> createVnSession(
       updatedAt: now ~/ 1000,
       sessionVars: {
         if (persona != null) kVnPersonaVarKey: jsonEncode(persona.toJson()),
+        kVnArtVarKey: ?artSize,
       },
       messages: [
         ChatMessage(
@@ -116,9 +133,17 @@ class VnNotifier extends AsyncNotifier<VnState> {
   _Ahead? _ahead;
   final Map<int, int> _aheadCount = {};
 
+  bool _drawingCast = false;
+  CancelToken? _artToken;
+  // Characters whose picture came back unusable; drawn again on a retry.
+  final Set<String> _artFailed = {};
+
   @override
   Future<VnState> build() async {
-    ref.onDispose(() => _ahead?.token.cancel('novel disposed'));
+    ref.onDispose(() {
+      _ahead?.token.cancel('novel disposed');
+      _artToken?.cancel('novel disposed');
+    });
     final session = await ref.read(chatRepoProvider).getById(sessionId);
     if (session == null) throw StateError('Novel $sessionId is gone');
     return VnState(
@@ -310,6 +335,76 @@ class VnNotifier extends AsyncNotifier<VnState> {
     }
   }
 
+  /// Draws sprites, one character at a time, for every cast member that has
+  /// none, when the novel was started with drawing on. Runs alongside the
+  /// story: the game shows cardboard until a character's sprites land. A
+  /// provider error stops the run until [retryCast]; a picture that cannot
+  /// be cut into sprites skips that character only.
+  Future<void> drawCast() async {
+    if (_drawingCast) return;
+    _drawingCast = true;
+    try {
+      while (true) {
+        final s = state.value;
+        if (s == null) return;
+        final size = s.session.sessionVars[kVnArtVarKey] ?? '';
+        if (size.isEmpty || s.artError != null) return;
+        final have = vnSpritesOf(s.session.sessionVars);
+        final who = s.doc.cast.values
+            .where((c) => !have.containsKey(c.id) && !_artFailed.contains(c.id))
+            .firstOrNull;
+        if (who == null) return;
+        state = AsyncData(s.copyWith(drawing: who.name));
+        final token = _artToken = CancelToken();
+        try {
+          final paths = await ref
+              .read(vnSpriteServiceProvider)
+              .draw(
+                sessionId: sessionId,
+                who: who,
+                setting: vnSpriteSetting(s.doc),
+                size: size,
+                cancelToken: token,
+              );
+          await _mutate((x) {
+            final all = vnSpritesOf(x.sessionVars)..[who.id] = paths;
+            return x.copyWith(
+              sessionVars: {
+                ...x.sessionVars,
+                kVnSpritesVarKey: jsonEncode(all),
+              },
+            );
+          }, bumpActivity: false);
+        } on FormatException catch (e) {
+          debugPrint('[VN3D] sprites of ${who.id} unusable: $e');
+          _artFailed.add(who.id);
+        } catch (e) {
+          if (token.isCancelled) return;
+          debugPrint('[VN3D] drawing ${who.id} failed: $e');
+          _artFailed.add(who.id);
+          final now = state.value;
+          if (now != null) state = AsyncData(now.copyWith(artError: e));
+          return;
+        }
+      }
+    } finally {
+      _drawingCast = false;
+      _artToken = null;
+      final s = state.value;
+      if (s != null && s.drawing != null) {
+        state = AsyncData(s.copyWith(clearDrawing: true));
+      }
+    }
+  }
+
+  /// Draws again every character that failed.
+  Future<void> retryCast() async {
+    _artFailed.clear();
+    final s = state.value;
+    if (s != null) state = AsyncData(s.copyWith(clearArtError: true));
+    await drawCast();
+  }
+
   /// Writes [mutate] to the session and keeps [state] on the result.
   Future<void> _mutate(
     ChatSession Function(ChatSession s) mutate, {
@@ -337,6 +432,8 @@ class VnNotifier extends AsyncNotifier<VnState> {
               doc: current.doc,
               writing: current.writing,
               error: current.error,
+              drawing: current.drawing,
+              artError: current.artError,
             ),
     );
   }

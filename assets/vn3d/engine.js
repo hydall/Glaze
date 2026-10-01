@@ -413,15 +413,60 @@
     blob.rotation.x = -Math.PI / 2; blob.position.y = 0.01; g.add(blob);
     g.position.set(x, 0, z);
     world.add(g);
-    const o = { id, g, card, m, ctx, tex, info, emo: 'normal', tx: x, tz: z };
+    const o = { id, g, card, m, ctx, tex, info, emo: 'normal', tx: x, tz: z, cy: 1.05 };
     g.userData.target = { kind: 'char', id, keys: [id], label: info.name };
     chars.set(id, o);
+    wearSprite(o);
     return o;
   }
   function setEmo(o, emo) {
     emo = ['smile', 'angry', 'sad', 'surprised'].includes(emo) ? emo : 'normal';
     if (o.emo === emo) return;
-    o.emo = emo; drawChar(o.ctx, o.info.color, emo); o.tex.needsUpdate = true;
+    o.emo = emo;
+    if (!wearSprite(o)) { drawChar(o.ctx, o.info.color, emo); o.tex.needsUpdate = true; }
+  }
+
+  // ── Drawn sprites: the host sends pictures of the cast once the image
+  // provider has drawn them; until then, and for a missing emotion, the
+  // cardboard above stands in. Kept across scenes and script reloads. ──
+  const SPRITE_H = 1.8;
+  const sprites = {};
+  function spriteOf(id, emo) {
+    const set = sprites[id];
+    if (!set) return null;
+    const e = set[emo] && set[emo].tex ? set[emo] : set.normal;
+    return e && e.tex ? e : null;
+  }
+  // Puts the character's sprite for its emotion on the card; false when
+  // there is none yet.
+  function wearSprite(o) {
+    const e = spriteOf(o.id, o.emo);
+    if (!e) return false;
+    if (o.m.map !== e.tex) { o.m.map = e.tex; o.m.alphaTest = 0.2; o.m.needsUpdate = true; }
+    const w = SPRITE_H * e.w / e.h;
+    o.card.scale.set(w / 1.05, SPRITE_H / 2.1, 1);
+    o.cy = SPRITE_H / 2;
+    return true;
+  }
+  function addSprites(map) {
+    for (const [id, emos] of Object.entries(map || {})) {
+      const old = sprites[id];
+      if (old) Object.values(old).forEach((e) => e.tex && e.tex.dispose());
+      const set = sprites[id] = {};
+      for (const [emo, url] of Object.entries(emos || {})) {
+        const e = set[emo] = { tex: null, w: 1, h: 2 };
+        const im = new Image();
+        im.onload = () => {
+          if (sprites[id] !== set) return;
+          const t = new T3.Texture(im);
+          t.encoding = T3.sRGBEncoding; t.anisotropy = 4; t.vnKeep = true; t.needsUpdate = true;
+          Object.assign(e, { tex: t, w: im.naturalWidth, h: im.naturalHeight });
+          const o = chars.get(id);
+          if (o) wearSprite(o);
+        };
+        im.src = url;
+      }
+    }
   }
 
   // ── Surfaces: a `texture` line names a pattern and its colors; the pattern
@@ -540,9 +585,14 @@
 
   function disposeWorld() {
     if (!world) return;
+    // A character wearing a sprite still owns its cardboard canvas.
+    chars.forEach((o) => o.tex.dispose());
     world.traverse((o) => {
       if (o.geometry) o.geometry.dispose();
-      if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); }
+      if (o.material) {
+        if (o.material.map && !o.material.map.vnKeep) o.material.map.dispose();
+        o.material.dispose();
+      }
     });
     scene.remove(world);
     world = null;
@@ -1075,7 +1125,7 @@
     chars.forEach((o) => {
       const p = o.g.position; p.x += (o.tx - p.x) * k2 * 0.6; p.z += (o.tz - p.z) * k2 * 0.6;
       o.g.rotation.y = Math.atan2(camera.position.x - p.x, camera.position.z - p.z);
-      o.card.position.y = 1.05 + (typing && st.speaking === o && !reduce ? Math.abs(Math.sin(t * 0.012)) * 0.03 : 0);
+      o.card.position.y = o.cy + (typing && st.speaking === o && !reduce ? Math.abs(Math.sin(t * 0.012)) * 0.03 : 0);
     });
     markers.forEach((m) => {
       const g = m.userData.owner;
@@ -1160,6 +1210,8 @@
       saveSoon();
     },
     input: hostInput,
+    // { castId: { emotion: imageUrl } }; a set replaces that character's.
+    sprites: addSprites,
     // The host gave up on writing the next part; a later `next` asks again.
     cancelNext() { pendingNext = null; saveSoon(); },
     snapshot,

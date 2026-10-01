@@ -1662,6 +1662,24 @@ with the journal, the choices and flags, the inventory and the chapter
 summaries, read live from `VN.snapshot()`. Continuations get the inventory
 and the last 25 journal lines.
 
+Sprites: a novel started with "Draw the characters" on (`sessionVars['__vnArt']`
+= the sheet size) draws each cast member with the image provider from the image
+generation settings, in the background, once their `cast` line exists
+(`VnNotifier.drawCast`). `vnSpritePlan` picks how: models that draw 21:9 at 2K
+or more (Nano Banana 2 / Pro) get one sheet of all five emotions, with a layout
+guide of grey mannequins as a reference when the provider takes references;
+1K-only models draw the neutral sprite at 9:16 and each emotion as an edit of
+it; providers without references draw the neutral sprite only. The model is
+asked for a flat green background (magenta for green-haired characters);
+`vn_sprite_image.dart` keys it out by how much that channel outweighs the
+others (which survives JPEG and clears gaps enclosed by the figure), despills
+the edges, splits the sheet on its empty columns and puts every emotion of a
+character on one canvas, feet on the bottom edge. The PNGs go to
+`<data>/vn_sprites/<sessionId>/`, their paths to `sessionVars['__vnSprites']`,
+and the screen sends them to `VN.sprites` as data URLs; the engine falls back to
+the neutral sprite for a missing emotion and to cardboard until any lands. The
+folder is removed with the novel; it is not part of backups or sync.
+
 | Piece | Where | Job |
 |---|---|---|
 | Engine | `assets/vn3d/engine.js` (+ vendored `three.min.js`, r128, MIT) | Parses the script (later definitions replace earlier ones, `---` separates parts), builds rooms on locations with procedurally painted textures, first-person movement (drag on the left half walks, drag on the right half looks, a tap interacts), dialogue, choices, flags, `next` |

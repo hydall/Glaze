@@ -30,6 +30,53 @@ const String kVnPersonaVarKey = '__vnPersona';
 /// player: `{chapter, key, body}` JSON, see [vnPrefetchKey].
 const String kVnPrefetchVarKey = '__vnPrefetch';
 
+/// [ChatSession.sessionVars] key holding the sprites drawn for the cast:
+/// `{castId: {emotion: path}}` JSON, paths relative to the app's data folder.
+const String kVnSpritesVarKey = '__vnSprites';
+
+/// [ChatSession.sessionVars] key set when the novel draws its cast with the
+/// image provider; the value is the sheet size asked for (`2K`, `4K`).
+/// Absent: the cast stays cardboard.
+const String kVnArtVarKey = '__vnArt';
+
+/// Sprite paths by cast id and emotion, read from the session.
+Map<String, Map<String, String>> vnSpritesOf(Map<String, String> vars) {
+  final json = vars[kVnSpritesVarKey];
+  if (json == null || json.isEmpty) return {};
+  try {
+    final m = jsonDecode(json);
+    if (m is! Map) return {};
+    return {
+      for (final e in m.entries)
+        if (e.value is Map)
+          '${e.key}': {
+            for (final f in (e.value as Map).entries) '${f.key}': '${f.value}',
+          },
+    };
+  } catch (_) {
+    return {};
+  }
+}
+
+/// A character as the script defines them.
+class VnCastMember {
+  const VnCastMember({
+    required this.id,
+    required this.name,
+    this.color,
+    this.about = '',
+  });
+
+  final String id;
+  final String name;
+
+  /// Hair color, `#rrggbb`.
+  final String? color;
+
+  /// The `about` line: role, personality, look.
+  final String about;
+}
+
 /// Who the player is in the story.
 class VnPersona {
   const VnPersona({required this.name, this.description = ''});
@@ -277,6 +324,37 @@ class VnDocument {
       );
     }
     return out;
+  }
+
+  /// Every character the script defines, by id, in order of definition. A
+  /// later `cast` or `about` line for the same id replaces the earlier one.
+  Map<String, VnCastMember> get cast {
+    final names = <String, ({String name, String? color})>{};
+    final about = <String, String>{};
+    for (final line in const LineSplitter().convert(script)) {
+      final c = RegExp(
+        r'^\s*cast\s+([\p{L}\p{N}_]+)\s+"([^"]+)"(?:\s+(#[0-9a-fA-F]{3,6}))?',
+        unicode: true,
+      ).firstMatch(line);
+      if (c != null) {
+        names[c.group(1)!] = (name: c.group(2)!, color: c.group(3));
+        continue;
+      }
+      final a = RegExp(
+        r'^\s*about\s+([\p{L}\p{N}_]+)\s*:\s*(.+)$',
+        unicode: true,
+      ).firstMatch(line);
+      if (a != null) about[a.group(1)!] = a.group(2)!.trim();
+    }
+    return {
+      for (final e in names.entries)
+        e.key: VnCastMember(
+          id: e.key,
+          name: e.value.name,
+          color: e.value.color,
+          about: about[e.key] ?? '',
+        ),
+    };
   }
 
   /// Scene ids used so far, so a new chapter does not reuse one.

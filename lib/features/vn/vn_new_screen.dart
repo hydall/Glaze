@@ -13,8 +13,11 @@ import '../../shared/utils/avatar_image.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/glaze_action_button.dart';
 import '../../shared/widgets/glaze_scaffold.dart';
+import '../../shared/widgets/glaze_switch.dart';
+import '../image_gen/image_gen_provider.dart';
 import '../personas/persona_list_provider.dart';
 import 'models/vn_document.dart';
+import 'services/vn_sprite_service.dart';
 import 'vn_provider.dart';
 
 /// Starts a novel: who the player is, then the idea, written at length in a
@@ -43,6 +46,9 @@ class _VnNewScreenState extends ConsumerState<VnNewScreen> {
   // Null until the player picks; then the persona id, or '' for none.
   String? _personaId;
   bool _creating = false;
+  // Null until toggled: then drawing follows whether image generation is on.
+  bool? _art;
+  String _artSize = '2K';
 
   @override
   void dispose() {
@@ -77,10 +83,12 @@ class _VnNewScreenState extends ConsumerState<VnNewScreen> {
     setState(() => _creating = true);
     final persona = _selected(personas);
     final router = GoRouter.of(context);
+    final art = _art ?? _artDefault;
     final sessionId = await createVnSession(
       ref.read(chatRepoProvider),
       _controller.text,
       personaId: persona?.id,
+      artSize: art ? _artSize : null,
       persona: persona == null
           ? null
           : VnPersona(
@@ -92,6 +100,63 @@ class _VnNewScreenState extends ConsumerState<VnNewScreen> {
     );
     if (!mounted) return;
     unawaited(router.pushReplacement('/vn/$sessionId'));
+  }
+
+  bool get _artDefault =>
+      ref.read(imageGenSettingsProvider).value?.enabled ?? false;
+
+  /// Whether the cast is drawn, and how the configured model will draw it.
+  Widget _artRow(BuildContext context) {
+    final settings = ref.watch(imageGenSettingsProvider).value;
+    final on = _art ?? (settings?.enabled ?? false);
+    final plan = settings == null ? null : vnSpritePlan(settings, _artSize);
+    final hint = switch (plan) {
+      VnSheetPlan() => 'vn_art_sheet'.tr(),
+      VnSinglesPlan(edits: true) => 'vn_art_edits'.tr(),
+      VnSinglesPlan(edits: false) => 'vn_art_single'.tr(),
+      null => '',
+    };
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'vn_art'.tr(),
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: context.cs.onSurface,
+                  ),
+                ),
+                if (on && hint.isNotEmpty)
+                  Text(
+                    hint,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: context.cs.onSurfaceVariant,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          if (on && plan is VnSheetPlan)
+            for (final size in const ['2K', '4K'])
+              Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: ChoiceChip(
+                  label: Text(size),
+                  selected: _artSize == size,
+                  onSelected: (_) => setState(() => _artSize = size),
+                ),
+              ),
+          GlazeSwitch(value: on, onChanged: (v) => setState(() => _art = v)),
+        ],
+      ),
+    );
   }
 
   @override
@@ -148,6 +213,7 @@ class _VnNewScreenState extends ConsumerState<VnNewScreen> {
                   ),
                 ),
               const SizedBox(height: 16),
+              _artRow(context),
               _label(context, 'vn_new_idea'.tr()),
               Wrap(
                 spacing: 6,

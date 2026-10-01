@@ -11,6 +11,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/state/db_provider.dart';
 import '../../core/utils/app_orientation.dart';
 import '../../shared/widgets/glaze_error_block.dart';
 import '../../shared/widgets/glaze_scaffold.dart';
@@ -62,6 +63,8 @@ class _VnScreenState extends ConsumerState<VnScreen> {
   String? _playedScript;
   bool _setupStarted = false;
   bool _resumeChecked = false;
+  // What was sent to the engine per cast id, so each set goes over once.
+  final Map<String, String> _sentSprites = {};
 
   VnNotifier get _notifier => ref.read(vnProvider(widget.sessionId).notifier);
 
@@ -102,6 +105,10 @@ class _VnScreenState extends ConsumerState<VnScreen> {
 
   void _onState(VnState? s) {
     if (s == null || !mounted) return;
+    if (s.doc.setup.containsKey(VnPass.characters) && s.drawing == null) {
+      unawaited(_notifier.drawCast());
+    }
+    if (_pageLoaded) unawaited(_sendSprites(s));
     if (!s.doc.playable) {
       // Written once per visit on its own; after a failure only the retry
       // button starts it again.
@@ -173,6 +180,7 @@ class _VnScreenState extends ConsumerState<VnScreen> {
       _controller = null;
       _pageLoaded = false;
       _playedScript = null;
+      _sentSprites.clear();
       _webViewGeneration++;
     });
   }
@@ -220,6 +228,31 @@ class _VnScreenState extends ConsumerState<VnScreen> {
       source:
           'window.VN && VN.extend(${jsonEncode(script)}, ${jsonEncode(opts)});',
     );
+  }
+
+  /// Hands the engine every character's sprites it does not have yet, as
+  /// data URLs: the page is loaded from a string and cannot read app files.
+  Future<void> _sendSprites(VnState s) async {
+    final sprites = vnSpritesOf(s.session.sessionVars);
+    if (sprites.isEmpty) return;
+    final storage = await ref.read(imageStorageProvider.future);
+    for (final e in sprites.entries) {
+      final sig = jsonEncode(e.value);
+      if (_sentSprites[e.key] == sig) continue;
+      _sentSprites[e.key] = sig;
+      final urls = <String, String>{};
+      for (final f in e.value.entries) {
+        final file = File(storage.absolutePath(f.value) ?? f.value);
+        if (!await file.exists()) continue;
+        urls[f.key] =
+            'data:image/png;base64,${base64Encode(await file.readAsBytes())}';
+      }
+      final controller = _controller;
+      if (urls.isEmpty || controller == null || !mounted) continue;
+      await controller.evaluateJavascript(
+        source: 'window.VN && VN.sprites(${jsonEncode({e.key: urls})});',
+      );
+    }
   }
 
   Future<void> _continue(Map<String, dynamic> snapshot) async {
@@ -368,6 +401,13 @@ class _VnScreenState extends ConsumerState<VnScreen> {
           VnGeneratingBadge(
             label: vnErrorText(s.error!),
             onRetry: _retryContinue,
+          )
+        else if (s.drawing != null)
+          VnGeneratingBadge(label: 'vn_drawing'.tr(args: [s.drawing!]))
+        else if (s.artError != null)
+          VnGeneratingBadge(
+            label: 'vn_drawing_failed'.tr(args: [vnErrorText(s.artError!)]),
+            onRetry: () => unawaited(_notifier.retryCast()),
           ),
       ],
     );

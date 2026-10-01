@@ -15,6 +15,7 @@ import '../chat/chat_provider.dart';
 import '../chat/chat_session_service.dart';
 import '../extensions/state/message_variables_notifier.dart';
 import '../vn/models/vn_document.dart';
+import '../vn/services/vn_sprite_service.dart';
 import '../vn/vn_labels.dart';
 import '../vn/vn_provider.dart';
 
@@ -298,6 +299,7 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
     ChatSessionService.clearCache();
     if (charId != null && isVnCharacterId(charId)) {
       ref.invalidate(vnProvider(sessionId));
+      await deleteVnSprites(ref, sessionId);
     }
     // The chat screen may still be bound to the row that just went away. Left
     // alone it keeps serving the deleted session, and its next write recreates
