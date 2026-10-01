@@ -5,6 +5,7 @@ import '../db/repositories/embedding_repo.dart';
 import '../db/repositories/lorebook_repo.dart';
 import '../db/repositories/memory_book_repo.dart';
 import '../models/chat_message.dart';
+import '../models/vn_session_id.dart';
 import 'chat_message_embedding_service.dart';
 import 'embedding_service.dart';
 import 'lorebook_embedding_service.dart';
@@ -217,6 +218,8 @@ class VectorRebuildService {
     if (request.sources.contains(VectorRebuildSource.rawChat)) {
       final sessions = await _chatRepo.getAllSessions();
       for (final session in sessions) {
+        // A novel's messages are game script, not conversation.
+        if (isVnCharacterId(session.characterId)) continue;
         final eligibleCount = session.messages
             .where(_isEmbeddableMessage)
             .length;

@@ -146,13 +146,6 @@ List<ToolsTileDef> buildToolsTileCatalog() => [
     defaultSize: ToolsTileSize.small,
   ),
   ToolsTileDef(
-    id: 'vn',
-    titleKey: 'vn_title',
-    subtitleKey: 'vn_subtitle',
-    icon: Icons.view_in_ar_outlined,
-    defaultSize: ToolsTileSize.small,
-  ),
-  ToolsTileDef(
     id: 'ext-blocks',
     titleKey: 'ext_blocks_title',
     subtitleKey: 'tools_ext_blocks_subtitle',

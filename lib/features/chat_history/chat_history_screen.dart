@@ -10,6 +10,7 @@ import '../../shared/theme/app_colors.dart';
 
 import '../../shared/widgets/glow_ripple.dart';
 import '../settings/app_settings_provider.dart';
+import '../vn/widgets/vn_new_sheet.dart';
 import 'chat_history_actions.dart';
 import 'chat_history_list.dart';
 import 'chat_history_provider.dart';
@@ -114,6 +115,17 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
       title: _searchExpanded ? null : 'tab_dialogs'.tr(),
       titleWidget: _searchExpanded ? _buildSearchField() : null,
       actions: [
+        if (!_searchExpanded)
+          SizedBox(
+            width: 44,
+            height: 44,
+            child: IconButton(
+              icon: const Icon(Icons.view_in_ar_rounded, size: 22),
+              tooltip: 'vn_new'.tr(),
+              color: context.cs.primary,
+              onPressed: () => showNewVnSheet(context, ref),
+            ),
+          ),
         SizedBox(
           width: 44,
           height: 44,
@@ -206,7 +218,9 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return widget.embedded ? _buildEmbedded(context) : _buildFullScreen(context);
+    return widget.embedded
+        ? _buildEmbedded(context)
+        : _buildFullScreen(context);
   }
 
   Widget _buildFullScreen(BuildContext context) {
@@ -260,51 +274,59 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
     return Material(
       type: MaterialType.transparency,
       child: Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
-          child: TextField(
-            controller: _searchCtrl,
-            onChanged: (v) => setState(() => _searchQuery = v),
-            textInputAction: TextInputAction.search,
-            cursorColor: context.cs.primary,
-            style: TextStyle(color: context.cs.onSurface, fontSize: 13),
-            decoration: InputDecoration(
-              isDense: true,
-              hintText: 'search_dialogs'.tr(),
-              hintStyle: TextStyle(
-                color: context.cs.onSurfaceVariant,
-                fontSize: 13,
-              ),
-              prefixIcon: Icon(
-                Icons.search_rounded,
-                size: 18,
-                color: context.cs.onSurfaceVariant,
-              ),
-              suffixIcon: _searchQuery.isNotEmpty
-                  ? IconButton(
-                      icon: const Icon(Icons.close_rounded, size: 16),
-                      onPressed: () {
-                        _searchCtrl.clear();
-                        setState(() => _searchQuery = '');
-                      },
-                    )
-                  : null,
-              filled: true,
-              fillColor: Colors.white.withValues(alpha: 0.06),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-                borderSide: BorderSide.none,
-              ),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 8,
-              ),
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
+            child: Row(
+              children: [
+                Expanded(child: _buildEmbeddedSearch(context)),
+                IconButton(
+                  icon: const Icon(Icons.view_in_ar_rounded, size: 20),
+                  tooltip: 'vn_new'.tr(),
+                  color: context.cs.primary,
+                  onPressed: () => showNewVnSheet(context, ref),
+                ),
+              ],
             ),
           ),
+          Expanded(child: ChatHistoryList(searchQuery: _searchQuery)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmbeddedSearch(BuildContext context) {
+    return TextField(
+      controller: _searchCtrl,
+      onChanged: (v) => setState(() => _searchQuery = v),
+      textInputAction: TextInputAction.search,
+      cursorColor: context.cs.primary,
+      style: TextStyle(color: context.cs.onSurface, fontSize: 13),
+      decoration: InputDecoration(
+        isDense: true,
+        hintText: 'search_dialogs'.tr(),
+        hintStyle: TextStyle(color: context.cs.onSurfaceVariant, fontSize: 13),
+        prefixIcon: Icon(
+          Icons.search_rounded,
+          size: 18,
+          color: context.cs.onSurfaceVariant,
         ),
-        Expanded(child: ChatHistoryList(searchQuery: _searchQuery)),
-      ],
+        suffixIcon: _searchQuery.isNotEmpty
+            ? IconButton(
+                icon: const Icon(Icons.close_rounded, size: 16),
+                onPressed: () {
+                  _searchCtrl.clear();
+                  setState(() => _searchQuery = '');
+                },
+              )
+            : null,
+        filled: true,
+        fillColor: Colors.white.withValues(alpha: 0.06),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide.none,
+        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       ),
     );
   }

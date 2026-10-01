@@ -41,9 +41,12 @@
   const ID = '[\\p{L}\\p{N}_]+';
   const re = (s) => new RegExp(s, 'u');
   const NUM = '-?\\d+(?:\\.\\d+)?';
+  const HEX = '#[0-9a-fA-F]{3,6}';
   const R = {
     scene: re(`^#\\s*(${ID})(?:\\s*<\\s*(${ID}))?\\s*$`),
-    cast: re(`^cast\\s+(${ID})\\s+"([^"]+)"(?:\\s+(#[0-9a-fA-F]{3,6}))?`),
+    location: re(`^location\\s+(${ID})\\s*$`),
+    texture: re(`^texture\\s+(${ID})\\s+([a-z]+)\\s+(${HEX})(?:\\s+(${HEX}))?(?:\\s+(${NUM}))?`),
+    cast: re(`^cast\\s+(${ID})\\s+"([^"]+)"(?:\\s+(${HEX}))?`),
     on: re(`^on\\s+(${ID})\\s*$`),
     room: re(`^room\\s+(${NUM})\\s+(${NUM})(.*)$`),
     light: /^light\s+(day|dusk|night)\b/,
@@ -59,6 +62,7 @@
     goto: re(`^goto\\s+(${ID})\\s*$`),
     move: re(`^move\\s+(${ID})\\s+(${NUM}),\\s*(${NUM})`),
     end: /^end\s*$/,
+    next: /^next(?:\s+(.+))?$/,
     once: /^once\s*$/,
     say: re(`^(${ID})(?:\\[(\\w+)\\])?\\s*:\\s*(.+)$`),
   };
@@ -67,11 +71,12 @@
   function parseLine(l) {
     let m;
     if ((m = l.match(R.room))) {
-      const f = m[3].match(/floor\s+(#[0-9a-f]{3,6})/i);
-      const w = m[3].match(/wall\s+(#[0-9a-f]{3,6}|none)/i);
+      // A surface is a color or the id of a `texture` line.
+      const f = m[3].match(/floor\s+(\S+)/i);
+      const w = m[3].match(/wall\s+(\S+)/i);
       return {
         op: 'room', w: clamp(+m[1], 4, 40), d: clamp(+m[2], 4, 40),
-        floor: f ? f[1] : '#7a7f90', wall: w ? w[1].toLowerCase() : '#c8c4ba',
+        floor: f ? f[1] : '#7a7f90', wall: w ? (w[1].toLowerCase() === 'none' ? 'none' : w[1]) : '#c8c4ba',
       };
     }
     if ((m = l.match(R.light))) return { op: 'light', v: m[1] };
@@ -96,30 +101,49 @@
     if ((m = l.match(R.goto))) return { op: 'goto', to: m[1] };
     if ((m = l.match(R.move))) return { op: 'move', id: m[1], x: +m[2], z: +m[3] };
     if (R.end.test(l)) return { op: 'end' };
+    if ((m = l.match(R.next))) return { op: 'next', hint: (m[1] || '').trim() };
     if (R.once.test(l)) return { op: 'once' };
     if ((m = l.match(R.say))) return { op: 'say', id: m[1], emo: (m[2] || '').toLowerCase(), text: m[3] };
     return null;
   }
 
+  // A script is the story so far: every pass the model wrote, joined. A later
+  // definition of a cast member, texture, location or scene replaces the
+  // earlier one. Each block carries a key so `once` survives a reload.
   function parse(src) {
-    const cast = {}, scenes = {}, order = [], skipped = [];
+    const cast = {}, scenes = {}, locations = {}, textures = {}, order = [], skipped = [];
     let cur = null, block = null;
+    const blockOf = (key) => { const b = []; b.key = key; return b; };
     String(src || '').split('\n').forEach((raw, i) => {
       const l = raw.trim();
       if (!l || l.startsWith('//')) return;
+      // Separates two parts of the story: nothing carries over the line.
+      if (l === '---') { cur = null; block = null; return; }
       let m;
       if ((m = l.match(R.scene))) {
-        cur = { id: m[1], base: m[2] || null, stat: [], intro: [], on: {} };
-        scenes[cur.id] = cur; order.push(cur.id); block = cur.intro;
+        cur = { id: m[1], base: m[2] || null, stat: [], intro: blockOf(`${m[1]}/`), on: {} };
+        if (!scenes[cur.id]) order.push(cur.id);
+        scenes[cur.id] = cur; block = cur.intro;
+        return;
+      }
+      if ((m = l.match(R.location))) {
+        cur = { id: m[1], base: null, stat: [], intro: [], on: {}, loc: true };
+        locations[cur.id] = cur; block = null;
+        return;
+      }
+      if ((m = l.match(R.texture))) {
+        textures[m[1]] = { kind: m[2], c1: m[3], c2: m[4] || null, scale: clamp(+(m[5] || 1), 0.25, 4) };
         return;
       }
       if ((m = l.match(R.cast))) { cast[m[1]] = { name: m[2], color: m[3] || '#c9c9d6' }; return; }
-      if (cur && (m = l.match(R.on))) { block = cur.on[m[1]] = []; return; }
+      if (cur && !cur.loc && (m = l.match(R.on))) { block = cur.on[m[1]] = blockOf(`${cur.id}/${m[1]}`); return; }
       const c = cur && parseLine(l);
       if (!c) { skipped.push(i + 1); return; }
-      if (STATIC.has(c.op)) cur.stat.push(c); else block.push(c);
+      if (STATIC.has(c.op)) cur.stat.push(c);
+      else if (block) block.push(c);
+      else skipped.push(i + 1);
     });
-    return { cast, scenes, order, skipped };
+    return { cast, scenes, locations, textures, order, skipped };
   }
 
   function clamp(v, a, b) { return Math.max(a, Math.min(b, Number.isFinite(v) ? v : a)); }
@@ -348,21 +372,24 @@
   }
 
   // ── World build ─────────────────────────────────────────────────────────────
-  let game = { cast: {}, scenes: {}, order: [], skipped: [] };
+  let game = { cast: {}, scenes: {}, locations: {}, textures: {}, order: [], skipped: [] };
   let world = null, worldSig = '';
   let room = { w: 12, d: 9, wall: '#c8c4ba' };
   const chars = new Map();
   let interactables = [], obstacles = [], markers = [], spawn = null;
 
-  function staticOf(id, depth) {
-    const sc = game.scenes[id];
-    if (!sc || depth > 8) return [];
-    return (sc.base ? staticOf(sc.base, depth + 1) : []).concat(sc.stat);
+  // `# scene < base` builds on a location first, else on an earlier scene.
+  function baseOf(sc) {
+    if (!sc.base) return null;
+    return game.locations[sc.base] || (sc.base !== sc.id ? game.scenes[sc.base] : null) || null;
   }
-  function handlersOf(id, depth) {
-    const sc = game.scenes[id];
+  function staticOf(sc, depth) {
+    if (!sc || depth > 8) return [];
+    return staticOf(baseOf(sc), depth + 1).concat(sc.stat);
+  }
+  function handlersOf(sc, depth) {
     if (!sc || depth > 8) return {};
-    return Object.assign(sc.base ? handlersOf(sc.base, depth + 1) : {}, sc.on);
+    return Object.assign(handlersOf(baseOf(sc), depth + 1), sc.on);
   }
 
   function makeChar(id, x, z) {
@@ -391,22 +418,117 @@
     o.emo = emo; drawChar(o.ctx, o.info.color, emo); o.tex.needsUpdate = true;
   }
 
-  function floorTex(hex, tiles) {
-    const cv = document.createElement('canvas'); cv.width = cv.height = 256;
-    const c = cv.getContext('2d');
-    c.fillStyle = hex; c.fillRect(0, 0, 256, 256);
-    let s = 7; const rnd = () => (s = (s * 9301 + 49297) % 233280) / 233280;
-    if (tiles) {
-      c.strokeStyle = shade(hex, -0.08); c.lineWidth = 3;
-      for (let i = 0; i <= 256; i += 64) { c.beginPath(); c.moveTo(i, 0); c.lineTo(i, 256); c.moveTo(0, i); c.lineTo(256, i); c.stroke(); }
-    } else {
+  // ── Surfaces: a `texture` line names a pattern and its colors; the pattern
+  // is painted here, so the model describes materials without any images ──
+  const PATTERNS = {
+    plain(c, a, b, rnd) {
+      for (let i = 0; i < 900; i++) { c.fillStyle = shade(a, (rnd() - 0.5) * 0.06); c.fillRect(rnd() * 256, rnd() * 256, 3, 3); }
+    },
+    planks(c, a, b, rnd) {
       for (let y = 0; y < 256; y += 32) {
-        c.fillStyle = shade(hex, (rnd() - 0.5) * 0.08); c.fillRect(0, y, 256, 32);
-        c.fillStyle = shade(hex, -0.14); c.fillRect(0, y, 256, 2);
+        c.fillStyle = shade(a, (rnd() - 0.5) * 0.08); c.fillRect(0, y, 256, 32);
+        c.fillStyle = b; c.fillRect(0, y, 256, 2);
         c.fillRect(rnd() * 256, y, 2, 32);
       }
+    },
+    tiles(c, a, b) {
+      c.strokeStyle = b; c.lineWidth = 3;
+      for (let i = 0; i <= 256; i += 64) { c.beginPath(); c.moveTo(i, 0); c.lineTo(i, 256); c.moveTo(0, i); c.lineTo(256, i); c.stroke(); }
+    },
+    checker(c, a, b) {
+      c.fillStyle = b;
+      for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) if ((x + y) % 2) c.fillRect(x * 64, y * 64, 64, 64);
+    },
+    brick(c, a, b, rnd) {
+      c.fillStyle = b; c.fillRect(0, 0, 256, 256);
+      for (let r = 0; r < 8; r++) {
+        const off = r % 2 ? 32 : 0;
+        for (let x = -64; x < 256; x += 64) {
+          c.fillStyle = shade(a, (rnd() - 0.5) * 0.1); c.fillRect(x + off + 2, r * 32 + 2, 60, 28);
+        }
+      }
+    },
+    stone(c, a, b, rnd) {
+      c.fillStyle = b; c.fillRect(0, 0, 256, 256);
+      for (let i = 0; i < 40; i++) {
+        c.fillStyle = shade(a, (rnd() - 0.5) * 0.12);
+        c.beginPath(); c.ellipse(rnd() * 256, rnd() * 256, 14 + rnd() * 18, 10 + rnd() * 14, rnd() * 3, 0, Math.PI * 2); c.fill();
+      }
+    },
+    carpet(c, a, b, rnd) {
+      for (let i = 0; i < 4000; i++) { c.fillStyle = shade(a, (rnd() - 0.5) * 0.1); c.fillRect(rnd() * 256, rnd() * 256, 2, 2); }
+      c.strokeStyle = b; c.lineWidth = 6; c.strokeRect(16, 16, 224, 224);
+    },
+    grass(c, a, b, rnd) {
+      c.lineWidth = 2;
+      for (let i = 0; i < 1400; i++) {
+        const x = rnd() * 256, y = rnd() * 256;
+        c.strokeStyle = rnd() < 0.3 ? b : shade(a, (rnd() - 0.5) * 0.14);
+        c.beginPath(); c.moveTo(x, y); c.lineTo(x + (rnd() - 0.5) * 6, y - 4 - rnd() * 6); c.stroke();
+      }
+    },
+    sand(c, a, b, rnd) {
+      for (let i = 0; i < 3000; i++) { c.fillStyle = rnd() < 0.2 ? b : shade(a, (rnd() - 0.5) * 0.08); c.fillRect(rnd() * 256, rnd() * 256, 2, 2); }
+    },
+    concrete(c, a, b, rnd) {
+      PATTERNS.plain(c, a, b, rnd);
+      c.strokeStyle = b; c.lineWidth = 1.5;
+      for (let i = 0; i < 3; i++) {
+        let x = rnd() * 256, y = rnd() * 256; c.beginPath(); c.moveTo(x, y);
+        for (let k = 0; k < 6; k++) { x += (rnd() - 0.5) * 40; y += (rnd() - 0.5) * 40; c.lineTo(x, y); }
+        c.stroke();
+      }
+    },
+    metal(c, a, b, rnd) {
+      for (let y = 0; y < 256; y += 2) { c.fillStyle = shade(a, (rnd() - 0.5) * 0.05); c.fillRect(0, y, 256, 2); }
+      c.fillStyle = b; [32, 224].forEach((x) => [32, 224].forEach((y) => { c.beginPath(); c.arc(x, y, 4, 0, Math.PI * 2); c.fill(); }));
+    },
+    stripes(c, a, b) {
+      c.fillStyle = b;
+      for (let x = 0; x < 256; x += 32) c.fillRect(x, 0, 12, 256);
+    },
+    wallpaper(c, a, b) {
+      c.fillStyle = b;
+      for (let y = 0; y < 256; y += 32) for (let x = (y / 32) % 2 ? 16 : 0; x < 256; x += 32) {
+        c.beginPath(); c.moveTo(x + 16, y + 6); c.lineTo(x + 24, y + 16); c.lineTo(x + 16, y + 26); c.lineTo(x + 8, y + 16); c.closePath(); c.fill();
+      }
+    },
+    panels(c, a, b) {
+      c.strokeStyle = b; c.lineWidth = 4;
+      c.strokeRect(8, 8, 112, 240); c.strokeRect(136, 8, 112, 240);
+    },
+    water(c, a, b, rnd) {
+      c.strokeStyle = b; c.lineWidth = 2;
+      for (let i = 0; i < 60; i++) {
+        const x = rnd() * 256, y = rnd() * 256;
+        c.beginPath(); c.arc(x, y, 6 + rnd() * 10, Math.PI * 1.15, Math.PI * 1.85); c.stroke();
+      }
+    },
+  };
+  const paintCache = new Map();
+
+  // [value] is a color or a texture id; [kind] is the pattern a bare color gets.
+  function surface(value, kind) {
+    const t = game.textures[value];
+    const spec = t
+      ? { kind: PATTERNS[t.kind] ? t.kind : 'plain', c1: t.c1, c2: t.c2, scale: t.scale }
+      : { kind, c1: /^#[0-9a-f]{3,6}$/i.test(value) ? value : '#8a8f9c', c2: null, scale: 1 };
+    spec.c2 = spec.c2 || shade(spec.c1, -0.14);
+    return spec;
+  }
+  function surfaceTex(spec, w, h) {
+    const sig = `${spec.kind}${spec.c1}${spec.c2}`;
+    let cv = paintCache.get(sig);
+    if (!cv) {
+      cv = document.createElement('canvas'); cv.width = cv.height = 256;
+      const c = cv.getContext('2d');
+      c.fillStyle = spec.c1; c.fillRect(0, 0, 256, 256);
+      let s = 7; const rnd = () => (s = (s * 9301 + 49297) % 233280) / 233280;
+      PATTERNS[spec.kind](c, spec.c1, spec.c2, rnd);
+      paintCache.set(sig, cv);
     }
     const t = new T3.CanvasTexture(cv); t.encoding = T3.sRGBEncoding; t.wrapS = t.wrapT = T3.RepeatWrapping;
+    t.repeat.set(w / (3 * spec.scale), h / (3 * spec.scale));
     return t;
   }
 
@@ -451,19 +573,20 @@
       const fill = new T3.PointLight(L.tint, 0.35, 18, 2); fill.position.set(0, H - 0.4, 0); world.add(fill);
     }
 
-    const ft = floorTex(room.floor, open); ft.repeat.set(room.w / 3, room.d / 3);
-    const floor = new T3.Mesh(new T3.PlaneGeometry(room.w, room.d), mat('#ffffff', { map: ft }));
+    const fs = surface(room.floor, open ? 'tiles' : 'planks');
+    const floor = new T3.Mesh(new T3.PlaneGeometry(room.w, room.d), mat('#ffffff', { map: surfaceTex(fs, room.w, room.d) }));
     floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; world.add(floor);
     if (!open) {
-      const wm = mat(room.wall), base = mat(shade(room.wall, -0.3));
+      const ws = surface(room.wall, 'plain'), base = mat(shade(ws.c1, -0.3));
       const wall = (w, x, z, ry) => {
-        const p = new T3.Mesh(new T3.PlaneGeometry(w, H), wm); p.position.set(x, H / 2, z); p.rotation.y = ry; p.receiveShadow = true; world.add(p);
+        const p = new T3.Mesh(new T3.PlaneGeometry(w, H), mat('#ffffff', { map: surfaceTex(ws, w, H) }));
+        p.position.set(x, H / 2, z); p.rotation.y = ry; p.receiveShadow = true; world.add(p);
         const b = new T3.Mesh(new T3.BoxGeometry(w, 0.14, 0.04), base); b.position.set(x, 0.07, z); b.rotation.y = ry; world.add(b);
       };
       wall(room.w, 0, -room.d / 2, 0); wall(room.w, 0, room.d / 2, Math.PI);
       wall(room.d, -room.w / 2, 0, Math.PI / 2); wall(room.d, room.w / 2, 0, -Math.PI / 2);
       // Lit from below only, so it gets a little of its own glow to stay pale.
-      const ceil = new T3.Mesh(new T3.PlaneGeometry(room.w, room.d), mat(shade(room.wall, 0.06), { emissive: room.wall, emissiveIntensity: 0.35 }));
+      const ceil = new T3.Mesh(new T3.PlaneGeometry(room.w, room.d), mat(shade(ws.c1, 0.06), { emissive: ws.c1, emissiveIntensity: 0.35 }));
       ceil.rotation.x = Math.PI / 2; ceil.position.y = H; world.add(ceil);
       for (let x = -room.w / 2 + 2; x < room.w / 2 - 1; x += 3) {
         const panel = new T3.Mesh(new T3.BoxGeometry(1.2, 0.04, 0.3), new T3.MeshBasicMaterial({ color: '#fff8ea' }));
@@ -561,19 +684,25 @@
     });
   }
 
-  async function enter(id) {
+  // [resume] puts the player back where a saved game left them, without
+  // replaying the scene's intro.
+  async function enter(id, resume) {
     const sc = game.scenes[id];
     if (!sc) { toast(S.noScene.replace('%s', id)); setMode('roam'); return; }
     setMode('fade');
-    const list = staticOf(id, 0), handlers = handlersOf(id, 0);
+    const list = staticOf(sc, 0), handlers = handlersOf(sc, 0);
     const willRebuild = JSON.stringify(list) !== worldSig || !world;
     if (willRebuild) await fade(true);
     const rebuilt = build(list, handlers);
     st.scene = sc;
-    if (rebuilt) placePlayer();
+    if (resume && resume.pos) {
+      player.x = +resume.pos.x || 0; player.z = +resume.pos.z || 0; player.yaw = +resume.pos.yaw || 0;
+      player.pitch = -0.05; st.lookAt = null; collide();
+    } else if (rebuilt) placePlayer();
     renderHud();
     if (willRebuild) await fade(false);
-    run(sc.intro);
+    saveSoon();
+    if (resume) setMode('roam'); else run(sc.intro);
   }
   function placePlayer() {
     const s = spawn || { x: 0, z: room.d / 2 - 1.2, rot: 0 };
@@ -582,9 +711,43 @@
     collide();
   }
 
-  // Blocks that started with `once` and already ran.
-  let seen = new WeakSet();
+  // Keys of the blocks that started with `once` and already ran.
+  let seen = new Set();
+  // What the player chose, newest last: the model reads it to write on.
+  let log = [];
+  // Set while the host writes the next part of the story.
+  let pendingNext = null;
+  // How many parts the host has written; kept on a `next` so the host can
+  // tell whether it was answered before the app closed.
+  let parts = 0;
   function run(seq) { st.seq = seq || []; st.pc = 0; step(); }
+
+  function snapshot() {
+    return {
+      scene: st.scene && st.scene.id,
+      flags: [...st.flags],
+      seen: [...seen],
+      log: log.slice(-60),
+      pos: { x: +player.x.toFixed(2), z: +player.z.toFixed(2), yaw: +player.yaw.toFixed(3) },
+      next: pendingNext,
+    };
+  }
+  // Batches the state writes of one step into one host call.
+  function saveSoon() {
+    if (saveSoon.queued) return;
+    saveSoon.queued = true;
+    setTimeout(() => { saveSoon.queued = false; host('state', { state: snapshot() }); }, 0);
+  }
+
+  // The story so far ends here: the host writes what comes next and calls
+  // `VN.extend`. The player keeps walking meanwhile.
+  function requestNext(hint) {
+    if (!pendingNext) {
+      pendingNext = { scene: st.scene && st.scene.id, hint: hint || '', part: parts };
+      host('next', { state: snapshot() });
+    }
+    setMode('roam');
+  }
 
   function jump(to) {
     if (st.handlers[to]) { run(st.handlers[to]); return; }
@@ -597,8 +760,8 @@
       const c = seq[st.pc++];
       switch (c.op) {
         case 'look': lookAtTarget(c.id); break;
-        case 'set': st.flags.add(c.f); renderHud(); break;
-        case 'unset': st.flags.delete(c.f); renderHud(); break;
+        case 'set': st.flags.add(c.f); renderHud(); saveSoon(); break;
+        case 'unset': st.flags.delete(c.f); renderHud(); saveSoon(); break;
         case 'move': { const o = chars.get(c.id); if (o) { o.tx = c.x; o.tz = c.z; } break; }
         case 'if': if (st.flags.has(c.f) !== c.not) { jump(c.to); return; } break;
         case 'goto': jump(c.to); return;
@@ -610,11 +773,13 @@
           choose(list); return;
         }
         case 'once':
-          if (seen.has(seq)) { st.pc = seq.length; break; }
-          seen.add(seq); break;
+          if (seen.has(seq.key)) { st.pc = seq.length; break; }
+          seen.add(seq.key); saveSoon(); break;
+        case 'next': requestNext(c.hint); return;
         case 'end': finish(); return;
       }
     }
+    if (queuedEnter) { const to = queuedEnter; queuedEnter = null; enter(to); return; }
     setMode('roam');
   }
 
@@ -652,7 +817,12 @@
     list.forEach((c, i) => {
       const b = document.createElement('button'); b.type = 'button';
       b.textContent = `${i + 1}. ${c.text}`;
-      b.addEventListener('pointerup', (e) => { e.stopPropagation(); st.full = ''; jump(c.to); });
+      b.addEventListener('pointerup', (e) => {
+        e.stopPropagation();
+        if (st.mode !== 'choice') return;
+        log.push({ scene: st.scene && st.scene.id, choice: c.text });
+        st.full = ''; saveSoon(); jump(c.to);
+      });
       choicesEl.append(b);
     });
   }
@@ -690,41 +860,76 @@
 
   function stopMove() { move.id = null; move.x = move.y = 0; }
 
-  stageEl.addEventListener('pointerdown', (e) => {
-    if (e.target.closest('button')) return;
+  // Pointer handling, fed by the page's own pointer events on desktop and by
+  // `VN.input` where the host forwards touches itself (see vn_screen.dart).
+  function pointerDown(id, x, y) {
     const r = stageEl.getBoundingClientRect();
-    const side = e.clientX - r.left < r.width / 2 ? 'move' : 'look';
-    pointers.set(e.pointerId, { side, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now(), moved: 0 });
-    if (side === 'move' && move.id === null) move.id = e.pointerId;
-    try { stageEl.setPointerCapture(e.pointerId); } catch (_) { /* already released */ }
-    e.preventDefault();
-  });
-  stageEl.addEventListener('pointermove', (e) => {
-    const p = pointers.get(e.pointerId);
+    const side = x - r.left < r.width / 2 ? 'move' : 'look';
+    pointers.set(id, { side, x, y, sx: x, sy: y, t: performance.now(), moved: 0 });
+    if (side === 'move' && move.id === null) move.id = id;
+  }
+  function pointerMove(id, x, y) {
+    const p = pointers.get(id);
     if (!p) return;
-    const dx = e.clientX - p.x, dy = e.clientY - p.y;
-    p.x = e.clientX; p.y = e.clientY; p.moved += Math.abs(dx) + Math.abs(dy);
+    const dx = x - p.x, dy = y - p.y;
+    p.x = x; p.y = y; p.moved += Math.abs(dx) + Math.abs(dy);
     if (st.mode !== 'roam' || p.moved <= TAP_SLOP / 2) return;
-    if (p.side === 'move' && e.pointerId === move.id) {
-      let vx = e.clientX - p.sx, vy = e.clientY - p.sy;
+    if (p.side === 'move' && id === move.id) {
+      let vx = x - p.sx, vy = y - p.sy;
       const len = Math.hypot(vx, vy);
       if (len > STICK_R) { vx = vx / len * STICK_R; vy = vy / len * STICK_R; }
       move.x = vx / STICK_R; move.y = vy / STICK_R;
     } else if (p.side === 'look') {
+      // A finger cannot cross a third of the screen between two events; a
+      // jump that large is a coordinate glitch, not a turn.
+      const r = stageEl.getBoundingClientRect();
+      if (Math.abs(dx) + Math.abs(dy) > Math.min(r.width, r.height) / 3) return;
       player.yaw -= dx * 0.0055;
       player.pitch = clamp(player.pitch - dy * 0.0045, -0.85, 0.75);
       st.lookAt = null;
     }
-  });
-  function endPointer(e) {
-    const p = pointers.get(e.pointerId);
-    pointers.delete(e.pointerId);
-    if (e.pointerId === move.id) stopMove();
-    if (!p || e.type === 'pointercancel') return;
-    if (p.moved < TAP_SLOP && performance.now() - p.t < 450) tap(e.clientX, e.clientY);
   }
+  function pointerUp(id, x, y, cancelled) {
+    const p = pointers.get(id);
+    pointers.delete(id);
+    if (id === move.id) stopMove();
+    if (!p || cancelled) return;
+    if (p.moved < TAP_SLOP && performance.now() - p.t < 450) tap(x, y);
+  }
+
+  stageEl.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('button')) return;
+    pointerDown(e.pointerId, e.clientX, e.clientY);
+    try { stageEl.setPointerCapture(e.pointerId); } catch (_) { /* already released */ }
+    e.preventDefault();
+  });
+  stageEl.addEventListener('pointermove', (e) => pointerMove(e.pointerId, e.clientX, e.clientY));
+  const endPointer = (e) => pointerUp(e.pointerId, e.clientX, e.clientY, e.type === 'pointercancel');
   stageEl.addEventListener('pointerup', endPointer);
   stageEl.addEventListener('pointercancel', endPointer);
+
+  // Host-forwarded touches: [[kind, id, x, y], ...] with kind d/m/u/c. A touch
+  // that lands on a button presses that button instead of steering.
+  const hostButtons = new Map();
+  function hostInput(list) {
+    for (const ev of list || []) {
+      const [kind, raw, x, y] = ev;
+      const id = `h${raw}`;
+      if (kind === 'd') {
+        const el = document.elementFromPoint(x, y);
+        const b = el && el.closest('button');
+        if (b) hostButtons.set(id, b); else pointerDown(id, x, y);
+      } else if (kind === 'm') {
+        if (!hostButtons.has(id)) pointerMove(id, x, y);
+      } else {
+        const b = hostButtons.get(id);
+        if (b) {
+          hostButtons.delete(id);
+          if (kind === 'u') b.dispatchEvent(new PointerEvent('pointerup'));
+        } else pointerUp(id, x, y, kind === 'c');
+      }
+    }
+  }
 
   const ray = new T3.Raycaster(), ndc = new T3.Vector2();
   function pick(clientX, clientY) {
@@ -856,12 +1061,21 @@
 
   // ── Entry ──────────────────────────────────────────────────────────────────
   let source = '';
-  function start() {
+  // A scene a new part of the story opens on, held until the current
+  // dialogue has finished.
+  let queuedEnter = null;
+  // [saved] is a snapshot() from an earlier session of this game.
+  function start(saved) {
     game = parse(source);
-    st.flags.clear(); seen = new WeakSet(); worldSig = ''; st.full = ''; endEl.hidden = true;
+    st.flags = new Set(saved && Array.isArray(saved.flags) ? saved.flags : []);
+    seen = new Set(saved && Array.isArray(saved.seen) ? saved.seen : []);
+    log = saved && Array.isArray(saved.log) ? saved.log.slice(-60) : [];
+    pendingNext = (saved && saved.next) || null;
+    queuedEnter = null; worldSig = ''; st.full = ''; endEl.hidden = true;
     if (!game.order.length) { disposeWorld(); setMode('idle'); toast(S.empty); renderHud(); return; }
     host('loaded', { scenes: game.order.length, skipped: game.skipped });
-    enter(game.order[0]);
+    if (saved && game.scenes[saved.scene]) enter(saved.scene, saved.pos ? { pos: saved.pos } : null);
+    else enter(game.order[0]);
   }
 
   window.VN = Object.freeze({
@@ -872,10 +1086,33 @@
       $('#endTitle').textContent = S.end;
       $('#restart').textContent = S.restart;
       source = String(text || '');
+      parts = (opts && +opts.parts) || 0;
       if (!renderer) { toast(S.noWebgl); return; }
       resize();
-      start();
+      start(opts && opts.state);
     },
+    // Swaps in a longer script without restarting: flags, `once` blocks and
+    // the player's place are kept. [opts.enter] is the scene the new part
+    // opens on; it starts once the current dialogue is over.
+    extend(text, opts) {
+      source = String(text || '');
+      parts = (opts && +opts.parts) || parts;
+      const here = st.scene && st.scene.id;
+      game = parse(source);
+      pendingNext = null;
+      const to = opts && opts.enter;
+      if (to && game.scenes[to]) {
+        if (st.mode === 'roam' || st.mode === 'idle') enter(to); else queuedEnter = to;
+      } else if (here && game.scenes[here]) {
+        st.scene = game.scenes[here];
+        if (world) refreshInteractables(handlersOf(st.scene, 0));
+      }
+      saveSoon();
+    },
+    input: hostInput,
+    // The host gave up on writing the next part; a later `next` asks again.
+    cancelNext() { pendingNext = null; saveSoon(); },
+    snapshot,
     parse,
     // Stops the frame loop and hands the GPU context back before the host
     // destroys the WebView: a WebGL context torn down mid-frame can take the

@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:easy_localization/easy_localization.dart';
+
 import '../../core/db/repositories/character_repo.dart' show CharacterRepo;
 import '../../core/models/chat_message.dart';
 import '../../core/state/character_provider.dart'
@@ -12,6 +14,9 @@ import '../../shared/utils/time_formatter.dart';
 import '../chat/chat_provider.dart';
 import '../chat/chat_session_service.dart';
 import '../extensions/state/message_variables_notifier.dart';
+import '../vn/models/vn_document.dart';
+import '../vn/vn_labels.dart';
+import '../vn/vn_provider.dart';
 
 class ChatSessionInfo {
   final String sessionId;
@@ -46,6 +51,10 @@ class ChatSessionInfo {
   final int sessionIndex;
   final String? sessionName;
 
+  /// A visual novel rather than a chat: [characterName] is its title, there
+  /// is no character behind it, and it opens in the novel screen.
+  final bool isVn;
+
   const ChatSessionInfo({
     required this.sessionId,
     required this.characterId,
@@ -59,7 +68,12 @@ class ChatSessionInfo {
     required this.messageCount,
     required this.sessionIndex,
     this.sessionName,
+    this.isVn = false,
   });
+
+  /// Where tapping the row goes.
+  String get route =>
+      isVn ? '/vn/$sessionId' : '/chat/$characterId?session=$sessionIndex';
 
   /// Full name for places that need one flat string (dialog copy, tooltips).
   String get fullCharacterName {
@@ -84,6 +98,7 @@ class ChatSessionInfo {
     messageCount: messageCount,
     sessionIndex: sessionIndex,
     sessionName: name,
+    isVn: isVn,
   );
 }
 
@@ -174,6 +189,10 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
 
     final result = <ChatSessionInfo>[];
     for (final m in allMeta) {
+      if (isVnCharacterId(m.characterId)) {
+        result.add(_vnInfo(m));
+        continue;
+      }
       final char = charMap[m.characterId];
       // Hidden characters take their chats with them: sessions drop out of the
       // history list while the character is hidden and reappear when it's
@@ -213,6 +232,28 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
 
     result.sort((a, b) => b.lastMessageTime.compareTo(a.lastMessageTime));
     return result;
+  }
+
+  /// A novel's row: titled by its session name, previewed by its newest pass.
+  static ChatSessionInfo _vnInfo(SessionMetadata m) {
+    final title = m.sessionName?.trim();
+    final time = m.lastMessageTimestamp > 0
+        ? m.lastMessageTimestamp
+        : m.updatedAt * 1000;
+    return ChatSessionInfo(
+      sessionId: m.sessionId,
+      characterId: m.characterId,
+      characterName: (title == null || title.isEmpty)
+          ? 'vn_untitled'.tr()
+          : title,
+      variantGroupId: m.characterId,
+      lastMessage: vnPreviewText(m.lastMessageContent),
+      lastMessageTime: time,
+      messageCount: m.messageCount,
+      sessionIndex: m.sessionIndex,
+      sessionName: m.sessionName,
+      isVn: true,
+    );
   }
 
   Future<void> _updateFromMetadata(
@@ -255,6 +296,9 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
     final charId = _characterIdOf(sessionId);
     await ref.read(sessionDeletionRepoProvider).deleteSession(sessionId);
     ChatSessionService.clearCache();
+    if (charId != null && isVnCharacterId(charId)) {
+      ref.invalidate(vnProvider(sessionId));
+    }
     // The chat screen may still be bound to the row that just went away. Left
     // alone it keeps serving the deleted session, and its next write recreates
     // the row it was deleted from (`commitDeleteMessages` ends in a full

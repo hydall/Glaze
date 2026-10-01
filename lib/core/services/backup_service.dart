@@ -7,6 +7,7 @@ import 'package:archive/archive.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../db/app_db.dart';
+import '../models/vn_session_id.dart';
 import 'backup/backup_cancel.dart';
 import 'backup/backup_exporter.dart';
 import 'backup/flutter_backup_importer.dart';
@@ -239,7 +240,10 @@ class BackupService {
 
     final sessions = await _db.select(_db.chatSessions).get();
     final orphanIds = sessions
-        .where((s) => !charIds.contains(s.characterId))
+        // A visual novel's session has no character by design.
+        .where((s) =>
+            !charIds.contains(s.characterId) &&
+            !isVnCharacterId(s.characterId))
         .map((s) => s.sessionId)
         .toList();
     if (orphanIds.isEmpty) return;

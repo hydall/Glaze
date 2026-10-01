@@ -205,6 +205,14 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
         final groupId = entry.key;
         final group = [...entry.value]
           ..sort((a, b) => b.lastMessageTime.compareTo(a.lastMessageTime));
+        // A novel is its own only session, so it is a plain row, not a group.
+        if (group.length == 1 && group.first.isVn) {
+          return _SessionTile(
+            info: group.first,
+            selectable: widget.selectable,
+            index: i - 1,
+          );
+        }
         final isExpanded = _expandedGroupIds.contains(groupId);
         return _ChatHistoryGroupSection(
           sessions: group,
@@ -487,8 +495,7 @@ class _SessionTileState extends ConsumerState<_SessionTile>
   ) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () =>
-          context.go('/chat/${info.characterId}?session=${info.sessionIndex}'),
+      onTap: _open,
       child: Tooltip(
         message: info.fullCharacterName,
         preferBelow: false,
@@ -584,6 +591,10 @@ class _SessionTileState extends ConsumerState<_SessionTile>
                                 const SizedBox(width: 6),
                                 VariationChip(name: info.variantName!),
                               ],
+                              if (info.isVn) ...[
+                                const SizedBox(width: 6),
+                                VariationChip(name: 'vn_badge'.tr()),
+                              ],
                             ],
                           ),
                         ),
@@ -593,7 +604,9 @@ class _SessionTileState extends ConsumerState<_SessionTile>
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      info.sessionName?.isNotEmpty == true
+                      info.isVn
+                          ? 'vn_kind'.tr()
+                          : info.sessionName?.isNotEmpty == true
                           ? info.sessionName!
                           : 'session_name'.tr(
                               namedArgs: {
@@ -695,6 +708,10 @@ class _SessionTileState extends ConsumerState<_SessionTile>
                                 const SizedBox(width: 6),
                                 VariationChip(name: info.variantName!),
                               ],
+                              if (info.isVn) ...[
+                                const SizedBox(width: 6),
+                                VariationChip(name: 'vn_badge'.tr()),
+                              ],
                             ],
                           ),
                         ),
@@ -731,7 +748,17 @@ class _SessionTileState extends ConsumerState<_SessionTile>
       ref.read(chatHistorySelectionProvider.notifier).toggle(info.sessionId);
       return;
     }
-    context.go('/chat/${info.characterId}?session=${info.sessionIndex}');
+    _open();
+  }
+
+  /// A novel opens over the list, so its back button returns here; a chat
+  /// replaces the list as it always did.
+  void _open() {
+    if (info.isVn) {
+      unawaited(context.push(info.route));
+    } else {
+      context.go(info.route);
+    }
   }
 
   /// Long press — and right-click, its desktop equivalent. On the full-screen
@@ -762,9 +789,7 @@ class _SessionTileState extends ConsumerState<_SessionTile>
     if (selected) {
       return BoxDecoration(
         color: context.cs.primary.withValues(alpha: 0.12),
-        border: Border(
-          left: BorderSide(color: context.cs.primary, width: 3),
-        ),
+        border: Border(left: BorderSide(color: context.cs.primary, width: 3)),
       );
     }
     if (!unread) return null;
@@ -780,6 +805,17 @@ class _SessionTileState extends ConsumerState<_SessionTile>
   }
 
   Widget _buildAvatar(BuildContext context, WidgetRef ref, {double size = 48}) {
+    if (info.isVn) {
+      return CircleAvatar(
+        radius: size / 2,
+        backgroundColor: context.cs.primary.withValues(alpha: 0.18),
+        child: Icon(
+          Icons.view_in_ar_rounded,
+          size: size * 0.5,
+          color: context.cs.primary,
+        ),
+      );
+    }
     ref.watch(avatarVersionProvider);
     final image = glazeAvatarImage(info.avatarPath);
     if (image != null) {

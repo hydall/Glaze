@@ -4,37 +4,49 @@ import 'dart:io';
 
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/utils/app_orientation.dart';
-import '../../shared/widgets/fullscreen_editor.dart';
-import '../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../shared/widgets/glaze_error_block.dart';
 import '../../shared/widgets/glaze_scaffold.dart';
 import '../../shared/widgets/glaze_spinner.dart';
-import '../../shared/widgets/glaze_toast.dart';
-import '../../shared/widgets/list_controls.dart';
 import '../chat/bridge/chat_webview_environment.dart';
-import 'services/vn_generator_service.dart';
+import 'models/vn_document.dart';
 import 'services/vn_script.dart';
+import 'vn_labels.dart';
 import 'vn_provider.dart';
 import 'widgets/vn_generating_badge.dart';
+import 'widgets/vn_setup_view.dart';
+import 'widgets/vn_touch_forwarder.dart';
 
-/// The 3D visual-novel mode: a walkable first-person game the model writes as
-/// a short script, played in its own WebView, apart from any chat.
+/// One visual novel, opened from the chat list: a walkable first-person game
+/// the model keeps writing as the player plays, in its own WebView.
+///
+/// Until the setup passes and the first chapter exist the screen shows their
+/// progress; after that it plays, and each `next` the player reaches asks the
+/// model for the following chapter.
 class VnScreen extends ConsumerStatefulWidget {
-  const VnScreen({super.key});
+  const VnScreen({super.key, required this.sessionId});
+
+  final String sessionId;
 
   @override
   ConsumerState<VnScreen> createState() => _VnScreenState();
 }
 
 class _VnScreenState extends ConsumerState<VnScreen> {
+  /// Phones and tablets get their touches through [VnTouchForwarder]; the
+  /// platform view's own forwarding scrambles multi-touch on Android.
+  static final bool _forwardTouches =
+      !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+
   late final Future<String> _page = _buildPage();
+  late final ProviderSubscription<AsyncValue<VnState>> _sub;
   InAppWebViewController? _controller;
   bool _pageLoaded = false;
   // Set once the engine has let go of the GPU and the WebView is unmounted.
@@ -44,6 +56,15 @@ class _VnScreenState extends ConsumerState<VnScreen> {
   int _webViewGeneration = 0;
   // WebView2 attaches to a window that already has a frame on screen.
   bool _mountNativeView = !Platform.isWindows;
+  // The script the engine is playing; a longer one means a chapter landed.
+  String? _playedScript;
+  bool _setupStarted = false;
+  bool _resumeChecked = false;
+
+  VnNotifier get _notifier => ref.read(vnProvider(widget.sessionId).notifier);
+
+  String get _language =>
+      context.locale.languageCode == 'en' ? 'English' : 'Russian';
 
   @override
   void initState() {
@@ -55,10 +76,18 @@ class _VnScreenState extends ConsumerState<VnScreen> {
         if (mounted) setState(() => _mountNativeView = true);
       });
     }
+    _sub = ref.listenManual(
+      vnProvider(widget.sessionId),
+      (_, next) => _onState(next.value),
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _onState(_sub.read().value);
+    });
   }
 
   @override
   void dispose() {
+    _sub.close();
     // Already done by [_leave] unless the route was popped some other way
     // (the iOS edge swipe).
     if (!_released) {
@@ -69,6 +98,25 @@ class _VnScreenState extends ConsumerState<VnScreen> {
     super.dispose();
   }
 
+  void _onState(VnState? s) {
+    if (s == null || !mounted) return;
+    if (!s.doc.playable) {
+      // Written once per visit on its own; after a failure only the retry
+      // button starts it again.
+      if (!_setupStarted && s.writing == null && s.error == null) {
+        _setupStarted = true;
+        unawaited(_notifier.writeSetup(language: _language));
+      }
+      return;
+    }
+    if (!_pageLoaded) return;
+    if (_playedScript == null) {
+      unawaited(_load(s));
+    } else if (s.doc.script != _playedScript) {
+      unawaited(_extend(s));
+    }
+  }
+
   /// Leaves the mode in an order that does not crash Android: the engine
   /// hands its WebGL context back, the WebView is unmounted while the route is
   /// still on screen, the orientation lock comes back, and only then the route
@@ -77,8 +125,21 @@ class _VnScreenState extends ConsumerState<VnScreen> {
   Future<void> _leave() async {
     if (_leaving) return;
     _leaving = true;
+    final controller = _controller;
+    if (controller != null && _playedScript != null) {
+      try {
+        final snapshot = await controller
+            .evaluateJavascript(source: 'window.VN && VN.snapshot()')
+            .timeout(const Duration(seconds: 1));
+        if (snapshot is Map) {
+          await _notifier.saveState(Map<String, dynamic>.from(snapshot));
+        }
+      } catch (e) {
+        debugPrint('[VN3D] saving the place before leaving failed: $e');
+      }
+    }
     try {
-      await _controller
+      await controller
           ?.evaluateJavascript(source: 'window.VN && VN.stop();')
           .timeout(const Duration(seconds: 1));
     } catch (e) {
@@ -96,18 +157,20 @@ class _VnScreenState extends ConsumerState<VnScreen> {
     if (router.canPop()) {
       router.pop();
     } else {
-      router.go('/tools');
+      router.go('/');
     }
   }
 
   /// The page process died (the GPU driver, memory pressure). Without a
-  /// handler Android kills the whole app; with one the game just restarts.
+  /// handler Android kills the whole app; with one the game just restarts
+  /// from its last saved place.
   void _onPageProcessGone() {
     debugPrint('[VN3D] page process gone, rebuilding the WebView');
     if (!mounted || _released) return;
     setState(() {
       _controller = null;
       _pageLoaded = false;
+      _playedScript = null;
       _webViewGeneration++;
     });
   }
@@ -121,151 +184,168 @@ class _VnScreenState extends ConsumerState<VnScreen> {
     return buildVnPage(shell: parts[0], three: parts[1], engine: parts[2]);
   }
 
-  Future<void> _play(String? script) async {
+  Future<void> _load(VnState s) async {
     final controller = _controller;
-    if (controller == null || !_pageLoaded || script == null) return;
+    if (controller == null) return;
+    final script = s.doc.script;
+    _playedScript = script;
+    final snapshot = resumeSnapshot(s.doc, s.play);
     final lang = context.locale.languageCode == 'en' ? 'en' : 'ru';
     await controller.evaluateJavascript(
       source:
-          'window.VN && VN.load(${jsonEncode(script)}, ${jsonEncode({'lang': lang})});',
+          'window.VN && VN.load(${jsonEncode(script)}, ${jsonEncode({'lang': lang, 'state': snapshot, 'parts': s.doc.chapters.length})});',
     );
-  }
-
-  Future<void> _askPremise() async {
-    final notifier = ref.read(vnProvider.notifier);
-    final language = context.locale.languageCode == 'en'
-        ? 'English'
-        : 'Russian';
-    await GlazeBottomSheet.show<void>(
-      context,
-      title: 'vn_generate'.tr(),
-      input: BottomSheetInput(
-        placeholder: 'vn_premise_hint'.tr(),
-        confirmLabel: 'vn_generate_confirm'.tr(),
-        onConfirm: (premise) {
-          Navigator.of(context, rootNavigator: true).pop();
-          unawaited(_generate(notifier, premise, language));
-        },
-      ),
-    );
-  }
-
-  Future<void> _generate(
-    VnNotifier notifier,
-    String premise,
-    String language,
-  ) async {
-    try {
-      await notifier.generate(premise: premise, language: language);
-    } on VnGenerationException catch (e) {
-      GlazeToast.showWithoutContext(switch (e.failure) {
-        VnGenerationFailure.noApi => 'vn_err_no_api'.tr(),
-        VnGenerationFailure.incompleteApi => 'vn_err_incomplete_api'.tr(),
-        VnGenerationFailure.noScenes => 'vn_err_no_scenes'.tr(),
-      }, isError: true);
-    } catch (e) {
-      GlazeToast.showWithoutContext(
-        'vn_err_failed'.tr(args: [e.toString()]),
-        isError: true,
-      );
+    // A `next` reached before the app closed and never answered.
+    if (!_resumeChecked) {
+      _resumeChecked = true;
+      final pending = snapshot == null ? null : VnPlayState(snapshot);
+      if (pending?.pendingNext != null && s.writing == null) {
+        unawaited(_continue(snapshot!));
+      }
     }
   }
 
-  Future<void> _editScript() async {
-    final current = ref.read(vnProvider).script ?? '';
-    var edited = current;
-    await FullscreenEditorScreen.show(
-      context,
-      title: 'vn_script'.tr(),
-      initialValue: current,
-      autofocus: false,
-      onChanged: (value) => edited = value,
+  Future<void> _extend(VnState s) async {
+    final controller = _controller;
+    if (controller == null) return;
+    final script = s.doc.script;
+    _playedScript = script;
+    final opts = {
+      'enter': s.doc.chapters.lastOrNull?.opensOn,
+      'parts': s.doc.chapters.length,
+    };
+    await controller.evaluateJavascript(
+      source:
+          'window.VN && VN.extend(${jsonEncode(script)}, ${jsonEncode(opts)});',
     );
-    if (edited != current) ref.read(vnProvider.notifier).setScript(edited);
+  }
+
+  Future<void> _continue(Map<String, dynamic> snapshot) async {
+    await _notifier.continueStory(language: _language, snapshot: snapshot);
+  }
+
+  void _retryContinue() {
+    final raw = ref.read(vnProvider(widget.sessionId)).value?.play?.raw;
+    if (raw != null) unawaited(_continue(raw));
+  }
+
+  void _onEngineEvent(List<dynamic> args) {
+    if (args.isEmpty) return;
+    final Map<String, dynamic> event;
+    try {
+      event = jsonDecode('${args.first}') as Map<String, dynamic>;
+    } catch (_) {
+      return;
+    }
+    if (kDebugMode) debugPrint('[VN3D] ${event['type']}');
+    final state = event['state'];
+    switch (event['type']) {
+      case 'state' when state is Map<String, dynamic>:
+        unawaited(_notifier.saveState(state));
+      case 'next' when state is Map<String, dynamic>:
+        unawaited(_continue(state));
+    }
+  }
+
+  Future<void> _sendInput(List<List<Object>> events) async {
+    final controller = _controller;
+    if (controller == null || !_pageLoaded) return;
+    await controller.evaluateJavascript(
+      source: 'window.VN && VN.input(${jsonEncode(events)});',
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    ref.listen(vnProvider.select((s) => s.script), (_, script) {
-      unawaited(_play(script));
-    });
-    final generating = ref.watch(vnProvider.select((s) => s.generating));
-
+    final async = ref.watch(vnProvider(widget.sessionId));
+    final s = async.value;
     return GlazeScaffold(
-      title: 'vn_title'.tr(),
+      title:
+          s?.session.sessionVars['sessionName'] ??
+          s?.doc.title ??
+          'vn_untitled'.tr(),
       onBack: _leave,
-      actions: [
-        GlazeActionChip(
-          icon: Icons.auto_awesome,
-          tooltip: 'vn_generate'.tr(),
-          onTap: generating ? () {} : _askPremise,
+      body: switch (async) {
+        AsyncValue(value: final VnState s) when s.doc.playable => _buildGame(s),
+        AsyncValue(value: final VnState s) => VnSetupView(
+          state: s,
+          onRetry: () => unawaited(_notifier.writeSetup(language: _language)),
         ),
-        GlazeActionChip(
-          icon: Icons.code,
-          tooltip: 'vn_script'.tr(),
-          onTap: _editScript,
-        ),
-        GlazeActionChip(
-          icon: Icons.restart_alt,
-          tooltip: 'vn_sample'.tr(),
-          onTap: () => unawaited(ref.read(vnProvider.notifier).loadSample()),
-        ),
-      ],
-      body: Stack(
-        children: [
-          Positioned.fill(
-            child: FutureBuilder<String>(
-              future: _page,
-              builder: (context, snapshot) {
-                final html = snapshot.data;
-                if (_released) return const SizedBox.shrink();
-                if (html == null || !_mountNativeView) {
-                  return const Center(child: GlazeSpinner());
-                }
-                return InAppWebView(
-                  key: ValueKey<int>(_webViewGeneration),
-                  webViewEnvironment: chatWebViewEnvironment,
-                  initialData: InAppWebViewInitialData(data: html),
-                  // Every touch belongs to the game. Without this the route's
-                  // and the shell's drag recognizers win the arena and the
-                  // page only ever sees taps.
-                  gestureRecognizers: {
-                    Factory<OneSequenceGestureRecognizer>(
-                      EagerGestureRecognizer.new,
-                    ),
-                  },
-                  initialSettings: InAppWebViewSettings(
-                    javaScriptEnabled: true,
-                    supportZoom: false,
-                    disableContextMenu: true,
-                    mediaPlaybackRequiresUserGesture: true,
-                    isInspectable: kDebugMode,
-                  ),
-                  onWebViewCreated: (controller) {
-                    _controller = controller;
-                    controller.addJavaScriptHandler(
-                      handlerName: 'vn',
-                      callback: _onEngineEvent,
-                    );
-                  },
-                  onRenderProcessGone: (_, _) => _onPageProcessGone(),
-                  onWebContentProcessDidTerminate: (_) => _onPageProcessGone(),
-                  onLoadStop: (_, _) {
-                    _pageLoaded = true;
-                    unawaited(_play(ref.read(vnProvider).script));
-                  },
-                );
-              },
-            ),
+        AsyncValue(error: final Object e) => Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: GlazeErrorBlock.fromError(e),
           ),
-          if (generating) const VnGeneratingBadge(),
-        ],
-      ),
+        ),
+        _ => const Center(child: GlazeSpinner()),
+      },
     );
   }
 
-  void _onEngineEvent(List<dynamic> args) {
-    if (!kDebugMode || args.isEmpty) return;
-    debugPrint('[VN3D] ${args.first}');
+  Widget _buildGame(VnState s) {
+    final writingNext = s.writing == VnPass.chapter;
+    final failedNext =
+        s.writing == null && s.error != null && s.play?.pendingNext != null;
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: FutureBuilder<String>(
+            future: _page,
+            builder: (context, snapshot) {
+              final html = snapshot.data;
+              if (_released) return const SizedBox.shrink();
+              if (html == null || !_mountNativeView) {
+                return const Center(child: GlazeSpinner());
+              }
+              final webView = _buildWebView(html);
+              return _forwardTouches
+                  ? VnTouchForwarder(onEvents: _sendInput, child: webView)
+                  : webView;
+            },
+          ),
+        ),
+        if (writingNext)
+          VnGeneratingBadge(label: 'vn_writing_next'.tr())
+        else if (failedNext)
+          VnGeneratingBadge(
+            label: vnErrorText(s.error!),
+            onRetry: _retryContinue,
+          ),
+      ],
+    );
+  }
+
+  Widget _buildWebView(String html) {
+    return InAppWebView(
+      key: ValueKey<int>(_webViewGeneration),
+      webViewEnvironment: chatWebViewEnvironment,
+      initialData: InAppWebViewInitialData(data: html),
+      // On desktop every pointer belongs to the game. Without this the
+      // route's and the shell's drag recognizers win the arena and the page
+      // only ever sees clicks.
+      gestureRecognizers: _forwardTouches
+          ? const <Factory<OneSequenceGestureRecognizer>>{}
+          : {Factory<OneSequenceGestureRecognizer>(EagerGestureRecognizer.new)},
+      initialSettings: InAppWebViewSettings(
+        javaScriptEnabled: true,
+        supportZoom: false,
+        disableContextMenu: true,
+        mediaPlaybackRequiresUserGesture: true,
+        isInspectable: kDebugMode,
+      ),
+      onWebViewCreated: (controller) {
+        _controller = controller;
+        controller.addJavaScriptHandler(
+          handlerName: 'vn',
+          callback: _onEngineEvent,
+        );
+      },
+      onRenderProcessGone: (_, _) => _onPageProcessGone(),
+      onWebContentProcessDidTerminate: (_) => _onPageProcessGone(),
+      onLoadStop: (_, _) {
+        _pageLoaded = true;
+        _onState(ref.read(vnProvider(widget.sessionId)).value);
+      },
+    );
   }
 }

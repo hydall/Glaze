@@ -360,9 +360,11 @@ GoRouter buildRouter(
           ),
         ),
         GoRoute(
-          path: '/vn',
-          pageBuilder: (_, state) =>
-              _adaptivePage(state: state, child: const VnScreen()),
+          path: '/vn/:sessionId',
+          pageBuilder: (_, state) => _adaptivePage(
+            state: state,
+            child: VnScreen(sessionId: state.pathParameters['sessionId']!),
+          ),
         ),
         GoRoute(
           path: '/sync',

@@ -403,7 +403,7 @@ lib/
 │   ├── onboarding/                   # First-run onboarding screen
 │   ├── picks/                        # Featured picks grid + detail launcher
 │   ├── tools/                        # Developer tools screen (tokenizer, coverage, etc.)
-│   ├── vn/                           # 3D visual-novel mode (route `/vn`, engine in `assets/vn3d/`)
+│   ├── vn/                           # 3D visual novels stored as chat sessions (route `/vn/:sessionId`, engine in `assets/vn3d/`)
 │   ├── dev/                          # Internal UI demos (menu group demo)
 │   └── menu/                         # Sidebar menu + About overlay/screen
 ├── shared/
@@ -440,7 +440,7 @@ GoRouter lives in `router.dart`, not `app.dart`. Shell tabs and overlay routes:
 | `/menu` (+ `settings`, `themes`, `about`, `glossary`) | `MenuScreen` — the header search filters the tab's nested settings; `settings` is one flat screen of themed groups with its own header search, and takes `?highlight=<row id>` so a hit deep-links to the row (`features/menu/search/`) |
 | `/chat/:charId` | `ChatScreen` (query params: `?session=`, `?new=1`, `?msg=`) |
 | `/character/create`, `/character/:charId`, `…/edit`, `…/gallery` | Character CRUD overlays |
-| `/vn` | `VnScreen` — the 3D visual-novel mode, opened from the Tools tile (§ 9.1) |
+| `/vn/:sessionId` | `VnScreen` — a 3D visual novel, opened from its row in the chat list (§ 9.1) |
 | `/sync` | `SyncSheet` |
 | `/extensions`, `/extensions/preset-editor/:presetId` | Extensions screens |
 
@@ -1611,24 +1611,48 @@ snapshot.
 the message header.
 
 
-## 9.1 3D visual novels (`/vn`)
+## 9.1 3D visual novels (`/vn/:sessionId`)
 
-A mode of its own, apart from every chat. The model writes a whole game as a
-short line-based script; a bundled engine turns it into walkable rooms with
-cardboard characters.
+A novel is a chat session: the only session of a pseudo-character whose id
+starts with `vn-` (`isVnCharacterId`, `lib/core/models/vn_session_id.dart`) and
+which has no character row. It is listed in the chat list with a VN chip and an
+icon avatar, opens `VnScreen` instead of a chat, syncs and backs up like any
+chat, and is skipped by the legacy-backup orphan sweep and by the raw-chat
+vector rebuild. New novels start from the 3D button in the Chats header (and in
+the desktop sidebar).
+
+The session's first message is the player's idea (`user`); every later one is
+a pass the model wrote, opening with an `@vn <pass>` header
+(`lib/features/vn/models/vn_document.dart`):
+
+1. `scenario` — plain text with a `title:` line (becomes the session name)
+2. `characters` — `cast` + `about` lines
+3. `locations` — `location` blocks naming floor/wall texture ids
+4. `textures` — a `texture` line for every id the locations used
+5. `chapter N` — `summary:` line, optional new definitions, then scenes
+
+Passes 1–4 and chapter 1 run in order from the idea (`VnNotifier.writeSetup`;
+the screen shows them ticked off and resumes from a failed one). After that
+the story never ends: every path of a chapter reaches `next`, the engine
+reports it with its snapshot, and `continueStory` asks for the next chapter
+with the definitions so far, every chapter's summary, the last chapter in full,
+the flags and the choices made. `VN.extend` swaps in the longer script without
+restarting and takes the player to the new chapter's first scene once the
+current dialogue is over. The engine's snapshot (scene, flags, `once` blocks,
+choices, position, an unanswered `next`) is kept in `sessionVars['__vnState']`,
+so a novel reopens where it was left; a `next` answered while the screen was
+closed is resolved by `resumeSnapshot`.
 
 | Piece | Where | Job |
 |---|---|---|
-| Engine | `assets/vn3d/engine.js` (+ vendored `three.min.js`, r128, MIT) | Parses the script, builds rooms, first-person movement (drag on the left half walks, drag on the right half looks, a tap interacts; no on-screen buttons), dialogue, choices, flags |
-| Page shell | `assets/vn3d/index.html` | HUD and controls markup; `buildVnPage` inlines three.js and the engine into it |
-| Script language | `assets/vn3d/model_spec.txt` | Sent verbatim as the system message of a generation; the single description of the language |
-| Sample | `assets/vn3d/sample_game.txt` | What the mode plays before anything is generated |
-| Screen | `lib/features/vn/vn_screen.dart` | Own `InAppWebView` loaded from data (no asset server, same on every platform); calls `VN.load(script, {lang})`. Claims every touch with an eager recognizer and leaves `disableHorizontalScroll`/`disableVerticalScroll` off — on Android those swallow move events before the page sees them. Unlocks rotation while open. Leaving goes through `_leave`: `VN.stop()` releases the WebGL context, the WebView is unmounted, the orientation lock comes back, then the route pops — tearing the WebView down mid-frame during the rotation killed the app on Android. Handles a dead page process by rebuilding the WebView, since Android kills the app when no WebView handles it |
-| Generation | `lib/features/vn/services/vn_generator_service.dart` | One non-streaming request on the active API connection; `extractVnScript` drops reasoning and code fences and rejects a reply without a `# scene` line |
+| Engine | `assets/vn3d/engine.js` (+ vendored `three.min.js`, r128, MIT) | Parses the script (later definitions replace earlier ones, `---` separates parts), builds rooms on locations with procedurally painted textures, first-person movement (drag on the left half walks, drag on the right half looks, a tap interacts), dialogue, choices, flags, `next` |
+| Page shell | `assets/vn3d/index.html` | HUD markup; `buildVnPage` inlines three.js and the engine into it |
+| Script language | `assets/vn3d/model_spec.txt` | The system message of every pass; the single description of the language |
+| Prompts | `lib/features/vn/services/vn_prompts.dart` | One request per pass, ordered from what never changes to what changes most; `extractVnPass` validates a reply and turns a chapter's `end` into `next` |
+| Screen | `lib/features/vn/vn_screen.dart` | Own `InAppWebView` loaded from data. On Android and iOS the WebView gets no touches: `VnTouchForwarder` reads them in Flutter and feeds `VN.input`, because Android's platform-view forwarding offsets the whole MotionEvent by the first pointer in Flutter's order minus the first in Android's — once a finger is lifted and put back while another is down, the two orders differ and every coordinate jumps by the distance between the fingers. Desktop keeps the page's own pointer events behind an eager recognizer. Unlocks rotation while open; `_leave` saves the place, releases the WebGL context, unmounts the WebView and only then pops |
 
 The engine never throws on a bad script: an unknown line is skipped, a jump to
-a missing scene or block shows a toast and returns the player to walking. The
-script is held in memory by `vnProvider`; nothing is persisted yet.
+a missing scene or block shows a toast and returns the player to walking.
 
 ---
 

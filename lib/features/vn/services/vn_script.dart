@@ -1,5 +1,5 @@
 /// The text side of the 3D visual-novel mode: the bundled assets, the page the
-/// engine runs in, and how a model's reply becomes a script.
+/// engine runs in, and how a model's reply is cleaned up.
 ///
 /// Everything here is pure so it can be tested without a WebView or a model.
 library;
@@ -7,7 +7,6 @@ library;
 const String kVnPageAsset = 'assets/vn3d/index.html';
 const String kVnThreeAsset = 'assets/vn3d/three.min.js';
 const String kVnEngineAsset = 'assets/vn3d/engine.js';
-const String kVnSampleAsset = 'assets/vn3d/sample_game.txt';
 const String kVnModelSpecAsset = 'assets/vn3d/model_spec.txt';
 
 const String _threeSlot = '<!--VN3D_THREE-->';
@@ -40,42 +39,14 @@ final RegExp _thinkBlock = RegExp(
   caseSensitive: false,
 );
 final RegExp _fence = RegExp(r'```[^\n]*\n([\s\S]*?)(?:```|$)');
-final RegExp _sceneLine = RegExp(r'^\s*#\s*\S', multiLine: true);
 
-/// The game script inside a model reply, or null when the reply holds none.
+/// A model reply without its reasoning and its code fence.
 ///
-/// Models tend to wrap the script in a code fence or think out loud first, so
-/// reasoning is dropped and the first fenced block wins when there is one. A
-/// reply counts as a script only if it has at least one `# scene` line.
-String? extractVnScript(String reply) {
+/// Models tend to wrap the answer in a fence or think out loud first, so
+/// reasoning is dropped and the first fenced block wins when there is one.
+String cleanVnReply(String reply) {
   var text = reply.replaceAll(_thinkBlock, '');
   final fenced = _fence.firstMatch(text);
   if (fenced != null) text = fenced.group(1)!;
-  text = text.trim();
-  if (!_sceneLine.hasMatch(text)) return null;
-  return text;
-}
-
-/// The messages that ask the active model for a whole game.
-///
-/// [spec] is the engine's language description; [language] is the name of
-/// the language the player reads, e.g. "Russian".
-List<Map<String, String>> buildVnGenerationMessages({
-  required String spec,
-  required String premise,
-  required String language,
-}) {
-  final idea = premise.trim().isEmpty
-      ? 'a short mystery in a small school'
-      : premise.trim();
-  return [
-    {'role': 'system', 'content': spec.trim()},
-    {
-      'role': 'user',
-      'content':
-          'Write a game of 2 to 4 scenes about: $idea\n'
-          'All names, lines and narration in $language. '
-          'Commands, types and colors stay as in the spec.',
-    },
-  ];
+  return text.trim();
 }

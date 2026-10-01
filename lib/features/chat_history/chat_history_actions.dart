@@ -21,16 +21,22 @@ Future<void> showChatSessionActions(
 ) async {
   if (sessions.isEmpty) return;
   final single = sessions.length == 1;
+  // A novel has no character to export a chat for.
+  final exportable = [
+    for (final s in sessions)
+      if (!s.isVn) s,
+  ];
   final rootNav = Navigator.of(context, rootNavigator: true);
   final result = await GlazeBottomSheet.show<String>(
     context,
     title: single ? 'Session' : '${sessions.length} ${'selected_count'.tr()}',
     items: [
-      BottomSheetItem(
-        icon: Icons.upload_file,
-        label: 'action_export_chat'.tr(),
-        onTap: () => rootNav.pop('export'),
-      ),
+      if (exportable.isNotEmpty)
+        BottomSheetItem(
+          icon: Icons.upload_file,
+          label: 'action_export_chat'.tr(),
+          onTap: () => rootNav.pop('export'),
+        ),
       // A rename names exactly one session, so with several selected there is
       // nothing the entry could mean — it is dropped rather than shown dead.
       if (single)
@@ -50,7 +56,7 @@ Future<void> showChatSessionActions(
   if (result == null || !context.mounted) return;
   switch (result) {
     case 'export':
-      await _exportSessions(context, ref, sessions);
+      await _exportSessions(context, ref, exportable);
     case 'rename':
       _showRenameSheet(context, ref, sessions.first);
     case 'delete':

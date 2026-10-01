@@ -8,10 +8,12 @@ import '../../../core/llm/transport/chat_transport_request.dart';
 import '../../../core/llm/transport/llm_protocol.dart';
 import '../../../core/llm/transport/transport_factory.dart';
 import '../../settings/api_list_provider.dart';
+import '../models/vn_document.dart';
+import 'vn_prompts.dart';
 import 'vn_script.dart';
 
-/// Why a game could not be generated.
-enum VnGenerationFailure { noApi, incompleteApi, noScenes }
+/// Why a pass could not be written.
+enum VnGenerationFailure { noApi, incompleteApi, badReply }
 
 class VnGenerationException implements Exception {
   const VnGenerationException(this.failure);
@@ -22,7 +24,7 @@ class VnGenerationException implements Exception {
   String toString() => 'VnGenerationException($failure)';
 }
 
-/// Asks the active API connection for a whole game script in one request.
+/// Writes one pass of a novel on the active API connection.
 class VnGeneratorService {
   VnGeneratorService(this._ref);
 
@@ -30,9 +32,13 @@ class VnGeneratorService {
 
   static const Duration _timeout = Duration(minutes: 3);
 
-  Future<String> generate({
-    required String premise,
+  /// The body of [pass] for [doc]. Throws [VnGenerationException] when the
+  /// connection is not set up or the reply holds no usable pass.
+  Future<String> writePass({
+    required VnDocument doc,
+    required VnPass pass,
     required String language,
+    VnPlayState? state,
     CancelToken? cancelToken,
   }) async {
     await _ref.read(apiListProvider.future);
@@ -53,10 +59,12 @@ class VnGeneratorService {
       pickChatTransport(apiConfig.protocol).stream(
         request: ChatTransportRequest.fromApiConfig(
           apiConfig,
-          messages: buildVnGenerationMessages(
+          messages: buildVnPassMessages(
             spec: spec,
-            premise: premise,
+            doc: doc,
+            pass: pass,
             language: language,
+            state: state,
           ),
           stream: false,
         ),
@@ -76,11 +84,11 @@ class VnGeneratorService {
         throw TimeoutException('VN generation timed out', _timeout);
       },
     );
-    final script = extractVnScript(reply);
-    if (script == null) {
-      throw const VnGenerationException(VnGenerationFailure.noScenes);
+    final body = extractVnPass(pass, reply);
+    if (body == null) {
+      throw const VnGenerationException(VnGenerationFailure.badReply);
     }
-    return script;
+    return body;
   }
 }
 

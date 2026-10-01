@@ -290,8 +290,6 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
         );
       case 'ext-blocks':
         _openExtBlocks();
-      case 'vn':
-        context.push('/vn');
     }
   }
 
