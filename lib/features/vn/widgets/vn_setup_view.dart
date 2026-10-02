@@ -8,9 +8,11 @@ import '../../../shared/widgets/glaze_spinner.dart';
 import '../models/vn_document.dart';
 import '../vn_labels.dart';
 import '../vn_provider.dart';
+import 'vn_cast_review.dart';
 
 /// The passes of a novel that cannot be played yet, ticked off as the model
-/// writes them.
+/// writes them. A novel that draws its cast adds the drawing right after the
+/// characters, and the cast to check and accept below the list.
 class VnSetupView extends StatelessWidget {
   const VnSetupView({super.key, required this.state, required this.onRetry});
 
@@ -23,6 +25,8 @@ class VnSetupView extends StatelessWidget {
   Widget build(BuildContext context) {
     final pending = state.doc.pendingPass;
     final error = state.error;
+    final hasCast = state.doc.setup.containsKey(VnPass.characters);
+    final review = state.drawsCast && hasCast && state.awaitingCastReview;
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
@@ -55,13 +59,21 @@ class VnSetupView extends StatelessWidget {
                 ),
               ],
               const SizedBox(height: 20),
-              for (final pass in _passes)
+              for (final pass in _passes) ...[
                 _PassRow(
                   label: vnPassLabel(pass),
                   done: pending == null || pass.index < pending.index,
                   active: pass == state.writing,
                   failed: error != null && pass == pending,
                 ),
+                if (pass == VnPass.characters && state.drawsCast)
+                  _PassRow(
+                    label: 'vn_art_pass'.tr(),
+                    done: !state.awaitingCastReview,
+                    active: state.drawing != null,
+                    failed: state.artError != null,
+                  ),
+              ],
               if (error != null) ...[
                 const SizedBox(height: 16),
                 GlazeErrorBlock(message: vnErrorText(error)),
@@ -73,6 +85,10 @@ class VnSetupView extends StatelessWidget {
                   expand: true,
                   onTap: onRetry,
                 ),
+              ],
+              if (review) ...[
+                const SizedBox(height: 20),
+                VnCastReview(sessionId: state.session.id, gate: true),
               ],
             ],
           ),

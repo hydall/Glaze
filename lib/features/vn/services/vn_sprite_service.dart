@@ -86,11 +86,16 @@ const Map<String, String> _emotionWords = {
   'surprised': 'surprised, eyes wide, mouth open',
 };
 
-String _who(VnCastMember who, String setting) {
+String _who(VnCastMember who, String setting, String? note) {
   final b = StringBuffer('Character: ${who.name}.');
   if (who.about.isNotEmpty) b.write(' ${who.about}');
   if (who.color != null) b.write(' Hair color ${who.color}.');
   if (setting.isNotEmpty) b.write('\nStory setting: $setting');
+  if (note != null && note.trim().isNotEmpty) {
+    b.write(
+      '\nThe reader asked for this; it overrides the above: ${note.trim()}',
+    );
+  }
   return b.toString();
 }
 
@@ -107,6 +112,7 @@ String vnSheetPrompt(
   String setting,
   VnChroma chroma, {
   required bool guide,
+  String? note,
 }) {
   final order = [
     for (var i = 0; i < kVnEmotions.length; i++)
@@ -118,7 +124,7 @@ String vnSheetPrompt(
     if (guide)
       'IMAGE_1 is the layout: draw one figure over each grey mannequin, in '
           'its place and at its size. Do not draw the mannequins.',
-    _who(who, setting),
+    _who(who, setting, note),
     'Every figure: the same person, the same outfit, the same full-body '
         'standing pose facing the viewer, head to feet in view with space '
         'around, nothing cropped. Figures do not touch or overlap. Only the '
@@ -128,9 +134,14 @@ String vnSheetPrompt(
 }
 
 /// The request for the neutral sprite on its own.
-String vnBasePrompt(VnCastMember who, String setting, VnChroma chroma) => [
+String vnBasePrompt(
+  VnCastMember who,
+  String setting,
+  VnChroma chroma, {
+  String? note,
+}) => [
   'A full-body character sprite for a visual novel.',
-  _who(who, setting),
+  _who(who, setting, note),
   'One figure, standing, facing the viewer, head to feet in view with space '
       'around, nothing cropped. ${_emotionWords['normal']}.',
   _background(chroma),
@@ -175,6 +186,7 @@ class VnSpriteService {
     required VnCastMember who,
     required String setting,
     required String size,
+    String? note,
     CancelToken? cancelToken,
   }) async {
     final settings = await _ref.read(imageGenSettingsProvider.future);
@@ -216,7 +228,7 @@ class VnSpriteService {
               )
             : null;
         final sheet = await generate(
-          vnSheetPrompt(who, setting, chroma, guide: guide),
+          vnSheetPrompt(who, setting, chroma, guide: guide, note: note),
           [
             if (layout != null)
               {
@@ -236,7 +248,7 @@ class VnSpriteService {
         }
       case VnSinglesPlan(:final edits):
         final base = await generate(
-          vnBasePrompt(who, setting, chroma),
+          vnBasePrompt(who, setting, chroma, note: note),
           const [],
           '9:16',
         );
@@ -270,14 +282,29 @@ class VnSpriteService {
 
     final storage = await _ref.read(imageStorageProvider.future);
     final folder = vnSpriteFolder(sessionId);
+    // A new name per drawing, so a redraw never shows a cached old picture.
+    final stamp = DateTime.now().millisecondsSinceEpoch.toRadixString(36);
     return {
       for (final e in sprites.entries)
         e.key: await () async {
-          final name = '${who.id}_${e.key}';
+          final name = '${who.id}_${e.key}_$stamp';
           await storage.saveBytes(e.value, folder, name, 'png');
           return '$folder/$name.png';
         }(),
     };
+  }
+
+  /// Deletes sprites replaced by a redraw.
+  Future<void> remove(Iterable<String> paths) async {
+    final storage = await _ref.read(imageStorageProvider.future);
+    for (final path in paths) {
+      try {
+        final file = File(storage.absolutePath(path) ?? path);
+        if (await file.exists()) await file.delete();
+      } catch (e) {
+        debugPrint('[VN3D] removing $path failed: $e');
+      }
+    }
   }
 }
 

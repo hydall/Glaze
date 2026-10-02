@@ -39,6 +39,27 @@ const String kVnSpritesVarKey = '__vnSprites';
 /// Absent: the cast stays cardboard.
 const String kVnArtVarKey = '__vnArt';
 
+/// [ChatSession.sessionVars] key set to `1` once the player has accepted the
+/// cast's sprites; the game does not start before that.
+const String kVnArtOkVarKey = '__vnArtOk';
+
+/// [ChatSession.sessionVars] key holding what the player asked to change in
+/// a character's picture: `{castId: note}` JSON, kept for later redraws.
+const String kVnArtNotesVarKey = '__vnArtNotes';
+
+/// The player's notes on the cast's pictures, read from the session.
+Map<String, String> vnArtNotesOf(Map<String, String> vars) {
+  final json = vars[kVnArtNotesVarKey];
+  if (json == null || json.isEmpty) return {};
+  try {
+    final m = jsonDecode(json);
+    if (m is! Map) return {};
+    return {for (final e in m.entries) '${e.key}': '${e.value}'};
+  } catch (_) {
+    return {};
+  }
+}
+
 /// Sprite paths by cast id and emotion, read from the session.
 Map<String, Map<String, String>> vnSpritesOf(Map<String, String> vars) {
   final json = vars[kVnSpritesVarKey];

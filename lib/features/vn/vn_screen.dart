@@ -22,6 +22,7 @@ import 'models/vn_document.dart';
 import 'services/vn_script.dart';
 import 'vn_labels.dart';
 import 'vn_provider.dart';
+import 'widgets/vn_cast_review.dart';
 import 'widgets/vn_generating_badge.dart';
 import 'widgets/vn_setup_view.dart';
 import 'widgets/vn_status_sheet.dart';
@@ -118,7 +119,7 @@ class _VnScreenState extends ConsumerState<VnScreen> {
       }
       return;
     }
-    if (!_pageLoaded) return;
+    if (!s.ready || !_pageLoaded) return;
     if (_playedScript == null) {
       unawaited(_load(s));
     } else if (s.doc.script != _playedScript) {
@@ -349,7 +350,17 @@ class _VnScreenState extends ConsumerState<VnScreen> {
           'vn_untitled'.tr(),
       onBack: _leave,
       actions: [
-        if (s != null && s.doc.playable)
+        if (s != null &&
+            s.ready &&
+            s.doc.cast.isNotEmpty &&
+            (s.drawsCast || vnSpritesOf(s.session.sessionVars).isNotEmpty))
+          GlazeActionChip(
+            icon: Icons.face_outlined,
+            tooltip: 'vn_cast'.tr(),
+            onTap: () =>
+                unawaited(VnCastReview.show(context, widget.sessionId)),
+          ),
+        if (s != null && s.ready)
           GlazeActionChip(
             icon: Icons.menu_book_outlined,
             tooltip: 'vn_status'.tr(),
@@ -357,7 +368,7 @@ class _VnScreenState extends ConsumerState<VnScreen> {
           ),
       ],
       body: switch (async) {
-        AsyncValue(value: final VnState s) when s.doc.playable => _buildGame(s),
+        AsyncValue(value: final VnState s) when s.ready => _buildGame(s),
         AsyncValue(value: final VnState s) => VnSetupView(
           state: s,
           onRetry: () => unawaited(_notifier.writeSetup(language: _language)),
@@ -403,7 +414,11 @@ class _VnScreenState extends ConsumerState<VnScreen> {
             onRetry: _retryContinue,
           )
         else if (s.drawing != null)
-          VnGeneratingBadge(label: 'vn_drawing'.tr(args: [s.drawing!]))
+          VnGeneratingBadge(
+            label: 'vn_drawing'.tr(
+              args: [s.doc.cast[s.drawing]?.name ?? s.drawing!],
+            ),
+          )
         else if (s.artError != null)
           VnGeneratingBadge(
             label: 'vn_drawing_failed'.tr(args: [vnErrorText(s.artError!)]),

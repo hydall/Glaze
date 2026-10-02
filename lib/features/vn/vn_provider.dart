@@ -25,6 +25,7 @@ class VnState {
     this.error,
     this.drawing,
     this.artError,
+    this.artFailed = const {},
   });
 
   final ChatSession session;
@@ -36,11 +37,26 @@ class VnState {
   /// Why the last pass failed; cleared when the next one starts.
   final Object? error;
 
-  /// The name of the character whose sprites are being drawn.
+  /// The cast id of the character whose sprites are being drawn.
   final String? drawing;
 
   /// Why drawing the cast stopped; cleared when it starts again.
   final Object? artError;
+
+  /// Why a character could not be drawn, by cast id: the provider's error,
+  /// or a [FormatException] for a picture that could not be cut.
+  final Map<String, Object> artFailed;
+
+  /// Whether the novel draws its cast with the image provider.
+  bool get drawsCast => (session.sessionVars[kVnArtVarKey] ?? '').isNotEmpty;
+
+  /// Whether the cast's sprites still wait for the player to accept them.
+  /// A novel already played is past that.
+  bool get awaitingCastReview =>
+      drawsCast && session.sessionVars[kVnArtOkVarKey] != '1' && play == null;
+
+  /// Whether the game can start: every pass written and the cast accepted.
+  bool get ready => doc.playable && !awaitingCastReview;
 
   VnPlayState? get play => VnPlayState.fromSessionVars(session.sessionVars);
 
@@ -56,6 +72,7 @@ class VnState {
     bool clearDrawing = false,
     Object? artError,
     bool clearArtError = false,
+    Map<String, Object>? artFailed,
   }) {
     final next = session ?? this.session;
     return VnState(
@@ -65,6 +82,7 @@ class VnState {
       error: clearError ? null : (error ?? this.error),
       drawing: clearDrawing ? null : (drawing ?? this.drawing),
       artError: clearArtError ? null : (artError ?? this.artError),
+      artFailed: artFailed ?? this.artFailed,
     );
   }
 }
@@ -135,8 +153,8 @@ class VnNotifier extends AsyncNotifier<VnState> {
 
   bool _drawingCast = false;
   CancelToken? _artToken;
-  // Characters whose picture came back unusable; drawn again on a retry.
-  final Set<String> _artFailed = {};
+  // Characters the player asked to draw again.
+  final Set<String> _redraw = {};
 
   @override
   Future<VnState> build() async {
@@ -176,6 +194,8 @@ class VnNotifier extends AsyncNotifier<VnState> {
             ),
       );
       if (!ok) return;
+      // The cast is drawn while the rest of the setup is written.
+      if (pass == VnPass.characters) unawaited(drawCast());
     }
   }
 
@@ -336,10 +356,11 @@ class VnNotifier extends AsyncNotifier<VnState> {
   }
 
   /// Draws sprites, one character at a time, for every cast member that has
-  /// none, when the novel was started with drawing on. Runs alongside the
-  /// story: the game shows cardboard until a character's sprites land. A
-  /// provider error stops the run until [retryCast]; a picture that cannot
-  /// be cut into sprites skips that character only.
+  /// none and for those [redraw] asked for, when the novel was started with
+  /// drawing on. Starts right after the characters pass; the player checks
+  /// the result before the game starts, and later characters show as
+  /// cardboard until theirs land. A provider error stops the run until
+  /// [retryCast]; a picture that cannot be cut skips that character only.
   Future<void> drawCast() async {
     if (_drawingCast) return;
     _drawingCast = true;
@@ -351,10 +372,20 @@ class VnNotifier extends AsyncNotifier<VnState> {
         if (size.isEmpty || s.artError != null) return;
         final have = vnSpritesOf(s.session.sessionVars);
         final who = s.doc.cast.values
-            .where((c) => !have.containsKey(c.id) && !_artFailed.contains(c.id))
+            .where(
+              (c) =>
+                  _redraw.contains(c.id) ||
+                  (!have.containsKey(c.id) && !s.artFailed.containsKey(c.id)),
+            )
             .firstOrNull;
         if (who == null) return;
-        state = AsyncData(s.copyWith(drawing: who.name));
+        _redraw.remove(who.id);
+        state = AsyncData(
+          s.copyWith(
+            drawing: who.id,
+            artFailed: {...s.artFailed}..remove(who.id),
+          ),
+        );
         final token = _artToken = CancelToken();
         try {
           final paths = await ref
@@ -364,10 +395,14 @@ class VnNotifier extends AsyncNotifier<VnState> {
                 who: who,
                 setting: vnSpriteSetting(s.doc),
                 size: size,
+                note: vnArtNotesOf(s.session.sessionVars)[who.id],
                 cancelToken: token,
               );
+          Map<String, String> old = const {};
           await _mutate((x) {
-            final all = vnSpritesOf(x.sessionVars)..[who.id] = paths;
+            final all = vnSpritesOf(x.sessionVars);
+            old = all[who.id] ?? const {};
+            all[who.id] = paths;
             return x.copyWith(
               sessionVars: {
                 ...x.sessionVars,
@@ -375,16 +410,24 @@ class VnNotifier extends AsyncNotifier<VnState> {
               },
             );
           }, bumpActivity: false);
-        } on FormatException catch (e) {
-          debugPrint('[VN3D] sprites of ${who.id} unusable: $e');
-          _artFailed.add(who.id);
+          final stale = old.values.toSet().difference(paths.values.toSet());
+          if (stale.isNotEmpty) {
+            await ref.read(vnSpriteServiceProvider).remove(stale);
+          }
         } catch (e) {
           if (token.isCancelled) return;
           debugPrint('[VN3D] drawing ${who.id} failed: $e');
-          _artFailed.add(who.id);
           final now = state.value;
-          if (now != null) state = AsyncData(now.copyWith(artError: e));
-          return;
+          if (now == null) return;
+          state = AsyncData(
+            now.copyWith(
+              artFailed: {...now.artFailed, who.id: e},
+              // A picture that could not be cut costs one character; anything
+              // else (no key, no quota, no network) would fail them all.
+              artError: e is FormatException ? null : e,
+            ),
+          );
+          if (e is! FormatException) return;
         }
       }
     } finally {
@@ -399,10 +442,60 @@ class VnNotifier extends AsyncNotifier<VnState> {
 
   /// Draws again every character that failed.
   Future<void> retryCast() async {
-    _artFailed.clear();
     final s = state.value;
-    if (s != null) state = AsyncData(s.copyWith(clearArtError: true));
+    if (s != null) {
+      state = AsyncData(s.copyWith(clearArtError: true, artFailed: const {}));
+    }
     await drawCast();
+  }
+
+  /// Draws [castId] again, keeping [note] (what to change, empty for nothing)
+  /// for this and later redraws. The old sprites stay until the new land.
+  Future<void> redraw(String castId, String note) async {
+    final s = state.value;
+    if (s == null) return;
+    final notes = vnArtNotesOf(s.session.sessionVars);
+    if ((notes[castId] ?? '') != note) {
+      if (note.isEmpty) {
+        notes.remove(castId);
+      } else {
+        notes[castId] = note;
+      }
+      await _mutate(
+        (x) => x.copyWith(
+          sessionVars: {...x.sessionVars, kVnArtNotesVarKey: jsonEncode(notes)},
+        ),
+        bumpActivity: false,
+      );
+    }
+    _redraw.add(castId);
+    final now = state.value;
+    if (now != null && now.artError != null) {
+      state = AsyncData(now.copyWith(clearArtError: true));
+    }
+    await drawCast();
+  }
+
+  /// The player accepted the cast's sprites: the game may start.
+  Future<void> approveCast() async {
+    await _mutate(
+      (x) => x.copyWith(sessionVars: {...x.sessionVars, kVnArtOkVarKey: '1'}),
+      bumpActivity: false,
+    );
+  }
+
+  /// Stops drawing: the sprites drawn so far stay, everyone else is
+  /// cardboard.
+  Future<void> skipArt() async {
+    _artToken?.cancel('art skipped');
+    _redraw.clear();
+    await _mutate(
+      (x) => x.copyWith(
+        sessionVars: {...x.sessionVars, kVnArtOkVarKey: '1'}
+          ..remove(kVnArtVarKey),
+      ),
+      bumpActivity: false,
+    );
   }
 
   /// Writes [mutate] to the session and keeps [state] on the result.
@@ -434,6 +527,7 @@ class VnNotifier extends AsyncNotifier<VnState> {
               error: current.error,
               drawing: current.drawing,
               artError: current.artError,
+              artFailed: current.artFailed,
             ),
     );
   }

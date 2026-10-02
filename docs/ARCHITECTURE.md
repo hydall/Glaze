@@ -1664,8 +1664,15 @@ and the last 25 journal lines.
 
 Sprites: a novel started with "Draw the characters" on (`sessionVars['__vnArt']`
 = the sheet size) draws each cast member with the image provider from the image
-generation settings, in the background, once their `cast` line exists
-(`VnNotifier.drawCast`). `vnSpritePlan` picks how: models that draw 21:9 at 2K
+generation settings (`VnNotifier.drawCast`). Drawing starts as soon as the
+characters pass is written, while the remaining passes are written alongside.
+The setup screen then shows `VnCastReview`: every emotion of every character,
+a redraw per character with a note on what to change (kept in
+`sessionVars['__vnArtNotes']` and added to the prompt; the new sprites get new
+file names and the old files are deleted), accept (`__vnArtOk`), or go on
+without pictures (drops `__vnArt`). The game does not start until the cast is
+accepted (`VnState.ready`). Characters a later chapter adds are drawn in the
+game without that gate; the header's characters button opens the same review. `vnSpritePlan` picks how: models that draw 21:9 at 2K
 or more (Nano Banana 2 / Pro) get one sheet of all five emotions, with a layout
 guide of grey mannequins as a reference when the provider takes references;
 1K-only models draw the neutral sprite at 9:16 and each emotion as an edit of
