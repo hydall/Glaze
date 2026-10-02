@@ -59,7 +59,7 @@ class _FakeSprites extends VnSpriteService {
   final List<String> removed = [];
 
   @override
-  Future<Map<String, String>> draw({
+  Future<VnDrawn> draw({
     required String sessionId,
     required VnCastMember who,
     required String setting,
@@ -68,7 +68,25 @@ class _FakeSprites extends VnSpriteService {
     CancelToken? cancelToken,
   }) async {
     draws.add((who.id, note, gen.calls.length));
-    return {'normal': 'vn_sprites/$sessionId/${who.id}_${draws.length}.png'};
+    return VnDrawn(
+      {'normal': 'vn_sprites/$sessionId/${who.id}_${draws.length}.png'},
+      {'sad': 'HTTP 429'},
+    );
+  }
+
+  @override
+  Future<Map<String, String>> drawEmotion({
+    required String sessionId,
+    required VnCastMember who,
+    required String emotion,
+    required Map<String, String> current,
+    CancelToken? cancelToken,
+  }) async {
+    draws.add((who.id, emotion, gen.calls.length));
+    return {
+      ...current,
+      emotion: 'vn_sprites/$sessionId/${who.id}_$emotion.png',
+    };
   }
 
   @override
@@ -233,6 +251,21 @@ void main() {
       await pumpEventQueue();
       expect(fake.draws, isEmpty);
       expect(stateOf(n).ready, isTrue);
+    });
+
+    test('one emotion is drawn again and its failure forgotten', () async {
+      final n = await playable(artSize: '2K');
+      await pumpEventQueue();
+      expect(stateOf(n).artMissing['mia'], {'sad': 'HTTP 429'});
+      await n.redrawEmotion('mia', 'sad');
+      final s = stateOf(n);
+      expect(sprites.draws.last.$2, 'sad');
+      expect(vnSpritesOf(s.session.sessionVars)['mia']!.keys, [
+        'normal',
+        'sad',
+      ]);
+      expect(s.artMissing['mia'], isEmpty);
+      expect(s.drawing, isNull);
     });
   });
 }

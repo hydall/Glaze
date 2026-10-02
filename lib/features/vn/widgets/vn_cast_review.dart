@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/state/db_provider.dart';
+import '../../image_gen/image_gen_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
@@ -14,6 +15,7 @@ import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/image_viewer.dart';
 import '../models/vn_document.dart';
 import '../services/vn_sprite_image.dart';
+import '../services/vn_sprite_service.dart';
 import '../vn_labels.dart';
 import '../vn_provider.dart';
 
@@ -64,7 +66,11 @@ class VnCastReview extends ConsumerWidget {
           _CastCard(
             who: who,
             sprites: sprites[who.id] ?? const {},
-            drawing: s.drawing == who.id,
+            drawing: s.drawing == who.id && s.drawingEmotion == null,
+            drawingEmotion: s.drawing == who.id ? s.drawingEmotion : null,
+            missing: s.artMissing[who.id] ?? const {},
+            onRedrawEmotion: (emotion) =>
+                unawaited(notifier.redrawEmotion(who.id, emotion)),
             failure: s.artFailed[who.id],
             canDraw: s.drawsCast,
             onRedraw: () => unawaited(
@@ -130,21 +136,35 @@ class _CastCard extends ConsumerWidget {
     required this.who,
     required this.sprites,
     required this.drawing,
+    required this.drawingEmotion,
+    required this.missing,
     required this.failure,
     required this.canDraw,
     required this.onRedraw,
+    required this.onRedrawEmotion,
   });
 
   final VnCastMember who;
   final Map<String, String> sprites;
   final bool drawing;
+  final String? drawingEmotion;
+  final Map<String, String> missing;
   final Object? failure;
   final bool canDraw;
   final VoidCallback onRedraw;
+  final ValueChanged<String> onRedrawEmotion;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final storage = ref.watch(imageStorageProvider).value;
+    final settings = ref.watch(imageGenSettingsProvider).value;
+    // One emotion is an edit of the calm sprite.
+    final canEdit =
+        canDraw &&
+        !drawing &&
+        sprites.containsKey('normal') &&
+        settings != null &&
+        vnCanRedrawEmotion(settings);
     final failure = this.failure;
     final String? status = drawing
         ? 'vn_cast_drawing'.tr()
@@ -194,7 +214,7 @@ class _CastCard extends ConsumerWidget {
                       ],
                     ),
                   ),
-                  if (drawing)
+                  if (drawing || drawingEmotion != null)
                     const Padding(
                       padding: EdgeInsets.all(12),
                       child: GlazeSpinner(size: 18, strokeWidth: 2),
@@ -222,6 +242,11 @@ class _CastCard extends ConsumerWidget {
                                 : storage.absolutePath(sprites[emotion]!) ??
                                       sprites[emotion],
                             name: who.name,
+                            drawing: drawingEmotion == emotion,
+                            missing: missing[emotion],
+                            onRedraw: canEdit && drawingEmotion == null
+                                ? () => onRedrawEmotion(emotion)
+                                : null,
                           ),
                         ),
                     ],
@@ -237,34 +262,89 @@ class _CastCard extends ConsumerWidget {
 }
 
 /// One emotion: the sprite on a dark ground, where a green fringe or a hole
-/// left by the cut-out shows; tapped, it opens full size.
+/// left by the cut-out shows. Tapped, it offers to open it full size and to
+/// draw it again, with why it is missing when it is.
 class _Sprite extends StatelessWidget {
   const _Sprite({
     required this.emotion,
     required this.path,
     required this.name,
+    required this.drawing,
+    required this.missing,
+    required this.onRedraw,
   });
 
   final String emotion;
   final String? path;
   final String name;
+  final bool drawing;
+
+  /// Why the emotion has no picture, when drawing it failed.
+  final String? missing;
+
+  /// Null when the emotion cannot be drawn again on its own.
+  final VoidCallback? onRedraw;
+
+  void _open(BuildContext context, String label) {
+    final path = this.path;
+    final onRedraw = this.onRedraw;
+    if (path != null && onRedraw == null) {
+      ImageViewer.show(
+        context,
+        imageProvider: FileImage(File(path)),
+        description: '$name · $label',
+      );
+      return;
+    }
+    final nav = Navigator.of(context, rootNavigator: true);
+    unawaited(
+      GlazeBottomSheet.show<void>(
+        context,
+        title: '$name · $label',
+        items: [
+          if (path != null)
+            BottomSheetItem(
+              icon: Icons.zoom_in,
+              label: 'vn_cast_view'.tr(),
+              onTap: () {
+                nav.pop();
+                ImageViewer.show(
+                  context,
+                  imageProvider: FileImage(File(path)),
+                  description: '$name · $label',
+                );
+              },
+            ),
+          if (onRedraw != null)
+            BottomSheetItem(
+              icon: Icons.brush_outlined,
+              label: 'vn_cast_redraw_emotion'.tr(),
+              hint: missing == null
+                  ? null
+                  : 'vn_cast_missing'.tr(args: [missing!]),
+              onTap: () {
+                nav.pop();
+                onRedraw();
+              },
+            ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final path = this.path;
     final label = 'vn_emotion_$emotion'.tr();
+    final missing = this.missing;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 2),
       child: Column(
         children: [
           GestureDetector(
-            onTap: path == null
+            onTap: drawing || (path == null && onRedraw == null)
                 ? null
-                : () => ImageViewer.show(
-                    context,
-                    imageProvider: FileImage(File(path)),
-                    description: '$name · $label',
-                  ),
+                : () => _open(context, label),
             child: Container(
               height: 150,
               decoration: BoxDecoration(
@@ -272,11 +352,40 @@ class _Sprite extends StatelessWidget {
                 borderRadius: BorderRadius.circular(8),
               ),
               alignment: Alignment.bottomCenter,
-              child: path == null
-                  ? Icon(
-                      Icons.remove,
-                      size: 16,
-                      color: context.cs.onSurfaceVariant,
+              child: drawing
+                  ? const Center(child: GlazeSpinner(size: 18, strokeWidth: 2))
+                  : path == null
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(4),
+                        child: missing == null
+                            ? Icon(
+                                Icons.remove,
+                                size: 16,
+                                color: context.cs.onSurfaceVariant,
+                              )
+                            : Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.error_outline,
+                                    size: 18,
+                                    color: context.cs.error,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    missing,
+                                    textAlign: TextAlign.center,
+                                    maxLines: 4,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: context.cs.error,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                      ),
                     )
                   : Image.file(
                       File(path),

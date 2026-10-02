@@ -26,6 +26,8 @@ class VnState {
     this.drawing,
     this.artError,
     this.artFailed = const {},
+    this.drawingEmotion,
+    this.artMissing = const {},
   });
 
   final ChatSession session;
@@ -46,6 +48,14 @@ class VnState {
   /// Why a character could not be drawn, by cast id: the provider's error,
   /// or a [FormatException] for a picture that could not be cut.
   final Map<String, Object> artFailed;
+
+  /// The one emotion of [drawing] being drawn again; null when the whole
+  /// character is.
+  final String? drawingEmotion;
+
+  /// Why an emotion of a character came out without a picture, by cast id
+  /// and emotion. Kept while the novel is open.
+  final Map<String, Map<String, String>> artMissing;
 
   /// Whether the novel draws its cast with the image provider.
   bool get drawsCast => (session.sessionVars[kVnArtVarKey] ?? '').isNotEmpty;
@@ -73,6 +83,8 @@ class VnState {
     Object? artError,
     bool clearArtError = false,
     Map<String, Object>? artFailed,
+    String? drawingEmotion,
+    Map<String, Map<String, String>>? artMissing,
   }) {
     final next = session ?? this.session;
     return VnState(
@@ -83,6 +95,10 @@ class VnState {
       drawing: clearDrawing ? null : (drawing ?? this.drawing),
       artError: clearArtError ? null : (artError ?? this.artError),
       artFailed: artFailed ?? this.artFailed,
+      drawingEmotion: clearDrawing
+          ? null
+          : (drawingEmotion ?? this.drawingEmotion),
+      artMissing: artMissing ?? this.artMissing,
     );
   }
 }
@@ -155,6 +171,8 @@ class VnNotifier extends AsyncNotifier<VnState> {
   CancelToken? _artToken;
   // Characters the player asked to draw again.
   final Set<String> _redraw = {};
+  // Single emotions the player asked to draw again, as (castId, emotion).
+  final Set<(String, String)> _redrawEmotions = {};
 
   @override
   Future<VnState> build() async {
@@ -371,6 +389,13 @@ class VnNotifier extends AsyncNotifier<VnState> {
         final size = s.session.sessionVars[kVnArtVarKey] ?? '';
         if (size.isEmpty || s.artError != null) return;
         final have = vnSpritesOf(s.session.sessionVars);
+        final one = _redrawEmotions.firstOrNull;
+        if (one != null) {
+          _redrawEmotions.remove(one);
+          final who = s.doc.cast[one.$1];
+          if (who != null) await _drawEmotion(who, one.$2);
+          continue;
+        }
         final who = s.doc.cast.values
             .where(
               (c) =>
@@ -388,7 +413,7 @@ class VnNotifier extends AsyncNotifier<VnState> {
         );
         final token = _artToken = CancelToken();
         try {
-          final paths = await ref
+          final drawn = await ref
               .read(vnSpriteServiceProvider)
               .draw(
                 sessionId: sessionId,
@@ -398,21 +423,14 @@ class VnNotifier extends AsyncNotifier<VnState> {
                 note: vnArtNotesOf(s.session.sessionVars)[who.id],
                 cancelToken: token,
               );
-          Map<String, String> old = const {};
-          await _mutate((x) {
-            final all = vnSpritesOf(x.sessionVars);
-            old = all[who.id] ?? const {};
-            all[who.id] = paths;
-            return x.copyWith(
-              sessionVars: {
-                ...x.sessionVars,
-                kVnSpritesVarKey: jsonEncode(all),
-              },
+          await _keepSprites(who.id, drawn.paths);
+          final now = state.value;
+          if (now != null) {
+            state = AsyncData(
+              now.copyWith(
+                artMissing: {...now.artMissing, who.id: drawn.missing},
+              ),
             );
-          }, bumpActivity: false);
-          final stale = old.values.toSet().difference(paths.values.toSet());
-          if (stale.isNotEmpty) {
-            await ref.read(vnSpriteServiceProvider).remove(stale);
           }
         } catch (e) {
           if (token.isCancelled) return;
@@ -438,6 +456,75 @@ class VnNotifier extends AsyncNotifier<VnState> {
         state = AsyncData(s.copyWith(clearDrawing: true));
       }
     }
+  }
+
+  /// Draws [emotion] of [who] again; a failure is kept on
+  /// [VnState.artMissing] and does not stop the run.
+  Future<void> _drawEmotion(VnCastMember who, String emotion) async {
+    final s = state.value;
+    if (s == null) return;
+    state = AsyncData(s.copyWith(drawing: who.id, drawingEmotion: emotion));
+    final token = _artToken = CancelToken();
+    String? reason;
+    try {
+      final paths = await ref
+          .read(vnSpriteServiceProvider)
+          .drawEmotion(
+            sessionId: sessionId,
+            who: who,
+            emotion: emotion,
+            current: vnSpritesOf(s.session.sessionVars)[who.id] ?? const {},
+            cancelToken: token,
+          );
+      await _keepSprites(who.id, paths);
+    } catch (e) {
+      if (token.isCancelled) return;
+      debugPrint('[VN3D] drawing ${who.id} $emotion failed: $e');
+      reason = vnArtReason(e);
+    }
+    final now = state.value;
+    if (now == null) return;
+    final missing = {...?now.artMissing[who.id]};
+    if (reason == null) {
+      missing.remove(emotion);
+    } else {
+      missing[emotion] = reason;
+    }
+    state = AsyncData(
+      now.copyWith(
+        clearDrawing: true,
+        artMissing: {...now.artMissing, who.id: missing},
+      ),
+    );
+  }
+
+  /// Puts [paths] on the session as [castId]'s sprites and deletes the files
+  /// they replace.
+  Future<void> _keepSprites(String castId, Map<String, String> paths) async {
+    Map<String, String> old = const {};
+    await _mutate((x) {
+      final all = vnSpritesOf(x.sessionVars);
+      old = all[castId] ?? const {};
+      all[castId] = paths;
+      return x.copyWith(
+        sessionVars: {...x.sessionVars, kVnSpritesVarKey: jsonEncode(all)},
+      );
+    }, bumpActivity: false);
+    final stale = old.values.toSet().difference(paths.values.toSet());
+    if (stale.isNotEmpty) {
+      await ref.read(vnSpriteServiceProvider).remove(stale);
+    }
+  }
+
+  /// Draws one [emotion] of [castId] again, as an edit of their calm
+  /// sprite; the rest of their set stays.
+  Future<void> redrawEmotion(String castId, String emotion) async {
+    _redrawEmotions.add((castId, emotion));
+    final now = state.value;
+    if (now != null && now.artError != null) {
+      state = AsyncData(now.copyWith(clearArtError: true));
+    }
+    await drawCast();
   }
 
   /// Draws again every character that failed.
@@ -489,6 +576,7 @@ class VnNotifier extends AsyncNotifier<VnState> {
   Future<void> skipArt() async {
     _artToken?.cancel('art skipped');
     _redraw.clear();
+    _redrawEmotions.clear();
     await _mutate(
       (x) => x.copyWith(
         sessionVars: {...x.sessionVars, kVnArtOkVarKey: '1'}
@@ -528,6 +616,8 @@ class VnNotifier extends AsyncNotifier<VnState> {
               drawing: current.drawing,
               artError: current.artError,
               artFailed: current.artFailed,
+              drawingEmotion: current.drawingEmotion,
+              artMissing: current.artMissing,
             ),
     );
   }

@@ -1671,7 +1671,12 @@ a redraw per character with a note on what to change (kept in
 `sessionVars['__vnArtNotes']` and added to the prompt; the new sprites get new
 file names and the old files are deleted), accept (`__vnArtOk`), or go on
 without pictures (drops `__vnArt`). The game does not start until the cast is
-accepted (`VnState.ready`). Characters a later chapter adds are drawn in the
+accepted (`VnState.ready`). Every image request is repeated after a pause on a
+rate limit, a 5xx or a network failure (honouring `Retry-After`), and once at
+once when the model answers without a picture; an emotion still missing keeps
+its reason on `VnState.artMissing` and shows in its slot. A slot can be drawn
+again on its own (`redrawEmotion`): an edit of the calm sprite put back on the
+chroma background, scaled to the set and aligned with it again. Characters a later chapter adds are drawn in the
 game without that gate; the header's characters button opens the same review. `vnSpritePlan` picks how: models that draw 21:9 at 2K
 or more (Nano Banana 2 / Pro) get one sheet of all five emotions, with a layout
 guide of grey mannequins as a reference when the provider takes references;

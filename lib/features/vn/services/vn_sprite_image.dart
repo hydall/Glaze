@@ -435,3 +435,59 @@ List<Uint8List?> spritesFromSingles(List<Uint8List> pictures) {
   var next = 0;
   return [for (final f in figures) f == null ? null : aligned[next++]];
 }
+
+/// A character's set with the emotion at [index] drawn anew: [kept] are the
+/// sprites already cut (transparent PNGs, null where there is none),
+/// [picture] the new drawing on the flat background. The new figure is
+/// scaled to the height of the first kept one, and the whole set is put on
+/// one canvas again. Throws [FormatException] when the new picture has no
+/// figure.
+List<Uint8List?> spritesWithRedrawn(
+  List<Uint8List?> kept,
+  int index,
+  Uint8List picture,
+) {
+  final decoded = img.decodeImage(picture);
+  var fresh = decoded == null ? null : trimToFigure(cutOutBackground(decoded));
+  if (fresh == null) throw const FormatException('No figure in the picture');
+  final figures = <img.Image?>[
+    for (var i = 0; i < kept.length; i++)
+      i == index || kept[i] == null
+          ? null
+          : () {
+              final png = img.decodePng(kept[i]!);
+              return png == null ? null : trimToFigure(png);
+            }(),
+  ];
+  final like = figures.whereType<img.Image>().firstOrNull;
+  if (like != null && like.height != fresh.height) {
+    fresh = img.copyResize(
+      fresh,
+      height: like.height,
+      interpolation: img.Interpolation.average,
+    );
+  }
+  figures[index] = fresh;
+  final present = figures.whereType<img.Image>().toList();
+  final aligned = alignFigures(present);
+  var next = 0;
+  return [for (final f in figures) f == null ? null : aligned[next++]];
+}
+
+/// A cut sprite back on a flat [chroma] background with room around it, as
+/// a reference for drawing it again with another expression.
+Uint8List spriteOnChroma(Uint8List png, VnChroma chroma) {
+  final sprite = img.decodePng(png);
+  if (sprite == null) throw const FormatException('Sprite does not decode');
+  final h = (sprite.height * 1.12).round();
+  final w = math.max((h * 9 / 16).round(), sprite.width + 32);
+  final canvas = img.Image(width: w, height: h);
+  img.fill(canvas, color: img.ColorRgb8(chroma.r, chroma.g, chroma.b));
+  img.compositeImage(
+    canvas,
+    sprite,
+    dstX: (w - sprite.width) ~/ 2,
+    dstY: (h - sprite.height) ~/ 2,
+  );
+  return img.encodePng(canvas);
+}

@@ -70,11 +70,14 @@ Uint8List _sheet({
 
 img.Image _png(Uint8List bytes) => img.decodePng(bytes)!;
 
-/// Hands back [picture] for every request.
+/// Hands back [picture] for every request, after throwing what [fail]
+/// returns for that request (counted from 0), if anything.
 class _FakeDispatcher extends ImageGenDispatcher {
-  const _FakeDispatcher(this.picture);
+  _FakeDispatcher(this.picture, {this.fail});
 
   final Uint8List picture;
+  final Object? Function(int request)? fail;
+  int requests = 0;
 
   @override
   Future<Uint8List> generate({
@@ -87,8 +90,21 @@ class _FakeDispatcher extends ImageGenDispatcher {
     String? instructionImageSize,
     CancelToken? cancelToken,
     LlmCaptureContext? captureContext,
-  }) async => picture;
+  }) async {
+    final error = fail?.call(requests++);
+    if (error != null) throw error;
+    return picture;
+  }
 }
+
+DioException _http(int code) => DioException(
+  requestOptions: RequestOptions(path: '/'),
+  type: DioExceptionType.badResponse,
+  response: Response(
+    requestOptions: RequestOptions(path: '/'),
+    statusCode: code,
+  ),
+);
 
 class _Settings extends ImageGenSettingsNotifier {
   _Settings(this.settings);
@@ -258,10 +274,15 @@ void main() {
     });
     tearDown(() => dir.delete(recursive: true));
 
-    Future<Map<String, String>> draw(
+    late _FakeDispatcher dispatcher;
+    late VnSpriteService service;
+
+    Future<VnDrawn> draw(
       ImageGenSettings settings,
-      Uint8List picture,
-    ) async {
+      Uint8List picture, {
+      Object? Function(int request)? fail,
+    }) async {
+      dispatcher = _FakeDispatcher(picture, fail: fail);
       final container = ProviderContainer(
         overrides: [
           imageGenSettingsProvider.overrideWith(() => _Settings(settings)),
@@ -269,21 +290,22 @@ void main() {
             (ref) async => ImageStorageService(dir.path),
           ),
           vnSpriteServiceProvider.overrideWith(
-            (ref) => VnSpriteService(ref, _FakeDispatcher(picture)),
+            (ref) =>
+                VnSpriteService(ref, dispatcher)
+                  ..retryDelays = const [Duration.zero, Duration.zero],
           ),
         ],
       );
       addTearDown(container.dispose);
-      return container
-          .read(vnSpriteServiceProvider)
-          .draw(
-            sessionId: 's',
-            who: const VnCastMember(id: 'mia', name: 'Мия'),
-            setting: '',
-            size: '2K',
-            // Unsendable to an isolate: the cut-out must not capture it.
-            cancelToken: CancelToken(),
-          );
+      service = container.read(vnSpriteServiceProvider);
+      return service.draw(
+        sessionId: 's',
+        who: const VnCastMember(id: 'mia', name: 'Мия'),
+        setting: '',
+        size: '2K',
+        // Unsendable to an isolate: the cut-out must not capture it.
+        cancelToken: CancelToken(),
+      );
     }
 
     test('a sheet is cut in an isolate and saved', () async {
@@ -294,8 +316,8 @@ void main() {
         ),
         _sheet(),
       );
-      expect(paths.keys, kVnEmotions);
-      for (final path in paths.values) {
+      expect(paths.paths.keys, kVnEmotions);
+      for (final path in paths.paths.values) {
         expect(File('${dir.path}/$path').existsSync(), isTrue);
       }
     });
@@ -314,7 +336,64 @@ void main() {
         const ImageGenSettings(apiType: ImageGenApiType.a1111),
         single,
       );
-      expect(paths.keys, ['normal']);
+      expect(paths.paths.keys, ['normal']);
+    });
+
+    Uint8List single() => img.encodePng(
+      img.copyCrop(
+        img.decodeJpg(_sheet(count: 1))!,
+        x: 300,
+        y: 0,
+        width: 400,
+        height: 420,
+      ),
+    );
+    const editing = ImageGenSettings(
+      apiType: ImageGenApiType.gemini,
+      customModel: 'gemini-2.5-flash-image',
+    );
+
+    test(
+      'a rate limit is waited out, a refusal is kept as the reason',
+      () async {
+        final drawn = await draw(
+          editing,
+          single(),
+          fail: (i) => switch (i) {
+            // The smile: rate limited twice, then drawn.
+            1 || 2 => _http(429),
+            // The anger: refused outright.
+            4 => _http(400),
+            _ => null,
+          },
+        );
+        expect(drawn.paths.keys, ['normal', 'smile', 'sad', 'surprised']);
+        expect(drawn.missing, {'angry': 'HTTP 400'});
+      },
+    );
+
+    test('one emotion is drawn again on the same canvas', () async {
+      final drawn = await draw(
+        editing,
+        single(),
+        fail: (i) => i == 3 ? _http(400) : null,
+      );
+      expect(drawn.missing.keys, ['sad']);
+      final again = await service.drawEmotion(
+        sessionId: 's',
+        who: const VnCastMember(id: 'mia', name: 'Мия'),
+        emotion: 'sad',
+        current: drawn.paths,
+      );
+      expect(again.keys, kVnEmotions);
+      final sizes = {
+        for (final p in again.values)
+          () {
+            final i = img.decodePng(File('${dir.path}/$p').readAsBytesSync())!;
+            return (i.width, i.height);
+          }(),
+      };
+      expect(sizes, hasLength(1), reason: 'every emotion on one canvas');
     });
   });
 }
