@@ -2577,6 +2577,7 @@
   "studio_preset_not_found": "Пресет не найден",
   "studio_preset_fallback_name": "Агентный пресет",
   "studio_preset_subtitle": "агентный пресет",
+  "studio_unavailable_notice": "Агентные пресеты и Студия будут переработаны после релиза (1.0)",
   "studio_preset_cloned": "Пресет клонирован",
   "studio_delete_preset": "Удалить пресет",
   "studio_confirm_delete_preset": "Удалить «{}»? Это действие необратимо.",

@@ -2556,6 +2556,7 @@
   "studio_preset_not_found": "Preset not found",
   "studio_preset_fallback_name": "Agentic Preset",
   "studio_preset_subtitle": "agentic preset",
+  "studio_unavailable_notice": "Agentic presets/Studio will be reworked after the release (1.0)",
   "studio_preset_cloned": "Preset cloned",
   "studio_delete_preset": "Delete Preset",
   "studio_confirm_delete_preset": "Delete \"{}\"? This cannot be undone.",

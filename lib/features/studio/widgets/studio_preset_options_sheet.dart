@@ -9,10 +9,13 @@ import '../../../shared/widgets/glaze_bottom_sheet.dart';
 void showStudioPresetOptions(
   BuildContext context, {
   required StudioPreset preset,
-  required VoidCallback onRename,
-  required VoidCallback onClone,
   required VoidCallback onExport,
   required VoidCallback onDelete,
+
+  /// Rename, clone and folder actions are omitted while Studio is closed —
+  /// an agentic preset can then only be exported or deleted.
+  VoidCallback? onRename,
+  VoidCallback? onClone,
 
   /// Omitted where folders don't apply (e.g. the editor opened outside the
   /// preset list).
@@ -35,22 +38,24 @@ void showStudioPresetOptions(
             onSelect();
           },
         ),
-      BottomSheetItem(
-        icon: Icons.drive_file_rename_outline,
-        label: 'action_rename'.tr(),
-        onTap: () {
-          Navigator.of(context, rootNavigator: true).pop();
-          onRename();
-        },
-      ),
-      BottomSheetItem(
-        icon: Icons.copy_outlined,
-        label: 'action_clone_block'.tr(),
-        onTap: () {
-          Navigator.of(context, rootNavigator: true).pop();
-          onClone();
-        },
-      ),
+      if (onRename != null)
+        BottomSheetItem(
+          icon: Icons.drive_file_rename_outline,
+          label: 'action_rename'.tr(),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            onRename();
+          },
+        ),
+      if (onClone != null)
+        BottomSheetItem(
+          icon: Icons.copy_outlined,
+          label: 'action_clone_block'.tr(),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            onClone();
+          },
+        ),
       if (onAddToFolder != null)
         BottomSheetItem(
           icon: Icons.create_new_folder_outlined,
