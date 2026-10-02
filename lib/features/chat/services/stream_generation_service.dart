@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/llm/game_time.dart';
 import '../../../core/llm/generation_phase.dart';
+import '../../../core/llm/converters/no_assistant.dart';
 import '../../../core/llm/history_assembler.dart';
 import '../../../core/llm/history_trim.dart';
 import '../../../core/llm/prompt_isolate.dart';
@@ -280,6 +281,7 @@ class StreamGenerationService {
       final apiMessages = buildApiMessages(
         promptResult.messages,
         reasoningHistoryCount: apiConfig.reasoningHistoryCount,
+        noAssistant: NoAssistantOptions.of(apiConfig),
       );
       final previousApiMessages = _lastRequestsBySession[session.id];
       _rememberRequest(session.id, apiMessages);

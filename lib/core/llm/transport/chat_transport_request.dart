@@ -1,5 +1,6 @@
 import '../../models/extra_request_parameter.dart';
 import '../../models/api_config.dart';
+import '../converters/no_assistant.dart';
 import 'llm_capture_context.dart';
 
 /// Provider-neutral input for [ChatTransport.stream].
@@ -70,6 +71,10 @@ class ChatTransportRequest {
   /// Request metadata only: transports do not serialize these as message names.
   final String? charName;
   final String? userName;
+
+  /// `stop` sequences. Only the Chat Completions body sends them; today the
+  /// one source is the NoAssistant stop string of a custom connection.
+  final List<String> stop;
 
   /// Optional tool definitions for native tool-call support (OpenAI format).
   /// When non-null, the request includes `tools` and `tool_choice` in the body.
@@ -145,6 +150,7 @@ class ChatTransportRequest {
     this.promptPostProcessing = 'none',
     this.charName,
     this.userName,
+    this.stop = const [],
     this.tools,
     this.toolChoice,
     this.responseJsonSchema,
@@ -200,6 +206,7 @@ class ChatTransportRequest {
     promptPostProcessing: apiConfig.promptPostProcessing,
     charName: charName,
     userName: userName,
+    stop: NoAssistantOptions.stopFor(apiConfig),
     tools: tools,
     toolChoice: toolChoice,
     useSystemInstruction: apiConfig.useSystemInstruction,
@@ -245,6 +252,7 @@ class ChatTransportRequest {
     promptPostProcessing: 'none',
     charName: charName,
     userName: userName,
+    stop: stop,
     tools: tools,
     toolChoice: toolChoice,
     responseJsonSchema: responseJsonSchema,

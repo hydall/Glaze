@@ -12,6 +12,7 @@ import '../models/chat_message.dart';
 import '../models/lorebook.dart';
 import 'macro_engine.dart';
 import 'game_time.dart';
+import 'converters/no_assistant.dart';
 import 'history_assembler.dart';
 import 'context_calculator.dart';
 import 'lorebook_scanner.dart';
@@ -987,6 +988,7 @@ PromptResult _assembleMessages({
               buildApiMessages(
                 finalMessagesWithRegex,
                 reasoningHistoryCount: payload.apiConfig.reasoningHistoryCount,
+                noAssistant: NoAssistantOptions.of(payload.apiConfig),
               ),
             ),
           ),

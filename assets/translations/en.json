@@ -562,6 +562,7 @@
   "desc_char_prefix": "Prefix prepended to character messages in history block",
   "label_squash_role": "Squash Role",
   "desc_squash_role": "Consecutive messages from this role will be merged",
+  "no_assistant_squash_none": "Don't squash",
   "btn_ok": "OK",
   "catalog_open_chat": "Open Chat",
   "label_formatted": "Formatted",

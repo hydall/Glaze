@@ -1,3 +1,4 @@
+import '../../core/llm/converters/no_assistant.dart';
 import '../../core/llm/converters/prompt_post_processing.dart';
 import '../../core/llm/converters/reasoning_effort.dart';
 import '../../core/llm/history_trim.dart';
@@ -123,6 +124,12 @@ class ApiConfigDraft {
       promptPostProcessing: protocol == LlmProtocol.customChatCompletion
           ? PromptPostProcessing.normalize(values.promptPostProcessing)
           : PromptPostProcessing.none,
+      // Same reasoning: NoAssistant is offered for custom endpoints only.
+      noAssistant:
+          protocol == LlmProtocol.customChatCompletion && values.noAssistant,
+      noAssistantSquashRole: NoAssistantSquashRole.normalize(
+        values.noAssistantSquashRole,
+      ),
     );
   }
 
@@ -204,6 +211,12 @@ class ApiConfigDraft {
       cacheBreakpointMode: normalized.cacheBreakpointMode,
       sessionIdMode: normalized.sessionIdMode,
       promptPostProcessing: normalized.promptPostProcessing,
+      // Prefixes are kept verbatim: the trailing space in `User: ` matters.
+      noAssistant: normalized.noAssistant,
+      noAssistantStopString: normalized.noAssistantStopString,
+      noAssistantUserPrefix: normalized.noAssistantUserPrefix,
+      noAssistantCharPrefix: normalized.noAssistantCharPrefix,
+      noAssistantSquashRole: normalized.noAssistantSquashRole,
       protocol: normalized.protocol,
       extraRequestParameters: normalized.extraRequestParameters,
     );
