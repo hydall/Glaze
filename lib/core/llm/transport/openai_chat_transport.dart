@@ -216,6 +216,10 @@ class OpenAiChatTransport implements ChatTransport {
       body['session_id'] = r.sessionId;
     }
 
+    if (r.stop.isNotEmpty) {
+      body['stop'] = r.stop;
+    }
+
     if (r.tools != null && r.tools!.isNotEmpty) {
       body['tools'] = r.tools;
       body['tool_choice'] = r.toolChoice ?? 'auto';

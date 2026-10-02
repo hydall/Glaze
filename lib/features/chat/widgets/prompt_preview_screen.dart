@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'dart:convert';
 
 import '../../../core/llm/converters/prompt_post_processing.dart';
+import '../../../core/llm/converters/no_assistant.dart';
 import '../../../core/llm/history_assembler.dart';
 import '../../../core/llm/history_trim.dart';
 import '../../../core/llm/prompt_builder.dart';
@@ -45,7 +46,12 @@ export 'requests/prompt_attachment_preview.dart'
 List<Map<String, dynamic>> buildPreviewApiMessages(
   List<PromptMessage> messages, {
   int reasoningHistoryCount = 0,
-}) => buildApiMessages(messages, reasoningHistoryCount: reasoningHistoryCount);
+  NoAssistantOptions? noAssistant,
+}) => buildApiMessages(
+  messages,
+  reasoningHistoryCount: reasoningHistoryCount,
+  noAssistant: noAssistant,
+);
 
 /// The request that would go out next, built for real and rendered the way the
 /// inspector renders every request: budget bar, parameters, coverage, messages.
@@ -105,6 +111,7 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
   List<InspectorMessage> _messages = const [];
 
   bool _loading = true;
+
   /// Raw JSON of the built request instead of the rendered message list.
   bool _raw = false;
 
@@ -145,8 +152,15 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
       if (mounted) {
         setState(() {
           _result = result;
+          // NoAssistant runs before post-processing on the live path too
+          // (`buildApiMessages`), so the rows show the combined history block.
+          final noAssistant = _apiConfig == null
+              ? null
+              : NoAssistantOptions.of(_apiConfig!);
           _previewMessages = buildPreviewMessages(
-            result.messages,
+            noAssistant == null
+                ? result.messages
+                : applyNoAssistant(result.messages, noAssistant),
             _apiConfig?.promptPostProcessing ?? PromptPostProcessing.none,
             charName: _charName,
             userName: _userName,
@@ -421,6 +435,7 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
       final apiMessages = buildPreviewApiMessages(
         _result!.messages,
         reasoningHistoryCount: cfg.reasoningHistoryCount,
+        noAssistant: NoAssistantOptions.of(cfg),
       );
 
       // The live path applies post-processing in the transport decorator; the

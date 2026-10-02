@@ -1,5 +1,6 @@
 import '../../features/image_gen/services/image_tag_markup.dart';
 import '../models/chat_message.dart';
+import 'converters/no_assistant.dart';
 import 'inline_media.dart';
 import 'macro_engine.dart';
 
@@ -219,10 +220,18 @@ List<String> _imagePathsFromJson(Map<String, dynamic> json) {
   return single is String && single.isNotEmpty ? [single] : const [];
 }
 
+/// The provider-bound message list for a built prompt.
+///
+/// [noAssistant] — `NoAssistantOptions.of(apiConfig)` — reshapes the prompt
+/// for NoAssistant mode first, so every caller that turns a chat prompt into
+/// a request (and the hash the lorebook manifest records of it) agrees on the
+/// same messages.
 List<Map<String, dynamic>> buildApiMessages(
   List<PromptMessage> messages, {
   int reasoningHistoryCount = 0,
+  NoAssistantOptions? noAssistant,
 }) {
+  if (noAssistant != null) messages = applyNoAssistant(messages, noAssistant);
   final included = messages
       .where(
         (message) =>

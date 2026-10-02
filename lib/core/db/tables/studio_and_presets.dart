@@ -170,6 +170,15 @@ class ApiConfigs extends Table {
       integer().withDefault(const Constant(60000))();
   TextColumn get promptPostProcessing =>
       text().withDefault(const Constant('none'))();
+  BoolColumn get noAssistant => boolean().withDefault(const Constant(false))();
+  TextColumn get noAssistantStopString =>
+      text().withDefault(const Constant(''))();
+  TextColumn get noAssistantUserPrefix =>
+      text().withDefault(const Constant(''))();
+  TextColumn get noAssistantCharPrefix =>
+      text().withDefault(const Constant(''))();
+  TextColumn get noAssistantSquashRole =>
+      text().withDefault(const Constant('assistant'))();
   BoolColumn get useSystemInstruction =>
       boolean().withDefault(const Constant(true))();
   TextColumn get extraRequestParametersJson =>

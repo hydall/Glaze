@@ -425,6 +425,33 @@ void main() {
     }
   });
 
+  test('NoAssistant survives only on custom endpoints', () {
+    for (final protocol in LlmProtocol.all) {
+      final config = ApiConfig(
+        id: 'api',
+        protocol: protocol,
+        noAssistant: true,
+        noAssistantUserPrefix: 'User: ',
+        noAssistantCharPrefix: 'Char: ',
+        noAssistantStopString: 'User:',
+        noAssistantSquashRole: 'user',
+      );
+      final draft = ApiConfigDraft.fromConfig(config);
+      final saved = draft.toConfig(const ApiConfig(id: 'api'));
+
+      expect(
+        saved.noAssistant,
+        protocol == LlmProtocol.customChatCompletion,
+        reason: protocol,
+      );
+      // Prefixes keep their trailing space.
+      expect(saved.noAssistantUserPrefix, 'User: ', reason: protocol);
+      expect(saved.noAssistantCharPrefix, 'Char: ', reason: protocol);
+      expect(saved.noAssistantStopString, 'User:', reason: protocol);
+      expect(saved.noAssistantSquashRole, 'user', reason: protocol);
+    }
+  });
+
   test('an unknown post-processing mode degrades to none', () {
     const config = ApiConfig(
       id: 'api',
