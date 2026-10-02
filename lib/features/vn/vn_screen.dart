@@ -421,7 +421,7 @@ class _VnScreenState extends ConsumerState<VnScreen> {
           )
         else if (s.artError != null)
           VnGeneratingBadge(
-            label: 'vn_drawing_failed'.tr(args: [vnErrorText(s.artError!)]),
+            label: vnArtErrorText(s.artError!),
             onRetry: () => unawaited(_notifier.retryCast()),
           ),
       ],

@@ -166,16 +166,25 @@ String vnSpriteSetting(VnDocument doc) {
   return text.length <= 400 ? text : '${text.substring(0, 400)}…';
 }
 
+// Top level, so the closure sent to the isolate captures only the pictures:
+// one made inside [VnSpriteService.draw] would carry its whole scope, cancel
+// token included, and that cannot cross isolates.
+Future<List<Uint8List>> _cutSheet(Uint8List sheet) =>
+    Isolate.run(() => spritesFromSheet(sheet, kVnEmotions.length));
+
+Future<List<Uint8List?>> _cutSingles(List<Uint8List> pictures) =>
+    Isolate.run(() => spritesFromSingles(pictures));
+
 String _dataUrl(Uint8List bytes) =>
     'data:image/png;base64,${base64Encode(bytes)}';
 
 /// Draws the cast of a novel with the image provider set up in the image
 /// generation settings.
 class VnSpriteService {
-  VnSpriteService(this._ref);
+  VnSpriteService(this._ref, [this._dispatcher = const ImageGenDispatcher()]);
 
   final Ref _ref;
-  final ImageGenDispatcher _dispatcher = const ImageGenDispatcher();
+  final ImageGenDispatcher _dispatcher;
 
   /// Draws [who] and saves the sprites under `vn_sprites/<sessionId>/`.
   /// Returns the saved paths by emotion, relative to the data folder;
@@ -240,9 +249,7 @@ class VnSpriteService {
           _sheetAspect,
           size: size,
         );
-        final pngs = await Isolate.run(
-          () => spritesFromSheet(sheet, kVnEmotions.length),
-        );
+        final pngs = await _cutSheet(sheet);
         for (var i = 0; i < kVnEmotions.length; i++) {
           sprites[kVnEmotions[i]] = pngs[i];
         }
@@ -270,7 +277,7 @@ class VnSpriteService {
             }
           }
         }
-        final pngs = await Isolate.run(() => spritesFromSingles(pictures));
+        final pngs = await _cutSingles(pictures);
         for (var i = 0; i < emotions.length; i++) {
           final png = pngs[i];
           if (png != null) sprites[emotions[i]] = png;

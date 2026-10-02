@@ -1,13 +1,23 @@
+import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:dio/dio.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:glaze_flutter/core/llm/transport/llm_capture_context.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
+import 'package:glaze_flutter/core/services/image_storage_service.dart';
+import 'package:glaze_flutter/core/state/db_provider.dart';
+import 'package:glaze_flutter/features/image_gen/image_gen_provider.dart';
+import 'package:glaze_flutter/features/image_gen/services/image_gen_dispatcher.dart';
 import 'package:glaze_flutter/features/image_gen/image_gen_models.dart';
 import 'package:glaze_flutter/features/vn/models/vn_document.dart';
 import 'package:glaze_flutter/features/vn/services/vn_sprite_image.dart';
 import 'package:glaze_flutter/features/vn/services/vn_sprite_service.dart';
 import 'package:image/image.dart' as img;
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// A sheet the way an image model returns one: [count] figures on a slightly
 /// noisy flat background, each with a gap of background enclosed between
@@ -59,6 +69,35 @@ Uint8List _sheet({
 }
 
 img.Image _png(Uint8List bytes) => img.decodePng(bytes)!;
+
+/// Hands back [picture] for every request.
+class _FakeDispatcher extends ImageGenDispatcher {
+  const _FakeDispatcher(this.picture);
+
+  final Uint8List picture;
+
+  @override
+  Future<Uint8List> generate({
+    required ImageGenSettings settings,
+    required String prompt,
+    required List<Map<String, String>> references,
+    required String llmEndpoint,
+    required String llmApiKey,
+    String? instructionAspectRatio,
+    String? instructionImageSize,
+    CancelToken? cancelToken,
+    LlmCaptureContext? captureContext,
+  }) async => picture;
+}
+
+class _Settings extends ImageGenSettingsNotifier {
+  _Settings(this.settings);
+
+  final ImageGenSettings settings;
+
+  @override
+  Future<ImageGenSettings> build() async => settings;
+}
 
 void main() {
   group('cutting sprites out of a sheet', () {
@@ -209,5 +248,73 @@ void main() {
         'mia': {'normal': 'vn_sprites/s/mia_normal.png'},
       },
     );
+  });
+
+  group('drawing through the service', () {
+    late Directory dir;
+    setUp(() async {
+      SharedPreferences.setMockInitialValues({});
+      dir = await Directory.systemTemp.createTemp('vn_sprites');
+    });
+    tearDown(() => dir.delete(recursive: true));
+
+    Future<Map<String, String>> draw(
+      ImageGenSettings settings,
+      Uint8List picture,
+    ) async {
+      final container = ProviderContainer(
+        overrides: [
+          imageGenSettingsProvider.overrideWith(() => _Settings(settings)),
+          imageStorageProvider.overrideWith(
+            (ref) async => ImageStorageService(dir.path),
+          ),
+          vnSpriteServiceProvider.overrideWith(
+            (ref) => VnSpriteService(ref, _FakeDispatcher(picture)),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+      return container
+          .read(vnSpriteServiceProvider)
+          .draw(
+            sessionId: 's',
+            who: const VnCastMember(id: 'mia', name: 'Мия'),
+            setting: '',
+            size: '2K',
+            // Unsendable to an isolate: the cut-out must not capture it.
+            cancelToken: CancelToken(),
+          );
+    }
+
+    test('a sheet is cut in an isolate and saved', () async {
+      final paths = await draw(
+        const ImageGenSettings(
+          apiType: ImageGenApiType.gemini,
+          customModel: 'gemini-3.1-flash-image-preview',
+        ),
+        _sheet(),
+      );
+      expect(paths.keys, kVnEmotions);
+      for (final path in paths.values) {
+        expect(File('${dir.path}/$path').existsSync(), isTrue);
+      }
+    });
+
+    test('a single picture is cut in an isolate and saved', () async {
+      final single = img.encodePng(
+        img.copyCrop(
+          img.decodeJpg(_sheet(count: 1))!,
+          x: 300,
+          y: 0,
+          width: 400,
+          height: 420,
+        ),
+      );
+      final paths = await draw(
+        const ImageGenSettings(apiType: ImageGenApiType.a1111),
+        single,
+      );
+      expect(paths.keys, ['normal']);
+    });
   });
 }

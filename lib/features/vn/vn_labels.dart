@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:easy_localization/easy_localization.dart';
 
 import 'models/vn_document.dart';
@@ -21,6 +22,16 @@ String vnErrorText(Object error) => switch (error) {
     'vn_err_bad_reply'.tr(),
   _ => 'vn_err_failed'.tr(args: [error.toString()]),
 };
+
+/// Why drawing the cast failed, as the player reads it.
+String vnArtErrorText(Object error) => 'vn_drawing_failed'.tr(
+  args: [
+    switch (error) {
+      DioException(:final message?) => message,
+      _ => '$error',
+    },
+  ],
+);
 
 /// The chat-list preview of a novel whose newest message is [content].
 String vnPreviewText(String content) {

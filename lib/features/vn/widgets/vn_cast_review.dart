@@ -73,7 +73,7 @@ class VnCastReview extends ConsumerWidget {
           ),
         if (s.artError != null) ...[
           const SizedBox(height: 4),
-          GlazeErrorBlock(message: vnErrorText(s.artError!)),
+          GlazeErrorBlock(message: vnArtErrorText(s.artError!)),
           const SizedBox(height: 8),
           GlazeActionButton(
             icon: Icons.refresh,
