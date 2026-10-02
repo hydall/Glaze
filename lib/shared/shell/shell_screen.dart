@@ -5,6 +5,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../features/studio/studio_availability.dart';
 import '../widgets/glass_nav_bar.dart';
 import '../widgets/glass_surface.dart';
 import '../widgets/glaze_background.dart';
@@ -28,6 +29,14 @@ class ShellScreen extends ConsumerStatefulWidget {
 class _ShellScreenState extends ConsumerState<ShellScreen> {
   int _lastBackPress = 0;
   int? _lastBranchIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) retireActiveStudio(context, ref);
+    });
+  }
 
   /// Reveals the header of a branch the moment it becomes active. Branch state
   /// (including each list's scroll offset) is preserved by the shell, and the

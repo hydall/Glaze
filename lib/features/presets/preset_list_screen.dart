@@ -20,6 +20,7 @@ import '../../core/state/active_studio_preset_provider.dart';
 import '../../core/state/preset_folder_provider.dart';
 import '../../core/utils/time_helpers.dart';
 import '../../shared/widgets/glaze_spinner.dart';
+import '../studio/studio_availability.dart';
 import '../studio/studio_preset_stats.dart';
 import '../studio/studio_preset_workflow_provider.dart';
 import '../studio/widgets/studio_preset_options_sheet.dart';
@@ -466,7 +467,9 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
                 ? null
                 : () => showPresetConnections(context, item.preset!.id),
             onEdit: item.isAgentic
-                ? () => _openStudioEditor(item.studioPreset!.id)
+                ? (studioAvailable
+                      ? () => _openStudioEditor(item.studioPreset!.id)
+                      : null)
                 : () => _openEditor(item.preset),
             onMenu: () => _showItemMenu(item),
           ),
@@ -614,6 +617,10 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
       return;
     }
     if (isActive) return;
+    if (item.isAgentic && !studioAvailable) {
+      showStudioUnavailableSheet(context);
+      return;
+    }
     if (item.isAgentic) {
       ref.read(activeStudioPresetProvider.notifier).set(item.studioPreset!.id);
       ref.read(studioFeatureEnabledProvider.notifier).enable();
@@ -928,14 +935,21 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
       context,
       preset: preset,
       onSelect: () => _startSelection(preset.id, PresetKind.agentic),
-      onRename: () => showStudioPresetRename(
-        context,
-        preset: preset,
-        onRename: (name) => unawaited(_renameAgentic(preset, name)),
-      ),
-      onClone: () => unawaited(_cloneAgentic(preset)),
-      onAddToFolder: () =>
-          _showAddToFolder([PresetFolderTarget(preset.id, PresetKind.agentic)]),
+      // While Studio is closed an agentic preset can only leave the app:
+      // exported or deleted.
+      onRename: studioAvailable
+          ? () => showStudioPresetRename(
+              context,
+              preset: preset,
+              onRename: (name) => unawaited(_renameAgentic(preset, name)),
+            )
+          : null,
+      onClone: studioAvailable ? () => unawaited(_cloneAgentic(preset)) : null,
+      onAddToFolder: studioAvailable
+          ? () => _showAddToFolder([
+              PresetFolderTarget(preset.id, PresetKind.agentic),
+            ])
+          : null,
       onExport: () => unawaited(exportStudioPreset(context, preset)),
       onDelete: () => unawaited(_deleteAgentic(preset)),
     );
@@ -993,14 +1007,15 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
             _openEditor(null);
           },
         ),
-        BottomSheetItem(
-          icon: Icons.smart_toy_outlined,
-          label: 'preset_add_agentic'.tr(),
-          onTap: () {
-            Navigator.of(context, rootNavigator: true).pop();
-            _createAgenticPreset();
-          },
-        ),
+        if (studioAvailable)
+          BottomSheetItem(
+            icon: Icons.smart_toy_outlined,
+            label: 'preset_add_agentic'.tr(),
+            onTap: () {
+              Navigator.of(context, rootNavigator: true).pop();
+              _createAgenticPreset();
+            },
+          ),
         BottomSheetItem(
           icon: Icons.file_upload_outlined,
           label: 'action_import'.tr(),
@@ -1708,11 +1723,12 @@ class _PsCard extends ConsumerWidget {
         else ...[
           // Agentic presets are global, so there is no per-chat/character
           // connection badge like a plain preset has.
-          _RowIconButton(
-            icon: Icons.edit_outlined,
-            color: context.cs.onSurfaceVariant,
-            onTap: onEdit,
-          ),
+          if (onEdit != null)
+            _RowIconButton(
+              icon: Icons.edit_outlined,
+              color: context.cs.onSurfaceVariant,
+              onTap: onEdit,
+            ),
           _RowIconButton(
             icon: Icons.more_vert,
             color: context.cs.onSurfaceVariant,

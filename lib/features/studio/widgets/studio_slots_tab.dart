@@ -16,6 +16,7 @@ import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/menu_group.dart';
 import '../../settings/api_list_provider.dart';
 import '../../settings/widgets/api_slot_group.dart';
+import '../studio_availability.dart';
 import '../studio_injection_points.dart';
 import 'studio_slot_settings_dialog.dart';
 import '../../../shared/widgets/glaze_sheet.dart';
@@ -85,108 +86,9 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
             style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant),
           ),
         ),
-        _slot(
-          context,
-          slotName: 'pregen',
-          studioSlot: StudioSlot.controller,
-          title: studioInjectionPointLabel('pregen'),
-          description: 'studio_slot_pregen_desc'.tr(),
-          apiConfigId: profile?.cheapApiConfigId ?? '',
-          onApiConfigChanged: (id) => _saveProfile(
-            (c) => c.copyWith(cheapApiConfigId: id),
-          ),
-          model: pipeline.studioAgent.studioControllerModelOverride,
-          onModelChanged: (value) => _savePipeline(
-            (p) => p.copyWith(
-              studioAgent: p.studioAgent.copyWith(
-                studioControllerModelOverride: value,
-              ),
-            ),
-          ),
-        ),
-        _slot(
-          context,
-          slotName: 'final',
-          studioSlot: StudioSlot.finalGenerator,
-          title: studioInjectionPointLabel('final'),
-          description: 'studio_slot_final_desc'.tr(),
-          apiConfigId: profile?.expensiveApiConfigId ?? '',
-          onApiConfigChanged: (id) => _saveProfile(
-            (c) => c.copyWith(expensiveApiConfigId: id),
-          ),
-          model: pipeline.studioAgent.studioFinalModelOverride,
-          onModelChanged: (value) => _savePipeline(
-            (p) => p.copyWith(
-              studioAgent: p.studioAgent.copyWith(
-                studioFinalModelOverride: value,
-              ),
-            ),
-          ),
-        ),
-        _slot(
-          context,
-          slotName: 'cleaner',
-          studioSlot: StudioSlot.cleaner,
-          title: studioInjectionPointLabel('cleaner'),
-          description: 'studio_slot_cleaner_desc'.tr(),
-          apiConfigId: profile?.cleanerApiConfigId ?? '',
-          onApiConfigChanged: (id) => _saveProfile(
-            (c) => c.copyWith(cleanerApiConfigId: id),
-          ),
-          model: pipeline.cleaner.postCleanerModel,
-          onModelChanged: (value) => _saveCleaner(
-            pipeline,
-            (c) => c.copyWith(postCleanerModel: value),
-          ),
-          // The Fact Checker pass runs before the rewrite and can use a cheaper
-          // model. It inherits the cleaner's connection — only the model differs.
-          extraLabel: 'studio_slot_audit_model'.tr(),
-          extraDescription: 'studio_slot_audit_model_desc'.tr(),
-          extraValue: pipeline.cleaner.postCleanerAuditModel,
-          onExtraChanged: (value) => _saveCleaner(
-            pipeline,
-            (c) => c.copyWith(postCleanerAuditModel: value),
-          ),
-        ),
-        _slot(
-          context,
-          slotName: 'ledger',
-          studioSlot: StudioSlot.ledger,
-          title: studioInjectionPointLabel('ledger'),
-          description: 'studio_slot_ledger_desc'.tr(),
-          apiConfigId: profile?.ledgerApiConfigId ?? '',
-          onApiConfigChanged: (id) => _saveProfile(
-            (c) => c.copyWith(ledgerApiConfigId: id),
-          ),
-          model: pipeline.ledger.studioLedgerModel,
-          onModelChanged: (value) => _saveLedger(
-            pipeline,
-            (l) => l.copyWith(studioLedgerModel: value),
-          ),
-        ),
-        // Card Rewriter runs after the Ledger's reconciliation, on the evidence
-        // that reconciliation commits, so it is bound here in that order. Its
-        // connection lives inside the lane's own settings object rather than in
-        // a preset column of its own — it was per-preset from the start.
-        _slot(
-          context,
-          slotName: 'card_rewriter',
-          studioSlot: null,
-          title: 'card_rewriter_studio_title'.tr(),
-          description: 'studio_slot_card_rewriter_desc'.tr(),
-          apiConfigId: pipeline.cardRewriter.apiConfigId,
-          onApiConfigChanged: (id) => _saveCardRewriter(
-            pipeline,
-            // A model picked against the previous connection would not resolve
-            // on the new one, so the override is cleared with the change.
-            (c) => c.copyWith(apiConfigId: id, modelOverride: ''),
-          ),
-          model: pipeline.cardRewriter.modelOverride,
-          onModelChanged: (value) => _saveCardRewriter(
-            pipeline,
-            (c) => c.copyWith(modelOverride: value),
-          ),
-        ),
+        // The Studio stages leave with Studio itself; MemoryBook below is not
+        // a Studio agent and stays.
+        if (studioAvailable) ..._studioSlots(context, profile, pipeline),
         // Memory draft generation is an auxiliary LLM call like the ones
         // above, so it is bound here alongside them — and chat summarization
         // runs on this same slot, which is why it is named for memory as a
@@ -211,12 +113,114 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
             ),
           ),
           model: pipeline.memoryBookApi.generationModel,
-          onModelChanged: (value) => _saveMemoryBookApi(
-            (api) => api.copyWith(generationModel: value),
-          ),
+          onModelChanged: (value) =>
+              _saveMemoryBookApi((api) => api.copyWith(generationModel: value)),
         ),
       ],
     );
+  }
+
+  List<Widget> _studioSlots(
+    BuildContext context,
+    StudioPreset? profile,
+    PipelineSettings pipeline,
+  ) {
+    return [
+      _slot(
+        context,
+        slotName: 'pregen',
+        studioSlot: StudioSlot.controller,
+        title: studioInjectionPointLabel('pregen'),
+        description: 'studio_slot_pregen_desc'.tr(),
+        apiConfigId: profile?.cheapApiConfigId ?? '',
+        onApiConfigChanged: (id) =>
+            _saveProfile((c) => c.copyWith(cheapApiConfigId: id)),
+        model: pipeline.studioAgent.studioControllerModelOverride,
+        onModelChanged: (value) => _savePipeline(
+          (p) => p.copyWith(
+            studioAgent: p.studioAgent.copyWith(
+              studioControllerModelOverride: value,
+            ),
+          ),
+        ),
+      ),
+      _slot(
+        context,
+        slotName: 'final',
+        studioSlot: StudioSlot.finalGenerator,
+        title: studioInjectionPointLabel('final'),
+        description: 'studio_slot_final_desc'.tr(),
+        apiConfigId: profile?.expensiveApiConfigId ?? '',
+        onApiConfigChanged: (id) =>
+            _saveProfile((c) => c.copyWith(expensiveApiConfigId: id)),
+        model: pipeline.studioAgent.studioFinalModelOverride,
+        onModelChanged: (value) => _savePipeline(
+          (p) => p.copyWith(
+            studioAgent: p.studioAgent.copyWith(
+              studioFinalModelOverride: value,
+            ),
+          ),
+        ),
+      ),
+      _slot(
+        context,
+        slotName: 'cleaner',
+        studioSlot: StudioSlot.cleaner,
+        title: studioInjectionPointLabel('cleaner'),
+        description: 'studio_slot_cleaner_desc'.tr(),
+        apiConfigId: profile?.cleanerApiConfigId ?? '',
+        onApiConfigChanged: (id) =>
+            _saveProfile((c) => c.copyWith(cleanerApiConfigId: id)),
+        model: pipeline.cleaner.postCleanerModel,
+        onModelChanged: (value) =>
+            _saveCleaner(pipeline, (c) => c.copyWith(postCleanerModel: value)),
+        // The Fact Checker pass runs before the rewrite and can use a cheaper
+        // model. It inherits the cleaner's connection — only the model differs.
+        extraLabel: 'studio_slot_audit_model'.tr(),
+        extraDescription: 'studio_slot_audit_model_desc'.tr(),
+        extraValue: pipeline.cleaner.postCleanerAuditModel,
+        onExtraChanged: (value) => _saveCleaner(
+          pipeline,
+          (c) => c.copyWith(postCleanerAuditModel: value),
+        ),
+      ),
+      _slot(
+        context,
+        slotName: 'ledger',
+        studioSlot: StudioSlot.ledger,
+        title: studioInjectionPointLabel('ledger'),
+        description: 'studio_slot_ledger_desc'.tr(),
+        apiConfigId: profile?.ledgerApiConfigId ?? '',
+        onApiConfigChanged: (id) =>
+            _saveProfile((c) => c.copyWith(ledgerApiConfigId: id)),
+        model: pipeline.ledger.studioLedgerModel,
+        onModelChanged: (value) =>
+            _saveLedger(pipeline, (l) => l.copyWith(studioLedgerModel: value)),
+      ),
+      // Card Rewriter runs after the Ledger's reconciliation, on the evidence
+      // that reconciliation commits, so it is bound here in that order. Its
+      // connection lives inside the lane's own settings object rather than in
+      // a preset column of its own — it was per-preset from the start.
+      _slot(
+        context,
+        slotName: 'card_rewriter',
+        studioSlot: null,
+        title: 'card_rewriter_studio_title'.tr(),
+        description: 'studio_slot_card_rewriter_desc'.tr(),
+        apiConfigId: pipeline.cardRewriter.apiConfigId,
+        onApiConfigChanged: (id) => _saveCardRewriter(
+          pipeline,
+          // A model picked against the previous connection would not resolve
+          // on the new one, so the override is cleared with the change.
+          (c) => c.copyWith(apiConfigId: id, modelOverride: ''),
+        ),
+        model: pipeline.cardRewriter.modelOverride,
+        onModelChanged: (value) => _saveCardRewriter(
+          pipeline,
+          (c) => c.copyWith(modelOverride: value),
+        ),
+      ),
+    ];
   }
 
   Future<void> _saveMemoryBookApi(
@@ -257,8 +261,9 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
   /// Writes the active preset's runtime settings.
   Future<void> _savePresetRuntime(
     StudioRuntimeSettings Function(StudioRuntimeSettings) mutate,
-  ) =>
-      _saveProfile((preset) => preset.copyWith(runtime: mutate(preset.runtime)));
+  ) => _saveProfile(
+    (preset) => preset.copyWith(runtime: mutate(preset.runtime)),
+  );
 
   /// The three lane writers all take the `effective` settings the rows are
   /// showing — the preset's own where it has them, the globals where it does
@@ -267,7 +272,8 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
   Future<void> _saveCleaner(
     PipelineSettings effective,
     CleanerSettings Function(CleanerSettings) mutate,
-  ) => _savePresetRuntime((r) => r.copyWith(cleaner: mutate(effective.cleaner)));
+  ) =>
+      _savePresetRuntime((r) => r.copyWith(cleaner: mutate(effective.cleaner)));
 
   Future<void> _saveLedger(
     PipelineSettings effective,
