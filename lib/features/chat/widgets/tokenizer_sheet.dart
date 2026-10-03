@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -18,7 +20,6 @@ import '../../settings/tokenizer_provider.dart';
 import '../../../core/llm/tokenizer.dart';
 import '../chat_provider.dart';
 import '../state/cached_token_breakdown.dart';
-import '../state/token_breakdown_cache.dart';
 import 'requests/inspector_insets.dart';
 import 'tokenizer_widgets.dart';
 
@@ -43,7 +44,10 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
   TokenBreakdown? _breakdown;
   int? _contextSize;
   bool _loading = false;
-  int _visibleCount = 0;
+
+  /// Something changed while a count was running; count again when it ends,
+  /// so the last change is never the one left out.
+  bool _recountPending = false;
 
   /// Slider positions while the sheet is open, null until the user drags one.
   ///
@@ -58,54 +62,24 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
     _loadOrCalculate();
   }
 
+  /// Paints the last breakdown this chat produced right away, then counts
+  /// the next prompt for real.
+  ///
+  /// The cached one is only a placeholder: it may come from the last
+  /// generation — the prompt *before* the reply that followed — or from
+  /// before an edit, a hide or a settings change, none of which a cheap key
+  /// can see. Showing it as final is how this tab used to disagree with the
+  /// Preview tab next to it.
   void _loadOrCalculate() {
-    final chatState = ref.read(chatProvider(widget.charId)).value;
-    final session = chatState?.session;
-    if (session == null) {
-      _calculate();
-      return;
-    }
-
+    final cached = ref.read(cachedTokenBreakdownProvider(widget.charId));
     final chatApi = _resolveApiConfig();
-    if (chatApi == null) {
-      _calculate();
-      return;
-    }
-
-    final visibleCount = session.messages
-        .where((m) => !m.isHidden && !m.isTyping)
-        .length;
-    final summaryContent = ref.read(
-      cachedTokenBreakdownProvider(widget.charId),
-    );
-    final hash = TokenBreakdownCache.computeHash(
-      charId: widget.charId,
-      sessionId: session.id,
-      messageCount: visibleCount,
-      contextSize: chatApi.contextSize,
-      maxTokens: chatApi.maxTokens,
-      authorsNote: session.authorsNote?.content ?? '',
-      summary: '',
-      trimSignature: chatApi.contextBudgetSignature,
-    );
-
-    final cached = TokenBreakdownCache.get(hash);
-    if (cached != null) {
+    if (cached != null && chatApi != null) {
       _contextSize = chatApi.contextSize;
-      _visibleCount = visibleCount;
       _breakdown = cached;
-      return;
     }
-
-    final riverpodCached = summaryContent;
-    if (riverpodCached != null) {
-      _contextSize = chatApi.contextSize;
-      _visibleCount = visibleCount;
-      _breakdown = riverpodCached;
-      return;
-    }
-
-    _calculate();
+    // Not from initState itself: _calculate sets state.
+    _loading = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _calculate());
   }
 
   ApiConfig? _resolveApiConfig() {
@@ -116,10 +90,19 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
     }
   }
 
+  void _recount() {
+    if (_loading) {
+      _recountPending = true;
+      return;
+    }
+    _calculate();
+  }
+
   Future<void> _calculate() async {
     // Callers await a write first (hide, unhide), so the sheet can be gone by
     // the time we get here.
     if (!mounted) return;
+    _recountPending = false;
     setState(() => _loading = true);
 
     try {
@@ -130,12 +113,6 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
         return;
       }
 
-      // Same predicate `HistoryAssembler` uses, so the count matches what the
-      // prompt actually carries — the typing placeholder is not a message.
-      _visibleCount = session.messages
-          .where((m) => !m.isHidden && !m.isTyping)
-          .length;
-
       final builder = ref.read(promptPayloadBuilderProvider);
       final inputs = await builder.collectInputs(
         charId: widget.charId,
@@ -144,46 +121,12 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
       _contextSize = inputs.apiConfig.contextSize;
 
       final result = await buildFromInputsInIsolate(inputs);
-      var breakdown = result.breakdown;
-
-      final lastVectorTokens = ref.read(
-        lastVectorLoreTokensProvider(widget.charId),
+      // The fast-path collectInputs skips vector search (it can take seconds
+      // via the embedding endpoint); reuse the count the last real generation
+      // found.
+      final breakdown = result.breakdown.withVectorLore(
+        ref.read(lastVectorLoreTokensProvider(widget.charId)),
       );
-      if (lastVectorTokens > 0 && breakdown.vectorLoreTokens == 0) {
-        // The fast-path collectInputs skips vector search (it can take
-        // seconds via the embedding endpoint), but vector entries were
-        // counted on the last real generation. Reuse that count here so
-        // the tokenizer/preview screen shows a "Vector Lorebook" row
-        // instead of silently folding them into the lorebook reserve.
-        final newSources = Map<String, int>.from(breakdown.sourceTokens)
-          ..['vectorLore'] = lastVectorTokens;
-        breakdown = TokenBreakdown(
-          sourceTokens: newSources,
-          macroTokens: breakdown.macroTokens,
-          staticTotal: breakdown.staticTotal,
-          historyBudget: breakdown.historyBudget,
-          historyTokens: breakdown.historyTokens,
-          totalTokens: breakdown.totalTokens + lastVectorTokens,
-          cutoffIndex: breakdown.cutoffIndex,
-          trimmedHistory: breakdown.trimmedHistory,
-          lorebookReserveTokens: breakdown.lorebookReserveTokens,
-          memoryTokens: breakdown.memoryTokens,
-          vectorLoreTokens: lastVectorTokens,
-          fixedTotal: breakdown.fixedTotal + lastVectorTokens,
-          remaining: breakdown.remaining - lastVectorTokens,
-        );
-      }
-
-      final hash = TokenBreakdownCache.computeHash(
-        charId: widget.charId,
-        sessionId: session.id,
-        messageCount: _visibleCount,
-        contextSize: inputs.apiConfig.contextSize,
-        maxTokens: inputs.apiConfig.maxTokens,
-        authorsNote: session.authorsNote?.content ?? '',
-        summary: inputs.summaryContent ?? '',
-      );
-      TokenBreakdownCache.set(hash, breakdown);
 
       ref.read(cachedTokenBreakdownProvider(widget.charId).notifier).state =
           breakdown;
@@ -192,7 +135,10 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
     } catch (e) {
       debugPrint('Tokenizer error: $e');
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        setState(() => _loading = false);
+        if (_recountPending) unawaited(_calculate());
+      }
     }
   }
 
@@ -201,31 +147,28 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
     ref.listen(chatProvider(widget.charId), (prev, next) {
       final prevSession = prev?.value?.session;
       final nextSession = next.value?.session;
-      if (prevSession != nextSession && !_loading) {
-        _calculate();
-      }
+      if (prevSession != nextSession) _recount();
     });
 
     // Editing the connection's window or trim mode changes which messages
-    // survive, so the numbers on screen are wrong the moment it is saved. The
-    // cached breakdown is keyed on the same signature, so drop it too.
+    // survive, so the numbers on screen are wrong the moment it is saved, and
+    // so is the cached breakdown other screens read.
     ref.listen(
       activeApiConfigProvider.select(
         (config) => config?.contextBudgetSignature ?? '',
       ),
       (previous, next) {
         if (previous == null || previous == next) return;
-        TokenBreakdownCache.invalidate();
         ref.read(cachedTokenBreakdownProvider(widget.charId).notifier).state =
             null;
-        _calculate();
+        _recount();
       },
     );
 
     // A different tokenizer makes every number on screen stale; app-level
     // listeners already dropped the cached breakdowns.
     ref.listen(tokenizerStatusProvider.select((s) => s.active), (prev, next) {
-      if (prev != null && prev != next && !_loading) _calculate();
+      if (prev != null && prev != next) _recount();
     });
 
     final contextSize = _contextSize ?? 4096;
@@ -235,7 +178,9 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
     final usedPercent = contextSize > 0 ? (used / contextSize * 100) : 0.0;
     final historyFill = bd?.historyFillPercent ?? 0.0;
 
-    final body = _loading
+    // A recount keeps the previous numbers on screen; the spinner is only for
+    // when there is nothing to show yet.
+    final body = _loading && bd == null
         ? const Center(child: GlazeSpinner())
         : bd == null
         ? Center(
@@ -312,9 +257,9 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
         shrinkWrap: true,
         padding: withInspectorBottomInset(
           context,
-          const EdgeInsets.all(16).copyWith(
-            top: 16 + MediaQuery.paddingOf(context).top,
-          ),
+          const EdgeInsets.all(
+            16,
+          ).copyWith(top: 16 + MediaQuery.paddingOf(context).top),
         ),
         children: [
           HeroCard(

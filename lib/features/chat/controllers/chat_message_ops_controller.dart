@@ -12,7 +12,6 @@ import '../chat_message_service.dart';
 import '../chat_session_service.dart';
 import '../chat_state.dart';
 import '../state/chat_session_write_queue.dart';
-import '../state/token_breakdown_cache.dart';
 import '../state/cached_token_breakdown.dart';
 import '../../../core/llm/regex_service.dart';
 import '../../../core/state/active_selection_provider.dart';
@@ -96,7 +95,6 @@ class ChatMessageOpsController {
       }),
     );
     if (!_ref.mounted) return;
-    TokenBreakdownCache.invalidate();
     _ref.read(cachedTokenBreakdownProvider(_charId).notifier).state = null;
     _ref.read(lastVectorLoreTokensProvider(_charId).notifier).state = 0;
     _publish(updated, token: token);
@@ -280,12 +278,10 @@ class ChatMessageOpsController {
   }
 
   /// Hiding a message takes it out of the prompt exactly the way editing one
-  /// rewrites it, so the cached breakdowns now describe a prompt that no
-  /// longer exists. Without this the Context screen reads the stale one back
-  /// (its own hash cache misses, the Riverpod copy is returned unchecked) and
-  /// shows a budget that still counts the hidden messages.
+  /// rewrites it, so the cached breakdown now describes a prompt that no
+  /// longer exists. Without this the drawer, the context card and the Context
+  /// screen's first paint show a budget that still counts the hidden messages.
   void _dropTokenBreakdown() {
-    TokenBreakdownCache.invalidate();
     _ref.read(cachedTokenBreakdownProvider(_charId).notifier).state = null;
   }
 

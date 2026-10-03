@@ -1,3 +1,5 @@
+import 'package:unorm_dart/unorm_dart.dart' as unorm;
+
 /// The subset of HuggingFace `tokenizer.json` normalizers Glaze needs to count
 /// tokens for the models it resolves to.
 ///
@@ -41,16 +43,17 @@ abstract class TextNormalizer {
           left: spec['strip_left'] as bool? ?? true,
           right: spec['strip_right'] as bool? ?? true,
         );
+      case 'NFC':
+        return const _Unicode(unorm.nfc);
+      case 'NFD':
+        return const _Unicode(unorm.nfd);
       case 'NFKC':
+        return const _Unicode(unorm.nfkc);
       case 'NFKD':
-        // Dart has no Unicode normalization. Fold the compatibility characters
-        // that actually turn up in roleplay text (ellipsis, no-break space,
-        // full-width ASCII); canonical composition is a no-op for text that is
-        // already NFC, which is nearly all of it.
-        return const _CompatibilityFold();
+        return const _Unicode(unorm.nfkd);
       default:
-        // NFC/NFD, Precompiled (SentencePiece charsmap), BertNormalizer…:
-        // identity for practical input.
+        // Precompiled (SentencePiece charsmap), BertNormalizer…: identity for
+        // practical input.
         return null;
     }
   }
@@ -117,47 +120,19 @@ class _Strip extends TextNormalizer {
   }
 }
 
-class _CompatibilityFold extends TextNormalizer {
-  const _CompatibilityFold();
-
-  static const _map = <int, String>{
-    0x00A0: ' ',
-    0x2002: ' ',
-    0x2003: ' ',
-    0x2009: ' ',
-    0x202F: ' ',
-    0x2026: '...',
-    0x2025: '..',
-    0x2122: 'TM',
-    0xFB00: 'ff',
-    0xFB01: 'fi',
-    0xFB02: 'fl',
-    0xFB03: 'ffi',
-    0xFB04: 'ffl',
-    0x3000: ' ',
-  };
+/// A Unicode normalization form. Claude's tokenizer runs NFKC, which folds
+/// the styled letters character cards like to use (𝓝𝓪𝓶𝓮, ⓐⓑⓒ, ｆｕｌｌ ｗｉｄｔｈ)
+/// into plain ones — without it those count several times over.
+class _Unicode extends TextNormalizer {
+  const _Unicode(this.form);
+  final String Function(String) form;
 
   @override
   String apply(String text) {
-    var needed = false;
+    // ASCII is invariant under every form, and it is most of what is counted.
     for (final unit in text.codeUnits) {
-      if (_map.containsKey(unit) || (unit >= 0xFF01 && unit <= 0xFF5E)) {
-        needed = true;
-        break;
-      }
+      if (unit >= 0x80) return form(text);
     }
-    if (!needed) return text;
-    final out = StringBuffer();
-    for (final unit in text.codeUnits) {
-      final mapped = _map[unit];
-      if (mapped != null) {
-        out.write(mapped);
-      } else if (unit >= 0xFF01 && unit <= 0xFF5E) {
-        out.writeCharCode(unit - 0xFEE0);
-      } else {
-        out.writeCharCode(unit);
-      }
-    }
-    return out.toString();
+    return text;
   }
 }

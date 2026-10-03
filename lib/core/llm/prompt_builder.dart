@@ -690,26 +690,37 @@ PromptResult _assembleMessages({
       final content = block.content;
       final accountingContent = block.contentForAccounting;
 
-      // setvar-only blocks: no LLM-visible text, but definitions count toward preset.
+      // setvar-only blocks: no LLM-visible text, but definitions count toward
+      // the preset row. Nothing is sent, so nothing counts toward the total.
       if (content.trim().isEmpty && !block.sendEmptyBlock) {
         if (accountingContent.isNotEmpty) {
           attributionBlocks.add(
-            StaticBlock(id: block.id, content: accountingContent),
+            StaticBlock(
+              id: block.id,
+              content: '',
+              presetContent: accountingContent,
+            ),
           );
         }
         if (block.id == 'char_card') injectLoreAfter();
         continue;
       }
 
-      // attributionBlocks feed the token breakdown. We pass the
-      // "accounting" content (dynamic macros blanked out) so that the
-      // preset's static chrome is attributed to sourceTokens['preset']
-      // and NOT double-counted under sourceTokens['memory'] /
-      // sourceTokens['summary'] / sourceTokens['lorebooks']. The
-      // dynamic injections are counted separately via dedicated
-      // StaticBlocks (hard-block injection) and macroTokens.
+      // attributionBlocks feed the token breakdown. The total and the history
+      // budget count what is sent; the "accounting" content (external
+      // injections blanked) is what the preset row shows, so the preset's
+      // chrome is not double-counted under memory / summary / lorebooks.
+      // A deferred {{memory}} is still its placeholder here and is counted as
+      // memoryTokens once finalized. An appended block travels inside the last
+      // user message, which the history already counts.
       attributionBlocks.add(
-        StaticBlock(id: block.id, content: accountingContent),
+        StaticBlock(
+          id: block.id,
+          content: block.appendToLastMessage
+              ? ''
+              : content.replaceAll(deferredMemoryPlaceholder, ''),
+          presetContent: accountingContent,
+        ),
       );
 
       // appendToLastMessage blocks are merged into the last user message in

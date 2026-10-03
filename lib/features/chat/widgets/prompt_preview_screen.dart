@@ -12,6 +12,7 @@ import '../../../core/llm/history_trim.dart';
 import '../../../core/llm/prompt_builder.dart';
 import '../../../core/llm/prompt_isolate.dart';
 import '../../../core/llm/prompt_worker.dart';
+import '../../../core/llm/request_tokens.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../providers/prompt_build_providers.dart';
 import '../../../core/llm/transport/anthropic_chat_transport.dart';
@@ -28,6 +29,7 @@ import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/sheet_view.dart';
 import '../../settings/api_list_provider.dart';
+import '../../settings/tokenizer_provider.dart';
 import '../chat_provider.dart';
 import '../state/cached_token_breakdown.dart';
 import 'requests/inspector_insets.dart';
@@ -101,6 +103,11 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
   String? _charName;
   String? _userName;
   Map<String, dynamic>? _requestBody;
+
+  /// Tokens of the messages [_requestBody] carries, counted the way a captured
+  /// request is ([countRequestTokens]) so the two views agree. Null when the
+  /// body could not be built.
+  int? _requestTokens;
 
   /// The built prompt after the connection's post-processing mode, computed
   /// once per build rather than per frame. Empty until the first prompt lands.
@@ -207,6 +214,11 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
         _build();
       },
     );
+
+    // Every count on screen belongs to the tokenizer that made it.
+    ref.listen(tokenizerStatusProvider.select((s) => s.active), (prev, next) {
+      if (prev != null && prev != next && !_loading) _build();
+    });
     if (widget.embedded) {
       // The Prompt Inspector injects the floating-header height as the body's
       // top inset. Offset the whole embedded column (toolbar + body) by it,
@@ -287,7 +299,7 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
         }
         return RequestBodyView(
           topInset: topPad,
-          tokens: _result!.breakdown.totalTokens,
+          tokens: _requestTokens ?? _result!.breakdown.totalTokens,
           contextSize: _apiConfig?.contextSize ?? 0,
           paramsTitle: _protocolLabel,
           params: _requestBody == null
@@ -429,6 +441,7 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
   /// instead of always emitting an OpenAI-shaped body. Returns `null` when the
   /// prompt/config isn't ready or building throws.
   Map<String, dynamic>? _buildRequestBody() {
+    _requestTokens = null;
     if (_result == null || _apiConfig == null) return null;
     try {
       final cfg = _apiConfig!;
@@ -450,6 +463,7 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
           userName: _userName,
         ),
       );
+      _requestTokens = countRequestTokens(request.messages);
 
       return switch (cfg.protocol) {
         LlmProtocol.anthropic => AnthropicChatTransport.buildRequest(

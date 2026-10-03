@@ -1,13 +1,7 @@
-import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/llm/context_calculator.dart';
 import '../../../core/llm/lorebook_activation.dart';
-import '../../../core/llm/prompt_isolate.dart';
-import '../providers/prompt_build_providers.dart';
-import '../../../core/models/api_config.dart';
 import '../../../core/models/lorebook.dart';
 import '../../../core/models/persona.dart';
 import '../../../core/models/preset.dart';
@@ -22,7 +16,6 @@ import '../../image_gen/image_gen_provider.dart';
 import '../../settings/api_list_provider.dart';
 import '../chat_provider.dart';
 import '../state/cached_token_breakdown.dart';
-import '../state/token_breakdown_cache.dart';
 import '../widgets/magic_drawer_models.dart';
 
 class MagicDrawerStatsService {
@@ -30,10 +23,6 @@ class MagicDrawerStatsService {
 
   MagicDrawerStatsService(this._ref);
 
-  bool _isCalculating = false;
-  bool _pendingRecalc = false;
-  String? _pendingCharId;
-  MagicDrawerStats? _pendingBase;
   bool _disposed = false;
 
   bool get isActive => !_disposed;
@@ -46,9 +35,6 @@ class MagicDrawerStatsService {
 
   void dispose() {
     _disposed = true;
-    _pendingRecalc = false;
-    _pendingCharId = null;
-    _pendingBase = null;
   }
 
   /// Awaits [future], swallowing failures into `null` so one broken read
@@ -225,144 +211,5 @@ class MagicDrawerStatsService {
       summaryContent: summaryContent,
       extBlocksActivePresetName: extActivePresetName,
     );
-  }
-
-  Future<MagicDrawerStats> computeTokenStats(
-    String charId,
-    MagicDrawerStats base,
-  ) async {
-    _ensureActive();
-    final session = base.session;
-    final character = base.character;
-    final chatApi = base.apiConfig;
-
-    if (session == null || character == null || chatApi == null) return base;
-
-    if (_isCalculating) {
-      _pendingRecalc = true;
-      _pendingCharId = charId;
-      _pendingBase = base;
-      return base;
-    }
-
-    _isCalculating = true;
-    try {
-      final visibleCount = session.messages.where((m) => !m.isHidden).length;
-      final hash = TokenBreakdownCache.computeHash(
-        charId: charId,
-        sessionId: session.id,
-        messageCount: visibleCount,
-        contextSize: chatApi.contextSize,
-        maxTokens: chatApi.maxTokens,
-        authorsNote: session.authorsNote?.content ?? '',
-        summary: base.summaryContent ?? '',
-        // The trim mode and its knobs decide where the history starts just as
-        // much as the window size does, so a breakdown taken under one mode
-        // must not be handed back under another — the drawer's numbers and the
-        // chat's context rule both come off this cache.
-        trimSignature: chatApi.contextBudgetSignature,
-      );
-
-      final cached = TokenBreakdownCache.get(hash);
-      if (cached != null) {
-        _ref.read(cachedTokenBreakdownProvider(charId).notifier).state = cached;
-        return base.copyWith(
-          promptTokens: cached.totalTokens,
-          characterTokens: (cached.sourceTokens['description'] ?? 0) > 0
-              ? cached.sourceTokens['description']!
-              : (cached.macroTokens['description'] ?? 0),
-          presetTokens: cached.presetNetTokens,
-          personaTokens: (cached.sourceTokens['persona'] ?? 0) > 0
-              ? cached.sourceTokens['persona']!
-              : (cached.macroTokens['persona'] ?? 0),
-          summaryTokens: (cached.sourceTokens['summary'] ?? 0) > 0
-              ? cached.sourceTokens['summary']!
-              : (cached.macroTokens['summary'] ?? 0),
-          vectorLoreTokens: cached.vectorLoreTokens,
-          keywordLoreTokens:
-              (cached.sourceTokens['lorebook'] ?? 0) +
-              (cached.macroTokens['lorebooks'] ?? 0),
-        );
-      }
-
-      final builder = _ref.read(promptPayloadBuilderProvider);
-      final inputs = await builder.collectInputs(
-        charId: charId,
-        session: session,
-      );
-      _ensureActive();
-      final result = await buildFromInputsInIsolate(inputs);
-      _ensureActive();
-      var breakdown = result.breakdown;
-
-      final lastVectorTokens = _ref.read(lastVectorLoreTokensProvider(charId));
-      if (lastVectorTokens > 0 && breakdown.vectorLoreTokens == 0) {
-        final newSources = Map<String, int>.from(breakdown.sourceTokens)
-          ..['vectorLore'] = lastVectorTokens;
-        breakdown = TokenBreakdown(
-          sourceTokens: newSources,
-          macroTokens: breakdown.macroTokens,
-          staticTotal: breakdown.staticTotal,
-          historyBudget: breakdown.historyBudget,
-          historyTokens: breakdown.historyTokens,
-          totalTokens: breakdown.totalTokens + lastVectorTokens,
-          cutoffIndex: breakdown.cutoffIndex,
-          trimmedHistory: breakdown.trimmedHistory,
-          // Carried, not dropped: the anchor is what the next stepped trim
-          // reuses, and the visible ids are what the chat's context rule and
-          // the memory refilter read off this breakdown.
-          historyAnchorId: breakdown.historyAnchorId,
-          visibleMessageIds: breakdown.visibleMessageIds,
-          lorebookReserveTokens: breakdown.lorebookReserveTokens,
-          memoryTokens: breakdown.memoryTokens,
-          vectorLoreTokens: lastVectorTokens,
-          fixedTotal: breakdown.fixedTotal + lastVectorTokens,
-          remaining: breakdown.remaining - lastVectorTokens,
-        );
-      }
-
-      final sourceTokens = breakdown.sourceTokens;
-
-      TokenBreakdownCache.set(hash, breakdown);
-      _ref.read(cachedTokenBreakdownProvider(charId).notifier).state =
-          breakdown;
-
-      return base.copyWith(
-        promptTokens: breakdown.totalTokens,
-        characterTokens: (sourceTokens['description'] ?? 0) > 0
-            ? sourceTokens['description']!
-            : (breakdown.macroTokens['description'] ?? 0),
-        presetTokens: breakdown.presetNetTokens,
-        personaTokens: (sourceTokens['persona'] ?? 0) > 0
-            ? sourceTokens['persona']!
-            : (breakdown.macroTokens['persona'] ?? 0),
-        summaryTokens: (sourceTokens['summary'] ?? 0) > 0
-            ? sourceTokens['summary']!
-            : (breakdown.macroTokens['summary'] ?? 0),
-        vectorLoreTokens: breakdown.vectorLoreTokens,
-        keywordLoreTokens:
-            (sourceTokens['lorebook'] ?? 0) +
-            (breakdown.macroTokens['lorebooks'] ?? 0),
-      );
-    } catch (e) {
-      debugPrint('[MagicDrawer] computeTokenStats error: $e');
-      return base;
-    } finally {
-      _isCalculating = false;
-      if (!_disposed && _pendingRecalc) {
-        _pendingRecalc = false;
-        final cId = _pendingCharId;
-        final b = _pendingBase;
-        _pendingCharId = null;
-        _pendingBase = null;
-        if (cId != null && b != null) {
-          unawaited(computeTokenStats(cId, b));
-        }
-      } else if (_disposed) {
-        _pendingRecalc = false;
-        _pendingCharId = null;
-        _pendingBase = null;
-      }
-    }
   }
 }

@@ -4,13 +4,34 @@ import 'history_assembler.dart';
 
 class StaticBlock {
   final String id;
+
+  /// The text the request carries for this block. All of it counts toward the
+  /// prompt total and the history budget.
   final String content;
-  const StaticBlock({required this.id, required this.content});
 
-  Map<String, dynamic> toJson() => {'id': id, 'content': content};
+  /// The preset-authored part of [content] — external injections (character
+  /// fields, persona, summary, lorebooks, names) blanked, see INV-PS5. When
+  /// set, these tokens go to the preset row and the rest of [content] to the
+  /// block's own source; null attributes all of [content] to the source.
+  final String? presetContent;
 
-  factory StaticBlock.fromJson(Map<String, dynamic> json) =>
-      StaticBlock(id: json['id'] as String, content: json['content'] as String);
+  const StaticBlock({
+    required this.id,
+    required this.content,
+    this.presetContent,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'content': content,
+    if (presetContent != null) 'presetContent': presetContent,
+  };
+
+  factory StaticBlock.fromJson(Map<String, dynamic> json) => StaticBlock(
+    id: json['id'] as String,
+    content: json['content'] as String,
+    presetContent: json['presetContent'] as String?,
+  );
 }
 
 class ContextCalculator {
@@ -70,11 +91,28 @@ class ContextCalculator {
     final sourceTokens = <String, int>{};
     var staticTotal = 0;
 
+    void attribute(String source, int tokens) {
+      sourceTokens[source] = (sourceTokens[source] ?? 0) + tokens;
+    }
+
     for (final block in staticBlocks) {
       final tokens = estimateTokens(block.content);
       final source = _sourceForBlock(block.id);
-      sourceTokens[source] = (sourceTokens[source] ?? 0) + tokens;
       staticTotal += tokens;
+      final presetContent = block.presetContent;
+      if (presetContent == null) {
+        attribute(source, tokens);
+        continue;
+      }
+      // The preset row keeps its own chrome (setvar definitions included,
+      // which never reach the request); whatever the block injected on top
+      // belongs to its source. Injections into a generic preset block are
+      // shown through `macroTokens`, so only the total carries them here.
+      final chrome = estimateTokens(presetContent);
+      attribute('preset', chrome);
+      if (source != 'preset' && tokens > chrome) {
+        attribute(source, tokens - chrome);
+      }
     }
 
     final actualLorebook =
@@ -374,6 +412,32 @@ class TokenBreakdown {
       vectorLoreTokens: vectorLoreTokens,
       fixedTotal: fixedTotal,
       remaining: remaining,
+      visibleMessageIds: visibleMessageIds,
+    );
+  }
+
+  /// This breakdown with [tokens] of vector lorebook added — for a build that
+  /// skipped the vector search (it can take seconds through the embedding
+  /// endpoint) but whose last real generation found entries. Without it the
+  /// Context tab would fold them into the lorebook reserve instead of showing
+  /// a "Vector Lorebook" row.
+  TokenBreakdown withVectorLore(int tokens) {
+    if (tokens <= 0 || vectorLoreTokens > 0) return this;
+    return TokenBreakdown(
+      sourceTokens: {...sourceTokens, 'vectorLore': tokens},
+      macroTokens: macroTokens,
+      staticTotal: staticTotal,
+      historyBudget: historyBudget,
+      historyTokens: historyTokens,
+      totalTokens: totalTokens + tokens,
+      cutoffIndex: cutoffIndex,
+      trimmedHistory: trimmedHistory,
+      historyAnchorId: historyAnchorId,
+      lorebookReserveTokens: lorebookReserveTokens,
+      memoryTokens: memoryTokens,
+      vectorLoreTokens: tokens,
+      fixedTotal: fixedTotal + tokens,
+      remaining: remaining - tokens,
       visibleMessageIds: visibleMessageIds,
     );
   }

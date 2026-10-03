@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/llm/tokenizer.dart';
 import 'package:glaze_flutter/core/llm/tokenizers/pre_tokenizer.dart';
+import 'package:glaze_flutter/core/llm/tokenizers/text_normalizer.dart';
 import 'package:glaze_flutter/core/llm/tokenizers/tokenizer_codec.dart';
 
 import 'tokenizer_fixtures.dart';
@@ -134,6 +135,28 @@ void main() {
         'split': true,
       })!;
       expect(pre.split(['hi there']), ['▁hi', '▁there']);
+    });
+
+    test('digits split on every numeric character, as HF does', () {
+      final pre = PreTokenizer.fromSpec({
+        'type': 'Digits',
+        'individual_digits': true,
+      })!;
+      expect(pre.split(['a12b１２½']), ['a', '1', '2', 'b', '１', '２', '½']);
+    });
+  });
+
+  group('normalizers', () {
+    test('NFKC folds compatibility characters and composes marks', () {
+      final nfkc = TextNormalizer.fromSpec({'type': 'NFKC'})!;
+      expect(nfkc.apply('𝐀𝐁 ⓒ ＡＢ ﬁ …'), 'AB c AB fi ...');
+      expect(nfkc.apply('e\u0301'), 'é');
+      expect(nfkc.apply('plain ascii'), 'plain ascii');
+    });
+
+    test('NFC composes without folding compatibility characters', () {
+      final nfc = TextNormalizer.fromSpec({'type': 'NFC'})!;
+      expect(nfc.apply('e\u0301 ﬁ'), 'é ﬁ');
     });
   });
 

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
+import '../../../../core/llm/request_tokens.dart';
 import '../../../../core/llm/tokenizer.dart';
 import '../../../../shared/theme/app_colors.dart';
 import '../../services/prompt_preview_post_processor.dart';
@@ -37,10 +38,16 @@ class InspectorMessage {
     this.isHistory = false,
     this.isDepth = false,
     this.isCacheAnchor = false,
+    this.captured,
   });
 
   final String role;
   final String content;
+
+  /// The message as a captured request recorded it, when it came from one.
+  /// Counted from this rather than from [content], which renders multimodal
+  /// parts as JSON.
+  final Map<String, dynamic>? captured;
 
   /// Name of the prompt block this message was built from, when it is known.
   final String? blockName;
@@ -73,7 +80,14 @@ class InspectorMessage {
     isHistory: isHistory,
     isDepth: isDepth,
     isCacheAnchor: true,
+    captured: captured,
   );
+
+  /// Prompt tokens of this message, by the rule the inspector's totals use
+  /// ([countRequestMessageTokens]) whenever the request shape is known.
+  int get tokens => captured == null
+      ? estimateTokens(content)
+      : countRequestMessageTokens(captured!);
 
   /// Flags the first history message in [messages] as the cache anchor.
   ///
@@ -129,6 +143,7 @@ class InspectorMessage {
           : content == null
           ? ''
           : const JsonEncoder.withIndent('  ').convert(content),
+      captured: message,
     );
   }
 }
@@ -216,7 +231,7 @@ class _InspectorMessageCardState extends State<InspectorMessageCard> {
   }
 
   Widget _header(BuildContext context, InspectorMessage message) {
-    final tokens = estimateTokens(message.content);
+    final tokens = message.tokens;
 
     return Row(
       children: [

@@ -7,9 +7,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/llm/history_trim.dart';
 import '../../../../core/llm/raw_response_text.dart';
-import '../../../../core/llm/tokenizer.dart';
+import '../../../../core/llm/request_tokens.dart';
 import '../../../../core/llm/transport/llm_protocol.dart';
 import '../../../../features/settings/api_list_provider.dart';
+import '../../../../features/settings/tokenizer_provider.dart';
 import '../../../../shared/theme/app_colors.dart';
 import '../../../../shared/widgets/glaze_tab_bar.dart';
 import '../../../../shared/widgets/glaze_toast.dart';
@@ -89,6 +90,8 @@ class _RequestDetailViewState extends ConsumerState<RequestDetailView> {
       agentId: capture.row.agentId,
     );
     final time = DateTime.fromMillisecondsSinceEpoch(capture.row.createdAtMs);
+    // The counts below are made now, with the tokenizer that is active now.
+    ref.watch(tokenizerStatusProvider.select((s) => s.active));
     final messages = [
       for (final message in capture.messages)
         InspectorMessage.fromCapture(message),
@@ -149,7 +152,7 @@ class _RequestDetailViewState extends ConsumerState<RequestDetailView> {
               : _raw
               ? _text(context, capture.formattedJson)
               : RequestBodyView(
-                  tokens: _tokens(messages),
+                  tokens: countRequestTokens(capture.messages),
                   contextSize: _contextSize(),
                   paramsTitle: _protocolLabel(capture),
                   params: _params(capture),
@@ -185,11 +188,6 @@ class _RequestDetailViewState extends ConsumerState<RequestDetailView> {
   /// Whatever the open tab is showing, in the shape it is showing it.
   String _copyText(PromptCaptureView capture) =>
       _tab == 1 ? _responseText(capture) : capture.formattedJson;
-
-  int _tokens(List<InspectorMessage> messages) => messages.fold(
-    0,
-    (total, message) => total + estimateTokens(message.content),
-  );
 
   /// The window the request had to fit into. The capture does not record it, so
   /// it comes from the connection that is active now — and when there is none,
