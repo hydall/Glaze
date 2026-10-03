@@ -34,6 +34,9 @@ class NaisteraImageProvider {
     // Whether the selected model round-trips reference images: decided by the
     // caller from the fetched catalog rather than by the shipped deny-list.
     bool supportsReferences = true,
+    // Already resolved by the caller (library entry or provider field) and
+    // gated on the catalog's `negative_prompt` flag; empty sends nothing.
+    String negativePrompt = '',
     CancelToken? cancelToken,
   }) async {
     final normalizedModel = NaisteraConstants.normalizeModel(model);
@@ -42,6 +45,8 @@ class NaisteraImageProvider {
       'aspect_ratio': aspectRatio,
       'model': normalizedModel,
     };
+    final negative = negativePrompt.trim();
+    if (negative.isNotEmpty) body['negative_prompt'] = negative;
     final referenceObjects = supportsReferences
         ? _referenceObjects(references)
         : const <Map<String, String>>[];
@@ -136,6 +141,7 @@ class NaisteraImageProvider {
           id: id,
           name: (model['name'] ?? id).toString(),
           references: model['references'] != false,
+          negativePrompt: model['negative_prompt'] == true,
         ),
       );
     }

@@ -112,7 +112,7 @@ void main() {
         providerMaxReferences(
           const ImageGenSettings(
             apiType: ImageGenApiType.naistera,
-            naisteraModel: 'grok',
+            naisteraModel: 'nano-banana-2',
           ),
         ),
         greaterThan(0),

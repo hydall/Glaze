@@ -17,6 +17,7 @@ import '../../../shared/widgets/menu_group.dart';
 import '../../../shared/widgets/sheet_view.dart';
 import '../image_gen_models.dart';
 import '../services/image_style_io.dart';
+import 'rows.dart' as rows;
 
 /// Style library: a list of named prompt styles plus the "no style" entry that
 /// hands control back to the style written into the image tag by the model.
@@ -44,7 +45,6 @@ class _StyleLibrarySheetState extends ConsumerState<StyleLibrarySheet> {
   late ImageGenSettings _settings = widget.settings;
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _valueController = TextEditingController();
-  final TextEditingController _negativeController = TextEditingController();
 
   /// Id of the style open in the editor; empty means the list is showing.
   String _editingId = '';
@@ -57,7 +57,6 @@ class _StyleLibrarySheetState extends ConsumerState<StyleLibrarySheet> {
   void dispose() {
     _nameController.dispose();
     _valueController.dispose();
-    _negativeController.dispose();
     super.dispose();
   }
 
@@ -82,7 +81,6 @@ class _StyleLibrarySheetState extends ConsumerState<StyleLibrarySheet> {
   void _openEditor(ImageStyle style) {
     _nameController.text = style.name;
     _valueController.text = style.value;
-    _negativeController.text = style.negativePrompt;
     setState(() {
       _isForward = true;
       _editingId = style.id;
@@ -438,11 +436,13 @@ class _StyleLibrarySheetState extends ConsumerState<StyleLibrarySheet> {
               maxLines: 6,
               onChanged: (v) => _patchEditing((s) => s.copyWith(value: v)),
             ),
-            MenuFieldItem(
+            // Same row as the NovelAI provider field.
+            rows.ImageGenTextFieldItem(
+              key: ValueKey('style-negative-${style.id}'),
               label: 'imggen_style_negative'.tr(),
-              controller: _negativeController,
-              placeholder: 'lowres, bad anatomy, watermark',
-              maxLines: 6,
+              value: style.negativePrompt,
+              hint: 'lowres, bad anatomy',
+              clearable: true,
               onChanged: (v) =>
                   _patchEditing((s) => s.copyWith(negativePrompt: v)),
             ),

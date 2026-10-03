@@ -56,7 +56,8 @@ class ImageGenSettingsNotifier extends AsyncNotifier<ImageGenSettings> {
       routmyImageSize: prefs.getString('gz_imggen_routmy_image_size') ?? '1K',
       routmyQuality: prefs.getString('gz_imggen_routmy_quality') ?? 'standard',
       naisteraApiKey: prefs.getString('gz_imggen_naistera_api_key') ?? '',
-      naisteraModel: prefs.getString('gz_imggen_naistera_model') ?? 'grok',
+      naisteraModel: prefs.getString('gz_imggen_naistera_model') ??
+          NaisteraConstants.defaultModel,
       naisteraAspectRatio:
           prefs.getString('gz_imggen_naistera_aspect_ratio') ?? '1:1',
       sendCharAvatar:

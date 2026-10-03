@@ -116,6 +116,12 @@ class ImageGenDispatcher {
           ),
           references: references.isEmpty ? null : references,
           supportsReferences: settings.naisteraSupportsReferences,
+          negativePrompt: settings.naisteraSupportsNegativePrompt
+              ? resolveEffectiveNegativePrompt(
+                  settings.naisteraNegativePrompt,
+                  settings,
+                )
+              : '',
           cancelToken: cancelToken,
         );
       case ImageGenApiType.routmy:

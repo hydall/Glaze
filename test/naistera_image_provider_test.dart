@@ -47,7 +47,7 @@ void main() {
       final bytes = await NaisteraImageProvider(baseUrl: server.baseUrl)
           .generate(
             apiKey: 'key',
-            model: 'grok',
+            model: 'nano-banana-2',
             prompt: 'a cat',
             aspectRatio: '16:9',
           );
@@ -58,8 +58,32 @@ void main() {
       expect(server.requests.single.body, {
         'prompt': 'a cat',
         'aspect_ratio': '16:9',
-        'model': 'grok',
+        'model': 'nano-banana-2',
       });
+    });
+
+    test('sends negative_prompt only when one is given', () async {
+      final server = await startServer([
+        {'data_url': 'data:image/png;base64,AQI='},
+      ]);
+
+      await NaisteraImageProvider(baseUrl: server.baseUrl).generate(
+        apiKey: 'key',
+        model: 'novelai-v5',
+        prompt: 'a cat',
+        aspectRatio: '1:1',
+        negativePrompt: '  lowres, blurry ',
+      );
+      await NaisteraImageProvider(baseUrl: server.baseUrl).generate(
+        apiKey: 'key',
+        model: 'novelai-v5',
+        prompt: 'a cat',
+        aspectRatio: '1:1',
+        negativePrompt: '   ',
+      );
+
+      expect(server.requests[0].body!['negative_prompt'], 'lowres, blurry');
+      expect(server.requests[1].body!.containsKey('negative_prompt'), isFalse);
     });
 
     test('sends references as data URLs in reference_objects', () async {
@@ -69,7 +93,7 @@ void main() {
 
       await NaisteraImageProvider(baseUrl: server.baseUrl).generate(
         apiKey: 'key',
-        model: 'nano banana 2',
+        model: 'nano-banana-2',
         prompt: 'a cat',
         aspectRatio: '1:1',
         references: [
@@ -121,19 +145,25 @@ void main() {
       },
     );
 
-    test('normalizes a retired model label', () async {
+    test('normalizes retired model labels', () async {
       final server = await startServer([
         {'data_url': 'data:image/png;base64,AQI='},
       ]);
 
-      await NaisteraImageProvider(baseUrl: server.baseUrl).generate(
-        apiKey: 'key',
-        model: 'nano banana',
-        prompt: 'a cat',
-        aspectRatio: '1:1',
-      );
+      for (final retired in ['nano banana', 'grok', 'grok-pro']) {
+        await NaisteraImageProvider(baseUrl: server.baseUrl).generate(
+          apiKey: 'key',
+          model: retired,
+          prompt: 'a cat',
+          aspectRatio: '1:1',
+        );
+      }
 
-      expect(server.requests.single.body!['model'], 'nano banana 2');
+      expect(server.requests.map((r) => r.body!['model']), [
+        'nano-banana-2',
+        'nano-banana-2',
+        'nano-banana-2',
+      ]);
     });
 
     test('polls the job endpoint when the response is async', () async {
@@ -149,7 +179,7 @@ void main() {
             pollInterval: const Duration(milliseconds: 10),
           ).generate(
             apiKey: 'key',
-            model: 'grok',
+            model: 'nano-banana-2',
             prompt: 'a cat',
             aspectRatio: '1:1',
           );
@@ -175,7 +205,7 @@ void main() {
           pollInterval: const Duration(milliseconds: 10),
         ).generate(
           apiKey: 'key',
-          model: 'grok',
+          model: 'nano-banana-2',
           prompt: 'a cat',
           aspectRatio: '1:1',
         ),
