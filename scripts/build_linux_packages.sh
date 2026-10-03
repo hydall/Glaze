@@ -9,6 +9,9 @@ APP_NAME="glaze-flutter"
 BINARY_NAME="Glaze"
 # Extract version from pubspec.yaml (e.g. 0.7.0)
 VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //g' | cut -d '+' -f 1 | tr -d '\r')
+# pacman's pkgver may not contain hyphens, so a pre-release such as 0.8.0-rc is
+# packaged as 0.8.0_rc (which pacman still orders before 0.8.0).
+PKGVER=${VERSION//-/_}
 ARCH=$(uname -m)
 
 if [ -z "$VERSION" ]; then
@@ -44,7 +47,7 @@ if command -v makepkg &> /dev/null; then
     # Generate PKGBUILD for pre-built binaries
     cat <<EOF > "$ARCH_DIR/PKGBUILD"
 pkgname=$APP_NAME-bin
-pkgver=$VERSION
+pkgver=$PKGVER
 pkgrel=1
 pkgdesc="Native LLM frontend for AI roleplay (Flutter)"
 arch=('x86_64')
