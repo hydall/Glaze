@@ -964,13 +964,16 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
   }
 
   Widget _buildTabBar() {
-    // Rendered in the shell header's `below` slot, which already supplies the
-    // horizontal padding — only the gap under the app bar is needed here.
+    // Rendered in the shell header's `below` slot. The phone header already
+    // supplies the horizontal padding there; the desktop column runs edge to
+    // edge, so the row takes the grid's 16px gutters itself and lines up with
+    // the sort/filter buttons below.
+    final desktop = isDesktopLayout(context);
     return Padding(
-      padding: const EdgeInsets.only(top: 10),
-      child: isDesktopLayout(context)
-          ? _buildDesktopTabsRow()
-          : _buildTabStrip(),
+      padding: desktop
+          ? const EdgeInsets.fromLTRB(16, 10, 16, 0)
+          : const EdgeInsets.only(top: 10),
+      child: desktop ? _buildDesktopTabsRow() : _buildTabStrip(),
     );
   }
 
