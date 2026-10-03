@@ -1,12 +1,11 @@
-import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../shell/desktop/desktop_active_surface_provider.dart';
 import '../shell/desktop/desktop_layout_provider.dart';
+import '../shell/desktop/desktop_window_chrome.dart';
 import '../shell/desktop/desktop_window_geometry.dart';
 import '../shell/shell_header_provider.dart';
-import '../theme/app_colors.dart';
-import 'glass_surface.dart';
 
 /// Width cap of a desktop sheet window. Matches the modal-sheet cap the theme
 /// applies on mobile (`kSheetMaxWidthConstraints`), kept here as a literal to
@@ -157,7 +156,10 @@ class _GlazeSheetWindowRoute<T> extends PopupRoute<T> {
     Animation<double> secondaryAnimation,
     Widget child,
   ) {
-    final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
+    final curved = CurvedAnimation(
+      parent: animation,
+      curve: Curves.easeOutCubic,
+    );
     return FadeTransition(
       opacity: curved,
       child: ScaleTransition(
@@ -171,7 +173,7 @@ class _GlazeSheetWindowRoute<T> extends PopupRoute<T> {
 /// The window chrome around a desktop sheet's content: centers it, caps its
 /// size and — when [chrome] is set — draws a title bar and publishes it as a
 /// [DetachedShellHost] so a hosted [SheetView] hands its title there.
-class GlazeSheetWindow extends StatefulWidget {
+class GlazeSheetWindow extends ConsumerStatefulWidget {
   final bool contentSized;
   final bool chrome;
   final String? fallbackTitle;
@@ -188,7 +190,7 @@ class GlazeSheetWindow extends StatefulWidget {
   });
 
   @override
-  State<GlazeSheetWindow> createState() => _GlazeSheetWindowState();
+  ConsumerState<GlazeSheetWindow> createState() => _GlazeSheetWindowState();
 }
 
 /// A window with [GlazeSheetWindow.chrome] can be dragged by its title bar; a
@@ -196,7 +198,7 @@ class GlazeSheetWindow extends StatefulWidget {
 /// (double-click the title bar). A content-sized window follows its content's
 /// height, so it only moves. Chrome-less windows are short-lived pickers and
 /// stay put.
-class _GlazeSheetWindowState extends State<GlazeSheetWindow> {
+class _GlazeSheetWindowState extends ConsumerState<GlazeSheetWindow> {
   /// Header pseudo-branches handed out to sheet windows, so a window opened
   /// over another does not take over the title bar of the one below. Counts
   /// down from [kDetachedChromeBranch], well clear of the floating windows'
@@ -214,6 +216,34 @@ class _GlazeSheetWindowState extends State<GlazeSheetWindow> {
   Offset _offset = Offset.zero;
   Offset _moveStart = Offset.zero;
 
+  /// Cached for [dispose], where reading `ref` is unsafe.
+  late final DesktopActiveSurfaceNotifier _surfaces;
+
+  @override
+  void initState() {
+    super.initState();
+    _surfaces = ref.read(desktopActiveSurfaceProvider.notifier);
+    // A window with a title bar takes part in the active-window highlight:
+    // it opens active and hands it back when it closes. Deferred, because
+    // providers cannot change while the tree is building.
+    if (widget.chrome) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _surfaces.activate(this);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    if (widget.chrome) {
+      final surfaces = _surfaces;
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => surfaces.release(this),
+      );
+    }
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return GlazeSheetWindowScope(
@@ -224,9 +254,15 @@ class _GlazeSheetWindowState extends State<GlazeSheetWindow> {
       // sheet.
       child: DesktopScope(
         isDesktop: true,
-        child: LayoutBuilder(
-          builder: (context, constraints) =>
-              _buildPlaced(context, constraints.biggest),
+        // Kept clear of the top inset — the app's own title bar on Windows,
+        // the status bar on a tablet — the way the desktop shell's columns
+        // are, so a window never slides under it.
+        child: Padding(
+          padding: EdgeInsets.only(top: MediaQuery.paddingOf(context).top),
+          child: LayoutBuilder(
+            builder: (context, constraints) =>
+                _buildPlaced(context, constraints.biggest),
+          ),
         ),
       ),
     );
@@ -241,6 +277,7 @@ class _GlazeSheetWindowState extends State<GlazeSheetWindow> {
 
     final Widget framed = widget.chrome
         ? _WindowFrame(
+            surface: this,
             headerBranch: _headerBranch,
             fallbackTitle: widget.fallbackTitle,
             fallbackActions: widget.fallbackActions,
@@ -369,6 +406,8 @@ class _SheetPanel extends StatelessWidget {
 }
 
 class _WindowFrame extends ConsumerWidget {
+  /// This window's key in [desktopActiveSurfaceProvider].
+  final Object surface;
   final int headerBranch;
   final String? fallbackTitle;
   final List<Widget>? fallbackActions;
@@ -377,6 +416,7 @@ class _WindowFrame extends ConsumerWidget {
   final Widget child;
 
   const _WindowFrame({
+    required this.surface,
     required this.headerBranch,
     this.fallbackTitle,
     this.fallbackActions,
@@ -390,118 +430,38 @@ class _WindowFrame extends ConsumerWidget {
     final entry = ref.watch(
       shellHeaderProvider.select((e) => resolveShellHeader(e, headerBranch)),
     );
+    final active = ref.watch(desktopSurfaceActiveProvider(surface));
     final title = entry?.config.title ?? fallbackTitle ?? '';
-    final actions = <Widget>[
-      ...?entry?.config.actions,
-      ...?fallbackActions,
-    ];
+    final actions = <Widget>[...?entry?.config.actions, ...?fallbackActions];
 
-    final radius = BorderRadius.circular(maximized ? 0 : 16);
-
-    return GlassSurface(
-      borderRadius: radius,
-      border: Border.all(color: context.cs.outlineVariant),
-      boxShadow: [
-        BoxShadow(
-          color: Colors.black.withValues(alpha: 0.5),
-          blurRadius: 40,
-          spreadRadius: 4,
-        ),
-      ],
-      child: ClipRRect(
-        borderRadius: radius,
-        child: Column(
-          children: [
-            DesktopWindowMoveArea(
-              child: _WindowTitleBar(
-                title: title,
-                titleWidget: entry?.config.titleWidget,
-                actions: actions,
-                maximized: maximized,
-                onToggleMaximize: onToggleMaximize,
-                onClose: () => Navigator.of(context).maybePop(),
-              ),
-            ),
-            Divider(height: 1, color: context.cs.outlineVariant),
-            Expanded(
-              child: DetachedShellHost(
-                hasChrome: true,
-                headerBranch: headerBranch,
-                child: MediaQuery.removePadding(
-                  context: context,
-                  removeTop: true,
-                  removeBottom: true,
-                  child: child,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _WindowTitleBar extends StatelessWidget {
-  final String title;
-  final Widget? titleWidget;
-  final List<Widget> actions;
-  final bool maximized;
-  final VoidCallback? onToggleMaximize;
-  final VoidCallback onClose;
-
-  const _WindowTitleBar({
-    required this.title,
-    this.titleWidget,
-    required this.actions,
-    required this.maximized,
-    required this.onToggleMaximize,
-    required this.onClose,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 52,
-      child: Row(
-        children: [
-          const SizedBox(width: 16),
-          Expanded(
-            child:
-                titleWidget ??
-                Text(
-                  title,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700,
-                    color: context.cs.onSurface,
-                  ),
-                ),
+    return Listener(
+      // Same as a floating window: any press inside makes it the active one.
+      onPointerDown: (_) =>
+          ref.read(desktopActiveSurfaceProvider.notifier).activate(surface),
+      child: DesktopWindowFrame(
+        active: active,
+        maximized: maximized,
+        titleBar: DesktopWindowMoveArea(
+          child: DesktopWindowTitleBar(
+            title: title,
+            titleWidget: entry?.config.titleWidget,
+            actions: actions,
+            active: active,
+            maximized: maximized,
+            onToggleMaximize: onToggleMaximize,
+            onClose: () => Navigator.of(context).maybePop(),
           ),
-          ...actions,
-          if (onToggleMaximize != null)
-            IconButton(
-              icon: Icon(
-                maximized
-                    ? Icons.fullscreen_exit_rounded
-                    : Icons.crop_square_rounded,
-                size: 18,
-              ),
-              color: context.cs.onSurfaceVariant,
-              visualDensity: VisualDensity.compact,
-              tooltip: maximized
-                  ? 'desktop_window_restore'.tr()
-                  : 'desktop_window_maximize'.tr(),
-              onPressed: onToggleMaximize,
-            ),
-          IconButton(
-            icon: const Icon(Icons.close_rounded, size: 20),
-            tooltip: MaterialLocalizations.of(context).closeButtonTooltip,
-            onPressed: onClose,
+        ),
+        child: DetachedShellHost(
+          hasChrome: true,
+          headerBranch: headerBranch,
+          child: MediaQuery.removePadding(
+            context: context,
+            removeTop: true,
+            removeBottom: true,
+            child: child,
           ),
-          const SizedBox(width: 4),
-        ],
+        ),
       ),
     );
   }

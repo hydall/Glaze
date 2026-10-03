@@ -10,8 +10,20 @@ const _prefsKey = 'gz_window_geometry';
 const Size _defaultSize = Size(1280, 820);
 const Size _minimumSize = Size(720, 560);
 
-bool get _isDesktopWindow =>
-    !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
+/// `flutter test` runs on the host OS but has no OS window to drive.
+bool get _underFlutterTest =>
+    !kIsWeb && Platform.environment.containsKey('FLUTTER_TEST');
+
+/// Whether the app runs in a desktop OS window that window_manager drives.
+bool get isDesktopAppWindow =>
+    !kIsWeb &&
+    !_underFlutterTest &&
+    (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
+
+/// Whether the app draws its own title bar instead of the system one, so the
+/// main window matches the windows floating inside it. Windows only: macOS
+/// keeps its traffic lights and Linux its window manager's decorations.
+bool get usesCustomAppTitleBar => isDesktopAppWindow && Platform.isWindows;
 
 /// Restores the window's last size and position, and keeps them saved.
 ///
@@ -19,7 +31,7 @@ bool get _isDesktopWindow =>
 /// port had no window management at all, so resizing was forgotten on every
 /// launch. Safe to call on mobile: it no-ops there.
 Future<void> initDesktopWindow() async {
-  if (!_isDesktopWindow) return;
+  if (!isDesktopAppWindow) return;
   await windowManager.ensureInitialized();
 
   final saved = await _readGeometry();
@@ -27,7 +39,9 @@ Future<void> initDesktopWindow() async {
     size: saved?.size ?? _defaultSize,
     minimumSize: _minimumSize,
     center: saved == null,
-    titleBarStyle: TitleBarStyle.normal,
+    titleBarStyle: usesCustomAppTitleBar
+        ? TitleBarStyle.hidden
+        : TitleBarStyle.normal,
   );
   await windowManager.waitUntilReadyToShow(options, () async {
     if (saved?.position != null) {

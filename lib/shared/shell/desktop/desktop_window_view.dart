@@ -11,7 +11,9 @@ import '../../../features/settings/theme_preset_screen.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/glass_surface.dart';
 import '../shell_header_provider.dart';
+import 'desktop_active_surface_provider.dart';
 import 'desktop_floating_provider.dart';
+import 'desktop_window_chrome.dart';
 import 'desktop_window_geometry.dart';
 
 /// Size a floating window opens at — Vue's `WindowView`: 620px wide, 82% of
@@ -31,6 +33,10 @@ class DesktopWindowView extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    ref.listen(
+      desktopWindowsProvider,
+      (previous, next) => _syncActiveSurface(ref, previous ?? const [], next),
+    );
     final windows = ref.watch(desktopWindowsProvider);
     if (windows.isEmpty) return const SizedBox.shrink();
     final focusedId = ref.read(desktopWindowsProvider.notifier).focused?.id;
@@ -52,11 +58,7 @@ class DesktopWindowView extends ConsumerWidget {
                     enabled: !window.minimized,
                     child: Stack(
                       children: [
-                        _DesktopWindow(
-                          window: window,
-                          bounds: bounds,
-                          focused: window.id == focusedId,
-                        ),
+                        _DesktopWindow(window: window, bounds: bounds),
                       ],
                     ),
                   ),
@@ -76,18 +78,34 @@ class DesktopWindowView extends ConsumerWidget {
       },
     );
   }
+
+  /// Keeps the active window in step with the window list: a window raised
+  /// any way other than a click (opened, cycled to, restored from the dock)
+  /// becomes the active one, and a closed or minimized one stops being it.
+  void _syncActiveSurface(
+    WidgetRef ref,
+    List<DesktopWindow> previous,
+    List<DesktopWindow> next,
+  ) {
+    final surfaces = ref.read(desktopActiveSurfaceProvider.notifier);
+    for (final window in previous) {
+      final now = next.where((w) => w.id == window.id).firstOrNull;
+      if (now == null || now.minimized) {
+        surfaces.release(desktopWindowSurface(window.id));
+      }
+    }
+    final raised = topmostVisibleWindow(next);
+    if (raised != null && raised.id != topmostVisibleWindow(previous)?.id) {
+      surfaces.activate(desktopWindowSurface(raised.id));
+    }
+  }
 }
 
 class _DesktopWindow extends ConsumerWidget {
   final DesktopWindow window;
   final Size bounds;
-  final bool focused;
 
-  const _DesktopWindow({
-    required this.window,
-    required this.bounds,
-    required this.focused,
-  });
+  const _DesktopWindow({required this.window, required this.bounds});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -116,15 +134,16 @@ class _DesktopWindow extends ConsumerWidget {
         // Raise on any press inside, before the press does anything else —
         // a Listener takes no part in the gesture arena, so the tap still
         // reaches whatever it landed on.
-        onPointerDown: (_) => windows.focus(id),
+        onPointerDown: (_) {
+          windows.focus(id);
+          ref
+              .read(desktopActiveSurfaceProvider.notifier)
+              .activate(desktopWindowSurface(id));
+        },
         child: DesktopWindowScope(
           windowId: id,
           child: _OpenAnimation(
-            child: _WindowFrame(
-              window: window,
-              focused: focused,
-              maximized: window.maximized,
-            ),
+            child: _WindowFrame(window: window, maximized: window.maximized),
           ),
         ),
       ),
@@ -158,20 +177,18 @@ class _OpenAnimation extends StatelessWidget {
 
 class _WindowFrame extends ConsumerWidget {
   final DesktopWindow window;
-  final bool focused;
   final bool maximized;
 
-  const _WindowFrame({
-    required this.window,
-    required this.focused,
-    required this.maximized,
-  });
+  const _WindowFrame({required this.window, required this.maximized});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final windows = ref.read(desktopWindowsProvider.notifier);
     final id = window.id;
     final viewId = window.activeView;
+    final active = ref.watch(
+      desktopSurfaceActiveProvider(desktopWindowSurface(id)),
+    );
     // Everything hosted here publishes its header under this window's own
     // pseudo-branch (see [DetachedShellHost.headerBranch]), so the title bar
     // shows this window's screen even with other windows open.
@@ -179,54 +196,32 @@ class _WindowFrame extends ConsumerWidget {
     final entry = ref.watch(
       shellHeaderProvider.select((e) => resolveShellHeader(e, branch)),
     );
-    final radius = BorderRadius.circular(maximized ? 0 : 16);
 
-    return GlassSurface(
-      borderRadius: radius,
-      border: Border.all(
-        color: focused
-            ? context.cs.outlineVariant
-            : context.cs.outlineVariant.withValues(alpha: 0.5),
-      ),
-      boxShadow: [
-        BoxShadow(
-          color: Colors.black.withValues(alpha: focused ? 0.5 : 0.3),
-          blurRadius: focused ? 40 : 24,
-          spreadRadius: focused ? 4 : 0,
+    return DesktopWindowFrame(
+      active: active,
+      maximized: maximized,
+      titleBar: DesktopWindowMoveArea(
+        child: DesktopWindowTitleBar(
+          title: entry?.config.title ?? desktopWindowTitle(viewId),
+          titleWidget: entry?.config.titleWidget,
+          actions: entry?.config.actions ?? const [],
+          active: active,
+          maximized: maximized,
+          onBack: window.canGoBack ? () => windows.pop(id) : null,
+          onDetach: window.canGoBack ? () => windows.detach(id) : null,
+          onMinimize: () => windows.minimize(id),
+          onToggleMaximize: () => windows.toggleMaximize(id),
+          onClose: () => windows.close(id),
         ),
-      ],
-      child: ClipRRect(
-        borderRadius: radius,
-        child: Column(
-          children: [
-            DesktopWindowMoveArea(
-              child: _TitleBar(
-                title: entry?.config.title ?? desktopWindowTitle(viewId),
-                titleWidget: entry?.config.titleWidget,
-                actions: entry?.config.actions ?? const [],
-                focused: focused,
-                maximized: maximized,
-                onBack: window.canGoBack ? () => windows.pop(id) : null,
-                onDetach: window.canGoBack ? () => windows.detach(id) : null,
-                onMinimize: () => windows.minimize(id),
-                onToggleMaximize: () => windows.toggleMaximize(id),
-                onClose: () => windows.close(id),
-              ),
-            ),
-            Divider(height: 1, color: context.cs.outlineVariant),
-            Expanded(
-              child: DetachedShellHost(
-                hasChrome: true,
-                headerBranch: branch,
-                // Keyed by depth and view, so stepping back rebuilds the
-                // screen underneath instead of reusing the one popped off.
-                child: KeyedSubtree(
-                  key: ValueKey('${window.stack.length}:$viewId'),
-                  child: desktopWindowContent(viewId),
-                ),
-              ),
-            ),
-          ],
+      ),
+      child: DetachedShellHost(
+        hasChrome: true,
+        headerBranch: branch,
+        // Keyed by depth and view, so stepping back rebuilds the screen
+        // underneath instead of reusing the one popped off.
+        child: KeyedSubtree(
+          key: ValueKey('${window.stack.length}:$viewId'),
+          child: desktopWindowContent(viewId),
         ),
       ),
     );
@@ -267,110 +262,6 @@ Widget desktopWindowContent(String viewId) => switch (viewId) {
   _ => const SizedBox.shrink(),
 };
 
-class _TitleBar extends StatelessWidget {
-  final String title;
-  final Widget? titleWidget;
-  final List<Widget> actions;
-  final bool focused;
-  final bool maximized;
-  final VoidCallback? onBack;
-  final VoidCallback? onDetach;
-  final VoidCallback onMinimize;
-  final VoidCallback onToggleMaximize;
-  final VoidCallback onClose;
-
-  const _TitleBar({
-    required this.title,
-    required this.titleWidget,
-    required this.actions,
-    required this.focused,
-    required this.maximized,
-    required this.onBack,
-    required this.onDetach,
-    required this.onMinimize,
-    required this.onToggleMaximize,
-    required this.onClose,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final chromeColor = focused
-        ? context.cs.onSurfaceVariant
-        : context.cs.onSurfaceVariant.withValues(alpha: 0.6);
-
-    Widget chromeButton(
-      IconData icon,
-      String tooltip,
-      VoidCallback onPressed, {
-      double size = 18,
-    }) => IconButton(
-      icon: Icon(icon, size: size),
-      color: chromeColor,
-      tooltip: tooltip,
-      visualDensity: VisualDensity.compact,
-      onPressed: onPressed,
-    );
-
-    return SizedBox(
-      height: kDesktopWindowTitleBarHeight + 4,
-      child: Row(
-        children: [
-          const SizedBox(width: 4),
-          if (onBack != null)
-            IconButton(
-              icon: const Icon(Icons.arrow_back_rounded, size: 20),
-              tooltip: MaterialLocalizations.of(context).backButtonTooltip,
-              onPressed: onBack,
-            )
-          else
-            const SizedBox(width: 12),
-          Expanded(
-            child:
-                titleWidget ??
-                Text(
-                  title,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: focused
-                        ? context.cs.onSurface
-                        : context.cs.onSurface.withValues(alpha: 0.6),
-                  ),
-                ),
-          ),
-          ...actions,
-          if (onDetach != null)
-            chromeButton(
-              Icons.open_in_new_rounded,
-              'desktop_window_detach'.tr(),
-              onDetach!,
-            ),
-          chromeButton(
-            Icons.minimize_rounded,
-            'desktop_window_minimize'.tr(),
-            onMinimize,
-          ),
-          chromeButton(
-            maximized ? Icons.fullscreen_exit_rounded : Icons.crop_square_rounded,
-            maximized
-                ? 'desktop_window_restore'.tr()
-                : 'desktop_window_maximize'.tr(),
-            onToggleMaximize,
-          ),
-          chromeButton(
-            Icons.close_rounded,
-            MaterialLocalizations.of(context).closeButtonTooltip,
-            onClose,
-            size: 20,
-          ),
-          const SizedBox(width: 4),
-        ],
-      ),
-    );
-  }
-}
-
 /// The strip that switches between floating windows: one entry per window,
 /// the focused one highlighted. Clicking an entry raises (or restores) its
 /// window; clicking the focused one minimizes it, as a taskbar does.
@@ -389,10 +280,7 @@ class _WindowDock extends ConsumerWidget {
       borderRadius: BorderRadius.circular(16),
       border: Border.all(color: context.cs.outlineVariant),
       boxShadow: [
-        BoxShadow(
-          color: Colors.black.withValues(alpha: 0.35),
-          blurRadius: 24,
-        ),
+        BoxShadow(color: Colors.black.withValues(alpha: 0.35), blurRadius: 24),
       ],
       child: Padding(
         padding: const EdgeInsets.all(6),
@@ -446,9 +334,8 @@ class _DockEntry extends ConsumerWidget {
         type: MaterialType.transparency,
         child: InkWell(
           borderRadius: BorderRadius.circular(10),
-          onTap: () => focused
-              ? windows.minimize(window.id)
-              : windows.focus(window.id),
+          onTap: () =>
+              focused ? windows.minimize(window.id) : windows.focus(window.id),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
             constraints: const BoxConstraints(maxWidth: 200),

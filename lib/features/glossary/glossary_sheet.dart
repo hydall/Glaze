@@ -20,10 +20,17 @@ class GlossarySheet extends ConsumerStatefulWidget {
   final String? initialTerm;
   final bool startExpanded;
 
+  /// Closes the glossary when it is hosted outside a route — the desktop
+  /// glossary window, whose title bar has the close button. Stepping back out
+  /// of the top level calls this instead of popping a route that is not the
+  /// glossary's.
+  final VoidCallback? onDismiss;
+
   const GlossarySheet({
     super.key,
     this.initialTerm,
     this.startExpanded = false,
+    this.onDismiss,
   });
 
   /// Convenience launcher used by `HelpTip` and menu entries.
@@ -120,6 +127,19 @@ class _GlossarySheetState extends ConsumerState<GlossarySheet> {
     return null;
   }
 
+  void _dismiss() {
+    final onDismiss = widget.onDismiss;
+    if (onDismiss != null) {
+      onDismiss();
+      return;
+    }
+    // Use pop(), not maybePop(): when presented as a fullscreen route the
+    // host SheetView wraps us in a PopScope with canPop:false, so maybePop()
+    // re-invokes this same handler and spins an unbounded microtask loop
+    // (hard UI freeze). pop() bypasses PopScope and dismisses the route.
+    Navigator.of(context).pop();
+  }
+
   void _goBack() {
     if (_stack.isNotEmpty) {
       final prev = _stack.removeLast();
@@ -131,16 +151,8 @@ class _GlossarySheetState extends ConsumerState<GlossarySheet> {
       });
       return;
     }
-    if (_openedViaHelptip) {
-      // Use pop(), not maybePop(): when presented as a fullscreen route the
-      // host SheetView wraps us in a PopScope with canPop:false, so maybePop()
-      // re-invokes this same handler and spins an unbounded microtask loop
-      // (hard UI freeze). pop() bypasses PopScope and dismisses the route.
-      Navigator.of(context).pop();
-      return;
-    }
-    if (_view == _View.categories) {
-      Navigator.of(context).pop();
+    if (_openedViaHelptip || _view == _View.categories) {
+      _dismiss();
       return;
     }
     setState(() {
@@ -244,7 +256,8 @@ class _GlossarySheetState extends ConsumerState<GlossarySheet> {
           title: _title(),
           showBack:
               _view != _View.categories ||
-              ModalRoute.of(context) is! ModalBottomSheetRoute,
+              (widget.onDismiss == null &&
+                  ModalRoute.of(context) is! ModalBottomSheetRoute),
           // A back gesture steps out of the terms list or the article one level
           // at a time, the way the header's back button does, instead of
           // dismissing the whole sheet from underneath the reader.

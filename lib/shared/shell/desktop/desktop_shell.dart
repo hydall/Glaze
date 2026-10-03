@@ -11,6 +11,7 @@ import '../../widgets/glaze_background.dart';
 import '../../widgets/glaze_scaffold.dart' show GlazeAppBar;
 import '../animated_header_below.dart';
 import '../shell_header_provider.dart';
+import 'desktop_active_surface_provider.dart';
 import 'desktop_file_drop.dart';
 import 'desktop_floating_provider.dart';
 import 'desktop_glossary_popup.dart';
@@ -244,36 +245,51 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
         child: GlazeBackground(
           child: Padding(
             padding: EdgeInsets.only(top: topInset),
-            child: Stack(
-              children: [
-                Row(
-                  children: [
-                    DesktopLeftSidebar(
-                      currentView: _currentView(context),
-                      width: widths.left,
-                    ),
-                    Expanded(
-                      child: RepaintBoundary(
-                        child: Stack(
-                          children: [
-                            widget.child,
-                            Positioned(
-                              top: 0,
-                              left: 0,
-                              right: 0,
-                              child: _DesktopHeader(),
-                            ),
-                          ],
+            // The inset is spent here, once. Left in the MediaQuery, every
+            // screen in the columns added it again — the chat header and the
+            // character list's first row slid down by a whole title bar.
+            child: MediaQuery.removePadding(
+              context: context,
+              removeTop: true,
+              child: Stack(
+                children: [
+                  // A press on the columns makes the main window the active
+                  // one again. Presses inside a floating window never reach
+                  // here: the window stack above takes them.
+                  Listener(
+                    onPointerDown: (_) => ref
+                        .read(desktopActiveSurfaceProvider.notifier)
+                        .activate(kDesktopMainSurface),
+                    child: Row(
+                      children: [
+                        DesktopLeftSidebar(
+                          currentView: _currentView(context),
+                          width: widths.left,
                         ),
-                      ),
+                        Expanded(
+                          child: RepaintBoundary(
+                            child: Stack(
+                              children: [
+                                widget.child,
+                                Positioned(
+                                  top: 0,
+                                  left: 0,
+                                  right: 0,
+                                  child: _DesktopHeader(),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        DesktopRightSidebar(width: widths.right),
+                      ],
                     ),
-                    DesktopRightSidebar(width: widths.right),
-                  ],
-                ),
-                // Floating windows. Not modal: presses outside a window fall
-                // through to the columns underneath.
-                const Positioned.fill(child: DesktopWindowView()),
-              ],
+                  ),
+                  // Floating windows. Not modal: presses outside a window fall
+                  // through to the columns underneath.
+                  const Positioned.fill(child: DesktopWindowView()),
+                ],
+              ),
             ),
           ),
         ),

@@ -480,6 +480,10 @@ class _SheetViewState extends ConsumerState<SheetView>
         ShellHeaderConfig(
           title: widget.title,
           titleWidget: widget.titleWidget,
+          // Offered to hosts that walk the sheet's own navigation from their
+          // title bar (the glossary window); read live, like the actions.
+          showBack: widget.showBack,
+          onBack: widget.showBack ? _onChromeBack : null,
           actions: [
             for (var i = 0; i < widget.actions.length; i++)
               _ChromeHeaderAction(owner: this, index: i),
@@ -494,7 +498,7 @@ class _SheetViewState extends ConsumerState<SheetView>
   /// [_ChromeHeaderAction], so they never go stale between publishes.
   String _chromeSignature() {
     final buffer = StringBuffer(widget.title ?? '')
-      ..write('|${widget.titleWidget?.runtimeType}');
+      ..write('|${widget.titleWidget?.runtimeType}|${widget.showBack}');
     for (final action in widget.actions) {
       final icon = action.icon;
       buffer.write(
@@ -503,6 +507,18 @@ class _SheetViewState extends ConsumerState<SheetView>
       );
     }
     return buffer.toString();
+  }
+
+  /// The back button of a host's title bar: the sheet's current [onBack], or
+  /// popping its route, exactly like its own header's back button.
+  void _onChromeBack() {
+    if (!mounted) return;
+    final onBack = widget.onBack;
+    if (onBack != null) {
+      onBack();
+    } else {
+      Navigator.of(context).pop();
+    }
   }
 
   /// Branch index of the shell this sheet currently lives in, or null when the

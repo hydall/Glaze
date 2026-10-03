@@ -85,12 +85,7 @@ class DesktopWindowsNotifier extends Notifier<List<DesktopWindow>> {
   bool get isOpen => state.isNotEmpty;
 
   /// The window keyboard shortcuts act on: the topmost one not minimized.
-  DesktopWindow? get focused {
-    for (final window in state.reversed) {
-      if (!window.minimized) return window;
-    }
-    return null;
-  }
+  DesktopWindow? get focused => topmostVisibleWindow(state);
 
   DesktopWindow? byId(int id) {
     for (final window in state) {
@@ -281,9 +276,8 @@ class DesktopWindowScope extends InheritedWidget {
     required super.child,
   });
 
-  static int? idOf(BuildContext context) => context
-      .getInheritedWidgetOfExactType<DesktopWindowScope>()
-      ?.windowId;
+  static int? idOf(BuildContext context) =>
+      context.getInheritedWidgetOfExactType<DesktopWindowScope>()?.windowId;
 
   @override
   bool updateShouldNotify(DesktopWindowScope oldWidget) =>
@@ -294,6 +288,14 @@ class DesktopWindowScope extends InheritedWidget {
 /// so each window's title bar shows its own screen's header. Kept well below
 /// `kDetachedChromeBranch` so it cannot collide with it or a real branch.
 int desktopWindowHeaderBranch(int windowId) => -1000 - windowId;
+
+/// The topmost window of [windows] (back to front) that is not minimized.
+DesktopWindow? topmostVisibleWindow(List<DesktopWindow> windows) {
+  for (final window in windows.reversed) {
+    if (!window.minimized) return window;
+  }
+  return null;
+}
 
 bool isDesktopFloatingView(String viewId) =>
     desktopFloatingViews.containsKey(viewId);
