@@ -37,12 +37,22 @@ class DrawerPanelScaffold extends StatelessWidget {
   /// handle is purely decorative (e.g. desktop sidebar hosting).
   final VoidCallback? onDismiss;
 
+  /// Whether the panel draws an edge along its top. Off under the desktop
+  /// app's title bar, whose own bottom edge is already there.
+  final bool showTopBorder;
+
+  /// Whether the drag handle is drawn at all. Off where the panel is not a
+  /// sheet, so the bar would only pretend it could be swiped away.
+  final bool showHandle;
+
   const DrawerPanelScaffold({
     super.key,
     required this.content,
     this.header,
     this.disableEffects = false,
     this.onDismiss,
+    this.showTopBorder = true,
+    this.showHandle = true,
   });
 
   @override
@@ -50,7 +60,9 @@ class DrawerPanelScaffold extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF1E1E1E),
-        border: Border(top: BorderSide(color: context.cs.outlineVariant)),
+        border: showTopBorder
+            ? Border(top: BorderSide(color: context.cs.outlineVariant))
+            : null,
       ),
       child: Stack(
         children: [
@@ -74,12 +86,13 @@ class DrawerPanelScaffold extends StatelessWidget {
           // and horizontal swipes it wants; only the vertical drag is the
           // handle's. The two do not overlap visually (bar 10-14px, strip
           // from 14px), so paint order is unaffected.
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: _DismissHandle(onDismiss: onDismiss),
-          ),
+          if (showHandle)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: _DismissHandle(onDismiss: onDismiss),
+            ),
         ],
       ),
     );

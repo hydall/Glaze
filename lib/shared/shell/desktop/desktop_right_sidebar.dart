@@ -2,11 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/platform/desktop_window.dart';
 import '../../../features/chat/bridge/chat_bridge_registry.dart';
 import '../../../features/chat/widgets/chat_drawer_panel.dart';
-import '../../../features/chat/widgets/magic_drawer.dart';
 import '../../../features/chat/widgets/magic_drawer_widgets.dart';
 import '../../../features/tools/tools_screen.dart';
+import '../../theme/app_colors.dart';
 import 'desktop_sidebar_surface.dart';
 import '../shell_header_provider.dart';
 import 'sidebar_drag_handle.dart';
@@ -17,6 +18,10 @@ import 'sidebar_tool_panels.dart';
 /// Width of the icon strip that sits beside an open panel — Vue's
 /// `.magic-drawer-sidebar.icon-only.left-icon-strip`.
 const double _stripWidth = 64;
+
+/// Height of the back button over the strip: the open panel's header row (a
+/// flush [GlazeAppBar]), which the button lines up with.
+const double _stripBackHeight = 56;
 
 class DesktopRightSidebar extends ConsumerWidget {
   /// See [DesktopLeftSidebar.width].
@@ -71,33 +76,19 @@ class DesktopRightSidebar extends ConsumerWidget {
     String? charId,
   ) {
     final collapsed = width < kSidebarCollapseThreshold;
-    final isChat = charId != null;
-
-    // Collapsed: nothing but the strip — which is the whole point of the
-    // collapsed state. It used to be a single decorative icon in chat, which
-    // made collapsing the sidebar equivalent to losing the Magic Drawer.
-    if (collapsed) {
-      return isChat
-          ? _buildMagicStrip(charId, key: const ValueKey('strip-collapsed'))
-          : _buildToolStrip(context, ref, activeId: panel?.id);
+    if (charId != null) {
+      return _buildChatBody(context, ref, panel, charId, collapsed: collapsed);
     }
 
-    final background = isChat
-        ? ChatDrawerPanel(
-            key: ValueKey('magic-$charId'),
-            charId: charId,
-            // The Ledger diagnostics' "jump to source message" needs the chat
-            // WebView, which the sidebar does not own — reach it through the
-            // bridge registry the chat screen publishes into.
-            onScrollToMessage: (id) async {
-              final bridge = ref.read(chatBridgeRegistryProvider(charId));
-              await bridge?.scrollToMessage(id, highlight: true);
-            },
-          )
-        : const ToolsScreen(inSidebar: true);
+    // Collapsed: nothing but the strip — which is the whole point of the
+    // collapsed state.
+    if (collapsed) return _buildToolStrip(context, ref, activeId: panel?.id);
 
     if (panel == null) {
-      return Material(color: Colors.transparent, child: background);
+      return const Material(
+        color: Colors.transparent,
+        child: ToolsScreen(inSidebar: true),
+      );
     }
 
     // Expanded with a panel: the strip shrinks to a rail on the left and the
@@ -112,28 +103,107 @@ class DesktopRightSidebar extends ConsumerWidget {
       children: [
         SizedBox(
           width: _stripWidth,
-          child: isChat
-              ? _buildMagicStrip(charId, key: const ValueKey('strip-rail'))
-              : _buildToolStrip(context, ref, activeId: panel.id),
-        ),
-        VerticalDivider(
-          width: 1,
-          color: Theme.of(context).colorScheme.outlineVariant,
-        ),
-        Expanded(
-          child: DetachedShellHost(
-            child: Material(
-              color: Colors.transparent,
-              child: Builder(builder: panel.builder),
-            ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _StripBackButton(panel: panel),
+              Expanded(
+                child: _buildToolStrip(context, ref, activeId: panel.id),
+              ),
+            ],
           ),
         ),
+        ..._buildPanel(context, ref, panel),
       ],
     );
   }
 
-  Widget _buildMagicStrip(String charId, {Key? key}) {
-    return MagicDrawerPanel(key: key, charId: charId, iconOnly: true);
+  /// The chat's Magic Drawer: a list, which shrinks to a strip of its icons
+  /// beside an open card's screen and in the collapsed sidebar.
+  ///
+  /// The list and the strip are one drawer, kept mounted at the head of the
+  /// row in every state and only told to drop its labels — its rows, their
+  /// height and its scroll are the same either way, so every icon stays where
+  /// the list drew it. (Collapsing the sidebar to a width other than the
+  /// strip's moves them sideways, to the middle of it.)
+  Widget _buildChatBody(
+    BuildContext context,
+    WidgetRef ref,
+    SidebarPanel? panel,
+    String charId, {
+    required bool collapsed,
+  }) {
+    final showPanel = panel != null && !collapsed;
+    final drawer = ChatDrawerPanel(
+      key: ValueKey('magic-$charId'),
+      charId: charId,
+      // The app's title bar draws the edge above the sidebar.
+      showTopBorder: !usesCustomAppTitleBar,
+      listLayout: true,
+      rail: collapsed || showPanel,
+      // The Ledger diagnostics' "jump to source message" needs the chat
+      // WebView, which the sidebar does not own — reach it through the
+      // bridge registry the chat screen publishes into.
+      onScrollToMessage: (id) async {
+        final bridge = ref.read(chatBridgeRegistryProvider(charId));
+        await bridge?.scrollToMessage(id, highlight: true);
+      },
+    );
+    return Material(
+      color: Colors.transparent,
+      child: LayoutBuilder(
+        builder: (context, constraints) => Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // The same widgets at the head of the row in every state, so the
+            // drawer is updated in place rather than built anew.
+            SizedBox(
+              width: showPanel ? _stripWidth : constraints.maxWidth,
+              child: Stack(
+                children: [
+                  Positioned.fill(child: drawer),
+                  // In the room the drawer's tabs leave above the strip.
+                  if (showPanel)
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      child: _StripBackButton(panel: panel),
+                    ),
+                ],
+              ),
+            ),
+            if (showPanel) ..._buildPanel(context, ref, panel),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// An open panel and the rule between it and the strip on its left.
+  List<Widget> _buildPanel(
+    BuildContext context,
+    WidgetRef ref,
+    SidebarPanel panel,
+  ) {
+    return [
+      VerticalDivider(
+        width: 1,
+        color: Theme.of(context).colorScheme.outlineVariant,
+      ),
+      Expanded(
+        child: DetachedShellHost(
+          child: Material(
+            color: Colors.transparent,
+            child: SidebarPanelScope(
+              onClose: () => closeRightSidebarPanel(ref),
+              back: panel.back,
+              child: Builder(builder: panel.builder),
+            ),
+          ),
+        ),
+      ),
+    ];
   }
 
   Widget _buildToolStrip(
@@ -168,5 +238,35 @@ class DesktopRightSidebar extends ConsumerWidget {
     final segments = uri.pathSegments;
     if (segments.length >= 2 && segments[0] == 'chat') return segments[1];
     return null;
+  }
+}
+
+/// The open panel's back button, over the strip beside it — where Vue drew the
+/// sheet's back arrow, its header running across the strip. It takes the
+/// panel header's row and lines up with it; the panel's own header draws none.
+class _StripBackButton extends ConsumerWidget {
+  final SidebarPanel panel;
+
+  const _StripBackButton({required this.panel});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Container(
+      height: _stripBackHeight,
+      alignment: Alignment.center,
+      decoration: usesCustomAppTitleBar
+          ? BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: context.cs.outlineVariant),
+              ),
+            )
+          : null,
+      child: IconButton(
+        icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
+        color: context.cs.primary,
+        tooltip: MaterialLocalizations.of(context).backButtonTooltip,
+        onPressed: () => panel.back.run(() => closeRightSidebarPanel(ref)),
+      ),
+    );
   }
 }

@@ -32,6 +32,9 @@ class QuickRepliesPanel extends ConsumerStatefulWidget {
   /// reorder.
   final VoidCallback? onEditingRequested;
 
+  /// See [ChatDrawerPanel.listLayout].
+  final bool listLayout;
+
   const QuickRepliesPanel({
     super.key,
     required this.charId,
@@ -39,6 +42,7 @@ class QuickRepliesPanel extends ConsumerStatefulWidget {
     this.beforeGeneration,
     this.editing = false,
     this.onEditingRequested,
+    this.listLayout = false,
   });
 
   @override
@@ -204,6 +208,7 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
       for (final reply in allReplies)
         if (!pins.contains(ComposerPin.reply(reply.id))) reply,
     ];
+    final list = widget.listLayout;
 
     final content = RawScrollbar(
       controller: _scrollController,
@@ -215,18 +220,21 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
         behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
         child: LayoutBuilder(
           builder: (context, constraints) {
-            final itemWidth = (constraints.maxWidth - 24 - 12) / 3;
+            final itemWidth = list
+                ? constraints.maxWidth
+                : (constraints.maxWidth - 24 - 12) / 3;
             var cellIndex = 0;
             return SingleChildScrollView(
               controller: _scrollController,
               padding: EdgeInsets.fromLTRB(
-                12,
+                list ? 0 : 12,
                 kDrawerContentTopInset,
-                12,
+                list ? 0 : 12,
                 16 + MediaQuery.of(context).padding.bottom,
               ),
               child: MagicCardGrid(
-                columns: 3,
+                columns: list ? 1 : 3,
+                runSpacing: list ? 0 : 8,
                 cells: [
                   for (final action in actions)
                     SizedBox(
@@ -252,6 +260,7 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
                             onHide: action.isInsert
                                 ? () => _hideAction(action)
                                 : null,
+                            listRow: list,
                           );
                           // Draggable but not a drop target: this block has a
                           // fixed home order, so the only move it accepts is
@@ -265,12 +274,10 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
                                 widget.onEditingRequested?.call();
                               }
                             },
-                            feedback: SizedBox(
+                            feedback: MagicDragFeedback(
                               width: itemWidth,
-                              child: Material(
-                                color: Colors.transparent,
-                                child: Opacity(opacity: 0.92, child: card),
-                              ),
+                              listRow: list,
+                              child: card,
                             ),
                             childWhenDragging: Opacity(
                               opacity: 0.25,
@@ -301,6 +308,7 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
                           onTap: () => _handleTap(reply),
                           onDelete: () => _remove(reply.id),
                           deletable: !reply.isBuiltIn,
+                          listRow: list,
                         );
 
                         return SizedBox(
@@ -353,12 +361,10 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
                                     _hoverIndex = null;
                                   });
                                 },
-                                feedback: SizedBox(
+                                feedback: MagicDragFeedback(
                                   width: itemWidth,
-                                  child: Material(
-                                    color: Colors.transparent,
-                                    child: Opacity(opacity: 0.92, child: card),
-                                  ),
+                                  listRow: list,
+                                  child: card,
                                 ),
                                 childWhenDragging: Opacity(
                                   opacity: 0.25,
@@ -375,7 +381,10 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
                   // is how a new user learns this tab is theirs to fill.
                   SizedBox(
                     width: itemWidth,
-                    child: AddMagicCard(onTap: () => _showAddSheet()),
+                    child: AddMagicCard(
+                      onTap: () => _showAddSheet(),
+                      listRow: list,
+                    ),
                   ),
                 ],
               ),

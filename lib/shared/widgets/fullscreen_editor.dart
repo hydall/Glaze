@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../core/utils/text_insert.dart';
+import '../shell/desktop/desktop_layout_provider.dart';
 import '../theme/app_colors.dart';
 import 'glass_surface.dart';
 import 'glaze_scaffold.dart';
+import 'glaze_sheet.dart';
 import 'menu_group.dart';
 
 class FullscreenEditorScreen extends StatefulWidget {
@@ -37,19 +39,26 @@ class FullscreenEditorScreen extends StatefulWidget {
     ValueChanged<String>? onChanged,
     bool showFormatBar = false,
   }) {
-    return Navigator.of(context).push<void>(
-      MaterialPageRoute(
-        fullscreenDialog: true,
-        builder: (_) => FullscreenEditorScreen(
-          title: title,
-          initialValue: initialValue,
-          hintText: hintText,
-          autofocus: autofocus,
-          onChanged: onChanged,
-          showFormatBar: showFormatBar,
-        ),
-      ),
+    Widget editor(BuildContext _) => FullscreenEditorScreen(
+      title: title,
+      initialValue: initialValue,
+      hintText: hintText,
+      autofocus: autofocus,
+      onChanged: onChanged,
+      showFormatBar: showFormatBar,
     );
+    // On desktop a window over the field it expands, which can still be
+    // maximized; a page would cover the whole app.
+    if (isDesktopLayout(context)) {
+      return showGlazeSheet<void>(
+        context: context,
+        useRootNavigator: true,
+        builder: editor,
+      );
+    }
+    return Navigator.of(
+      context,
+    ).push<void>(MaterialPageRoute(fullscreenDialog: true, builder: editor));
   }
 
   @override

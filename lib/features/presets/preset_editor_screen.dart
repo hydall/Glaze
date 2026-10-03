@@ -13,6 +13,8 @@ import '../../core/services/preset_defaults.dart';
 import '../../core/state/db_provider.dart';
 import '../../core/utils/id_generator.dart';
 import '../../core/utils/time_helpers.dart';
+import '../../shared/shell/desktop/desktop_floating_provider.dart';
+import '../../shared/shell/desktop/desktop_layout_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
@@ -194,6 +196,14 @@ class PresetEditorBody extends ConsumerStatefulWidget {
 }
 
 class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
+  /// The editors block windows were opened from, by preset id, for those
+  /// windows to reach (see [PresetBlockEditorWindow]).
+  static final Map<String, PresetEditorBodyState> _mounted = {};
+
+  /// Cached for [dispose], where reading `ref` is unsafe. Set once a block
+  /// window has been opened from here.
+  DesktopWindowsNotifier? _windows;
+
   late final _nameCtrl = TextEditingController(text: widget.preset?.name ?? '');
   late String _author = widget.preset?.author ?? '';
   late String? _imagePath = widget.preset?.imagePath;
@@ -268,6 +278,18 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
       _saveTimer!.cancel();
       _performSave();
     }
+    if (identical(_mounted[_currentId], this)) _mounted.remove(_currentId);
+    // Its block windows have nothing left to edit. Deferred: the window list
+    // is a provider, which cannot change while the tree is being torn down.
+    final presetId = _currentId;
+    final windows = _windows;
+    if (windows != null) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => windows.closeWhere(
+          (w) => w.stack.any((view) => _blockWindowPreset(view) == presetId),
+        ),
+      );
+    }
     _nameCtrl.dispose();
     _reasoningStartCtrl.dispose();
     _reasoningEndCtrl.dispose();
@@ -316,9 +338,85 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
   }
 
   void _openBlockEditor(int index) {
+    // On desktop the block opens in a window of its own beside the block
+    // list, rather than in its place.
+    if (isDesktopLayout(context)) {
+      _openBlockEditorWindow(_blocks[index]);
+      return;
+    }
     _saveScrollOffset();
     setState(() => _expandedBlockIndex = index);
     _publishBlockEditorActions();
+  }
+
+  /// The desktop block editor: a floating window, so the rest of the app stays
+  /// usable and several blocks can be open side by side (opening one already
+  /// open brings its window to the front).
+  ///
+  /// Floating windows sit under anything pushed over the whole app, so a
+  /// preset editor in such a route — the chat's preset sheet or editor page —
+  /// opens it as a sheet window over itself instead.
+  void _openBlockEditorWindow(PresetBlock block) {
+    final view = Uri(
+      path: 'preset-block',
+      queryParameters: {'preset': _currentId, 'block': block.id},
+    ).toString();
+    _mounted[_currentId] = this;
+    _windows ??= ref.read(desktopWindowsProvider.notifier);
+    if (floatingWindowsVisibleFrom(context) && floatOnDesktop(context, view)) {
+      return;
+    }
+    unawaited(
+      showGlazeSheet<void>(
+        context: context,
+        useRootNavigator: true,
+        builder: (sheetContext) => _blockEditorView(
+          sheetContext,
+          block,
+          close: () => Navigator.of(sheetContext).pop(),
+        ),
+      ),
+    );
+  }
+
+  /// [block]'s editor in a window: its title bar carries the block's name and
+  /// the stash and delete buttons a phone gets in the host's header. Edits land
+  /// on the block list as they are made, so its row follows along.
+  Widget _blockEditorView(
+    BuildContext context,
+    PresetBlock block, {
+    required VoidCallback close,
+  }) {
+    return SheetView(
+      title: block.name,
+      actions: block.isStatic
+          ? const []
+          : presetBlockEditorSheetActions(
+              context,
+              PresetBlockEditorActions(
+                stashed: block.isStashed,
+                onStash: () {
+                  close();
+                  if (block.isStashed) {
+                    _unstashBlock(block.id);
+                  } else {
+                    _stashBlock(block.id);
+                  }
+                },
+                onDelete: () {
+                  close();
+                  _deleteBlock(block.id);
+                },
+              ),
+            ),
+      body: _blockEditor(block),
+    );
+  }
+
+  void _deleteBlock(String blockId) {
+    if (!mounted) return;
+    setState(() => _blocks.removeWhere((b) => b.id == blockId));
+    _scheduleSave();
   }
 
   void _closeBlockEditor() {
@@ -391,66 +489,69 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
     });
   }
 
+  /// The editor for [block]. Its edits are written back by the block's id, so
+  /// they land on the right block wherever the editor is shown.
+  Widget _blockEditor(PresetBlock block) {
+    void replace(PresetBlock updated, [void Function()? alsoSet]) {
+      if (!mounted) return;
+      final index = _blocks.indexWhere((b) => b.id == block.id);
+      if (index == -1) return;
+      setState(() {
+        _blocks[index] = updated;
+        alsoSet?.call();
+      });
+      _scheduleSave();
+    }
+
+    // Author's Note edits per-preset role/depth/insertion here; its content
+    // (session-scoped) is shown and edited via the linked chat note sheet.
+    if (block.id == 'authors_note') {
+      return _AuthorsNoteBlockEditor(
+        key: ValueKey(block.id),
+        block: block,
+        charId: widget.charId,
+        presetId: widget.preset?.id,
+        onSave: replace,
+      );
+    }
+    // Guided Generation: the block is always enabled and its text is two
+    // preset-level prompts, so it gets the same treatment as the other
+    // blocks whose content is not in `block.content`.
+    if (block.id == 'guided_generation') {
+      return _GuidedGenerationBlockEditor(
+        key: ValueKey(block.id),
+        block: block,
+        generationPrompt:
+            _guidedGenerationPrompt ?? kDefaultGuidedGenerationPrompt,
+        impersonationPrompt:
+            _guidedImpersonationPrompt ?? kDefaultGuidedImpersonationPrompt,
+        onSave: (updated, generation, impersonation) => replace(updated, () {
+          _guidedGenerationPrompt = generation;
+          _guidedImpersonationPrompt = impersonation;
+        }),
+      );
+    }
+    // Summary: per-preset role/depth/insertion/prefix here; content (session-
+    // scoped, in the summary repo) is shown and edited via the chat sheet.
+    if (block.id == 'summary') {
+      return _SummaryBlockEditor(
+        key: ValueKey(block.id),
+        block: block,
+        charId: widget.charId,
+        onSave: replace,
+      );
+    }
+    return _BlockEditorInline(
+      key: ValueKey(block.id),
+      block: block,
+      onSave: replace,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_expandedBlockIndex != null) {
-      final expanded = _blocks[_expandedBlockIndex!];
-      // Author's Note edits per-preset role/depth/insertion here; its content
-      // (session-scoped) is shown and edited via the linked chat note sheet.
-      if (expanded.id == 'authors_note') {
-        return _AuthorsNoteBlockEditor(
-          key: ValueKey(expanded.id),
-          block: expanded,
-          charId: widget.charId,
-          presetId: widget.preset?.id,
-          onSave: (updated) {
-            setState(() => _blocks[_expandedBlockIndex!] = updated);
-            _scheduleSave();
-          },
-        );
-      }
-      // Guided Generation: the block is always enabled and its text is two
-      // preset-level prompts, so it gets the same treatment as the other
-      // blocks whose content is not in `block.content`.
-      if (expanded.id == 'guided_generation') {
-        return _GuidedGenerationBlockEditor(
-          key: ValueKey(expanded.id),
-          block: expanded,
-          generationPrompt:
-              _guidedGenerationPrompt ?? kDefaultGuidedGenerationPrompt,
-          impersonationPrompt:
-              _guidedImpersonationPrompt ?? kDefaultGuidedImpersonationPrompt,
-          onSave: (updated, generation, impersonation) {
-            setState(() {
-              _blocks[_expandedBlockIndex!] = updated;
-              _guidedGenerationPrompt = generation;
-              _guidedImpersonationPrompt = impersonation;
-            });
-            _scheduleSave();
-          },
-        );
-      }
-      // Summary: per-preset role/depth/insertion/prefix here; content (session-
-      // scoped, in the summary repo) is shown and edited via the chat sheet.
-      if (expanded.id == 'summary') {
-        return _SummaryBlockEditor(
-          key: ValueKey(expanded.id),
-          block: expanded,
-          charId: widget.charId,
-          onSave: (updated) {
-            setState(() => _blocks[_expandedBlockIndex!] = updated);
-            _scheduleSave();
-          },
-        );
-      }
-      return _BlockEditorInline(
-        key: ValueKey(expanded.id),
-        block: expanded,
-        onSave: (updated) {
-          setState(() => _blocks[_expandedBlockIndex!] = updated);
-          _scheduleSave();
-        },
-      );
+      return _blockEditor(_blocks[_expandedBlockIndex!]);
     }
 
     return SingleChildScrollView(
@@ -1443,6 +1544,41 @@ class _SettingsToggle extends StatelessWidget {
   }
 }
 
+// ─── PresetBlockEditorWindow ────────────────────────────────────────────────────
+
+/// The preset a `preset-block` window [view] edits a block of, or null for
+/// any other view.
+String? _blockWindowPreset(String view) {
+  final uri = Uri.parse(view);
+  return uri.path == 'preset-block' ? uri.queryParameters['preset'] : null;
+}
+
+/// A prompt block's editor in a desktop floating window (`preset-block`). It
+/// works on the preset editor it was opened from, which closes it when it goes
+/// away, so edits land on that editor's block list like the inline ones do.
+class PresetBlockEditorWindow extends StatelessWidget {
+  final String presetId;
+  final String blockId;
+
+  const PresetBlockEditorWindow({
+    super.key,
+    required this.presetId,
+    required this.blockId,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final editor = PresetEditorBodyState._mounted[presetId];
+    final block = editor?._blocks.where((b) => b.id == blockId).firstOrNull;
+    if (editor == null || block == null) return const SizedBox.shrink();
+    return editor._blockEditorView(
+      context,
+      block,
+      close: () => popDesktopWindow(context),
+    );
+  }
+}
+
 // ─── _BlockEditorInline ─────────────────────────────────────────────────────────
 
 /// Editor for one prompt block. Stash and Delete are not here: they are handed
@@ -1527,6 +1663,8 @@ class _BlockEditorInline extends StatelessWidget {
       item: block.toJson(),
       config: config,
       scrollable: true,
+      // In a desktop window the content takes the window's remaining height.
+      fillField: 'content',
       onChanged: (values) {
         onSave(PresetBlock.fromJson(values));
       },
@@ -1607,7 +1745,8 @@ class _AuthorsNoteBlockEditor extends ConsumerWidget {
       child: ListView(
         padding: EdgeInsets.only(
           top: MediaQuery.paddingOf(context).top + 16,
-          bottom: MediaQuery.paddingOf(context).bottom + 60,
+          bottom:
+              MediaQuery.paddingOf(context).bottom + editorTrailingGap(context),
         ),
         children: [
           _linkedSessionContentCard(
@@ -1700,7 +1839,8 @@ class _SummaryBlockEditor extends ConsumerWidget {
       child: ListView(
         padding: EdgeInsets.only(
           top: MediaQuery.paddingOf(context).top + 16,
-          bottom: MediaQuery.paddingOf(context).bottom + 60,
+          bottom:
+              MediaQuery.paddingOf(context).bottom + editorTrailingGap(context),
         ),
         children: [
           _linkedSessionContentCard(

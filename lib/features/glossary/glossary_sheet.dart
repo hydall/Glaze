@@ -11,6 +11,7 @@ import '../../shared/widgets/sheet_view.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../settings/app_settings_provider.dart';
 import '../../shared/widgets/glaze_sheet.dart';
+import '../../shared/shell/desktop/sidebar_sheet_provider.dart';
 
 /// Bottom-sheet glossary viewer — port of `GlossarySheet.vue`.
 ///
@@ -133,11 +134,11 @@ class _GlossarySheetState extends ConsumerState<GlossarySheet> {
       onDismiss();
       return;
     }
-    // Use pop(), not maybePop(): when presented as a fullscreen route the
-    // host SheetView wraps us in a PopScope with canPop:false, so maybePop()
+    // A pop, not maybePop(): when presented as a fullscreen route the host
+    // SheetView wraps us in a PopScope with canPop:false, so maybePop()
     // re-invokes this same handler and spins an unbounded microtask loop
-    // (hard UI freeze). pop() bypasses PopScope and dismisses the route.
-    Navigator.of(context).pop();
+    // (hard UI freeze). In a desktop sidebar panel it closes the panel.
+    closeSheet(context);
   }
 
   void _goBack() {

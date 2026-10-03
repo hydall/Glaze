@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:easy_localization/easy_localization.dart';
 
+import '../../shared/shell/desktop/desktop_floating_provider.dart';
 import '../../shared/shell/desktop/sidebar_sheet_provider.dart';
 import '../../core/models/folder.dart';
 import '../../core/models/persona.dart';
@@ -201,11 +202,53 @@ class _PersonaListScreenState extends ConsumerState<PersonaListScreen> {
   }
 
   void _showEditor(BuildContext context, [Persona? existing]) {
-    Navigator.of(context, rootNavigator: !widget.startExpanded).push(
-      MaterialPageRoute<void>(
-        builder: (_) => _PersonaEditorScreen(existing: existing),
-      ),
+    openPersonaEditor(
+      context,
+      existing: existing,
+      rootNavigator: !widget.startExpanded,
     );
+  }
+}
+
+/// Opens the editor for [existing], or for a new persona: on desktop in a
+/// floating window of its own beside the list (opening one already open brings
+/// it to the front), elsewhere as a page pushed on [rootNavigator] or the
+/// nearest one.
+void openPersonaEditor(
+  BuildContext context, {
+  Persona? existing,
+  bool rootNavigator = true,
+}) {
+  final view = Uri(
+    path: 'persona-editor',
+    queryParameters: existing == null
+        ? {'new': generateId()}
+        : {'id': existing.id},
+  ).toString();
+  if (floatOnDesktop(context, view)) return;
+  Navigator.of(context, rootNavigator: rootNavigator).push(
+    MaterialPageRoute<void>(
+      builder: (_) => _PersonaEditorScreen(existing: existing),
+    ),
+  );
+}
+
+/// The persona editor in a desktop floating window (`persona-editor`): the
+/// persona [personaId] names, or a new one when it is null.
+class PersonaEditorWindow extends ConsumerWidget {
+  final String? personaId;
+
+  const PersonaEditorWindow({super.key, this.personaId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final id = personaId;
+    if (id == null) return const _PersonaEditorScreen();
+    final personas = ref.watch(personaListProvider).value;
+    if (personas == null) return const Center(child: GlazeSpinner());
+    final persona = personas.where((p) => p.id == id).firstOrNull;
+    if (persona == null) return const SizedBox.shrink();
+    return _PersonaEditorScreen(existing: persona);
   }
 }
 

@@ -5,11 +5,19 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import '../../core/utils/platform_paths.dart';
 import '../shell/desktop/desktop_layout_provider.dart';
+import '../shell/shell_header_provider.dart';
 import '../theme/app_colors.dart';
 import 'fullscreen_editor.dart';
 import 'glaze_bottom_sheet.dart';
 import 'glass_surface.dart';
 import 'menu_group.dart';
+
+/// Room an editor leaves under its last field, past the bottom inset: clear of
+/// a phone's floating nav bar, but only a margin inside a desktop window, where
+/// nothing sits under the content and a phone's clearance reads as a strange
+/// empty band.
+double editorTrailingGap(BuildContext context) =>
+    DetachedShellHost.drawsChrome(context) ? 16 : 60;
 
 class GenericEditorField {
   final String key;
@@ -67,6 +75,12 @@ class GenericEditor extends StatefulWidget {
   final Duration debounceDuration;
   final EdgeInsetsGeometry? padding;
 
+  /// Key of a `textarea` that, in a scrollable editor on desktop, stretches to
+  /// take whatever height the other fields leave — the prompt block's content
+  /// in its own window, which otherwise ends in an empty band. The editor then
+  /// scrolls as a whole once the fields stop fitting.
+  final String? fillField;
+
   const GenericEditor({
     super.key,
     required this.item,
@@ -83,6 +97,7 @@ class GenericEditor extends StatefulWidget {
     this.onSave,
     this.debounceDuration = const Duration(milliseconds: 1000),
     this.padding,
+    this.fillField,
   });
 
   @override
@@ -98,6 +113,9 @@ class _GenericEditorState extends State<GenericEditor> {
 
   /// Whether the editor is laid out for desktop; refreshed every build.
   bool _desktop = false;
+
+  /// Whether [GenericEditor.fillField] stretches in this build.
+  bool _filling = false;
 
   @override
   void initState() {
@@ -444,6 +462,11 @@ class _GenericEditorState extends State<GenericEditor> {
   @override
   Widget build(BuildContext context) {
     _desktop = isDesktopLayout(context);
+    _filling =
+        widget.fillField != null &&
+        widget.scrollable &&
+        _desktop &&
+        !widget.showAvatar;
     final sections = [
       for (final section in widget.config) _buildSection(section),
     ];
@@ -468,7 +491,9 @@ class _GenericEditorState extends State<GenericEditor> {
         widget.padding?.resolve(Directionality.of(context)) ??
         EdgeInsets.only(
           top: MediaQuery.of(context).padding.top + 16,
-          bottom: MediaQuery.of(context).padding.bottom + 60,
+          bottom:
+              MediaQuery.of(context).padding.bottom +
+              editorTrailingGap(context),
         );
 
     return Material(
@@ -476,6 +501,19 @@ class _GenericEditorState extends State<GenericEditor> {
       child: LayoutBuilder(
         builder: (context, constraints) {
           final width = constraints.maxWidth;
+          if (_filling) {
+            final gutter = width < _wideBreakpoint
+                ? 0.0
+                : ((width - _fieldsMaxWidth) / 2).clamp(0.0, double.infinity);
+            return _buildFilling(
+              constraints.maxHeight,
+              padding.copyWith(
+                left: padding.left + gutter,
+                right: padding.right + gutter,
+              ),
+              sections,
+            );
+          }
           if (!_desktop || width < _wideBreakpoint) {
             return ListView(
               padding: padding,
@@ -487,6 +525,30 @@ class _GenericEditorState extends State<GenericEditor> {
           }
           return _buildWide(width, padding, sections);
         },
+      ),
+    );
+  }
+
+  /// The fields in a column at least as tall as the viewport, the section
+  /// holding [GenericEditor.fillField] taking up the slack; taller than that,
+  /// it scrolls like the list it replaces.
+  Widget _buildFilling(
+    double viewport,
+    EdgeInsets padding,
+    List<Widget> sections,
+  ) {
+    return SingleChildScrollView(
+      padding: padding,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          minHeight: (viewport - padding.vertical).clamp(0.0, double.infinity),
+        ),
+        child: IntrinsicHeight(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: sections,
+          ),
+        ),
       ),
     );
   }
@@ -546,11 +608,19 @@ class _GenericEditorState extends State<GenericEditor> {
         .where((f) => f.showIf == null || f.showIf!(_localItem))
         .toList();
     if (visibleFields.isEmpty) return const SizedBox.shrink();
-    return MenuGroup(
+    bool fills(GenericEditorField field) =>
+        _filling && field.key == widget.fillField;
+    final group = MenuGroup(
       header: section.title,
       headerVariant: MenuGroupHeaderVariant.accentCaps,
-      items: visibleFields.map(_buildFieldItem).toList(),
+      items: [
+        for (final field in visibleFields)
+          fills(field)
+              ? Expanded(child: _buildFieldItem(field))
+              : _buildFieldItem(field),
+      ],
     );
+    return visibleFields.any(fills) ? Expanded(child: group) : group;
   }
 
   Widget _buildFieldItem(GenericEditorField field) {
@@ -582,6 +652,7 @@ class _GenericEditorState extends State<GenericEditor> {
           // is the phone compromise.
           maxLines: isArea ? (_desktop ? rows * 4 : rows) : 1,
           minLines: isArea && _desktop ? rows : null,
+          expands: isArea && _filling && field.key == widget.fillField,
           onExpand: field.expandable ? () => _openFieldEditor(field) : null,
         );
       case 'select':

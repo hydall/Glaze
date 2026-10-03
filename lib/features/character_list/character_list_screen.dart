@@ -20,6 +20,7 @@ import '../../shared/shell/header_scroll_hider.dart';
 import '../../shared/shell/nav_height_provider.dart';
 import '../../shared/shell/nav_retap_provider.dart';
 import '../../shared/shell/shell_header_provider.dart';
+import '../../shared/shell/title_bar_header.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/glaze_action_button.dart';
@@ -40,6 +41,7 @@ import 'character_sort.dart';
 import 'dropped_files_provider.dart';
 import 'character_import_persistence_provider.dart';
 import 'character_detail_screen.dart';
+import 'character_editor_screen.dart';
 import 'character_selection_provider.dart';
 import 'filtered_characters_provider.dart';
 import 'widgets/import_progress_dialog.dart';
@@ -75,6 +77,12 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
   final FocusNode _searchFocus = FocusNode();
   bool _searchExpanded = false;
   Timer? _catalogDebounce;
+
+  /// Under the app's title bar (Windows desktop) the search is not a loupe in
+  /// the header but a strip that always leads the column, and search mode
+  /// follows whatever is typed in it. Kept up to date by
+  /// [didChangeDependencies].
+  bool _searchInStrip = false;
   String? _lastOpenedInitialCharacterId;
   bool _openingInitialCharacter = false;
 
@@ -87,6 +95,10 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
   /// Width the desktop tab strip settles at, leaving the rest of the row to
   /// the Add button (Vue's `.tabs-row`). Mobile keeps a full-width strip.
   static const double _kTabStripWidth = 420.0;
+
+  /// Height of the search strip that leads the column under the app's title
+  /// bar (see [_searchInStrip]), its bottom edge included.
+  static const double _kSearchStripBlock = 41.0;
 
   // Owns one scroll position per sub-tab (the grids attach via
   // PrimaryScrollController), so tapping the active tab can animate it back to
@@ -182,7 +194,8 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     final catalogVisible = ref.read(catalogVisibleProvider);
     final inFolder = _tabIndex == 0 && _currentFolderId != null;
     final inPicks = inFolder && _currentFolderId == kPicksFolderId;
-    final inSearch = _searchExpanded && !inPicks;
+    final searchStrip = _searchInStrip && !inPicks;
+    final inSearch = _searchExpanded && !inPicks && !_searchInStrip;
     // Chub's Timeline feed ignores free-text search, so the loupe is locked out
     // while it's selected on the Discover tab.
     final timelineLocked =
@@ -195,7 +208,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
       titleWidget: inSearch ? _buildSearchField(context) : null,
       showBack: inFolder,
       onBack: inFolder ? _handleFolderBack : null,
-      actions: inPicks
+      actions: inPicks || _searchInStrip
           ? null
           : [
               SizedBox(
@@ -220,7 +233,16 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
       // entirely when the catalog is disabled (only "My Characters" remains) —
       // except on desktop, where the same row also carries the Add button and
       // so outlives a hidden catalog.
-      below: (!inFolder && (catalogVisible || isDesktopLayout(context)))
+      below: searchStrip
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _buildSearchStrip(context, locked: timelineLocked),
+                if (!inFolder) _buildTabBar(),
+              ],
+            )
+          : (!inFolder && (catalogVisible || isDesktopLayout(context)))
           ? _buildTabBar()
           : null,
     );
@@ -297,6 +319,15 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    // The window crossing between the desktop and mobile layouts moves this
+    // screen in or out of the title bar with its state kept; the published
+    // header has to follow, or the mobile header comes up without its loupe.
+    final inStrip = TitleBarHeaderScope.of(context);
+    if (inStrip != _searchInStrip) {
+      _searchInStrip = inStrip;
+      // Deferred: the registry cannot change while the tree is building.
+      WidgetsBinding.instance.addPostFrameCallback((_) => refreshShellHeader());
+    }
     _maybeOpenInitialCharacter();
   }
 
@@ -440,7 +471,10 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     // Selecting Chub's Timeline feed locks the query out. If it lands while the
     // Discover search is open, close it; either way republish the header so the
     // loupe disables in step.
-    ref.listen(catalogProvider.select((s) => s.chubTimelineActive), (_, active) {
+    ref.listen(catalogProvider.select((s) => s.chubTimelineActive), (
+      _,
+      active,
+    ) {
       if (active && _tabIndex == 1 && _searchExpanded) {
         _closeSearch();
       } else {
@@ -462,7 +496,11 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     // the content below still has to clear it.
     final showHeaderRow =
         !inFolder && (catalogVisible || isDesktopLayout(context));
-    final contentTopPad = showHeaderRow ? topPad + _kTabBarBlock : topPad;
+    final searchStrip =
+        _searchInStrip && !(inFolder && _currentFolderId == kPicksFolderId);
+    final contentTopPad =
+        (showHeaderRow ? topPad + _kTabBarBlock : topPad) +
+        (searchStrip ? _kSearchStripBlock : 0);
 
     // While inside a folder, intercept the system/gesture back so it pops out to
     // the top-level grid instead of bubbling up to the shell (which would exit
@@ -926,6 +964,90 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     );
   }
 
+  /// The search strip leading the column under the app's title bar: the same
+  /// field as the left sidebar's dialog search, run edge to edge with a line
+  /// under it. Disabled while Chub's Timeline (which ignores the query) is on.
+  Widget _buildSearchStrip(BuildContext context, {required bool locked}) {
+    final textStyle = Theme.of(context).textTheme.bodyMedium;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // The field's own fill only spans its line of text, leaving a darker
+        // band under it; the strip carries the fill edge to edge instead.
+        ColoredBox(
+          color:
+              Theme.of(context).inputDecorationTheme.fillColor ??
+              context.cs.surfaceContainerHighest,
+          child: SizedBox(
+            height: _kSearchStripBlock - 1,
+            child: ValueListenableBuilder<TextEditingValue>(
+              valueListenable: _searchCtrl,
+              // Sized by its own even padding, like the sidebar's dialog
+              // search, and centred as a whole: stretched to the strip, the
+              // field left its text sitting high.
+              builder: (context, value, _) => Center(
+                child: TextField(
+                  controller: _searchCtrl,
+                  focusNode: _searchFocus,
+                  enabled: !locked,
+                  onChanged: _onSearchStripChanged,
+                  textInputAction: TextInputAction.search,
+                  cursorColor: context.cs.primary,
+                  style: textStyle,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    filled: false,
+                    hintText: _tabIndex == 1
+                        ? 'catalog_search_placeholder'.tr()
+                        : 'search_characters'.tr(),
+                    hintStyle: textStyle?.copyWith(
+                      color: context.cs.onSurfaceVariant,
+                    ),
+                    // Lines the loupe up with the grid's 16px gutter.
+                    prefixIcon: Padding(
+                      padding: const EdgeInsets.only(left: 16, right: 10),
+                      child: Icon(
+                        Icons.search_rounded,
+                        size: 18,
+                        color: context.cs.primary,
+                      ),
+                    ),
+                    prefixIconConstraints: const BoxConstraints(),
+                    suffixIcon: value.text.isEmpty
+                        ? null
+                        : IconButton(
+                            icon: const Icon(Icons.close_rounded, size: 16),
+                            padding: EdgeInsets.zero,
+                            onPressed: _closeSearch,
+                          ),
+                    // Kept within the strip, so clearing never resizes it.
+                    suffixIconConstraints: const BoxConstraints.tightFor(
+                      width: 40,
+                      height: 32,
+                    ),
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    disabledBorder: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        Divider(height: 1, color: context.cs.outlineVariant),
+      ],
+    );
+  }
+
+  void _onSearchStripChanged(String value) {
+    final active = value.isNotEmpty;
+    if (active != _searchExpanded) setState(() => _searchExpanded = active);
+    _onSearchChanged(value);
+  }
+
   /// Hands [child] the scroll controller that belongs to [tab].
   ///
   /// The grids scroll with the inherited primary controller; the default
@@ -1045,7 +1167,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
           label: 'action_create_new'.tr(),
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
-            context.push('/character/create');
+            openCharacterCreator(context);
           },
         ),
         BottomSheetItem(
@@ -1192,7 +1314,11 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     String? lastError;
     for (final c in chars) {
       try {
-        final path = await exportCharacterToFile(ref: ref, character: c, format: format);
+        final path = await exportCharacterToFile(
+          ref: ref,
+          character: c,
+          format: format,
+        );
         // Empty path = the user cancelled the save dialog — stop the loop
         // instead of counting the file as exported (or re-prompting).
         if (path.isEmpty) break;

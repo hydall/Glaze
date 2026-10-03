@@ -3,10 +3,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../features/backup/backup_screen.dart';
+import '../../../features/catalog/widgets/third_party_providers_screen.dart';
+import '../../../features/character_list/character_editor_screen.dart';
 import '../../../features/cloud_sync/widgets/sync_sheet.dart';
 import '../../../features/menu/about_screen.dart';
+import '../../../features/menu/hall_of_fame_screen.dart';
+import '../../../features/lorebooks/lorebook_editor_screen.dart';
 import '../../../features/menu/menu_screen.dart';
+import '../../../features/personas/persona_list_screen.dart';
+import '../../../features/presets/preset_editor_screen.dart';
+import '../../../features/regex/regex_sheet.dart';
 import '../../../features/settings/app_settings_screen.dart';
+import '../../../features/settings/theme_editor_screen.dart';
 import '../../../features/settings/theme_preset_screen.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/glass_surface.dart';
@@ -28,17 +36,33 @@ Size _preferredWindowSize(Size bounds) => Size(620, bounds.height * 0.82);
 /// from its edges, minimized, maximized and raised by clicking it, and several
 /// can be open at once. A dock at the bottom switches between them once there
 /// is more than one (or one is minimized).
-class DesktopWindowView extends ConsumerWidget {
+class DesktopWindowView extends ConsumerStatefulWidget {
   const DesktopWindowView({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<DesktopWindowView> createState() => _DesktopWindowViewState();
+}
+
+class _DesktopWindowViewState extends ConsumerState<DesktopWindowView> {
+  /// The windows of the last build, to tell which ones have just closed.
+  List<DesktopWindow> _shown = const [];
+
+  /// Windows already closed but still fading out, drawn as they last were.
+  /// Their screens stay mounted for that, but take no more input.
+  final List<DesktopWindow> _closing = [];
+
+  @override
+  Widget build(BuildContext context) {
     ref.listen(
       desktopWindowsProvider,
       (previous, next) => _syncActiveSurface(ref, previous ?? const [], next),
     );
     final windows = ref.watch(desktopWindowsProvider);
-    if (windows.isEmpty) return const SizedBox.shrink();
+    for (final window in _shown) {
+      if (!windows.any((w) => w.id == window.id)) _closing.add(window);
+    }
+    _shown = windows;
+    if (windows.isEmpty && _closing.isEmpty) return const SizedBox.shrink();
     final focusedId = ref.read(desktopWindowsProvider.notifier).focused?.id;
     final showDock = windows.length > 1 || windows.any((w) => w.minimized);
 
@@ -50,20 +74,11 @@ class DesktopWindowView extends ConsumerWidget {
             // Keyed and kept mounted while minimized, so raising a window or
             // restoring it keeps its screen's state (scroll, search, …).
             for (final window in windows)
-              Positioned.fill(
-                key: ValueKey(window.id),
-                child: Offstage(
-                  offstage: window.minimized,
-                  child: TickerMode(
-                    enabled: !window.minimized,
-                    child: Stack(
-                      children: [
-                        _DesktopWindow(window: window, bounds: bounds),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
+              _buildWindow(window, bounds, closing: false),
+            // On top: a window is closed from its own title bar or the dock,
+            // so it is almost always the one in front anyway.
+            for (final window in _closing)
+              _buildWindow(window, bounds, closing: true),
             if (showDock)
               Positioned(
                 left: 0,
@@ -76,6 +91,29 @@ class DesktopWindowView extends ConsumerWidget {
           ],
         );
       },
+    );
+  }
+
+  Widget _buildWindow(
+    DesktopWindow window,
+    Size bounds, {
+    required bool closing,
+  }) {
+    return Positioned.fill(
+      key: ValueKey(window.id),
+      child: _WindowPresence(
+        visible: !closing && !window.minimized,
+        onHidden: closing
+            ? () =>
+                  setState(() => _closing.removeWhere((w) => w.id == window.id))
+            : null,
+        child: IgnorePointer(
+          ignoring: closing,
+          child: Stack(
+            children: [_DesktopWindow(window: window, bounds: bounds)],
+          ),
+        ),
+      ),
     );
   }
 
@@ -142,33 +180,99 @@ class _DesktopWindow extends ConsumerWidget {
         },
         child: DesktopWindowScope(
           windowId: id,
-          child: _OpenAnimation(
-            child: _WindowFrame(window: window, maximized: window.maximized),
-          ),
+          child: _WindowFrame(window: window, maximized: window.maximized),
         ),
       ),
     );
   }
 }
 
-/// Fades and lifts a window in the first time it is built.
-class _OpenAnimation extends StatelessWidget {
+/// Fades and lifts a window in when it opens or is restored, and back out
+/// when it is minimized or closed; [onHidden] runs once it is all the way out.
+///
+/// Out of sight the window goes offstage with its tickers paused, but stays
+/// mounted, so restoring it keeps its screen's state.
+class _WindowPresence extends StatefulWidget {
+  final bool visible;
+  final VoidCallback? onHidden;
   final Widget child;
 
-  const _OpenAnimation({required this.child});
+  const _WindowPresence({
+    required this.visible,
+    this.onHidden,
+    required this.child,
+  });
+
+  @override
+  State<_WindowPresence> createState() => _WindowPresenceState();
+}
+
+class _WindowPresenceState extends State<_WindowPresence>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 200),
+    reverseDuration: const Duration(milliseconds: 150),
+  )..addStatusListener(_onStatus);
+
+  late final Animation<double> _t = CurvedAnimation(
+    parent: _ctrl,
+    curve: Curves.easeOutCubic,
+    reverseCurve: Curves.easeInCubic,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.visible) _ctrl.forward();
+  }
+
+  @override
+  void didUpdateWidget(_WindowPresence oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.visible == oldWidget.visible) return;
+    if (widget.visible) {
+      _ctrl.forward();
+    } else if (_ctrl.isDismissed) {
+      // Closed while minimized: already out, nothing to play. Deferred, as
+      // the callback rebuilds the parent that is building this.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) widget.onHidden?.call();
+      });
+    } else {
+      _ctrl.reverse();
+    }
+  }
+
+  void _onStatus(AnimationStatus status) {
+    if (status != AnimationStatus.dismissed) return;
+    setState(() {});
+    widget.onHidden?.call();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0, end: 1),
-      duration: const Duration(milliseconds: 200),
-      curve: Curves.easeOutCubic,
-      child: child,
-      builder: (context, t, child) => Opacity(
-        opacity: t,
-        child: Transform.translate(
-          offset: Offset(0, (1 - t) * 16),
-          child: child,
+    final hidden = !widget.visible && _ctrl.isDismissed;
+    return Offstage(
+      offstage: hidden,
+      child: TickerMode(
+        enabled: !hidden,
+        child: AnimatedBuilder(
+          animation: _t,
+          child: widget.child,
+          builder: (context, child) => Opacity(
+            opacity: _t.value,
+            child: Transform.translate(
+              offset: Offset(0, (1 - _t.value) * 16),
+              child: child,
+            ),
+          ),
         ),
       ),
     );
@@ -207,7 +311,11 @@ class _WindowFrame extends ConsumerWidget {
           actions: entry?.config.actions ?? const [],
           active: active,
           maximized: maximized,
-          onBack: window.canGoBack ? () => windows.pop(id) : null,
+          // A step back inside the screen (an entry editor to its list) comes
+          // before stepping the window back.
+          onBack:
+              entry?.config.innerBack ??
+              (window.canGoBack ? () => windows.pop(id) : null),
           onDetach: window.canGoBack ? () => windows.detach(id) : null,
           onMinimize: () => windows.minimize(id),
           onToggleMaximize: () => windows.toggleMaximize(id),
@@ -217,11 +325,19 @@ class _WindowFrame extends ConsumerWidget {
       child: DetachedShellHost(
         hasChrome: true,
         headerBranch: branch,
-        // Keyed by depth and view, so stepping back rebuilds the screen
-        // underneath instead of reusing the one popped off.
-        child: KeyedSubtree(
-          key: ValueKey('${window.stack.length}:$viewId'),
-          child: desktopWindowContent(viewId),
+        // Stepping to another view and back cross-fades, as the same step
+        // does on a phone (the router's `_fadePage`). The incoming screen
+        // claims the title bar last, so it wins it while both are mounted.
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 220),
+          layoutBuilder: (current, previous) =>
+              Stack(fit: StackFit.expand, children: [...previous, ?current]),
+          // Keyed by depth and view, so stepping back rebuilds the screen
+          // underneath instead of reusing the one popped off.
+          child: KeyedSubtree(
+            key: ValueKey('${window.stack.length}:$viewId'),
+            child: desktopWindowContent(viewId),
+          ),
         ),
       ),
     );
@@ -230,21 +346,37 @@ class _WindowFrame extends ConsumerWidget {
 
 /// Title of [viewId] for when its screen has not published a header (yet) —
 /// also what the dock labels a window with.
-String desktopWindowTitle(String viewId) => switch (viewId) {
+String desktopWindowTitle(String viewId) => switch (desktopViewName(viewId)) {
   'menu' => 'menu_menu_title'.tr(),
   'settings' => 'menu_app_settings'.tr(),
   'theme-settings' => 'theme_presets'.tr(),
+  'theme-editor' => 'theme_edit_theme'.tr(),
+  'third-party-providers' => 'third_party_providers_title'.tr(),
+  'character-editor' => 'action_edit_character'.tr(),
+  'preset-block' => 'section_prompt_blocks'.tr(),
+  'persona-editor' => 'tab_personas'.tr(),
+  'lorebook-editor' => 'menu_lorebooks'.tr(),
+  'regex-editor' => 'regex_editor'.tr(),
   'about' => 'menu_about'.tr(),
+  'hall-of-fame' => 'about_hall_of_fame'.tr(),
   'sync' => 'menu_cloud_sync'.tr(),
   'backup' => 'menu_backup'.tr(),
   _ => '',
 };
 
-IconData _windowIcon(String viewId) => switch (viewId) {
+IconData _windowIcon(String viewId) => switch (desktopViewName(viewId)) {
   'menu' => Icons.menu_rounded,
   'settings' => Icons.settings_rounded,
   'theme-settings' => Icons.palette_rounded,
+  'theme-editor' => Icons.format_paint_rounded,
+  'third-party-providers' => Icons.extension_rounded,
+  'character-editor' => Icons.person_rounded,
+  'preset-block' => Icons.notes_rounded,
+  'persona-editor' => Icons.badge_rounded,
+  'lorebook-editor' => Icons.menu_book_rounded,
+  'regex-editor' => Icons.code_rounded,
   'about' => Icons.info_outline_rounded,
+  'hall-of-fame' => Icons.emoji_events_rounded,
   'sync' => Icons.cloud_sync_rounded,
   'backup' => Icons.backup_rounded,
   _ => Icons.web_asset_rounded,
@@ -252,15 +384,44 @@ IconData _windowIcon(String viewId) => switch (viewId) {
 
 /// The screen a floating window shows for [viewId]. Every id in
 /// [desktopFloatingViews] must resolve here.
-Widget desktopWindowContent(String viewId) => switch (viewId) {
-  'menu' => const MenuScreen(),
-  'settings' => const AppSettingsScreen(),
-  'theme-settings' => const ThemePresetScreen(),
-  'about' => const AboutScreen(),
-  'sync' => const SyncSheet(),
-  'backup' => const BackupScreen(),
-  _ => const SizedBox.shrink(),
-};
+Widget desktopWindowContent(String viewId) {
+  final view = Uri.parse(viewId);
+  return switch (view.path) {
+    'menu' => const MenuScreen(),
+    'settings' => AppSettingsScreen(
+      highlightId: view.queryParameters['highlight'],
+    ),
+    'theme-settings' => const ThemePresetScreen(),
+    'theme-editor' => const ThemeEditorScreen(),
+    'third-party-providers' => const ThirdPartyProvidersScreen(),
+    'character-editor' => switch (view.queryParameters['new']) {
+      final newId? => CharacterEditorScreen(charId: newId, isNew: true),
+      null => CharacterEditorScreen(charId: view.queryParameters['id'] ?? ''),
+    },
+    'preset-block' => PresetBlockEditorWindow(
+      presetId: view.queryParameters['preset'] ?? '',
+      blockId: view.queryParameters['block'] ?? '',
+    ),
+    'persona-editor' => PersonaEditorWindow(
+      personaId: view.queryParameters['id'],
+    ),
+    'lorebook-editor' => LorebookEditorScreen(
+      lorebookId: view.queryParameters['id'] ?? '',
+    ),
+    'regex-editor' => RegexEditorWindow(
+      scriptId: view.queryParameters['id'] ?? '',
+      scope:
+          RegexScope.values.asNameMap()[view.queryParameters['scope']] ??
+          RegexScope.global,
+      presetId: view.queryParameters['preset'],
+    ),
+    'about' => const AboutScreen(),
+    'hall-of-fame' => const HallOfFameScreen(),
+    'sync' => const SyncSheet(),
+    'backup' => const BackupScreen(),
+    _ => const SizedBox.shrink(),
+  };
+}
 
 /// The strip that switches between floating windows: one entry per window,
 /// the focused one highlighted. Clicking an entry raises (or restores) its

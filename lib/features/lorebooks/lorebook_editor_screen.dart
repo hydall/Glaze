@@ -17,12 +17,16 @@ import '../../core/utils/cast_helpers.dart';
 import '../../core/utils/id_generator.dart';
 import '../../core/utils/time_helpers.dart';
 import '../../features/settings/api_list_provider.dart';
+import '../../shared/shell/desktop/desktop_floating_provider.dart';
+import '../../shared/shell/desktop/desktop_layout_provider.dart';
+import '../../shared/shell/desktop/sidebar_sheet_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/glaze_action_button.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_scaffold.dart';
+import '../../shared/widgets/glaze_sheet.dart';
 import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/list_controls.dart';
@@ -40,6 +44,21 @@ class _IndexResult {
   final int skipped;
   final int failed;
   const _IndexResult(this.indexed, this.skipped, this.failed);
+}
+
+/// Opens lorebook [lorebookId]'s editor: on desktop in a floating window of its
+/// own (opening one already open brings it to the front), elsewhere as a page.
+Future<void> openLorebookEditor(BuildContext context, String lorebookId) async {
+  final view = Uri(
+    path: 'lorebook-editor',
+    queryParameters: {'id': lorebookId},
+  ).toString();
+  if (floatOnDesktop(context, view)) return;
+  await Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => LorebookEditorScreen(lorebookId: lorebookId),
+    ),
+  );
 }
 
 class LorebookEditorScreen extends ConsumerStatefulWidget {
@@ -907,15 +926,21 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
   }
 
   Future<void> _openPerBookSettings() async {
-    final result = await Navigator.push<Map<String, dynamic>>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => LorebookPerBookSettingsScreen(
-          settings: _settings,
-          globalSettings: ref.read(lorebookSettingsProvider),
-        ),
-      ),
+    Widget settingsScreen(BuildContext _) => LorebookPerBookSettingsScreen(
+      settings: _settings,
+      globalSettings: ref.read(lorebookSettingsProvider),
     );
+    // On desktop a window over this one; a page would cover the whole app.
+    final result = isDesktopLayout(context)
+        ? await showGlazeSheet<Map<String, dynamic>>(
+            context: context,
+            useRootNavigator: true,
+            builder: settingsScreen,
+          )
+        : await Navigator.push<Map<String, dynamic>>(
+            context,
+            MaterialPageRoute(builder: settingsScreen),
+          );
     if (result != null) {
       setState(() {
         if (result['reset'] == true) {
@@ -1048,9 +1073,11 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
         if (_view == _View.editEntry) {
           _closeEdit();
         } else {
-          Navigator.of(context).pop();
+          closeSheet(context);
         }
       },
+      // In a desktop window its title bar steps back from an entry.
+      innerBack: _view == _View.editEntry ? _closeEdit : null,
       title: isEntries
           ? null
           : (_entries[_editIndex].comment.isNotEmpty

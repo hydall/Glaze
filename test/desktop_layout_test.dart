@@ -4,9 +4,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:glaze_flutter/features/settings/app_settings_screen.dart';
 import 'package:glaze_flutter/shared/shell/desktop/desktop_floating_provider.dart';
 import 'package:glaze_flutter/shared/shell/desktop/desktop_layout_provider.dart';
 import 'package:glaze_flutter/shared/shell/desktop/desktop_window_geometry.dart';
+import 'package:glaze_flutter/shared/shell/desktop/desktop_window_view.dart';
 import 'package:glaze_flutter/shared/shell/desktop/sidebar_resizer.dart';
 import 'package:glaze_flutter/shared/shell/desktop/sidebar_sheet_provider.dart';
 import 'package:glaze_flutter/shared/shell/desktop/sidebar_tool_panels.dart';
@@ -273,10 +275,26 @@ void main() {
       expect(windows.byId(reopened)?.rect, rect);
     });
 
-    test('every floating view has a phone route to fall back to', () {
-      for (final id in desktopFloatingViews.keys) {
-        expect(desktopFloatingViews[id], startsWith('/'));
+    test('every floating view phone route is an absolute location', () {
+      for (final route in desktopFloatingViews.values.nonNulls) {
+        expect(route, startsWith('/'));
       }
+    });
+
+    test('every floating view opens a screen', () {
+      for (final id in desktopFloatingViews.keys) {
+        expect(desktopWindowContent(id), isNot(isA<SizedBox>()), reason: id);
+        expect(desktopWindowTitle(id), isNotEmpty, reason: id);
+      }
+    });
+
+    test('a view id carries its arguments as a query', () {
+      const id = 'settings?highlight=language';
+      expect(desktopViewName(id), 'settings');
+      expect(isDesktopFloatingView(id), isTrue);
+      final screen = desktopWindowContent(id);
+      expect(screen, isA<AppSettingsScreen>());
+      expect((screen as AppSettingsScreen).highlightId, 'language');
     });
 
     test('each window publishes its header under its own branch', () {

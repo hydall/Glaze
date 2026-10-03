@@ -7,6 +7,7 @@ import '../../../shared/utils/time_formatter.dart';
 import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
+import '../../../shared/widgets/sheet_view.dart';
 import '../../chat_history/chat_history_provider.dart';
 import '../chat_actions_service.dart';
 import '../chat_provider.dart';
@@ -60,9 +61,13 @@ Future<SessionPickerResult?> showSessionPickerSheet(
 }
 
 /// Opens the new-session / import menu and, once a choice is made, resolves the
-/// picker with it. Shared by the header's add button and the empty state's
-/// centred create button, so the two cannot offer different choices.
-Future<void> _showCreateMenu(BuildContext context) async {
+/// picker with it — or hands it to [onPicked], for a picker that is not a sheet
+/// (see [SessionPickerPanel]). Shared by the header's add button and the empty
+/// state's centred create button, so the two cannot offer different choices.
+Future<void> _showCreateMenu(
+  BuildContext context, {
+  ValueChanged<SessionPickerResult>? onPicked,
+}) async {
   final rootNav = Navigator.of(context, rootNavigator: true);
   final action = await GlazeBottomSheet.show<SessionPickerAction>(
     context,
@@ -82,10 +87,55 @@ Future<void> _showCreateMenu(BuildContext context) async {
   );
   // Runs once the inner sheet's route is gone, so this pop closes the picker
   // rather than racing the menu's exit animation.
-  if (action == SessionPickerAction.newSession) {
-    rootNav.pop(const SessionPickerResult.newSession());
-  } else if (action == SessionPickerAction.importChat) {
-    rootNav.pop(const SessionPickerResult.importChat());
+  final result = switch (action) {
+    SessionPickerAction.newSession => const SessionPickerResult.newSession(),
+    SessionPickerAction.importChat => const SessionPickerResult.importChat(),
+    _ => null,
+  };
+  if (result == null) return;
+  if (onPicked != null) {
+    onPicked(result);
+  } else {
+    rootNav.pop(result);
+  }
+}
+
+/// The picker as a desktop right-sidebar panel: the same rows, with a pick
+/// handed to [onPicked] — along with this panel's own context and ref, which
+/// outlive whatever opened it — instead of closing a sheet. The panel stays
+/// open on the list.
+class SessionPickerPanel extends ConsumerWidget {
+  final String charId;
+  final void Function(
+    BuildContext context,
+    WidgetRef ref,
+    SessionPickerResult result,
+  )
+  onPicked;
+
+  const SessionPickerPanel({
+    super.key,
+    required this.charId,
+    required this.onPicked,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    void pick(SessionPickerResult result) => onPicked(context, ref, result);
+    return SheetView(
+      title: 'history_title'.tr(),
+      showRouteBackground: false,
+      actions: [
+        SheetViewAction(
+          icon: const Icon(Icons.add, size: 20),
+          tooltip: 'action_new_session'.tr(),
+          onPressed: () => _showCreateMenu(context, onPicked: pick),
+        ),
+      ],
+      body: ListView(
+        children: [SessionPickerList(charId: charId, onPicked: pick)],
+      ),
+    );
   }
 }
 
@@ -118,7 +168,10 @@ class _SessionPickerAddButton extends ConsumerWidget {
 class SessionPickerList extends ConsumerStatefulWidget {
   final String charId;
 
-  const SessionPickerList({super.key, required this.charId});
+  /// Takes a pick instead of the sheet's route being popped with it.
+  final ValueChanged<SessionPickerResult>? onPicked;
+
+  const SessionPickerList({super.key, required this.charId, this.onPicked});
 
   @override
   ConsumerState<SessionPickerList> createState() => _SessionPickerListState();
@@ -142,10 +195,7 @@ class _SessionPickerListState extends ConsumerState<SessionPickerList> {
 
     return sessionsAsync.when(
       loading: () => const Center(
-        child: Padding(
-          padding: EdgeInsets.all(32.0),
-          child: GlazeSpinner(),
-        ),
+        child: Padding(padding: EdgeInsets.all(32.0), child: GlazeSpinner()),
       ),
       error: (error, _) => Center(
         child: Padding(
@@ -158,7 +208,9 @@ class _SessionPickerListState extends ConsumerState<SessionPickerList> {
           for (final session in all)
             if (session.characterId == widget.charId) session,
         ];
-        if (sessions.isEmpty) return const _SessionPickerEmptyState();
+        if (sessions.isEmpty) {
+          return _SessionPickerEmptyState(onPicked: widget.onPicked);
+        }
 
         final activeSessionId = ref
             .watch(chatProvider(widget.charId))
@@ -183,6 +235,15 @@ class _SessionPickerListState extends ConsumerState<SessionPickerList> {
     );
   }
 
+  void _pick(SessionPickerResult result) {
+    final onPicked = widget.onPicked;
+    if (onPicked != null) {
+      onPicked(result);
+    } else {
+      Navigator.of(context, rootNavigator: true).pop(result);
+    }
+  }
+
   BottomSheetSessionItem _itemFor(
     ChatSessionInfo session, {
     required String? activeSessionId,
@@ -202,10 +263,7 @@ class _SessionPickerListState extends ConsumerState<SessionPickerList> {
       // A live reply supersedes the unread dot: the row already reads as
       // "active". Same rule as the chat list.
       unread: !generating && unread,
-      onTap: () => Navigator.of(
-        context,
-        rootNavigator: true,
-      ).pop(SessionPickerResult.open(session)),
+      onTap: () => _pick(SessionPickerResult.open(session)),
       onMore: () => _showSessionActions(session),
     );
   }
@@ -309,7 +367,9 @@ class _SessionPickerListState extends ConsumerState<SessionPickerList> {
 /// Shown instead of the list when the character has no sessions yet: a centred
 /// create button, the same action the header's add button would offer.
 class _SessionPickerEmptyState extends StatelessWidget {
-  const _SessionPickerEmptyState();
+  final ValueChanged<SessionPickerResult>? onPicked;
+
+  const _SessionPickerEmptyState({this.onPicked});
 
   @override
   Widget build(BuildContext context) {
@@ -337,7 +397,7 @@ class _SessionPickerEmptyState extends StatelessWidget {
             icon: Icons.add,
             label: 'btn_create'.tr(),
             tone: GlazeActionTone.primary,
-            onTap: () => _showCreateMenu(context),
+            onTap: () => _showCreateMenu(context, onPicked: onPicked),
           ),
         ],
       ),

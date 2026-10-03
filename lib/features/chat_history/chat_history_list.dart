@@ -23,6 +23,7 @@ import '../../core/state/chat_session_ops_provider.dart';
 import '../../shared/utils/variant_label.dart';
 import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/variation_chip.dart';
+import '../character_list/character_editor_screen.dart';
 import '../chat/generating_sessions_provider.dart';
 import '../chat/unread_sessions_provider.dart';
 import '../settings/app_settings_provider.dart';
@@ -53,6 +54,12 @@ class ChatHistoryList extends ConsumerStatefulWidget {
   /// there a long press keeps opening the row's own action menu.
   final bool selectable;
 
+  /// Shown under the chat count — the desktop sidebar's dialog search. With
+  /// it the count and this widget stay fixed above the list rather than
+  /// scrolling with it, and stay when nothing matches: a search that finds no
+  /// chat must not take its own field away.
+  final Widget? belowCount;
+
   const ChatHistoryList({
     super.key,
     this.collapsed = false,
@@ -61,6 +68,7 @@ class ChatHistoryList extends ConsumerStatefulWidget {
     this.bottomPadding = 20,
     this.controller,
     this.selectable = false,
+    this.belowCount,
   });
 
   @override
@@ -115,30 +123,46 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
               .toList();
         }
 
+        final Widget body;
         if (filtered.isEmpty) {
-          return _buildEmptyState();
+          body = _buildEmptyState();
+        } else if (settings.groupDialogs) {
+          body = _buildGroupedList(filtered);
+        } else {
+          body = _buildFlatList(filtered);
         }
 
-        if (settings.groupDialogs) {
-          return _buildGroupedList(filtered);
-        }
+        final belowCount = widget.belowCount;
+        if (belowCount == null || widget.collapsed) return body;
+        // One shape whether or not anything matched, so the field below the
+        // count is never remounted mid-typing.
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildCountLabel(filtered.length),
+            belowCount,
+            Expanded(child: body),
+          ],
+        );
+      },
+    );
+  }
 
-        return ListView.builder(
-          controller: widget.controller,
-          padding: EdgeInsets.only(
-            top: widget.topPadding,
-            bottom: widget.bottomPadding,
-          ),
-          itemCount: filtered.length + 1,
-          itemBuilder: (_, i) {
-            if (i == 0) return _buildCountHeader(filtered.length);
-            return _SessionTile(
-              info: filtered[i - 1],
-              collapsed: widget.collapsed,
-              selectable: widget.selectable,
-              index: i - 1,
-            );
-          },
+  Widget _buildFlatList(List<ChatSessionInfo> filtered) {
+    return ListView.builder(
+      controller: widget.controller,
+      padding: EdgeInsets.only(
+        top: widget.topPadding,
+        bottom: widget.bottomPadding,
+      ),
+      itemCount: filtered.length + 1,
+      itemBuilder: (_, i) {
+        if (i == 0) return _buildCountHeader(filtered.length);
+        return _SessionTile(
+          info: filtered[i - 1],
+          collapsed: widget.collapsed,
+          selectable: widget.selectable,
+          index: i - 1,
         );
       },
     );
@@ -224,8 +248,16 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
     );
   }
 
+  /// The count as the list's first row — unless it sits fixed above the list
+  /// (see [ChatHistoryList.belowCount]).
   Widget _buildCountHeader(int count) {
-    if (widget.collapsed) return const SizedBox.shrink();
+    if (widget.collapsed || widget.belowCount != null) {
+      return const SizedBox.shrink();
+    }
+    return _buildCountLabel(count);
+  }
+
+  Widget _buildCountLabel(int count) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
       child: Text(
@@ -1075,7 +1107,7 @@ class _GroupHeader extends ConsumerWidget {
     );
     if (result == null || !context.mounted) return;
     if (result == 'edit') {
-      unawaited(context.push('/character/${info.characterId}/edit'));
+      unawaited(openCharacterEditor(context, info.characterId));
       return;
     }
 

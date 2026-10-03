@@ -11,11 +11,13 @@ import '../../../core/state/active_studio_preset_provider.dart';
 import '../../../core/state/studio_feature_provider.dart';
 import '../../../core/state/summary_providers.dart';
 
+import '../../../shared/shell/desktop/sidebar_sheet_provider.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../chat_provider.dart';
 import '../composer_pins_provider.dart';
 import 'drawer_panel_scaffold.dart';
 import 'magic_drawer_catalog.dart';
+import 'magic_drawer_list_row.dart';
 import 'magic_drawer_models.dart';
 import '../services/drawer_item_launcher.dart';
 import '../services/magic_drawer_layout_service.dart';
@@ -40,12 +42,20 @@ class MagicDrawerPanel extends ConsumerStatefulWidget {
   final VoidCallback? onEditingRequested;
 
   /// Renders the panel as a narrow vertical strip of icons instead of the
-  /// three-column card grid — the desktop right sidebar's collapsed state, and
-  /// the strip that sits beside an open panel there.
+  /// cards — the desktop right sidebar's collapsed state, and the strip that
+  /// sits beside an open panel there.
+  ///
+  /// The strip is the [listLayout] list with its labels gone: the same rows at
+  /// the same height in the same scroll view, so turning it on or off on a
+  /// mounted panel leaves every icon where it was.
   ///
   /// Taps run through the very same handler as the cards, so the strip cannot
   /// drift out of sync with the grid the way a hand-copied icon list would.
   final bool iconOnly;
+
+  /// Renders the cards as a full-width list instead of the three-column grid —
+  /// the desktop right sidebar's layout. See [ChatDrawerPanel.listLayout].
+  final bool listLayout;
 
   /// Called when the drawer wants to dismiss itself: on a swipe-down of the
   /// drag handle, or before a picked item performs real navigation away from
@@ -66,6 +76,7 @@ class MagicDrawerPanel extends ConsumerStatefulWidget {
     this.editing = false,
     this.onEditingRequested,
     this.iconOnly = false,
+    this.listLayout = false,
     this.onScrollToMessage,
   });
 
@@ -200,7 +211,9 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
     try {
       await _loadStats();
     } catch (e) {
-      debugPrint('[MagicDrawer] _refreshStats error: $e');
+      // A tap that opened a desktop sidebar panel swaps this drawer for the
+      // strip mid-refresh; its stats service is gone then, and that is fine.
+      if (mounted) debugPrint('[MagicDrawer] _refreshStats error: $e');
     }
     if (!mounted) return;
     setState(() {});
@@ -437,6 +450,11 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
     };
     final items = _displayItems(extSettings, extPresets, pinnedIds);
     final canAdd = _canAddMore();
+    final strip = widget.iconOnly;
+    // Flush with the edges: the list's rows, and the strip that replaces them.
+    final list = widget.listLayout || strip;
+    // The card whose screen is open beside the strip, in the sidebar's panel.
+    final activeId = strip ? ref.watch(rightSidebarPanelProvider)?.id : null;
 
     final scrollable = RawScrollbar(
       controller: _scrollController,
@@ -448,143 +466,161 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
         behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
         child: LayoutBuilder(
           builder: (context, constraints) {
-            final itemWidth = (constraints.maxWidth - 24 - 12) / 3;
+            final itemWidth = list
+                ? constraints.maxWidth
+                : (constraints.maxWidth - 24 - 12) / 3;
             return SingleChildScrollView(
               controller: _scrollController,
               padding: EdgeInsets.fromLTRB(
-                12,
+                list ? 0 : 12,
                 kDrawerContentTopInset,
-                12,
+                list ? 0 : 12,
                 16 + MediaQuery.of(context).padding.bottom,
               ),
-              child: MagicCardGrid(
-                columns: 3,
-                cells: [
-                  ...List.generate(items.length, (index) {
-                    final item = items[index];
-                    final card = MagicCard(
-                      item: item,
-                      editing: widget.editing,
-                      hovered: _hoverIndex == index && _draggingIndex != index,
-                      onTap: () => _handleTap(item.def),
-                      onDelete: () => _removeItem(item.def.id),
-                    );
-
-                    return SizedBox(
-                      width: itemWidth,
-                      // The payload is a [ComposerPin] rather than a grid
-                      // index so the same drag can end in the composer's row,
-                      // which is how a card is pinned now that the grid has no
-                      // badge for it. Drops that stay here are guarded to
-                      // cards this grid is actually showing, so a button
-                      // dragged down out of the row cannot reshuffle it.
-                      child: DragTarget<ComposerPin>(
-                        onWillAcceptWithDetails: (details) {
-                          final incoming = details.data;
-                          if (incoming.kind != ComposerPinKind.tool ||
-                              incoming.refId == item.def.id ||
-                              !items.any((i) => i.def.id == incoming.refId)) {
-                            return false;
-                          }
-                          setState(() => _hoverIndex = index);
-                          return true;
-                        },
-                        onLeave: (_) {
-                          if (_hoverIndex == index) {
-                            setState(() => _hoverIndex = null);
-                          }
-                        },
-                        onAcceptWithDetails: (details) {
-                          _moveItem(details.data.refId, item.def.id);
-                        },
-                        builder: (context, _, _) {
-                          return LongPressDraggable<ComposerPin>(
-                            data: ComposerPin.tool(item.def.id),
-                            delay: const Duration(milliseconds: 300),
-                            onDragStarted: () {
-                              Haptics.mediumImpact();
-                              if (!widget.editing) {
-                                widget.onEditingRequested?.call();
-                              }
-                              setState(() => _draggingIndex = index);
-                            },
-                            onDragEnd: (_) {
-                              setState(() {
-                                _draggingIndex = null;
-                                _hoverIndex = null;
-                              });
-                            },
-                            feedback: SizedBox(
-                              width: itemWidth,
-                              child: Material(
-                                color: Colors.transparent,
-                                child: Opacity(opacity: 0.92, child: card),
-                              ),
-                            ),
-                            childWhenDragging: Opacity(
-                              opacity: 0.25,
-                              child: card,
-                            ),
-                            child: card,
-                          );
-                        },
-                      ),
-                    );
-                  }),
-                  // The add tile is always the last cell rather than a header
-                  // button revealed by edit mode: a "+" sitting in the grid is
-                  // how a new user finds out the row is theirs to change.
-                  // It is outside the drag/drop wiring above — it has no index
-                  // to reorder and must never be a drop target.
-                  if (canAdd)
-                    SizedBox(
-                      width: itemWidth,
-                      child: AddMagicCard(onTap: _showAddItemSheet),
+              // The strip goes in this same scroll view rather than one of
+              // its own, so the scroll offset carries over too.
+              child: strip
+                  ? _buildIconStrip(items, canAdd: canAdd, activeId: activeId)
+                  : _buildCardGrid(
+                      items,
+                      canAdd: canAdd,
+                      list: list,
+                      itemWidth: itemWidth,
                     ),
-                ],
-              ),
             );
           },
         ),
       ),
     );
 
-    if (widget.iconOnly) return _buildIconStrip(items);
-
     // The chrome (background, drag handle, header) belongs to the hosting
     // [ChatDrawerPanel] — this is only the tab body.
     return PanelLoadingOverlay(loading: _loading, child: scrollable);
   }
 
-  /// Vue's `.tools-strip.magic-drawer-sidebar.icon-only`: a scrollable column
-  /// of 48px rows, each a tinted rounded icon with the card's label as its
-  /// tooltip.
-  Widget _buildIconStrip(List<MagicDrawerCardItem> items) {
-    if (_loading && items.isEmpty) {
-      return const Center(
-        child: SizedBox(
-          width: 20,
-          height: 20,
-          child: CircularProgressIndicator(strokeWidth: 2),
-        ),
-      );
-    }
-    return ScrollConfiguration(
-      behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
-      child: SingleChildScrollView(
-        controller: _scrollController,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final item in items)
-              MagicDrawerStripIcon(
-                icon: item.def.icon,
-                label: item.def.label,
-                onTap: () => _handleTap(item.def),
-              ),
-          ],
-        ),
-      ),
+  /// The cards, as the three-column grid or, with [list], the desktop
+  /// sidebar's list; [itemWidth] is one card's width in either.
+  Widget _buildCardGrid(
+    List<MagicDrawerCardItem> items, {
+    required bool canAdd,
+    required bool list,
+    required double itemWidth,
+  }) {
+    return MagicCardGrid(
+      columns: list ? 1 : 3,
+      runSpacing: list ? 0 : 8,
+      cells: [
+        ...List.generate(items.length, (index) {
+          final item = items[index];
+          final card = MagicCard(
+            item: item,
+            editing: widget.editing,
+            hovered: _hoverIndex == index && _draggingIndex != index,
+            onTap: () => _handleTap(item.def),
+            onDelete: () => _removeItem(item.def.id),
+            listRow: list,
+          );
+
+          return SizedBox(
+            width: itemWidth,
+            // The payload is a [ComposerPin] rather than a grid
+            // index so the same drag can end in the composer's row,
+            // which is how a card is pinned now that the grid has no
+            // badge for it. Drops that stay here are guarded to
+            // cards this grid is actually showing, so a button
+            // dragged down out of the row cannot reshuffle it.
+            child: DragTarget<ComposerPin>(
+              onWillAcceptWithDetails: (details) {
+                final incoming = details.data;
+                if (incoming.kind != ComposerPinKind.tool ||
+                    incoming.refId == item.def.id ||
+                    !items.any((i) => i.def.id == incoming.refId)) {
+                  return false;
+                }
+                setState(() => _hoverIndex = index);
+                return true;
+              },
+              onLeave: (_) {
+                if (_hoverIndex == index) {
+                  setState(() => _hoverIndex = null);
+                }
+              },
+              onAcceptWithDetails: (details) {
+                _moveItem(details.data.refId, item.def.id);
+              },
+              builder: (context, _, _) {
+                return LongPressDraggable<ComposerPin>(
+                  data: ComposerPin.tool(item.def.id),
+                  delay: const Duration(milliseconds: 300),
+                  onDragStarted: () {
+                    Haptics.mediumImpact();
+                    if (!widget.editing) {
+                      widget.onEditingRequested?.call();
+                    }
+                    setState(() => _draggingIndex = index);
+                  },
+                  onDragEnd: (_) {
+                    setState(() {
+                      _draggingIndex = null;
+                      _hoverIndex = null;
+                    });
+                  },
+                  feedback: MagicDragFeedback(
+                    width: itemWidth,
+                    listRow: list,
+                    child: card,
+                  ),
+                  childWhenDragging: Opacity(
+                    opacity: 0.25,
+                    child: card,
+                  ),
+                  child: card,
+                );
+              },
+            ),
+          );
+        }),
+        // The add tile is always the last cell rather than a header
+        // button revealed by edit mode: a "+" sitting in the grid is
+        // how a new user finds out the row is theirs to change.
+        // It is outside the drag/drop wiring above — it has no index
+        // to reorder and must never be a drop target.
+        if (canAdd)
+          SizedBox(
+            width: itemWidth,
+            child: AddMagicCard(
+              onTap: _showAddItemSheet,
+              listRow: list,
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// Vue's `.tools-strip.magic-drawer-sidebar.icon-only`: the list's rows with
+  /// only their icons left, each a tinted rounded square with the card's label
+  /// as its tooltip, at the list rows' height.
+  Widget _buildIconStrip(
+    List<MagicDrawerCardItem> items, {
+    required bool canAdd,
+    String? activeId,
+  }) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (final item in items)
+          MagicDrawerStripIcon(
+            icon: item.def.icon,
+            label: item.def.label,
+            height: kMagicDrawerRowHeight,
+            active: item.def.id == activeId,
+            onTap: () => _handleTap(item.def),
+          ),
+        // The list's add row has no place in the strip, but its height does:
+        // without it, a list scrolled to its end would lose that much scroll
+        // range and every icon would shift down by it.
+        if (canAdd) const SizedBox(height: kMagicDrawerRowHeight),
+      ],
     );
   }
 }

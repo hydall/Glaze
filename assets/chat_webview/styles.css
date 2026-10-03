@@ -118,6 +118,16 @@
 /* ============================================================
  * Message section (root)
  * ============================================================ */
+/* Desktop's capped chat column (ChatColumnWidth in Flutter). The WebView
+ * spans the whole middle column so the chat background is one surface edge to
+ * edge; the rows — and the virtual list's spacers beside them — keep to the
+ * column here, centred. `none` (the default) leaves them full width. */
+#chat-container > * {
+  max-width: var(--chat-column-width, none);
+  margin-left: auto;
+  margin-right: auto;
+}
+
 .message-section {
   padding: 12px 16px;
   display: flex;

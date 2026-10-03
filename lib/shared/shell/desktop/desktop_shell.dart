@@ -5,12 +5,14 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/platform/desktop_window.dart';
 import '../../../core/state/shared_prefs_provider.dart';
 import '../../widgets/glass_surface.dart';
 import '../../widgets/glaze_background.dart';
 import '../../widgets/glaze_scaffold.dart' show GlazeAppBar;
 import '../animated_header_below.dart';
 import '../shell_header_provider.dart';
+import '../title_bar_header.dart';
 import 'desktop_active_surface_provider.dart';
 import 'desktop_file_drop.dart';
 import 'desktop_floating_provider.dart';
@@ -80,32 +82,39 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
     // dependency and the layout would not react to the panel opening.
     final hasPanel = ref.watch(rightSidebarPanelProvider) != null;
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final width = constraints.maxWidth;
-        final isDesktop =
-            isDesktopViewportSize(Size(width, constraints.maxHeight)) &&
-            !forceMobile;
+    // The sidebars render the widths [_fitSidebars] works out here, so a drag
+    // on either grip has to rebuild this layout, not just the sidebar dragged.
+    return ListenableBuilder(
+      listenable: Listenable.merge([_leftController, _rightController]),
+      builder: (context, _) => LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.maxWidth;
+          final isDesktop =
+              isDesktopViewportSize(Size(width, constraints.maxHeight)) &&
+              !forceMobile;
 
-        if (!isDesktop) {
-          return DesktopScope(isDesktop: false, child: widget.child);
-        }
+          if (!isDesktop) {
+            return DesktopScope(isDesktop: false, child: widget.child);
+          }
 
-        _migrateRootRoute(context);
+          _migrateRootRoute(context);
 
-        return DesktopScope(
-          isDesktop: true,
-          child: ProviderScope(
-            overrides: [
-              leftSidebarControllerProvider.overrideWithValue(_leftController),
-              rightSidebarControllerProvider.overrideWithValue(
-                _rightController,
-              ),
-            ],
-            child: _buildDesktopLayout(context, width, hasPanel),
-          ),
-        );
-      },
+          return DesktopScope(
+            isDesktop: true,
+            child: ProviderScope(
+              overrides: [
+                leftSidebarControllerProvider.overrideWithValue(
+                  _leftController,
+                ),
+                rightSidebarControllerProvider.overrideWithValue(
+                  _rightController,
+                ),
+              ],
+              child: _buildDesktopLayout(context, width, hasPanel),
+            ),
+          );
+        },
+      ),
     );
   }
 
@@ -268,16 +277,18 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
                         ),
                         Expanded(
                           child: RepaintBoundary(
-                            child: Stack(
-                              children: [
-                                widget.child,
-                                Positioned(
-                                  top: 0,
-                                  left: 0,
-                                  right: 0,
-                                  child: _DesktopHeader(),
-                                ),
-                              ],
+                            child: _middleColumn(
+                              Stack(
+                                children: [
+                                  widget.child,
+                                  Positioned(
+                                    top: 0,
+                                    left: 0,
+                                    right: 0,
+                                    child: _DesktopHeader(),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
@@ -292,6 +303,43 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  /// With the app's own title bar showing the header (Windows), the screens in
+  /// the middle column hand it their title row (see [TitleBarHeaderScope]).
+  /// They still lay out around that row, so the column keeps its strip but
+  /// moves it above its top edge, out of sight under the title bar.
+  Widget _middleColumn(Widget column) {
+    if (!usesCustomAppTitleBar) return column;
+    return TitleBarHeaderScope(
+      child: _HiddenTopStrip(
+        height: kTitleBarHiddenHeaderHeight,
+        child: column,
+      ),
+    );
+  }
+}
+
+/// Lays [child] out [height] taller than the space it gets and aligns it to
+/// the bottom, clipped, so its top [height] pixels sit above the visible area.
+class _HiddenTopStrip extends StatelessWidget {
+  final double height;
+  final Widget child;
+
+  const _HiddenTopStrip({required this.height, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) => ClipRect(
+        child: OverflowBox(
+          alignment: Alignment.bottomCenter,
+          minHeight: constraints.maxHeight + height,
+          maxHeight: constraints.maxHeight + height,
+          child: child,
         ),
       ),
     );
@@ -324,7 +372,11 @@ class _DesktopHeader extends ConsumerWidget {
         alignment: Alignment.topCenter,
         children: [...previousChildren, ?currentChild],
       ),
-      child: entry == null || entry.config.hidden
+      child: usesCustomAppTitleBar
+          // The title bar draws the row; its height stays so the slot under
+          // it sits where the screens expect it.
+          ? const SizedBox(height: kTitleBarHiddenHeaderHeight)
+          : entry == null || entry.config.hidden
           ? const SizedBox.shrink(key: ValueKey('desktop-header-empty'))
           : KeyedSubtree(
               key: ObjectKey(entry.key),
@@ -343,20 +395,28 @@ class _DesktopHeader extends ConsumerWidget {
     // Same grouping as the mobile shell header: the app-bar row and the slot
     // under it are painted one after the other and never overlap, so they can
     // share one backdrop capture. See [GlassBackdropGroup].
-    return GlassBackdropGroup(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          appBar,
-          // Decoupled from the app bar's cross-fade so that switching to a
-          // screen without a segmented control slides the control up and out on
-          // its own, instead of plain-fading with the rest of the header.
-          AnimatedHeaderBelow(
-            below: entry == null || entry.config.hidden
-                ? null
-                : entry.config.below,
-          ),
-        ],
+    //
+    // The header floats over the column outside any screen's Scaffold, so the
+    // slot under the app bar gets its Material here: without it, text there
+    // (the tab row's Add) falls back to the debug style, and fields have
+    // nothing to draw on.
+    return Material(
+      type: MaterialType.transparency,
+      child: GlassBackdropGroup(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            appBar,
+            // Decoupled from the app bar's cross-fade so that switching to a
+            // screen without a segmented control slides the control up and out
+            // on its own, instead of plain-fading with the rest of the header.
+            AnimatedHeaderBelow(
+              below: entry == null || entry.config.hidden
+                  ? null
+                  : entry.config.below,
+            ),
+          ],
+        ),
       ),
     );
   }

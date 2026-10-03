@@ -30,6 +30,7 @@ import '../../core/state/studio_turn_config_resolver.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/shell/desktop/desktop_layout_provider.dart'
     show isDesktopLayout;
+import '../../shared/shell/title_bar_header.dart';
 import 'widgets/chat_column_width.dart';
 import 'widgets/message_actions.dart';
 import 'widgets/message_delete_confirmation.dart';
@@ -64,7 +65,6 @@ import 'state/studio_history_rotation_provider.dart';
 import 'bridge/chat_overlay_blur_region.dart';
 import 'bridge/chat_webview_blur_mode.dart';
 import 'widgets/chat_blur_region_tracker.dart';
-import 'widgets/chat_background.dart';
 import 'widgets/chat_header.dart';
 import 'widgets/chat_input_bar.dart';
 import 'widgets/chat_drawer_panel.dart';
@@ -295,27 +295,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     }
   }
 
-  /// The chat's background, painted full width behind [ChatColumnWidth]'s
-  /// side gutters. Mirrors what [ChatWebViewSurface] paints behind the
-  /// WebView, from the same inputs, through the shared [ChatBackground].
-  Widget _buildChatBackground() {
-    final preset = ref.watch(themeProvider).activePreset;
-    final character = ref.watch(characterByIdProvider(widget.charId));
-    final bytes = switch (preset.chatBgMode) {
-      'custom' => ref.watch(chatBgImageBytesProvider),
-      'inherit' => ref.watch(effectiveBgImageBytesProvider),
-      _ => null,
-    };
-    return ChatBackground(
-      mode: preset.chatBgMode,
-      color: preset.chatBgColorParsed,
-      avatarPath: character?.avatarPath,
-      imageBytes: bytes,
-      blur: preset.bgBlur,
-      dim: preset.bgDim,
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     PerfDebug.chatScreenBuilt();
@@ -373,6 +352,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       _ => chatBg.hasGlobalImage,
     };
 
+    // Under the app's title bar the header is one slim row: the character on
+    // the left, the search field on the right with the bar's other buttons.
+    final inTitleBar = TitleBarHeaderScope.of(context);
+
     final keyboardHeight = MediaQuery.viewInsetsOf(context).bottom;
     _drawerCtrl.handleKeyboardFrame(keyboardHeight);
 
@@ -426,10 +409,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         }
         _everBuiltBody = true;
         return ChatColumnWidth(
-          // The capped column would otherwise sit as a lighter strip
-          // between two bands of the app background; painting the chat's
-          // own background across the whole width keeps the two even.
-          background: _buildChatBackground(),
           child: Stack(
             children: [
               _ChatBody(
@@ -522,7 +501,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                   _search.search(q, chatState?.messages ?? []);
                 },
               )
-            : (character != null
+            : (character != null && inTitleBar
+                  ? ChatHeader(
+                      character: character,
+                      sessionName: sessionName,
+                      currentSessionIndex: sessionIndex,
+                      compact: true,
+                      onTapInfo: () => _showCharacterCard(charId),
+                      onTapAvatar:
+                          (character.avatarPath != null &&
+                              character.avatarPath!.isNotEmpty)
+                          ? () => _showAvatarViewer(character.avatarPath!)
+                          : null,
+                    )
+                  : character != null
                   ? Row(
                       children: [
                         Expanded(
@@ -543,7 +535,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                         // `.chat-search-inline-desktop`); the toggle button is
                         // dropped below to match.
                         if (isDesktopLayout(context))
-                          _InlineChatSearchField(search: _search),
+                          _InlineChatSearchField(
+                            search: _search,
+                            charId: charId,
+                          ),
                       ],
                     )
                   : null),
@@ -582,7 +577,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           }
           context.go('/');
         },
-        actions: _search.showSearch
+        actions: inTitleBar
+            ? [
+                _InlineChatSearchField(
+                  search: _search,
+                  charId: charId,
+                  inTitleBar: true,
+                ),
+              ]
+            : _search.showSearch
             ? const []
             : isDesktopLayout(context)
             ? const []
@@ -631,14 +634,23 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 ///
 /// Search mode follows the query — typing turns highlighting on, clearing the
 /// field turns it back off — so there is no open/close button at all.
+///
+/// Under the app's title bar it sits on the bar's right edge as a small
+/// rounded box, the way a window's search usually looks there.
 class _InlineChatSearchField extends ConsumerWidget {
   final ChatSearchDelegate search;
+  final String charId;
+  final bool inTitleBar;
 
-  const _InlineChatSearchField({required this.search});
+  const _InlineChatSearchField({
+    required this.search,
+    required this.charId,
+    this.inTitleBar = false,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return SizedBox(
+    final field = SizedBox(
       width: 220,
       child: ListenableBuilder(
         listenable: search,
@@ -648,6 +660,9 @@ class _InlineChatSearchField extends ConsumerWidget {
           textInputAction: TextInputAction.search,
           decoration: InputDecoration(
             isDense: true,
+            // In the title bar the rounded box below is the background; the
+            // theme's square fill on top left only a ragged ring of it.
+            filled: inTitleBar ? false : null,
             hintText: 'search_messages'.tr(),
             hintStyle: TextStyle(
               fontSize: 14,
@@ -674,21 +689,29 @@ class _InlineChatSearchField extends ConsumerWidget {
             border: InputBorder.none,
             enabledBorder: InputBorder.none,
             focusedBorder: InputBorder.none,
-            contentPadding: const EdgeInsets.symmetric(vertical: 8),
+            contentPadding: EdgeInsets.symmetric(vertical: inTitleBar ? 6 : 8),
           ),
+          // The id comes from the screen rather than the router: under the
+          // title bar the field is built outside the chat route.
           onChanged: (q) => search.syncInlineQuery(
             q,
-            ref.read(chatProvider(_charIdOf(context))).value?.messages ??
-                const [],
+            ref.read(chatProvider(charId)).value?.messages ?? const [],
           ),
         ),
       ),
     );
+    if (!inTitleBar) return field;
+    return Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: context.cs.onSurface.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: SizedBox(height: 30, child: Center(child: field)),
+      ),
+    );
   }
-
-  /// The field lives inside the chat route, so the id is right there in the URL.
-  String _charIdOf(BuildContext context) =>
-      GoRouterState.of(context).pathParameters['charId'] ?? '';
 }
 
 /// The round glass button floating over the chat that jumps to the top or the
@@ -1492,12 +1515,21 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                   sessionId: widget.state.session?.id,
                 )),
               );
-              Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) =>
-                      PresetEditorScreen(preset: preset, charId: widget.charId),
-                ),
-              );
+              Widget editor(BuildContext _) =>
+                  PresetEditorScreen(preset: preset, charId: widget.charId);
+              // On desktop a window over the chat; a page would cover the
+              // whole app.
+              if (isDesktopLayout(context)) {
+                showGlazeSheet<void>(
+                  context: context,
+                  useRootNavigator: true,
+                  builder: editor,
+                );
+              } else {
+                Navigator.of(
+                  context,
+                ).push(MaterialPageRoute<void>(builder: editor));
+              }
             },
           ),
         );
@@ -1714,6 +1746,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
           WidgetsBinding.instance.addPostFrameCallback((_) => _checkHeight());
         }
 
+        final column = ChatColumnScope.maybeOf(context);
         return Stack(
           children: [
             // The box height feeds the WebView's inset split (see
@@ -1797,6 +1830,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                         chatFontDataUrl: fontDataUrl,
                         chatFontSize: fontStyle.fontSize,
                         chatLetterSpacing: fontStyle.letterSpacing,
+                        chatColumnWidth: column?.columnWidth ?? 0,
                         memoryEntries: memBook.value?.entries ?? [],
                         memoryDrafts: memBook.value?.pendingDrafts ?? [],
                         sessionId: widget.state.session?.id,
@@ -2140,462 +2174,512 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                 ),
               ),
             ),
-            // Fades under the header and the input area. Dropped on desktop:
-            // the flush header is opaque enough on its own, and against the
-            // now-even chat background the two bands only read as a darkened
-            // top and bottom edge.
-            if (!isDesktopLayout(context)) ...[
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                height: MediaQuery.paddingOf(context).top + 20,
-                child: IgnorePointer(
-                  child: Container(
-                    decoration: const BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [Colors.black54, Colors.transparent],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
-                height: messageListBottom + 40,
-                child: IgnorePointer(
-                  child: Container(
-                    decoration: const BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.bottomCenter,
-                        end: Alignment.topCenter,
-                        colors: [Colors.black54, Colors.transparent],
-                        stops: [0.0, 1.0],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-            // The scroll-to-bottom button. Mirror Vue ChatInput
-            // (`v-if="!isSearchMode"`): it is suppressed while searching.
-            Positioned(
-              right: 16,
-              bottom: messageListBottom + 16,
-              child: _ChatScrollButton(
-                visible: showScrollBtn,
-                icon: Icons.keyboard_arrow_down_rounded,
-                onTap: _scrollToBottom,
-              ),
-            ),
-            // Context coverage panel: memory + lorebook for the next prompt.
-            // It sits under the header, separated by [kContextCardHeaderGap],
-            // and rides the header's own hide-on-scroll animation (same curve,
-            // same pixel travel — see
-            // [kGlazeHeaderHideDuration]), so the two slide away and come back
-            // as one unit. It cannot live inside GlazeScaffold's header itself:
-            // its measured height is what insets the top of the message list
-            // (see [_contextCardHeight]), and that measurement belongs to this
-            // body. The animation wrappers stay OUTSIDE the size notifier so
-            // the reserved space is the panel's natural height — the reserve
-            // does not collapse while the header is hidden, exactly like the
-            // header's own reserved strip.
-            if (showContextCard)
-              Positioned(
-                top: messageListTop + kContextCardHeaderGap,
-                left: 12,
-                right: 12,
-                child: IgnorePointer(
-                  ignoring: widget.isHeaderHidden,
-                  child: AnimatedSlide(
-                    offset: widget.isHeaderHidden
-                        ? Offset(
-                            0,
-                            -glazeHeaderHideSlideFor(
-                              // The panel is anchored below the header, one
-                              // gap down: `messageListTop` (safe-area top +
-                              // 10px padding + the 56px app bar) plus that gap
-                              // is how far it has to travel to clear it.
-                              headerHeight:
-                                  messageListTop + kContextCardHeaderGap,
-                              overlayHeight: _contextCardHeight,
-                            ),
-                          )
-                        : Offset.zero,
-                    duration: kGlazeHeaderHideDuration,
-                    curve: kGlazeHeaderHideCurve,
-                    child: AnimatedOpacity(
-                      opacity: widget.isHeaderHidden ? 0.0 : 1.0,
-                      duration: kGlazeHeaderHideDuration,
-                      curve: kGlazeHeaderHideCurve,
-                      child:
-                          NotificationListener<SizeChangedLayoutNotification>(
-                            onNotification: (n) {
-                              WidgetsBinding.instance.addPostFrameCallback(
-                                (_) => _checkHeight(),
-                              );
-                              return true;
-                            },
-                            child: SizeChangedLayoutNotifier(
-                              child: Container(
-                                key: _contextCardKey,
-                                child: ContextCoverageCard(
-                                  charId: widget.charId,
-                                  memory: hasMemoryActivity
-                                      ? memoryActivity
-                                      : null,
-                                  expanded: _contextCardExpanded,
-                                  sessionId: widget.state.session?.id,
-                                  onToggle: () {
-                                    setState(() {
-                                      _contextCardExpanded =
-                                          !_contextCardExpanded;
-                                    });
-                                  },
-                                ),
-                              ),
-                            ),
-                          ),
-                    ),
-                  ),
-                ),
-              ),
-            // POST-cleaner live status card. Rendered AFTER the memory activity
-            // card so it sits ABOVE it in z-order — the Stop button must stay
-            // clickable even when the memory card is visible underneath.
-            Positioned(
-              left: 12,
-              right: 12,
-              top: contextCardBottom,
-              child: const PostCleanerStatusCard(),
-            ),
-            // Studio tracker-cycle live status card. Shown during generation
-            // while Studio trackers / final generator are running.
-            Positioned(
-              left: 12,
-              right: 12,
-              top: contextCardBottom + 56,
-              child: const StudioStatusCard(),
-            ),
-            // Post-generation tasks (Ledger and extension blocks) live status.
-            Positioned(
-              left: 12,
-              right: 12,
-              top: contextCardBottom + 112,
-              child: PostGenStatusCard(sessionId: widget.state.session?.id),
-            ),
-            // Scroll-to-top: centred just under the header. It is gated on the
-            // header's own hide-on-scroll (`!widget.isHeaderHidden`), so a
-            // downward scroll takes it away with the header and an upward one
-            // brings it back. Rendered after the status cards so it stays above
-            // them; the centre of those cards is dead space, so it covers no
-            // control. Suppressed while searching, like the bottom button.
-            Positioned(
-              left: 0,
-              right: 0,
-              top: messageListTop + kContextCardHeaderGap,
-              child: Align(
-                alignment: Alignment.topCenter,
-                child: _ChatScrollButton(
-                  visible: showScrollTopBtn,
-                  icon: Icons.keyboard_arrow_up_rounded,
-                  onTap: _scrollToTop,
-                  slideFromBelow: false,
-                ),
-              ),
-            ),
-            // Bottom panel: drawer + input bar
+            // Everything laid over the WebView keeps to the capped column (see
+            // [ChatColumnWidth]); the WebView alone spans the full width.
             Positioned.fill(
+              left: column?.gutter ?? 0,
+              right: column?.gutter ?? 0,
               child: Stack(
                 children: [
-                  if (renderDrawer)
+                  // Fades under the header and the input area. Dropped on desktop:
+                  // the flush header is opaque enough on its own, and against the
+                  // now-even chat background the two bands only read as a darkened
+                  // top and bottom edge.
+                  if (!isDesktopLayout(context)) ...[
                     Positioned(
+                      top: 0,
                       left: 0,
                       right: 0,
-                      bottom:
-                          -widget.drawerCtrl.activeDrawerHeight *
-                          (1 - progress),
-                      height: widget.drawerCtrl.activeDrawerHeight,
-                      child: ChatDrawerPanel(
-                        charId: widget.charId,
-                        beforeGeneration: _maybeSeedGameTime,
-                        onClose: () => widget.drawerCtrl.closeDrawer(),
-                        disableEffects:
-                            batterySaver && widget.drawerCtrl.isDrawerAnimating,
-                        onScrollToMessage: (id) => _scrollToTargetMessage(id),
+                      height: MediaQuery.paddingOf(context).top + 20,
+                      child: IgnorePointer(
+                        child: Container(
+                          decoration: const BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [Colors.black54, Colors.transparent],
+                            ),
+                          ),
+                        ),
                       ),
                     ),
+                    Positioned(
+                      bottom: 0,
+                      left: 0,
+                      right: 0,
+                      height: messageListBottom + 40,
+                      child: IgnorePointer(
+                        child: Container(
+                          decoration: const BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.bottomCenter,
+                              end: Alignment.topCenter,
+                              colors: [Colors.black54, Colors.transparent],
+                              stops: [0.0, 1.0],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                  // The scroll-to-bottom button. Mirror Vue ChatInput
+                  // (`v-if="!isSearchMode"`): it is suppressed while searching.
+                  Positioned(
+                    right: 16,
+                    bottom: messageListBottom + 16,
+                    child: _ChatScrollButton(
+                      visible: showScrollBtn,
+                      icon: Icons.keyboard_arrow_down_rounded,
+                      onTap: _scrollToBottom,
+                    ),
+                  ),
+                  // Context coverage panel: memory + lorebook for the next prompt.
+                  // It sits under the header, separated by [kContextCardHeaderGap],
+                  // and rides the header's own hide-on-scroll animation (same curve,
+                  // same pixel travel — see
+                  // [kGlazeHeaderHideDuration]), so the two slide away and come back
+                  // as one unit. It cannot live inside GlazeScaffold's header itself:
+                  // its measured height is what insets the top of the message list
+                  // (see [_contextCardHeight]), and that measurement belongs to this
+                  // body. The animation wrappers stay OUTSIDE the size notifier so
+                  // the reserved space is the panel's natural height — the reserve
+                  // does not collapse while the header is hidden, exactly like the
+                  // header's own reserved strip.
+                  if (showContextCard)
+                    Positioned(
+                      top: messageListTop + kContextCardHeaderGap,
+                      left: 12,
+                      right: 12,
+                      child: IgnorePointer(
+                        ignoring: widget.isHeaderHidden,
+                        child: AnimatedSlide(
+                          offset: widget.isHeaderHidden
+                              ? Offset(
+                                  0,
+                                  -glazeHeaderHideSlideFor(
+                                    // The panel is anchored below the header, one
+                                    // gap down: `messageListTop` (safe-area top +
+                                    // 10px padding + the 56px app bar) plus that gap
+                                    // is how far it has to travel to clear it.
+                                    headerHeight:
+                                        messageListTop + kContextCardHeaderGap,
+                                    overlayHeight: _contextCardHeight,
+                                  ),
+                                )
+                              : Offset.zero,
+                          duration: kGlazeHeaderHideDuration,
+                          curve: kGlazeHeaderHideCurve,
+                          child: AnimatedOpacity(
+                            opacity: widget.isHeaderHidden ? 0.0 : 1.0,
+                            duration: kGlazeHeaderHideDuration,
+                            curve: kGlazeHeaderHideCurve,
+                            child:
+                                NotificationListener<
+                                  SizeChangedLayoutNotification
+                                >(
+                                  onNotification: (n) {
+                                    WidgetsBinding.instance
+                                        .addPostFrameCallback(
+                                          (_) => _checkHeight(),
+                                        );
+                                    return true;
+                                  },
+                                  child: SizeChangedLayoutNotifier(
+                                    child: Container(
+                                      key: _contextCardKey,
+                                      child: ContextCoverageCard(
+                                        charId: widget.charId,
+                                        memory: hasMemoryActivity
+                                            ? memoryActivity
+                                            : null,
+                                        expanded: _contextCardExpanded,
+                                        sessionId: widget.state.session?.id,
+                                        onToggle: () {
+                                          setState(() {
+                                            _contextCardExpanded =
+                                                !_contextCardExpanded;
+                                          });
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  // POST-cleaner live status card. Rendered AFTER the memory activity
+                  // card so it sits ABOVE it in z-order — the Stop button must stay
+                  // clickable even when the memory card is visible underneath.
+                  Positioned(
+                    left: 12,
+                    right: 12,
+                    top: contextCardBottom,
+                    child: const PostCleanerStatusCard(),
+                  ),
+                  // Studio tracker-cycle live status card. Shown during generation
+                  // while Studio trackers / final generator are running.
+                  Positioned(
+                    left: 12,
+                    right: 12,
+                    top: contextCardBottom + 56,
+                    child: const StudioStatusCard(),
+                  ),
+                  // Post-generation tasks (Ledger and extension blocks) live status.
+                  Positioned(
+                    left: 12,
+                    right: 12,
+                    top: contextCardBottom + 112,
+                    child: PostGenStatusCard(
+                      sessionId: widget.state.session?.id,
+                    ),
+                  ),
+                  // Scroll-to-top: centred just under the header. It is gated on the
+                  // header's own hide-on-scroll (`!widget.isHeaderHidden`), so a
+                  // downward scroll takes it away with the header and an upward one
+                  // brings it back. Rendered after the status cards so it stays above
+                  // them; the centre of those cards is dead space, so it covers no
+                  // control. Suppressed while searching, like the bottom button.
                   Positioned(
                     left: 0,
                     right: 0,
-                    bottom: animatedBottomPanelInset,
-                    child: ChatBlurRegionScope(
-                      registry: _blurRegistry,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          NotificationListener<SizeChangedLayoutNotification>(
-                            onNotification: (n) {
-                              WidgetsBinding.instance.addPostFrameCallback(
-                                (_) => _checkHeight(),
-                              );
-                              return true;
-                            },
-                            child: SizeChangedLayoutNotifier(
-                              child: Container(
-                                key: _inputBarKey,
-                                child: Builder(
-                                  builder: (context) {
-                                    final allSelectedHidden = _selectionCtrl
-                                        .allSelectedHidden(
-                                          widget.state.messages,
+                    top: messageListTop + kContextCardHeaderGap,
+                    child: Align(
+                      alignment: Alignment.topCenter,
+                      child: _ChatScrollButton(
+                        visible: showScrollTopBtn,
+                        icon: Icons.keyboard_arrow_up_rounded,
+                        onTap: _scrollToTop,
+                        slideFromBelow: false,
+                      ),
+                    ),
+                  ),
+                  // Bottom panel: drawer + input bar
+                  Positioned.fill(
+                    child: Stack(
+                      children: [
+                        if (renderDrawer)
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom:
+                                -widget.drawerCtrl.activeDrawerHeight *
+                                (1 - progress),
+                            height: widget.drawerCtrl.activeDrawerHeight,
+                            child: ChatDrawerPanel(
+                              charId: widget.charId,
+                              beforeGeneration: _maybeSeedGameTime,
+                              onClose: () => widget.drawerCtrl.closeDrawer(),
+                              disableEffects:
+                                  batterySaver &&
+                                  widget.drawerCtrl.isDrawerAnimating,
+                              onScrollToMessage: (id) =>
+                                  _scrollToTargetMessage(id),
+                            ),
+                          ),
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: animatedBottomPanelInset,
+                          child: ChatBlurRegionScope(
+                            registry: _blurRegistry,
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                NotificationListener<
+                                  SizeChangedLayoutNotification
+                                >(
+                                  onNotification: (n) {
+                                    WidgetsBinding.instance
+                                        .addPostFrameCallback(
+                                          (_) => _checkHeight(),
                                         );
-                                    final canDeleteSelected = _selectionCtrl
-                                        .canDeleteSelection(
-                                          widget.state.messages,
-                                        );
-                                    return ChatInputBar(
-                                      key: ValueKey(widget.state.session?.id),
-                                      blurViaWebView: !widget.blurIsFlutterSide,
-                                      backdropKey: widget.chromeBackdropKey,
-                                      focusNode: widget.drawerCtrl.inputFocus,
-                                      initialDraft:
-                                          widget.state.session?.draft ?? '',
-                                      batterySaver:
-                                          appSettings?.batterySaver ?? false,
-                                      onDraftChanged: (text) {
-                                        ref
-                                            .read(
-                                              chatProvider(
-                                                widget.charId,
-                                              ).notifier,
-                                            )
-                                            .saveDraft(text);
-                                      },
-                                      showSearchControls:
-                                          widget.search.showSearch,
-                                      searchQuery: widget.search.searchQuery,
-                                      searchMatchCount:
-                                          widget.search.matchCount,
-                                      searchCurrentIndex:
-                                          widget.search.searchCurrentIndex,
-                                      onSearchNext: widget.search.onSearchNext,
-                                      onSearchPrev: widget.search.onSearchPrev,
-                                      isEditingMessage: isEditingMessage,
-                                      isSelectionMode:
-                                          _selectionCtrl.isSelectionMode,
-                                      selectedCount: _selectionCtrl
-                                          .selectedMessageIds
-                                          .length,
-                                      allSelectedHidden: allSelectedHidden,
-                                      canDeleteSelected: canDeleteSelected,
-                                      onCancelSelection: () {
-                                        setState(() {
-                                          _selectionCtrl.clearSelection();
-                                        });
-                                      },
-                                      // The WebView owns the selection set, so
-                                      // the range buttons ask it to extend
-                                      // (or clear) the run; the resulting
-                                      // onSelectionChange updates the toolbar.
-                                      onSelectAbove: () {
-                                        _webViewStateKey.currentState
-                                            ?.selectMessagesAbove();
-                                      },
-                                      onSelectBelow: () {
-                                        _webViewStateKey.currentState
-                                            ?.selectMessagesBelow();
-                                      },
-                                      onHideSelected: () async {
-                                        await _selectionCtrl.hideSelected(
-                                          ref,
-                                          widget.charId,
-                                          widget.state.messages,
-                                        );
-                                        if (mounted) setState(() {});
-                                      },
-                                      onDeleteSelected: () async {
-                                        if (!await confirmMessageDeletion(
-                                          context,
-                                          ref,
-                                          sessionId:
+                                    return true;
+                                  },
+                                  child: SizeChangedLayoutNotifier(
+                                    child: Container(
+                                      key: _inputBarKey,
+                                      child: Builder(
+                                        builder: (context) {
+                                          final allSelectedHidden =
+                                              _selectionCtrl.allSelectedHidden(
+                                                widget.state.messages,
+                                              );
+                                          final canDeleteSelected =
+                                              _selectionCtrl.canDeleteSelection(
+                                                widget.state.messages,
+                                              );
+                                          return ChatInputBar(
+                                            key: ValueKey(
                                               widget.state.session?.id,
-                                        )) {
-                                          return;
-                                        }
-                                        if (!mounted || !context.mounted) return;
-                                        // deleteSelected drops the selection
-                                        // synchronously; rebuild before
-                                        // awaiting so the toolbar closes with
-                                        // the messages instead of after the
-                                        // DB cleanup finishes.
-                                        final pending = _selectionCtrl
-                                            .deleteSelected(
-                                              ref,
-                                              widget.charId,
-                                              widget.state.messages,
-                                            );
-                                        if (mounted) setState(() {});
-                                        await pending;
-                                        if (mounted) setState(() {});
-                                      },
-                                      isDrawerOpen:
-                                          widget.drawerCtrl.drawerOpen ||
-                                          widget.drawerCtrl.switchingToDrawer,
-                                      virtualKeyboardSend:
-                                          widget.virtualKeyboardSend,
-                                      enterToSend: widget.enterToSend,
-                                      canSend: () =>
-                                          _ensurePersonaSelected() &&
-                                          _ensureApiSelected(),
-                                      onSend: (text) async {
-                                        if (text.trim().isEmpty) {
-                                          return false;
-                                        }
-                                        if (!await _maybeSeedGameTime()) {
-                                          return false;
-                                        }
-                                        final accepted = await ref
-                                            .read(
-                                              chatProvider(
+                                            ),
+                                            blurViaWebView:
+                                                !widget.blurIsFlutterSide,
+                                            backdropKey:
+                                                widget.chromeBackdropKey,
+                                            focusNode:
+                                                widget.drawerCtrl.inputFocus,
+                                            initialDraft:
+                                                widget.state.session?.draft ??
+                                                '',
+                                            batterySaver:
+                                                appSettings?.batterySaver ??
+                                                false,
+                                            onDraftChanged: (text) {
+                                              ref
+                                                  .read(
+                                                    chatProvider(
+                                                      widget.charId,
+                                                    ).notifier,
+                                                  )
+                                                  .saveDraft(text);
+                                            },
+                                            showSearchControls:
+                                                widget.search.showSearch,
+                                            searchQuery:
+                                                widget.search.searchQuery,
+                                            searchMatchCount:
+                                                widget.search.matchCount,
+                                            searchCurrentIndex: widget
+                                                .search
+                                                .searchCurrentIndex,
+                                            onSearchNext:
+                                                widget.search.onSearchNext,
+                                            onSearchPrev:
+                                                widget.search.onSearchPrev,
+                                            isEditingMessage: isEditingMessage,
+                                            isSelectionMode:
+                                                _selectionCtrl.isSelectionMode,
+                                            selectedCount: _selectionCtrl
+                                                .selectedMessageIds
+                                                .length,
+                                            allSelectedHidden:
+                                                allSelectedHidden,
+                                            canDeleteSelected:
+                                                canDeleteSelected,
+                                            onCancelSelection: () {
+                                              setState(() {
+                                                _selectionCtrl.clearSelection();
+                                              });
+                                            },
+                                            // The WebView owns the selection set, so
+                                            // the range buttons ask it to extend
+                                            // (or clear) the run; the resulting
+                                            // onSelectionChange updates the toolbar.
+                                            onSelectAbove: () {
+                                              _webViewStateKey.currentState
+                                                  ?.selectMessagesAbove();
+                                            },
+                                            onSelectBelow: () {
+                                              _webViewStateKey.currentState
+                                                  ?.selectMessagesBelow();
+                                            },
+                                            onHideSelected: () async {
+                                              await _selectionCtrl.hideSelected(
+                                                ref,
                                                 widget.charId,
-                                              ).notifier,
-                                            )
-                                            .trySendMessage(text);
-                                        // The follow is armed by the sync
-                                        // dispatcher on the rising edge of the
-                                        // send window, which is the dispatch
-                                        // that appends the bubble. Arming it
-                                        // here instead waited out the durable
-                                        // write and missed that append.
-                                        return accepted;
-                                      },
-                                      onSendWithGuidance: (text, guidance) async {
-                                        if (text.trim().isEmpty) {
-                                          return false;
-                                        }
-                                        if (!await _maybeSeedGameTime()) {
-                                          return false;
-                                        }
-                                        final accepted = await ref
-                                            .read(
-                                              chatProvider(
-                                                widget.charId,
-                                              ).notifier,
-                                            )
-                                            .trySendMessage(
-                                              text,
-                                              guidanceText: guidance,
-                                            );
-                                        // The follow is armed by the sync
-                                        // dispatcher on the rising edge of the
-                                        // send window, which is the dispatch
-                                        // that appends the bubble. Arming it
-                                        // here instead waited out the durable
-                                        // write and missed that append.
-                                        return accepted;
-                                      },
-                                      onSendWithImages:
-                                          (
-                                            text,
-                                            guidanceText,
-                                            imageDataUrls,
-                                          ) async {
-                                            if (!await _maybeSeedGameTime()) {
-                                              return false;
-                                            }
-                                            final accepted = await ref
+                                                widget.state.messages,
+                                              );
+                                              if (mounted) setState(() {});
+                                            },
+                                            onDeleteSelected: () async {
+                                              if (!await confirmMessageDeletion(
+                                                context,
+                                                ref,
+                                                sessionId:
+                                                    widget.state.session?.id,
+                                              )) {
+                                                return;
+                                              }
+                                              if (!mounted || !context.mounted) {
+                                                return;
+                                              }
+                                              // deleteSelected drops the selection
+                                              // synchronously; rebuild before
+                                              // awaiting so the toolbar closes with
+                                              // the messages instead of after the
+                                              // DB cleanup finishes.
+                                              final pending = _selectionCtrl
+                                                  .deleteSelected(
+                                                    ref,
+                                                    widget.charId,
+                                                    widget.state.messages,
+                                                  );
+                                              if (mounted) setState(() {});
+                                              await pending;
+                                              if (mounted) setState(() {});
+                                            },
+                                            isDrawerOpen:
+                                                widget.drawerCtrl.drawerOpen ||
+                                                widget
+                                                    .drawerCtrl
+                                                    .switchingToDrawer,
+                                            virtualKeyboardSend:
+                                                widget.virtualKeyboardSend,
+                                            enterToSend: widget.enterToSend,
+                                            canSend: () =>
+                                                _ensurePersonaSelected() &&
+                                                _ensureApiSelected(),
+                                            onSend: (text) async {
+                                              if (text.trim().isEmpty) {
+                                                return false;
+                                              }
+                                              if (!await _maybeSeedGameTime()) {
+                                                return false;
+                                              }
+                                              final accepted = await ref
+                                                  .read(
+                                                    chatProvider(
+                                                      widget.charId,
+                                                    ).notifier,
+                                                  )
+                                                  .trySendMessage(text);
+                                              // The follow is armed by the sync
+                                              // dispatcher on the rising edge of the
+                                              // send window, which is the dispatch
+                                              // that appends the bubble. Arming it
+                                              // here instead waited out the durable
+                                              // write and missed that append.
+                                              return accepted;
+                                            },
+                                            onSendWithGuidance: (text, guidance) async {
+                                              if (text.trim().isEmpty) {
+                                                return false;
+                                              }
+                                              if (!await _maybeSeedGameTime()) {
+                                                return false;
+                                              }
+                                              final accepted = await ref
+                                                  .read(
+                                                    chatProvider(
+                                                      widget.charId,
+                                                    ).notifier,
+                                                  )
+                                                  .trySendMessage(
+                                                    text,
+                                                    guidanceText: guidance,
+                                                  );
+                                              // The follow is armed by the sync
+                                              // dispatcher on the rising edge of the
+                                              // send window, which is the dispatch
+                                              // that appends the bubble. Arming it
+                                              // here instead waited out the durable
+                                              // write and missed that append.
+                                              return accepted;
+                                            },
+                                            onSendWithImages:
+                                                (
+                                                  text,
+                                                  guidanceText,
+                                                  imageDataUrls,
+                                                ) async {
+                                                  if (!await _maybeSeedGameTime()) {
+                                                    return false;
+                                                  }
+                                                  final accepted = await ref
+                                                      .read(
+                                                        chatProvider(
+                                                          widget.charId,
+                                                        ).notifier,
+                                                      )
+                                                      .trySendMessage(
+                                                        text,
+                                                        guidanceText:
+                                                            guidanceText,
+                                                        imageDataUrls:
+                                                            imageDataUrls,
+                                                      );
+                                                  // Armed by the sync dispatcher —
+                                                  // see onSend above.
+                                                  return accepted;
+                                                },
+                                            isGenerating:
+                                                widget.state.isGenerating,
+                                            isGeneratingImage:
+                                                widget.state.isGeneratingImage,
+                                            isPostGenRunning:
+                                                widget.state.isPostGenRunning,
+                                            onStop:
+                                                (widget.state.isGenerating ||
+                                                    widget
+                                                        .state
+                                                        .isGeneratingImage ||
+                                                    widget
+                                                        .state
+                                                        .isPostGenRunning)
+                                                ? () {
+                                                    final notifier = ref.read(
+                                                      chatProvider(
+                                                        widget.charId,
+                                                      ).notifier,
+                                                    );
+                                                    if (widget
+                                                            .state
+                                                            .isGeneratingImage &&
+                                                        !widget
+                                                            .state
+                                                            .isGenerating) {
+                                                      notifier
+                                                          .cancelImageGeneration();
+                                                    } else {
+                                                      notifier
+                                                          .abortGeneration();
+                                                    }
+                                                  }
+                                                : null,
+                                            // On desktop the Magic Drawer lives in
+                                            // the right sidebar and the bottom
+                                            // drawer is never rendered — the button
+                                            // would only animate an empty gap open,
+                                            // so hide it (Vue: `.desktop-mode
+                                            // #btn-magic { display: none }`).
+                                            onMagicDrawer:
+                                                isDesktopLayout(context)
+                                                ? null
+                                                : () {
+                                                    // Edit mode never survives a
+                                                    // close: it drives the drawer's
+                                                    // badges *and* the composer row's,
+                                                    // and a flag left standing would
+                                                    // greet the next open with arrows
+                                                    // nobody asked for.
+                                                    if (!widget
+                                                        .drawerCtrl
+                                                        .drawerOpen) {
+                                                      ref
+                                                              .read(
+                                                                chatDrawerEditingProvider
+                                                                    .notifier,
+                                                              )
+                                                              .state =
+                                                          false;
+                                                    }
+                                                    widget.drawerCtrl
+                                                        .toggleDrawer(context);
+                                                  },
+                                            beforeGeneration:
+                                                _maybeSeedGameTime,
+                                            onImpersonate: (guidance) => ref
                                                 .read(
                                                   chatProvider(
                                                     widget.charId,
                                                   ).notifier,
                                                 )
-                                                .trySendMessage(
-                                                  text,
-                                                  guidanceText: guidanceText,
-                                                  imageDataUrls: imageDataUrls,
-                                                );
-                                            // Armed by the sync dispatcher —
-                                            // see onSend above.
-                                            return accepted;
-                                          },
-                                      isGenerating: widget.state.isGenerating,
-                                      isGeneratingImage:
-                                          widget.state.isGeneratingImage,
-                                      isPostGenRunning:
-                                          widget.state.isPostGenRunning,
-                                      onStop:
-                                          (widget.state.isGenerating ||
-                                              widget.state.isGeneratingImage ||
-                                              widget.state.isPostGenRunning)
-                                          ? () {
-                                              final notifier = ref.read(
-                                                chatProvider(
-                                                  widget.charId,
-                                                ).notifier,
-                                              );
-                                              if (widget
-                                                      .state
-                                                      .isGeneratingImage &&
-                                                  !widget.state.isGenerating) {
-                                                notifier
-                                                    .cancelImageGeneration();
-                                              } else {
-                                                notifier.abortGeneration();
-                                              }
-                                            }
-                                          : null,
-                                      // On desktop the Magic Drawer lives in
-                                      // the right sidebar and the bottom
-                                      // drawer is never rendered — the button
-                                      // would only animate an empty gap open,
-                                      // so hide it (Vue: `.desktop-mode
-                                      // #btn-magic { display: none }`).
-                                      onMagicDrawer: isDesktopLayout(context)
-                                          ? null
-                                          : () {
-                                              // Edit mode never survives a
-                                              // close: it drives the drawer's
-                                              // badges *and* the composer row's,
-                                              // and a flag left standing would
-                                              // greet the next open with arrows
-                                              // nobody asked for.
-                                              if (!widget
-                                                  .drawerCtrl
-                                                  .drawerOpen) {
-                                                ref
-                                                        .read(
-                                                          chatDrawerEditingProvider
-                                                              .notifier,
-                                                        )
-                                                        .state =
-                                                    false;
-                                              }
-                                              widget.drawerCtrl.toggleDrawer(
-                                                context,
-                                              );
-                                            },
-                                      beforeGeneration: _maybeSeedGameTime,
-                                      onImpersonate: (guidance) => ref
-                                          .read(
-                                            chatProvider(
-                                              widget.charId,
-                                            ).notifier,
-                                          )
-                                          .impersonate(guidanceText: guidance),
-                                      charId: widget.charId,
-                                    );
-                                  },
+                                                .impersonate(
+                                                  guidanceText: guidance,
+                                                ),
+                                            charId: widget.charId,
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  ),
                                 ),
-                              ),
+                              ],
                             ),
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
                 ],

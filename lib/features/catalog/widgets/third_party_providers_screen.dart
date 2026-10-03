@@ -2,6 +2,8 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../shared/shell/desktop/desktop_floating_provider.dart';
+import '../../../shared/shell/shell_header_provider.dart';
 import '../../../shared/widgets/glaze_scaffold.dart';
 import '../../../shared/widgets/menu_group.dart';
 import '../../../core/platform/haptics.dart';
@@ -20,11 +22,14 @@ import 'janitor_source_settings.dart';
 import 'provider_logo.dart';
 import 'saucepan_login_sheet.dart';
 
-/// Opens the content providers screen as a full-screen pushed route on the
-/// root navigator, so it works identically from the menu and from the catalog
-/// provider picker (which live in different shell branches).
-Future<void> openThirdPartyProvidersScreen(BuildContext context) {
-  return Navigator.of(context, rootNavigator: true).push(
+/// Opens the content providers screen: on desktop in a floating window
+/// (stacked onto the Menu's when opened from there), on phones as a
+/// full-screen pushed route on the root navigator, so it works identically from
+/// the menu and from the catalog provider picker (which live in different shell
+/// branches).
+Future<void> openThirdPartyProvidersScreen(BuildContext context) async {
+  if (floatOnDesktop(context, 'third-party-providers', push: true)) return;
+  await Navigator.of(context, rootNavigator: true).push(
     MaterialPageRoute<void>(builder: (_) => const ThirdPartyProvidersScreen()),
   );
 }
@@ -42,7 +47,11 @@ class ThirdPartyProvidersScreen extends ConsumerWidget {
     final disabled = ref.watch(thirdPartyProvidersProvider);
     final catalogEnabled = ref.watch(catalogMasterEnabledProvider);
     final blurNsfw = ref.watch(blurNsfwImagesProvider);
-    final topPad = MediaQuery.of(context).padding.top + 74.0;
+    // Inside the desktop floating window the frame supplies the title bar, so
+    // the space reserved for a header would be a gap.
+    final topPad = DetachedShellHost.of(context)
+        ? 0.0
+        : MediaQuery.of(context).padding.top + 74.0;
     final bottomPad = MediaQuery.of(context).padding.bottom + 20.0;
 
     return GlazeScaffold(

@@ -7,19 +7,13 @@ import 'desktop_window_geometry.dart';
 
 const Duration _kActiveFade = Duration(milliseconds: 150);
 
-/// Border color of a window frame: accented while [active], a quiet outline
-/// otherwise — still visible, so a window never melts into what is under it.
-Color desktopWindowBorderColor(BuildContext context, {required bool active}) =>
-    active
-    ? context.cs.primary.withValues(alpha: 0.7)
-    : context.cs.outline.withValues(alpha: 0.4);
-
 /// The frame every window drawn over the desktop layout shares — floating
 /// windows, sheet windows and the glossary — so they read as one kind of
 /// thing: a glass panel with a [titleBar] on top of [child].
 ///
-/// The [active] window (see `desktopSurfaceActiveProvider`) gets an accented
-/// outline, a deeper shadow and full-strength title text; the others recede.
+/// The [active] window (see `desktopSurfaceActiveProvider`) gets a deeper
+/// shadow and full-strength title text; the others recede. The outline stays
+/// the same quiet grey either way, like every other edge in the layout.
 class DesktopWindowFrame extends StatelessWidget {
   final bool active;
   final bool maximized;
@@ -39,9 +33,10 @@ class DesktopWindowFrame extends StatelessWidget {
     final radius = BorderRadius.circular(maximized ? 0 : 16);
     return GlassSurface(
       borderRadius: radius,
-      border: Border.all(
-        color: desktopWindowBorderColor(context, active: active),
-      ),
+      border: Border.all(color: context.cs.outlineVariant),
+      // Over the content: a screen that paints its own fill edge to edge
+      // would otherwise cover the frame below the title bar.
+      borderOnTop: true,
       boxShadow: [
         BoxShadow(
           color: Colors.black.withValues(alpha: active ? 0.5 : 0.3),
@@ -131,12 +126,16 @@ class DesktopWindowTitleBar extends StatelessWidget {
                 titleWidget ??
                 AnimatedDefaultTextStyle(
                   duration: _kActiveFade,
-                  style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700,
-                    color: active
-                        ? context.cs.onSurface
-                        : context.cs.onSurface.withValues(alpha: 0.55),
+                  // Merged onto the ambient style, which carries the theme's
+                  // font: a bare style here replaces it with the platform's.
+                  style: DefaultTextStyle.of(context).style.merge(
+                    TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                      color: active
+                          ? context.cs.onSurface
+                          : context.cs.onSurface.withValues(alpha: 0.55),
+                    ),
                   ),
                   child: Text(title, overflow: TextOverflow.ellipsis),
                 ),

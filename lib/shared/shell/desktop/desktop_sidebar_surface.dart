@@ -44,6 +44,9 @@ class DesktopSidebarSurface extends StatelessWidget {
         border: edge == SidebarEdge.left
             ? Border(right: side)
             : Border(left: side),
+        // Over the content: an opaque panel inside (the chat drawer, the
+        // tools hub) otherwise painted the divider away.
+        borderOnTop: true,
         // Sidebars never scroll as a whole and are the full height of the
         // window; clip so a child's overflow cannot paint over the divider.
         child: ClipRect(child: child),

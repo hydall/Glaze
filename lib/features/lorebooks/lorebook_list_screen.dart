@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../shared/shell/desktop/desktop_layout_provider.dart';
 import '../../shared/shell/desktop/sidebar_sheet_provider.dart';
 import '../../core/import/st_lorebook_importer.dart';
 import '../../core/models/folder.dart';
@@ -24,6 +25,7 @@ import '../../shared/widgets/glaze_action_button.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_spinner.dart';
+import '../../shared/widgets/glaze_sheet.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/help_tip.dart';
 import '../../shared/widgets/list_controls.dart';
@@ -123,11 +125,18 @@ class _LorebookListScreenState extends ConsumerState<LorebookListScreen> {
           SheetViewAction(
             icon: const Icon(Icons.search, size: 20),
             tooltip: 'lorebook_embedding_settings_tooltip'.tr(),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => const EmbeddingSettingsScreen(),
-              ),
-            ),
+            // On desktop a window; a page would cover the whole app.
+            onPressed: () => isDesktopLayout(context)
+                ? showGlazeSheet<void>(
+                    context: context,
+                    useRootNavigator: true,
+                    builder: (_) => const EmbeddingSettingsScreen(),
+                  )
+                : Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const EmbeddingSettingsScreen(),
+                    ),
+                  ),
           ),
       ],
       body: lorebooksAsync.when(
@@ -182,12 +191,7 @@ class _LorebookListScreenState extends ConsumerState<LorebookListScreen> {
                     for (final lb in lorebooks)
                       _LorebookCard(
                         lorebook: lb,
-                        onTap: () => Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) =>
-                                LorebookEditorScreen(lorebookId: lb.id),
-                          ),
-                        ),
+                        onTap: () => openLorebookEditor(context, lb.id),
                         onMore: () => _lorebookMenu(context, lb),
                         onConnections: () =>
                             showLorebookConnections(context, lb.id),
@@ -263,11 +267,7 @@ class _LorebookListScreenState extends ConsumerState<LorebookListScreen> {
           );
           ref.read(lorebooksProvider.notifier).addLorebook(lorebook).then((_) {
             if (!context.mounted) return;
-            Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => LorebookEditorScreen(lorebookId: id),
-              ),
-            );
+            openLorebookEditor(context, id);
           });
         },
       ),
@@ -361,11 +361,7 @@ class _LorebookListScreenState extends ConsumerState<LorebookListScreen> {
           args: [single.lorebook.name, single.entryCount.toString()],
         ),
       );
-      await Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => LorebookEditorScreen(lorebookId: single.lorebook.id),
-        ),
-      );
+      await openLorebookEditor(context, single.lorebook.id);
       return;
     }
 

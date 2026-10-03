@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/state/shared_prefs_provider.dart';
 import '../../shared/shell/nav_height_provider.dart';
+import '../../shared/shell/shell_header_provider.dart';
 import '../../shared/theme/theme_preset.dart';
 import '../../shared/theme/theme_provider.dart';
 import '../../shared/theme/app_colors.dart';
@@ -138,6 +139,8 @@ class _ThemeEditorScreenState extends ConsumerState<ThemeEditorScreen> {
     const tabRowHeight = 66.0;
     final warningHeight = (isDefault || colorsLocked) ? 62.0 : 0.0;
     final totalTopPadding = statusBar + tabRowHeight + warningHeight;
+    // In a desktop window the back button is the title bar's.
+    final inWindow = DetachedShellHost.drawsChrome(context);
 
     return GlazeScaffold(
       extendBodyBehindHeader: true,
@@ -191,18 +194,20 @@ class _ThemeEditorScreenState extends ConsumerState<ThemeEditorScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 10, 16, 8),
+                    padding: EdgeInsets.fromLTRB(inWindow ? 16 : 4, 10, 16, 8),
                     child: Row(
                       children: [
-                        IconButton(
-                          icon: const Icon(
-                            Icons.arrow_back_ios_new_rounded,
-                            size: 20,
+                        if (!inWindow) ...[
+                          IconButton(
+                            icon: const Icon(
+                              Icons.arrow_back_ios_new_rounded,
+                              size: 20,
+                            ),
+                            color: context.cs.primary,
+                            onPressed: () => Navigator.pop(context),
                           ),
-                          color: context.cs.primary,
-                          onPressed: () => Navigator.pop(context),
-                        ),
-                        const SizedBox(width: 4),
+                          const SizedBox(width: 4),
+                        ],
                         Expanded(
                           child: GlazeTabBar(
                             tabs: [

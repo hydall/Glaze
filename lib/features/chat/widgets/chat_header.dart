@@ -22,6 +22,11 @@ class ChatHeader extends ConsumerWidget {
   /// when the character has no avatar image (only the initial is shown).
   final VoidCallback? onTapAvatar;
 
+  /// One slim row — a small avatar, then the name and the session side by
+  /// side — that fits the app's desktop title bar; it also leaves the rest of
+  /// the bar free to drag the window by.
+  final bool compact;
+
   const ChatHeader({
     super.key,
     required this.character,
@@ -29,14 +34,16 @@ class ChatHeader extends ConsumerWidget {
     this.currentSessionIndex = 0,
     this.onTapInfo,
     this.onTapAvatar,
+    this.compact = false,
   });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     ref.watch(avatarVersionProvider);
     final preset = ref.watch(themeProvider.select((s) => s.activePreset));
-    final scale =
-        preset.uiFontSize is num ? preset.uiFontSizeValue / 15.0 : 1.0;
+    final scale = preset.uiFontSize is num
+        ? preset.uiFontSizeValue / 15.0
+        : 1.0;
     final letterSpacing = preset.uiLetterSpacing;
     final textColor = preset.uiTextParsed ?? context.cs.onSurface;
     final secondaryColor =
@@ -54,19 +61,22 @@ class ChatHeader extends ConsumerWidget {
         ? character.name[0].toUpperCase()
         : '?';
 
+    final double avatarSize = compact ? 24 : 34;
     Widget avatar;
     if (character.avatarPath != null && character.avatarPath!.isNotEmpty) {
       avatar = CircleAvatar(
-        radius: 17,
-        backgroundImage: FileImage(File(resolveGlazeFilePath(character.avatarPath!)!)),
+        radius: avatarSize / 2,
+        backgroundImage: FileImage(
+          File(resolveGlazeFilePath(character.avatarPath!)!),
+        ),
         onBackgroundImageError: (_, _) {},
         backgroundColor: avatarColor.withValues(alpha: 0.2),
         child: const SizedBox.shrink(),
       );
     } else {
       avatar = Container(
-        width: 34,
-        height: 34,
+        width: avatarSize,
+        height: avatarSize,
         decoration: BoxDecoration(
           color: avatarColor.withValues(alpha: 0.2),
           shape: BoxShape.circle,
@@ -75,12 +85,56 @@ class ChatHeader extends ConsumerWidget {
           child: Text(
             initial,
             style: TextStyle(
-              fontSize: 16,
+              fontSize: compact ? 12 : 16,
               color: avatarColor,
               fontWeight: FontWeight.bold,
             ),
           ),
         ),
+      );
+    }
+
+    if (compact) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: onTapAvatar,
+            child: avatar,
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onTapInfo,
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(
+                      text: character.name,
+                      style: TextStyle(
+                        color: textColor,
+                        fontSize: 14 * scale,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    TextSpan(
+                      text: '   $sessionName',
+                      style: TextStyle(
+                        color: secondaryColor,
+                        fontSize: 12 * scale,
+                      ),
+                    ),
+                  ],
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(letterSpacing: letterSpacing),
+              ),
+            ),
+          ),
+        ],
       );
     }
 
@@ -132,5 +186,4 @@ class ChatHeader extends ConsumerWidget {
       ],
     );
   }
-
 }

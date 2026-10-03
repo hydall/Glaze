@@ -1,5 +1,6 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -52,6 +53,11 @@ class _DesktopLeftSidebarState extends ConsumerState<DesktopLeftSidebar> {
     super.dispose();
   }
 
+  void _clearSearch() {
+    _searchCtrl.clear();
+    setState(() => _searchQuery = '');
+  }
+
   /// Secret gesture: tapping Characters [kRevealHiddenTapCount] times within
   /// [kRevealHiddenTapWindow] reveals hidden characters.
   void _registerCharactersTabTap() {
@@ -68,18 +74,6 @@ class _DesktopLeftSidebarState extends ConsumerState<DesktopLeftSidebar> {
 
   void _openCharacters() {
     _registerCharactersTabTap();
-    goShellBranch(
-      context,
-      ref,
-      _charactersBranch,
-      fallbackLocation: '/characters',
-    );
-  }
-
-  /// The Vue sidebar's "New Chat" opened a character picker; the closest
-  /// equivalent here is the characters branch reset to its list, from which a
-  /// tap starts a fresh session.
-  void _startNewChat() {
     goShellBranch(
       context,
       ref,
@@ -129,24 +123,15 @@ class _DesktopLeftSidebarState extends ConsumerState<DesktopLeftSidebar> {
     final collapsed = widget.width < kSidebarCollapseThreshold;
 
     // Order matches the Vue sidebar in BOTH modes: the two primary entries on
-    // top, the chat list in the middle, the two secondary entries at the
-    // bottom. Previously the expanded layout moved Characters to the bottom
-    // and dropped New Chat entirely.
-    final top = <_NavItem>[
-      _NavItem(
-        label: 'tab_characters'.tr(),
-        icon: Icons.people_rounded,
-        active: widget.currentView == 'characters',
-        prominent: true,
-        onTap: _openCharacters,
-      ),
-      _NavItem(
-        label: 'btn_new_chat'.tr(),
-        icon: Icons.add_comment_rounded,
-        accent: true,
-        onTap: _startNewChat,
-      ),
-    ];
+    // top (Characters as a tile beside New Chat), the chat list in the middle,
+    // the two secondary entries at the bottom.
+    final characters = _NavItem(
+      label: 'tab_characters'.tr(),
+      icon: Icons.people_rounded,
+      active: widget.currentView == 'characters',
+      prominent: true,
+      onTap: _openCharacters,
+    );
     final bottom = <_NavItem>[
       _NavItem(
         label: 'menu_glossary'.tr(),
@@ -169,9 +154,9 @@ class _DesktopLeftSidebarState extends ConsumerState<DesktopLeftSidebar> {
       child: Stack(
         children: [
           if (collapsed)
-            _buildCollapsed(context, top, bottom)
+            _buildCollapsed(context, characters, bottom)
           else
-            _buildExpanded(context, top, bottom),
+            _buildExpanded(context, characters, bottom),
           Positioned(
             top: 0,
             bottom: 0,
@@ -186,18 +171,26 @@ class _DesktopLeftSidebarState extends ConsumerState<DesktopLeftSidebar> {
 
   Widget _buildExpanded(
     BuildContext context,
-    List<_NavItem> top,
+    _NavItem characters,
     List<_NavItem> bottom,
   ) {
     return Material(
       type: MaterialType.transparency,
       child: Column(
         children: [
-          for (final item in top) _SidebarButton(item: item),
-          Divider(height: 1, color: context.cs.outlineVariant),
-          _buildSearchField(context),
-          Divider(height: 1, color: context.cs.outlineVariant),
-          Expanded(child: ChatHistoryList(searchQuery: _searchQuery)),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+            child: _CharactersButton(item: characters),
+          ),
+          Expanded(
+            child: ChatHistoryList(
+              searchQuery: _searchQuery,
+              belowCount: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                child: _buildSearchField(context),
+              ),
+            ),
+          ),
           Divider(height: 1, color: context.cs.outlineVariant),
           for (final item in bottom) _SidebarButton(item: item),
           const SizedBox(height: 4),
@@ -207,41 +200,59 @@ class _DesktopLeftSidebarState extends ConsumerState<DesktopLeftSidebar> {
   }
 
   Widget _buildSearchField(BuildContext context) {
-    return TextField(
-      controller: _searchCtrl,
-      onChanged: (v) => setState(() => _searchQuery = v),
-      textInputAction: TextInputAction.search,
-      cursorColor: context.cs.primary,
-      style: Theme.of(context).textTheme.bodyMedium,
-      decoration: InputDecoration(
-        isDense: true,
-        hintText: 'search_dialogs'.tr(),
-        hintStyle: Theme.of(
-          context,
-        ).textTheme.bodyMedium?.copyWith(color: context.cs.onSurfaceVariant),
-        prefixIcon: Icon(
-          Icons.search_rounded,
-          size: 18,
-          color: context.cs.primary,
-        ),
-        prefixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 0),
-        suffixIcon: _searchQuery.isNotEmpty
-            ? IconButton(
-                icon: const Icon(Icons.close_rounded, size: 16),
-                onPressed: () {
-                  _searchCtrl.clear();
-                  setState(() => _searchQuery = '');
-                },
-              )
-            : null,
-        filled: true,
-        fillColor: Colors.transparent,
-        border: InputBorder.none,
-        focusedBorder: InputBorder.none,
-        enabledBorder: InputBorder.none,
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 10,
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: context.cs.onSurface.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      // Escape clears the search, as the close button does.
+      child: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.escape): _clearSearch,
+        },
+        child: SizedBox(
+          height: 36,
+          child: Center(
+            child: TextField(
+              controller: _searchCtrl,
+              onChanged: (v) => setState(() => _searchQuery = v),
+              textInputAction: TextInputAction.search,
+              cursorColor: context.cs.primary,
+              style: Theme.of(context).textTheme.bodyMedium,
+              decoration: InputDecoration(
+                isDense: true,
+                hintText: 'search_dialogs'.tr(),
+                hintStyle: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: context.cs.onSurfaceVariant,
+                ),
+                prefixIcon: Icon(
+                  Icons.search_rounded,
+                  size: 18,
+                  color: context.cs.primary,
+                ),
+                prefixIconConstraints: const BoxConstraints(
+                  minWidth: 40,
+                  minHeight: 0,
+                ),
+                suffixIcon: _searchQuery.isEmpty
+                    ? null
+                    : IconButton(
+                        icon: const Icon(Icons.close_rounded, size: 16),
+                        padding: EdgeInsets.zero,
+                        onPressed: _clearSearch,
+                      ),
+                suffixIconConstraints: const BoxConstraints.tightFor(
+                  width: 40,
+                  height: 32,
+                ),
+                filled: false,
+                border: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(vertical: 10),
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -249,15 +260,17 @@ class _DesktopLeftSidebarState extends ConsumerState<DesktopLeftSidebar> {
 
   Widget _buildCollapsed(
     BuildContext context,
-    List<_NavItem> top,
+    _NavItem characters,
     List<_NavItem> bottom,
   ) {
     return Column(
       children: [
         const SizedBox(height: 8),
-        for (final item in top) _CollapsedIcon(item: item),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: _CharactersTile(item: characters),
+        ),
         const SizedBox(height: 4),
-        Divider(height: 1, color: context.cs.outlineVariant),
         const Expanded(child: ChatHistoryList(collapsed: true)),
         Divider(height: 1, color: context.cs.outlineVariant),
         for (final item in bottom) _CollapsedIcon(item: item),
@@ -277,21 +290,17 @@ class _NavItem {
   /// rather than the muted tone used by the secondary entries.
   final bool prominent;
 
-  /// Rendered in the accent colour when idle (Vue's `.desktop-new-chat-btn`).
-  final bool accent;
-
   const _NavItem({
     required this.label,
     required this.icon,
     required this.onTap,
     this.active = false,
     this.prominent = false,
-    this.accent = false,
   });
 }
 
 Color _itemColor(BuildContext context, _NavItem item) {
-  if (item.active || item.accent) return context.cs.primary;
+  if (item.active) return context.cs.primary;
   return item.prominent ? context.cs.onSurface : context.cs.onSurfaceVariant;
 }
 
@@ -326,10 +335,102 @@ class _SidebarButton extends StatelessWidget {
                     item.label,
                     overflow: TextOverflow.ellipsis,
                     style:
-                        (item.prominent || item.accent
+                        (item.prominent
                                 ? textTheme.labelLarge
                                 : textTheme.labelMedium)
                             ?.copyWith(color: color),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Characters as a square button on a filled background, the way Discord's
+/// direct-messages button heads its server list. The screen's title already
+/// says "Characters", so a second row with the word would only repeat it.
+class _CharactersTile extends StatelessWidget {
+  static const double _size = 40;
+
+  final _NavItem item;
+
+  const _CharactersTile({required this.item});
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: item.label,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: item.onTap,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: SizedBox.square(
+            dimension: _size,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  color: item.active
+                      ? context.cs.primary
+                      : context.cs.onSurface.withValues(alpha: 0.08),
+                ),
+                HoverGlow(
+                  child: Center(
+                    child: Icon(
+                      item.icon,
+                      size: 22,
+                      color: item.active
+                          ? context.cs.onPrimary
+                          : context.cs.primary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Characters across the full width of the expanded sidebar, with no fill of
+/// its own: the open section shows in the accent colour, as the other entries
+/// do. Collapsed, the sidebar shows it as [_CharactersTile].
+class _CharactersButton extends StatelessWidget {
+  final _NavItem item;
+
+  const _CharactersButton({required this.item});
+
+  @override
+  Widget build(BuildContext context) {
+    final foreground = _itemColor(context, item);
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: item.onTap,
+      child: HoverGlow(
+        borderRadius: BorderRadius.circular(12),
+        child: SizedBox(
+          height: _CharactersTile._size,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              children: [
+                Icon(item.icon, size: 20, color: foreground),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    item.label,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.labelLarge?.copyWith(color: foreground),
                   ),
                 ),
               ],

@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/platform/desktop_window.dart';
 import '../theme/app_colors.dart';
+import '../shell/desktop/sidebar_sheet_provider.dart';
 import '../shell/nav_height_provider.dart';
 import '../shell/shell_header_provider.dart';
+import '../shell/title_bar_header.dart';
 import '../../features/settings/app_settings_provider.dart';
 import 'card_backdrop.dart';
 import 'glass_surface.dart';
@@ -49,6 +52,11 @@ class SheetView extends ConsumerStatefulWidget {
   final Widget? titleWidget;
   final bool showBack;
   final VoidCallback? onBack;
+
+  /// A step back within this sheet's own content — an entry's editor back to
+  /// its list — while it has one to take. A desktop window's title bar shows
+  /// it as its back button (see [ShellHeaderConfig.innerBack]).
+  final VoidCallback? innerBack;
   final List<SheetViewAction> actions;
   final List<SheetViewTab> tabs;
   final String? activeTabId;
@@ -88,6 +96,7 @@ class SheetView extends ConsumerStatefulWidget {
     this.titleWidget,
     this.showBack = false,
     this.onBack,
+    this.innerBack,
     this.actions = const [],
     this.tabs = const [],
     this.activeTabId,
@@ -144,6 +153,15 @@ class _SheetViewState extends ConsumerState<SheetView>
   /// handed to the window's title bar instead of being drawn here.
   bool _hostDrawsChrome = false;
 
+  /// A page in the desktop middle column under the app's own title bar, which
+  /// draws this sheet's title row (see [TitleBarHeaderScope]).
+  bool _inTitleBar = false;
+
+  /// Inside a desktop window with a title bar — a floating window or a sheet
+  /// window. Its glass is then this sheet's background, as it is behind
+  /// Settings, instead of a fill or the app background of its own.
+  bool _inWindow = false;
+
   /// Whether the header is drawn edge to edge with square corners, as the
   /// desktop shell draws a tab's. True for a sheet hosted in the right
   /// sidebar, where the inset pill of the phone layout left a floating bar
@@ -152,6 +170,10 @@ class _SheetViewState extends ConsumerState<SheetView>
 
   /// Whether the app-bar row belongs to this sheet's own header.
   bool get _ownsAppBar => !_hostDrawsChrome;
+
+  /// The back step of the desktop sidebar panel this sheet is open in, which
+  /// it has claimed (see [SidebarPanelBack]); null outside a panel.
+  SidebarPanelBack? _panelBack;
 
   /// Signature of the header content last published to a chrome-drawing host,
   /// so a rebuild only republishes when something visible actually changed —
@@ -399,7 +421,12 @@ class _SheetViewState extends ConsumerState<SheetView>
     }
     // A modal bottom sheet is mounted on the root navigator, above any host,
     // so it always keeps its own header.
-    _hostDrawsChrome = !_inModalSheet && DetachedShellHost.drawsChrome(context);
+    _inTitleBar =
+        !_inModalSheet &&
+        !DetachedShellHost.of(context) &&
+        TitleBarHeaderScope.of(context);
+    _inWindow = !_inModalSheet && DetachedShellHost.drawsChrome(context);
+    _hostDrawsChrome = _inWindow || _inTitleBar;
     // Hosted in the desktop right sidebar: a panel filling a fixed column, not
     // a sheet floating over a phone screen. Its header runs edge to edge with
     // square corners there, the way the desktop shell paints a tab's header —
@@ -425,7 +452,7 @@ class _SheetViewState extends ConsumerState<SheetView>
     // A sheet hosted in the desktop sidebar or floating window belongs to no
     // branch — suppressing "the current route's" branch there would hide the
     // header of the unrelated screen in the middle column.
-    final branch = _inModalSheet || DetachedShellHost.of(context)
+    final branch = _inModalSheet || DetachedShellHost.of(context) || _inTitleBar
         ? null
         : widget.shellBranchIndex ?? _branchForCurrentRoute();
     if (branch == _suppressedBranch) return;
@@ -464,8 +491,12 @@ class _SheetViewState extends ConsumerState<SheetView>
     }
     // Each floating window hands its own pseudo-branch down; a sheet window
     // uses the shared one.
+    // The title bar reads the branch of the route it is at.
     final branch =
-        DetachedShellHost.chromeBranchOf(context) ?? kDetachedChromeBranch;
+        DetachedShellHost.chromeBranchOf(context) ??
+        (_inTitleBar
+            ? widget.shellBranchIndex ?? titleBarHeaderBranchFor(context)
+            : kDetachedChromeBranch);
     final signature = '$branch|${_chromeSignature()}';
     if (signature == _publishedChromeSignature) return;
     _publishedChromeSignature = signature;
@@ -484,6 +515,7 @@ class _SheetViewState extends ConsumerState<SheetView>
           // title bar (the glossary window); read live, like the actions.
           showBack: widget.showBack,
           onBack: widget.showBack ? _onChromeBack : null,
+          innerBack: widget.innerBack == null ? null : _onChromeInnerBack,
           actions: [
             for (var i = 0; i < widget.actions.length; i++)
               _ChromeHeaderAction(owner: this, index: i),
@@ -498,7 +530,10 @@ class _SheetViewState extends ConsumerState<SheetView>
   /// [_ChromeHeaderAction], so they never go stale between publishes.
   String _chromeSignature() {
     final buffer = StringBuffer(widget.title ?? '')
-      ..write('|${widget.titleWidget?.runtimeType}|${widget.showBack}');
+      ..write(
+        '|${widget.titleWidget?.runtimeType}|${widget.showBack}'
+        '|${widget.innerBack != null}',
+      );
     for (final action in widget.actions) {
       final icon = action.icon;
       buffer.write(
@@ -511,6 +546,22 @@ class _SheetViewState extends ConsumerState<SheetView>
 
   /// The back button of a host's title bar: the sheet's current [onBack], or
   /// popping its route, exactly like its own header's back button.
+  void _onChromeInnerBack() {
+    if (mounted) widget.innerBack?.call();
+  }
+
+  /// Back from the strip beside the sidebar panel this sheet is open in: the
+  /// sheet's own back step, or closing the panel.
+  void _onPanelBack() {
+    if (!mounted) return;
+    final onBack = widget.onBack;
+    if (onBack != null) {
+      onBack();
+    } else {
+      SidebarPanelScope.maybeOf(context)?.onClose();
+    }
+  }
+
   void _onChromeBack() {
     if (!mounted) return;
     final onBack = widget.onBack;
@@ -554,6 +605,7 @@ class _SheetViewState extends ConsumerState<SheetView>
         (_) => registry.remove(this),
       );
     }
+    _panelBack?.release(this);
     _anim?.removeListener(_onTick);
     _routeAnimation?.removeStatusListener(_onRouteAnimationStatus);
     // Hand the screen below back before going away. The route's own reverse
@@ -650,6 +702,12 @@ class _SheetViewState extends ConsumerState<SheetView>
           widget.showBack ||
           widget.actions.isNotEmpty);
 
+  /// Colour of the scrim the body fades under the pinned header. In a window
+  /// it is the glass's own, so the strip reads as part of the window rather
+  /// than as a band of the app surface across it.
+  Color _headerScrimColor(BuildContext context) =>
+      _inWindow ? context.cs.surfaceContainerHighest : context.cs.surface;
+
   bool get _hasHeader =>
       _hasAppBarRow ||
       widget.tabs.isNotEmpty ||
@@ -690,7 +748,16 @@ class _SheetViewState extends ConsumerState<SheetView>
       // pop(), not maybePop(): this runs inside the PopScope below whose
       // canPop is false whenever showBack is true. maybePop() would re-enter
       // onPopInvokedWithResult and spin an unbounded microtask loop (freeze).
-      final backHandler = widget.onBack ?? () => Navigator.of(context).pop();
+      // In a sidebar panel back closes the panel: there is no route of this
+      // sheet's own to pop, and popping would take the app's page with it.
+      final panel = SidebarPanelScope.maybeOf(context);
+      final backHandler =
+          widget.onBack ?? panel?.onClose ?? () => Navigator.of(context).pop();
+      // In a panel the back button is the strip's, beside it; it runs this
+      // sheet's back step. Claimed on every build, so it is never stale.
+      if (!identical(panel?.back, _panelBack)) _panelBack?.release(this);
+      _panelBack = panel?.back;
+      _panelBack?.claim(this, _onPanelBack);
       // When the sheet is rendered as a page route inside the Shell, the
       // GlassNavBar overlaps the body (Shell uses extendBody: true). Inject
       // its measured height into MediaQuery.padding.bottom so the body's
@@ -733,7 +800,9 @@ class _SheetViewState extends ConsumerState<SheetView>
                     enabled: _hasHeader && !batterySaver,
                     height: extraTop + 8,
                     sigma: 24,
-                    tintColor: context.cs.surface.withValues(alpha: 0.88),
+                    tintColor: _headerScrimColor(
+                      context,
+                    ).withValues(alpha: 0.88),
                     child: MediaQuery(
                       data: mediaQuery.copyWith(padding: newPadding),
                       child: _MaybeScrollbar(
@@ -767,11 +836,23 @@ class _SheetViewState extends ConsumerState<SheetView>
                             GlazeAppBar(
                               title: widget.title,
                               titleWidget: widget.titleWidget,
-                              showBack: widget.showBack,
+                              // A panel's back button is the strip's.
+                              showBack: widget.showBack && panel == null,
+                              showLeading: panel == null,
                               onBack: widget.onBack,
                               borderRadius: _flushHeader
                                   ? BorderRadius.zero
                                   : const BorderRadius.all(Radius.circular(20)),
+                              // Flush in a sidebar under the app's title bar,
+                              // the bar's edge, the sidebar's divider and the
+                              // window's edge already frame three sides.
+                              border: _flushHeader && usesCustomAppTitleBar
+                                  ? Border(
+                                      bottom: BorderSide(
+                                        color: context.cs.outlineVariant,
+                                      ),
+                                    )
+                                  : null,
                               actions: widget.actions.map((action) {
                                 return _HeaderIconButton(
                                   onPressed: action.onPressed,
@@ -843,15 +924,24 @@ class _SheetViewState extends ConsumerState<SheetView>
         ),
       );
 
+      // Under the title bar the column hides the strip a title row would
+      // take, and this sheet draws none: start below that strip.
+      final page = _inTitleBar
+          ? Padding(
+              padding: const EdgeInsets.only(top: kTitleBarHiddenHeaderHeight),
+              child: routeScaffold,
+            )
+          : routeScaffold;
       return PopScope(
         canPop: !widget.showBack,
         onPopInvokedWithResult: (didPop, _) {
           if (didPop) return;
           backHandler();
         },
-        child: widget.showRouteBackground
-            ? GlazeBackground(child: routeScaffold)
-            : routeScaffold,
+        // A window or a sidebar panel shows its own glass instead.
+        child: widget.showRouteBackground && !_inWindow && panel == null
+            ? GlazeBackground(child: page)
+            : page,
       );
     }
 
@@ -933,7 +1023,14 @@ class _SheetViewState extends ConsumerState<SheetView>
         backHandler();
       },
       child: SizedBox.expand(
-        child: _sheetContent(context, bottomInset, batterySaver, opaque: true),
+        // With a title bar, on the window's glass (see [_inWindow]); a
+        // chrome-less window has nothing behind it and keeps its fill.
+        child: _sheetContent(
+          context,
+          bottomInset,
+          batterySaver,
+          opaque: !_inWindow,
+        ),
       ),
     );
   }
@@ -961,7 +1058,9 @@ class _SheetViewState extends ConsumerState<SheetView>
       ),
     );
     return ColoredBox(
-      color: context.cs.surface.withValues(alpha: opaque ? 1.0 : 0.8),
+      color: _inWindow
+          ? Colors.transparent
+          : context.cs.surface.withValues(alpha: opaque ? 1.0 : 0.8),
       // This fill is what the sheet's content sits on, not the app background,
       // so nothing inside may sample a baked app backdrop — it would paint the
       // background straight over this surface. See [CardBackdrop].
@@ -1053,7 +1152,7 @@ class _SheetViewState extends ConsumerState<SheetView>
       enabled: widget.enableHeaderBlur && _hasHeader && !batterySaver,
       height: _headerH + 8,
       sigma: 24,
-      tintColor: context.cs.surface.withValues(alpha: 0.88),
+      tintColor: _headerScrimColor(context).withValues(alpha: 0.88),
       child: _buildScrollConfig(context, bottomInset, isKeyboardOpen),
     );
   }

@@ -47,8 +47,9 @@ class GlazeSheetWindowScope extends InheritedWidget {
 /// On phones (and whenever the desktop layout is off) this is exactly
 /// [showModalBottomSheet]: it forwards every argument, so existing call sites
 /// keep their behaviour. On desktop it opens the same content as a centered,
-/// floating window with a dimmed backdrop instead of a full-width band sliding
-/// in from the bottom.
+/// floating window instead of a full-width band sliding in from the bottom. A
+/// window with [windowChrome] leaves what is behind it undimmed; a chrome-less
+/// one dims it with [barrierColor].
 ///
 /// The window's height is fixed unless [windowContentSized] is set, in which
 /// case it hugs its content up to [kGlazeSheetWindowMaxWidth]'s height cap. A
@@ -122,8 +123,12 @@ class _GlazeSheetWindowRoute<T> extends PopupRoute<T> {
     this.windowActions,
   });
 
+  // A window with a title bar is one window among the others on the desktop
+  // and dims nothing behind it: its glass would show that dimming through and
+  // read darker than every other window. A chrome-less picker is solid, and
+  // keeps the dim that sets it apart.
   @override
-  Color? get barrierColor => barrier;
+  Color? get barrierColor => chrome ? null : barrier;
 
   @override
   bool get barrierDismissible => dismissible;

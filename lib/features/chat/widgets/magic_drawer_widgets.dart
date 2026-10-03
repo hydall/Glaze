@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/hover_glow.dart';
 import 'action_glyph.dart';
+import 'magic_drawer_list_row.dart';
 import 'magic_drawer_models.dart';
 
 class MagicCard extends StatefulWidget {
@@ -25,6 +26,10 @@ class MagicCard extends StatefulWidget {
   /// what it runs.
   final VoidCallback? onHide;
 
+  /// Draws the card as a full-width [MagicDrawerListRow] — the desktop
+  /// sidebar's list — instead of a grid tile.
+  final bool listRow;
+
   const MagicCard({
     super.key,
     required this.item,
@@ -35,6 +40,7 @@ class MagicCard extends StatefulWidget {
     this.onLongPress,
     this.deletable = true,
     this.onHide,
+    this.listRow = false,
   });
 
   @override
@@ -44,12 +50,51 @@ class MagicCard extends StatefulWidget {
 class _MagicCardState extends State<MagicCard> {
   bool _pressed = false;
 
+  /// Edit mode's badge for this card, or null when it has none.
+  Widget? _editBadge({required double size}) {
+    if (!widget.editing) return null;
+    if (widget.onHide != null) {
+      return MagicCardBadge(
+        icon: Icons.visibility_off,
+        color: Colors.blueGrey,
+        tooltip: 'composer_action_hide'.tr(),
+        onTap: widget.onHide!,
+        size: size,
+      );
+    }
+    if (!widget.deletable) return null;
+    return MagicCardBadge(
+      icon: Icons.close,
+      color: const Color(0xFFFF3B30),
+      tooltip: 'btn_delete'.tr(),
+      onTap: widget.onDelete,
+      size: size,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final item = widget.item;
     final editing = widget.editing;
     final hovered = widget.hovered;
 
+    if (widget.listRow) {
+      return GestureDetector(
+        onLongPress: widget.onLongPress,
+        child: MagicDrawerListRow(
+          icon: item.def.icon,
+          glyph: item.def.glyph,
+          label: item.def.label,
+          status: item.status,
+          editing: editing,
+          hovered: hovered,
+          onTap: widget.onTap,
+          trailing: _editBadge(size: 22),
+        ),
+      );
+    }
+
+    final badge = _editBadge(size: 24);
     return GestureDetector(
       onTap: widget.onTap,
       onLongPress: widget.onLongPress,
@@ -137,28 +182,8 @@ class _MagicCardState extends State<MagicCard> {
                       ),
                     ],
                   ),
-                  if (editing && widget.onHide != null)
-                    Positioned(
-                      top: -8,
-                      right: -8,
-                      child: MagicCardBadge(
-                        icon: Icons.visibility_off,
-                        color: Colors.blueGrey,
-                        tooltip: 'composer_action_hide'.tr(),
-                        onTap: widget.onHide!,
-                      ),
-                    )
-                  else if (editing && widget.deletable)
-                    Positioned(
-                      top: -8,
-                      right: -8,
-                      child: MagicCardBadge(
-                        icon: Icons.close,
-                        color: const Color(0xFFFF3B30),
-                        tooltip: 'btn_delete'.tr(),
-                        onTap: widget.onDelete,
-                      ),
-                    ),
+                  if (badge != null)
+                    Positioned(top: -8, right: -8, child: badge),
                 ],
               ),
             ),
@@ -311,6 +336,8 @@ class MagicDrawerAddList extends StatelessWidget {
 /// Lays out fixed-width cells left-to-right in rows of [columns], like
 /// [Wrap], but stretches every cell in a row to match the tallest cell in
 /// that row so cards with a status line and cards without one stay level.
+///
+/// One column is a plain list — the desktop sidebar's — with nothing to level.
 class MagicCardGrid extends StatelessWidget {
   final List<Widget> cells;
   final int columns;
@@ -327,6 +354,17 @@ class MagicCardGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (columns == 1) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (var i = 0; i < cells.length; i++) ...[
+            if (i > 0 && runSpacing > 0) SizedBox(height: runSpacing),
+            cells[i],
+          ],
+        ],
+      );
+    }
     final rows = <Widget>[];
     for (var i = 0; i < cells.length; i += columns) {
       final rowCells = cells.skip(i).take(columns).toList();
@@ -352,10 +390,21 @@ class MagicCardGrid extends StatelessWidget {
 class AddMagicCard extends StatelessWidget {
   final VoidCallback onTap;
 
-  const AddMagicCard({super.key, required this.onTap});
+  /// See [MagicCard.listRow].
+  final bool listRow;
+
+  const AddMagicCard({super.key, required this.onTap, this.listRow = false});
 
   @override
   Widget build(BuildContext context) {
+    if (listRow) {
+      return MagicDrawerListRow(
+        icon: Icons.add,
+        label: 'action_add'.tr(),
+        onTap: onTap,
+        muted: true,
+      );
+    }
     return GestureDetector(
       onTap: onTap,
       child: ClipRRect(
@@ -394,6 +443,35 @@ class AddMagicCard extends StatelessWidget {
   }
 }
 
+/// A card as it rides under the pointer while being dragged: the card itself,
+/// a touch translucent, at its width in the layout. A list row has no surface
+/// of its own, so it is lifted onto one; a grid tile already has its own.
+class MagicDragFeedback extends StatelessWidget {
+  final double width;
+  final bool listRow;
+  final Widget child;
+
+  const MagicDragFeedback({
+    super.key,
+    required this.width,
+    required this.listRow,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: width,
+      child: Material(
+        color: listRow ? const Color(0xFF2A2A2A) : Colors.transparent,
+        borderRadius: listRow ? BorderRadius.circular(10) : null,
+        clipBehavior: listRow ? Clip.antiAlias : Clip.none,
+        child: Opacity(opacity: 0.92, child: child),
+      ),
+    );
+  }
+}
+
 /// One row of the desktop right sidebar's icon strip.
 ///
 /// Mirrors Vue's `.tools-strip .magic-item`: a 64x48 cell with a hairline
@@ -406,12 +484,17 @@ class MagicDrawerStripIcon extends StatelessWidget {
   final bool active;
   final VoidCallback onTap;
 
+  /// Row height. The chat drawer's strip passes [kMagicDrawerRowHeight], the
+  /// height of the list rows it replaces.
+  final double height;
+
   const MagicDrawerStripIcon({
     super.key,
     required this.icon,
     required this.label,
     required this.onTap,
     this.active = false,
+    this.height = 48,
   });
 
   @override
@@ -426,7 +509,7 @@ class MagicDrawerStripIcon extends StatelessWidget {
         child: HoverGlow(
           child: Container(
             width: 64,
-            height: 48,
+            height: height,
             decoration: BoxDecoration(
               color: active
                   ? scheme.primary.withValues(alpha: 0.08)
