@@ -69,8 +69,23 @@ const anchor = (page) =>
     };
   });
 
-async function openMidChat(page, count, scrollTop) {
+// Chromium anchors a scroller natively; WebKit does not, and there the list
+// offsets `scrollTop` itself. The harness runs Chromium, so the WebKit path is
+// reproduced by switching the native anchoring off and telling the list so.
+const ENGINES = [
+  { name: 'native scroll anchoring', native: true },
+  { name: 'no native scroll anchoring', native: false },
+];
+
+async function openMidChat(page, count, scrollTop, { native = true } = {}) {
   await boot(page);
+  if (!native) {
+    await page.evaluate(() => {
+      const vl = window.bridge.virtualList;
+      vl.container.style.overflowAnchor = 'none';
+      vl._nativeScrollAnchoring = false;
+    });
+  }
   await page.evaluate((n) => window.__fill(n), count);
   await page.waitForTimeout(600);
   await page.evaluate((top) => {
@@ -79,64 +94,66 @@ async function openMidChat(page, count, scrollTop) {
   await page.waitForTimeout(400);
 }
 
-test('a row that grows above the reader does not move the text under them', async ({
-  page,
-}) => {
-  await openMidChat(page, 60, 1500);
-  const before = await anchor(page);
-  expect(before, 'no mounted row was in view').not.toBeNull();
-  expect(before.aboveId, 'the fixture needs a row above the viewport').not.toBeNull();
+for (const engine of ENGINES) {
+  test(`a row that grows above the reader does not move the text under them (${engine.name})`, async ({
+    page,
+  }) => {
+    await openMidChat(page, 60, 1500, engine);
+    const before = await anchor(page);
+    expect(before, 'no mounted row was in view').not.toBeNull();
+    expect(before.aboveId, 'the fixture needs a row above the viewport').not.toBeNull();
 
-  // The row above the reader gets much taller, as an image block landing in an
-  // earlier message does.
-  await page.evaluate((id) => {
-    window.bridge.updateMessage(JSON.stringify(window.__M(
-      id,
-      'assistant',
-      'HUGE ' + 'lorem ipsum dolor sit amet '.repeat(120),
-    )));
-  }, before.aboveId);
-  await page.waitForTimeout(800);
+    // The row above the reader gets much taller, as an image block landing in an
+    // earlier message does.
+    await page.evaluate((id) => {
+      window.bridge.updateMessage(JSON.stringify(window.__M(
+        id,
+        'assistant',
+        'HUGE ' + 'lorem ipsum dolor sit amet '.repeat(120),
+      )));
+    }, before.aboveId);
+    await page.waitForTimeout(800);
 
-  const after = await anchor(page);
-  expect(after.id, 'the anchor row changed').toBe(before.id);
-  expect(
-    Math.abs(after.offset - before.offset),
-    'the text under the reader slid with the row above it',
-  ).toBeLessThan(4);
-  expect(after.scrollTop, 'scrollTop was not offset to hold the reading position')
-    .toBeGreaterThan(before.scrollTop);
-});
+    const after = await anchor(page);
+    expect(after.id, 'the anchor row changed').toBe(before.id);
+    expect(
+      Math.abs(after.offset - before.offset),
+      'the text under the reader slid with the row above it',
+    ).toBeLessThan(4);
+    expect(after.scrollTop, 'scrollTop was not offset to hold the reading position')
+      .toBeGreaterThan(before.scrollTop);
+  });
 
-test('a row that shrinks above the reader does not move the text under them', async ({
-  page,
-}) => {
-  await openMidChat(page, 60, 1500);
+  test(`a row that shrinks above the reader does not move the text under them (${engine.name})`, async ({
+    page,
+  }) => {
+    await openMidChat(page, 60, 1500, engine);
 
-  // Grow the row above first, then shrink it back: the shrink must offset the
-  // other way, not leave the reader where the growth put them.
-  const before = await anchor(page);
-  await page.evaluate((id) => {
-    window.bridge.updateMessage(JSON.stringify(window.__M(
-      id,
-      'assistant',
-      'HUGE ' + 'lorem ipsum dolor sit amet '.repeat(120),
-    )));
-  }, before.aboveId);
-  await page.waitForTimeout(600);
-  const grown = await anchor(page);
+    // Grow the row above first, then shrink it back: the shrink must offset the
+    // other way, not leave the reader where the growth put them.
+    const before = await anchor(page);
+    await page.evaluate((id) => {
+      window.bridge.updateMessage(JSON.stringify(window.__M(
+        id,
+        'assistant',
+        'HUGE ' + 'lorem ipsum dolor sit amet '.repeat(120),
+      )));
+    }, before.aboveId);
+    await page.waitForTimeout(600);
+    const grown = await anchor(page);
 
-  await page.evaluate((id) => {
-    window.bridge.updateMessage(JSON.stringify(window.__M(id, 'assistant', 'short')));
-  }, before.aboveId);
-  await page.waitForTimeout(800);
+    await page.evaluate((id) => {
+      window.bridge.updateMessage(JSON.stringify(window.__M(id, 'assistant', 'short')));
+    }, before.aboveId);
+    await page.waitForTimeout(800);
 
-  const after = await anchor(page);
-  expect(after.id).toBe(before.id);
-  expect(Math.abs(after.offset - before.offset)).toBeLessThan(4);
-  expect(after.scrollTop, 'the shrink did not give the offset back')
-    .toBeLessThan(grown.scrollTop);
-});
+    const after = await anchor(page);
+    expect(after.id).toBe(before.id);
+    expect(Math.abs(after.offset - before.offset)).toBeLessThan(4);
+    expect(after.scrollTop, 'the shrink did not give the offset back')
+      .toBeLessThan(grown.scrollTop);
+  });
+}
 
 test('a bottom-pinned reader still follows a row that grows above them', async ({ page }) => {
   await openMidChat(page, 30, 0);
