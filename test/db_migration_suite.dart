@@ -3723,56 +3723,60 @@ INSERT INTO card_evolution_claims VALUES
       });
     }
 
-    test('v139 adds the NoAssistant columns turned off', () async {
-      final file = File(
-        '${Directory.systemTemp.path}/glaze_mig_no_assistant_'
-        '${DateTime.now().microsecondsSinceEpoch}.db',
-      );
-      addTearDown(() async {
-        if (file.existsSync()) await file.delete();
-      });
-      final seeded = AppDatabase.forTesting(
-        NativeDatabase.createInBackground(file),
-      );
-      await seeded.customSelect('SELECT 1').get();
-      for (final column in const [
-        'no_assistant',
-        'no_assistant_stop_string',
-        'no_assistant_user_prefix',
-        'no_assistant_char_prefix',
-        'no_assistant_squash_role',
-      ]) {
-        await seeded.customStatement(
-          'ALTER TABLE api_configs DROP COLUMN $column',
+    for (final fromVersion in const [135, 138]) {
+      // From v135 the v136 rebuild runs first and copies every declared
+      // column, so it must add these before the rebuild.
+      test('v139 adds the NoAssistant columns turned off from v$fromVersion', () async {
+        final file = File(
+          '${Directory.systemTemp.path}/glaze_mig_no_assistant_${fromVersion}_'
+          '${DateTime.now().microsecondsSinceEpoch}.db',
         );
-      }
-      await seeded.customStatement(
-        "INSERT INTO api_configs (config_id, name) VALUES ('api', 'Chat')",
-      );
-      await seeded.customStatement('PRAGMA user_version = 138');
-      await seeded.close();
+        addTearDown(() async {
+          if (file.existsSync()) await file.delete();
+        });
+        final seeded = AppDatabase.forTesting(
+          NativeDatabase.createInBackground(file),
+        );
+        await seeded.customSelect('SELECT 1').get();
+        for (final column in const [
+          'no_assistant',
+          'no_assistant_stop_string',
+          'no_assistant_user_prefix',
+          'no_assistant_char_prefix',
+          'no_assistant_squash_role',
+        ]) {
+          await seeded.customStatement(
+            'ALTER TABLE api_configs DROP COLUMN $column',
+          );
+        }
+        await seeded.customStatement(
+          "INSERT INTO api_configs (config_id, name) VALUES ('api', 'Chat')",
+        );
+        await seeded.customStatement('PRAGMA user_version = $fromVersion');
+        await seeded.close();
 
-      final upgraded = AppDatabase.forTesting(
-        NativeDatabase.createInBackground(file),
-      );
-      addTearDown(() async => upgraded.close());
-      final row = await upgraded
-          .customSelect(
-            'SELECT no_assistant, no_assistant_stop_string, '
-            'no_assistant_user_prefix, no_assistant_char_prefix, '
-            "no_assistant_squash_role FROM api_configs WHERE config_id = 'api'",
-          )
-          .getSingle();
-      expect(row.read<bool>('no_assistant'), isFalse);
-      expect(row.read<String>('no_assistant_stop_string'), '');
-      expect(row.read<String>('no_assistant_user_prefix'), '');
-      expect(row.read<String>('no_assistant_char_prefix'), '');
-      expect(row.read<String>('no_assistant_squash_role'), 'assistant');
-      final version = await upgraded
-          .customSelect('PRAGMA user_version')
-          .getSingle();
-      expect(version.read<int>('user_version'), 139);
-    });
+        final upgraded = AppDatabase.forTesting(
+          NativeDatabase.createInBackground(file),
+        );
+        addTearDown(() async => upgraded.close());
+        final row = await upgraded
+            .customSelect(
+              'SELECT no_assistant, no_assistant_stop_string, '
+              'no_assistant_user_prefix, no_assistant_char_prefix, '
+              "no_assistant_squash_role FROM api_configs WHERE config_id = 'api'",
+            )
+            .getSingle();
+        expect(row.read<bool>('no_assistant'), isFalse);
+        expect(row.read<String>('no_assistant_stop_string'), '');
+        expect(row.read<String>('no_assistant_user_prefix'), '');
+        expect(row.read<String>('no_assistant_char_prefix'), '');
+        expect(row.read<String>('no_assistant_squash_role'), 'assistant');
+        final version = await upgraded
+            .customSelect('PRAGMA user_version')
+            .getSingle();
+        expect(version.read<int>('user_version'), 139);
+      });
+    }
 
     test('v132 resets pair-based Collector state only', () async {
       final file = File(

@@ -11,8 +11,10 @@ extension _AppDatabaseUpgradeV136 on AppDatabase {
     // inserts that leave a column out pick up the new defaults.
     //
     // The rebuild copies every column the current schema declares, so columns
-    // added after v136 must exist before it runs.
-    await _ensureApiConfigTokenizerColumn(m);
+    // added after v136 must exist before it runs: every later migration that
+    // adds an api_configs column has to be called here too.
+    await _ensureApiConfigTokenizerColumn(m); // v137
+    await _ensureApiConfigNoAssistantColumns(m); // v139
     await m.alterTable(TableMigration(apiConfigs));
   }
 }
