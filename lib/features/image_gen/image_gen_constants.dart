@@ -109,40 +109,41 @@ class NaisteraConstants {
   /// legacy `/prompt/api/img` route answers 405 Method Not Allowed.
   static const String baseUrl = 'https://naistera.org';
 
+  static const String defaultModel = 'nano-banana-2';
+
   static const models = [
-    ('grok', 'Grok'),
-    ('grok-pro', 'Grok Pro'),
-    ('nano banana 2', 'Nano Banana 2'),
-    ('novelai', 'NovelAI'),
+    ('nano-banana-2', 'Nano Banana 2'),
+    ('nano-banana-2-lite', 'Nano Banana 2 Lite'),
+    ('novelai-v4.5', 'NovelAI V4.5'),
+    ('novelai-v5', 'NovelAI V5'),
   ];
 
   static const aspectRatios = ['1:1', '16:9', '9:16', '3:2', '2:3'];
 
-  static const noRefModels = {'grok-pro', 'novelai'};
-
   /// Maps stored and retired model labels onto the ids the API accepts today,
   /// so a settings blob written by an older build keeps generating.
   ///
-  /// An id that is not a known alias passes through untouched: since the
-  /// catalog is loaded from `GET /api/models`, anything the API adds later
-  /// must survive this, and rewriting it to `grok` would silently generate
-  /// with the wrong model.
+  /// `grok` / `grok-pro` are deprecated and hidden from the catalog, so they
+  /// fold into [defaultModel]. An id that is not a known alias passes through
+  /// untouched: since the catalog is loaded from `GET /api/models`, anything
+  /// the API adds later must survive this, and rewriting it would silently
+  /// generate with the wrong model.
   static String normalizeModel(String? model) {
     final trimmed = (model ?? '').trim();
-    if (trimmed.isEmpty) return 'grok';
+    if (trimmed.isEmpty) return defaultModel;
     switch (trimmed.toLowerCase()) {
+      case 'grok':
       case 'grok pro':
       case 'grok-pro':
       case 'grok-imagine-pro':
       case 'imagine-pro':
-        return 'grok-pro';
       case 'nano-banana':
       case 'nano banana':
       case 'nano banana pro':
       case 'nano-banana-pro':
       case 'nano-banana-2':
       case 'nano banana 2':
-        return 'nano banana 2';
+        return defaultModel;
       case 'novel ai':
       case 'novelai':
         return 'novelai';
@@ -151,8 +152,14 @@ class NaisteraConstants {
     return trimmed;
   }
 
+  /// Fallback until the catalog is loaded: NovelAI models are text-only.
   static bool supportsReferences(String? model) =>
-      !noRefModels.contains(normalizeModel(model));
+      !isNovelAIModel(normalizeModel(model));
+
+  /// Fallback until the catalog is loaded: only NovelAI models take a
+  /// `negative_prompt`.
+  static bool supportsNegativePrompt(String? model) =>
+      isNovelAIModel(normalizeModel(model));
 
   /// NovelAI models take the style as a plain prefix — the `[STYLE: ...]`
   /// wrapper reaches the sampler as literal tokens and poisons the image.

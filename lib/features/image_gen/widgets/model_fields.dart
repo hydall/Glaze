@@ -78,6 +78,16 @@ List<Widget> buildNaisteraModelFields(
         onSelected: (v) => onUpdate(s.copyWith(naisteraAspectRatio: v)),
       ),
     ),
+    // Only models whose catalog entry has `negative_prompt: true` take one.
+    // Same row as the NovelAI provider field.
+    if (s.naisteraSupportsNegativePrompt)
+      rows.ImageGenTextFieldItem(
+        label: 'Negative prompt',
+        value: s.naisteraNegativePrompt,
+        hint: 'lowres, bad anatomy',
+        clearable: true,
+        onChanged: (v) => onUpdate(s.copyWith(naisteraNegativePrompt: v)),
+      ),
     MenuSelectorItem(
       label: 'imggen_char_descriptions'.tr(),
       description: 'imggen_char_descriptions_desc'.tr(),

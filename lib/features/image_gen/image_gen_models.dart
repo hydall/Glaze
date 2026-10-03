@@ -62,6 +62,9 @@ abstract class NaisteraModelInfo with _$NaisteraModelInfo {
     required String id,
     @Default('') String name,
     @Default(true) bool references,
+
+    /// Catalog `negative_prompt` flag — only these models get one sent.
+    @Default(false) bool negativePrompt,
   }) = _NaisteraModelInfo;
 }
 
@@ -286,8 +289,11 @@ abstract class ImageGenSettings with _$ImageGenSettings {
     @Default(1024) int geminiCustomWidth,
     @Default(1024) int geminiCustomHeight,
     @Default('') String naisteraApiKey,
-    @Default('grok') String naisteraModel,
+    @Default(NaisteraConstants.defaultModel) String naisteraModel,
     @Default('1:1') String naisteraAspectRatio,
+
+    /// Sent only to models whose catalog entry has `negative_prompt: true`.
+    @Default('') String naisteraNegativePrompt,
 
     /// Catalog last loaded from `GET /api/models`. Empty until the user hits
     /// refresh — [NaisteraConstants.models] is the fallback shortlist.
@@ -348,6 +354,18 @@ abstract class ImageGenSettings with _$ImageGenSettings {
       if (model.id == id || model.id == naisteraModel) return model.references;
     }
     return NaisteraConstants.supportsReferences(naisteraModel);
+  }
+
+  /// Negative-prompt support of the selected Naistera model: the fetched
+  /// catalog when it knows the model, NovelAI-only otherwise.
+  bool get naisteraSupportsNegativePrompt {
+    final id = NaisteraConstants.normalizeModel(naisteraModel);
+    for (final model in naisteraModels) {
+      if (model.id == id || model.id == naisteraModel) {
+        return model.negativePrompt;
+      }
+    }
+    return NaisteraConstants.supportsNegativePrompt(naisteraModel);
   }
 
   /// Human-readable label of a Naistera model id — the catalog name when it is

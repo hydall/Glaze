@@ -153,7 +153,12 @@ void main() {
         'tier': 'pro',
         'models': [
           {'id': 'grok', 'name': 'Grok', 'references': true},
-          {'id': 'novelai', 'name': 'NovelAI', 'references': false},
+          {
+            'id': 'novelai',
+            'name': 'NovelAI',
+            'references': false,
+            'negative_prompt': true,
+          },
           {'id': 'hidden', 'visible': false},
           {'id': 'old', 'deprecated': true},
           {'id': '   '},
@@ -167,6 +172,9 @@ void main() {
 
       expect(catalog.map((m) => m.id), ['grok', 'novelai', 'flux-pro']);
       expect(catalog[1].references, isFalse);
+      expect(catalog[1].negativePrompt, isTrue);
+      // No `negative_prompt` flag means the model takes none.
+      expect(catalog[0].negativePrompt, isFalse);
       // A model with no `references` field is assumed to accept them.
       expect(catalog[2].references, isTrue);
       // A catalog entry with no name falls back to its id.
@@ -205,8 +213,10 @@ void main() {
       expect(NaisteraConstants.normalizeModel('flux-pro'), 'flux-pro');
       expect(NaisteraConstants.normalizeModel('Seedream-5'), 'Seedream-5');
       // Retired labels are still mapped onto the current ids.
-      expect(NaisteraConstants.normalizeModel('nano banana'), 'nano banana 2');
-      expect(NaisteraConstants.normalizeModel(''), 'grok');
+      expect(NaisteraConstants.normalizeModel('nano banana'), 'nano-banana-2');
+      // The deprecated Grok models fold into the current default.
+      expect(NaisteraConstants.normalizeModel('grok'), 'nano-banana-2');
+      expect(NaisteraConstants.normalizeModel(''), 'nano-banana-2');
     });
 
     test('catalog names label the picker', () {
@@ -215,7 +225,7 @@ void main() {
       );
       expect(settings.naisteraModelLabel('flux-pro'), 'FLUX Pro');
       // Falls back to the shipped shortlist, then to the raw id.
-      expect(settings.naisteraModelLabel('grok'), 'Grok');
+      expect(settings.naisteraModelLabel('novelai-v5'), 'NovelAI V5');
       expect(settings.naisteraModelLabel('mystery'), 'mystery');
     });
   });
@@ -245,6 +255,59 @@ void main() {
       expect(restored.apiType, ImageGenApiType.xai);
     });
 
+    test('the Naistera negative prompt round-trips', () {
+      const settings = ImageGenSettings(
+        apiType: ImageGenApiType.naistera,
+        naisteraModel: 'novelai-v5',
+        naisteraNegativePrompt: 'blurry',
+        naisteraModels: [
+          NaisteraModelInfo(id: 'novelai-v5', negativePrompt: true),
+        ],
+      );
+
+      final restored = ImageGenSettingsCodec.fromJson(
+        ImageGenSettingsCodec.toJson(settings),
+      );
+
+      expect(restored, settings);
+    });
+
+    test('an old blob gets the new default model', () {
+      expect(
+        ImageGenSettingsCodec.fromJson({}).naisteraModel,
+        NaisteraConstants.defaultModel,
+      );
+    });
+  });
+
+  group('Naistera negative prompt', () {
+    test('Naistera negative support: catalog first, NovelAI fallback', () {
+      const novel = ImageGenSettings(
+        apiType: ImageGenApiType.naistera,
+        naisteraModel: 'novelai-v4.5',
+      );
+      expect(novel.naisteraSupportsNegativePrompt, isTrue);
+      expect(
+        novel
+            .copyWith(naisteraModel: 'nano-banana-2')
+            .naisteraSupportsNegativePrompt,
+        isFalse,
+      );
+      expect(
+        novel
+            .copyWith(
+              naisteraModel: 'flux-pro',
+              naisteraModels: const [
+                NaisteraModelInfo(id: 'flux-pro', negativePrompt: true),
+              ],
+            )
+            .naisteraSupportsNegativePrompt,
+        isTrue,
+      );
+    });
+  });
+
+  group('legacy settings', () {
     test('the mode defaults to as-is for a blob written before it existed', () {
       expect(
         ImageGenSettingsCodec.fromJson({}).naisteraCharacterDescriptionsMode,
