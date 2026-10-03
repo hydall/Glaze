@@ -182,7 +182,25 @@ class UseVirtualScroll {
         this._selfPinTop = null;
         this._smartScrollUnlock = null;
         this._heightOffsetUnlock = null;
-        
+        // Chromium — the Android WebView and WebView2 — anchors the reader's
+        // place natively (CSS scroll anchoring). Rows the window mounts above
+        // the viewport come in at their real heights where the spacer held the
+        // cached estimate, and the browser already moves `scrollTop` by that
+        // difference. Offsetting it again from the ResizeObserver doubled the
+        // move: during a touch fling on Android the scroll stopped dead and the
+        // reader was thrown back onto messages they had already passed. So a
+        // row's first measurement after it is mounted is left to the browser
+        // where it anchors, and only a row that changes height *while mounted*
+        // — the late reflow that native anchoring does not hold — is offset.
+        // WebKit has no native anchoring, so there every change is offset.
+        this._nativeScrollAnchoring = typeof CSS !== 'undefined' &&
+            typeof CSS.supports === 'function' &&
+            CSS.supports('overflow-anchor', 'auto');
+        // Rows mounted by `renderDOM` whose first ResizeObserver entry has not
+        // arrived yet. Held by element, so renumbering the items cannot point
+        // it at the wrong row.
+        this._awaitingFirstMeasure = new WeakSet();
+
         this.visibleIndices = new Set();
         this.realVisibleIndices = new Set();
         
@@ -895,6 +913,7 @@ class UseVirtualScroll {
                 this.container.insertBefore(item.el, insertBefore);
                 this.observer.observe(item.el);
                 this.realObserver.observe(item.el);
+                this._awaitingFirstMeasure.add(item.el);
                 this.resizeObserver?.observe(item.el);
             }
             insertBefore = item.el;
@@ -1088,6 +1107,10 @@ class UseVirtualScroll {
                     const idx = parseInt(entry.target.dataset.index);
                     const height = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
                     if (isNaN(idx) || height <= 0) continue;
+                    // The mount itself, not a reflow: the browser anchored it
+                    // already where it can (see `_nativeScrollAnchoring`).
+                    const mountedJustNow = this._awaitingFirstMeasure.delete(entry.target) &&
+                        this._nativeScrollAnchoring;
                     const previous = this.cache.itemHeights.get(idx);
                     if (previous == null || Math.abs(previous - height) > 1) {
                         this.cache.setHeight(idx, height);
@@ -1099,7 +1122,8 @@ class UseVirtualScroll {
                         // `previous > 0` skips the 0 sentinel `update()` writes
                         // to force a first measurement: that row was replaced,
                         // not resized, so there is no delta to offset.
-                        if (!isEditing && previous > 0 && anchorIndex >= 0 && idx < anchorIndex) {
+                        if (!isEditing && !mountedJustNow && previous > 0 &&
+                            anchorIndex >= 0 && idx < anchorIndex) {
                             anchorDelta += height - previous;
                         }
                     }

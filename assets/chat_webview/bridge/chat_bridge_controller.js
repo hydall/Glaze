@@ -467,9 +467,37 @@ export class Bridge {
       this._sendToFlutter('onScrollToBottomVisibility', [show]);
     };
 
+    // Content that grows or shrinks *above* the reader moves `scrollTop` with
+    // it — a page of older messages prepended, rows mounting above the viewport
+    // at their real heights, the browser's own scroll anchoring — while the
+    // text on screen does not move at all. Read as scrolling, each of those hid
+    // the header and the next upward flick brought it back: the header bouncing
+    // on every load-more. So the baseline is carried along with the row at the
+    // top of the screen, and only what moves that row on screen counts.
+    let headerRef = null;
+    let headerRefTop = 0;
+    const followHeaderRef = (st) => {
+      if (headerRef && headerRef.isConnected) {
+        this._headerLastTop += headerRef.offsetTop - headerRefTop;
+      }
+      headerRef = null;
+      const vl = this.virtualList;
+      // offsetTop is measured from the body, scrollTop from the container.
+      const base = container.offsetTop;
+      for (let i = vl.renderStart; i < vl.renderEnd; i++) {
+        const el = vl.items[i]?.el;
+        if (el && el.isConnected && el.offsetTop - base + el.offsetHeight > st) {
+          headerRef = el;
+          headerRefTop = el.offsetTop;
+          break;
+        }
+      }
+    };
+
     const updateHeader = () => {
       ticking = false;
       const st = container.scrollTop;
+      followHeaderRef(st);
       // Right after showHeader() the list is still being filled and scrolled to
       // the bottom programmatically. Follow the offset without deciding, so the
       // jump is never mistaken for the user scrolling down.
@@ -838,7 +866,9 @@ export class Bridge {
     this.flush();
     this._suppressLoadMore = true;
     const messages = JSON.parse(messagesJson);
-    const scrollBefore = this.virtualList.container.scrollHeight;
+    const container = this.virtualList.container;
+    const topBefore = container.scrollTop;
+    const scrollBefore = container.scrollHeight;
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i];
       const rendered = this.renderer.renderMessage(msg);
@@ -848,8 +878,21 @@ export class Bridge {
         this.virtualList.prepend(id, el);
       }
     }
-    const scrollAfter = this.virtualList.container.scrollHeight;
-    this.virtualList.container.scrollTop += scrollAfter - scrollBefore;
+    const scrollAfter = container.scrollHeight;
+    // Absolute, not `+=`: where the browser anchors natively (Chromium) the
+    // layout the read above just forced has already moved `scrollTop` by the
+    // growth, and adding it again threw the reader a whole page down — onto
+    // messages they had already read. Where it does not (WebKit, or at the
+    // very top, where Chromium never anchors) this is the whole correction.
+    container.scrollTop = topBefore + (scrollAfter - scrollBefore);
+    // The page went in above the reader as spacer only: `prepend` keeps the
+    // window on the rows already on screen, and the observer will not grow it
+    // until one of them changes visibility — with long replies, not before the
+    // reader has scrolled into the spacer and seen an empty chat. Mount the
+    // buffer above them now, while the reader's row is still in view, so their
+    // real heights replace the estimates against that row instead of against a
+    // position the blank-viewport recovery guessed from the estimates.
+    this.virtualList.updateWindow();
     this._hideLoadingScreen();
     setTimeout(() => { this._suppressLoadMore = false; }, 500);
   }

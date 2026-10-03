@@ -227,6 +227,42 @@ scroll) and for an editing row (the browser reveals the caret). It writes
 `_lastScrollTop` with the new offset, so the scroll event it queues is not read
 as the reader scrolling. `specs/reading_position.spec.js` holds this.
 
+**A row's first measurement after it mounts is not a reflow.** Where the engine
+anchors natively (`CSS.supports('overflow-anchor', 'auto')` — Chromium, so the
+Android WebView and WebView2), the browser already moves `scrollTop` when rows
+mount above the viewport at real heights the spacer only estimated. An offset
+of our own on top of that moved the reader twice; during a touch fling on
+Android it stopped the fling dead and threw the reader back onto messages they
+had already passed. So `renderDOM` marks what it mounts
+(`_awaitingFirstMeasure`), and that first entry is left to the browser. Only a
+row that changes height *while mounted* is offset there — the case native
+anchoring does not hold. WebKit has no native anchoring, so it offsets every
+change; the specs run both ways.
+
+---
+
+## A page of older messages goes in above the reader without moving them
+
+`prependMessages` puts the rows in above the viewport as spacer, at estimated
+heights. Two things follow:
+
+* **the restore is absolute.** It sets `scrollTop` to where it was plus the
+  growth, never `+=`: native anchoring may already have moved it by the time
+  the layout read returns, and adding the growth again threw the reader a whole
+  page down.
+* **the window grows over the new rows straight away** (`updateWindow()` after
+  the restore). `prepend` keeps the window on the rows already on screen, and
+  the observer does not grow it until one of them changes visibility — with
+  long replies, not before the reader has scrolled into the spacer, seen an
+  empty chat and had the blank-viewport recovery rebuild the window from the
+  estimates.
+
+The header tracker reads this growth too: content added above the reader moves
+`scrollTop` without moving the reader, so its baseline follows the row at the
+top of the screen rather than the raw offset. Otherwise every load-more hid the
+header and the next upward flick showed it again.
+`specs/load_older_scroll.spec.js` holds all three.
+
 ---
 
 ## State that has to reach the whole chat is written to `items`, not the document

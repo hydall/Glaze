@@ -390,6 +390,77 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       });
     }
 
+    // Built before the scaffold, not inside its argument list: the data branch
+    // below is what sets `_everBuiltBody`, and `showBackground` reads it. Read
+    // in argument order, the flag was a build late — the first build after the
+    // body appeared still asked for the background wrapper and the next one
+    // dropped it, so every chat open restructured the scaffold under the chat
+    // body while the WebView was still wiring itself up.
+    final body = chatStateAsync.when(
+      loading: () => const Center(child: GlazeSpinner()),
+      error: (e, _) => Center(child: Text('${'title_error'.tr()}: $e')),
+      data: (state) {
+        // The index comparison only gates the INITIAL navigation to a
+        // requested session (deep link / history open). Once that initial
+        // session has been applied (`_sessionApplied`), in-chat switches
+        // like branchSession produce a session with a *different*
+        // sessionIndex than `initialSessionIndex` — comparing against it
+        // forever would leave the spinner stuck after branching until an
+        // app restart. After the initial apply, only `_sessionSwitchPending`
+        // gates the spinner.
+        final awaitingTargetSession =
+            _sessionSwitchPending ||
+            (!_sessionApplied &&
+                widget.initialSessionIndex != null &&
+                state.session?.sessionIndex != widget.initialSessionIndex);
+        // Only replace the body with a full-screen spinner on the very
+        // first open, when the WebView hasn't been built yet. For an
+        // in-chat switch (e.g. after importing a chat, which re-navigates
+        // to /chat/<id>?session=N) the keep-alive WebView is already
+        // mounted; destroying and recreating `_ChatBody` here would not
+        // re-run WebView init reliably and left a grey, unresponsive page
+        // until restart. Keep the body mounted and overlay the spinner so
+        // the WebView's own `_applySessionSwitch` handles the transition.
+        if (awaitingTargetSession && !_everBuiltBody) {
+          return const Center(child: GlazeSpinner());
+        }
+        _everBuiltBody = true;
+        return ChatColumnWidth(
+          // The capped column would otherwise sit as a lighter strip
+          // between two bands of the app background; painting the chat's
+          // own background across the whole width keeps the two even.
+          background: _buildChatBackground(),
+          child: Stack(
+            children: [
+              _ChatBody(
+                charId: charId,
+                state: state,
+                drawerCtrl: _drawerCtrl,
+                search: _search,
+                keyboardHeight: keyboardHeight,
+                onScrollDirection: _onScrollDirection,
+                virtualKeyboardSend: virtualKeyboardSend,
+                enterToSend: enterToSend,
+                targetMessageId: widget.targetMessageId,
+                isHeaderHidden: _isHeaderHidden,
+                blurIsFlutterSide: _blurIsFlutterSide,
+                chromeBackdropKey: _chromeBackdropKey,
+              ),
+              if (awaitingTargetSession)
+                const Positioned.fill(
+                  child: AbsorbPointer(
+                    child: ColoredBox(
+                      color: Colors.transparent,
+                      child: Center(child: GlazeSpinner()),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+
     return SessionLifecycleTracker(
       charId: charId,
       // Chat is always reached via `context.go('/chat/...')`, which replaces the
@@ -524,70 +595,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                   },
                 ),
               ],
-        body: chatStateAsync.when(
-          loading: () => const Center(child: GlazeSpinner()),
-          error: (e, _) => Center(child: Text('${'title_error'.tr()}: $e')),
-          data: (state) {
-            // The index comparison only gates the INITIAL navigation to a
-            // requested session (deep link / history open). Once that initial
-            // session has been applied (`_sessionApplied`), in-chat switches
-            // like branchSession produce a session with a *different*
-            // sessionIndex than `initialSessionIndex` — comparing against it
-            // forever would leave the spinner stuck after branching until an
-            // app restart. After the initial apply, only `_sessionSwitchPending`
-            // gates the spinner.
-            final awaitingTargetSession =
-                _sessionSwitchPending ||
-                (!_sessionApplied &&
-                    widget.initialSessionIndex != null &&
-                    state.session?.sessionIndex != widget.initialSessionIndex);
-            // Only replace the body with a full-screen spinner on the very
-            // first open, when the WebView hasn't been built yet. For an
-            // in-chat switch (e.g. after importing a chat, which re-navigates
-            // to /chat/<id>?session=N) the keep-alive WebView is already
-            // mounted; destroying and recreating `_ChatBody` here would not
-            // re-run WebView init reliably and left a grey, unresponsive page
-            // until restart. Keep the body mounted and overlay the spinner so
-            // the WebView's own `_applySessionSwitch` handles the transition.
-            if (awaitingTargetSession && !_everBuiltBody) {
-              return const Center(child: GlazeSpinner());
-            }
-            _everBuiltBody = true;
-            return ChatColumnWidth(
-              // The capped column would otherwise sit as a lighter strip
-              // between two bands of the app background; painting the chat's
-              // own background across the whole width keeps the two even.
-              background: _buildChatBackground(),
-              child: Stack(
-                children: [
-                  _ChatBody(
-                    charId: charId,
-                    state: state,
-                    drawerCtrl: _drawerCtrl,
-                    search: _search,
-                    keyboardHeight: keyboardHeight,
-                    onScrollDirection: _onScrollDirection,
-                    virtualKeyboardSend: virtualKeyboardSend,
-                    enterToSend: enterToSend,
-                    targetMessageId: widget.targetMessageId,
-                    isHeaderHidden: _isHeaderHidden,
-                    blurIsFlutterSide: _blurIsFlutterSide,
-                    chromeBackdropKey: _chromeBackdropKey,
-                  ),
-                  if (awaitingTargetSession)
-                    const Positioned.fill(
-                      child: AbsorbPointer(
-                        child: ColoredBox(
-                          color: Colors.transparent,
-                          child: Center(child: GlazeSpinner()),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            );
-          },
-        ),
+        body: body,
       ),
     );
   }

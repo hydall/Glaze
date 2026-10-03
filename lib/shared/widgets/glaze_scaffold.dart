@@ -41,7 +41,7 @@ double glazeHeaderHideSlideFor({
 ///
 /// Screens inside the shell (history, character list, menu) build their own
 /// header inline in their body since they share the shell's bottom nav.
-class GlazeScaffold extends StatelessWidget {
+class GlazeScaffold extends StatefulWidget {
   final String? title;
   final Widget? titleWidget;
   final Widget body;
@@ -103,8 +103,26 @@ class GlazeScaffold extends StatelessWidget {
   });
 
   @override
+  State<GlazeScaffold> createState() => _GlazeScaffoldState();
+}
+
+class _GlazeScaffoldState extends State<GlazeScaffold> {
+  /// Keeps the scaffold — and the body under it — the same element while the
+  /// wrappers above it come and go. [GlazeBackground] is added and dropped here
+  /// with [GlazeScaffold.showBackground], and its own layers (`CardBackdrop`,
+  /// the image) with the theme and battery saver; without the key each of
+  /// those changes unmounted the whole body and built it again.
+  ///
+  /// For the chat that rebuild was fatal, not just wasteful. A fresh
+  /// `InAppWebView` takes over the shared keep-alive WebView while the old one
+  /// is still mounted, and disposing the old one then pulls the WebView out of
+  /// the new one's container: the page is left detached and hidden, so it never
+  /// paints again and the chat goes blank.
+  final GlobalKey _contentKey = GlobalKey();
+
+  @override
   Widget build(BuildContext context) {
-    final backHandler = onBack ?? () => Navigator.of(context).maybePop();
+    final backHandler = widget.onBack ?? () => Navigator.of(context).maybePop();
     final isIosLikeTargetPlatform =
         !kIsWeb &&
         (defaultTargetPlatform == TargetPlatform.iOS ||
@@ -124,18 +142,18 @@ class GlazeScaffold extends StatelessWidget {
     final header = SafeArea(
       bottom: false,
       child: Padding(
-        padding: flushHeader
+        padding: widget.flushHeader
             ? EdgeInsets.zero
             : const EdgeInsets.fromLTRB(16, 10, 16, 0),
         child: GlazeAppBar(
-          title: title,
-          titleWidget: titleWidget,
-          actions: actions,
-          showBack: showBack,
+          title: widget.title,
+          titleWidget: widget.titleWidget,
+          actions: widget.actions,
+          showBack: widget.showBack,
           onBack: backHandler,
-          blurViaWebView: headerBlurViaWebView,
-          backdropKey: headerBackdropKey,
-          borderRadius: flushHeader
+          blurViaWebView: widget.headerBlurViaWebView,
+          backdropKey: widget.headerBackdropKey,
+          borderRadius: widget.flushHeader
               ? BorderRadius.zero
               : const BorderRadius.all(Radius.circular(20)),
         ),
@@ -143,13 +161,13 @@ class GlazeScaffold extends StatelessWidget {
     );
 
     final animatedHeader = AnimatedSlide(
-      offset: hideHeader
+      offset: widget.hideHeader
           ? const Offset(0, -kGlazeHeaderHideSlideFactor)
           : Offset.zero,
       duration: kGlazeHeaderHideDuration,
       curve: kGlazeHeaderHideCurve,
       child: AnimatedOpacity(
-        opacity: hideHeader ? 0.0 : 1.0,
+        opacity: widget.hideHeader ? 0.0 : 1.0,
         duration: kGlazeHeaderHideDuration,
         curve: kGlazeHeaderHideCurve,
         child: header,
@@ -159,7 +177,7 @@ class GlazeScaffold extends StatelessWidget {
     // When delegating to the shell's persistent header, reserve the same space
     // the local header would occupy but draw nothing — the shell paints the
     // header on top.
-    final headerSlot = useShellHeader
+    final headerSlot = widget.useShellHeader
         ? const SafeArea(
             bottom: false,
             child: Padding(
@@ -170,18 +188,19 @@ class GlazeScaffold extends StatelessWidget {
         : animatedHeader;
 
     final scaffold = PopScope(
-      canPop: isIosLikeTargetPlatform ? navigatorCanPop : !showBack,
+      key: _contentKey,
+      canPop: isIosLikeTargetPlatform ? navigatorCanPop : !widget.showBack,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
         backHandler();
       },
       child: Scaffold(
         backgroundColor: Colors.transparent,
-        resizeToAvoidBottomInset: resizeToAvoidBottomInset,
-        body: extendBodyBehindHeader
+        resizeToAvoidBottomInset: widget.resizeToAvoidBottomInset,
+        body: widget.extendBodyBehindHeader
             ? Stack(
                 children: [
-                  Positioned.fill(child: body),
+                  Positioned.fill(child: widget.body),
                   Positioned(top: 0, left: 0, right: 0, child: headerSlot),
                 ],
               )
@@ -192,7 +211,7 @@ class GlazeScaffold extends StatelessWidget {
                     child: MediaQuery.removePadding(
                       context: context,
                       removeTop: true,
-                      child: body,
+                      child: widget.body,
                     ),
                   ),
                 ],
@@ -200,19 +219,19 @@ class GlazeScaffold extends StatelessWidget {
       ),
     );
 
-    final withBackground = showBackground
+    final withBackground = widget.showBackground
         ? GlazeBackground(child: scaffold)
         : scaffold;
 
-    if (!useShellHeader) return withBackground;
+    if (!widget.useShellHeader) return withBackground;
 
     return _ShellHeaderPublisher(
-      branchIndex: headerBranchIndex ?? 0,
+      branchIndex: widget.headerBranchIndex ?? 0,
       config: ShellHeaderConfig(
-        title: title,
-        titleWidget: titleWidget,
-        actions: actions,
-        showBack: showBack,
+        title: widget.title,
+        titleWidget: widget.titleWidget,
+        actions: widget.actions,
+        showBack: widget.showBack,
         onBack: backHandler,
       ),
       child: withBackground,
