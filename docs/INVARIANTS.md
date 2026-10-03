@@ -1009,6 +1009,21 @@ character/persona payloads.
 `presetNetTokens` equals `sourceTokens['preset']` (no further
 subtraction — external macros are already excluded in accounting).
 
+**Totals count what is sent.** The accounting split only decides which
+row a token is shown on. Each preset block reaches `ContextCalculator`
+as a `StaticBlock` carrying both: `content` (the expanded text, minus a
+deferred `{{memory}}` placeholder, which `memoryTokens` covers) goes into
+`staticTotal`, `totalTokens` and the history budget; `presetContent`
+(`contentForAccounting`) goes to the preset row, and the remainder of a
+dedicated block (`char_card` → `description`, `user_persona` → `persona`,
+…) to that block's own row. A setvar-only block and an
+`appendToLastMessage` block add nothing to the total — the first sends
+nothing, the second travels inside the last user message the history
+already counts. With external injections left out of the total, the
+character card, persona and every `{{char}}` / `{{user}}` were missing
+from the budget, and the history was allowed to overflow the window by
+exactly that much.
+
 ### INV-PS7: Macro resolution order is fixed
 
 Within a single `MacroEngine.replaceMacros()` call, macros resolve in this order:

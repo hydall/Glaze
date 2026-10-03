@@ -38,9 +38,14 @@ abstract class PreTokenizer {
         if (!useRegex && !prefix) return null;
         return _ByteLevelSplit(useRegex: useRegex, addPrefixSpace: prefix);
       case 'Digits':
+        // HF splits on `char::is_numeric` — every \p{N}, so full-width digits,
+        // ½ and ① too, not just ASCII 0-9.
         return RegexSplit(
           RegExp(
-            (spec['individual_digits'] as bool? ?? false) ? '[0-9]' : '[0-9]+',
+            (spec['individual_digits'] as bool? ?? false)
+                ? r'\p{N}'
+                : r'\p{N}+',
+            unicode: true,
           ),
           behavior: SplitBehavior.isolated,
         );

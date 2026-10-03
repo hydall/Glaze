@@ -48,6 +48,7 @@ dependencies:
   desktop_drop: ^0.8.3
   pasteboard: ^0.5.0
   window_manager: ^0.5.2
+  unorm_dart: ^0.3.2
 
 dev_dependencies:
   flutter_test:

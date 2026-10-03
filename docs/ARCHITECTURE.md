@@ -116,6 +116,7 @@ lib/
 │   │   ├── response_normalizer.dart  # Extracts content from non-streaming response body
 │   │   ├── summary_service.dart      # Reads/writes summaries, triggers LLM regeneration
 │   │   ├── tokenizer.dart            # estimateTokens() with LRU cache, base64 stripping
+│   │   ├── request_tokens.dart       # countRequestTokens(): one rule for the inspector's next and captured requests
 │   │   ├── macro_engine.dart         # SillyTavern-compatible macro replacement engine
 │   │   ├── memory_formatting.dart    # Shared formatMemoryItems / formatMemoryRange helpers
 │   │   ├── vector_math.dart          # cosineSimilarity, findTopK, findTopKMulti, BLOB helpers
@@ -326,8 +327,7 @@ lib/
 │   │   ├── state/
 │   │   │   ├── chat_body_selectors.dart # batteryAware dual-read helper
 │   │   │   ├── chat_drawer_editing_provider.dart # Drawer edit mode; also drives the composer row
-│   │   │   ├── cached_token_breakdown.dart
-│   │   │   └── token_breakdown_cache.dart
+│   │   │   └── cached_token_breakdown.dart
 │   │   ├── utils/
 │   │   │   └── message_preview.dart   # Notification preview text helper
 │   │   └── widgets/                      # Chat UI widgets (sheets, header, webview, etc.)

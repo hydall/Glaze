@@ -21,6 +21,7 @@ import '../services/drawer_item_launcher.dart';
 import '../services/magic_drawer_layout_service.dart';
 import '../services/magic_drawer_stats_service.dart';
 import 'magic_drawer_widgets.dart';
+import '../state/cached_token_breakdown.dart';
 import '../state/magic_drawer_stats_cache.dart';
 import '../../extensions/models/extension_preset.dart';
 import '../../extensions/models/extensions_settings.dart';
@@ -373,6 +374,12 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
               nextSession?.messages.lastOrNull?.content) {
         _scheduleRefresh();
       }
+    });
+    // The token subtitles are read off the last breakdown a prompt build
+    // produced (generation, the inspector); a new one, or one dropped by an
+    // edit or a tokenizer switch, must not wait for the next open.
+    ref.listen(cachedTokenBreakdownProvider(widget.charId), (prev, next) {
+      if (!identical(prev, next)) _scheduleRefresh();
     });
     ref.listen(activePresetIdProvider, (prev, next) {
       if (prev != next) _scheduleRefresh();

@@ -26,7 +26,6 @@ import 'features/settings/api_list_provider.dart';
 import 'features/settings/app_settings_provider.dart';
 import 'features/settings/tokenizer_provider.dart';
 import 'features/chat/state/cached_token_breakdown.dart';
-import 'features/chat/state/token_breakdown_cache.dart';
 import 'shared/widgets/desktop_popup.dart';
 import 'shared/theme/theme_font_provider.dart';
 import 'core/services/onboarding_service.dart';
@@ -266,7 +265,6 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
         tokenizerStatusProvider.select((status) => status.active),
         (previous, next) {
           if (previous == null || previous == next) return;
-          TokenBreakdownCache.invalidate();
           ref.invalidate(cachedTokenBreakdownProvider);
         },
       ),

@@ -3,8 +3,6 @@ import 'package:glaze_flutter/core/llm/context_calculator.dart';
 import 'package:glaze_flutter/core/llm/history_assembler.dart';
 import 'package:glaze_flutter/core/llm/history_trim.dart';
 import 'package:glaze_flutter/core/llm/tokenizer.dart';
-import 'package:glaze_flutter/core/models/api_config.dart';
-import 'package:glaze_flutter/features/chat/state/token_breakdown_cache.dart';
 
 /// History of [count] messages, each roughly the same size, ids `m0..mN`.
 List<PromptMessage> _history(int count) => [
@@ -177,54 +175,6 @@ void main() {
       final result = _run(_calculator(mode: HistoryTrimMode.stepped), huge);
       expect(result.trimmedHistory, hasLength(1));
       expect(result.cutoffIndex, 0);
-    });
-  });
-
-  group('live updates', () {
-    const base = ApiConfig(id: 'c1');
-
-    String hashFor(ApiConfig config) => TokenBreakdownCache.computeHash(
-      charId: 'char',
-      sessionId: 'session',
-      messageCount: 10,
-      contextSize: config.contextSize,
-      maxTokens: config.maxTokens,
-      authorsNote: '',
-      summary: '',
-      trimSignature: config.contextBudgetSignature,
-    );
-
-    test('switching the trim mode changes the cache key', () {
-      final stepped = base.copyWith(historyTrimMode: HistoryTrimMode.stepped);
-      expect(hashFor(stepped), isNot(hashFor(base)));
-    });
-
-    test('moving either stepped knob changes the cache key', () {
-      final stepped = base.copyWith(historyTrimMode: HistoryTrimMode.stepped);
-      expect(
-        hashFor(stepped.copyWith(historyTrimTriggerPercent: 60)),
-        isNot(hashFor(stepped)),
-      );
-      expect(
-        hashFor(stepped.copyWith(historyTrimStepPercent: 50)),
-        isNot(hashFor(stepped)),
-      );
-    });
-
-    test('a cached breakdown is not served across a trim-mode change', () {
-      final breakdown = _run(
-        _calculator(mode: HistoryTrimMode.sliding),
-        _history(40),
-      );
-      TokenBreakdownCache.set(hashFor(base), breakdown);
-
-      expect(TokenBreakdownCache.get(hashFor(base)), isNotNull);
-      expect(
-        TokenBreakdownCache.get(
-          hashFor(base.copyWith(historyTrimMode: HistoryTrimMode.stepped)),
-        ),
-        isNull,
-      );
     });
   });
 }

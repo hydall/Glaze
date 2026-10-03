@@ -15,7 +15,6 @@ import '../../core/llm/transport/endpoint_resolution_cache.dart';
 import '../../core/llm/transport/llm_protocol.dart';
 import '../../core/llm/transport/transport_factory.dart';
 import '../../core/services/api_connection_tester.dart';
-import '../chat/state/token_breakdown_cache.dart';
 import '../chat/state/cached_token_breakdown.dart';
 import '../../core/llm/history_trim.dart';
 import '../../core/llm/tokenizer.dart';
@@ -549,7 +548,6 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
           updated.contextBudgetSignature != config.contextBudgetSignature;
       await _container.read(apiListProvider.notifier).put(updated);
       if (budgetChanged) {
-        TokenBreakdownCache.invalidate();
         _container.invalidate(cachedTokenBreakdownProvider);
       }
     }
