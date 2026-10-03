@@ -4,7 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 
+import '../shell/desktop/desktop_floating_provider.dart';
 import '../shell/shell_header_provider.dart';
+import '../shell/title_bar_header.dart';
 import '../theme/app_colors.dart';
 import 'glass_surface.dart';
 import 'glaze_background.dart';
@@ -122,7 +124,19 @@ class _GlazeScaffoldState extends State<GlazeScaffold> {
 
   @override
   Widget build(BuildContext context) {
-    final backHandler = widget.onBack ?? () => Navigator.of(context).maybePop();
+    // Inside a desktop window the window's title bar is the header: nothing is
+    // drawn or kept clear for one here, the title and actions are published to
+    // that bar, and going back steps the window back. The window's glass is
+    // the background, too, as it is behind Settings — every window reads the
+    // same, whatever [showBackground] asks for on a phone.
+    final inWindow = DetachedShellHost.drawsChrome(context);
+    final fallbackBack =
+        widget.onBack ?? () => Navigator.of(context).maybePop();
+    void backHandler() {
+      if (inWindow && popDesktopWindow(context)) return;
+      fallbackBack();
+    }
+
     final isIosLikeTargetPlatform =
         !kIsWeb &&
         (defaultTargetPlatform == TargetPlatform.iOS ||
@@ -139,24 +153,32 @@ class _GlazeScaffoldState extends State<GlazeScaffold> {
     // test) has no stack to consult, so it reads as unpoppable.
     final navigatorCanPop = GoRouter.maybeOf(context)?.canPop() ?? false;
 
+    // In the desktop middle column under the app's own title bar, that bar
+    // draws this header (see [TitleBarHeaderScope]): the row keeps its space
+    // here, empty, and the title, back button and actions are published.
+    final inTitleBar =
+        !widget.useShellHeader && TitleBarHeaderScope.of(context);
+
     final header = SafeArea(
       bottom: false,
       child: Padding(
         padding: widget.flushHeader
             ? EdgeInsets.zero
             : const EdgeInsets.fromLTRB(16, 10, 16, 0),
-        child: GlazeAppBar(
-          title: widget.title,
-          titleWidget: widget.titleWidget,
-          actions: widget.actions,
-          showBack: widget.showBack,
-          onBack: backHandler,
-          blurViaWebView: widget.headerBlurViaWebView,
-          backdropKey: widget.headerBackdropKey,
-          borderRadius: widget.flushHeader
-              ? BorderRadius.zero
-              : const BorderRadius.all(Radius.circular(20)),
-        ),
+        child: inTitleBar
+            ? const SizedBox(height: kTitleBarHiddenHeaderHeight)
+            : GlazeAppBar(
+                title: widget.title,
+                titleWidget: widget.titleWidget,
+                actions: widget.actions,
+                showBack: widget.showBack,
+                onBack: backHandler,
+                blurViaWebView: widget.headerBlurViaWebView,
+                backdropKey: widget.headerBackdropKey,
+                borderRadius: widget.flushHeader
+                    ? BorderRadius.zero
+                    : const BorderRadius.all(Radius.circular(20)),
+              ),
       ),
     );
 
@@ -177,7 +199,9 @@ class _GlazeScaffoldState extends State<GlazeScaffold> {
     // When delegating to the shell's persistent header, reserve the same space
     // the local header would occupy but draw nothing — the shell paints the
     // header on top.
-    final headerSlot = widget.useShellHeader
+    final headerSlot = inWindow
+        ? const SizedBox.shrink()
+        : widget.useShellHeader
         ? const SafeArea(
             bottom: false,
             child: Padding(
@@ -219,14 +243,18 @@ class _GlazeScaffoldState extends State<GlazeScaffold> {
       ),
     );
 
-    final withBackground = widget.showBackground
+    final withBackground = widget.showBackground && !inWindow
         ? GlazeBackground(child: scaffold)
         : scaffold;
 
-    if (!widget.useShellHeader) return withBackground;
+    if (!widget.useShellHeader && !inTitleBar && !inWindow) {
+      return withBackground;
+    }
 
     return _ShellHeaderPublisher(
-      branchIndex: widget.headerBranchIndex ?? 0,
+      branchIndex: inTitleBar
+          ? titleBarHeaderBranchFor(context)
+          : widget.headerBranchIndex ?? 0,
       config: ShellHeaderConfig(
         title: widget.title,
         titleWidget: widget.titleWidget,
@@ -318,6 +346,14 @@ class GlazeAppBar extends ConsumerWidget {
   /// the backdrop once for all of them.
   final BackdropKey? backdropKey;
 
+  /// Outline of the bar; all four sides when null.
+  final BoxBorder? border;
+
+  /// False drops the leading slot — back button, [leading] or logo — and the
+  /// title starts at the edge gutter. For a header whose back button is drawn
+  /// beside it: a desktop sidebar panel's, at the top of the strip.
+  final bool showLeading;
+
   const GlazeAppBar({
     super.key,
     this.title,
@@ -329,6 +365,8 @@ class GlazeAppBar extends ConsumerWidget {
     this.borderRadius = const BorderRadius.all(Radius.circular(20)),
     this.blurViaWebView = false,
     this.backdropKey,
+    this.border,
+    this.showLeading = true,
   });
 
   @override
@@ -338,15 +376,17 @@ class GlazeAppBar extends ConsumerWidget {
       blurViaWebView: blurViaWebView,
       backdropKey: backdropKey,
       borderRadius: borderRadius,
-      border: Border.all(color: context.cs.outlineVariant),
+      border: border ?? Border.all(color: context.cs.outlineVariant),
       child: SizedBox(
         height: 56,
         child: Row(
           children: [
             // Left: back button OR logo
             SizedBox(
-              width: 52,
-              child: showBack
+              width: showLeading ? 52 : 16,
+              child: !showLeading
+                  ? null
+                  : showBack
                   ? IconButton(
                       icon: const Icon(
                         Icons.arrow_back_ios_new_rounded,

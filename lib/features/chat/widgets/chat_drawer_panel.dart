@@ -35,6 +35,22 @@ class ChatDrawerPanel extends ConsumerStatefulWidget {
   /// Runs before an Actions tap starts a generation; false aborts it.
   final Future<bool> Function()? beforeGeneration;
 
+  /// See [DrawerPanelScaffold.showTopBorder].
+  final bool showTopBorder;
+
+  /// Lays both tabs out as a full-width list instead of a three-column grid,
+  /// and drops the drag handle — the desktop right sidebar, where the drawer
+  /// is a column that is always there rather than a sheet over the keyboard.
+  /// Opening a card there shrinks the list to its icons, beside the card's
+  /// screen (see [rail]).
+  final bool listLayout;
+
+  /// Shrinks the [listLayout] drawer to the Tools tab's icons alone, without
+  /// the header — the desktop sidebar's strip, beside an open card's screen or
+  /// as the whole collapsed sidebar. Toggled on a mounted drawer, so the list
+  /// keeps its rows and its scroll and every icon stays where it was.
+  final bool rail;
+
   const ChatDrawerPanel({
     super.key,
     required this.charId,
@@ -42,6 +58,9 @@ class ChatDrawerPanel extends ConsumerStatefulWidget {
     this.disableEffects = false,
     this.onScrollToMessage,
     this.beforeGeneration,
+    this.showTopBorder = true,
+    this.listLayout = false,
+    this.rail = false,
   });
 
   @override
@@ -62,41 +81,57 @@ class _ChatDrawerPanelState extends ConsumerState<ChatDrawerPanel> {
     // one pencil, one meaning — so it lives in a provider rather than here:
     // the row is a sibling of this panel, out of reach of local state.
     final editing = ref.watch(chatDrawerEditingProvider);
+    final rail = widget.listLayout && widget.rail;
 
     return DrawerPanelScaffold(
       disableEffects: widget.disableEffects,
       onDismiss: widget.onClose,
-      header: _ChatDrawerHeader(
-        activeIndex: tab.index,
-        editing: editing,
-        onTabChanged: (index) {
-          ref.read(chatDrawerTabProvider.notifier).state =
-              ChatDrawerTab.values[index];
-        },
-        onToggleEditing: () =>
-            ref.read(chatDrawerEditingProvider.notifier).state = !editing,
-      ),
+      showTopBorder: widget.showTopBorder,
+      showHandle: !widget.listLayout,
+      // No room for the tabs in the strip. Their space stays empty, so the
+      // icons below keep their place.
+      header: rail
+          ? null
+          : _ChatDrawerHeader(
+              activeIndex: tab.index,
+              editing: editing,
+              onTabChanged: (index) {
+                ref.read(chatDrawerTabProvider.notifier).state =
+                    ChatDrawerTab.values[index];
+              },
+              onToggleEditing: () =>
+                  ref.read(chatDrawerEditingProvider.notifier).state = !editing,
+            ),
       // IndexedStack, not a switcher that discards the hidden tab: Tools
       // computes prompt/token stats on build, and rebuilding it on every tab
       // flip would re-run that work for nothing.
       content: IndexedStack(
-        index: tab.index,
+        // The strip is the Tools tab's: its cards are the ones that open a
+        // screen beside it.
+        index: rail ? ChatDrawerTab.tools.index : tab.index,
         sizing: StackFit.expand,
         children: [
           MagicDrawerPanel(
             charId: widget.charId,
-            editing: editing,
+            // The strip has nothing to edit, and its icons must still open.
+            editing: editing && !rail,
             onEditingRequested: _startEditing,
             onClose: widget.onClose,
             onScrollToMessage: widget.onScrollToMessage,
+            listLayout: widget.listLayout,
+            iconOnly: rail,
           ),
-          QuickRepliesPanel(
-            charId: widget.charId,
-            editing: editing,
-            onEditingRequested: _startEditing,
-            onClose: widget.onClose,
-            beforeGeneration: widget.beforeGeneration,
-          ),
+          // Not built for the strip: never shown there, an IndexedStack would
+          // still lay it out, and its rows do not fit a strip's width.
+          if (!rail)
+            QuickRepliesPanel(
+              charId: widget.charId,
+              editing: editing,
+              onEditingRequested: _startEditing,
+              onClose: widget.onClose,
+              beforeGeneration: widget.beforeGeneration,
+              listLayout: widget.listLayout,
+            ),
         ],
       ),
     );

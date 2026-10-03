@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/platform/haptics.dart';
 import '../../../core/platform/system_settings.dart';
+import '../../../shared/shell/desktop/desktop_floating_provider.dart';
 import '../../catalog/widgets/third_party_providers_screen.dart';
 import '../menu_actions.dart';
 import 'menu_search_entry.dart';
@@ -39,11 +40,14 @@ List<MenuSearchEntry> buildSettingsSearchIndex() {
     icon: icon,
     keywords: keywords,
     settingId: id,
-    open: (context) => context.push(
-      Uri(
+    open: (context) => goOrFloat(
+      context,
+      Uri(path: 'settings', queryParameters: {'highlight': id}).toString(),
+      route: Uri(
         path: '/menu/settings',
         queryParameters: {'highlight': id},
       ).toString(),
+      push: true,
     ),
   );
 
@@ -54,7 +58,7 @@ List<MenuSearchEntry> buildSettingsSearchIndex() {
       breadcrumb: [...settings, 'settings_group_appearance'.tr()],
       icon: Icons.palette_outlined,
       keywords: const ['theme', 'colors', 'тема', 'цвета', 'оформление'],
-      open: (context) => context.push('/menu/themes'),
+      open: (context) => goOrFloat(context, 'theme-settings', push: true),
     ),
     row(
       'theme_mode',
@@ -267,7 +271,7 @@ List<MenuSearchEntry> _menuEntries() {
       breadcrumb: more,
       icon: Icons.settings_outlined,
       keywords: const ['settings', 'настройки'],
-      open: (context) => context.push('/menu/settings'),
+      open: (context) => goOrFloat(context, 'settings', push: true),
     ),
     MenuSearchEntry(
       title: 'menu_third_party_providers'.tr(),
@@ -292,7 +296,11 @@ List<MenuSearchEntry> _menuEntries() {
       breadcrumb: more,
       icon: Icons.backup_outlined,
       keywords: const ['backup', 'export', 'import', 'бэкап', 'резервная'],
-      open: (context) => openBackupsSheet(context),
+      open: (context) {
+        if (!floatOnDesktop(context, 'backup', push: true)) {
+          openBackupsSheet(context);
+        }
+      },
     ),
     MenuSearchEntry(
       title: 'menu_cloud_sync'.tr(),
@@ -300,7 +308,11 @@ List<MenuSearchEntry> _menuEntries() {
       breadcrumb: more,
       icon: Icons.sync_rounded,
       keywords: const ['sync', 'cloud', 'синхронизация', 'облако'],
-      open: (context) => openCloudSyncSheet(context),
+      open: (context) {
+        if (!floatOnDesktop(context, 'sync', push: true)) {
+          openCloudSyncSheet(context);
+        }
+      },
     ),
     MenuSearchEntry(
       title: 'menu_about'.tr(),
@@ -308,28 +320,28 @@ List<MenuSearchEntry> _menuEntries() {
       breadcrumb: more,
       icon: Icons.info_outline_rounded,
       keywords: const ['version', 'версия', 'о приложении'],
-      open: (context) => context.push('/menu/about'),
+      open: (context) => goOrFloat(context, 'about', push: true),
     ),
     MenuSearchEntry(
       title: 'update_section_header'.tr(),
       breadcrumb: [...more, 'menu_about'.tr()],
       icon: Icons.system_update_alt_rounded,
       keywords: const ['update', 'обновление'],
-      open: (context) => context.push('/menu/about'),
+      open: (context) => goOrFloat(context, 'about', push: true),
     ),
     MenuSearchEntry(
       title: 'about_hall_of_fame'.tr(),
       breadcrumb: [...more, 'menu_about'.tr()],
       icon: Icons.emoji_events_outlined,
       keywords: const ['donators', 'зал славы'],
-      open: (context) => context.push('/menu/about/hall-of-fame'),
+      open: (context) => goOrFloat(context, 'hall-of-fame', push: true),
     ),
     MenuSearchEntry(
       title: 'about_license_header'.tr(),
       breadcrumb: [...more, 'menu_about'.tr()],
       icon: Icons.gavel_rounded,
       keywords: const ['agpl', 'licence', 'лицензия'],
-      open: (context) => context.push('/menu/about'),
+      open: (context) => goOrFloat(context, 'about', push: true),
     ),
     MenuSearchEntry(
       title: 'menu_glossary'.tr(),

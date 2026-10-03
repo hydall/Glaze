@@ -11,19 +11,19 @@ import '../../settings/app_settings_provider.dart';
 /// port had neither, so messages stretched the full width of a 1080p monitor.
 /// Dragging either edge resizes symmetrically and persists to settings; a width
 /// of 0 means "fill the column" and hides the grips.
+///
+/// The [child] itself is not narrowed: the chat's WebView keeps the full width,
+/// so its background is one surface edge to edge, and the messages keep to the
+/// column inside the page. The child reads the cap from [ChatColumnScope] and
+/// narrows what it lays over the WebView (the input bar, the buttons) to match.
 class ChatColumnWidth extends ConsumerStatefulWidget {
   final Widget child;
-
-  /// Painted across the full column, behind the capped child and its gutters,
-  /// so the chat's background carries edge to edge instead of stopping at the
-  /// column and leaving the app's background showing at the sides.
-  final Widget? background;
 
   static const double minWidth = 400;
   static const double maxWidth = 1600;
   static const double handleWidth = 8;
 
-  const ChatColumnWidth({super.key, required this.child, this.background});
+  const ChatColumnWidth({super.key, required this.child});
 
   @override
   ConsumerState<ChatColumnWidth> createState() => _ChatColumnWidthState();
@@ -68,46 +68,70 @@ class _ChatColumnWidthState extends ConsumerState<ChatColumnWidth> {
         ref.watch(appSettingsProvider.select((s) => s.value?.chatMaxWidth)) ??
         0;
     final width = _dragWidth ?? configured;
+    final enabled = isDesktopLayout(context) && width > 0;
 
-    if (!isDesktopLayout(context) || width <= 0) return widget.child;
-
+    // One shape whether or not the column is capped, so crossing the limit
+    // (a window resize, the setting) never remounts the chat and its WebView.
     return LayoutBuilder(
       builder: (context, constraints) {
         // Nothing to cap — and nothing to drag — when the column is already
         // narrower than the limit.
-        if (constraints.maxWidth <= width) return widget.child;
-        final gutter = (constraints.maxWidth - width) / 2;
+        final capped = enabled && constraints.maxWidth > width;
+        final gutter = capped ? (constraints.maxWidth - width) / 2 : 0.0;
         return Stack(
           children: [
-            if (widget.background != null)
-              Positioned.fill(child: IgnorePointer(child: widget.background!)),
-            Positioned(
-              left: gutter,
-              right: gutter,
-              top: 0,
-              bottom: 0,
-              child: widget.child,
+            Positioned.fill(
+              child: ChatColumnScope(
+                gutter: gutter,
+                columnWidth: capped ? width : 0,
+                child: widget.child,
+              ),
             ),
-            _Grip(
-              left: gutter - ChatColumnWidth.handleWidth / 2,
-              onStart: () => _begin(width),
-              onUpdate: (dx) => _update(dx, -1),
-              onEnd: _commit,
-            ),
-            _Grip(
-              left:
-                  constraints.maxWidth -
-                  gutter -
-                  ChatColumnWidth.handleWidth / 2,
-              onStart: () => _begin(width),
-              onUpdate: (dx) => _update(dx, 1),
-              onEnd: _commit,
-            ),
+            if (capped) ...[
+              _Grip(
+                left: gutter - ChatColumnWidth.handleWidth / 2,
+                onStart: () => _begin(width),
+                onUpdate: (dx) => _update(dx, -1),
+                onEnd: _commit,
+              ),
+              _Grip(
+                left:
+                    constraints.maxWidth -
+                    gutter -
+                    ChatColumnWidth.handleWidth / 2,
+                onStart: () => _begin(width),
+                onUpdate: (dx) => _update(dx, 1),
+                onEnd: _commit,
+              ),
+            ],
           ],
         );
       },
     );
   }
+}
+
+/// The capped chat column handed down by [ChatColumnWidth]: [columnWidth] is
+/// the width the messages keep to (0 when uncapped) and [gutter] the space left
+/// on either side of it.
+class ChatColumnScope extends InheritedWidget {
+  final double gutter;
+  final double columnWidth;
+
+  const ChatColumnScope({
+    super.key,
+    required this.gutter,
+    required this.columnWidth,
+    required super.child,
+  });
+
+  /// The scope above [context]; null outside [ChatColumnWidth].
+  static ChatColumnScope? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<ChatColumnScope>();
+
+  @override
+  bool updateShouldNotify(ChatColumnScope oldWidget) =>
+      gutter != oldWidget.gutter || columnWidth != oldWidget.columnWidth;
 }
 
 class _Grip extends StatefulWidget {

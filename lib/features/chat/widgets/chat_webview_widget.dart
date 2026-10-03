@@ -118,6 +118,11 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
   final String? chatFontDataUrl;
   final double chatFontSize;
   final double chatLetterSpacing;
+
+  /// Width the messages keep to, centred, on desktop (see [ChatColumnWidth]);
+  /// 0 lets them span the WebView. The WebView itself always spans the
+  /// column, so the chat's background is one surface edge to edge.
+  final double chatColumnWidth;
   final List<dynamic> memoryEntries;
   final List<dynamic> memoryDrafts;
   final String? sessionId;
@@ -195,6 +200,7 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
     this.chatFontDataUrl,
     this.chatFontSize = 15.0,
     this.chatLetterSpacing = 0.0,
+    this.chatColumnWidth = 0,
     this.memoryEntries = const [],
     this.memoryDrafts = const [],
     this.sessionId,
@@ -1123,6 +1129,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       chatFontDataUrl: w.chatFontDataUrl,
       chatFontSize: w.chatFontSize,
       chatLetterSpacing: w.chatLetterSpacing,
+      chatColumnWidth: w.chatColumnWidth,
       isSelectionMode: w.isSelectionMode,
       batterySaver: w.batterySaver,
       hideMessageId: w.hideMessageId,
@@ -1405,7 +1412,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
   }
 
   Map<String, String> _buildThemeMap() {
-    return ChatWebViewThemeBuilder.build(
+    final theme = ChatWebViewThemeBuilder.build(
       context,
       ChatWebViewThemeInput(
         elementOpacity: widget.elementOpacity,
@@ -1427,6 +1434,12 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
         showCharName: widget.showCharName,
       ),
     );
+    return {
+      ...theme,
+      'chat-column-width': widget.chatColumnWidth > 0
+          ? '${widget.chatColumnWidth.toStringAsFixed(1)}px'
+          : 'none',
+    };
   }
 
   Future<void> _applyThemeToBridge() async {

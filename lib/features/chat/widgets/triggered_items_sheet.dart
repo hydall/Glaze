@@ -62,11 +62,7 @@ void showTriggeredItemsSheet(
 
 void _openLorebook(BuildContext context, TriggeredEntry e) {
   Navigator.of(context, rootNavigator: true).pop();
-  Navigator.of(context).push(
-    MaterialPageRoute<void>(
-      builder: (_) => LorebookEditorScreen(lorebookId: e.lorebookId),
-    ),
-  );
+  openLorebookEditor(context, e.lorebookId);
 }
 
 class _TriggeredGroup extends StatelessWidget {

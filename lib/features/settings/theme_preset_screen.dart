@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/platform/wallpaper.dart';
 import '../../../core/services/file_export_service.dart';
+import '../../../shared/shell/desktop/desktop_floating_provider.dart';
 import '../../../shared/shell/nav_height_provider.dart';
 import '../../../shared/state/preset_sort.dart';
 import '../../../shared/theme/built_in_themes.dart';
@@ -641,9 +642,7 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
       _applyPreset(preset);
     }
     if (!mounted) return;
-    await Navigator.of(context, rootNavigator: true).push(
-      MaterialPageRoute<void>(builder: (_) => const ThemeEditorScreen()),
-    );
+    await _pushThemeEditor();
   }
 
   Future<void> _createNewTheme() async {
@@ -654,6 +653,14 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
     await ref.read(themeProvider.notifier).importPreset(preset);
     await ref.read(themeProvider.notifier).applyPreset(preset);
     if (!mounted) return;
+    await _pushThemeEditor();
+  }
+
+  /// Opens the editor on the active theme: in the desktop window this list
+  /// sits in, as every screen reached from the Menu does there, and over the
+  /// whole app on phones.
+  Future<void> _pushThemeEditor() async {
+    if (floatOnDesktop(context, 'theme-editor', push: true)) return;
     await Navigator.of(context, rootNavigator: true).push(
       MaterialPageRoute<void>(builder: (_) => const ThemeEditorScreen()),
     );

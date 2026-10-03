@@ -67,11 +67,39 @@ void main() {
     expect(find.text('panel body'), findsOneWidget);
 
     final sidebar = tester.getRect(find.byType(DesktopRightSidebar));
+    final back = tester.getRect(find.byIcon(Icons.arrow_back_ios_new_rounded));
     final firstIcon = tester.getRect(find.byType(MagicDrawerStripIcon).first);
 
-    // The first icon sits flush with the sidebar's top edge, not floated down
-    // by a centred Row.
-    expect(firstIcon.top, moreOrLessEquals(sidebar.top, epsilon: 0.5));
+    // The panel's back button tops the rail, as Vue's sheet header ran across
+    // it, and the icons stack right under its 56px row — not floated down by
+    // a centred Row.
+    expect(back.top, lessThan(sidebar.top + 56));
+    expect(back.left, lessThan(sidebar.left + 64));
+    expect(firstIcon.top, moreOrLessEquals(sidebar.top + 56, epsilon: 0.5));
+  });
+
+  testWidgets('the rail back button runs the panel back step', (tester) async {
+    await pumpSidebar(tester, withPanel: true);
+    final ref = ProviderScope.containerOf(
+      tester.element(find.byType(DesktopRightSidebar)),
+    );
+    final panel = ref.read(rightSidebarPanelProvider)!;
+
+    // A screen's own step comes first...
+    var steps = 0;
+    final owner = Object();
+    panel.back.claim(owner, () => steps++);
+    await tester.tap(find.byIcon(Icons.arrow_back_ios_new_rounded));
+    await tester.pumpAndSettle();
+    expect(steps, 1);
+    expect(ref.read(rightSidebarPanelProvider), same(panel));
+
+    // ...and with none claimed, back closes the panel.
+    panel.back.release(owner);
+    await tester.tap(find.byIcon(Icons.arrow_back_ios_new_rounded));
+    await tester.pumpAndSettle();
+    expect(ref.read(rightSidebarPanelProvider), isNull);
+    expect(find.text('panel body'), findsNothing);
   });
 
   testWidgets('the collapsed strip also starts at the top', (tester) async {

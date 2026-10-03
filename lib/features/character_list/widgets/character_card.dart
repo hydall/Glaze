@@ -17,6 +17,7 @@ import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_error_dialog.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../character_detail_screen.dart';
+import '../character_editor_screen.dart';
 import 'character_hiding_onboarding_sheet.dart';
 import 'character_variations_sheet.dart';
 import '../../../shared/widgets/variation_chip.dart';
@@ -457,7 +458,7 @@ class _CharacterCardState extends ConsumerState<CharacterCard>
           label: 'action_edit'.tr(),
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
-            context.push('/character/${character.id}/edit');
+            openCharacterEditor(context, character.id);
           },
         ),
         // Renaming and duplicating are per-variation, so they only belong to a

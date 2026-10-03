@@ -1134,6 +1134,7 @@ ChatWebViewWidgetFields _fields({
   chatFontDataUrl: null,
   chatFontSize: 16,
   chatLetterSpacing: 0,
+  chatColumnWidth: 0,
   isSelectionMode: false,
   batterySaver: false,
   hideMessageId: false,

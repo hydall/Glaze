@@ -8,6 +8,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/services/chat_import_export.dart';
+import '../../../shared/shell/desktop/desktop_layout_provider.dart';
+import '../../../shared/shell/desktop/sidebar_sheet_provider.dart';
 import '../../../shared/widgets/glaze_error_dialog.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../character_list/character_detail_screen.dart';
@@ -53,6 +55,16 @@ class DrawerItemLauncher {
   /// Runs the card named [itemId]. Unknown ids are ignored — a stored layout or
   /// a pinned button may still name a card this build has dropped.
   Future<void> open(BuildContext context, String itemId) async {
+    // On desktop the drawer lives in the right sidebar, and a card opens there
+    // too: as a panel beside the strip, which a second tap on the card closes.
+    // Editors inside those screens open in windows of their own.
+    if (isDesktopLayout(context)) {
+      final panel = _sidebarPanel(itemId);
+      if (panel != null) {
+        togglePanelInRightSidebar(ref, panel);
+        return;
+      }
+    }
     switch (itemId) {
       case 'inspector':
         await showPromptInspectorSheet(context, charId);
@@ -142,6 +154,41 @@ class DrawerItemLauncher {
     }
   }
 
+  /// The card's screen as a desktop right-sidebar panel, or null for one that
+  /// stays a window there: the character card, with its own actions and its
+  /// editor to open.
+  ///
+  /// Everything read here is read now: the builders run once the panel mounts,
+  /// by which time the drawer that launched it may be gone, and [ref] with it.
+  SidebarPanel? _sidebarPanel(String itemId) {
+    final charId = this.charId;
+    final sessionId = ref.read(chatProvider(charId)).value?.session?.id;
+    final WidgetBuilder? builder = switch (itemId) {
+      'inspector' => (_) => PromptInspectorSheet(charId: charId),
+      'memory' => (_) => MemorySheet(charId: charId),
+      'sessions' => (_) => SessionPickerPanel(
+        charId: charId,
+        onPicked: (context, panelRef, result) =>
+            applySessionPick(context, panelRef, charId, result),
+      ),
+      'lorebooks' => (_) => const LorebookListScreen(startExpanded: true),
+      'regex' => (_) => const RegexSheet(startExpanded: true),
+      'api' => (_) => const ApiSettingsScreen(startExpanded: true),
+      'presets' => (_) => PresetListScreen(startExpanded: true, charId: charId),
+      'personas' => (_) => const PersonaListScreen(startExpanded: true),
+      'image-gen' => (_) => ImageGenSheet(charId: charId),
+      'authors-note' => (_) => AuthorsNoteSheet(charId: charId),
+      'glossary' => (_) => const GlossarySheet(startExpanded: true),
+      'ext-blocks' => (_) => const ExtBlocksSettingsSheet(),
+      'agent-ops' => (_) => AgenticOperationsLogDialog(
+        sessionId: sessionId,
+        characterId: charId,
+      ),
+      _ => null,
+    };
+    return builder == null ? null : SidebarPanel(id: itemId, builder: builder);
+  }
+
   Future<void> _showAgentOpsLog(BuildContext context) async {
     final session = ref.read(chatProvider(charId)).value?.session;
     final route = await AgenticOperationsLogDialog.show(
@@ -166,81 +213,99 @@ class DrawerItemLauncher {
     // the open chat in place instead of routing to it.
     final result = await showSessionPickerSheet(context, charId: charId);
     if (result == null || !context.mounted) return;
-    switch (result.action) {
-      case SessionPickerAction.open:
-        final target = result.session!.sessionIndex;
-        final current = ref
-            .read(chatProvider(charId))
-            .value
-            ?.session
-            ?.sessionIndex;
-        if (target == current) return;
-        try {
-          await ref
-              .read(chatProvider(charId).notifier)
-              .switchSession(target)
-              .timeout(const Duration(seconds: 30));
-        } catch (error) {
-          if (context.mounted) {
-            GlazeErrorDialog.show(
-              context,
-              error,
-              prefix: 'error_switch_chat_session_failed'.tr(),
-            );
-          }
-        }
-      case SessionPickerAction.newSession:
-        await ref.read(chatProvider(charId).notifier).newSession();
-      case SessionPickerAction.importChat:
-        await _importChat(context);
-    }
+    await applySessionPick(context, ref, charId, result);
   }
+}
 
-  Future<void> _importChat(BuildContext context) async {
-    final result = await FilePicker.pickFiles(
-      type: Platform.isIOS ? FileType.any : FileType.custom,
-      allowedExtensions: Platform.isIOS ? null : ['jsonl', 'json'],
-      allowMultiple: false,
-      withData: false,
+/// Carries out what was picked in the session picker for [charId]'s chat:
+/// switches to that session, starts a new one, or imports a chat file.
+///
+/// Takes the [ref] of whoever holds the picker — the drawer for the sheet, the
+/// panel itself on desktop, which outlives the drawer that opened it.
+Future<void> applySessionPick(
+  BuildContext context,
+  WidgetRef ref,
+  String charId,
+  SessionPickerResult result,
+) async {
+  switch (result.action) {
+    case SessionPickerAction.open:
+      final target = result.session!.sessionIndex;
+      final current = ref
+          .read(chatProvider(charId))
+          .value
+          ?.session
+          ?.sessionIndex;
+      if (target == current) return;
+      try {
+        await ref
+            .read(chatProvider(charId).notifier)
+            .switchSession(target)
+            .timeout(const Duration(seconds: 30));
+      } catch (error) {
+        if (context.mounted) {
+          GlazeErrorDialog.show(
+            context,
+            error,
+            prefix: 'error_switch_chat_session_failed'.tr(),
+          );
+        }
+      }
+    case SessionPickerAction.newSession:
+      await ref.read(chatProvider(charId).notifier).newSession();
+    case SessionPickerAction.importChat:
+      await _importChat(context, ref, charId);
+  }
+}
+
+Future<void> _importChat(
+  BuildContext context,
+  WidgetRef ref,
+  String charId,
+) async {
+  final result = await FilePicker.pickFiles(
+    type: Platform.isIOS ? FileType.any : FileType.custom,
+    allowedExtensions: Platform.isIOS ? null : ['jsonl', 'json'],
+    allowMultiple: false,
+    withData: false,
+  );
+  if (result == null || result.files.isEmpty) return;
+  final file = result.files.first;
+  final filePath = file.path;
+  try {
+    ChatImportSaveResult saveResult;
+    if (file.bytes != null) {
+      final importResult = importChatFromJsonlString(utf8.decode(file.bytes!));
+      saveResult = await ref
+          .read(chatActionsServiceProvider)
+          .importChatFromResult(charId, importResult);
+    } else if (filePath != null) {
+      saveResult = await ref
+          .read(chatActionsServiceProvider)
+          .importChat(charId, filePath);
+    } else {
+      return;
+    }
+    if (!context.mounted) return;
+    final count = saveResult.count;
+    final sessionIndex = saveResult.sessionIndex;
+    if (count > 0 && sessionIndex != null) {
+      // The sessions sheet has already resolved and closed itself by the
+      // time this runs (`showSessionPickerSheet` pops with the picked
+      // action), so there is nothing left here to pop.
+      context.go('/chat/$charId?session=$sessionIndex');
+    }
+    GlazeToast.show(
+      context,
+      count == 0 ? 'No messages found in file' : 'Imported $count messages',
     );
-    if (result == null || result.files.isEmpty) return;
-    final file = result.files.first;
-    final filePath = file.path;
-    try {
-      ChatImportSaveResult saveResult;
-      if (file.bytes != null) {
-        final importResult = importChatFromJsonlString(utf8.decode(file.bytes!));
-        saveResult = await ref
-            .read(chatActionsServiceProvider)
-            .importChatFromResult(charId, importResult);
-      } else if (filePath != null) {
-        saveResult = await ref
-            .read(chatActionsServiceProvider)
-            .importChat(charId, filePath);
-      } else {
-        return;
-      }
-      if (!context.mounted) return;
-      final count = saveResult.count;
-      final sessionIndex = saveResult.sessionIndex;
-      if (count > 0 && sessionIndex != null) {
-        // The sessions sheet has already resolved and closed itself by the
-        // time this runs (`showSessionPickerSheet` pops with the picked
-        // action), so there is nothing left here to pop.
-        context.go('/chat/$charId?session=$sessionIndex');
-      }
-      GlazeToast.show(
+  } catch (e) {
+    if (context.mounted) {
+      GlazeErrorDialog.show(
         context,
-        count == 0 ? 'No messages found in file' : 'Imported $count messages',
+        e,
+        prefix: 'error_import_failed_prefix'.tr(),
       );
-    } catch (e) {
-      if (context.mounted) {
-        GlazeErrorDialog.show(
-          context,
-          e,
-          prefix: 'error_import_failed_prefix'.tr(),
-        );
-      }
     }
   }
 }

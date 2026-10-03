@@ -10,6 +10,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:easy_localization/easy_localization.dart';
 
+import '../../shared/shell/desktop/desktop_floating_provider.dart';
+import '../../shared/shell/desktop/desktop_layout_provider.dart';
 import '../../shared/shell/desktop/sidebar_sheet_provider.dart';
 import '../../core/models/folder.dart';
 import '../../core/models/preset.dart';
@@ -27,6 +29,7 @@ import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/folder_section.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
+import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/list_controls.dart';
@@ -92,6 +95,21 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     bool isStudio = false,
     Set<String> studioStages = const {},
   }) {
+    // On desktop the script opens in a window of its own beside the list,
+    // rather than in its place.
+    if (isDesktopLayout(context)) {
+      openRegexEditorWindow(
+        context,
+        script.id,
+        isStudio
+            ? RegexScope.studio
+            : isPreset
+            ? RegexScope.preset
+            : RegexScope.global,
+        presetId: isPreset ? _effectivePresetId : null,
+      );
+      return;
+    }
     setState(() {
       _isForward = true;
       _activeScript = script;
@@ -153,29 +171,17 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     });
   }
 
-  Future<void> _saveActiveScript(PresetRegex script) async {
-    if (_isStudioScript) {
-      await ref
-          .read(studioRegexProvider.notifier)
-          .updateRegex(
-            StudioRegex(script: script, stages: _activeStudioStages),
-          );
-    } else if (_isPresetScript) {
-      final pid = _effectivePresetId;
-      if (pid == null) return;
-      final presets = ref.read(presetListProvider).value ?? [];
-      final preset = presets.where((p) => p.id == pid).firstOrNull;
-      if (preset == null) return;
-      final updated = preset.regexes
-          .map((r) => r.id == script.id ? script : r)
-          .toList();
-      await ref
-          .read(presetListProvider.notifier)
-          .updatePreset(preset.copyWith(regexes: updated));
-    } else {
-      await ref.read(globalRegexProvider.notifier).updateRegex(script);
-    }
-  }
+  Future<void> _saveActiveScript(PresetRegex script) => _writeRegexScript(
+    ref,
+    script,
+    _isStudioScript
+        ? RegexScope.studio
+        : _isPresetScript
+        ? RegexScope.preset
+        : RegexScope.global,
+    presetId: _effectivePresetId,
+    studioStages: _activeStudioStages,
+  );
 
   Future<void> _setStudioStages(Set<String> stages) async {
     final script = _activeScript;
@@ -901,6 +907,188 @@ class _EmptyState extends StatelessWidget {
           'no_results'.tr(),
           style: TextStyle(color: context.cs.onSurfaceVariant),
         ),
+      ),
+    );
+  }
+}
+
+// ── Where a script lives ───────────────────────────────────────────────────────
+
+/// Where a regex script lives, which decides where its edits are written.
+enum RegexScope { global, preset, studio }
+
+/// Writes [script] back where it lives: the global list, preset [presetId]'s
+/// scripts, or Studio's (with its [studioStages]).
+Future<void> _writeRegexScript(
+  WidgetRef ref,
+  PresetRegex script,
+  RegexScope scope, {
+  String? presetId,
+  Set<String> studioStages = const {},
+}) async {
+  switch (scope) {
+    case RegexScope.studio:
+      await ref
+          .read(studioRegexProvider.notifier)
+          .updateRegex(StudioRegex(script: script, stages: studioStages));
+    case RegexScope.preset:
+      if (presetId == null) return;
+      final presets = ref.read(presetListProvider).value ?? [];
+      final preset = presets.where((p) => p.id == presetId).firstOrNull;
+      if (preset == null) return;
+      final updated = preset.regexes
+          .map((r) => r.id == script.id ? script : r)
+          .toList();
+      await ref
+          .read(presetListProvider.notifier)
+          .updatePreset(preset.copyWith(regexes: updated));
+    case RegexScope.global:
+      await ref.read(globalRegexProvider.notifier).updateRegex(script);
+  }
+}
+
+// ── Desktop window ─────────────────────────────────────────────────────────────
+
+/// Opens script [scriptId]'s editor in a desktop floating window of its own
+/// (opening one already open brings it to the front).
+void openRegexEditorWindow(
+  BuildContext context,
+  String scriptId,
+  RegexScope scope, {
+  String? presetId,
+}) {
+  floatOnDesktop(
+    context,
+    Uri(
+      path: 'regex-editor',
+      queryParameters: {
+        'id': scriptId,
+        'scope': scope.name,
+        'preset': ?presetId,
+      },
+    ).toString(),
+  );
+}
+
+/// A regex script's editor in a desktop floating window (`regex-editor`). It
+/// reads the script from where it lives and writes edits back there, so it
+/// needs nothing from the list it was opened from.
+class RegexEditorWindow extends ConsumerStatefulWidget {
+  final String scriptId;
+  final RegexScope scope;
+  final String? presetId;
+
+  const RegexEditorWindow({
+    super.key,
+    required this.scriptId,
+    required this.scope,
+    this.presetId,
+  });
+
+  @override
+  ConsumerState<RegexEditorWindow> createState() => _RegexEditorWindowState();
+}
+
+class _RegexEditorWindowState extends ConsumerState<RegexEditorWindow> {
+  /// The script as last edited here; null until it has been found.
+  PresetRegex? _script;
+  Set<String> _stages = const {};
+  Timer? _saveTimer;
+
+  /// The script where it lives, watched until it shows up — a script created a
+  /// moment ago may not be in its list yet when the window opens.
+  ({PresetRegex script, Set<String> stages})? _find() {
+    final id = widget.scriptId;
+    switch (widget.scope) {
+      case RegexScope.global:
+        final script = ref
+            .watch(globalRegexProvider)
+            .value
+            ?.where((r) => r.id == id)
+            .firstOrNull;
+        return script == null ? null : (script: script, stages: const {});
+      case RegexScope.preset:
+        final preset = ref
+            .watch(presetListProvider)
+            .value
+            ?.where((p) => p.id == widget.presetId)
+            .firstOrNull;
+        final script = preset?.regexes.where((r) => r.id == id).firstOrNull;
+        return script == null ? null : (script: script, stages: const {});
+      case RegexScope.studio:
+        final entry = ref
+            .watch(studioRegexProvider)
+            .value
+            ?.where((r) => r.script.id == id)
+            .firstOrNull;
+        return entry == null
+            ? null
+            : (script: entry.script, stages: entry.stages);
+    }
+  }
+
+  void _onChanged(PresetRegex updated) {
+    _script = updated;
+    _saveTimer?.cancel();
+    _saveTimer = Timer(const Duration(milliseconds: 500), _save);
+  }
+
+  void _save() {
+    final script = _script;
+    if (script == null || !mounted) return;
+    _writeRegexScript(
+      ref,
+      script,
+      widget.scope,
+      presetId: widget.presetId,
+      studioStages: _stages,
+    );
+  }
+
+  Future<void> _setStages(Set<String> stages) async {
+    setState(() => _stages = stages);
+    final script = _script;
+    if (script == null) return;
+    await ref
+        .read(studioRegexProvider.notifier)
+        .updateRegex(StudioRegex(script: script, stages: stages));
+  }
+
+  @override
+  void deactivate() {
+    // Closing the window must not drop the last edit still waiting on the
+    // debounce; ref is still usable here, unlike in dispose().
+    if (_saveTimer?.isActive ?? false) {
+      _saveTimer!.cancel();
+      _save();
+    }
+    super.deactivate();
+  }
+
+  @override
+  void dispose() {
+    _saveTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_script == null) {
+      final found = _find();
+      if (found == null) return const Center(child: GlazeSpinner());
+      _script = found.script;
+      _stages = found.stages;
+    }
+    final studio = widget.scope == RegexScope.studio;
+    return SheetView(
+      title: 'regex_editor'.tr(),
+      showRouteBackground: false,
+      body: _RegexEditView(
+        key: ValueKey(widget.scriptId),
+        script: _script!,
+        onChanged: _onChanged,
+        studioStages: studio ? _stages : null,
+        onStudioStagesChanged: studio ? _setStages : null,
       ),
     );
   }

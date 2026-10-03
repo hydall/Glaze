@@ -6,12 +6,29 @@ import 'desktop_layout_provider.dart';
 import 'desktop_window_geometry.dart';
 
 /// Views that open as desktop floating windows instead of taking over the
-/// middle column, keyed by the route segment they correspond to on mobile.
-const desktopFloatingViews = <String, String>{
+/// middle column or the whole app, each with the route it corresponds to on
+/// mobile — or null for a screen phones push without a route of its own, which
+/// its caller then does itself (see [floatOnDesktop]).
+///
+/// A view id may carry arguments as a query, `settings?highlight=language`;
+/// [desktopViewName] is the id without them.
+const desktopFloatingViews = <String, String?>{
   'menu': '/menu',
   'settings': '/menu/settings',
   'theme-settings': '/menu/themes',
+  'theme-editor': null,
+  'third-party-providers': null,
+  // `?id=<character>`, or `?new=<id>` for a character not yet created.
+  'character-editor': null,
+  // `?preset=<id>&block=<id>`: works on the preset editor it was opened from.
+  'preset-block': null,
+  // `?id=<persona>`, or `?new=<id>` for a persona not yet created.
+  'persona-editor': null,
+  'lorebook-editor': null,
+  // `?id=<script>&scope=global|preset|studio[&preset=<id>]`.
+  'regex-editor': null,
   'about': '/menu/about',
+  'hall-of-fame': '/menu/about/hall-of-fame',
   'sync': '/sync',
   'backup': '/menu/settings',
 };
@@ -85,12 +102,7 @@ class DesktopWindowsNotifier extends Notifier<List<DesktopWindow>> {
   bool get isOpen => state.isNotEmpty;
 
   /// The window keyboard shortcuts act on: the topmost one not minimized.
-  DesktopWindow? get focused {
-    for (final window in state.reversed) {
-      if (!window.minimized) return window;
-    }
-    return null;
-  }
+  DesktopWindow? get focused => topmostVisibleWindow(state);
 
   DesktopWindow? byId(int id) {
     for (final window in state) {
@@ -158,6 +170,15 @@ class DesktopWindowsNotifier extends Notifier<List<DesktopWindow>> {
       for (final w in state)
         if (w.id != id) w,
     ];
+  }
+
+  /// Closes every window [test] holds for. Safe to call late, from a
+  /// callback that may outlive the app (a disposed screen's cleanup).
+  void closeWhere(bool Function(DesktopWindow window) test) {
+    if (!ref.mounted) return;
+    for (final window in [...state]) {
+      if (test(window)) close(window.id);
+    }
   }
 
   void closeAll() {
@@ -281,9 +302,8 @@ class DesktopWindowScope extends InheritedWidget {
     required super.child,
   });
 
-  static int? idOf(BuildContext context) => context
-      .getInheritedWidgetOfExactType<DesktopWindowScope>()
-      ?.windowId;
+  static int? idOf(BuildContext context) =>
+      context.getInheritedWidgetOfExactType<DesktopWindowScope>()?.windowId;
 
   @override
   bool updateShouldNotify(DesktopWindowScope oldWidget) =>
@@ -295,33 +315,77 @@ class DesktopWindowScope extends InheritedWidget {
 /// `kDetachedChromeBranch` so it cannot collide with it or a real branch.
 int desktopWindowHeaderBranch(int windowId) => -1000 - windowId;
 
-bool isDesktopFloatingView(String viewId) =>
-    desktopFloatingViews.containsKey(viewId);
+/// The topmost window of [windows] (back to front) that is not minimized.
+DesktopWindow? topmostVisibleWindow(List<DesktopWindow> windows) {
+  for (final window in windows.reversed) {
+    if (!window.minimized) return window;
+  }
+  return null;
+}
 
-/// Opens [viewId] in a floating window on desktop, or navigates to its route
-/// on phones.
+/// [viewId] without the arguments it may carry (`settings?highlight=x` →
+/// `settings`).
+String desktopViewName(String viewId) => Uri.parse(viewId).path;
+
+bool isDesktopFloatingView(String viewId) =>
+    desktopFloatingViews.containsKey(desktopViewName(viewId));
+
+/// Opens [viewId] in a floating window when the desktop layout is up, and
+/// returns whether it did; on phones it does nothing and returns false, so the
+/// caller navigates there the phone's way.
 ///
 /// [push] stacks the view onto the window [context] sits in (a menu item
 /// drilling in); otherwise the view is brought up in a window of its own.
 /// Holding Ctrl (Cmd on macOS) always opens a new window.
+bool floatOnDesktop(BuildContext context, String viewId, {bool push = false}) {
+  if (!isDesktopLayout(context) || !isDesktopFloatingView(viewId)) {
+    return false;
+  }
+  final windows = ProviderScope.containerOf(
+    context,
+    listen: false,
+  ).read(desktopWindowsProvider.notifier);
+  final windowId = DesktopWindowScope.idOf(context);
+  final newWindow = isNewWindowModifierPressed;
+  if (push && windowId != null && !newWindow) {
+    windows.push(windowId, viewId);
+  } else {
+    windows.open(viewId, newWindow: newWindow);
+  }
+  return true;
+}
+
+/// Opens [viewId] in a floating window on desktop (see [floatOnDesktop]), or
+/// navigates to its route on phones.
 void goOrFloat(
   BuildContext context,
-  WidgetRef ref,
   String viewId, {
   String? route,
   bool push = false,
 }) {
-  final target = route ?? desktopFloatingViews[viewId] ?? '/$viewId';
-  if (isDesktopLayout(context) && isDesktopFloatingView(viewId)) {
-    final windows = ref.read(desktopWindowsProvider.notifier);
-    final windowId = DesktopWindowScope.idOf(context);
-    final newWindow = isNewWindowModifierPressed;
-    if (push && windowId != null && !newWindow) {
-      windows.push(windowId, viewId);
-    } else {
-      windows.open(viewId, newWindow: newWindow);
-    }
-    return;
-  }
-  context.push(target);
+  if (floatOnDesktop(context, viewId, push: push)) return;
+  context.push(route ?? desktopFloatingViews[viewId] ?? '/$viewId');
+}
+
+/// Whether a floating window opened from [context] would be seen: not from a
+/// route pushed over the whole app (a sheet window, a dialog, a full-screen
+/// page), which covers the shell the floating windows are drawn in.
+bool floatingWindowsVisibleFrom(BuildContext context) {
+  final route = ModalRoute.of(context);
+  if (route == null) return true;
+  return route.navigator != Navigator.maybeOf(context, rootNavigator: true) ||
+      route.isFirst;
+}
+
+/// Steps the floating window [context] sits in back one view, closing it from
+/// its root. Returns false outside a window, where the caller goes back its own
+/// way.
+bool popDesktopWindow(BuildContext context) {
+  final windowId = DesktopWindowScope.idOf(context);
+  if (windowId == null) return false;
+  ProviderScope.containerOf(
+    context,
+    listen: false,
+  ).read(desktopWindowsProvider.notifier).pop(windowId);
+  return true;
 }

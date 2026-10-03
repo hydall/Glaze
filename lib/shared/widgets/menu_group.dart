@@ -6,6 +6,7 @@ import '../../core/platform/haptics.dart';
 import '../theme/app_colors.dart';
 import '../shell/shell_header_provider.dart';
 import 'glass_surface.dart';
+import 'glow_ripple.dart';
 import 'help_tip.dart';
 import 'glaze_switch.dart';
 
@@ -49,44 +50,42 @@ class _MenuCollapsibleSectionState extends State<MenuCollapsibleSection> {
   Widget build(BuildContext context) {
     final flat = DetachedShellHost.drawsChrome(context);
     final radius = flat ? BorderRadius.zero : BorderRadius.circular(20);
-    final surface = GlassSurface(
-      enableRipple: true,
-      borderRadius: radius,
-      border: flat
-          ? Border(bottom: BorderSide(color: context.cs.outlineVariant))
-          : Border.all(color: context.cs.outlineVariant),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          InkWell(
-            // Only the top corners round while the section is open: the card
-            // continues past the header into its own content.
-            borderRadius: _expanded
-                ? BorderRadius.vertical(top: radius.topLeft)
-                : radius,
-            onTap: () {
-              Haptics.selectionClick();
-              setState(() => _expanded = !_expanded);
-            },
-            child: _buildHeader(context),
-          ),
-          // The children are laid out inside this card, so they must not draw
-          // cards of their own. The last one also drops its separator rule,
-          // which would otherwise double up against the card's own edge.
-          if (_expanded)
-            for (var i = 0; i < widget.children.length; i++)
-              MenuGroupNesting(
-                showDivider: i < widget.children.length - 1,
-                child: widget.children[i],
-              ),
-        ],
-      ),
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        InkWell(
+          // Only the top corners round while the section is open: the card
+          // continues past the header into its own content.
+          borderRadius: _expanded
+              ? BorderRadius.vertical(top: radius.topLeft)
+              : radius,
+          onTap: () {
+            Haptics.selectionClick();
+            setState(() => _expanded = !_expanded);
+          },
+          child: _buildHeader(context),
+        ),
+        // The children are laid out inside this card, so they must not draw
+        // cards of their own. The last one also drops its separator rule,
+        // which would otherwise double up against the card's own edge.
+        if (_expanded)
+          for (var i = 0; i < widget.children.length; i++)
+            MenuGroupNesting(
+              showDivider: i < widget.children.length - 1,
+              child: widget.children[i],
+            ),
+      ],
     );
 
-    if (flat) return surface;
+    if (flat) return _FlatGroupSurface(child: content);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-      child: surface,
+      child: GlassSurface(
+        enableRipple: true,
+        borderRadius: radius,
+        border: Border.all(color: context.cs.outlineVariant),
+        child: content,
+      ),
     );
   }
 
@@ -144,6 +143,36 @@ class _MenuCollapsibleSectionState extends State<MenuCollapsibleSection> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// A group's surface inside a host that draws its own frame (see
+/// [DetachedShellHost.drawsChrome]): the rule under it and the tap glow, but
+/// no glass. The window's own fill is already under it, and a second tint
+/// over that marked out a lighter band exactly as tall as the groups, with
+/// the bare window showing below the last one.
+class _FlatGroupSurface extends StatelessWidget {
+  final Widget child;
+
+  const _FlatGroupSurface({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return GlowRippleOverlay(
+      glowColor: context.cs.primary,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: context.cs.outlineVariant)),
+        ),
+        // What a [GlassSurface] gives its content: a Material the rows' ink
+        // lands on (the window's own sits under the screen's fill), and glass
+        // inside that blurs on its own rather than joining the list's group.
+        child: Material(
+          type: MaterialType.transparency,
+          child: GlassBackdropGroup.none(child: child),
+        ),
       ),
     );
   }
@@ -250,12 +279,7 @@ class MenuGroup extends StatelessWidget {
     // edge to edge — no side gutters, no left/right edges, no rounding — and
     // only the rule under it separates one group from the next.
     if (DetachedShellHost.drawsChrome(context)) {
-      return GlassSurface(
-        enableRipple: true,
-        borderRadius: BorderRadius.zero,
-        border: Border(bottom: BorderSide(color: context.cs.outlineVariant)),
-        child: body,
-      );
+      return _FlatGroupSurface(child: body);
     }
 
     return Padding(
@@ -596,6 +620,12 @@ class MenuFieldItem extends StatelessWidget {
   /// field actually differs from that default.
   final VoidCallback? onReset;
 
+  /// Stretches the input to the height this item is given, text starting at
+  /// the top, instead of sizing it by its lines. Only for an item laid out
+  /// with a bounded height (an [Expanded] one); [maxLines] and [minLines] are
+  /// ignored then.
+  final bool expands;
+
   const MenuFieldItem({
     super.key,
     required this.label,
@@ -614,10 +644,66 @@ class MenuFieldItem extends StatelessWidget {
     this.helper,
     this.helperIsError = false,
     this.onReset,
+    this.expands = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    final input = Row(
+      crossAxisAlignment: expands
+          ? CrossAxisAlignment.stretch
+          : CrossAxisAlignment.center,
+      children: [
+        if (onReset != null) ...[
+          _ResetToDefaultButton(onPressed: onReset!),
+          const SizedBox(width: 6),
+        ],
+        Expanded(
+          child: TextField(
+            controller: controller,
+            obscureText: obscure,
+            keyboardType: keyboardType,
+            inputFormatters: inputFormatters,
+            onChanged: onChanged,
+            maxLines: expands ? null : maxLines,
+            minLines: expands ? null : minLines,
+            expands: expands,
+            textAlignVertical: expands ? TextAlignVertical.top : null,
+            style: TextStyle(color: context.cs.onSurface, fontSize: 15),
+            decoration: InputDecoration(
+              hintText: placeholder,
+              hintStyle: TextStyle(
+                color: context.cs.onSurfaceVariant.withValues(alpha: 0.4),
+              ),
+              filled: true,
+              fillColor: context.inputFill,
+              suffixIcon: suffix,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: context.cs.outlineVariant),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: context.cs.outlineVariant),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(
+                  color: context.cs.primary.withValues(alpha: 0.5),
+                  width: 1.5,
+                ),
+              ),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 13,
+              ),
+              isDense: true,
+            ),
+          ),
+        ),
+      ],
+    );
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
       child: Column(
@@ -660,55 +746,7 @@ class MenuFieldItem extends StatelessWidget {
             ),
           ],
           const SizedBox(height: 6),
-          Row(
-            children: [
-              if (onReset != null) ...[
-                _ResetToDefaultButton(onPressed: onReset!),
-                const SizedBox(width: 6),
-              ],
-              Expanded(
-                child: TextField(
-                  controller: controller,
-                  obscureText: obscure,
-                  keyboardType: keyboardType,
-                  inputFormatters: inputFormatters,
-                  onChanged: onChanged,
-                  maxLines: maxLines,
-                  minLines: minLines,
-                  style: TextStyle(color: context.cs.onSurface, fontSize: 15),
-                  decoration: InputDecoration(
-                    hintText: placeholder,
-                    hintStyle: TextStyle(
-                      color: context.cs.onSurfaceVariant.withValues(alpha: 0.4),
-                    ),
-                    filled: true,
-                    fillColor: context.inputFill,
-                    suffixIcon: suffix,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(color: context.cs.outlineVariant),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(color: context.cs.outlineVariant),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(
-                        color: context.cs.primary.withValues(alpha: 0.5),
-                        width: 1.5,
-                      ),
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 13,
-                    ),
-                    isDense: true,
-                  ),
-                ),
-              ),
-            ],
-          ),
+          if (expands) Expanded(child: input) else input,
           if (helper != null && helper!.isNotEmpty) ...[
             const SizedBox(height: 6),
             Text(

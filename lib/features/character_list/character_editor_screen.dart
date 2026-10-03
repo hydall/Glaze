@@ -13,6 +13,7 @@ import '../../core/state/db_provider.dart';
 import '../../core/utils/id_generator.dart';
 import '../../core/utils/time_helpers.dart';
 import '../../core/state/lorebook_provider.dart';
+import '../../shared/shell/desktop/desktop_floating_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/sheet_view.dart';
@@ -20,6 +21,30 @@ import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/generic_editor.dart';
 import '../../shared/widgets/help_tip.dart';
+
+/// Opens the editor for character [charId]: on desktop in a floating window of
+/// its own, which leaves the rest of the app usable and can sit beside other
+/// editors (opening one already open brings it to the front); on phones as the
+/// editor's route.
+Future<void> openCharacterEditor(BuildContext context, String charId) async {
+  final view = Uri(
+    path: 'character-editor',
+    queryParameters: {'id': charId},
+  ).toString();
+  if (floatOnDesktop(context, view)) return;
+  await context.push<void>('/character/$charId/edit');
+}
+
+/// Opens a blank editor for a new character, the way [openCharacterEditor]
+/// opens an existing one.
+Future<void> openCharacterCreator(BuildContext context) async {
+  final view = Uri(
+    path: 'character-editor',
+    queryParameters: {'new': generateId()},
+  ).toString();
+  if (floatOnDesktop(context, view)) return;
+  await context.push<void>('/character/create');
+}
 
 class CharacterEditorScreen extends ConsumerStatefulWidget {
   final String charId;
@@ -116,6 +141,8 @@ class _CharacterEditorScreenState extends ConsumerState<CharacterEditorScreen> {
   }
 
   void _goBack() {
+    // A desktop window: close it.
+    if (popDesktopWindow(context)) return;
     if (context.canPop()) {
       context.pop();
     } else {

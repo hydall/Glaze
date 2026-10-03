@@ -632,6 +632,10 @@ class JanitorWebViewProxy {
   bool _active = false;
   Timer? _shutdownTimer;
 
+  /// Requests and captures queued on [_gate] or running. The WebView is never
+  /// torn down under one of them.
+  int _pending = 0;
+
   /// Called by the catalog UI to mark the JanitorAI catalog visible/hidden.
   /// On hide we tear the WebView down after a short grace period (debounces the
   /// branch cross-fade and sub-tab toggles); on show we just cancel any pending
@@ -643,14 +647,47 @@ class JanitorWebViewProxy {
       if (!_active) _log('catalog active');
       _active = true;
     } else {
-      if (!_active) return;
+      if (_active) _log('catalog hidden — scheduling shutdown');
       _active = false;
-      _log('catalog hidden — scheduling shutdown');
-      _shutdownTimer?.cancel();
-      _shutdownTimer = Timer(const Duration(seconds: 3), () {
-        if (!_active) dispose();
-      });
+      // Even when the catalog was never shown: its first page loads at launch
+      // (the character list reads the catalog's state), and that load starts
+      // the WebView with nobody around to mark the catalog hidden later.
+      _scheduleIdleShutdown();
     }
+  }
+
+  /// Tears the WebView down a short grace period after it was last needed —
+  /// with the catalog out of sight and no request left on [_gate]. Without
+  /// this a request made while the catalog is hidden (the launch-time first
+  /// page, a lorebook lookup) left a janitorai.com page running in the
+  /// background for the rest of the session, a few hundred MB and a steady
+  /// slice of CPU.
+  void _scheduleIdleShutdown() {
+    if (_active || _pending > 0) return;
+    if (_webView == null && _starting == null) return;
+    _shutdownTimer?.cancel();
+    _shutdownTimer = Timer(const Duration(seconds: 3), () {
+      if (!_active && _pending == 0) dispose();
+    });
+  }
+
+  /// Queues [task] on [_gate], holding the WebView up until it is done.
+  Future<T> _enqueue<T>(Future<T> Function() task) {
+    final completer = Completer<T>();
+    _pending++;
+    _shutdownTimer?.cancel();
+    _shutdownTimer = null;
+    _gate = _gate.then((_) async {
+      try {
+        completer.complete(await task());
+      } catch (e, st) {
+        completer.completeError(e, st);
+      } finally {
+        _pending--;
+        _scheduleIdleShutdown();
+      }
+    });
+    return completer.future;
   }
 
   /// Fetches [url] (must be a janitorai.com URL) from inside the WebView session
@@ -660,17 +697,8 @@ class JanitorWebViewProxy {
   /// [method] defaults to GET; pass e.g. `'PATCH'` with a JSON [body] string to
   /// mutate account data (the body is sent as `application/json`). Mutating
   /// requests need an account session — the bearer token is attached in-page.
-  Future<String> fetch(String url, {String method = 'GET', String? body}) {
-    final completer = Completer<String>();
-    _gate = _gate.then((_) async {
-      try {
-        completer.complete(await _fetchLocked(url, method: method, body: body));
-      } catch (e, st) {
-        completer.completeError(e, st);
-      }
-    });
-    return completer.future;
-  }
+  Future<String> fetch(String url, {String method = 'GET', String? body}) =>
+      _enqueue(() => _fetchLocked(url, method: method, body: body));
 
   /// Captures the assembled `generateAlpha` payload for [characterId] — the
   /// fully-built system prompt containing the hidden character card and the
@@ -695,18 +723,10 @@ class JanitorWebViewProxy {
     String triggerText = '',
     bool includeCard = true,
     void Function(String phase)? onPhase,
-  }) {
-    final completer = Completer<JanitorCaptureResult>();
-    _gate = _gate.then((_) async {
-      try {
-        completer.complete(await _captureLocked(
-            characterId, triggerText, includeCard, onPhase));
-      } catch (e, st) {
-        completer.completeError(e, st);
-      }
-    });
-    return completer.future;
-  }
+  }) =>
+      _enqueue(
+        () => _captureLocked(characterId, triggerText, includeCard, onPhase),
+      );
 
   Future<JanitorCaptureResult> _captureLocked(
     String characterId,

@@ -46,7 +46,7 @@ void main() {
   // widget was missing.
   group('the Guided Generation block is editable', () {
     test('the block routes to its own editor', () {
-      expect(editor, contains("expanded.id == 'guided_generation'"));
+      expect(editor, contains("block.id == 'guided_generation'"));
       expect(editor, contains('_GuidedGenerationBlockEditor('));
     });
 

@@ -7,6 +7,7 @@ import '../../../shared/widgets/sheet_view.dart';
 import 'tokenizer_sheet.dart';
 import 'requests/request_timeline_view.dart';
 import '../../../shared/widgets/glaze_sheet.dart';
+import '../../../shared/shell/desktop/sidebar_sheet_provider.dart';
 
 /// Unified diagnostics surface: Context (the token budget) and Requests (what
 /// the chat sent, and what went into it). Both answer the same question — "what
@@ -65,7 +66,7 @@ class _PromptInspectorSheetState extends ConsumerState<PromptInspectorSheet> {
       _timelineKey.currentState?.closeDetail();
       return;
     }
-    Navigator.of(context).pop();
+    closeSheet(context);
   }
 
   static const _order = [

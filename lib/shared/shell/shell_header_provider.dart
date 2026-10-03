@@ -13,6 +13,12 @@ class ShellHeaderConfig {
   final bool showBack;
   final VoidCallback? onBack;
 
+  /// A step back inside the screen itself — a lorebook entry's editor back to
+  /// the entry list — which a desktop window's title bar offers as its back
+  /// button, ahead of stepping the window back. Null when the screen is at its
+  /// own top level.
+  final VoidCallback? innerBack;
+
   /// Replaces the header's leading slot — the Glaze logo by default. Screens
   /// that temporarily stop being "a tab" set it (the dialogs list swaps in a
   /// close button while a multi-selection is running); ignored when
@@ -34,6 +40,7 @@ class ShellHeaderConfig {
     this.actions,
     this.showBack = false,
     this.onBack,
+    this.innerBack,
     this.leading,
     this.below,
     this.hidden = false,

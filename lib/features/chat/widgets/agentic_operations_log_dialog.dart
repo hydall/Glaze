@@ -14,6 +14,7 @@ import 'agentic_collector_tab.dart';
 import 'agentic_reconciler_tab.dart';
 import 'agentic_snapshots_tab.dart';
 import '../../../shared/widgets/glaze_sheet.dart';
+import '../../../shared/shell/desktop/sidebar_sheet_provider.dart';
 
 class AgenticOperationsLogDialog extends ConsumerStatefulWidget {
   final String? sessionId;
@@ -131,7 +132,7 @@ class _AgenticOperationsLogDialogState
       title: 'agent_ops_title'.tr(),
       showBack: true,
       startExpanded: true,
-      onBack: () => Navigator.of(context).maybePop(),
+      onBack: () => closeSheet(context),
       headerBottom: sessionId == null || sessionId.isEmpty
           ? null
           : GlazeTabBar(

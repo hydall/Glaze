@@ -264,8 +264,7 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with ShellHeaderMixin {
                       icon: Icons.settings_outlined,
                       label: 'menu_app_settings'.tr(),
                       subtitle: 'menu_app_settings_hint'.tr(),
-                      onTap: () =>
-                          goOrFloat(context, ref, 'settings', push: true),
+                      onTap: () => goOrFloat(context, 'settings', push: true),
                     ),
                     MenuItem(
                       icon: Icons.extension_outlined,
@@ -284,7 +283,7 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with ShellHeaderMixin {
                       label: 'menu_backups'.tr(),
                       subtitle: 'menu_backups_hint'.tr(),
                       onTap: () => isDesktopLayout(context)
-                          ? goOrFloat(context, ref, 'backup', push: true)
+                          ? goOrFloat(context, 'backup', push: true)
                           : openBackupsSheet(context),
                     ),
                     MenuItem(
@@ -292,7 +291,7 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with ShellHeaderMixin {
                       label: 'menu_cloud_sync'.tr(),
                       subtitle: 'menu_cloud_sync_hint'.tr(),
                       onTap: () => isDesktopLayout(context)
-                          ? goOrFloat(context, ref, 'sync', push: true)
+                          ? goOrFloat(context, 'sync', push: true)
                           : openCloudSyncSheet(context),
                     ),
                   ],
@@ -496,7 +495,7 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with ShellHeaderMixin {
                       icon: Icons.info_outline_rounded,
                       label: 'menu_about'.tr(),
                       subtitle: 'menu_about_hint'.tr(),
-                      onTap: () => goOrFloat(context, ref, 'about', push: true),
+                      onTap: () => goOrFloat(context, 'about', push: true),
                     ),
                     MenuItem(
                       icon: Icons.menu_book_rounded,

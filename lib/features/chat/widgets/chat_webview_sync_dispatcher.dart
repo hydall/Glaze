@@ -360,7 +360,8 @@ class ChatWebViewSyncDispatcher {
         current.chatLayout != old.chatLayout ||
         current.elementOpacity != old.elementOpacity ||
         current.elementBlur != old.elementBlur ||
-        current.chatFontSize != old.chatFontSize) {
+        current.chatFontSize != old.chatFontSize ||
+        current.chatColumnWidth != old.chatColumnWidth) {
       bridge.applyTheme(current.buildThemeMap());
     }
   }
@@ -720,6 +721,7 @@ class ChatWebViewWidgetFields {
     required this.chatFontDataUrl,
     required this.chatFontSize,
     required this.chatLetterSpacing,
+    required this.chatColumnWidth,
     required this.isSelectionMode,
     required this.batterySaver,
     required this.hideMessageId,
@@ -786,6 +788,7 @@ class ChatWebViewWidgetFields {
   final String? chatFontDataUrl;
   final double chatFontSize;
   final double chatLetterSpacing;
+  final double chatColumnWidth;
   final bool isSelectionMode;
   final bool batterySaver;
   final bool hideMessageId;

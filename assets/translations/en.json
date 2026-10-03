@@ -273,7 +273,6 @@
   "label_content": "Content",
   "placeholder_prompt_text": "Prompt text...",
   "history_title": "Sessions",
-  "btn_new_chat": "New Chat",
   "randomizing_skip": "Skip",
   "randomizing_new_chat": "New Chat",
   "randomizing_hint": "Swipe right to chat, left to skip",

@@ -7,15 +7,10 @@ import '../../../shared/widgets/blurred_image.dart';
 
 /// The chat's own background — base colour, optional image, blur and dim.
 ///
-/// Painted in two places, which is what keeps the desktop layout even: behind
-/// the WebView (which is transparent, so the background has to come from
-/// Flutter), and across the full column behind [ChatColumnWidth]'s side
-/// gutters. Without the second one the capped chat column carried the chat's
-/// background while the gutters beside it showed the app's, so the chat read
-/// as a lighter strip between two darker bands.
-///
-/// The two overlap over the column itself, but the upper copy is opaque, so
-/// the result is the same as painting it once.
+/// Painted behind the WebView, which is transparent, so the background has to
+/// come from Flutter. On desktop the WebView spans the whole middle column even
+/// when the messages keep to a narrower one (see [ChatColumnWidth]), so this
+/// one surface covers the column edge to edge.
 class ChatBackground extends StatelessWidget {
   /// One of `color`, `avatar`, `custom` or `inherit`.
   final String mode;

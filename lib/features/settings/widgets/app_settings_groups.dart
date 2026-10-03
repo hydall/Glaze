@@ -66,7 +66,7 @@ class _AppearanceGroup extends SettingsGroup {
               shape: BoxShape.circle,
             ),
           ),
-          onTap: () => goOrFloat(context, ref, 'theme-settings', push: true),
+          onTap: () => goOrFloat(context, 'theme-settings', push: true),
         ),
         highlightIf(
           'theme_mode',

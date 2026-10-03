@@ -47,6 +47,7 @@ import '../../shared/widgets/colored_markdown.dart';
 import '../../shared/widgets/variation_chip.dart';
 import '../../shared/utils/variant_label.dart';
 import 'character_editor_screen.dart';
+import '../../shared/shell/desktop/desktop_layout_provider.dart';
 import '../character_gallery/widgets/character_gallery_view.dart';
 import 'widgets/character_variations_sheet.dart';
 import 'widgets/character_hiding_onboarding_sheet.dart';
@@ -401,6 +402,13 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
   /// same root navigator puts it on top; popping it (its own back button, the
   /// system back gesture, or `context.pop`) returns to the still-open sheet.
   void _openEditor() {
+    // On desktop the editor is a floating window, and those sit under a
+    // modal one like this: step aside for it.
+    if (isDesktopLayout(context)) {
+      unawaited(openCharacterEditor(context, widget.charId));
+      Navigator.of(context).pop();
+      return;
+    }
     final isIos = !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
     final editor = CharacterEditorScreen(charId: widget.charId);
     Navigator.of(context, rootNavigator: true).push(
