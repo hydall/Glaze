@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 
 import '../../../shared/theme/app_colors.dart';
 import '../state/memory_activity_provider.dart';
-import 'agentic_operations_log_dialog.dart';
 import 'context_coverage/coverage_reasons.dart';
 import 'memory_graph_panel.dart';
 
@@ -87,16 +86,7 @@ class _MemoryActivitySectionState extends State<MemoryActivitySection> {
                 ],
               ),
             ),
-            if (sessionId != null && sessionId.isNotEmpty) ...[
-              IconButton(
-                onPressed: () => AgenticOperationsLogDialog.show(
-                  context,
-                  sessionId: sessionId,
-                ),
-                icon: const Icon(Icons.smart_toy_outlined, size: 18),
-                tooltip: 'agent_ops_title'.tr(),
-                visualDensity: VisualDensity.compact,
-              ),
+            if (sessionId != null && sessionId.isNotEmpty)
               IconButton(
                 onPressed: () => showDialog<void>(
                   context: context,
@@ -106,7 +96,6 @@ class _MemoryActivitySectionState extends State<MemoryActivitySection> {
                 tooltip: 'memory_graph_title'.tr(),
                 visualDensity: VisualDensity.compact,
               ),
-            ],
           ],
         ),
         const SizedBox(height: 8),
@@ -372,9 +361,7 @@ class _MemoryActivitySectionState extends State<MemoryActivitySection> {
                     Padding(
                       padding: const EdgeInsets.only(top: 2),
                       child: Text(
-                        'memory_detail_keys'.tr(
-                          args: [matchedKeys.join(', ')],
-                        ),
+                        'memory_detail_keys'.tr(args: [matchedKeys.join(', ')]),
                         style: TextStyle(
                           fontSize: 11,
                           height: 1.3,

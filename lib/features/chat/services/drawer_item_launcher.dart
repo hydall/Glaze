@@ -23,7 +23,6 @@ import '../../regex/regex_sheet.dart';
 import '../../settings/api_settings_screen.dart';
 import '../chat_actions_service.dart';
 import '../chat_provider.dart';
-import '../widgets/agentic_operations_log_dialog.dart';
 import '../widgets/authors_note_sheet.dart';
 import '../widgets/memory_sheet.dart';
 import '../widgets/prompt_inspector_sheet.dart';
@@ -149,8 +148,6 @@ class DrawerItemLauncher {
           isScrollControlled: true,
           builder: (_) => const ExtBlocksSettingsSheet(),
         );
-      case 'agent-ops':
-        await _showAgentOpsLog(context);
     }
   }
 
@@ -162,7 +159,6 @@ class DrawerItemLauncher {
   /// by which time the drawer that launched it may be gone, and [ref] with it.
   SidebarPanel? _sidebarPanel(String itemId) {
     final charId = this.charId;
-    final sessionId = ref.read(chatProvider(charId)).value?.session?.id;
     final WidgetBuilder? builder = switch (itemId) {
       'inspector' => (_) => PromptInspectorSheet(charId: charId),
       'memory' => (_) => MemorySheet(charId: charId),
@@ -180,27 +176,9 @@ class DrawerItemLauncher {
       'authors-note' => (_) => AuthorsNoteSheet(charId: charId),
       'glossary' => (_) => const GlossarySheet(startExpanded: true),
       'ext-blocks' => (_) => const ExtBlocksSettingsSheet(),
-      'agent-ops' => (_) => AgenticOperationsLogDialog(
-        sessionId: sessionId,
-        characterId: charId,
-      ),
       _ => null,
     };
     return builder == null ? null : SidebarPanel(id: itemId, builder: builder);
-  }
-
-  Future<void> _showAgentOpsLog(BuildContext context) async {
-    final session = ref.read(chatProvider(charId)).value?.session;
-    final route = await AgenticOperationsLogDialog.show(
-      context,
-      sessionId: session?.id,
-      characterId: charId,
-    );
-    if (!context.mounted) return;
-    if (route != null && route.isNotEmpty) {
-      onClose?.call();
-      context.go(route);
-    }
   }
 
   Future<void> _showSessionsSheet(BuildContext context) async {
