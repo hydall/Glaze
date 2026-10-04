@@ -731,10 +731,11 @@
           <div class="sub-header">${esc(t('credits_presets'))}</div>
           <div class="credits-list">
             ${G.presetCredits.map((p) => `
-              <div class="row tile-row">
+              ${p.url ? `<a class="row tile-row" href="${p.url}" ${ext}>` : '<div class="row tile-row">'}
                 <span class="tile">${ms('tune')}</span>
                 <span class="row-text"><span class="tile-label">${esc(p.name)}</span><span class="tile-sub">${esc(t('credits_by'))}: ${esc(p.author)}</span></span>
-              </div>`).join('')}
+                ${p.url ? ms('open_in_new', 'chevron') : ''}
+              ${p.url ? '</a>' : '</div>'}`).join('')}
           </div>
         </div>
       </div>

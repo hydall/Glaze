@@ -352,9 +352,13 @@ window.GLAZE = {
 
   // Authors of the presets Glaze ships with (see featured_presets.dart).
   presetCredits: [
-    { name: 'Shino', author: 'Shino' },
-    { name: 'Fawnie v3', author: 'fawn1e' },
-    { name: 'MicroCot Talks Mini', author: 'MicroCoT' },
+    { name: 'Shino', author: 'Shino', url: 'https://t.me/ah_ah_shino4ka' },
+    { name: 'Fawnie v3', author: 'fawn1e', url: 'https://t.me/dearfawwn' },
+    {
+      name: 'MicroCot Talks Mini',
+      author: 'MicroCoT',
+      url: 'https://t.me/sillytavern1',
+    },
     { name: 'Renri', author: 'nimda trashcan' },
   ],
 
