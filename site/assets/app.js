@@ -129,7 +129,10 @@
   async function loadRelease() {
     try {
       const cached = JSON.parse(localStorage.getItem(RELEASE_CACHE_KEY) || 'null');
-      if (cached && Date.now() - cached.at < RELEASE_CACHE_MS) {
+      // A cached answer naming another release than the one this build of the
+      // site expects is stale (cached before a release went out): ask again.
+      if (cached && Date.now() - cached.at < RELEASE_CACHE_MS
+          && cached.release?.tag === G.fallbackRelease.tag) {
         state.release = cached.release;
       } else {
         const res = await fetch(`https://api.github.com/repos/${G.repo}/releases/latest`, { headers: { Accept: 'application/vnd.github+json' } });
@@ -147,6 +150,7 @@
       state.releaseState = 'fallback';
     }
     renderDownload();
+    if (state.article) renderArticles();
     const badge = $('#heroVersion');
     if (badge) badge.textContent = 'v' + shortVersion();
   }
@@ -549,7 +553,9 @@
   function articleDownload(tag) {
     const rel = G.releases.find((r) => r.tag === tag);
     const fb = G.fallbackRelease && G.fallbackRelease.tag === tag ? G.fallbackRelease : null;
-    const list = (rel && rel.assets) || (fb && fb.assets) || [];
+    // The live release from GitHub when it is this one, for the real sizes.
+    const live = state.releaseState === 'live' && state.release?.tag === tag ? state.release : null;
+    const list = (live && live.assets) || (rel && rel.assets) || (fb && fb.assets) || [];
     if (!list.length) return '';
     const assets = list.map((a) => ({
       ...a,
