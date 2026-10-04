@@ -466,6 +466,7 @@ window.GLAZE = {
       date: '2026-10-04',
       author: 'hydall',
       langs: ['ru', 'en'],
+      download: 'v0.8.0',
       title: { ru: 'Glaze beta 0.8.0', en: 'Glaze beta 0.8.0' },
       lead: {
         ru: 'Вернулся ПК-интерфейс, JAR встроен в Glaze целиком, NovelAI и ComfyUI для картинок, настраиваемая панель ввода и очень много исправлений.',

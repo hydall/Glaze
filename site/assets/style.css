@@ -551,6 +551,14 @@ a.article-author:hover span { color: var(--accent-text); }
 .article-body blockquote p:last-child { margin-bottom: 0; }
 .article-body hr { margin: 28px 0; border: 0; border-top: 1px solid var(--line); }
 
+/* A release's files at the end of its article */
+.article-download { margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--line); }
+.article-download .group-header { padding: 0 0 14px; }
+.article-download .install-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.article-download .install-card { background: rgba(255, 255, 255, 0.03); border: 1px solid var(--line); border-radius: 16px; }
+.article-download-all { display: inline-flex; margin-top: 14px; }
+@media (max-width: 560px) { .article-download .install-grid { grid-template-columns: 1fr; } }
+
 /* ── Screenshots ────────────────────────────────────────────────────────── */
 
 .shots-group { margin-bottom: 28px; }

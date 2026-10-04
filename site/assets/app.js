@@ -459,6 +459,7 @@
         <h1>${esc(pick(a.title))}</h1>
         ${articleLang(a) !== state.lang ? `<div class="article-note">${ms('translate')}${esc(t('article_only_ru'))}</div>` : ''}
         ${content}
+        ${a.download ? articleDownload(a.download) : ''}
       </article>
     </div>`;
   }
@@ -537,6 +538,53 @@
     return post
       ? `<a class="text-link" href="#articles/${encodeURIComponent(post)}">${esc(t('release_notes'))}${ms('arrow_forward')}</a>`
       : `<a class="text-link" href="https://github.com/${G.repo}/releases/tag/${esc(tag)}" ${ext}>${esc(t('release_notes'))}${ms('open_in_new')}</a>`;
+  }
+
+  // A download block inside an article, for the release it is about. Files
+  // come from the release entry when it lists them, else from the fallback
+  // (the newest release), and always link to that release's GitHub assets.
+  function articleDownload(tag) {
+    const rel = G.releases.find((r) => r.tag === tag);
+    const fb = G.fallbackRelease && G.fallbackRelease.tag === tag ? G.fallbackRelease : null;
+    const list = (rel && rel.assets) || (fb && fb.assets) || [];
+    if (!list.length) return '';
+    const assets = list.map((a) => ({
+      ...a,
+      url: `https://github.com/${G.repo}/releases/download/${tag}/${a.name}`,
+    }));
+    const byPlatform = {};
+    for (const a of assets) {
+      const c = classify(a.name);
+      if (c) (byPlatform[c.platform] ||= []).push({ ...a, kind: c.kind });
+    }
+    const order = { universal: 0, arm64: 1, arm32: 2, ZIP: 0, EXE: 1, DEB: 0, AppImage: 1, pacman: 0, 'tar.zst': 1 };
+    Object.values(byPlatform).forEach((l) => l.sort((a, b) => (order[a.kind] ?? 9) - (order[b.kind] ?? 9)));
+    const kindLabel = (k) => ({ universal: t('asset_universal'), arm64: t('asset_arm64'), arm32: t('asset_arm32') })[k] || k;
+    const platforms = [
+      { id: 'android', icon: 'android', color: '#3DDC84' },
+      { id: 'ios', icon: 'phone_iphone', color: '#C5C7CB' },
+      { id: 'windows', icon: 'desktop_windows', color: '#4CA3F2' },
+      { id: 'linux', icon: 'terminal', color: '#F2C14E' },
+    ];
+    const cards = platforms.map((p) => {
+      const l = byPlatform[p.id] || [];
+      if (!l.length) return '';
+      const buttons = l.map((a, i) => `<a class="btn ${i === 0 ? 'btn-primary' : 'btn-glass'} btn-sm" href="${a.url}" download>
+        ${i === 0 ? ms('download') : ''}${esc(kindLabel(a.kind))} <span class="size">${esc(fmtSize(a.size))}</span></a>`).join('');
+      return `<div class="install-card" data-glow>
+        <div class="head">
+          <span class="tile" style="background:${p.color}1f;color:${p.color}">${ms(p.icon)}</span>
+          <span class="row-text"><span class="tile-label">${esc(t('plat_' + p.id))}</span><span class="tile-sub">${esc(l.map((a) => a.kind).join(' · '))}</span></span>
+        </div>
+        <div class="dl-actions">${buttons}</div>
+      </div>`;
+    }).join('');
+    const version = tag.replace(/^v/, '');
+    return `<section class="article-download">
+      <div class="group-header">${ms('download')}<h3>${esc(t('download_title'))} ${esc(version)}</h3></div>
+      <div class="install-grid">${cards}</div>
+      <a class="text-link article-download-all" href="${G.links.releases}" ${ext}>${esc(t('dl_all'))}${ms('open_in_new')}</a>
+    </section>`;
   }
 
   function renderDownload() {
