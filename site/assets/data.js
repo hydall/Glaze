@@ -364,6 +364,7 @@ window.GLAZE = {
       url: 'https://t.me/sillytavern1',
     },
     { name: 'Renri', author: 'nimda trashcan', url: 'https://t.me/nimdatrashcan' },
+    { name: 'NoriMyn', author: 'MoriNori', url: 'https://t.me/MoriNori_hi' },
   ],
 
   testers: ['nightsyr', 'Саша Белый', 'múrx', 'lina', 'ShikiN', 'N K', 'Сатаник1155'],
