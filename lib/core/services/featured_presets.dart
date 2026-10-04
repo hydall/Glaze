@@ -23,6 +23,12 @@ class FeaturedPreset {
   final String? reasoningStart;
   final String? reasoningEnd;
 
+  /// Bumped when the bundled JSON changes in a way existing installs should
+  /// pick up. The seeder refreshes a preset whose stored revision is older (see
+  /// `seedFeaturedPresets`), so leave it at 1 for a preset that has never
+  /// shipped an update.
+  final int revision;
+
   const FeaturedPreset({
     required this.id,
     required this.name,
@@ -33,6 +39,7 @@ class FeaturedPreset {
     this.reasoningEnabled = false,
     this.reasoningStart,
     this.reasoningEnd,
+    this.revision = 1,
   });
 }
 
@@ -48,6 +55,8 @@ const featuredPresets = <FeaturedPreset>[
     reasoningEnabled: true,
     reasoningStart: '<thinking>',
     reasoningEnd: '</thinking>',
+    // v2: the Gemini 3.8 "flash" rewrite of the bundled Shino preset.
+    revision: 2,
   ),
   FeaturedPreset(
     id: 'default_fawnie',
@@ -72,6 +81,17 @@ const featuredPresets = <FeaturedPreset>[
     jsonAsset: 'assets/presets/renri.json',
     imageAsset: 'assets/presets/renri.jpg',
     createdAt: 4,
+  ),
+  FeaturedPreset(
+    id: 'default_norimyn',
+    name: 'NoriMyn',
+    author: 'NoriMyn',
+    jsonAsset: 'assets/presets/norimyn.json',
+    imageAsset: 'assets/presets/norimyn.jpg',
+    createdAt: 5,
+    reasoningEnabled: true,
+    reasoningStart: '<think>',
+    reasoningEnd: '</think>',
   ),
 ];
 
