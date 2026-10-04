@@ -612,6 +612,9 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
           onTap: _showStashSheet,
           onCover: onCover,
         ),
+        // The count bubbles overhang each button (top/right by 4), so the two
+        // buttons need a gap or the first button's bubble sits on the second.
+        const SizedBox(width: 8),
         PresetUtilButton(
           icon: Icons.code,
           count: _regexes.length,

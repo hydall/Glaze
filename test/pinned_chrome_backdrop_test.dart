@@ -69,7 +69,10 @@ void main() {
     final routeBranch = source.substring(routeStart, routeEnd);
 
     expect(routeBranch, contains('return TopEdgeBlur('));
-    expect(routeBranch, contains('height: extraTop + 8'));
+    expect(routeBranch, contains('extraTop + 8'));
+    // The scrim is only painted over a header the sheet actually pins; a
+    // chrome-drawing host leaves it with none, so no stale band.
+    expect(routeBranch, contains('_hasHeader'));
   });
 
   testWidgets('samples only the top strip, not the full child subtree', (

@@ -798,11 +798,14 @@ class _SheetViewState extends ConsumerState<SheetView>
 
                   return TopEdgeBlur(
                     enabled: _hasHeader && !batterySaver,
-                    height: extraTop + 8,
+                    height: _hasHeader ? extraTop + 8 : 0,
                     sigma: 24,
-                    tintColor: _headerScrimColor(
-                      context,
-                    ).withValues(alpha: 0.88),
+                    // A chrome-drawing host (a floating window) renders the
+                    // title row in its own title bar, leaving this sheet with no
+                    // header to back — so it must not paint the scrim band.
+                    tintColor: _hasHeader
+                        ? _headerScrimColor(context).withValues(alpha: 0.88)
+                        : null,
                     child: MediaQuery(
                       data: mediaQuery.copyWith(padding: newPadding),
                       child: _MaybeScrollbar(
@@ -1148,11 +1151,19 @@ class _SheetViewState extends ConsumerState<SheetView>
     // `enabled`, so the scroll body's Element (and any focused TextField's
     // FocusNode) survives interaction/battery-saver transitions without
     // GlobalKey tricks.
+    // The scrim only backs chrome this sheet pins over the body. A
+    // chrome-drawing host (a desktop sheet window) renders the title row in its
+    // own title bar, so the sheet has no header of its own — yet its cached
+    // `_headerH` is still the estimate made before the host was known, which
+    // painted a stale tint band across the top of the window. No pinned header,
+    // no tint.
     return TopEdgeBlur(
       enabled: widget.enableHeaderBlur && _hasHeader && !batterySaver,
-      height: _headerH + 8,
+      height: _hasHeader ? _headerH + 8 : 0,
       sigma: 24,
-      tintColor: _headerScrimColor(context).withValues(alpha: 0.88),
+      tintColor: _hasHeader
+          ? _headerScrimColor(context).withValues(alpha: 0.88)
+          : null,
       child: _buildScrollConfig(context, bottomInset, isKeyboardOpen),
     );
   }

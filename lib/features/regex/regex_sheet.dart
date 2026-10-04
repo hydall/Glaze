@@ -642,6 +642,10 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     final studioRegexes = studioAsync.value ?? <StudioRegex>[];
 
     final isEdit = _view == 'edit';
+    // On desktop the add action belongs in the sheet's header — drawn in the
+    // sidebar panel's app bar, or the sheet window's title bar — instead of as
+    // a floating chip over the list.
+    final desktop = isDesktopLayout(context);
     final regexFolders = ref.watch(foldersProvider(FolderDomain.regex)).value;
     final globalFolderName = regexFolders
         ?.where((f) => f.id == _globalFolderId)
@@ -657,6 +661,15 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
           ? (globalFolderName ?? 'menu_regex'.tr())
           : 'menu_regex'.tr(),
       showBack: isEdit || widget.startExpanded,
+      actions: !isEdit && desktop
+          ? [
+              SheetViewAction(
+                icon: const Icon(Icons.add),
+                tooltip: 'action_add_script'.tr(),
+                onPressed: () => _showAddMenu(context),
+              ),
+            ]
+          : const [],
       // A back gesture while the editor is open must return to the list, not
       // tear the whole sheet down — and inside a Global folder it steps back to
       // the folders. Hand both to [_handleBack], exactly like the header's back
@@ -685,7 +698,7 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
                 studioRegexes: studioRegexes,
               ),
       ),
-      floatingActionButton: isEdit
+      floatingActionButton: isEdit || desktop
           ? null
           : GlazeActionChip(
               icon: Icons.add,
