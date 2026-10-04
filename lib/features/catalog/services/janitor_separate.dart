@@ -127,6 +127,8 @@ final _exampleBlock = RegExp(
 }
 
 /// Builds a whitespace/punctuation-tolerant regex source from a verbatim string.
+/// Public because the field diff ([janitor_field_diff.dart]) matches the same
+/// server-rewritten text and must tolerate the same drift.
 ///
 /// The public-entry content is injected into `generateAlpha` verbatim, but the
 /// server (and our own tidying) can change *whitespace* (collapse runs, swap
@@ -135,7 +137,7 @@ final _exampleBlock = RegExp(
 /// whitespace run matches any other, and quote/apostrophe/dash variants match
 /// each other. Everything else (including regex metacharacters) is escaped.
 /// Port of separate.cjs `loosePattern`.
-String _loosePattern(String needle) => needle
+String loosePattern(String needle) => needle
     .replaceAllMapped(RegExp(r'[.*+?^${}()|[\]\\]'), (m) => '\\${m[0]}')
     .replaceAll(RegExp(r'\s+'), r'\s+')
     .replaceAll(RegExp(r'''['‘’ʼ]'''), r"['‘’ʼ]")
@@ -147,7 +149,7 @@ String _loosePattern(String needle) => needle
 /// A character's public and closed lorebooks are injected into the SAME
 /// `generateAlpha` system message, so the extracted text contains both. The
 /// public entries' `content` is injected **verbatim**, so we cut it back out
-/// (with the whitespace/glyph tolerance of [_loosePattern]) — entries that
+/// (with the whitespace/glyph tolerance of [loosePattern]) — entries that
 /// never triggered simply aren't found and are skipped. Port of separate.cjs
 /// `stripPublicEntries`.
 ({String out, List<String> removed}) _stripPublicEntries(
@@ -160,7 +162,7 @@ String _loosePattern(String needle) => needle
     if (needle.length < 12) continue;
     RegExp re;
     try {
-      re = RegExp(_loosePattern(needle), caseSensitive: false);
+      re = RegExp(loosePattern(needle), caseSensitive: false);
     } catch (_) {
       continue;
     }
@@ -177,11 +179,15 @@ String _tidy(String text) => text
     .replaceAll(RegExp(r'\n{3,}'), '\n\n')
     .trim();
 
-/// Strips the leading bracketed jailbreak/system-prefix block(s) from [text].
-/// Used by the full-prompt path so the model isn't fed the jailbreak prologue as
-/// if it were a lorebook entry; the persona/scenario/entries are left intact.
-String stripLeadingJailbreak(String text) =>
-    text.replaceFirst(_leadingJailbreak, '').trim();
+/// [text] with the verbatim content of the character's PUBLIC lorebook entries
+/// removed and the gaps tidied — what [separate] does inline, available on its
+/// own for text that was isolated before those entries were known (a public
+/// script the user converts after the capture) and for the field diff, which
+/// subtracts them from every block it recovers.
+String withoutPublicEntries(String text, List<String> publicContents) =>
+    publicContents.isEmpty
+        ? text
+        : _tidy(_stripPublicEntries(text, publicContents).out);
 
 /// Splits the isolated lorebook text into discrete entry blocks on blank lines.
 List<String> splitEntries(String text) => text
@@ -238,6 +244,42 @@ String extractFirstMessage(Map<String, dynamic> payload) {
     }
   }
   return '';
+}
+
+/// Shortest name that may be swapped back to a macro. A one- or two-letter
+/// name matches everywhere and would shred the text.
+const int _minMacroNeedle = 3;
+
+/// Puts the `{{char}}` / `{{user}}` macros back into captured text.
+///
+/// JanitorAI expands macros **before** it assembles the prompt, so everything we
+/// capture carries real names where the card's macros used to be. `{{user}}` is
+/// normally handled upstream (the capture binds a persona literally named
+/// `{{user}}`, making the substitution a no-op) — [userName] is only for the
+/// fallback path where that persona could not be created, and is the name that
+/// got baked in instead. [charNames] are the character's names as JanitorAI
+/// knows them (`name`, `chat_name`, the persona-tag name); each is swapped back
+/// to `{{char}}`. Names shorter than [_minMacroNeedle] are left alone.
+String restoreMacros(
+  String text, {
+  List<String> charNames = const [],
+  String? userName,
+}) {
+  if (text.isEmpty) return text;
+  var out = text;
+  // Longest first: swapping "Anna" before "Anna Lee" would leave "{{char}} Lee".
+  final chars = charNames
+      .map((n) => n.trim())
+      .where((n) => n.length >= _minMacroNeedle)
+      .toSet()
+      .toList()
+    ..sort((a, b) => b.length.compareTo(a.length));
+  for (final name in chars) {
+    out = out.replaceAll(name, '{{char}}');
+  }
+  final user = userName?.trim() ?? '';
+  if (user.length >= _minMacroNeedle) out = out.replaceAll(user, '{{user}}');
+  return out;
 }
 
 /// Isolates the closed-lorebook text from [payload]. Pass the known card text

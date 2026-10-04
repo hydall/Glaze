@@ -3,13 +3,18 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
+import '../../../core/utils/error_format.dart';
+
 class ImageGenHttp {
   final Dio _dio;
 
-  ImageGenHttp() : _dio = Dio(BaseOptions(
-    connectTimeout: const Duration(seconds: 60),
-    receiveTimeout: const Duration(seconds: 300),
-  ));
+  ImageGenHttp()
+    : _dio = Dio(
+        BaseOptions(
+          connectTimeout: const Duration(seconds: 60),
+          receiveTimeout: const Duration(seconds: 300),
+        ),
+      );
 
   Future<Map<String, dynamic>> post({
     required String url,
@@ -45,8 +50,119 @@ class ImageGenHttp {
     CancelToken? cancelToken,
     required String Function(Map<String, dynamic>) extractBase64,
   }) async {
-    final json = await post(url: url, body: body, apiKey: apiKey, extraHeaders: extraHeaders, cancelToken: cancelToken);
+    final json = await post(
+      url: url,
+      body: body,
+      apiKey: apiKey,
+      extraHeaders: extraHeaders,
+      cancelToken: cancelToken,
+    );
     final b64 = extractBase64(json);
+    return b64;
+  }
+
+  /// Generic post + extract that allows the caller to return [Uint8List]
+  /// directly — supports both base64 and URL-download paths.
+  Future<Uint8List> postAndExtract({
+    required String url,
+    required Map<String, dynamic> body,
+    String? apiKey,
+    Map<String, String>? extraHeaders,
+    CancelToken? cancelToken,
+    required Future<Uint8List> Function(Map<String, dynamic>) extract,
+  }) async {
+    final json = await post(
+      url: url,
+      body: body,
+      apiKey: apiKey,
+      extraHeaders: extraHeaders,
+      cancelToken: cancelToken,
+    );
+    return await extract(json);
+  }
+
+  /// Sends a JSON request and returns the raw response body. Used by
+  /// providers whose image comes back as binary (a ZIP attachment) rather
+  /// than JSON.
+  Future<Uint8List> postForBytes({
+    required String url,
+    required Map<String, dynamic> body,
+    String? apiKey,
+    Map<String, String>? extraHeaders,
+    CancelToken? cancelToken,
+  }) async {
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+      if (apiKey != null && apiKey.isNotEmpty)
+        'Authorization': 'Bearer $apiKey',
+      ...?extraHeaders,
+    };
+    try {
+      final response = await _dio.post<List<int>>(
+        url,
+        data: body,
+        options: Options(headers: headers, responseType: ResponseType.bytes),
+        cancelToken: cancelToken,
+      );
+      return Uint8List.fromList(response.data ?? const []);
+    } on DioException catch (error) {
+      // The success payload is binary, so the error body is bytes too; decode
+      // it before `formatError` sees it, or the provider's reason is lost.
+      throw await decodeByteError(error);
+    }
+  }
+
+  /// Plain JSON GET (job polling, model listings).
+  Future<Map<String, dynamic>> getJson({
+    required String url,
+    String? apiKey,
+    Map<String, String>? extraHeaders,
+    CancelToken? cancelToken,
+  }) async {
+    final headers = <String, String>{
+      'Accept': 'application/json',
+      if (apiKey != null && apiKey.isNotEmpty)
+        'Authorization': 'Bearer $apiKey',
+      ...?extraHeaders,
+    };
+    final response = await _dio.get<Map<String, dynamic>>(
+      url,
+      options: Options(headers: headers),
+      cancelToken: cancelToken,
+    );
+    return response.data ?? {};
+  }
+
+  /// Downloads raw bytes from a URL (for endpoints that return `url` instead
+  /// of `b64_json`).
+  static Future<Uint8List> downloadImage(
+    String url, {
+    CancelToken? cancelToken,
+  }) async {
+    final dio = Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 30),
+        receiveTimeout: const Duration(seconds: 120),
+      ),
+    );
+    try {
+      final response = await dio.get<Uint8List>(
+        url,
+        options: Options(responseType: ResponseType.bytes),
+        cancelToken: cancelToken,
+      );
+      return response.data ?? Uint8List(0);
+    } finally {
+      dio.close();
+    }
+  }
+
+  /// Strips an optional `data:image/...;base64,` prefix from a base64 string.
+  static String stripBase64Prefix(String b64) {
+    final commaIdx = b64.indexOf(',');
+    if (commaIdx >= 0 && b64.startsWith('data:')) {
+      return b64.substring(commaIdx + 1);
+    }
     return b64;
   }
 
@@ -54,10 +170,17 @@ class ImageGenHttp {
     return base64Decode(b64);
   }
 
-  Future<Response<Uint8List>> getRaw(String url, {CancelToken? cancelToken}) async {
+  Future<Response<Uint8List>> getRaw(
+    String url, {
+    CancelToken? cancelToken,
+    Map<String, String>? extraHeaders,
+  }) async {
     return _dio.get<Uint8List>(
       url,
-      options: Options(responseType: ResponseType.bytes),
+      options: Options(
+        responseType: ResponseType.bytes,
+        headers: {...?extraHeaders},
+      ),
       cancelToken: cancelToken,
     );
   }
@@ -81,13 +204,20 @@ class ImageGenHttp {
       formData.fields.add(MapEntry(entry.key, entry.value));
     }
     for (final (fieldName, bytes, filename, mime) in imageFields) {
-      formData.files.add(MapEntry(
-        fieldName,
-        MultipartFile.fromBytes(bytes, filename: filename, contentType: DioMediaType.parse(mime)),
-      ));
+      formData.files.add(
+        MapEntry(
+          fieldName,
+          MultipartFile.fromBytes(
+            bytes,
+            filename: filename,
+            contentType: DioMediaType.parse(mime),
+          ),
+        ),
+      );
     }
     final headers = <String, String>{
-      if (apiKey != null && apiKey.isNotEmpty) 'Authorization': 'Bearer $apiKey',
+      if (apiKey != null && apiKey.isNotEmpty)
+        'Authorization': 'Bearer $apiKey',
     };
     try {
       final response = await _dio.post<Map<String, dynamic>>(

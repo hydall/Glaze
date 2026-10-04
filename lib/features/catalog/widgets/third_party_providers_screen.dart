@@ -2,30 +2,43 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../shared/shell/desktop/desktop_floating_provider.dart';
+import '../../../shared/shell/shell_header_provider.dart';
 import '../../../shared/widgets/glaze_scaffold.dart';
 import '../../../shared/widgets/menu_group.dart';
 import '../../../core/platform/haptics.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../settings/app_settings_provider.dart';
+import '../chub_account_provider.dart';
+import '../datacat_account_provider.dart';
 import '../janitor_account_provider.dart';
 import '../saucepan_account_provider.dart';
 import '../third_party_providers_provider.dart';
+import 'catalog_onboarding_sheet.dart';
+import 'chub_login_sheet.dart';
+import 'datacat/datacat_account_sheet.dart';
 import 'janitor_login_sheet.dart';
+import 'janitor_source_settings.dart';
+import 'provider_logo.dart';
 import 'saucepan_login_sheet.dart';
 
-/// Opens the Third-Party providers screen as a full-screen pushed route on the
-/// root navigator, so it works identically from the menu and from the catalog
-/// provider picker (which live in different shell branches).
-Future<void> openThirdPartyProvidersScreen(BuildContext context) {
-  return Navigator.of(context, rootNavigator: true).push(
+/// Opens the content providers screen: on desktop in a floating window
+/// (stacked onto the Menu's when opened from there), on phones as a
+/// full-screen pushed route on the root navigator, so it works identically from
+/// the menu and from the catalog provider picker (which live in different shell
+/// branches).
+Future<void> openThirdPartyProvidersScreen(BuildContext context) async {
+  if (floatOnDesktop(context, 'third-party-providers', push: true)) return;
+  await Navigator.of(context, rootNavigator: true).push(
     MaterialPageRoute<void>(builder: (_) => const ThirdPartyProvidersScreen()),
   );
 }
 
-/// Lists the five third-party sources (JanitorAI, Janny, Datacat, Chub,
-/// Saucepan), each as a group that can be toggled on/off. Disabling a group
-/// hides that provider from the catalog and collapses its per-provider settings
-/// (e.g. the account login for JanitorAI and Saucepan).
+/// Lists the five content sources (JanitorAI, Janny, Datacat, Chub, Saucepan),
+/// each as a group. The four browse providers can be toggled on/off: disabling
+/// one hides it from the catalog and collapses its per-provider settings.
+/// Saucepan has no toggle — it is always on and only backs URL import, so its
+/// account settings are always shown.
 class ThirdPartyProvidersScreen extends ConsumerWidget {
   const ThirdPartyProvidersScreen({super.key});
 
@@ -33,7 +46,12 @@ class ThirdPartyProvidersScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final disabled = ref.watch(thirdPartyProvidersProvider);
     final catalogEnabled = ref.watch(catalogMasterEnabledProvider);
-    final topPad = MediaQuery.of(context).padding.top + 74.0;
+    final blurNsfw = ref.watch(blurNsfwImagesProvider);
+    // Inside the desktop floating window the frame supplies the title bar, so
+    // the space reserved for a header would be a gap.
+    final topPad = DetachedShellHost.of(context)
+        ? 0.0
+        : MediaQuery.of(context).padding.top + 74.0;
     final bottomPad = MediaQuery.of(context).padding.bottom + 20.0;
 
     return GlazeScaffold(
@@ -58,7 +76,24 @@ class ThirdPartyProvidersScreen extends ConsumerWidget {
               onChanged: (v) =>
                   ref.read(catalogMasterEnabledProvider.notifier).setEnabled(v),
             ),
-            items: const [],
+            items: [
+              MenuItem(
+                icon: Icons.school_outlined,
+                label: 'catalog_onboarding_replay'.tr(),
+                subtitle: 'catalog_onboarding_replay_hint'.tr(),
+                onTap: () => replayCatalogOnboarding(context),
+              ),
+              // One switch for every source: a display choice only, it covers
+              // the main image and the images in the bio of an adult row and
+              // never removes a character from the results.
+              MenuSwitchItem(
+                label: 'catalog_blur_nsfw'.tr(),
+                description: 'catalog_blur_nsfw_desc'.tr(),
+                value: blurNsfw,
+                onChanged: (v) =>
+                    ref.read(blurNsfwImagesProvider.notifier).setBlurring(v),
+              ),
+            ],
           ),
           for (final p in ThirdPartyProvider.values)
             _providerGroup(context, ref, p, enabled: !disabled.contains(p)),
@@ -73,18 +108,24 @@ class ThirdPartyProvidersScreen extends ConsumerWidget {
     ThirdPartyProvider p, {
     required bool enabled,
   }) {
+    // Saucepan is always on: it is not a browse source, so it has no
+    // enable/disable switch and its account settings are always visible.
+    final toggleable = p != ThirdPartyProvider.saucepan;
     return MenuGroup(
       header: _label(p),
-      headerIcon: _icon(p),
+      headerIconWidget: ProviderLogo(provider: p),
       description: _description(p),
-      headerTrailing: _GroupSwitch(
-        value: enabled,
-        onChanged: (v) =>
-            ref.read(thirdPartyProvidersProvider.notifier).setEnabled(p, v),
-      ),
+      headerTrailing: toggleable
+          ? _GroupSwitch(
+              value: enabled,
+              onChanged: (v) => ref
+                  .read(thirdPartyProvidersProvider.notifier)
+                  .setEnabled(p, v),
+            )
+          : null,
       items: [
         // Per-provider settings are only shown while the group is enabled.
-        if (enabled) ..._settingsFor(context, ref, p),
+        if (enabled || !toggleable) ..._settingsFor(context, ref, p),
       ],
     );
   }
@@ -110,14 +151,7 @@ class ThirdPartyProvidersScreen extends ConsumerWidget {
             onTap: () => openJanitorAccountSheet(context, ref),
           ),
           if (settings != null)
-            MenuSwitchItem(
-              label: 'menu_extract_janitor_locally'.tr(),
-              description: 'desc_extract_janitor_locally'.tr(),
-              value: settings.extractJanitorLocally,
-              onChanged: (v) => ref
-                  .read(appSettingsProvider.notifier)
-                  .save(settings.copyWith(extractJanitorLocally: v)),
-            ),
+            ...janitorSourceMenuItems(context, ref, settings),
         ];
       case ThirdPartyProvider.saucepan:
         final account = ref.watch(saucepanAccountProvider);
@@ -133,9 +167,55 @@ class ThirdPartyProvidersScreen extends ConsumerWidget {
             onTap: () => openSaucepanAccountSheet(context, ref),
           ),
         ];
-      case ThirdPartyProvider.janny:
-      case ThirdPartyProvider.datacat:
       case ThirdPartyProvider.chub:
+        final chub = ref.watch(chubAccountProvider);
+        return [
+          MenuItem(
+            icon: Icons.key_outlined,
+            label: 'chub_login_menu'.tr(),
+            subtitle: chub.isLoggedIn
+                ? 'chub_login_menu_logged_in'.tr()
+                : 'chub_login_menu_logged_out'.tr(),
+            onTap: () => openChubAccountSheet(context, ref),
+          ),
+          // Account-level NSFL opt-in, mirroring chub.ai's own `no_nsfl`
+          // profile flag: the site only ever serves NSFL to a signed-in
+          // account, and this is the persistent "I want it" that the
+          // per-search toggle in the filter sheet then narrows.
+          MenuSwitchItem(
+            label: 'catalog_filter_nsfl'.tr(),
+            description: 'chub_nsfl_account_hint'.tr(),
+            value: chub.nsfl,
+            onChanged: (v) {
+              if (v && !chub.isLoggedIn) {
+                // NSFL is account-scoped on chub.ai — sign in first.
+                openChubAccountSheet(context, ref);
+                return;
+              }
+              ref.read(chubAccountProvider.notifier).setNsfl(v);
+            },
+          ),
+        ];
+      case ThirdPartyProvider.datacat:
+        // Linking is only needed to post kudos and comments; browsing and
+        // importing work without it, so the row says what it unlocks rather
+        // than presenting itself as a prerequisite.
+        final datacat = ref.watch(datacatAccountProvider);
+        return [
+          MenuItem(
+            icon: Icons.person_outline_rounded,
+            label: 'datacat_account_menu'.tr(),
+            subtitle: datacat.linked
+                ? (datacat.displayName != null
+                      ? 'datacat_account_linked_as'.tr(
+                          namedArgs: {'name': datacat.displayName!},
+                        )
+                      : 'datacat_account_linked'.tr())
+                : 'datacat_account_not_linked'.tr(),
+            onTap: () => openDatacatAccountSheet(context, ref),
+          ),
+        ];
+      case ThirdPartyProvider.janny:
         // No dedicated settings — the group is just an enable/disable toggle.
         return const [];
     }
@@ -147,14 +227,6 @@ class ThirdPartyProvidersScreen extends ConsumerWidget {
     ThirdPartyProvider.datacat => 'Datacat',
     ThirdPartyProvider.chub => 'Chub',
     ThirdPartyProvider.saucepan => 'Saucepan',
-  };
-
-  IconData _icon(ThirdPartyProvider p) => switch (p) {
-    ThirdPartyProvider.janitor => Icons.cleaning_services_outlined,
-    ThirdPartyProvider.janny => Icons.auto_awesome_outlined,
-    ThirdPartyProvider.datacat => Icons.pets_outlined,
-    ThirdPartyProvider.chub => Icons.explore_outlined,
-    ThirdPartyProvider.saucepan => Icons.ramen_dining_outlined,
   };
 
   String _description(ThirdPartyProvider p) => switch (p) {

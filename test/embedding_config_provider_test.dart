@@ -1,7 +1,15 @@
+import 'dart:io';
+
+import 'package:drift/native.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/llm/embedding_request_gate.dart';
+import 'package:glaze_flutter/core/state/db_provider.dart';
 import 'package:glaze_flutter/core/state/lorebook_embedding_provider.dart';
+import 'package:glaze_flutter/features/settings/api_list_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   group('resolveEmbeddingConfig', () {
@@ -30,6 +38,7 @@ void main() {
         embeddingUseSame: true,
         embeddingModel: 'embedding-model',
         embeddingMaxChunkTokens: 256,
+        embeddingRequestsPerMinute: 40,
       );
 
       final config = resolveEmbeddingConfig(api);
@@ -38,11 +47,401 @@ void main() {
       expect(config.apiKey, api.apiKey);
       expect(config.model, api.embeddingModel);
       expect(config.maxChunkTokens, 256);
+      expect(config.requestsPerMinute, 40);
+    });
+
+    test('borrows the active LLM preset while "use LLM API" is on', () {
+      const llm = ApiConfig(
+        id: 'llm',
+        endpoint: 'https://llm.example/v1',
+        apiKey: 'llm-key',
+        model: 'chat-model',
+      );
+      const embedding = ApiConfig(
+        id: 'embedding',
+        endpoint: 'https://other.example/v1',
+        apiKey: 'other-key',
+        model: 'other-chat-model',
+        embeddingEnabled: true,
+        embeddingUseSame: true,
+        embeddingModel: 'embedding-model',
+      );
+
+      final config = resolveEmbeddingConfig(embedding, llm);
+
+      // The toggle is the one link left between the two selections: the
+      // endpoint and key come from the LLM preset, everything else from the
+      // embedding one.
+      expect(config.endpoint, llm.endpoint);
+      expect(config.apiKey, llm.apiKey);
+      expect(config.model, 'embedding-model');
+    });
+
+    test(
+      'ignores the LLM preset once the endpoint is the embedding preset\'s own',
+      () {
+        const llm = ApiConfig(
+          id: 'llm',
+          endpoint: 'https://llm.example/v1',
+          apiKey: 'llm-key',
+          model: 'chat-model',
+        );
+        const embedding = ApiConfig(
+          id: 'embedding',
+          embeddingEnabled: true,
+          embeddingUseSame: false,
+          embeddingEndpoint: 'https://vectors.example/v1',
+          embeddingApiKey: 'vector-key',
+          embeddingModel: 'embedding-model',
+        );
+
+        final config = resolveEmbeddingConfig(embedding, llm);
+
+        expect(config.endpoint, 'https://vectors.example/v1');
+        expect(config.apiKey, 'vector-key');
+        expect(config.model, 'embedding-model');
+      },
+    );
+  });
+
+  group('vectorSearchAvailableProvider', () {
+    bool available(ApiConfig? config) {
+      final container = ProviderContainer(
+        overrides: [activeEmbeddingConfigProvider.overrideWithValue(config)],
+      );
+      addTearDown(container.dispose);
+      return container.read(vectorSearchAvailableProvider);
+    }
+
+    test('is false without an active API preset', () {
+      expect(available(null), isFalse);
+    });
+
+    test('is false while embeddings are disabled on the preset', () {
+      expect(
+        available(
+          const ApiConfig(
+            id: 'api',
+            endpoint: 'https://api.example/v1',
+            model: 'chat-model',
+          ),
+        ),
+        isFalse,
+      );
+    });
+
+    test('is true for the tab\'s own embedding-mode preset', () {
+      expect(
+        available(
+          const ApiConfig(
+            id: 'emb',
+            mode: kEmbeddingPresetMode,
+            embeddingEnabled: true,
+            embeddingEndpoint: 'https://vectors.example/v1',
+            embeddingModel: 'embedding-model',
+          ),
+        ),
+        isTrue,
+      );
+    });
+
+    test('is true once embeddings are enabled on the embedding preset', () {
+      expect(
+        available(
+          const ApiConfig(
+            id: 'api',
+            endpoint: 'https://api.example/v1',
+            model: 'chat-model',
+            embeddingEnabled: true,
+          ),
+        ),
+        isTrue,
+      );
+    });
+
+    test('follows the embedding preset, not the chat one', () {
+      // The chat preset having embeddings off must not hide the vector UI when
+      // the embedding side runs on a preset that has them on.
+      final container = ProviderContainer(
+        overrides: [
+          activeApiConfigProvider.overrideWithValue(
+            const ApiConfig(id: 'chat', endpoint: 'https://chat.example/v1'),
+          ),
+          activeEmbeddingConfigProvider.overrideWithValue(
+            const ApiConfig(
+              id: 'embedding',
+              endpoint: 'https://vectors.example/v1',
+              embeddingEnabled: true,
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      expect(container.read(vectorSearchAvailableProvider), isTrue);
+    });
+
+    test('gates every vector affordance in the UI', () {
+      // Each of these screens/sheets used to show its vector, embedding or
+      // index controls unconditionally.
+      const gated = [
+        'lib/features/lorebooks/lorebook_list_screen.dart',
+        'lib/features/lorebooks/lorebook_global_settings_screen.dart',
+        'lib/features/lorebooks/lorebook_per_book_settings_screen.dart',
+        'lib/features/lorebooks/lorebook_editor_screen.dart',
+        'lib/features/chat/widgets/memory_books_tab.dart',
+        // The memory settings sheet reads the gate once and hands it to its
+        // section builders, so the sheet is what has to carry it now.
+        'lib/features/chat/widgets/memory_generation_settings_sheet.dart',
+      ];
+      for (final path in gated) {
+        expect(
+          File(path).readAsStringSync(),
+          contains('vectorSearchAvailableProvider'),
+          reason: '$path must gate its vector UI on the API toggle',
+        );
+      }
+    });
+  });
+
+  group('the embedding preset list', () {
+    Future<ProviderContainer> containerWith(
+      List<ApiConfig> configs, {
+      Map<String, Object> prefs = const {},
+    }) async {
+      SharedPreferences.setMockInitialValues(prefs);
+      final db = AppDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(db.close);
+      final container = ProviderContainer(
+        overrides: [appDbProvider.overrideWithValue(db)],
+      );
+      addTearDown(container.dispose);
+      for (final config in configs) {
+        await container.read(apiConfigRepoProvider).put(config);
+      }
+      container.invalidate(apiListProvider);
+      container.invalidate(embeddingPresetListProvider);
+      await container.read(apiListProvider.future);
+      await container.read(embeddingPresetListProvider.future);
+      return container;
+    }
+
+    const chat = ApiConfig(
+      id: 'chat',
+      name: 'Chat',
+      endpoint: 'https://chat.example/v1',
+      apiKey: 'chat-key',
+      model: 'chat-model',
+    );
+    const otherChat = ApiConfig(
+      id: 'other-chat',
+      name: 'Other chat',
+      endpoint: 'https://other-chat.example/v1',
+      apiKey: 'other-chat-key',
+      model: 'other-chat-model',
+    );
+    const vectors = ApiConfig(
+      id: 'vectors',
+      name: 'Vectors',
+      mode: kEmbeddingPresetMode,
+      embeddingEnabled: true,
+      embeddingUseSame: false,
+      embeddingEndpoint: 'https://vectors.example/v1',
+      embeddingApiKey: 'vector-key',
+      embeddingModel: 'embedding-model',
+    );
+    const borrowing = ApiConfig(
+      id: 'borrowing',
+      name: 'Borrowed',
+      mode: kEmbeddingPresetMode,
+      embeddingEnabled: true,
+      embeddingUseSame: true,
+      embeddingModel: 'embedding-model',
+    );
+
+    test('the two lists never share a preset', () async {
+      final container = await containerWith([chat, otherChat, vectors]);
+
+      expect(container.read(apiListProvider).value?.map((c) => c.id), [
+        'chat',
+        'other-chat',
+      ]);
+      expect(
+        container.read(embeddingPresetListProvider).value?.map((c) => c.id),
+        ['vectors'],
+      );
+    });
+
+    test(
+      'switching the chat preset leaves the embedding one where it is',
+      () async {
+        final container = await containerWith(
+          [chat, otherChat, vectors],
+          prefs: {kEmbeddingPresetsSeededKey: true},
+        );
+        // The repo normalizes an endpoint on the way in, so the expectation is
+        // taken from the stored preset rather than from the literal above.
+        final stored = container.read(activeEmbeddingConfigProvider)!;
+        expect(
+          container.read(embeddingConfigProvider).endpoint,
+          stored.embeddingEndpoint,
+        );
+
+        container.read(activeApiPresetIdProvider.notifier).state = otherChat.id;
+
+        expect(container.read(activeApiConfigProvider)?.id, otherChat.id);
+        expect(container.read(activeEmbeddingConfigProvider)?.id, vectors.id);
+        final config = container.read(embeddingConfigProvider);
+        expect(config.endpoint, stored.embeddingEndpoint);
+        expect(config.apiKey, 'vector-key');
+        expect(config.model, 'embedding-model');
+      },
+    );
+
+    test('"use LLM API" follows the chat preset while it names none', () async {
+      final container = await containerWith(
+        [chat, otherChat, borrowing],
+        prefs: {kEmbeddingPresetsSeededKey: true},
+      );
+      final storedChat = container.read(activeApiConfigProvider)!;
+      expect(
+        container.read(embeddingConfigProvider).endpoint,
+        storedChat.endpoint,
+      );
+
+      container.read(activeApiPresetIdProvider.notifier).state = otherChat.id;
+
+      final storedOther = container.read(activeApiConfigProvider)!;
+      final config = container.read(embeddingConfigProvider);
+      expect(config.endpoint, storedOther.endpoint);
+      expect(config.apiKey, otherChat.apiKey);
+      expect(config.model, 'embedding-model');
+    });
+
+    test('"endpoint from" pins the borrow to one LLM preset', () async {
+      final container = await containerWith(
+        [
+          chat,
+          otherChat,
+          borrowing.copyWith(embeddingLlmPresetId: otherChat.id),
+        ],
+        prefs: {kEmbeddingPresetsSeededKey: true},
+      );
+      final pinned = container
+          .read(apiListProvider)
+          .value!
+          .firstWhere((c) => c.id == otherChat.id);
+
+      // The chat tab is on `chat`, the named preset is `other-chat`.
+      expect(container.read(activeApiConfigProvider)?.id, chat.id);
+      final config = container.read(embeddingConfigProvider);
+      expect(config.endpoint, pinned.endpoint);
+      expect(config.apiKey, pinned.apiKey);
+    });
+
+    test('a named preset that is gone falls back to the active one', () async {
+      final container = await containerWith(
+        [chat, borrowing.copyWith(embeddingLlmPresetId: 'deleted')],
+        prefs: {kEmbeddingPresetsSeededKey: true},
+      );
+      final storedChat = container.read(activeApiConfigProvider)!;
+
+      expect(
+        container.read(embeddingConfigProvider).endpoint,
+        storedChat.endpoint,
+      );
+    });
+
+    test(
+      'seeds a preset from the settings that lived on a chat preset',
+      () async {
+        final container = await containerWith(
+          [
+            chat.copyWith(
+              embeddingEnabled: true,
+              embeddingUseSame: true,
+              embeddingModel: 'embedding-model',
+              embeddingMaxChunkTokens: 256,
+            ),
+            otherChat,
+          ],
+          prefs: {'activeApiConfigId': chat.id},
+        );
+
+        final presets = container.read(embeddingPresetListProvider).value!;
+        expect(presets, hasLength(1));
+        final seeded = presets.single;
+        expect(seeded.mode, kEmbeddingPresetMode);
+        expect(seeded.name, 'Chat');
+        expect(seeded.embeddingEnabled, isTrue);
+        expect(seeded.embeddingModel, 'embedding-model');
+        expect(seeded.embeddingMaxChunkTokens, 256);
+        // Pointing at the preset it came from keeps "use LLM API" resolving to
+        // the endpoint it resolved to before the split.
+        expect(seeded.embeddingLlmPresetId, chat.id);
+        expect(container.read(activeEmbeddingConfigProvider)?.id, seeded.id);
+
+        final prefs = await SharedPreferences.getInstance();
+        expect(prefs.getString(kActiveEmbeddingConfigIdKey), seeded.id);
+        expect(prefs.getBool(kEmbeddingPresetsSeededKey), isTrue);
+      },
+    );
+
+    test('seeds nothing when embeddings were never configured', () async {
+      final container = await containerWith([chat, otherChat]);
+
+      expect(container.read(embeddingPresetListProvider).value, isEmpty);
+      expect(container.read(activeEmbeddingConfigProvider), isNull);
+      expect(container.read(vectorSearchAvailableProvider), isFalse);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getBool(kEmbeddingPresetsSeededKey), isTrue);
+    });
+
+    test(
+      'a preset saved from the Embeddings tab stays out of the chat list',
+      () async {
+        final container = await containerWith(
+          [chat],
+          prefs: {kEmbeddingPresetsSeededKey: true},
+        );
+
+        // The tab creates presets with the mode set, but the list is what
+        // guarantees it: a row saved here can never surface as a chat preset.
+        await container
+            .read(embeddingPresetListProvider.notifier)
+            .put(const ApiConfig(id: 'new-emb', name: 'New'));
+        await container.read(embeddingPresetListProvider.future);
+        container.invalidate(apiListProvider);
+        await container.read(apiListProvider.future);
+
+        expect(
+          container.read(embeddingPresetListProvider).value?.single.id,
+          'new-emb',
+        );
+        expect(container.read(apiListProvider).value?.map((c) => c.id), [
+          'chat',
+        ]);
+      },
+    );
+
+    test('restores the stored embedding preset selection', () async {
+      final container = await containerWith(
+        [chat, vectors, borrowing],
+        prefs: {
+          kEmbeddingPresetsSeededKey: true,
+          kActiveEmbeddingConfigIdKey: borrowing.id,
+        },
+      );
+
+      expect(container.read(activeEmbeddingConfigProvider)?.id, borrowing.id);
     });
   });
 
   group('EmbeddingRequestGate', () {
-    tearDown(() => EmbeddingRequestGate.setEnabled(true));
+    tearDown(() {
+      EmbeddingRequestGate.setEnabled(true);
+      EmbeddingRequestRateLimiter.resetForTesting();
+    });
 
     test('rejects requests immediately after embeddings are disabled', () {
       EmbeddingRequestGate.setEnabled(false);
@@ -58,6 +457,34 @@ void main() {
       EmbeddingRequestGate.setEnabled(false);
 
       expect(token.isCancelled, isTrue);
+    });
+
+    test('rate limiter spaces concurrent request starts', () async {
+      final first = EmbeddingRequestGate.beginRequest(null);
+      final second = EmbeddingRequestGate.beginRequest(null);
+      final stopwatch = Stopwatch()..start();
+
+      await Future.wait([
+        EmbeddingRequestRateLimiter.acquire(600, first),
+        EmbeddingRequestRateLimiter.acquire(600, second),
+      ]);
+
+      expect(stopwatch.elapsedMilliseconds, greaterThanOrEqualTo(80));
+      EmbeddingRequestGate.endRequest(first);
+      EmbeddingRequestGate.endRequest(second);
+    });
+
+    test('rate limiter wait is cancellable', () async {
+      final first = EmbeddingRequestGate.beginRequest(null);
+      final second = EmbeddingRequestGate.beginRequest(null);
+      await EmbeddingRequestRateLimiter.acquire(60, first);
+
+      final waiting = EmbeddingRequestRateLimiter.acquire(60, second);
+      second.cancel('cancelled');
+
+      await expectLater(waiting, throwsA(isA<Object>()));
+      EmbeddingRequestGate.endRequest(first);
+      EmbeddingRequestGate.endRequest(second);
     });
   });
 }

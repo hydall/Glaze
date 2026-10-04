@@ -1,12 +1,27 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:isolate';
 
 import 'package:drift/drift.dart';
 
 import '../app_db.dart';
+import '../../llm/prompt/exact_lorebook_manifest.dart';
+import 'lorebook_use_manifest_repo.dart';
 import 'session_deletion_queries.dart';
 import '../../models/chat_message.dart';
 import '../../application/sync_repo_interfaces.dart';
+
+class _PreparedUserMessageAppend {
+  const _PreparedUserMessageAppend({
+    required this.messagesJson,
+    required this.messages,
+    this.didAppend = true,
+  });
+
+  final String messagesJson;
+  final List<ChatMessage> messages;
+  final bool didAppend;
+}
 
 class ChatRepo implements SyncChatStore {
   final AppDatabase _db;
@@ -34,6 +49,20 @@ class ChatRepo implements SyncChatStore {
               ..orderBy([(t) => OrderingTerm(expression: t.sessionIndex)]))
             .get();
     return rows.map(_toMetadata).toList();
+  }
+
+  /// How many chat sessions one character has, aggregated in SQL.
+  ///
+  /// The Quick Access session card needs the number and nothing else;
+  /// [getByCharacterId] would decode every message of every session just to
+  /// read `.length` off the result.
+  Future<int> countByCharacterId(String charId) async {
+    final countExpr = _db.chatSessions.sessionId.count();
+    final query = _db.selectOnly(_db.chatSessions)
+      ..addColumns([countExpr])
+      ..where(_db.chatSessions.characterId.equals(charId));
+    final row = await query.getSingleOrNull();
+    return row?.read(countExpr) ?? 0;
   }
 
   /// Number of chat sessions per character id, aggregated in SQL.
@@ -67,10 +96,25 @@ class ChatRepo implements SyncChatStore {
 
   @override
   Future<List<SessionMetadata>> getAllSessionMetadata() async {
-    final rows = await (_db.select(
-      _db.chatSessions,
-    )..orderBy([(t) => OrderingTerm.desc(t.updatedAt)])).get();
-    return rows.map(_toMetadata).toList();
+    final rows = await _db
+        .customSelect(
+          '''
+SELECT
+  session_id,
+  character_id,
+  session_index,
+  updated_at,
+  session_vars_json,
+  json_array_length(messages_json) AS message_count,
+  json_extract(messages_json, '\$[0].timestamp') AS first_timestamp,
+  json_extract(messages_json, '\$[#-1]') AS last_message_json
+FROM chat_sessions
+ORDER BY updated_at DESC
+''',
+          readsFrom: {_db.chatSessions},
+        )
+        .get();
+    return rows.map(_projectedMetadata).toList();
   }
 
   Stream<List<SessionMetadata>> watchAllSessionMetadata() {
@@ -114,6 +158,18 @@ class ChatRepo implements SyncChatStore {
         .insertOnConflictUpdate(_toCompanion(session));
   }
 
+  /// Inserts a newly allocated session without replacing an existing owner of
+  /// the same globally unique session id.
+  Future<bool> insertIfAbsent(ChatSession session) async {
+    final inserted = await _db
+        .into(_db.chatSessions)
+        .insertReturningOrNull(
+          _toCompanion(session),
+          mode: InsertMode.insertOrIgnore,
+        );
+    return inserted != null;
+  }
+
   /// Atomically appends a user message and clears the draft.
   ///
   /// This avoids the send path writing a whole stale session blob while the
@@ -124,37 +180,165 @@ class ChatRepo implements SyncChatStore {
     required ChatMessage message,
     required int updatedAt,
   }) async {
-    return _db.transaction(() async {
-      final row = await (_db.select(
+    while (true) {
+      final snapshot = await (_db.select(
         _db.chatSessions,
       )..where((t) => t.sessionId.equals(sessionId))).getSingleOrNull();
-      if (row == null) return null;
+      if (snapshot == null) return null;
 
-      final messages =
-          (jsonDecode(row.messagesJson) as List<dynamic>)
-              .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
-              .toList()
-            ..add(message);
+      final prepared = await _prepareUserMessageAppend(
+        snapshot.messagesJson,
+        message,
+      );
 
-      await (_db.update(
+      final result = await _db.transaction<({bool retry, ChatSession? value})>(
+        () async {
+          final current = await (_db.select(
+            _db.chatSessions,
+          )..where((t) => t.sessionId.equals(sessionId))).getSingleOrNull();
+          if (current == null) return (retry: false, value: null);
+          if (current.messagesJson != snapshot.messagesJson) {
+            return (retry: true, value: null);
+          }
+          await (_db.update(
+            _db.chatSessions,
+          )..where((t) => t.sessionId.equals(sessionId))).write(
+            ChatSessionsCompanion(
+              messagesJson: Value(prepared.messagesJson),
+              draft: const Value(''),
+              updatedAt: Value(updatedAt),
+            ),
+          );
+          return (
+            retry: false,
+            value: _toModel(
+              current.copyWith(
+                messagesJson: prepared.messagesJson,
+                draft: const Value(''),
+                updatedAt: updatedAt,
+              ),
+              messages: prepared.messages,
+            ),
+          );
+        },
+      );
+      if (!result.retry) return result.value;
+    }
+  }
+
+  /// Atomically appends a user message, clears the draft, and records that the
+  /// caller-observed assistant variation was accepted.
+  ///
+  /// The assistant identity is a compare-and-swap guard: selection may change
+  /// between the UI capturing it and this transaction reading the session. A
+  /// legacy variation without a manifest remains sendable; an immutable
+  /// manifest, when present, must receive its acceptance in this transaction.
+  Future<ChatSession?> appendUserMessageAndAcceptCurrentVariation({
+    required String sessionId,
+    required ChatMessage message,
+    required LorebookUseGenerationIdentity expectedPrecedingAssistant,
+    required int updatedAt,
+  }) async {
+    if (expectedPrecedingAssistant.sessionId != sessionId) {
+      return null;
+    }
+    while (true) {
+      final snapshot = await (_db.select(
         _db.chatSessions,
-      )..where((t) => t.sessionId.equals(sessionId))).write(
-        ChatSessionsCompanion(
-          messagesJson: Value(
-            jsonEncode(messages.map((e) => e.toJson()).toList()),
-          ),
-          draft: const Value(''),
-          updatedAt: Value(updatedAt),
-        ),
-      );
+      )..where((t) => t.sessionId.equals(sessionId))).getSingleOrNull();
+      if (snapshot == null) return null;
 
-      final updatedRow = row.copyWith(
-        messagesJson: jsonEncode(messages.map((e) => e.toJson()).toList()),
-        draft: const Value(''),
-        updatedAt: updatedAt,
+      final prepared = await _prepareAcceptedUserMessageAppend(
+        messagesJson: snapshot.messagesJson,
+        message: message,
+        expectedPrecedingAssistant: expectedPrecedingAssistant,
       );
-      return _toModel(updatedRow);
-    });
+      if (prepared == null) return null;
+
+      // A retry after a completed transaction must not append the same user
+      // message or a second acceptance event. The draft still has to go: this
+      // branch reports the send as accepted, and the session it returns is
+      // published into `ChatState` and the session cache, so a draft left on
+      // it is the text of the message that was just sent — sitting in the
+      // composer again the next time the chat is opened.
+      if (!prepared.didAppend) {
+        if ((snapshot.draft ?? '').isEmpty) {
+          return _toModel(snapshot, messages: prepared.messages);
+        }
+        await (_db.update(
+          _db.chatSessions,
+        )..where((t) => t.sessionId.equals(sessionId))).write(
+          const ChatSessionsCompanion(draft: Value('')),
+        );
+        return _toModel(
+          snapshot.copyWith(draft: const Value('')),
+          messages: prepared.messages,
+        );
+      }
+
+      final result = await _db.transaction<({bool retry, ChatSession? value})>(
+        () async {
+          final row = await (_db.select(
+            _db.chatSessions,
+          )..where((t) => t.sessionId.equals(sessionId))).getSingleOrNull();
+          if (row == null) return (retry: false, value: null);
+          if (row.messagesJson != snapshot.messagesJson) {
+            return (retry: true, value: null);
+          }
+
+          final manifest =
+              await (_db.select(_db.lorebookUseManifests)
+                    ..where((t) => t.sessionId.equals(sessionId))
+                    ..where(
+                      (t) => t.messageId.equals(
+                        expectedPrecedingAssistant.messageId,
+                      ),
+                    )
+                    ..where(
+                      (t) =>
+                          t.swipeId.equals(expectedPrecedingAssistant.swipeId),
+                    )
+                    ..where(
+                      (t) => t.agentSwipeId.equals(
+                        expectedPrecedingAssistant.agentSwipeId,
+                      ),
+                    ))
+                  .getSingleOrNull();
+
+          await (_db.update(
+            _db.chatSessions,
+          )..where((t) => t.sessionId.equals(sessionId))).write(
+            ChatSessionsCompanion(
+              messagesJson: Value(prepared.messagesJson),
+              draft: const Value(''),
+              updatedAt: Value(updatedAt),
+            ),
+          );
+
+          if (manifest != null) {
+            await LorebookUseManifestRepo(_db).insertVariationAcceptance(
+              acceptanceId: 'variation:$sessionId:${message.id}',
+              identity: expectedPrecedingAssistant,
+              acceptedByUserMessageId: message.id,
+              acceptedAt: updatedAt,
+            );
+          }
+
+          return (
+            retry: false,
+            value: _toModel(
+              row.copyWith(
+                messagesJson: prepared.messagesJson,
+                draft: const Value(''),
+                updatedAt: updatedAt,
+              ),
+              messages: prepared.messages,
+            ),
+          );
+        },
+      );
+      if (!result.retry) return result.value;
+    }
   }
 
   /// Updates only the draft column, and only if [expectedMessageCount] still
@@ -199,6 +383,21 @@ class ChatRepo implements SyncChatStore {
       ),
     );
   }
+
+  Future<ChatSession?> mutateMessagesWithBeforeWrite({
+    required String sessionId,
+    required List<ChatMessage> Function(List<ChatMessage> messages) mutate,
+    required int updatedAt,
+    required Future<void> Function(ChatSession before, ChatSession after)
+    beforeWrite,
+  }) => _mutateSession(
+    sessionId: sessionId,
+    updatedAt: updatedAt,
+    mutate: (session) => session.copyWith(
+      messages: mutate(List<ChatMessage>.from(session.messages)),
+    ),
+    beforeWrite: beforeWrite,
+  );
 
   /// Atomically transforms one message identified by its durable ID.
   Future<ChatSession?> mutateMessage({
@@ -257,6 +456,17 @@ class ChatRepo implements SyncChatStore {
     required String sessionId,
     required ChatSession? Function(ChatSession session) mutate,
     int? updatedAt,
+  }) => _mutateSession(
+    sessionId: sessionId,
+    mutate: mutate,
+    updatedAt: updatedAt,
+  );
+
+  Future<ChatSession?> _mutateSession({
+    required String sessionId,
+    required ChatSession? Function(ChatSession session) mutate,
+    int? updatedAt,
+    Future<void> Function(ChatSession before, ChatSession after)? beforeWrite,
   }) async {
     return _db.transaction(() async {
       final row = await (_db.select(
@@ -267,6 +477,7 @@ class ChatRepo implements SyncChatStore {
       final current = _toModel(row);
       final updated = mutate(current);
       if (updated == null) return null;
+      if (beforeWrite != null) await beforeWrite(current, updated);
       final messagesJson = jsonEncode(
         updated.messages.map((e) => e.toJson()).toList(),
       );
@@ -305,6 +516,153 @@ class ChatRepo implements SyncChatStore {
         ),
       );
     });
+  }
+
+  /// Commits a generated assistant variation and, when supplied, its exact
+  /// lorebook-use manifest in one database transaction.  The message mutation
+  /// deliberately mirrors the guarded generation commit path: a stale regen
+  /// cannot attach provenance (or replace text) after its anchor changed.
+  Future<ChatSession?> commitGenerationResult({
+    required ChatSession baseSession,
+    required ChatSession generatedSession,
+    required String? regenTargetId,
+    ExactLorebookManifest? manifest,
+    Future<void> Function(ChatSession before, ChatSession after)? beforeWrite,
+  }) async {
+    return _db.transaction(() async {
+      final row =
+          await (_db.select(_db.chatSessions)
+                ..where((table) => table.sessionId.equals(generatedSession.id)))
+              .getSingleOrNull();
+      if (row == null) return null;
+
+      final latest = _toModel(row);
+      final messages = List<ChatMessage>.from(latest.messages);
+      ChatMessage? committed;
+      if (regenTargetId != null) {
+        final baseIndex = baseSession.messages.indexWhere(
+          (message) => message.id == regenTargetId,
+        );
+        final generatedIndex = generatedSession.messages.indexWhere(
+          (message) => message.id == regenTargetId,
+        );
+        final latestIndex = messages.indexWhere(
+          (message) => message.id == regenTargetId,
+        );
+        if (baseIndex < 0 || generatedIndex < 0 || latestIndex < 0) {
+          return null;
+        }
+        final base = baseSession.messages[baseIndex];
+        final current = messages[latestIndex];
+        if (!_sameGenerationAnchor(base, current)) return null;
+        committed = generatedSession.messages[generatedIndex].copyWith(
+          isHidden: current.isHidden,
+          imageHidden: current.imageHidden,
+        );
+        messages[latestIndex] = committed;
+      } else {
+        if (generatedSession.messages.length !=
+            baseSession.messages.length + 1) {
+          return null;
+        }
+        final expectedTail = baseSession.messages.lastOrNull?.id;
+        final currentTail = messages.lastOrNull?.id;
+        if (expectedTail != currentTail) return null;
+        committed = generatedSession.messages.last;
+        messages.add(committed);
+      }
+
+      final updated = latest.copyWith(
+        messages: messages,
+        sessionVars: applySessionVarDelta(
+          latest.sessionVars,
+          baseSession.sessionVars,
+          generatedSession.sessionVars,
+        ),
+      );
+      if (beforeWrite != null) await beforeWrite(latest, updated);
+      final messagesJson = jsonEncode(
+        updated.messages.map((e) => e.toJson()).toList(),
+      );
+      final sessionVarsJson = updated.sessionVars.isNotEmpty
+          ? jsonEncode(updated.sessionVars)
+          : null;
+      final authorsNoteJson = updated.authorsNote != null
+          ? jsonEncode(updated.authorsNote!.toJson())
+          : null;
+      final lastScrollAnchorJson = updated.lastScrollAnchor.isNotEmpty
+          ? jsonEncode(updated.lastScrollAnchor)
+          : null;
+
+      await (_db.update(
+        _db.chatSessions,
+      )..where((table) => table.sessionId.equals(generatedSession.id))).write(
+        ChatSessionsCompanion(
+          messagesJson: Value(messagesJson),
+          sessionVarsJson: Value(sessionVarsJson),
+          authorsNoteJson: Value(authorsNoteJson),
+          draft: Value(updated.draft),
+          lastScrollAnchorJson: Value(lastScrollAnchorJson),
+          updatedAt: Value(generatedSession.updatedAt),
+        ),
+      );
+
+      if (manifest != null) {
+        // A durable round trip verifies all strict schema/content/hash
+        // invariants before any provenance row can be written.
+        final durable = ExactLorebookManifest.decodeDurable(manifest.toJson());
+        await LorebookUseManifestRepo(_db).insertGenerationManifest(
+          identity: LorebookUseGenerationIdentity(
+            sessionId: updated.id,
+            messageId: committed.id,
+            swipeId: committed.swipeId,
+            agentSwipeId: committed.agentSwipeId,
+          ),
+          manifest: LorebookUseManifestInput(
+            manifestJson: durable.canonicalJson,
+            manifestHash: durable.canonicalHash,
+            manifestSchemaVersion: 1,
+            finalPromptHash: durable.providerMessagesHash,
+            presetSnapshotHash: durable.promptProvenance.presetSnapshotHash,
+          ),
+          createdAt: generatedSession.updatedAt,
+          entries: [
+            for (var index = 0; index < durable.entries.length; index++)
+              LorebookUseManifestEntryInput(
+                lorebookId: durable.entries[index].lorebookId,
+                entryId: durable.entries[index].entryId,
+                entryOrder: index,
+                evidenceJson: jsonEncode(durable.entries[index].toJson()),
+              ),
+          ],
+        );
+      }
+
+      return _toModel(
+        row.copyWith(
+          messagesJson: messagesJson,
+          sessionVarsJson: Value(sessionVarsJson),
+          authorsNoteJson: Value(authorsNoteJson),
+          draft: Value(updated.draft),
+          lastScrollAnchorJson: Value(lastScrollAnchorJson),
+          updatedAt: generatedSession.updatedAt,
+        ),
+      );
+    });
+  }
+
+  static bool _sameGenerationAnchor(ChatMessage expected, ChatMessage current) {
+    return expected.content == current.content &&
+        expected.swipeId == current.swipeId &&
+        expected.agentSwipeId == current.agentSwipeId &&
+        jsonEncode(expected.swipes) == jsonEncode(current.swipes) &&
+        jsonEncode(expected.swipesMeta) == jsonEncode(current.swipesMeta) &&
+        jsonEncode(
+              expected.agentSwipes.map((swipe) => swipe.toJson()).toList(),
+            ) ==
+            jsonEncode(
+              current.agentSwipes.map((swipe) => swipe.toJson()).toList(),
+            );
   }
 
   Future<Map<String, dynamic>> updateSessionVarsJson(
@@ -531,6 +889,7 @@ class ChatRepo implements SyncChatStore {
                 reasoning: msg.reasoning,
                 genTime: msg.genTime,
                 tokens: msg.tokens,
+                time: msg.time,
                 studioOutputs: msg.studioOutputs,
               ),
             );
@@ -561,17 +920,19 @@ class ChatRepo implements SyncChatStore {
                     ? agentSwipes[parentSwipeId].studioOutputs
                     : const <Map<String, dynamic>>[]);
 
-          agentSwipes.add(
-            AgentSwipe(
-              content: content,
-              kind: kind,
-              reasoning: reasoning,
-              genTime: genTime,
-              tokens: tokens,
-              studioOutputs: effectiveStudioOutputs,
-              parentSwipeId: parentSwipeId,
-            ),
+          final appendedSwipe = AgentSwipe(
+            content: content,
+            kind: kind,
+            reasoning: reasoning,
+            genTime: genTime,
+            tokens: tokens,
+            time: kind == 'cleaned' && parentSwipeId != null
+                ? agentSwipes[parentSwipeId].time
+                : null,
+            studioOutputs: effectiveStudioOutputs,
+            parentSwipeId: parentSwipeId,
           );
+          agentSwipes.add(appendedSwipe);
 
           messages[i] = msg.copyWith(
             content: content,
@@ -584,6 +945,7 @@ class ChatRepo implements SyncChatStore {
             // applyCleanedText fallback path.
             genTime: genTime ?? msg.genTime,
             tokens: tokens ?? msg.tokens,
+            time: appendedSwipe.time,
             agentSwipes: agentSwipes,
             agentSwipeId: agentSwipes.length - 1,
             swipesMeta: _syncAgentSwipesToMeta(
@@ -752,6 +1114,7 @@ class ChatRepo implements SyncChatStore {
           content: active.content,
           genTime: active.genTime,
           tokens: active.tokens,
+          time: active.time,
           agentSwipes: agentSwipes,
           agentSwipeId: newActiveId,
           swipesMeta: _syncAgentSwipesToMeta(
@@ -853,6 +1216,12 @@ class ChatRepo implements SyncChatStore {
               }
               lastContent = parts.join(' ');
             }
+            // A continued message grew at its tail, so the row must preview
+            // from the continuation boundary rather than the head (INV-CM7).
+            lastContent = previewSource(
+              lastContent,
+              lastMsg['continuationOffset'] as int?,
+            );
             if (lastContent.length > 250) {
               lastContent = lastContent.substring(0, 250);
             }
@@ -900,6 +1269,66 @@ class ChatRepo implements SyncChatStore {
       sessionName: sessionName,
       originTimestamp: originTimestamp,
       originKind: originKind,
+    );
+  }
+
+  SessionMetadata _projectedMetadata(QueryRow row) {
+    final lastMessageJson = row.readNullable<String>('last_message_json');
+    var lastContent = '';
+    var lastTimestamp = 0;
+    if (lastMessageJson != null) {
+      try {
+        final lastMessage = jsonDecode(lastMessageJson) as Map<String, dynamic>;
+        final rawContent = lastMessage['content'];
+        if (rawContent is String) {
+          lastContent = rawContent;
+        } else if (rawContent is List) {
+          lastContent = rawContent
+              .whereType<Map<Object?, Object?>>()
+              .where((part) => part['type'] == 'text' && part['text'] is String)
+              .map((part) => part['text'] as String)
+              .join(' ');
+        }
+        lastContent = previewSource(
+          lastContent,
+          lastMessage['continuationOffset'] as int?,
+        );
+        if (lastContent.length > 250) {
+          lastContent = lastContent.substring(0, 250);
+        }
+        lastTimestamp = (lastMessage['timestamp'] as int?) ?? 0;
+      } catch (_) {}
+    }
+
+    String? sessionName;
+    int? branchedAt;
+    final sessionVarsJson = row.readNullable<String>('session_vars_json');
+    if (sessionVarsJson != null && sessionVarsJson.isNotEmpty) {
+      try {
+        final vars = jsonDecode(sessionVarsJson) as Map;
+        sessionName = vars['sessionName'] as String?;
+        final rawBranchedAt = vars['branchedAt'];
+        if (rawBranchedAt is String) branchedAt = int.tryParse(rawBranchedAt);
+      } catch (_) {}
+    }
+
+    final firstTimestamp = row.readNullable<int>('first_timestamp') ?? 0;
+    final hasBranchTimestamp = branchedAt != null && branchedAt > 0;
+    return SessionMetadata(
+      sessionId: row.read<String>('session_id'),
+      characterId: row.read<String>('character_id'),
+      sessionIndex: row.read<int>('session_index'),
+      updatedAt: row.read<int>('updated_at'),
+      messageCount: row.readNullable<int>('message_count') ?? 0,
+      lastMessageContent: lastContent,
+      lastMessageTimestamp: lastTimestamp,
+      sessionName: sessionName,
+      originTimestamp: hasBranchTimestamp ? branchedAt : firstTimestamp,
+      originKind: hasBranchTimestamp
+          ? 'branched'
+          : firstTimestamp > 0
+          ? 'created'
+          : null,
     );
   }
 
@@ -984,24 +1413,29 @@ class ChatRepo implements SyncChatStore {
     return (count, lastStart);
   }
 
-  ChatSession _toModel(ChatSessionRow c) => ChatSession(
-    id: c.sessionId,
-    characterId: c.characterId,
-    sessionIndex: c.sessionIndex,
-    messages: (jsonDecode(c.messagesJson) as List)
-        .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
-        .toList(),
-    updatedAt: c.updatedAt,
-    sessionVars: c.sessionVarsJson != null
-        ? Map<String, String>.from(jsonDecode(c.sessionVarsJson!) as Map)
-        : {},
-    authorsNote: _parseAuthorsNote(c.authorsNoteJson),
-    draft: c.draft,
-    lastScrollAnchor:
-        c.lastScrollAnchorJson != null && c.lastScrollAnchorJson!.isNotEmpty
-        ? Map<String, dynamic>.from(jsonDecode(c.lastScrollAnchorJson!) as Map)
-        : {},
-  );
+  ChatSession _toModel(ChatSessionRow c, {List<ChatMessage>? messages}) =>
+      ChatSession(
+        id: c.sessionId,
+        characterId: c.characterId,
+        sessionIndex: c.sessionIndex,
+        messages:
+            messages ??
+            (jsonDecode(c.messagesJson) as List)
+                .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
+                .toList(),
+        updatedAt: c.updatedAt,
+        sessionVars: c.sessionVarsJson != null
+            ? Map<String, String>.from(jsonDecode(c.sessionVarsJson!) as Map)
+            : {},
+        authorsNote: _parseAuthorsNote(c.authorsNoteJson),
+        draft: c.draft,
+        lastScrollAnchor:
+            c.lastScrollAnchorJson != null && c.lastScrollAnchorJson!.isNotEmpty
+            ? Map<String, dynamic>.from(
+                jsonDecode(c.lastScrollAnchorJson!) as Map,
+              )
+            : {},
+      );
 
   ChatSessionsCompanion _toCompanion(ChatSession m) => ChatSessionsCompanion(
     sessionId: Value(m.id),
@@ -1044,3 +1478,81 @@ class ChatRepo implements SyncChatStore {
     return <String, dynamic>{};
   }
 }
+
+/// Decoding and encoding a long chat history is CPU-bound. Keep it out of the
+/// UI isolate. Callers do this before opening a short compare-and-swap
+/// transaction so an isolate delay cannot occupy the database executor.
+Future<_PreparedUserMessageAppend> _prepareUserMessageAppend(
+  String messagesJson,
+  ChatMessage message,
+) => Isolate.run(
+  () => _decodeAndAppendUserMessage(messagesJson, message.toJson()),
+);
+
+Future<_PreparedUserMessageAppend?> _prepareAcceptedUserMessageAppend({
+  required String messagesJson,
+  required ChatMessage message,
+  required LorebookUseGenerationIdentity expectedPrecedingAssistant,
+}) => Isolate.run(
+  () => _decodeAndAppendAcceptedUserMessage(
+    messagesJson,
+    message.toJson(),
+    expectedPrecedingAssistant.messageId,
+    expectedPrecedingAssistant.swipeId,
+    expectedPrecedingAssistant.agentSwipeId,
+  ),
+);
+
+_PreparedUserMessageAppend _decodeAndAppendUserMessage(
+  String messagesJson,
+  Map<String, dynamic> messageJson,
+) {
+  final messages = _decodeChatMessages(messagesJson)
+    ..add(ChatMessage.fromJson(messageJson));
+  return _PreparedUserMessageAppend(
+    messagesJson: jsonEncode(
+      messages.map((message) => message.toJson()).toList(),
+    ),
+    messages: messages,
+  );
+}
+
+_PreparedUserMessageAppend? _decodeAndAppendAcceptedUserMessage(
+  String messagesJson,
+  Map<String, dynamic> messageJson,
+  String expectedMessageId,
+  int expectedSwipeId,
+  int expectedAgentSwipeId,
+) {
+  final messages = _decodeChatMessages(messagesJson);
+  final message = ChatMessage.fromJson(messageJson);
+  if (messages.any((existing) => existing.id == message.id)) {
+    return _PreparedUserMessageAppend(
+      messagesJson: messagesJson,
+      messages: messages,
+      didAppend: false,
+    );
+  }
+
+  // A user send accepts only the assistant immediately before it, never an
+  // older assistant found by scanning history after a concurrent change.
+  final preceding = messages.isNotEmpty ? messages.last : null;
+  if (preceding == null ||
+      preceding.role != 'assistant' ||
+      preceding.id != expectedMessageId ||
+      preceding.swipeId != expectedSwipeId ||
+      preceding.agentSwipeId != expectedAgentSwipeId) {
+    return null;
+  }
+
+  messages.add(message);
+  return _PreparedUserMessageAppend(
+    messagesJson: jsonEncode(messages.map((item) => item.toJson()).toList()),
+    messages: messages,
+  );
+}
+
+List<ChatMessage> _decodeChatMessages(String messagesJson) =>
+    (jsonDecode(messagesJson) as List<dynamic>)
+        .map((entry) => ChatMessage.fromJson(entry as Map<String, dynamic>))
+        .toList();

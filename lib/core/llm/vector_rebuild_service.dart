@@ -8,6 +8,7 @@ import '../models/chat_message.dart';
 import 'chat_message_embedding_service.dart';
 import 'embedding_service.dart';
 import 'lorebook_embedding_service.dart';
+import 'lorebook_embedding_text.dart';
 import 'memory_embedding_service.dart';
 
 enum VectorRebuildSource { memoryBooks, lorebooks, rawChat }
@@ -179,11 +180,9 @@ class VectorRebuildService {
     if (request.sources.contains(VectorRebuildSource.lorebooks)) {
       final lorebooks = await _lorebookRepo.getAll();
       for (final lorebook in lorebooks) {
+        final vectorizeAll = lorebook.settings?.vectorizeAllEntries ?? false;
         for (final entry in lorebook.entries) {
-          if (!entry.enabled || entry.constant) continue;
-          if (entry.excludeFromVectorization) continue;
-          if (!entry.vectorSearch &&
-              (entry.keys.isNotEmpty || entry.secondaryKeys.isNotEmpty)) {
+          if (!isLorebookEntryIndexable(entry, vectorizeAll: vectorizeAll)) {
             continue;
           }
           tasks.add(
@@ -199,7 +198,9 @@ class VectorRebuildService {
                       _config,
                       forceReindex: request.forceReindex,
                       embeddingTarget:
-                          lorebook.settings?.embeddingTarget ?? 'content',
+                          lorebook.settings?.embeddingTarget ??
+                          LorebookEmbeddingTarget.content,
+                      vectorizeAll: vectorizeAll,
                     );
                 return _VectorTaskResult(
                   indexed: result.indexed,

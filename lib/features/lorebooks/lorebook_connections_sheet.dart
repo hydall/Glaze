@@ -32,10 +32,21 @@ class _LorebookConnectionsSheetState
     if (lb == null) return const SizedBox.shrink();
 
     final activations = ref.watch(lorebookActivationsProvider);
-    final charIds = activations.character.entries
+    final chars = ref.watch(charactersProvider).value ?? const <Character>[];
+    final characterTargetIds = activations.character.entries
         .where((e) => e.value.contains(lb.id))
         .map((e) => e.key)
-        .toList();
+        .toSet();
+    if (lb.activationScope == 'character' &&
+        lb.activationTargetId?.isNotEmpty == true) {
+      final persistedTarget = lb.activationTargetId!;
+      if (_isCharacterGroupId(chars, persistedTarget)) {
+        characterTargetIds.removeWhere(
+          (id) => _characterGroupId(chars, id) == persistedTarget,
+        );
+      }
+      characterTargetIds.add(persistedTarget);
+    }
     final chatIds = activations.chat.entries
         .where((e) => e.value.contains(lb.id))
         .map((e) => e.key)
@@ -54,10 +65,7 @@ class _LorebookConnectionsSheetState
                 children: [
                   Text(
                     '${'header_connections'.tr()}: ${lb.name}',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                   ),
                   const HelpTip(term: 'connections'),
                 ],
@@ -87,7 +95,7 @@ class _LorebookConnectionsSheetState
               const SizedBox(width: 6),
               ConnectionScopeChip(
                 label: 'level_character'.tr(),
-                selected: charIds.isNotEmpty,
+                selected: characterTargetIds.isNotEmpty,
                 color: Colors.purple,
               ),
               const SizedBox(width: 6),
@@ -118,18 +126,21 @@ class _LorebookConnectionsSheetState
           icon: Icons.person,
           title: 'lbc_section_characters'.tr(),
           onAdd: () => _addCharacterConnection(lb),
-          child: charIds.isEmpty
+          child: characterTargetIds.isEmpty
               ? ConnectionEmptyHint('no_char_connections'.tr())
               : Wrap(
                   spacing: 6,
                   runSpacing: 4,
-                  children: charIds
+                  children: characterTargetIds
                       .map(
                         (id) => ConnectionChip(
                           id: id,
                           futureLabel: _charName(id),
-                          onRemove: () =>
-                              _toggleActivation(lb.id, 'character', id),
+                          onRemove: () => _setCharacterActivation(
+                            lb.id,
+                            id,
+                            enabled: false,
+                          ),
                         ),
                       )
                       .toList(),
@@ -164,8 +175,58 @@ class _LorebookConnectionsSheetState
 
   Future<String> _charName(String id) async {
     final chars = ref.read(charactersProvider).value ?? [];
-    final c = chars.where((c) => c.id == id).firstOrNull;
+    final direct = chars.where((c) => c.id == id).firstOrNull;
+    if (direct != null && !_isCharacterGroupId(chars, id)) return direct.name;
+    final group = chars.where((c) => _characterGroupId(chars, c.id) == id);
+    final c =
+        group.where((c) => c.variantOrder == 0).firstOrNull ??
+        group.firstOrNull;
     return c?.name ?? id;
+  }
+
+  String _characterGroupId(List<Character> chars, String characterId) {
+    final character = chars.where((c) => c.id == characterId).firstOrNull;
+    final groupId = character?.variantGroupId;
+    return groupId?.isNotEmpty == true ? groupId! : characterId;
+  }
+
+  bool _isCharacterGroupId(List<Character> chars, String id) => chars.any(
+    (character) =>
+        character.variantGroupId == id ||
+        (character.variantGroupId.isEmpty && character.id == id),
+  );
+
+  void _setCharacterActivation(
+    String lbId,
+    String targetId, {
+    required bool enabled,
+  }) {
+    final chars = ref.read(charactersProvider).value ?? const <Character>[];
+    final current = ref.read(lorebookActivationsProvider);
+    final map = Map<String, List<String>>.from(current.character);
+    final targetIsGroup = _isCharacterGroupId(chars, targetId);
+    final matchingKeys = map.keys
+        .where(
+          (id) =>
+              id == targetId ||
+              (targetIsGroup && _characterGroupId(chars, id) == targetId),
+        )
+        .toList(growable: false);
+
+    for (final id in matchingKeys) {
+      final ids = List<String>.from(map[id]!)..remove(lbId);
+      if (ids.isEmpty) {
+        map.remove(id);
+      } else {
+        map[id] = ids;
+      }
+    }
+    if (enabled) {
+      final ids = List<String>.from(map[targetId] ?? const []);
+      if (!ids.contains(lbId)) ids.add(lbId);
+      map[targetId] = ids;
+    }
+    _commitActivation(lbId, 'character', current.copyWith(character: map));
   }
 
   Future<String> _chatLabel(String sessionId) async {
@@ -199,13 +260,21 @@ class _LorebookConnectionsSheetState
     final updated = scope == 'character'
         ? current.copyWith(character: map)
         : current.copyWith(chat: map);
+    _commitActivation(lbId, scope, updated);
+  }
+
+  void _commitActivation(
+    String lbId,
+    String scope,
+    LorebookActivations updated,
+  ) {
     ref.read(lorebookActivationsProvider.notifier).state = updated;
     saveLorebookActivations(updated);
 
     final lorebooks = ref.read(lorebooksProvider).value ?? [];
     final lb = lorebooks.where((l) => l.id == lbId).firstOrNull;
     if (lb != null) {
-      final allLinked = scope == 'character'
+      var allLinked = scope == 'character'
           ? updated.character.entries
                 .where((e) => e.value.contains(lbId))
                 .map((e) => e.key)
@@ -236,32 +305,43 @@ class _LorebookConnectionsSheetState
   void _addCharacterConnection(Lorebook lb) async {
     final chars = ref.read(charactersProvider).value ?? [];
     final activations = ref.read(lorebookActivationsProvider);
-    final existingIds = activations.character.entries
+    final existingGroupIds = activations.character.entries
         .where((e) => e.value.contains(lb.id))
-        .map((e) => e.key)
+        .map((e) => _characterGroupId(chars, e.key))
         .toSet();
 
-    final available = chars.where((c) => !existingIds.contains(c.id)).toList();
+    final representatives = <String, Character>{};
+    for (final character in chars) {
+      final groupId = _characterGroupId(chars, character.id);
+      final current = representatives[groupId];
+      if (current == null || character.variantOrder < current.variantOrder) {
+        representatives[groupId] = character;
+      }
+    }
+    final available = representatives.entries
+        .where((entry) => !existingGroupIds.contains(entry.key))
+        .toList();
     if (available.isEmpty) {
       GlazeToast.show(context, 'lorebook_all_chars_connected'.tr());
       return;
     }
 
-    final selected = await GlazeBottomSheet.show<Character>(
+    final selected = await GlazeBottomSheet.show<MapEntry<String, Character>>(
       context,
       title: 'lbc_add_character'.tr(),
       items: available
           .map(
-            (c) => BottomSheetItem(
-              label: c.name,
-              onTap: () => Navigator.of(context, rootNavigator: true).pop(c),
+            (entry) => BottomSheetItem(
+              label: entry.value.name,
+              onTap: () =>
+                  Navigator.of(context, rootNavigator: true).pop(entry),
             ),
           )
           .toList(),
     );
 
     if (selected != null) {
-      _toggleActivation(lb.id, 'character', selected.id);
+      _setCharacterActivation(lb.id, selected.key, enabled: true);
     }
   }
 

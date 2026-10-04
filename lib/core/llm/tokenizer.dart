@@ -2,111 +2,104 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
-import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
-import '../utils/platform_paths.dart';
-// ignore: depend_on_referenced_packages, implementation_imports
-import 'package:tiktoken/src/common/byte_array.dart';
-import 'package:tiktoken/tiktoken.dart';
 
-const _o200kBaseVocabUrl =
-    'https://openaipublic.blob.core.windows.net/encodings/o200k_base.tiktoken';
+import 'inline_media.dart';
+import 'tokenizers/bpe_tokenizer.dart';
+import 'tokenizers/tokenizer_codec.dart';
+import 'tokenizers/tokenizer_kind.dart';
 
-const _o200kBasePatStr =
-    r"[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]*[\p{Ll}\p{Lm}\p{Lo}\p{M}]+('[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])?|[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]+[\p{Ll}\p{Lm}\p{Lo}\p{M}]*('[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])?|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+";
+export 'tokenizers/tokenizer_kind.dart';
 
-const _o200kCacheFile = 'o200k_base.tiktoken';
-
-Tiktoken? _o200kBaseEncoder;
+/// The tokenizer [estimateTokens] counts with, per isolate.
+///
+/// The UI isolate and the prompt worker each hold their own copy (isolates
+/// share no memory); both load it from the same cache file written by
+/// `TokenizerStore`, so they always count alike.
+BpeTokenizer? _active;
+TokenizerKind? _activeKind;
 
 final _tokenCache = <String, int>{};
+int _activationSeq = 0;
 
-/// Loads o200k_base tokenizer. Call from main thread with no arguments,
-/// or from an isolate by passing [appSupportPath] to avoid platform channels.
-Future<void> preloadO200kBase({String? appSupportPath}) async {
-  if (_o200kBaseEncoder != null) return;
+/// The kind [estimateTokens] currently counts with. [TokenizerKind.approx]
+/// until a real tokenizer has been loaded into this isolate.
+TokenizerKind get activeTokenizerKind => _activeKind ?? TokenizerKind.approx;
 
+/// Where [kind]'s compact cache lives under the app data directory.
+String tokenizerCachePath(String dataDir, TokenizerKind kind) =>
+    '$dataDir/tokenizers/${kind.id}.glztok';
+
+/// Switches this isolate to [kind], reading its cache under [dataDir].
+///
+/// Returns false — and keeps counting with the previous tokenizer — when the
+/// cache is missing or unreadable; the caller downloads it first.
+///
+/// A call overtaken by a later one (the user flipped models while a large
+/// vocabulary was still being read) returns false without installing
+/// anything, so the latest request always wins.
+Future<bool> activateTokenizer(TokenizerKind kind, String dataDir) async {
+  final seq = ++_activationSeq;
+  if (!kind.needsDownload) {
+    _setActive(null, kind);
+    return true;
+  }
+  if (_activeKind == kind && _active != null) return true;
   try {
-    final dir = appSupportPath ?? await getAppDataDir();
-    final cacheFile = File('$dir/$_o200kCacheFile');
-
-    String bpeData;
-    if (await cacheFile.exists()) {
-      bpeData = await cacheFile.readAsString();
-    } else {
-      final response = await Dio(BaseOptions(
-        connectTimeout: const Duration(seconds: 15),
-        receiveTimeout: const Duration(seconds: 60),
-      )).get<String>(
-        _o200kBaseVocabUrl,
-        options: Options(responseType: ResponseType.plain),
-      );
-      bpeData = response.data!;
-      await cacheFile.writeAsString(bpeData);
-    }
-
-    final mergeableRanks = <ByteArray, int>{};
-    for (final line in bpeData.split('\n')) {
-      if (line.isEmpty) continue;
-      final parts = line.split(' ');
-      if (parts.length != 2) continue;
-      mergeableRanks[ByteArray.fromList(base64Decode(parts[0]))] =
-          int.parse(parts[1]);
-    }
-
-    _o200kBaseEncoder = Tiktoken(
-      name: 'o200k_base',
-      patStr: _o200kBasePatStr,
-      mergeableRanks: mergeableRanks,
-      specialTokens: const {
-        '<|endoftext|>': 199999,
-        '<|endofprompt|>': 200018,
-      },
-    );
-
-    // Smoke test
-    _o200kBaseEncoder!
-        .encode('test', disallowedSpecial: SpecialTokensSet.empty());
-    _tokenCache.clear();
+    final file = File(tokenizerCachePath(dataDir, kind));
+    if (!await file.exists()) return false;
+    final bytes = await file.readAsBytes();
+    if (seq != _activationSeq) return false;
+    final tokenizer = decodeTokenizerCache(bytes);
+    if (tokenizer == null) return false;
+    _setActive(tokenizer, kind);
+    return true;
   } catch (e) {
-    // Ignore tokenizer errors
+    debugPrint('[tokenizer] failed to load ${kind.id}: $e');
+    return false;
   }
 }
 
-/// Convenience alias used by the isolate entry point.
-Future<void> preloadO200kBaseInIsolate(String appSupportPath) =>
-    preloadO200kBase(appSupportPath: appSupportPath);
+/// Installs an already-built tokenizer. Tests use it to count with a real
+/// vocabulary without touching the file system.
+@visibleForTesting
+void debugSetActiveTokenizer(BpeTokenizer? tokenizer, TokenizerKind kind) =>
+    _setActive(tokenizer, kind);
 
-bool get o200kBaseLoaded => _o200kBaseEncoder != null;
+void _setActive(BpeTokenizer? tokenizer, TokenizerKind kind) {
+  _active = tokenizer;
+  _activeKind = kind;
+  _tokenCache.clear();
+}
 
-/// Estimate token count for [text] using o200k_base with persistent caching.
-/// Falls back to ~4 chars/token if encoder is not yet loaded.
+/// Estimate token count for [text] with the active tokenizer, memoized.
+/// Inline base64 media is counted as the placeholder the request carries
+/// instead (see [stripInlineMedia]).
+/// Falls back to ~4 chars/token while no tokenizer is loaded.
 int estimateTokens(String text, {bool useCache = true}) {
   if (text.isEmpty) return 0;
-  final cleaned = _stripBase64Media(text);
+  final cleaned = stripInlineMedia(text);
   if (cleaned.isEmpty) return 0;
 
-  final encoder = _o200kBaseEncoder;
-  if (encoder == null) return _approxTokens(cleaned);
+  final tokenizer = _active;
+  if (tokenizer == null) return _approxTokens(cleaned);
 
-  if (!useCache) return _encode(encoder, cleaned);
+  if (!useCache) return _count(tokenizer, cleaned);
 
   final key = _cacheKey(cleaned);
   final cached = _tokenCache[key];
   if (cached != null) return cached;
 
-  final count = _encode(encoder, cleaned);
+  final count = _count(tokenizer, cleaned);
   _tokenCache[key] = count;
   return count;
 }
 
-int _encode(Tiktoken encoder, String text) {
+int _count(BpeTokenizer tokenizer, String text) {
   try {
-    return encoder
-        .encode(text, disallowedSpecial: SpecialTokensSet.empty())
-        .length;
+    return tokenizer.count(text);
   } catch (e) {
-    debugPrint('[tokenizer] encode failed: $e');
+    debugPrint('[tokenizer] count failed: $e');
     return _approxTokens(text);
   }
 }
@@ -122,18 +115,3 @@ String _cacheKey(String text) {
 }
 
 void clearTokenCache() => _tokenCache.clear();
-
-/// Strips base64-encoded images/data URIs from text before token counting,
-/// since they inflate char count but are not sent to the LLM.
-String _stripBase64Media(String text) {
-  if (text.length < 256) return text;
-  var result = text.replaceAllMapped(
-    RegExp(r'<img\s+src="data:image/[^"]{256,}?"\s*/?>'),
-    (_) => '',
-  );
-  result = result.replaceAllMapped(
-    RegExp(r'data:image/[^;]+;base64,[A-Za-z0-9+/=]{256,}'),
-    (_) => '',
-  );
-  return result;
-}

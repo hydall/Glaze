@@ -6,6 +6,8 @@ import '../app_db.dart';
 import '../../models/api_config.dart';
 import '../../application/sync_repo_interfaces.dart';
 import '../../models/extra_request_parameter.dart';
+import '../../llm/history_trim.dart';
+import '../../llm/transport/endpoint_normalizer.dart';
 
 class ApiConfigRepo implements SyncApiConfigStore {
   final AppDatabase _db;
@@ -27,7 +29,21 @@ class ApiConfigRepo implements SyncApiConfigStore {
 
   @override
   Future<void> put(ApiConfig config) async {
-    await _db.into(_db.apiConfigs).insertOnConflictUpdate(_toCompanion(config));
+    final persisted = config.copyWith(
+      endpoint: EndpointNormalizer.persistedLlmEndpoint(
+        raw: config.endpoint,
+        protocol: config.protocol,
+        model: config.model,
+        stream: config.stream,
+        useResponsesApi: config.useResponsesApi,
+      ),
+      embeddingEndpoint: EndpointNormalizer.persistedEmbeddingEndpoint(
+        config.embeddingEndpoint,
+      ),
+    );
+    await _db
+        .into(_db.apiConfigs)
+        .insertOnConflictUpdate(_toCompanion(persisted));
   }
 
   @override
@@ -53,6 +69,9 @@ class ApiConfigRepo implements SyncApiConfigStore {
     mode: c.mode,
     maxTokens: c.maxTokens,
     contextSize: c.contextSize,
+    historyTrimMode: HistoryTrimMode.normalize(c.historyTrimMode),
+    historyTrimTriggerPercent: c.historyTrimTriggerPercent,
+    historyTrimStepPercent: c.historyTrimStepPercent,
     temperature: c.temperature,
     topP: c.topP,
     topK: c.topK,
@@ -64,6 +83,7 @@ class ApiConfigRepo implements SyncApiConfigStore {
     useResponsesApi: c.useResponsesApi,
     showNativeReasoning: c.showNativeReasoning,
     reasoningHistoryCount: c.reasoningHistoryCount,
+    excludeReasoningFromContextBudget: c.excludeReasoningFromContextBudget,
     reasoningTagStart: c.reasoningTagStart,
     reasoningTagEnd: c.reasoningTagEnd,
     embeddingUseSame: c.embeddingUseSame,
@@ -72,6 +92,8 @@ class ApiConfigRepo implements SyncApiConfigStore {
     embeddingApiKey: c.embeddingApiKey ?? '',
     embeddingModel: c.embeddingModel ?? '',
     embeddingMaxChunkTokens: c.embeddingMaxChunkTokens,
+    embeddingRequestsPerMinute: c.embeddingRequestsPerMinute,
+    embeddingLlmPresetId: c.embeddingLlmPresetId,
     omitTemperature: c.omitTemperature,
     omitTopP: c.omitTopP,
     omitTopK: c.omitTopK,
@@ -82,7 +104,15 @@ class ApiConfigRepo implements SyncApiConfigStore {
     cacheControlTtl: c.cacheControlTtl,
     cacheBreakpointMode: c.cacheBreakpointMode,
     sessionIdMode: c.sessionIdMode,
+    promptPostProcessing: c.promptPostProcessing,
+    noAssistant: c.noAssistant,
+    noAssistantStopString: c.noAssistantStopString,
+    noAssistantUserPrefix: c.noAssistantUserPrefix,
+    noAssistantCharPrefix: c.noAssistantCharPrefix,
+    noAssistantSquashRole: c.noAssistantSquashRole,
     firstChunkTimeoutMs: c.firstChunkTimeoutMs,
+    useSystemInstruction: c.useSystemInstruction,
+    tokenizer: c.tokenizer,
     extraRequestParameters:
         (jsonDecode(c.extraRequestParametersJson) as List<dynamic>)
             .map(
@@ -104,6 +134,9 @@ class ApiConfigRepo implements SyncApiConfigStore {
     mode: Value(m.mode),
     maxTokens: Value(m.maxTokens),
     contextSize: Value(m.contextSize),
+    historyTrimMode: Value(HistoryTrimMode.normalize(m.historyTrimMode)),
+    historyTrimTriggerPercent: Value(m.historyTrimTriggerPercent),
+    historyTrimStepPercent: Value(m.historyTrimStepPercent),
     temperature: Value(m.temperature),
     topP: Value(m.topP),
     topK: Value(m.topK),
@@ -116,6 +149,9 @@ class ApiConfigRepo implements SyncApiConfigStore {
     showNativeReasoning: Value(m.showNativeReasoning),
     includeLastReasoning: Value(m.reasoningHistoryCount != 0),
     reasoningHistoryCount: Value(m.reasoningHistoryCount),
+    excludeReasoningFromContextBudget: Value(
+      m.excludeReasoningFromContextBudget,
+    ),
     reasoningTagStart: Value(m.reasoningTagStart),
     reasoningTagEnd: Value(m.reasoningTagEnd),
     embeddingUseSame: Value(m.embeddingUseSame),
@@ -124,6 +160,8 @@ class ApiConfigRepo implements SyncApiConfigStore {
     embeddingApiKey: Value(m.embeddingApiKey),
     embeddingModel: Value(m.embeddingModel),
     embeddingMaxChunkTokens: Value(m.embeddingMaxChunkTokens),
+    embeddingRequestsPerMinute: Value(m.embeddingRequestsPerMinute),
+    embeddingLlmPresetId: Value(m.embeddingLlmPresetId),
     omitTemperature: Value(m.omitTemperature),
     omitTopP: Value(m.omitTopP),
     omitTopK: Value(m.omitTopK),
@@ -134,7 +172,15 @@ class ApiConfigRepo implements SyncApiConfigStore {
     cacheControlTtl: Value(m.cacheControlTtl),
     cacheBreakpointMode: Value(m.cacheBreakpointMode),
     sessionIdMode: Value(m.sessionIdMode),
+    promptPostProcessing: Value(m.promptPostProcessing),
+    noAssistant: Value(m.noAssistant),
+    noAssistantStopString: Value(m.noAssistantStopString),
+    noAssistantUserPrefix: Value(m.noAssistantUserPrefix),
+    noAssistantCharPrefix: Value(m.noAssistantCharPrefix),
+    noAssistantSquashRole: Value(m.noAssistantSquashRole),
     firstChunkTimeoutMs: Value(m.firstChunkTimeoutMs),
+    useSystemInstruction: Value(m.useSystemInstruction),
+    tokenizer: Value(m.tokenizer),
     extraRequestParametersJson: Value(
       jsonEncode(
         m.extraRequestParameters.map((value) => value.toJson()).toList(),

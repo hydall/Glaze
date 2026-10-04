@@ -11,62 +11,82 @@ import 'package:glaze_flutter/core/models/preset.dart';
 
 // Baseline command: flutter test test/prompt_lorebook_baseline_test.dart
 void main() {
-  test('baseline: isolate prompt build handles long history and large lorebook',
-      () async {
-    const historyCount = 160;
-    const lorebookEntryCount = 240;
-    const injectedLorebookEntries = 6;
-    final inputs = _baselineInputs();
+  test(
+    'baseline: isolate prompt build handles long history and large lorebook',
+    () async {
+      const historyCount = 160;
+      const lorebookEntryCount = 240;
+      const injectedLorebookEntries = 6;
+      final inputs = _baselineInputs();
 
-    // The first request includes worker/isolate initialization; the second
-    // measures the persistent worker path. Timings are diagnostic only.
-    final coldWatch = Stopwatch()..start();
-    final cold = await buildFromInputsInIsolate(inputs);
-    coldWatch.stop();
+      // The first request includes worker/isolate initialization; the second
+      // measures the persistent worker path. Timings are diagnostic only.
+      final coldWatch = Stopwatch()..start();
+      final cold = await buildFromInputsInIsolate(inputs);
+      coldWatch.stop();
 
-    final warmWatch = Stopwatch()..start();
-    final warm = await buildFromInputsInIsolate(inputs);
-    warmWatch.stop();
+      final warmWatch = Stopwatch()..start();
+      final warm = await buildFromInputsInIsolate(inputs);
+      warmWatch.stop();
+
+      addTearDown(() async {
+        final worker = await PromptWorker.ensureInitialized();
+        worker.dispose();
+      });
+
+      final outputChars = cold.messages.fold<int>(
+        0,
+        (total, message) => total + message.content.length,
+      );
+      // ignore: avoid_print
+      print(
+        'prompt/lorebook baseline: history=$historyCount '
+        'lorebookEntries=$lorebookEntryCount cold=${coldWatch.elapsedMilliseconds}ms '
+        'warm=${warmWatch.elapsedMilliseconds}ms outputChars=$outputChars '
+        'tokens=${cold.breakdown.totalTokens}',
+      );
+
+      final expectedLoreIds = [
+        for (var index = 0; index < injectedLorebookEntries; index++)
+          'lore-$index',
+      ];
+      expect(cold.triggeredLorebooks.map((entry) => entry.id), expectedLoreIds);
+      expect(
+        cold.messages.where((message) => message.isHistory).length,
+        historyCount,
+      );
+      expect(
+        cold.messages.map((message) => message.content).join('\n'),
+        allOf(contains('LOREBOOK_BASELINE_0'), contains('history-marker-159')),
+      );
+
+      // Assert output semantics, never a machine-dependent timing threshold.
+      expect(_signature(warm), _signature(cold));
+      expect(warm.breakdown.totalTokens, cold.breakdown.totalTokens);
+    },
+  );
+
+  test('regression: persistent worker handles a 690-entry lorebook', () async {
+    final inputs = _baselineInputs(lorebookEntryCount: 690);
+
+    final result = await buildFromInputsInIsolate(inputs);
 
     addTearDown(() async {
       final worker = await PromptWorker.ensureInitialized();
       worker.dispose();
     });
 
-    final outputChars = cold.messages.fold<int>(
-      0,
-      (total, message) => total + message.content.length,
-    );
-    // ignore: avoid_print
-    print(
-      'prompt/lorebook baseline: history=$historyCount '
-      'lorebookEntries=$lorebookEntryCount cold=${coldWatch.elapsedMilliseconds}ms '
-      'warm=${warmWatch.elapsedMilliseconds}ms outputChars=$outputChars '
-      'tokens=${cold.breakdown.totalTokens}',
-    );
-
-    final expectedLoreIds = [
-      for (var index = 0; index < injectedLorebookEntries; index++)
-        'lore-$index',
-    ];
-    expect(cold.triggeredLorebooks.map((entry) => entry.id), expectedLoreIds);
+    expect(result.triggeredLorebooks, hasLength(6));
     expect(
-      cold.messages.where((message) => message.isHistory).length,
-      historyCount,
+      result.messages.map((message) => message.content).join('\n'),
+      contains('LOREBOOK_BASELINE_0'),
     );
-    expect(
-      cold.messages.map((message) => message.content).join('\n'),
-      allOf(contains('LOREBOOK_BASELINE_0'), contains('history-marker-159')),
-    );
-
-    // Assert output semantics, never a machine-dependent timing threshold.
-    expect(_signature(warm), _signature(cold));
-    expect(warm.breakdown.totalTokens, cold.breakdown.totalTokens);
   });
 }
 
-PromptInputs _baselineInputs() {
-  const filler = 'synthetic history payload for deterministic prompt benchmarking ';
+PromptInputs _baselineInputs({int lorebookEntryCount = 240}) {
+  const filler =
+      'synthetic history payload for deterministic prompt benchmarking ';
   return PromptInputs(
     character: const Character(
       id: 'baseline-character',
@@ -110,7 +130,7 @@ PromptInputs _baselineInputs() {
         id: 'baseline-lorebook',
         name: 'Baseline lorebook',
         entries: [
-          for (var index = 0; index < 240; index++)
+          for (var index = 0; index < lorebookEntryCount; index++)
             LorebookEntry(
               id: 'lore-$index',
               comment: 'Benchmark lore $index',

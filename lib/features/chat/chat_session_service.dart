@@ -3,10 +3,12 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/models/character.dart';
 import '../../core/models/chat_message.dart';
 import '../../core/models/persona.dart';
 import '../../core/state/active_selection_provider.dart';
 import '../../core/state/lorebook_provider.dart';
+import '../../core/state/lorebook_embedding_provider.dart';
 import '../../core/state/shared_prefs_provider.dart';
 import '../../core/utils/time_helpers.dart';
 import '../../core/utils/sync_deletion_tracker.dart';
@@ -19,6 +21,15 @@ class ChatSessionService {
   static final int _maxCacheSize = 20;
   static final Map<String, ChatSession> _cache = {};
   static final List<String> _cacheAccessOrder = [];
+
+  /// Bumped by every eviction. Reads that started before an eviction (the
+  /// fire-and-forget [_prefetchAdjacent] pass) must not publish their result
+  /// afterwards: a prefetch of the session the user is about to delete lands
+  /// after [clearCache] and puts the deleted row straight back in the cache.
+  /// Session ids are `${charId}_$index` and a freed index is handed to the
+  /// next new chat, so that stale entry is served as "the new chat" — which is
+  /// exactly the deleted chat opening again.
+  static int _cacheEpoch = 0;
 
   static int get cacheSize => _cache.length;
 
@@ -39,6 +50,7 @@ class ChatSessionService {
   }
 
   static void clearCache({String? charId}) {
+    _cacheEpoch++;
     if (charId == null) {
       _cache.clear();
       _cacheAccessOrder.clear();
@@ -54,7 +66,6 @@ class ChatSessionService {
   }
 
   Future<ChatSession> createInitialSession(String charId) async {
-    final repo = _ref.read(chatRepoProvider);
     final charRepo = _ref.read(characterRepoProvider);
     final personaRepo = _ref.read(personaRepoProvider);
     final activePersonaId = _ref.read(activePersonaIdProvider);
@@ -69,20 +80,13 @@ class ChatSessionService {
       connections,
     );
 
-    final sessionId = '${charId}_0';
-    final initialMessages = InitialMessageBuilder.build(
+    final session = await _insertNewSession(
+      charId: charId,
       character: character,
       persona: persona,
-      sessionId: sessionId,
+      stampUpdatedAt: false,
     );
-
-    final session = ChatSession(
-      id: sessionId,
-      characterId: charId,
-      sessionIndex: 0,
-      messages: initialMessages,
-    );
-    await repo.put(session);
+    updateCache(session);
     return session;
   }
 
@@ -94,18 +98,28 @@ class ChatSessionService {
 
     final directId = '${charId}_$currentIdx';
     var session = await repo.getById(directId);
-    if (session != null) return session;
+    if (session?.characterId == charId) return session;
 
     final sessions = await repo.getByCharacterId(charId);
     if (sessions.isEmpty) return null;
-    return sessions.first;
+    // The recorded index points at a session that is gone — the usual cause is
+    // deleting the chat you were in. Pick the most recent survivor (row order
+    // is not guaranteed, so choose explicitly) and repair the record, or every
+    // later `switchToSession(currentIdx)` keeps missing and throwing.
+    final fallback = sessions.reduce(
+      (a, b) => b.lastActivityMs > a.lastActivityMs ? b : a,
+    );
+    await saveCurrentSessionIndex(charId, fallback.sessionIndex);
+    return fallback;
   }
 
   Future<ChatSession> switchToSession(String charId, int sessionIndex) async {
     final cacheKey = '${charId}_$sessionIndex';
 
     final cached = _cache[cacheKey];
-    if (cached != null) {
+    if (cached != null &&
+        cached.characterId == charId &&
+        cached.sessionIndex == sessionIndex) {
       _touchCacheKey(cacheKey);
       await saveCurrentSessionIndex(charId, sessionIndex);
       _prefetchAdjacent(charId, sessionIndex);
@@ -114,7 +128,9 @@ class ChatSessionService {
 
     final repo = _ref.read(chatRepoProvider);
     final session = await repo.getById(cacheKey);
-    if (session == null) {
+    if (session == null ||
+        session.characterId != charId ||
+        session.sessionIndex != sessionIndex) {
       final sessions = await repo.getByCharacterId(charId);
       final target = sessions
           .where((s) => s.sessionIndex == sessionIndex)
@@ -139,34 +155,30 @@ class ChatSessionService {
   void _prefetchAdjacent(String charId, int currentIdx) {
     if (!_ref.mounted) return;
     final repo = _ref.read(chatRepoProvider);
+    // Snapshotted before the reads start; a deletion between now and the reply
+    // bumps it and the result is dropped instead of resurrecting a row that no
+    // longer exists.
+    final epoch = _cacheEpoch;
     () async {
       try {
         final futures = <Future<void>>[];
 
+        void publish(String key, ChatSession? session) {
+          if (session == null || epoch != _cacheEpoch) return;
+          _cache[key] = session;
+          _touchCacheKey(key);
+        }
+
         if (currentIdx > 0) {
           final prevKey = '${charId}_${currentIdx - 1}';
           if (!_cache.containsKey(prevKey)) {
-            futures.add(
-              repo.getById(prevKey).then((s) {
-                if (s != null) {
-                  _cache[prevKey] = s;
-                  _touchCacheKey(prevKey);
-                }
-              }),
-            );
+            futures.add(repo.getById(prevKey).then((s) => publish(prevKey, s)));
           }
         }
 
         final nextKey = '${charId}_${currentIdx + 1}';
         if (!_cache.containsKey(nextKey)) {
-          futures.add(
-            repo.getById(nextKey).then((s) {
-              if (s != null) {
-                _cache[nextKey] = s;
-                _touchCacheKey(nextKey);
-              }
-            }),
-          );
+          futures.add(repo.getById(nextKey).then((s) => publish(nextKey, s)));
         }
 
         if (futures.isNotEmpty) await Future.wait(futures);
@@ -177,12 +189,10 @@ class ChatSessionService {
   }
 
   Future<ChatSession> createNewSession(String charId) async {
-    final repo = _ref.read(chatRepoProvider);
     final charRepo = _ref.read(characterRepoProvider);
     final personaRepo = _ref.read(personaRepoProvider);
     final activePersonaId = _ref.read(activePersonaIdProvider);
     final connections = _ref.read(personaConnectionsProvider);
-    final nextIndex = await _nextSessionIndex(charId);
     final character = await charRepo.getById(charId);
     final personas = await personaRepo.getAll();
     final persona = getEffectivePersona(
@@ -192,24 +202,80 @@ class ChatSessionService {
       activePersonaId,
       connections,
     );
-    final sessionId = '${charId}_$nextIndex';
-    final initialMessages = InitialMessageBuilder.build(
+    final session = await _insertNewSession(
+      charId: charId,
       character: character,
       persona: persona,
-      sessionId: sessionId,
+      stampUpdatedAt: true,
     );
-    final session = ChatSession(
-      id: sessionId,
-      characterId: charId,
-      sessionIndex: nextIndex,
-      messages: initialMessages,
-      // Stamp creation time so the new chat carries a real "last activity"
-      // date for the session list (display + sorting) instead of 0.
-      updatedAt: currentTimestampSeconds(),
-    );
-    await repo.put(session);
-    await saveCurrentSessionIndex(charId, nextIndex);
+    updateCache(session);
     return session;
+  }
+
+  Future<ChatSession> _insertNewSession({
+    required String charId,
+    required Character? character,
+    required Persona? persona,
+    required bool stampUpdatedAt,
+  }) {
+    final repo = _ref.read(chatRepoProvider);
+    final charRepo = _ref.read(characterRepoProvider);
+    return repo.transaction(() async {
+      var index = await _nextSessionIndex(charId);
+      while (true) {
+        final sessionId = '${charId}_$index';
+        final session = ChatSession(
+          id: sessionId,
+          characterId: charId,
+          sessionIndex: index,
+          messages: InitialMessageBuilder.build(
+            character: character,
+            persona: persona,
+            sessionId: sessionId,
+          ),
+          updatedAt: stampUpdatedAt ? currentTimestampSeconds() : 0,
+        );
+        if (await repo.insertIfAbsent(session)) {
+          await charRepo.setCurrentSessionIndex(charId, index);
+          return session;
+        }
+        index++;
+      }
+    });
+  }
+
+  /// Inserts a branch that keeps the source card: a plain extra session on
+  /// that character, carrying the retained slice instead of a fresh greeting.
+  ///
+  /// Runs inside [branchSession]'s transaction, so it claims the index the
+  /// same way [_insertNewSession] does — insert-if-absent, stepping forward
+  /// while the id is taken — and moves the character's current session onto
+  /// the branch the user is about to be sent to.
+  Future<ChatSession> _insertBranchSession({
+    required Character character,
+    required ChatSession source,
+    required List<ChatMessage> retainedMessages,
+    required Map<String, String> sessionVars,
+  }) async {
+    final repo = _ref.read(chatRepoProvider);
+    final charRepo = _ref.read(characterRepoProvider);
+    var index = await _nextSessionIndex(character.id);
+    while (true) {
+      final session = ChatSession(
+        id: '${character.id}_$index',
+        characterId: character.id,
+        sessionIndex: index,
+        messages: retainedMessages,
+        sessionVars: sessionVars,
+        authorsNote: source.authorsNote,
+        updatedAt: currentTimestampSeconds(),
+      );
+      if (await repo.insertIfAbsent(session)) {
+        await charRepo.setCurrentSessionIndex(character.id, index);
+        return session;
+      }
+      index++;
+    }
   }
 
   Future<ChatSession> branchSession(
@@ -218,27 +284,72 @@ class ChatSessionService {
     int messageIndex,
   ) async {
     final repo = _ref.read(chatRepoProvider);
+    final selectedMessage = current.messages[messageIndex];
     final session = await repo.transaction(() async {
-      final nextIndex = await _nextSessionIndex(charId);
-      final branch = ChatSession(
-        id: '${charId}_$nextIndex',
-        characterId: charId,
-        sessionIndex: nextIndex,
-        messages: current.messages.sublist(0, messageIndex + 1),
-        sessionVars: {
-          ...current.sessionVars,
-          'branchedAt': DateTime.now().millisecondsSinceEpoch.toString(),
-        },
-        authorsNote: current.authorsNote,
-        updatedAt: currentTimestampSeconds(),
+      final durableSource = await repo.getById(current.id);
+      if (durableSource == null) {
+        throw StateError('Session ${current.id} not found');
+      }
+      final durableIndex = durableSource.messages.indexWhere(
+        (message) => message.id == selectedMessage.id,
       );
+      if (durableIndex < 0 ||
+          durableSource.messages[durableIndex].swipeId !=
+              selectedMessage.swipeId ||
+          durableSource.messages[durableIndex].agentSwipeId !=
+              selectedMessage.agentSwipeId) {
+        throw StateError('Branch message selection is stale');
+      }
+      final character = await _ref
+          .read(characterRepoProvider)
+          .getById(durableSource.characterId);
+      if (character == null) {
+        throw StateError('Character ${durableSource.characterId} not found');
+      }
+      final retainedMessages = durableSource.messages.sublist(
+        0,
+        durableIndex + 1,
+      );
+      final sessionVars = {
+        ...current.sessionVars,
+        'branchedAt': DateTime.now().millisecondsSinceEpoch.toString(),
+      };
+      // A branch only needs a card of its own once the Card Rewriter can have
+      // moved this session's card away from the character it points at. With
+      // no rewrite behind it the branch is a plain extra session on the same
+      // card, and the first rewrite in either session forks the card itself.
+      final branchRepo = _ref.read(chatSessionBranchRepoProvider);
+      final forksCard = await branchRepo.requiresCardForkInTransaction(
+        sourceCharacter: character,
+        sourceSessionId: durableSource.id,
+      );
+      final branchResult = forksCard
+          ? await branchRepo.createInTransaction(
+              sourceCharacter: character,
+              sourceSession: durableSource,
+              retainedMessages: retainedMessages,
+              sessionVars: sessionVars,
+            )
+          : null;
+      final branch =
+          branchResult?.session ??
+          await _insertBranchSession(
+            character: character,
+            source: durableSource,
+            retainedMessages: retainedMessages,
+            sessionVars: sessionVars,
+          );
       final messageIds = branch.messages.map((message) => message.id).toSet();
-      await repo.put(branch);
       await _ref
           .read(characterSessionBaselineRepoProvider)
           .copyForSessionBranch(
             fromSessionId: current.id,
             toSessionId: branch.id,
+            characterId: branch.characterId,
+            // Null keeps the source session's own baseline evidence, which is
+            // exactly the card an unforked branch inherits.
+            baselineCardJson: branchResult?.rootSnapshotJson,
+            baselineHash: branchResult?.rootRevisionHash,
           );
       await _ref
           .read(memoryBookRepoProvider)
@@ -275,8 +386,30 @@ class ChatSessionService {
             toSessionId: branch.id,
             messageIds: messageIds,
           );
+      // Only a forked branch has a canon timeline to inherit: an unforked one
+      // branches a session that never applied a rewrite, so there is neither a
+      // root checkpoint nor a transition to copy.
+      if (branchResult != null) {
+        final root = await _ref
+            .read(sessionCanonCheckpointRepoProvider)
+            .getLatest(branch.id);
+        await branchRepo.copyCanonTransitionsInTransaction(
+          sourceSessionId: current.id,
+          branchSessionId: branch.id,
+          branchCharacterId: branch.characterId,
+          branchRevisionHash: root!.characterRevisionHash,
+          sourceCheckpointSequence: branchResult.sourceCheckpointSequence,
+        );
+      }
       await _ref
           .read(ledgerReconciliationCheckpointRepoProvider)
+          .copyForSessionBranch(
+            fromSessionId: current.id,
+            toSessionId: branch.id,
+            messageIds: messageIds,
+          );
+      await _ref
+          .read(ledgerReconciliationRunRepoProvider)
           .copyForSessionBranch(
             fromSessionId: current.id,
             toSessionId: branch.id,
@@ -295,13 +428,6 @@ class ChatSessionService {
             fromSessionId: current.id,
             toSessionId: branch.id,
           );
-      final character = await _ref.read(characterRepoProvider).getById(charId);
-      if (character == null) {
-        throw StateError('Character $charId not found');
-      }
-      await _ref
-          .read(characterRepoProvider)
-          .put(character.copyWith(currentSessionIndex: nextIndex));
       return (await repo.getById(branch.id))!;
     });
 
@@ -313,6 +439,7 @@ class ChatSessionService {
       debugPrint('[ChatSessionService] branch preference copy error: $error');
     }
     updateCache(session);
+    unawaited(_ref.read(sessionLorebookEmbeddingWorkerProvider).drain());
     return session;
   }
 
@@ -406,20 +533,36 @@ class ChatSessionService {
     if (!_ref.mounted) return;
     final charRepo = _ref.read(characterRepoProvider);
     try {
-      final character = await charRepo.getById(charId);
-      if (character != null) {
-        await charRepo.put(character.copyWith(currentSessionIndex: index));
-      }
+      await charRepo.setCurrentSessionIndex(charId, index);
     } catch (e) {
       debugPrint('[ChatSessionService] saveCurrentSessionIndex error: $e');
     }
   }
 
+  /// The index a new session gets. Session ids are `${charId}_$index`, so an
+  /// index handed out twice means two different chats share an id — the second
+  /// one inherits whatever the first left behind (cache entries, and the
+  /// pending `SyncDeletionTracker` record that would delete it again on the
+  /// next sync).
+  ///
+  /// Deleting the highest-numbered session frees its index, so the surviving
+  /// rows alone are not a safe high-water mark. `currentSessionIndex` is the
+  /// character's durable record of the last index that existed, which closes
+  /// the common case: deleting the chat you are in and immediately starting a
+  /// new one.
   Future<int> _nextSessionIndex(String charId) async {
     final repo = _ref.read(chatRepoProvider);
     final sessions = await repo.getByCharacterId(charId);
+    // No sessions at all → start over at 0, the index `createInitialSession`
+    // uses. `currentSessionIndex` defaults to 0 and so cannot tell "never had
+    // a chat" from "was on chat #1"; it is only a usable high-water mark while
+    // at least one session survives.
     if (sessions.isEmpty) return 0;
-    return sessions.map((s) => s.sessionIndex).reduce((a, b) => a > b ? a : b) +
-        1;
+    final character = await _ref.read(characterRepoProvider).getById(charId);
+    final lastKnownIndex = character?.currentSessionIndex ?? 0;
+    final maxExisting = sessions
+        .map((s) => s.sessionIndex)
+        .reduce((a, b) => a > b ? a : b);
+    return (maxExisting > lastKnownIndex ? maxExisting : lastKnownIndex) + 1;
   }
 }

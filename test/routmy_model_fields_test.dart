@@ -6,7 +6,8 @@ void main() {
   test('Seedream hides the ignored quality selector', () {
     final seedream = buildRoutmyModelFields(
       const ImageGenSettings(routmyModel: 'bytedance/seedream-5.0-pro'),
-      isRu: false,
+      isFetching: false,
+      onFetchModels: () {},
       onUpdate: (_) {},
       showOptions:
           <T>({
@@ -19,7 +20,8 @@ void main() {
     );
     final generic = buildRoutmyModelFields(
       const ImageGenSettings(routmyModel: 'meta/muse-spark-1.1'),
-      isRu: false,
+      isFetching: false,
+      onFetchModels: () {},
       onUpdate: (_) {},
       showOptions:
           <T>({

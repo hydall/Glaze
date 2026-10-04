@@ -3,12 +3,30 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 
 import '../db/repositories/ledger_reconciliation_checkpoint_repo.dart';
+import '../models/character.dart';
 import '../models/character_knowledge_fact.dart';
 import '../models/chat_message.dart';
 import '../models/knowledge_cleanup.dart';
 import '../models/tracker.dart';
+import 'studio_ledger_prompt.dart';
 
 const ledgerReconciliationPromptBlockId = 'ledger_reconciliation_prompt';
+
+String computeLedgerReconciliationRangeHash(Iterable<ChatMessage> messages) =>
+    sha256
+        .convert(
+          utf8.encode(
+            messages
+                .map(
+                  (message) =>
+                      '${message.id}\u001f${message.swipeId}\u001f'
+                      '${message.agentSwipeId}\u001f${message.role}\u001f'
+                      '${message.content}',
+                )
+                .join('\u001e'),
+          ),
+        )
+        .toString();
 
 class LedgerReconciliationPlan {
   final List<ChatMessage> messages;
@@ -26,14 +44,16 @@ class LedgerReconciliationPlan {
 }
 
 class LedgerReconciliationPlanner {
-  static const interval = 6;
-  static const maxMessages = 20;
-
+  /// Five accepted interaction chunks are reviewed when the following
+  /// assistant turn is generated. The chat-opening assistant belongs to the
+  /// first `assistant-user-assistant` chunk; later chunks are `user-assistant`.
+  /// The next turn is only the acceptance trigger and is never reviewed.
+  static const acceptedChunksPerRun = 5;
   const LedgerReconciliationPlanner();
 
   /// Builds an on-demand review ending at an explicitly accepted assistant
-  /// turn. Unlike [plan], this does not apply the six-turn cadence or
-  /// checkpoint deduplication.
+  /// turn. Unlike [plan], this does not apply trigger cadence or checkpoint
+  /// deduplication, but still returns no more than five complete Ledger chunks.
   LedgerReconciliationPlan? planForEndpoint({
     required List<ChatMessage> messages,
     required String endAssistantMessageId,
@@ -42,35 +62,53 @@ class LedgerReconciliationPlanner {
       (message) => message.id == endAssistantMessageId,
     );
     if (endIndex < 0 || !_isAcceptedAssistant(messages[endIndex])) return null;
-    return _buildPlan(messages: messages, endIndex: endIndex);
+    final chunks = _parseCompletedChunks(messages.take(endIndex + 1));
+    if (chunks == null || chunks.isEmpty) return null;
+    if (chunks.last.endAssistant.id != endAssistantMessageId) return null;
+    final start = chunks.length > acceptedChunksPerRun
+        ? chunks.length - acceptedChunksPerRun
+        : 0;
+    return _buildPlan(chunks: chunks, start: start);
   }
 
   LedgerReconciliationPlan? plan({
     required List<ChatMessage> messages,
     required String currentAssistantMessageId,
     LedgerReconciliationCheckpoint? checkpoint,
+    String? previousEndMessageId,
   }) {
     final currentIndex = messages.indexWhere(
       (message) => message.id == currentAssistantMessageId,
     );
-    if (currentIndex < 0) return null;
-
-    final acceptedAssistants = messages
-        .take(currentIndex)
-        .where(_isAcceptedAssistant)
-        .toList(growable: false);
-    if (acceptedAssistants.isEmpty ||
-        acceptedAssistants.length % interval != 0) {
+    if (currentIndex < 0 || !_isAcceptedAssistant(messages[currentIndex])) {
       return null;
     }
 
-    // Review boundary N only while N+1 is being generated. A reroll of N+1
-    // has the same boundary and is deduplicated by the checkpoint; N+2 must
-    // never re-run or rewrite the older boundary.
-    final endIndex = messages.indexWhere(
-      (message) => message.id == acceptedAssistants.last.id,
+    final chunks = _parseCompletedChunks(
+      messages.take(currentIndex),
+      allowTrailingUser: true,
     );
-    final plan = _buildPlan(messages: messages, endIndex: endIndex);
+    if (chunks == null) return null;
+    var previousChunkIndex = -1;
+    if (previousEndMessageId != null) {
+      previousChunkIndex = chunks.indexWhere(
+        (chunk) => chunk.endAssistant.id == previousEndMessageId,
+      );
+      // A durable logical head that is no longer in the transcript must not
+      // silently reset cadence to the beginning.
+      if (previousChunkIndex < 0) return null;
+    }
+    final firstUnprocessed = previousChunkIndex + 1;
+    final unprocessedCount = chunks.length - firstUnprocessed;
+    if (unprocessedCount < acceptedChunksPerRun) {
+      return null;
+    }
+
+    final mandatoryEnd = firstUnprocessed + acceptedChunksPerRun;
+    final plan = _buildPlan(
+      chunks: chunks.sublist(0, mandatoryEnd),
+      start: firstUnprocessed,
+    );
     if (plan == null) return null;
     final end = plan.endMessage;
     final hash = plan.rangeHash;
@@ -84,37 +122,22 @@ class LedgerReconciliationPlanner {
   }
 
   LedgerReconciliationPlan? _buildPlan({
-    required List<ChatMessage> messages,
-    required int endIndex,
+    required List<_LedgerReviewChunk> chunks,
+    required int start,
   }) {
-    final end = messages[endIndex];
-    final startIndex = endIndex + 1 > maxMessages
-        ? endIndex + 1 - maxMessages
-        : 0;
-    final range = messages
-        .sublist(startIndex, endIndex + 1)
-        .where(_isReviewable)
+    if (chunks.isEmpty || start < 0 || start >= chunks.length) {
+      return null;
+    }
+    final range = chunks
+        .sublist(start)
+        .expand((chunk) => chunk.messages)
         .toList(growable: false);
-    if (range.isEmpty) return null;
+    final end = chunks.last.endAssistant;
 
-    final hash = sha256
-        .convert(
-          utf8.encode(
-            range
-                .map(
-                  (message) =>
-                      '${message.id}\u001f${message.swipeId}\u001f'
-                      '${message.agentSwipeId}\u001f${message.role}\u001f'
-                      '${message.content}',
-                )
-                .join('\u001e'),
-          ),
-        )
-        .toString();
     return LedgerReconciliationPlan(
       messages: range,
       endMessage: end,
-      rangeHash: hash,
+      rangeHash: computeLedgerReconciliationRangeHash(range),
     );
   }
 
@@ -131,6 +154,41 @@ class LedgerReconciliationPlanner {
       !message.isError &&
       !message.isHidden &&
       message.content.trim().isNotEmpty;
+
+  List<_LedgerReviewChunk>? _parseCompletedChunks(
+    Iterable<ChatMessage> source, {
+    bool allowTrailingUser = false,
+  }) {
+    final messages = source.where(_isReviewable).toList(growable: false);
+    if (messages.isEmpty || !_isAcceptedAssistant(messages.first)) return null;
+    final chunks = <_LedgerReviewChunk>[];
+    var index = 1;
+    while (index < messages.length) {
+      final user = messages[index];
+      if (user.role != 'user') return null;
+      if (index + 1 >= messages.length) {
+        return allowTrailingUser ? chunks : null;
+      }
+      final assistant = messages[index + 1];
+      if (!_isAcceptedAssistant(assistant)) return null;
+      chunks.add(
+        _LedgerReviewChunk([
+          if (chunks.isEmpty) messages.first,
+          user,
+          assistant,
+        ]),
+      );
+      index += 2;
+    }
+    return chunks;
+  }
+}
+
+final class _LedgerReviewChunk {
+  const _LedgerReviewChunk(this.messages);
+
+  final List<ChatMessage> messages;
+  ChatMessage get endAssistant => messages.last;
 }
 
 class StudioLedgerReconciliationPrompt {
@@ -144,6 +202,7 @@ class StudioLedgerReconciliationPrompt {
     required LedgerReconciliationPlan plan,
     required List<Tracker> trackers,
     List<CharacterKnowledgeFact> knowledgeFacts = const [],
+    Character? character,
   }) {
     final chat = plan.messages
         .map(
@@ -165,10 +224,11 @@ class StudioLedgerReconciliationPrompt {
     final factLines = facts.isEmpty
         ? '(no reviewable knowledge facts)'
         : facts.map(_factLine).join('\n');
+    final cardSection = StudioLedgerPrompt.buildCharacterCardSection(character);
 
     return '''$systemPrompt
 
-<review_range start="${plan.startMessageId}" end="${plan.endMessage.id}">
+$cardSection<review_range start="${plan.startMessageId}" end="${plan.endMessage.id}">
 $chat
 </review_range>
 
@@ -204,7 +264,14 @@ Knowledge cleanup may only repair facts listed in <knowledge_facts>:
   range explicitly resolves a placeholder or descriptive identity. Never
   rename an already named person into a different named person.
 Never create facts, rewrite fact content, or retract a fact merely because it is
-old or absent from the review range.''';
+old or absent from the review range.
+
+Game clock (world:time, world:date, world:day): advance world:time (24h HH:MM)
+only to correct a demonstrable clock error in the committed endpoint state.
+The ordinary turns in the review range were already applied; never add their
+elapsed time again. Keep the complete DD.MM.YYYY / RP day / HH:MM tuple and never
+guess a missing date or day. The clock only moves FORWARD — never rewind it;
+treat flashbacks and memories as prose, not clock changes.''';
   }
 
   List<CharacterKnowledgeFact> relevantKnowledgeFacts(

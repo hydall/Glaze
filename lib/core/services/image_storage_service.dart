@@ -23,6 +23,30 @@ const int kThumbnailLongSide = 4096;
 /// JPEG quality for the generated thumbnails.
 const int _kThumbnailQuality = 92;
 
+/// A scaled thumbnail's encoded bytes plus the file extension that encoding
+/// requires.
+///
+/// JPEG keeps opaque art small, but it has no alpha channel: encoding a
+/// transparent portrait flattened the cut-out onto an implicit white box,
+/// while the full-resolution hero on the detail screen stayed transparent —
+/// the same character looked different in the grid and in its card. Sources
+/// with transparent pixels are therefore kept as PNG; opaque ones stay JPEG.
+typedef EncodedThumbnail = ({Uint8List bytes, String extension});
+
+/// True when [image] has at least one pixel that is not fully opaque.
+///
+/// Scans rather than trusting [img.Image.hasAlpha]: an image can carry an
+/// alpha channel whose every pixel is still opaque, and those are much
+/// cheaper as JPEG. Palette images are scanned too, since their transparency
+/// lives in the palette rather than the pixel channels.
+bool hasTransparentPixel(img.Image image) {
+  if (!image.hasAlpha && image.palette == null) return false;
+  for (final pixel in image) {
+    if (pixel.a < 255) return true;
+  }
+  return false;
+}
+
 String imageExtensionForBytes(Uint8List bytes) {
   if (bytes.length >= 3 &&
       bytes[0] == 0xff &&
@@ -57,17 +81,25 @@ String imageExtensionForBytes(Uint8List bytes) {
 /// new [kThumbnailShortSide] / resize policy takes effect for existing
 /// libraries. Pair with [_kThumbBackfillKey] so the wiped thumbnails are
 /// regenerated in the background.
-const String _kThumbMigrationKey = 'gz_thumb_v6_migrated';
+///
+/// v7 keeps transparency: v6 encoded every thumbnail as JPEG, so transparent
+/// portraits were flattened onto a white box. Regenerating existing thumbnails
+/// picks up the PNG-when-transparent policy.
+const String _kThumbMigrationKey = 'gz_thumb_v7_migrated';
 
 /// SharedPreferences flag guarding the one-time background thumbnail backfill.
-const String _kThumbBackfillKey = 'gz_thumb_v6_backfilled';
+const String _kThumbBackfillKey = 'gz_thumb_v7_backfilled';
 
-const String _kThumbMigrationMarker = '.thumbnails-v6-migrated';
-const String _kThumbRefreshMarker = '.thumbnails-v6-refresh-required';
+const String _kThumbMigrationMarker = '.thumbnails-v7-migrated';
+const String _kThumbRefreshMarker = '.thumbnails-v7-refresh-required';
 
 /// Runs in a background isolate and scales without upscaling or changing the
 /// aspect ratio. Both axes are bounded to keep extreme images mobile-safe.
-Uint8List? resizeAvatarBytes(
+///
+/// Encodes as PNG when the scaled image has transparent pixels and as JPEG
+/// otherwise — see [EncodedThumbnail]. Callers must write the bytes under the
+/// returned [EncodedThumbnail.extension].
+EncodedThumbnail? resizeAvatarBytes(
   Uint8List imageBytes,
   int maxShortSide, [
   int maxLongSide = kThumbnailLongSide,
@@ -87,8 +119,17 @@ Uint8List? resizeAvatarBytes(
             height: (image.height * scale).round().clamp(1, maxLongSide),
           )
         : image;
-    return Uint8List.fromList(
-      img.encodeJpg(scaled, quality: _kThumbnailQuality),
+    if (hasTransparentPixel(scaled)) {
+      return (
+        bytes: Uint8List.fromList(img.encodePng(scaled)),
+        extension: 'png',
+      );
+    }
+    return (
+      bytes: Uint8List.fromList(
+        img.encodeJpg(scaled, quality: _kThumbnailQuality),
+      ),
+      extension: 'jpg',
     );
   } catch (_) {
     return null;
@@ -165,7 +206,7 @@ class ImageStorageService implements SyncImageStore {
           continue;
         }
         final name = p.basenameWithoutExtension(resolvedPath);
-        await File(p.join(dir.path, '$name.jpg')).writeAsBytes(thumbnail);
+        await _writeThumbnail(dir.path, name, thumbnail);
         made++;
       } catch (_) {
         complete = false;
@@ -208,10 +249,9 @@ class ImageStorageService implements SyncImageStore {
     if (!await dir.exists()) {
       await dir.create(recursive: true);
     }
-    final thumbnail = _resizeImage(imageBytes, kThumbnailShortSide);
+    final thumbnail = await _resizeImage(imageBytes, kThumbnailShortSide);
     if (thumbnail == null) return null;
-    final path = p.join(dir.path, '$characterId.jpg');
-    await File(path).writeAsBytes(thumbnail);
+    final path = await _writeThumbnail(dir.path, characterId, thumbnail);
     return path;
   }
 
@@ -222,7 +262,7 @@ class ImageStorageService implements SyncImageStore {
     if (!await avatarFile.exists()) return null;
 
     final bytes = await avatarFile.readAsBytes();
-    final thumbnail = _resizeImage(bytes, kThumbnailShortSide);
+    final thumbnail = await _resizeImage(bytes, kThumbnailShortSide);
     if (thumbnail == null) return null;
 
     final dir = Directory(p.join(baseDir, 'thumbnails'));
@@ -231,8 +271,26 @@ class ImageStorageService implements SyncImageStore {
     }
 
     final name = p.basenameWithoutExtension(resolvedPath);
-    final path = p.join(dir.path, '$name.jpg');
-    await File(path).writeAsBytes(thumbnail);
+    final path = await _writeThumbnail(dir.path, name, thumbnail);
+    return path;
+  }
+
+  /// Writes [thumbnail] as `<dir>/<name>.<extension>` and removes the
+  /// same-named file with the other extension, so a re-encode that changes
+  /// format (opaque JPEG ↔ transparent PNG) never leaves a stale sibling that
+  /// path resolution would then prefer.
+  Future<String> _writeThumbnail(
+    String dirPath,
+    String name,
+    EncodedThumbnail thumbnail,
+  ) async {
+    final path = p.join(dirPath, '$name.${thumbnail.extension}');
+    await File(path).writeAsBytes(thumbnail.bytes);
+    for (final ext in kThumbnailExtensions) {
+      if (ext == thumbnail.extension) continue;
+      final stale = File(p.join(dirPath, '$name.$ext'));
+      if (await stale.exists()) await stale.delete();
+    }
     return path;
   }
 
@@ -240,16 +298,20 @@ class ImageStorageService implements SyncImageStore {
     final avatarPath = p.join(baseDir, 'avatars', '$characterId.png');
     final file = File(avatarPath);
     if (await file.exists()) await file.delete();
-    final thumbPath = p.join(baseDir, 'thumbnails', '$characterId.jpg');
-    final thumbFile = File(thumbPath);
-    if (await thumbFile.exists()) await thumbFile.delete();
+    for (final ext in kThumbnailExtensions) {
+      final thumbFile = File(p.join(baseDir, 'thumbnails', '$characterId.$ext'));
+      if (await thumbFile.exists()) await thumbFile.delete();
+    }
   }
 
   String? thumbnailPath(String? avatarPath) {
     if (avatarPath == null || avatarPath.isEmpty) return null;
     final name = p.basenameWithoutExtension(avatarPath);
-    final thumb = p.join(baseDir, 'thumbnails', '$name.jpg');
-    return File(thumb).existsSync() ? thumb : null;
+    for (final ext in kThumbnailExtensions) {
+      final thumb = p.join(baseDir, 'thumbnails', '$name.$ext');
+      if (File(thumb).existsSync()) return thumb;
+    }
+    return null;
   }
 
   @override
@@ -298,8 +360,18 @@ class ImageStorageService implements SyncImageStore {
     return File(absPath).existsSync() ? absPath : null;
   }
 
-  Uint8List? _resizeImage(Uint8List imageBytes, int maxDimension) =>
-      resizeAvatarBytes(imageBytes, maxDimension);
+  /// Resizes off the UI isolate.
+  ///
+  /// Decoding a full-size card PNG and re-encoding it costs hundreds of
+  /// milliseconds and a decode buffer many times the file size. Doing that
+  /// inline meant one dropped frame — and one large allocation — per imported
+  /// card; a mass import piled up hundreds of them. `Isolate.run` hands those
+  /// buffers back the moment the worker exits (the thumbnail backfill above
+  /// already worked this way).
+  Future<EncodedThumbnail?> _resizeImage(
+    Uint8List imageBytes,
+    int maxDimension,
+  ) => Isolate.run(() => resizeAvatarBytes(imageBytes, maxDimension));
 
   Uint8List _stripPngTextChunks(Uint8List pngBytes) {
     if (pngBytes.length < 8) return pngBytes;

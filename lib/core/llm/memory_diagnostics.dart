@@ -2,6 +2,7 @@ import '../models/agent_operation_record.dart';
 import '../models/memory_book.dart';
 import 'memory_budget.dart';
 import 'memory_excerpt_selector.dart';
+import 'memory_retrieval_mode.dart';
 import 'memory_selector.dart';
 
 class MemoryCandidateDiagnostics {
@@ -233,7 +234,10 @@ class MemoryDiagnostics {
           );
         })
         .toList(growable: false);
-    final missingContext = memoryMode == 'balanced'
+    final missingContext =
+        MemoryRetrievalMode.fromValue(
+          memoryMode,
+        ).supports(MemoryRetrievalCapability.missingContextDiagnostics)
         ? _missingContextSignals(selection, currentText)
         : const <String>[];
 

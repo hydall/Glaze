@@ -1,9 +1,13 @@
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
+
 import '../models/character.dart';
 import '../models/chat_message.dart';
 import '../models/lorebook.dart';
 import 'glaze_matcher.dart';
+import 'lorebook_activation.dart';
+import 'lorebook_limits.dart';
 
 final _rng = Random();
 
@@ -18,6 +22,10 @@ class ScannedEntry {
   final bool constant;
   final int? maxInjectedEntries;
 
+  /// The entry opts out of the entry caps: it is never cut by the per-book or
+  /// the global budget, and it does not spend a slot other entries could use.
+  final bool ignoreBudget;
+
   const ScannedEntry({
     required this.id,
     required this.comment,
@@ -28,6 +36,7 @@ class ScannedEntry {
     required this.lorebookId,
     required this.constant,
     this.maxInjectedEntries,
+    this.ignoreBudget = false,
   });
 
   Map<String, dynamic> toJson() => {
@@ -40,6 +49,7 @@ class ScannedEntry {
     'lorebookId': lorebookId,
     'constant': constant,
     'maxInjectedEntries': maxInjectedEntries,
+    'ignoreBudget': ignoreBudget,
   };
 
   factory ScannedEntry.fromJson(Map<String, dynamic> json) => ScannedEntry(
@@ -52,8 +62,18 @@ class ScannedEntry {
     lorebookId: json['lorebookId'] as String,
     constant: json['constant'] as bool,
     maxInjectedEntries: json['maxInjectedEntries'] as int?,
+    ignoreBudget: json['ignoreBudget'] as bool? ?? false,
   );
 }
+
+/// How many times a scan source has been built, across all scans.
+///
+/// The fix above is invisible from the outside — the same entries match — so
+/// this is how a test states it: scanning many entries must build the text
+/// once per distinct scan depth, not once per entry. Incremented only; a test
+/// resets it before measuring.
+@visibleForTesting
+int lorebookScanSourceBuilds = 0;
 
 List<ScannedEntry> scanLorebooks({
   required List<ChatMessage> history,
@@ -67,38 +87,47 @@ List<ScannedEntry> scanLorebooks({
 }) {
   if (globalSettings.searchType == 'vector') return [];
 
-  final charId = char?.id;
-  final charWorld = char?.world;
-
-  final activeLorebooks = lorebooks.where((lb) {
-    if (lb.enabled) return true;
-    if (charId != null &&
-        activations.character[charId]?.contains(lb.id) == true) {
-      return true;
-    }
-    if (chatId != null && activations.chat[chatId]?.contains(lb.id) == true) {
-      return true;
-    }
-    if (charId != null &&
-        lb.activationScope == 'character' &&
-        lb.activationTargetId == charId) {
-      return true;
-    }
-    if (chatId != null &&
-        lb.activationScope == 'chat' &&
-        lb.activationTargetId == chatId) {
-      return true;
-    }
-    if (charWorld != null && charWorld.isNotEmpty && lb.name == charWorld) {
-      return true;
-    }
-    return false;
-  }).toList();
+  final activeLorebooks = activeLorebooksFor(
+    lorebooks: lorebooks,
+    charId: char?.id,
+    charGroupId: char?.variantGroupId,
+    charWorld: char?.world,
+    chatId: chatId,
+    activations: activations,
+  );
 
   if (activeLorebooks.isEmpty) return [];
 
   final allRelevantEntries = <ScannedEntry>[];
+  final relevantEntryKeys = <String>{};
   final candidateEntries = <_CandidateEntry>[];
+  final visibleHistory = history
+      .where((message) => !message.isHidden && !message.isTyping)
+      .toList(growable: false);
+  final historyByDepth = <int, String>{};
+  final lowerHistoryByDepth = <int, String>{};
+  // Every candidate entry scans the same text, and the text was rebuilt for
+  // each of them: a fresh lowercase pass over the recursion buffer plus a
+  // fresh concatenation with the history slice. With many entries that is the
+  // whole cost of a scan — the work is proportional to entries x characters
+  // when it only ever needed to be characters. Keyed by the two things it
+  // actually depends on.
+  final scanSourceByDepth = <(int, bool), String>{};
+  String? lowerScanText;
+
+  String historyTextFor(int depth, {required bool caseSensitive}) {
+    final cache = caseSensitive ? historyByDepth : lowerHistoryByDepth;
+    return cache.putIfAbsent(depth, () {
+      final start = visibleHistory.length > depth
+          ? visibleHistory.length - depth
+          : 0;
+      final text = visibleHistory
+          .skip(start)
+          .map((message) => message.content)
+          .join('\n');
+      return caseSensitive ? text : text.toLowerCase();
+    });
+  }
 
   for (final lb in activeLorebooks) {
     final lbSettings = lb.settings;
@@ -132,7 +161,9 @@ List<ScannedEntry> scanLorebooks({
           recursiveScan: lbRecursiveScan,
           caseSensitive: lbCaseSensitive,
           matchWholeWords: lbMatchWholeWords,
-          maxInjectedEntries: lbSettings?.maxInjectedEntries,
+          maxInjectedEntries: resolvePerBookEntryCap(
+            lbSettings?.maxInjectedEntries,
+          ),
         ),
       );
     }
@@ -140,9 +171,7 @@ List<ScannedEntry> scanLorebooks({
 
   for (final c in candidateEntries) {
     if (c.entry.constant) {
-      if (!allRelevantEntries.any(
-        (e) => e.id == c.entry.id && e.lorebookId == c.lorebookId,
-      )) {
+      if (relevantEntryKeys.add(_candidateKey(c))) {
         allRelevantEntries.add(_toScanned(c));
       }
     }
@@ -157,15 +186,30 @@ List<ScannedEntry> scanLorebooks({
       : 1;
   var scanText = textToScan;
 
+  String scanSourceFor(int depth, {required bool caseSensitive}) {
+    return scanSourceByDepth.putIfAbsent((depth, caseSensitive), () {
+      lorebookScanSourceBuilds++;
+      final messages = historyTextFor(depth, caseSensitive: caseSensitive);
+      if (caseSensitive) return '$messages$scanText';
+      return '$messages${lowerScanText ??= scanText.toLowerCase()}';
+    });
+  }
+
+  // A matched entry appends its content to the recursion buffer, which every
+  // later entry in the same pass must see. Dropping the cache there is what
+  // keeps this identical to rebuilding it every time.
+  void scanTextChanged() {
+    scanSourceByDepth.clear();
+    lowerScanText = null;
+  }
+
   while (changed && iteration < maxIterations) {
     changed = false;
     iteration++;
 
     for (final c in candidateEntries) {
       final entry = c.entry;
-      if (allRelevantEntries.any(
-        (e) => e.id == entry.id && e.lorebookId == c.lorebookId,
-      )) {
+      if (relevantEntryKeys.contains(_candidateKey(c))) {
         continue;
       }
       if (entry.constant) continue;
@@ -197,22 +241,10 @@ List<ScannedEntry> scanLorebooks({
                 : temporalDepth
           : scanDepth;
 
-      final visibleHistory = history
-          .where((m) => !m.isHidden && !m.isTyping)
-          .toList();
-
-      final messagesToScan = visibleHistory
-          .skip(
-            visibleHistory.length > effectiveScanDepth
-                ? visibleHistory.length - effectiveScanDepth
-                : 0,
-          )
-          .map((m) => m.content)
-          .join('\n');
-
-      var scanSource = caseSensitive
-          ? '$messagesToScan$scanText'
-          : '${messagesToScan.toLowerCase()}${scanText.toLowerCase()}';
+      final scanSource = scanSourceFor(
+        effectiveScanDepth,
+        caseSensitive: caseSensitive,
+      );
 
       bool isStickyActive = false;
       bool isOnCooldown = false;
@@ -279,9 +311,11 @@ List<ScannedEntry> scanLorebooks({
           }
 
           allRelevantEntries.add(_toScanned(c));
+          relevantEntryKeys.add(_candidateKey(c));
 
           if (!entry.preventRecursion && iteration < maxIterations) {
             scanText = '$scanText\n${entry.content.toLowerCase()}';
+            scanTextChanged();
             changed = true;
           }
         }
@@ -295,13 +329,6 @@ List<ScannedEntry> scanLorebooks({
   // Constant entries are always injected and do not count toward any cap.
   final constantEntries = allRelevantEntries.where((e) => e.constant).toList();
   var triggeredEntries = allRelevantEntries.where((e) => !e.constant).toList();
-
-  final perBookLimits = <String, int>{};
-  for (final c in candidateEntries) {
-    if (c.maxInjectedEntries != null && c.maxInjectedEntries! > 0) {
-      perBookLimits[c.lorebookId] = c.maxInjectedEntries!;
-    }
-  }
 
   if (applyPerBookLimits) {
     triggeredEntries = applyLorebookPerBookLimits(triggeredEntries);
@@ -318,7 +345,9 @@ List<ScannedEntry> applyLorebookPerBookLimits(List<ScannedEntry> entries) {
   final filtered = <ScannedEntry>[];
   for (final entry in entries) {
     final limit = entry.maxInjectedEntries;
-    if (limit != null) {
+    // An entry that ignores the budget is neither cut by the book's cap nor
+    // counted against it, so it cannot push a normal entry out either.
+    if (limit != null && !entry.ignoreBudget) {
       final count = lorebookCounts[entry.lorebookId] ?? 0;
       if (count >= limit) continue;
       lorebookCounts[entry.lorebookId] = count + 1;
@@ -340,7 +369,11 @@ ScannedEntry _toScanned(_CandidateEntry c) => ScannedEntry(
   lorebookId: c.lorebookId,
   constant: c.entry.constant,
   maxInjectedEntries: c.maxInjectedEntries,
+  ignoreBudget: c.entry.ignoreBudget,
 );
+
+String _candidateKey(_CandidateEntry candidate) =>
+    '${candidate.lorebookId}_${candidate.entry.id}';
 
 class _CandidateEntry {
   final LorebookEntry entry;

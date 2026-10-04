@@ -96,8 +96,6 @@ mixin JsPresetMapper on TypeConverters {
           json['impersonationPrompt'] as String? ??
           json['impersonation_prompt'] as String?,
       summaryPrompt: json['summaryPrompt'] as String?,
-      mergePrompts: json['mergePrompts'] as bool? ?? false,
-      mergeRole: json['mergeRole'] as String? ?? 'system',
       createdAt: toInt(json['createdAt']) ?? 0,
     ));
   }

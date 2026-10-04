@@ -1,14 +1,20 @@
 # Release channels
 
-Three long-lived branches, one per build channel. The channel decides whether a
-build ships developer tooling — developer mode and the build watermark.
+Three long-lived branches, one per build channel. The channel decides packaging
+— app identity, data folder, cloud root and update source — and the watermark
+default. It no longer decides whether developer mode is on.
 
-| Branch    | Channel   | Dev mode default | Watermark default | Audience              |
-|-----------|-----------|------------------|-------------------|-----------------------|
-| `stable`  | `stable`  | off              | off               | public releases       |
-| `staging` | `staging` | **on**           | **on**            | testers / release RCs |
-| `nightly` | `nightly` | **on**           | **on**            | daily internal builds |
-| any other | `nightly` | **on**           | **on**            | feature branches      |
+| Branch    | Channel   | Dev mode default | Watermark default   | Audience              |
+|-----------|-----------|------------------|---------------------|-----------------------|
+| `stable`  | `stable`  | off              | on while `0.x`      | public releases       |
+| `staging` | `staging` | off              | **on**              | testers / release RCs |
+| `nightly` | `nightly` | off              | **on**              | daily internal builds |
+| any other | `nightly` | off              | **on**              | feature branches      |
+
+Developer mode is hidden on every channel, local `flutter run` included, and is
+unlocked only through the 7-tap easter egg on the version badge in About. The
+build watermark is shown on every current version — `stable` only drops it once
+the app leaves `0.x`, since a beta needs its screenshots identifiable.
 
 `stable` is the repository default branch. Branching and promotion rules live in
 [`WORKFLOW.md`](./WORKFLOW.md).
@@ -38,38 +44,53 @@ existing defines:
 ```dart
 const buildChannel = String.fromEnvironment('BUILD_CHANNEL', defaultValue: 'nightly');
 const isStableChannel = buildChannel == 'stable';
-const devToolingEnabledByDefault = !isStableChannel;
 ```
 
 The default is `nightly`, so a local `flutter run` — which never passes the
-define — keeps dev tooling on. Nothing about the developer experience changes.
+define — is packaged like an internal build.
 
-## What the channel actually controls
+## What the channel still controls
 
-Only the **defaults** of two persisted settings in
-`lib/core/state/dev_mode_provider.dart`:
+Of the two persisted settings in `lib/core/state/dev_mode_provider.dart`, only
+the watermark is channel-aware now:
 
 ```dart
-// devModeProvider
-return prefs?.getBool(_prefsKey) ?? devToolingEnabledByDefault;
+// devModeProvider — hidden until unlocked in About, on every channel
+return prefs?.getBool(prefsKey) ?? false;
 
-// hideBuildWatermarkProvider  (note: "hide", so stable → hidden)
-return prefs?.getBool(_prefsKey) ?? isStableChannel;
+// hideBuildWatermarkProvider (note: "hide") — only a non-beta stable hides it
+return prefs?.getBool(_prefsKey) ?? (isStableChannel && !isBetaVersion);
 ```
 
-Two consequences worth being explicit about:
-
+- **Dev settings are opt-in everywhere.** The Dev group in
+  `lib/features/menu/menu_screen.dart` is gated on `devModeProvider`, and the
+  only thing that flips it is tapping the version badge seven times in
+  `lib/features/menu/about_screen.dart`. A nightly build looks exactly like a
+  stable one until someone does that — no channel gives it away for free.
+- **The watermark ships on every current version.** `isBetaVersion` is true for
+  the whole `0.x` line (`lib/core/constants/app_version.dart`), so even a stable
+  build stamps its date and branch today; the stamp disappears from `stable` on
+  its own at `1.0`. Turning it off before then means unlocking dev mode first.
 - **A user's own choice still wins.** Both values are persisted in
-  `SharedPreferences`; the channel only supplies the value used when nothing has
-  been stored yet.
-- **`stable` is not a lockout.** The 7-tap easter egg on the version badge
-  (`lib/features/menu/about_screen.dart`) still unlocks dev mode on a stable
-  build, and the watermark can then be switched back on from the Dev group for
-  diagnostics. This is deliberate — it keeps production builds debuggable.
+  `SharedPreferences`; the defaults above are only used when nothing has been
+  stored yet, so an install that already toggled either setting keeps what it
+  had.
 
-If you ever need the watermark to be genuinely unreachable on `stable`, gate the
-widget itself on `!isStableChannel` in `lib/app.dart` rather than changing the
-default — that is a behaviour change, not a default change.
+### One-time dev-mode reset
+
+Older `nightly`/`staging` builds defaulted dev mode to **on**, and that `true`
+was written to `SharedPreferences` the moment the user touched any dev toggle —
+a stored value outranks the new default, so those installs would have kept the
+Dev group forever. `resetLegacyDevModeFlag`
+(`lib/core/services/dev_mode_flag_migration.dart`) removes the `devModeEnabled`
+key once at startup, guarded by a `devModeDefaultResetV1` marker, and runs after
+`migrateLegacyWindowsPreferences` because that one rewrites the preferences file
+on disk before `SharedPreferences` is first opened. After the marker is written
+the flag is the user's own again and is never touched.
+
+If a future channel ever needs different behaviour here, add a derived `const`
+to `build_channel.dart` and use it for the default rather than reading
+`buildChannel` in feature code.
 
 ## Side-by-side installs
 
@@ -198,8 +219,9 @@ trade rather than a gap worth closing.
    workflows (all three build jobs each) if it gets its own Dropbox app key,
    and to `_foreignChannelFolders` in `dropbox_adapter.dart` so a wipe from
    `stable` leaves it alone.
-4. If it needs different dev-tooling behaviour, extend
-   `build_channel.dart` — keep the derived flags `const` so they tree-shake.
+4. If it needs dev-tooling behaviour that differs from the "hidden everywhere,
+   watermark everywhere" default, extend `build_channel.dart` — keep the derived
+   flags `const` so they tree-shake.
 
 Do not read `buildChannel` directly in feature code; depend on the derived
 booleans instead, so the channel list stays in one place.

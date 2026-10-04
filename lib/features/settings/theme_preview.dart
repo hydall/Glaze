@@ -230,7 +230,7 @@ class _PreviewChatScene extends StatelessWidget {
           ChatInputBar(
             focusNode: FocusNode(canRequestFocus: false, skipTraversal: true),
             isGenerating: false,
-            onSend: (_) {},
+            onSend: (_) async => true,
             initialDraft: '',
           ),
         ],

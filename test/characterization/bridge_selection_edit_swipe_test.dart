@@ -418,6 +418,7 @@ void main() {
       final expectedHandlers = [
         'onLoadMore',
         'onHeaderScroll',
+        'onScrollToTopVisibility',
         'onLinkClick',
         'onImageClick',
         'onMessageContext',
@@ -433,6 +434,7 @@ void main() {
         'onSelectionChange',
         'onInjectClick',
         'onImgRetry',
+        'onImgEnableRetry',
         'onImgFind',
         'onImgRegen',
         'onImgCancel',
@@ -474,9 +476,14 @@ void main() {
     });
 
     test(
-      'image callbacks (retry/find/regen) send instruction and messageId',
+      'image callbacks (retry/enable/find/regen) send instruction and messageId',
       () {
-        for (final action in ['onImgRetry', 'onImgFind', 'onImgRegen']) {
+        for (final action in [
+          'onImgRetry',
+          'onImgEnableRetry',
+          'onImgFind',
+          'onImgRegen',
+        ]) {
           expect(
             interactionDispatchJs,
             contains("'$action'"),
@@ -553,7 +560,11 @@ void main() {
     test('_executeUpdateMessage contains update logic', () {
       expect(bridgeJs, contains('_executeUpdateMessage(msg)'));
       final idx = bridgeJs.indexOf('_executeUpdateMessage(msg) {');
-      final methodBody = bridgeJs.substring(idx, idx + 1200);
+      expect(idx, isNot(-1));
+      // Walk the method rather than slicing a fixed window: the guard at the
+      // top of it grows (the typing placeholder is re-created there when its
+      // node is gone), and a byte budget turns that into a false failure.
+      final methodBody = _extractBlockBody(bridgeJs, idx);
       expect(methodBody, contains('updateMessageContent'));
     });
 
@@ -588,7 +599,7 @@ void main() {
     });
 
     test('flush() called before clearAll', () {
-      final idx = bridgeJs.indexOf('clearAll()');
+      final idx = bridgeJs.indexOf('clearAll(keepPlaceholder = true)');
       final methodBody = bridgeJs.substring(idx, idx + 100);
       expect(methodBody, contains('this.flush()'));
     });

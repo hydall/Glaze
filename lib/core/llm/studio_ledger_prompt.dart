@@ -1,3 +1,4 @@
+import '../models/character.dart';
 import '../models/memory_book.dart';
 import '../models/tracker.dart';
 
@@ -34,11 +35,24 @@ class StudioLedgerPrompt {
   ///
   /// [recentMemoryEntries] — up to 20 active MemoryBook entries (title + keys
   /// only, content omitted to keep prompt lean).
+  ///
+  /// [character] — the character card for this session. Name, description, and
+  /// personality are injected as a reference section so the ledger can resolve
+  /// aliases and placeholders to the canonical identity.
+  ///
+  /// [entityAliases] — compact `{subjectKey: subjectName}` map of entities
+  /// that already appear in active knowledge facts. Lets the ledger issue
+  /// `rename_entity` ops to merge descriptive aliases into canonical
+  /// identities immediately, without waiting for reconciliation.
   String build({
     required String finalAssistantText,
     required String recentHistoryText,
     required List<Tracker> currentTrackers,
     required List<MemoryEntry> recentMemoryEntries,
+    Character? character,
+    Map<String, String> entityAliases = const {},
+    String focalUserName = '',
+    List<String> gameClockHistory = const [],
   }) {
     final trackerBlock = buildCurrentStateBlock(
       currentTrackers,
@@ -46,14 +60,106 @@ class StudioLedgerPrompt {
     );
     final keyCatalog = buildExistingKeyCatalog(currentTrackers);
     final memoryBlock = _buildMemoryBlock(recentMemoryEntries);
+    final cardBlock = buildCharacterCardSection(character);
+    final entityBlock = buildEntityAliasSection(entityAliases);
+    final clockBlock = buildGameClockHistoryBlock(gameClockHistory);
 
     return '''$_systemPrompt
+
+$cardBlock
+<current_state>
+$trackerBlock
+</current_state>
+
+$clockBlock<existing_keys>
+$keyCatalog
+</existing_keys>
+
+$entityBlock<existing_memory>
+$memoryBlock
+</existing_memory>
+
+<recent_chat>
+$recentHistoryText
+</recent_chat>
+
+<final_assistant_response>
+$finalAssistantText
+</final_assistant_response>
+
+Now produce the Studio Ledger output. You MUST return BOTH blocks below.
+The <glaze_memory_export> block is MANDATORY — even when there is nothing
+to write, include it with empty arrays. Do not omit it under any circumstance.
+
+Required response template (follow this exact structure):
+<glaze_memory_export>
+{"ops":[],"knowledgeFacts":[]}
+</glaze_memory_export>
+<glaze_knowledge_cleanup>
+{"ops":[]}
+</glaze_knowledge_cleanup>
+<studio_ledger>
+Compact continuity snapshot here.
+</studio_ledger>
+
+The <glaze_memory_export> block MUST come first, before <studio_ledger>.
+It must contain a single JSON object with "ops" and "knowledgeFacts" arrays.
+When there are no state changes or knowledge facts, output empty arrays —
+do NOT skip the block.
+
+The <glaze_knowledge_cleanup> block is OPTIONAL. Include it only when you
+need to rename a descriptive alias entity to a canonical identity. Use:
+{"ops":[{"op":"rename_entity","fromKey":"entity:descriptive_alias","toKey":"entity:canonical","canonicalName":"Name"}]}
+Only rename placeholder/descriptive identities listed in
+<existing_fact_entities>. Never rename an already-named entity to a
+different name. The canonicalName must appear in the final assistant
+response or recent chat.
+
+Ops format:
+{"ops":[{"op":"set","key":"npc:Name.field","value":"…","evidence":"…","eventState":"completed"},…],"knowledgeFacts":[{"knowerKey":"entity:lucy","knowerName":"Lucy","subjectKey":"entity:danvi","subjectName":"Danvi","factClass":"relationship","scopeKey":"relationship:danvi","predicate":"trusts","object":"Trusts Danvi.","epistemicState":"confirmed","confidence":0.9,"importance":0.8,"entities":["Lucy"],"topics":["trust"],"supersedesId":null}]}
+
+Allowed namespaces: npc:, relationship:, arc:, world:, scene.
+Allowed ops: set, delete. Every set replaces the complete current value.
+Do not write npc:*.knowledge — use knowledgeFacts instead.
+Allowed eventState: planned, suggested, threatened, attempted, completed, failed, cancelled, unknown (or omit).
+Allowed factClass: knowledge, relationship, behavior_change, commitment, goal, persistent_condition, identity_development.
+Allowed epistemicState: observed, heard_claim, inferred, confirmed, disbelieved, forgotten, retracted.
+knowledgeFacts rules:
+- One proposition per fact. Never summarize prior facts.
+- supersedesId only when correcting a known injected fact ID.
+- Distinguish direct observation, heard claim, inference, confirmation, disbelief, and correction.
+- Never output future events as facts.
+ - scopeKey: narrowest defensible scope (e.g. relationship:danvi), never global for convenience.
+ - Do not create npc:$focalUserName.* or arc:$focalUserName.* state. The user's goals, emotions, intentions, and arc belong to their own messages.
+ - For $focalUserName, write knowledgeFacts only for concrete information explicitly seen, heard, or confirmed; this tracks information access and never dictates a reaction or belief.''';
+  }
+
+  /// Parser-compatible per-turn compatibility profile for presets that do not
+  /// use automatic reconciliation. It preserves the former workflow shape,
+  /// with minimal adaptations for the current parser contract; it is not
+  /// claimed to be a byte-for-byte historical prompt copy.
+  String buildLegacyTurnOnly({
+    required String finalAssistantText,
+    required String recentHistoryText,
+    required List<Tracker> currentTrackers,
+    required List<MemoryEntry> recentMemoryEntries,
+    String focalUserName = '',
+    List<String> gameClockHistory = const [],
+  }) {
+    final trackerBlock = buildCurrentStateBlock(
+      currentTrackers,
+      '$recentHistoryText\n$finalAssistantText',
+    );
+    final keyCatalog = buildExistingKeyCatalog(currentTrackers);
+    final memoryBlock = _buildMemoryBlock(recentMemoryEntries);
+    final clockBlock = buildGameClockHistoryBlock(gameClockHistory);
+    return '''$_legacyTurnOnlySystemPrompt
 
 <current_state>
 $trackerBlock
 </current_state>
 
-<existing_keys>
+$clockBlock<existing_keys>
 $keyCatalog
 </existing_keys>
 
@@ -83,11 +189,10 @@ Compact continuity snapshot here.
 
 The <glaze_memory_export> block MUST come first, before <studio_ledger>.
 It must contain a single JSON object with "ops" and "knowledgeFacts" arrays.
-When there are no state changes or knowledge facts, output empty arrays —
-do NOT skip the block.
+When there are no state changes or knowledge facts, output empty arrays.
 
 Ops format:
-{"ops":[{"op":"set","key":"npc:Name.field","value":"…","evidence":"…","eventState":"completed"},…],"knowledgeFacts":[{"knowerKey":"entity:lucy","knowerName":"Lucy","subjectKey":"entity:danvi","subjectName":"Danvi","factClass":"relationship","scopeKey":"relationship:danvi","predicate":"trusts","object":"Trusts Danvi.","epistemicState":"confirmed","confidence":0.9,"importance":0.8,"entities":["Lucy"],"topics":["trust"],"supersedesId":null}]}
+{"ops":[{"op":"set","key":"npc:Name.field","value":"…","evidence":"…","eventState":"completed"}],"knowledgeFacts":[]}
 
 Allowed namespaces: npc:, relationship:, arc:, world:, scene.
 Allowed ops: set, delete. Every set replaces the complete current value.
@@ -98,9 +203,9 @@ Allowed epistemicState: observed, heard_claim, inferred, confirmed, disbelieved,
 knowledgeFacts rules:
 - One proposition per fact. Never summarize prior facts.
 - supersedesId only when correcting a known injected fact ID.
-- Distinguish direct observation, heard claim, inference, confirmation, disbelief, and correction.
 - Never output future events as facts.
-- scopeKey: narrowest defensible scope (e.g. relationship:danvi), never global for convenience.''';
+ - scopeKey must be the narrowest defensible scope.
+ - Do not create npc:$focalUserName.* or arc:$focalUserName.* state. For $focalUserName, write knowledgeFacts only for concrete information explicitly seen, heard, or confirmed.''';
   }
 
   /// Full values for state relevant to this turn. This filters rows, never
@@ -181,6 +286,55 @@ knowledgeFacts rules:
         .join('\n');
   }
 
+  /// Compact `<character_card>` section for the ledger prompt.
+  ///
+  /// Includes name, description, and personality (each capped at 2000 chars)
+  /// so the ledger agent can resolve descriptive aliases ("беловолосая
+  /// женщина") and transliteration variants ("Lucy" / "Люси") to the canonical
+  /// character identity from the card.
+  static String buildCharacterCardSection(Character? character) {
+    if (character == null) return '';
+    final parts = <String>[];
+    final name = (character.displayName?.isNotEmpty ?? false)
+        ? character.displayName!
+        : character.name;
+    parts.add('Name: $name');
+    if (character.description != null && character.description!.isNotEmpty) {
+      final desc = character.description!;
+      parts.add(
+        'Description: ${desc.length > 2000 ? '${desc.substring(0, 2000)}…' : desc}',
+      );
+    }
+    if (character.personality != null && character.personality!.isNotEmpty) {
+      final pers = character.personality!;
+      parts.add(
+        'Personality: ${pers.length > 2000 ? '${pers.substring(0, 2000)}…' : pers}',
+      );
+    }
+    return '<character_card>\n${parts.join('\n')}\n</character_card>\n\n';
+  }
+
+  /// Compact `<existing_fact_entities>` section — entity keys and display
+  /// names only, no fact content. Lets the ledger issue `rename_entity` ops
+  /// to merge aliases without injecting full fact bodies (which would grow
+  /// the prompt unboundedly with fact count).
+  static String buildEntityAliasSection(Map<String, String> entityAliases) {
+    if (entityAliases.isEmpty) return '';
+    final lines = entityAliases.entries
+        .map((e) => '- ${e.key}: ${e.value}')
+        .join('\n');
+    return '<existing_fact_entities>\n$lines\n</existing_fact_entities>\n\n';
+  }
+
+  /// Compact `<clock_history>` section listing the recent game-clock
+  /// trajectory (oldest→newest). Lets the ledger see that a timeskip already
+  /// happened and where the clock currently stands, so it does not re-apply a
+  /// previous skip or over-advance time. Empty entries yield an empty block.
+  static String buildGameClockHistoryBlock(List<String> entries) {
+    if (entries.isEmpty) return '';
+    return '<clock_history>\n${entries.join('\n')}\n</clock_history>\n\n';
+  }
+
   static const String _systemPrompt =
       '''You are Studio Ledger, an internal continuity and state extractor.
 You do not write story prose.
@@ -245,5 +399,45 @@ Rules:
 - Relationship keys: relationship:A:B.trust, relationship:A:B.status, relationship:A:B.relationship, relationship:A:B.attitude, relationship:A:B.boundaries, relationship:A:B.card_override
 - Never write npc:*.knowledge or relationship:*.knowledge. Use knowledgeFacts.
 - Arc keys: arc:id.status, arc:id.summary, arc:id.do_not_reopen, arc:id.card_override
-- World/scene keys: world:location, world:time, world:date, world:active_threats, scene.present_entities, scene.absent_backstory_entities''';
+- World/scene keys: world:location, world:time, world:date, world:day, world:active_threats, scene.present_entities, scene.absent_backstory_entities
+- Game clock: keep world:time in 24h HH:MM as the current in-game time of day and
+  keep it paired with world:date (DD.MM.YYYY) and zero-based world:day. Never
+  invent a month or year; when the canonical timeline names only a month and year,
+  derive day-of-month = 1 + world:day (Day 0 = the 1st of that month) and write
+  world:date in DD.MM.YYYY. When all three are established,
+  advance it when narrated events imply elapsed time. The clock only moves
+  FORWARD — never rewind it; flashbacks stay in prose. Past midnight, advance
+  world:day (day 0 = first story day) and world:date.
+  For an ordinary continuous turn with no explicit duration, advance the clock
+  by 1–5 minutes. Use an explicitly narrated duration instead when available.
+  Do not invent time skips the narrative does not support.
+  A timeskip already applied in a prior turn is consummated: it advances the
+  clock once and the new world:date/day stand from then on. Do not re-apply the
+  same timeskip on a later turn, and do not advance the clock for time the
+  narrative does not actually spend. Unless the user explicitly requests a NEW
+  timeskip, advance only by the hours/minutes the narrated events require.
+  Treat <clock_history> as the authoritative recent trajectory — its newest
+  line is where the clock currently stands.''';
+
+  static const String _legacyTurnOnlySystemPrompt =
+      '''You are Studio Ledger, an internal continuity and state extractor.
+You do not write story prose. You maintain session-canon facts for future generations.
+
+Rules:
+- Preserve prior state unless contradicted by the final response.
+- Temporary posture/outfit/props stay in the visible ledger unless important.
+- Do not create quests or persona stats unless explicitly established.
+- Do not infer romance or trust jumps without evidence.
+- Session state overrides character-card baseline.
+- Never write future events as facts or pending choices as completed events.
+- Distinguish planned, suggested, threatened, attempted, completed, failed, cancelled, and unknown event states.
+- Do not mark an entity present merely because it is mentioned.
+- Prefer patch ops; update current truth rather than creating a history log.
+- Reuse exact keys from current_state or existing_keys for the same fact.
+- Never output ledger text as story prose or a chat message.
+- Entity keys include relationship_to_user, attitude_to_user, trust_to_user, boundaries, location, current_emotional_residue, current_goal, and persistent_condition.
+- Relationship keys include trust, status, relationship, attitude, boundaries, and card_override.
+- Never write npc:*.knowledge or relationship:*.knowledge. Use knowledgeFacts.
+- Arc keys: arc:id.status, arc:id.summary, arc:id.do_not_reopen, arc:id.card_override.
+- World/scene keys: world:location, world:time, world:date, world:day, world:active_threats, scene.present_entities, scene.absent_backstory_entities.''';
 }

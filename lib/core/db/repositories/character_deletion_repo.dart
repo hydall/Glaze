@@ -18,7 +18,7 @@ class CharacterDeletionRepo implements CharacterDeletionStore {
         characterIds: {},
         sessionIds: {},
         studioConfigSessionIds: {},
-        lorebookIds: {},
+        detachedLorebookIds: {},
       );
     }
 
@@ -37,38 +37,68 @@ class CharacterDeletionRepo implements CharacterDeletionStore {
           _db.studioConfigRows,
         )..where((row) => row.sessionId.isIn(sessionIds))).get();
         for (final config in configs) {
-          if (config.profileId.isEmpty ||
-              config.profileId == config.sessionId) {
-            studioConfigSessionIds.add(config.sessionId);
-          }
+          studioConfigSessionIds.add(config.sessionId);
         }
       }
 
-      final lorebooks =
-          await (_db.select(_db.lorebooks)..where(
-                (row) =>
-                    row.activationScope.equals('character') &
-                    row.activationTargetId.isIn(ids),
-              ))
-              .get();
-      final lorebookIds = lorebooks.map((row) => row.lorebookId).toSet();
+      final retainedVariantGroups = <String>{};
+      for (final row in characterRows) {
+        final groupId = row.variantGroupId.isEmpty
+            ? row.charId
+            : row.variantGroupId;
+        final sibling =
+            await (_db.select(_db.characters)
+                  ..where(
+                    (candidate) =>
+                        candidate.variantGroupId.equals(groupId) &
+                        candidate.charId.isNotIn(ids),
+                  )
+                  ..limit(1))
+                .getSingleOrNull();
+        if (sibling != null) retainedVariantGroups.add(groupId);
+      }
+      final orphanedLorebookTargets = ids
+          .where((id) => !retainedVariantGroups.contains(id))
+          .toList();
+
+      final lorebooks = orphanedLorebookTargets.isEmpty
+          ? const <LorebookRow>[]
+          : await (_db.select(_db.lorebooks)..where(
+                  (row) =>
+                      row.activationScope.equals('character') &
+                      row.activationTargetId.isIn(orphanedLorebookTargets),
+                ))
+                .get();
+      final detachedLorebookIds = lorebooks.map((row) => row.lorebookId).toSet();
 
       final sessionDeletion = SessionDeletionQueries(_db);
       for (final sessionId in sessionIds) {
         await sessionDeletion.deleteSessionRows(sessionId);
       }
+      // Character-global transitions have a NULL chat_session_id and therefore
+      // intentionally survive individual session deletion. Remove every
+      // character-owned rewrite/transition here, children before parents.
+      await _deleteCharacterRewriteProvenance(ids);
 
-      if (lorebookIds.isNotEmpty) {
-        await (_db.delete(_db.embeddings)..where(
-              (row) =>
-                  row.sourceType.equals('lorebook_entry') &
-                  row.sourceId.isIn(lorebookIds),
+      // A lorebook outlives the character it was connected to. Deleting the
+      // card must not take the world with it, so the book is detached back to
+      // global scope — entries, settings and embeddings all stay intact and the
+      // user can re-connect it to another character.
+      if (detachedLorebookIds.isNotEmpty) {
+        await (_db.update(_db.lorebooks)..where(
+              (row) => row.lorebookId.isIn(detachedLorebookIds),
             ))
-            .go();
-        await (_db.delete(
-          _db.lorebooks,
-        )..where((row) => row.lorebookId.isIn(lorebookIds))).go();
+            .write(
+              LorebooksCompanion(
+                activationScope: const Value('global'),
+                activationTargetId: const Value(null),
+                updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
+              ),
+            );
       }
+      await (_db.delete(
+        _db.characterRevisionRows,
+      )..where((row) => row.characterId.isIn(ids))).go();
       await (_db.delete(
         _db.characterFolderMembers,
       )..where((row) => row.charId.isIn(ids))).go();
@@ -99,8 +129,51 @@ class CharacterDeletionRepo implements CharacterDeletionStore {
         characterIds: characterIds,
         sessionIds: sessionIds,
         studioConfigSessionIds: studioConfigSessionIds,
-        lorebookIds: lorebookIds,
+        detachedLorebookIds: detachedLorebookIds,
       );
     });
+  }
+
+  Future<void> _deleteCharacterRewriteProvenance(
+    List<String> characterIds,
+  ) async {
+    final jobs = await (_db.select(
+      _db.rewriteJobs,
+    )..where((row) => row.characterId.isIn(characterIds))).get();
+    final jobIds = jobs.map((row) => row.id).toSet();
+    final operations = jobIds.isEmpty
+        ? const <RewriteOperationRow>[]
+        : await (_db.select(
+            _db.rewriteOperations,
+          )..where((row) => row.rewriteJobId.isIn(jobIds))).get();
+    final operationIds = operations.map((row) => row.id).toSet();
+    if (operationIds.isNotEmpty) {
+      await (_db.delete(
+        _db.rewriteOperationRevisions,
+      )..where((row) => row.rewriteOperationId.isIn(operationIds))).go();
+      await (_db.delete(
+        _db.rewriteEvidenceRows,
+      )..where((row) => row.rewriteOperationId.isIn(operationIds))).go();
+      await (_db.delete(
+        _db.rewriteOperations,
+      )..where((row) => row.id.isIn(operationIds))).go();
+    }
+    if (jobIds.isNotEmpty) {
+      await (_db.delete(
+        _db.rewriteJobs,
+      )..where((row) => row.id.isIn(jobIds))).go();
+    }
+    final transitions = await (_db.select(
+      _db.appliedCanonTransitionRows,
+    )..where((row) => row.characterId.isIn(characterIds))).get();
+    final transitionIds = transitions.map((row) => row.id).toSet();
+    if (transitionIds.isNotEmpty) {
+      await (_db.delete(
+        _db.canonTransitionFactRefs,
+      )..where((row) => row.appliedCanonTransitionId.isIn(transitionIds))).go();
+      await (_db.delete(
+        _db.appliedCanonTransitionRows,
+      )..where((row) => row.id.isIn(transitionIds))).go();
+    }
   }
 }

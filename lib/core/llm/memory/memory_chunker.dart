@@ -3,10 +3,16 @@ import '../tokenizer.dart';
 /// A text chunk with its index and token cost.
 class ExcerptChunk {
   final int index;
+  final int paragraphIndex;
   final String text;
   final int tokenCost;
 
-  const ExcerptChunk(this.index, this.text, this.tokenCost);
+  const ExcerptChunk(
+    this.index,
+    this.paragraphIndex,
+    this.text,
+    this.tokenCost,
+  );
 }
 
 /// Text chunking logic for memory excerpt selection.
@@ -29,17 +35,18 @@ class MemoryChunker {
     int maxTokens,
     int Function(String text) tokenCounter,
   ) {
-    final blocks = content
-        .split(RegExp(r'\n\s*\n+'))
-        .map((part) => part.trim())
-        .where((part) => part.isNotEmpty)
-        .toList(growable: false);
+    final blocks = paragraphs(content);
     final chunks = <ExcerptChunk>[];
     var index = 0;
-    for (final block in blocks) {
+    for (
+      var paragraphIndex = 0;
+      paragraphIndex < blocks.length;
+      paragraphIndex++
+    ) {
+      final block = blocks[paragraphIndex];
       final tokenCost = tokenCounter(block);
       if (tokenCost <= maxTokens) {
-        chunks.add(ExcerptChunk(index++, block, tokenCost));
+        chunks.add(ExcerptChunk(index++, paragraphIndex, block, tokenCost));
         continue;
       }
       final sentences = MemoryChunker.sentences(block);
@@ -47,30 +54,64 @@ class MemoryChunker {
       for (final sentence in sentences) {
         final candidate = [...window, sentence].join(' ').trim();
         if (candidate.isEmpty) continue;
-        if (tokenCounter(candidate) > maxTokens && window.isNotEmpty) {
+        if (tokenCounter(candidate) <= maxTokens) {
+          window.add(sentence);
+          continue;
+        }
+        if (window.isNotEmpty) {
           final text = window.join(' ').trim();
-          chunks.add(ExcerptChunk(index++, text, tokenCounter(text)));
-          window = [sentence];
-        } else if (tokenCounter(candidate) > maxTokens) {
+          chunks.add(
+            ExcerptChunk(index++, paragraphIndex, text, tokenCounter(text)),
+          );
+          window = [];
+        }
+        if (tokenCounter(sentence) > maxTokens) {
           final words = sentence.split(RegExp(r'\s+'));
-          final shortText = words.take(maxTokens * 3).join(' ').trim();
-          if (shortText.isNotEmpty) {
-            chunks.add(
-              ExcerptChunk(index++, shortText, tokenCounter(shortText)),
-            );
+          var wordStart = 0;
+          while (wordStart < words.length) {
+            var wordEnd = wordStart + 1;
+            while (wordEnd <= words.length &&
+                tokenCounter(words.sublist(wordStart, wordEnd).join(' ')) <=
+                    maxTokens) {
+              wordEnd++;
+            }
+            final safeEnd = (wordEnd - 1).clamp(wordStart + 1, words.length);
+            final shortText = words
+                .sublist(wordStart, safeEnd)
+                .join(' ')
+                .trim();
+            if (shortText.isNotEmpty) {
+              chunks.add(
+                ExcerptChunk(
+                  index++,
+                  paragraphIndex,
+                  shortText,
+                  tokenCounter(shortText),
+                ),
+              );
+            }
+            wordStart = safeEnd;
           }
           window = [];
-        } else {
-          window.add(sentence);
+          continue;
         }
+        window.add(sentence);
       }
       if (window.isNotEmpty) {
         final text = window.join(' ').trim();
-        chunks.add(ExcerptChunk(index++, text, tokenCounter(text)));
+        chunks.add(
+          ExcerptChunk(index++, paragraphIndex, text, tokenCounter(text)),
+        );
       }
     }
     return chunks;
   }
+
+  static List<String> paragraphs(String content) => content
+      .split(RegExp(r'\n\s*\n+'))
+      .map((part) => part.trim())
+      .where((part) => part.isNotEmpty)
+      .toList(growable: false);
 
   /// Split text into sentences using punctuation boundaries.
   static List<String> sentences(String text) {

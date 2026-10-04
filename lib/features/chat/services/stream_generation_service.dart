@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:easy_localization/easy_localization.dart';
@@ -6,29 +7,51 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/llm/game_time.dart';
+import '../../../core/llm/generation_phase.dart';
+import '../../../core/llm/converters/no_assistant.dart';
 import '../../../core/llm/history_assembler.dart';
+import '../../../core/llm/history_trim.dart';
 import '../../../core/llm/prompt_isolate.dart';
 import '../../../core/llm/prompt/main_model_context_snapshot.dart';
+import '../../../core/llm/prompt/exact_lorebook_manifest.dart';
 import '../../../core/llm/studio/studio_stream_interceptor.dart';
+import '../../../core/llm/prompt/prompt_build_stale_exception.dart';
+import '../../../core/llm/studio/studio_history_limiter.dart';
+import '../../../core/llm/studio/studio_context.dart';
+import '../../../core/llm/studio/studio_context_preparer.dart';
+import '../../../core/llm/prompt/prompt_payload.dart';
+import '../../../core/llm/prompt/prompt_result.dart';
+import '../../../core/llm/context_calculator.dart';
 import '../../../core/llm/stream_accumulator.dart';
+import '../../../core/llm/studio_regex_applicator.dart';
 import '../../../core/llm/beauty_state_parser.dart';
 import '../../../core/llm/idle_timeout_guard.dart';
+import '../../../core/llm/transport/call_attempt_outcome.dart';
 import '../../../core/llm/transport/chat_transport_request.dart';
+import '../../../core/llm/transport/llm_call_event.dart';
+import '../../../core/llm/transport/llm_capture_context.dart';
 import '../../../core/llm/transport/transport_factory.dart';
 import '../../../core/utils/error_format.dart';
+import '../../../core/utils/cast_helpers.dart';
 import '../../../core/llm/tokenizer.dart';
 import '../../../core/llm/studio_turn_config_snapshot.dart';
 import '../../../core/state/studio_turn_config_resolver.dart';
+import '../../../core/state/studio_regex_provider.dart';
+import '../../../shared/widgets/glaze_toast.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../core/models/api_config.dart';
 import '../../../core/models/pipeline_settings.dart';
 import '../../../core/services/model_usage_service.dart';
+import '../../../core/services/preset_defaults.dart';
 import '../../../core/state/active_selection_provider.dart';
+import '../../../core/state/db_provider.dart';
 import '../../../core/state/memory_agent_providers.dart';
 import '../chat_provider.dart';
 import '../chat_state.dart';
 import '../providers/prompt_build_providers.dart';
 import '../state/cached_token_breakdown.dart';
+import '../state/generation_phase_provider.dart';
 import '../state/memory_activity_provider.dart';
 import '../state/studio_cycle_state_mapper.dart';
 import '../state/studio_cycle_state_provider.dart';
@@ -53,6 +76,14 @@ class StreamGenerationService {
     required this._isAborted,
   });
 
+  /// Publishes the live generation phase for the typing bubble. Never let a
+  /// UI-only signal disturb the run: a stale generation must not overwrite
+  /// the phase a newer one is reporting.
+  void _phase(GenerationPhase phase) {
+    if (_isAborted()) return;
+    setGenerationPhase(_ref, _charId, phase);
+  }
+
   Future<ChatState> run({
     required ChatSession session,
     ChatSession? saveSession,
@@ -63,11 +94,16 @@ class StreamGenerationService {
     int? previousTokens,
     List<Map<String, dynamic>>? previousSwipesMeta,
     String? guidanceText,
+    String guidanceType = 'GENERATION',
     String? regenTargetId,
+    String? continueTargetId,
     required ChatState currentState,
     StudioTurnConfigSnapshot? studioTurnConfig,
   }) async {
     final vsi = currentState.visibleStartIndex;
+    // Everything captured from here on belongs to this turn (see
+    // `bindTurnMessageId`).
+    final turnStartedAtMs = DateTime.now().millisecondsSinceEpoch;
     final cancelToken = CancelToken();
     var studioWasActive = false;
     _ref
@@ -86,6 +122,7 @@ class StreamGenerationService {
           studioTurnConfig ??
           await _ref.read(studioTurnConfigResolverProvider).resolve(session.id);
       final studioConfig = turnConfig.config;
+      final studioPreset = turnConfig.preset;
       studioWasActive = studioConfig != null;
       if (_isAborted()) {
         return ChatState(
@@ -95,14 +132,21 @@ class StreamGenerationService {
         );
       }
 
+      _phase(GenerationPhase.preparing);
       final builder = _ref.read(promptPayloadBuilderProvider);
-      final payload = await builder.buildFromSession(
+      final inputs = await builder.collectGenerationContext(
         charId: _charId,
         session: session,
         apiConfigOverride: turnConfig.activeApiConfig,
         guidanceText: guidanceText,
+        continueInstruction: continueTargetId == null
+            ? null
+            : kContinueInstruction,
+        includeEffectiveCanon: turnConfig.enabled,
+        excludeSnapshotMessageId: regenTargetId,
         shouldAbort: _isAborted,
         cancelToken: cancelToken,
+        onPhase: _phase,
       );
       if (_isAborted()) {
         return ChatState(
@@ -111,28 +155,72 @@ class StreamGenerationService {
           visibleStartIndex: vsi,
         );
       }
-      final apiConfig = payload.apiConfig;
+      final apiConfig = inputs.apiConfig;
 
       final pipelineSettings = turnConfig.pipelineSettings;
-      final studioFinalContextSize = studioConfig == null
+      final studioFinalContextSize =
+          studioConfig == null || studioPreset == null
           ? 0
           : pipelineSettings.studioAgent.studioFinalContextSize > 0
           ? pipelineSettings.studioAgent.studioFinalContextSize
-          : studioConfig.maxFinalHistoryMessages;
+          : studioPreset.maxFinalHistoryMessages;
       final studioFinalVisibleMessageIds = studioConfig == null
           ? const <String>{}
           : StudioStreamInterceptor.computeStudioFinalVisibleMessageIds(
-              payload.history,
+              inputs.history,
               studioFinalContextSize,
+              reasoningHistoryCount:
+                  pipelineSettings.studioAgent.studioFinalReasoningHistoryCount,
+              excludeReasoningFromContextBudget: pipelineSettings
+                  .studioAgent
+                  .studioFinalExcludeReasoningFromContextBudget,
+              historyWindowStartMessageId: inputs
+                  .sessionVars[StudioHistoryLimiter.historyWindowStartVar],
             );
-      final finalPayload = studioConfig != null
-          ? StudioStreamInterceptor.payloadWithSourceWindow(
-              payload,
-              studioFinalVisibleMessageIds,
+      _phase(GenerationPhase.prompt);
+      final payload = studioConfig == null
+          ? await builder.buildOrdinaryFromGenerationContext(
+              inputs,
+              shouldAbort: _isAborted,
             )
-          : payload;
-
-      final promptResult = await buildPromptInIsolate(finalPayload);
+          : PromptPayload.fromGenerationContext(
+              inputs,
+              preset: null,
+              ledgerPromptInjectionPolicy:
+                  turnConfig.ledgerPromptInjectionPolicy,
+              consumerPath: 'studio-saved',
+            );
+      final finalPayload = studioConfig == null
+          ? payload
+          : PromptPayload.fromGenerationContext(
+              inputs,
+              preset: null,
+              sourceWindowVisibleMessageIds: studioFinalVisibleMessageIds,
+              ledgerPromptInjectionPolicy:
+                  turnConfig.ledgerPromptInjectionPolicy,
+              consumerPath: 'studio-final',
+            );
+      final finalStudioContext = studioConfig == null
+          ? null
+          : const StudioContextPreparer().prepare(
+              inputs: inputs,
+              visibleMessageIds: studioFinalVisibleMessageIds,
+              ledgerPromptInjectionPolicy:
+                  turnConfig.ledgerPromptInjectionPolicy,
+              consumerPath: 'studio-final',
+              reasoningTagStartOverride:
+                  studioPreset?.runtime.reasoningTagStart,
+              reasoningTagEndOverride: studioPreset?.runtime.reasoningTagEnd,
+              studioPreset: studioPreset,
+            );
+      final promptResult = studioConfig == null
+          ? await buildPromptInIsolate(finalPayload)
+          : _studioCompatibilityResult(finalStudioContext!);
+      await builder.ensureMemoryEntriesCurrent(
+        sessionId: session.id,
+        selection: inputs.memorySelection,
+        triggered: promptResult.triggeredMemories,
+      );
       if (_isAborted()) {
         return ChatState(
           session: saveSession ?? session,
@@ -142,6 +230,17 @@ class StreamGenerationService {
       }
       _ref.read(cachedTokenBreakdownProvider(_charId).notifier).state =
           promptResult.breakdown;
+
+      // A stepped trim anchors on the oldest message it kept. Persisting that
+      // id is the whole mechanism: next turn reuses the same anchor, so the
+      // request keeps the same prefix and the provider's cache hits instead of
+      // being invalidated by a cut that moved one message along.
+      _persistHistoryAnchor(
+        session: session,
+        breakdown: promptResult.breakdown,
+        history: inputs.history,
+        historyTrimMode: apiConfig.historyTrimMode,
+      );
 
       _ref.read(lastVectorLoreTokensProvider(_charId).notifier).state =
           promptResult.breakdown.vectorLoreTokens;
@@ -182,6 +281,7 @@ class StreamGenerationService {
       final apiMessages = buildApiMessages(
         promptResult.messages,
         reasoningHistoryCount: apiConfig.reasoningHistoryCount,
+        noAssistant: NoAssistantOptions.of(apiConfig),
       );
       final previousApiMessages = _lastRequestsBySession[session.id];
       _rememberRequest(session.id, apiMessages);
@@ -200,21 +300,28 @@ class StreamGenerationService {
 
       if (studioConfig != null) {
         List<Map<String, dynamic>>? studioFinalMessages;
+        Set<String>? studioLorebookClassifications;
         final trackerContextSize =
-            pipelineSettings.studioAgent.studioTrackerContextSize;
+            pipelineSettings.studioAgent.studioControllerContextSize;
         final trackerVisibleMessageIds =
-            StudioStreamInterceptor.computeStudioFinalVisibleMessageIds(
-              payload.history,
+            StudioStreamInterceptor.computeStudioVisibleMessageIds(
+              inputs.history,
               trackerContextSize,
             );
-        final trackerPayload = StudioStreamInterceptor.payloadWithSourceWindow(
-          payload,
-          trackerVisibleMessageIds,
-        );
-        final trackerPromptResult =
+        final trackerStudioContext =
             setEquals(trackerVisibleMessageIds, studioFinalVisibleMessageIds)
-            ? promptResult
-            : await buildPromptInIsolate(trackerPayload);
+            ? finalStudioContext!
+            : const StudioContextPreparer().prepare(
+                inputs: inputs,
+                visibleMessageIds: trackerVisibleMessageIds,
+                ledgerPromptInjectionPolicy:
+                    turnConfig.ledgerPromptInjectionPolicy,
+                consumerPath: 'studio-tracker',
+                reasoningTagStartOverride:
+                    studioPreset?.runtime.reasoningTagStart,
+                reasoningTagEndOverride: studioPreset?.runtime.reasoningTagEnd,
+                studioPreset: studioPreset,
+              );
         if (_isAborted()) {
           return ChatState(
             session: saveSession ?? session,
@@ -224,25 +331,49 @@ class StreamGenerationService {
         }
         _log(
           'studio intercept char=$_charId session=${session.id} '
-          'agents=${studioConfig.agents.length}',
+          'agents=${studioPreset!.agents.length}',
         );
         _ref
             .read(studioCycleStateProvider.notifier)
             .state = StudioCycleState.running(
           sessionId: session.id,
-          totalAgents: studioConfig.agents.length,
+          totalAgents: studioPreset.agents.length,
         );
+        _phase(GenerationPhase.agents);
         final startGenTime = DateTime.now();
         DateTime? finalStartTime;
         bool studioFrameScheduled = false;
         var latestStudioText = '';
         String? latestStudioReasoning;
+        // Phase reporting only ever moves forward (reasoning-only → visible
+        // text), so it is derived once per transition. The early return keeps
+        // the trim off the hot path once the reply has started: re-deriving
+        // per chunk would scan the whole accumulated text on every delta.
+        var studioReportedPhase = GenerationPhase.waiting;
+        void reportStudioStreamPhase(String visibleText) {
+          if (studioReportedPhase == GenerationPhase.streaming) return;
+          final next = visibleText.trimLeft().isEmpty
+              ? GenerationPhase.reasoning
+              : GenerationPhase.streaming;
+          if (next == studioReportedPhase) return;
+          studioReportedPhase = next;
+          _phase(next);
+        }
+
+        // Publishing is deferred to the next frame, and the pipeline clears
+        // the streaming state as soon as this call returns. A callback that
+        // fires after that clear leaves the finished reply in a state that is
+        // meant to be empty, and the next send paints it into the typing
+        // bubble — the answer the user just read, shown again under the
+        // message they just sent. Closing the window flushes the text one
+        // last time, synchronously, and drops anything scheduled behind it.
+        var studioPublishClosed = false;
         void scheduleStudioStreamingUpdate() {
-          if (studioFrameScheduled) return;
+          if (studioFrameScheduled || studioPublishClosed) return;
           studioFrameScheduled = true;
           SchedulerBinding.instance.scheduleFrameCallback((_) {
             studioFrameScheduled = false;
-            if (_isAborted()) return;
+            if (studioPublishClosed || _isAborted()) return;
             _ref
                 .read(streamingStateProvider(_charId).notifier)
                 .state = StreamingState(
@@ -252,18 +383,52 @@ class StreamGenerationService {
           });
         }
 
+        void closeStudioStreamPublishing() {
+          if (studioPublishClosed) return;
+          studioPublishClosed = true;
+          if (!studioFrameScheduled || _isAborted()) return;
+          studioFrameScheduled = false;
+          _ref
+              .read(streamingStateProvider(_charId).notifier)
+              .state = StreamingState(
+            text: latestStudioText,
+            reasoning: latestStudioReasoning,
+          );
+        }
+
+        final studioOutputRegexes = await _ref.read(studioRegexProvider.future);
+        String transformStudioOutput(String text) =>
+            applyStudioOutputRegexesToText(
+              text: text,
+              entries: studioOutputRegexes,
+              macroContext: finalStudioContext!.macroContext,
+            );
+
+        await builder.ensureMemoryEntriesCurrent(
+          sessionId: session.id,
+          selection: inputs.memorySelection,
+          triggered: promptResult.triggeredMemories,
+        );
+        if (_isAborted()) {
+          throw const PromptBuildStaleException('Generation cancelled.');
+        }
         final studioResult = await studioService.runTrackerCycle(
+          beforeFinalSend: () => builder.ensureMemoryEntriesCurrent(
+            sessionId: session.id,
+            selection: inputs.memorySelection,
+            triggered: promptResult.triggeredMemories,
+          ),
           config: studioConfig,
-          promptResult: trackerPromptResult,
-          promptPayload: trackerPayload,
-          finalPromptResult: promptResult,
-          finalPromptPayload: finalPayload,
+          inputs: inputs,
+          trackerContext: trackerStudioContext,
+          finalContext: finalStudioContext!,
           apiConfig: apiConfig,
           sessionId: session.id,
           turnConfig: turnConfig,
           cancelToken: cancelToken,
           onFinalStart: () {
             if (_isAborted()) return;
+            _phase(GenerationPhase.waiting);
             final cur = _ref.read(studioCycleStateProvider);
             if (cur.phase == StudioCyclePhase.running) {
               finalStartTime ??= DateTime.now();
@@ -280,8 +445,10 @@ class StreamGenerationService {
           },
           onFinalResponseUpdate: (text, reasoning) {
             if (_isAborted()) return;
-            latestStudioText = text;
+            final transformedText = transformStudioOutput(text);
+            latestStudioText = transformedText;
             latestStudioReasoning = reasoning;
+            reportStudioStreamPhase(transformedText);
             // Phase transition is handled by onFinalStart above; here we only
             // push the streaming text to the UI. Guard against the rare case
             // where onFinalStart was not wired (e.g. older callers) so the
@@ -303,7 +470,11 @@ class StreamGenerationService {
           onFinalMessagesBuilt: (messages) {
             studioFinalMessages = messages;
           },
+          onFinalLorebookClassificationsBuilt: (classifications) {
+            studioLorebookClassifications = classifications;
+          },
         );
+        closeStudioStreamPublishing();
         if (_isAborted() || studioResult.status == 'aborted') {
           _ref.read(studioCycleStateProvider.notifier).state =
               const StudioCycleState.idle();
@@ -329,6 +500,9 @@ class StreamGenerationService {
           );
           _ref.read(studioCycleStateProvider.notifier).state =
               StudioCycleState.error(sessionId: session.id);
+          if (continueTargetId != null) {
+            return _continueFailure(message, session, vsi);
+          }
           if (regenTargetId != null && saveSession != null) {
             return _writer.writeRegenError(
               errorText: message,
@@ -358,10 +532,25 @@ class StreamGenerationService {
           StudioCyclePhase.done,
         );
         final beautyApplied = applyBeautyState(
-          studioResult.response,
+          transformStudioOutput(studioResult.response),
           pendingSessionVars,
         );
         final wrappedStudioText = wrapLumiaOocColors(beautyApplied.text);
+        final studioPromptResult = _studioCompatibilityResult(
+          finalStudioContext,
+          exactLorebookManifest: _finalizeStudioLorebookManifest(
+            finalStudioContext,
+            studioLorebookClassifications,
+            studioFinalMessages,
+          ),
+        );
+        // Use the same clock projection that built the prompt. During regen it
+        // excludes the target message's own snapshot.
+        final openingClock = GameTimeState(
+          time: inputs.gameTime,
+          date: inputs.gameDate,
+          day: int.tryParse(inputs.gameDay ?? ''),
+        ).format();
         final finalState = _writer
             .writeAssistant(
               text: wrappedStudioText,
@@ -373,6 +562,7 @@ class StreamGenerationService {
               pendingSessionVars: beautyApplied.vars,
               genTime: '${(elapsed / 1000).toStringAsFixed(1)}s',
               tokens: estimateTokens(studioResult.response),
+              time: openingClock,
               rawResponse:
                   studioResult.rawResponseJson ?? studioResult.response,
               previousSwipes: previousSwipes,
@@ -382,6 +572,7 @@ class StreamGenerationService {
               previousTokens: previousTokens,
               previousSwipesMeta: previousSwipesMeta,
               guidanceText: guidanceText,
+              guidanceType: guidanceType,
               memoryCoverage: coverage,
               isAllReasoning: false,
               triggeredLorebooks: triggeredLorebooks,
@@ -398,13 +589,14 @@ class StreamGenerationService {
                   ? null
                   : MainModelContextSnapshot(
                       providerMessages: studioFinalMessages!,
-                      promptResult: promptResult,
+                      promptResult: studioPromptResult,
                       promptPayload: finalPayload,
                       isStudioFinalWriter: true,
                     ),
             );
         _recordModelUsage(apiConfig.model);
         final messageId = _lastAssistantId(finalState.session!, regenTargetId);
+        _bindTurnCaptures(session.id, messageId, turnStartedAtMs);
         _recorder.recordStudioTrackerOperation(
           sessionId: session.id,
           messageId: messageId,
@@ -461,6 +653,53 @@ class StreamGenerationService {
       ChatState? finalState;
 
       bool frameScheduled = false;
+      // See the Studio branch above for why the deferred publish has to be
+      // closed: a frame callback that lands after the pipeline cleared the
+      // streaming state resurrects the finished reply into the next send's
+      // typing bubble.
+      var streamPublishClosed = false;
+      void publishStreamedText() {
+        _ref
+            .read(streamingStateProvider(_charId).notifier)
+            .state = StreamingState(
+          text: accumulator.text.trimLeft(),
+          reasoning: accumulator.reasoning.isNotEmpty
+              ? accumulator.reasoning
+              : null,
+        );
+      }
+
+      void closeStreamPublishing() {
+        if (streamPublishClosed) return;
+        streamPublishClosed = true;
+        if (!frameScheduled || _isAborted()) return;
+        frameScheduled = false;
+        publishStreamedText();
+      }
+
+      // See the Studio branch above: one report per transition, never a
+      // per-chunk re-derivation over the accumulated text.
+      var reportedPhase = GenerationPhase.waiting;
+      void reportStreamPhase() {
+        if (reportedPhase == GenerationPhase.streaming) return;
+        // Cheap while the reply is still empty, and never reached once the
+        // first visible character has landed.
+        final next = accumulator.text.trimLeft().isEmpty
+            ? GenerationPhase.reasoning
+            : GenerationPhase.streaming;
+        if (next == reportedPhase) return;
+        reportedPhase = next;
+        _phase(next);
+      }
+
+      await builder.ensureMemoryEntriesCurrent(
+        sessionId: session.id,
+        selection: inputs.memorySelection,
+        triggered: promptResult.triggeredMemories,
+      );
+      if (_isAborted()) {
+        throw const PromptBuildStaleException('Generation cancelled.');
+      }
 
       // Idle timeout: cancel the timer on the first chunk (text OR reasoning)
       // so a long (but progressing) generation is never cut off. Mirrors
@@ -474,12 +713,51 @@ class StreamGenerationService {
         cancelToken.cancel('First-chunk timeout after ${idleTimeoutMs}ms');
       });
 
+      // What every field of this is for is documented on the factory. The
+      // turn's message id is bound over it once the write lands
+      // (`bindTurnMessageId`), which is why an ordinary turn passes none.
+      final captureContext = mainCaptureContext(
+        sessionId: session.id,
+        genId: _genId,
+        messageId: regenTargetId ?? continueTargetId,
+      );
+
+      // One outcome per call. `onComplete` and `onError` are not exclusive on
+      // every transport — an aborted stream can reach both — and the table is
+      // keyed on `callId + attempt`, so a second write would collide with the
+      // first rather than adding to it.
+      var outcomeRecorded = false;
+      void recordOutcome({String? responseText, Object? error}) {
+        if (outcomeRecorded) return;
+        outcomeRecorded = true;
+        unawaited(
+          LlmCallEventCapture.record(
+            LlmCallEvent.transport(
+              context: captureContext,
+              attempt: describeCallAttempt(
+                attempt: 1,
+                startedAtMs: startGenTime.millisecondsSinceEpoch,
+                elapsedMs: DateTime.now()
+                    .difference(startGenTime)
+                    .inMilliseconds,
+                error: error,
+              ),
+              responseText: responseText,
+            ),
+          ),
+        );
+      }
+
+      _phase(GenerationPhase.waiting);
       await transport.stream(
         request: ChatTransportRequest.fromApiConfig(
           apiConfig,
           messages: apiMessages,
           sessionId: session.id,
           previousMessages: previousApiMessages,
+          charName: inputs.character.name,
+          userName: inputs.persona?.name ?? 'User',
+          captureContext: captureContext,
         ),
         cancelToken: cancelToken,
         onUpdate: (delta, reasoningDelta) {
@@ -488,25 +766,26 @@ class StreamGenerationService {
             idleGuard.cancel();
           }
           accumulator.consumeDelta(delta, reasoningDelta: reasoningDelta);
-          if (!frameScheduled) {
+          // Reasoning-only output keeps the typing bubble on screen (the
+          // visible text is still empty), so name that phase for what it is.
+          reportStreamPhase();
+          if (!frameScheduled && !streamPublishClosed) {
             frameScheduled = true;
             SchedulerBinding.instance.scheduleFrameCallback((_) {
               frameScheduled = false;
-              if (_isAborted()) return;
-              _ref
-                  .read(streamingStateProvider(_charId).notifier)
-                  .state = StreamingState(
-                text: accumulator.text.trimLeft(),
-                reasoning: accumulator.reasoning.isNotEmpty
-                    ? accumulator.reasoning
-                    : null,
-              );
+              if (streamPublishClosed || _isAborted()) return;
+              publishStreamedText();
             });
           }
         },
         onComplete: (text, reasoning, {rawResponseJson}) {
           if (_isAborted()) return;
+          closeStreamPublishing();
           idleGuard.dispose();
+          // The raw body when the transport kept one: the Response tab
+          // pretty-prints it and reads the assistant text back out of it, so
+          // the payload is worth more there than the assembled text alone.
+          recordOutcome(responseText: rawResponseJson ?? text);
           if (!apiConfig.stream &&
               accumulator.text.isEmpty &&
               accumulator.reasoning.isEmpty &&
@@ -562,6 +841,7 @@ class StreamGenerationService {
                 previousTokens: previousTokens,
                 previousSwipesMeta: previousSwipesMeta,
                 guidanceText: guidanceText,
+                guidanceType: guidanceType,
                 memoryCoverage: coverage,
                 isAllReasoning: isAllReasoning,
                 triggeredLorebooks: triggeredLorebooks,
@@ -579,6 +859,13 @@ class StreamGenerationService {
                 ),
               );
           _recordModelUsage(apiConfig.model);
+          _bindTurnCaptures(
+            session.id,
+            finalState?.session == null
+                ? null
+                : _lastAssistantId(finalState!.session!, regenTargetId),
+            turnStartedAtMs,
+          );
           if (memoryDiagnostics is Map<String, dynamic> &&
               finalState?.session != null) {
             final messageId = _lastAssistantId(
@@ -613,12 +900,24 @@ class StreamGenerationService {
           }
         },
         onError: (error) {
+          closeStreamPublishing();
           idleGuard.dispose();
           if (idleTimedOut) {
             final msg = 'error_first_chunk_timeout'.tr(
               namedArgs: {'seconds': '${idleTimeoutMs ~/ 1000}'},
             );
-            if (regenTargetId != null && saveSession != null) {
+            // A first-chunk timeout reaches here as the cancel it was
+            // implemented as. Record it as the timeout the reader saw, so the
+            // inspector does not file it under "you stopped it".
+            recordOutcome(
+              error: TimeoutException(
+                msg,
+                Duration(milliseconds: idleTimeoutMs),
+              ),
+            );
+            if (continueTargetId != null) {
+              finalState = _continueFailure(msg, session, vsi);
+            } else if (regenTargetId != null && saveSession != null) {
               finalState = _writer.writeRegenError(
                 errorText: msg,
                 saveSession: saveSession,
@@ -634,6 +933,7 @@ class StreamGenerationService {
             }
             return;
           }
+          recordOutcome(error: error);
           final isCancelled =
               (error is DioException &&
                   error.type == DioExceptionType.cancel) ||
@@ -645,6 +945,8 @@ class StreamGenerationService {
               isGenerating: false,
               visibleStartIndex: vsi,
             );
+          } else if (continueTargetId != null) {
+            finalState = _continueFailure(formatError(error), session, vsi);
           } else if (regenTargetId != null && saveSession != null) {
             finalState = _writer.writeRegenError(
               errorText: formatError(error),
@@ -661,6 +963,9 @@ class StreamGenerationService {
           }
         },
       );
+      // Neither callback is guaranteed on every transport path; the window
+      // must be shut before the pipeline clears the streaming state.
+      closeStreamPublishing();
 
       return finalState ??
           ChatState(
@@ -684,6 +989,9 @@ class StreamGenerationService {
         _ref.read(studioCycleStateProvider.notifier).state =
             StudioCycleState.error(sessionId: session.id);
       }
+      if (continueTargetId != null) {
+        return _continueFailure(formatError(e), session, vsi);
+      }
       if (regenTargetId != null && saveSession != null) {
         return _writer.writeRegenError(
           errorText: formatError(e),
@@ -698,6 +1006,67 @@ class StreamGenerationService {
         visibleStartIndex: vsi,
       );
     }
+  }
+
+  /// Continue mode failure: settle the run without touching the session.
+  /// A failed continuation must leave the message it was extending exactly as
+  /// the user saw it — no error swipe, no appended error bubble — so the only
+  /// surface is the `Continue Failed` toast driven off [ChatState.error].
+  /// See `docs/INVARIANTS.md` INV-CM4.
+  ChatState _continueFailure(String errorText, ChatSession session, int vsi) {
+    return ChatState(
+      session: session,
+      isGenerating: false,
+      error: errorText,
+      visibleStartIndex: vsi,
+    );
+  }
+
+  PromptResult _studioCompatibilityResult(
+    StudioContext context, {
+    ExactLorebookManifest? exactLorebookManifest,
+  }) {
+    final messages = <PromptMessage>[
+      ...context.staticContext,
+      ...context.dynamicContext,
+      ...context.history,
+    ];
+    return PromptResult(
+      messages: messages,
+      breakdown: TokenBreakdown(
+        sourceTokens: const {},
+        staticTotal: 0,
+        historyBudget: 0,
+        historyTokens: 0,
+        totalTokens: 0,
+        cutoffIndex: 0,
+        trimmedHistory: context.history,
+        vectorLoreTokens: context.diagnostics.vectorLoreTokens,
+        visibleMessageIds: context.diagnostics.visibleMessageIds,
+      ),
+      sessionVars: context.sessionVars,
+      globalVars: context.globalVars,
+      triggeredLorebooks: context.diagnostics.triggeredLorebooks,
+      triggeredMemories: context.diagnostics.triggeredMemories,
+      memoryCoverage: context.diagnostics.memoryCoverage,
+      exactLorebookManifest: exactLorebookManifest,
+    );
+  }
+
+  ExactLorebookManifest? _finalizeStudioLorebookManifest(
+    StudioContext context,
+    Set<String>? classifications,
+    List<Map<String, dynamic>>? providerMessages,
+  ) {
+    final manifest = context.diagnostics.exactLorebookManifest;
+    if (manifest == null ||
+        classifications == null ||
+        providerMessages == null) {
+      return null;
+    }
+    return manifest
+        .confirmedForClassifications(classifications)
+        .withProviderMessagesHash(computeHash(jsonEncode(providerMessages)));
   }
 
   static void _rememberRequest(
@@ -717,11 +1086,32 @@ class StreamGenerationService {
   @visibleForTesting
   static Set<String> computeStudioFinalVisibleMessageIds(
     List<ChatMessage> history,
-    int finalContextSize,
-  ) => StudioStreamInterceptor.computeStudioFinalVisibleMessageIds(
+    int finalContextSize, {
+    int reasoningHistoryCount = 0,
+    bool excludeReasoningFromContextBudget = false,
+    String? historyWindowStartMessageId,
+  }) => StudioStreamInterceptor.computeStudioFinalVisibleMessageIds(
     history,
     finalContextSize,
+    reasoningHistoryCount: reasoningHistoryCount,
+    excludeReasoningFromContextBudget: excludeReasoningFromContextBudget,
+    historyWindowStartMessageId: historyWindowStartMessageId,
   );
+
+  /// Ties this turn's generation-phase captures to the message they produced.
+  /// Fire-and-forget: a diagnostics link must never delay or fail a turn.
+  void _bindTurnCaptures(String sessionId, String? messageId, int sinceMs) {
+    if (messageId == null || messageId.isEmpty) return;
+    unawaited(
+      _ref
+          .read(llmRequestCaptureRepoProvider)
+          .bindTurnMessageId(
+            sessionId: sessionId,
+            messageId: messageId,
+            sinceMs: sinceMs,
+          ),
+    );
+  }
 
   static String? _lastAssistantId(ChatSession session, String? regenTargetId) {
     if (regenTargetId != null &&
@@ -749,7 +1139,85 @@ class StreamGenerationService {
     ApiConfig apiConfig,
     PipelineSettings pipelineSettings,
   ) {
-    final override = pipelineSettings.studioAgent.studioTrackerModelOverride;
+    final override = pipelineSettings.studioAgent.studioControllerModelOverride;
     return override.isNotEmpty ? override : apiConfig.model;
+  }
+
+  /// Stores the history anchor a stepped trim settled on, when it moved, and
+  /// raises the amber "trimmed" toast for the block the move dropped.
+  ///
+  /// Fire-and-forget and change-guarded: it must never delay a generation, and
+  /// the anchor holds still for many turns, so the common case writes nothing.
+  /// Failure is survivable — the next turn simply re-anchors.
+  void _persistHistoryAnchor({
+    required ChatSession session,
+    required TokenBreakdown breakdown,
+    required List<ChatMessage> history,
+    required String historyTrimMode,
+  }) {
+    final current = session.sessionVars[ChatSessionX.historyAnchorVarKey];
+    final next = breakdown.historyAnchorId;
+    final normalizedCurrent = (current == null || current.isEmpty)
+        ? null
+        : current;
+    final normalizedNext = (next == null || next.isEmpty) ? null : next;
+    if (normalizedCurrent == normalizedNext) return;
+    unawaited(
+      _ref
+          .read(chatRepoProvider)
+          .updateSessionVarsJson(session.id, (vars) {
+            final updated = Map<String, dynamic>.from(vars);
+            if (normalizedNext == null) {
+              updated.remove(ChatSessionX.historyAnchorVarKey);
+            } else {
+              updated[ChatSessionX.historyAnchorVarKey] = normalizedNext;
+            }
+            return updated;
+          })
+          .catchError((Object e) {
+            debugPrint('[history-anchor] persist failed: $e');
+            return <String, dynamic>{};
+          }),
+    );
+
+    // Only the stepped mode holds an anchor, so only a stepped trim is worth a
+    // notice. `historyAnchorId` is already null under sliding.
+    if (historyTrimMode == HistoryTrimMode.stepped && normalizedNext != null) {
+      _toastHistoryTrim(history, normalizedCurrent, normalizedNext);
+    }
+  }
+
+  /// Reports one stepped trim in an amber toast: how many messages it dropped
+  /// and what they were worth in tokens.
+  ///
+  /// A missing previous anchor (the first stepped trim after switching modes)
+  /// counts from the start of the history. A stored anchor the open chat no
+  /// longer has (the message was deleted) reports nothing rather than a number
+  /// read off the wrong list.
+  void _toastHistoryTrim(
+    List<ChatMessage> history,
+    String? currentId,
+    String newId,
+  ) {
+    final newIndex = history.indexWhere((m) => m.id == newId);
+    if (newIndex < 0) return;
+    final oldIndex = currentId == null
+        ? 0
+        : history.indexWhere((m) => m.id == currentId);
+    if (currentId != null && oldIndex < 0) return;
+    final from = oldIndex < 0 ? 0 : oldIndex;
+    final dropped = newIndex - from;
+    if (dropped <= 0) return;
+
+    var droppedTokens = 0;
+    for (var i = from; i < newIndex; i++) {
+      droppedTokens += estimateTokens(history[i].content);
+    }
+    GlazeToast.warningWithoutContext(
+      'history_trim_toast'.plural(
+        dropped,
+        namedArgs: {'tokens': '$droppedTokens'},
+      ),
+    );
   }
 }

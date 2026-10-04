@@ -2,9 +2,9 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/llm/prompt_isolate.dart';
 import '../providers/prompt_build_providers.dart';
 import '../../../core/llm/studio/studio_stream_interceptor.dart';
+import '../../../core/llm/studio/studio_context_preparer.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/state/memory_agent_providers.dart';
@@ -92,10 +92,10 @@ class TrackerMemoryRecoveryService {
       return const RecoveryResult();
     }
 
-    final studioConfig = recoverTrackers
-        ? (await _ref.read(studioTurnConfigResolverProvider).resolve(sessionId))
-              .config
+    final turnConfig = recoverTrackers
+        ? await _ref.read(studioTurnConfigResolverProvider).resolve(sessionId)
         : null;
+    final studioConfig = turnConfig?.config;
     var trackersWritten = 0;
     var failed = 0;
 
@@ -129,25 +129,45 @@ class TrackerMemoryRecoveryService {
           final sliced = session.copyWith(
             messages: session.messages.sublist(0, msgIdx + 1),
           );
-          final payload = await _ref
+          final inputs = await _ref
               .read(promptPayloadBuilderProvider)
-              .buildFromSession(
+              .collectGenerationContext(
                 charId: charId,
                 session: sliced,
+                apiConfigOverride: turnConfig?.activeApiConfig,
+                includeEffectiveCanon: true,
                 shouldAbort: () => token.isCancelled,
                 cancelToken: token,
               );
           if (token.isCancelled) break;
-          final promptResult = await buildPromptInIsolate(payload);
-          if (token.isCancelled) break;
+          final contextSize =
+              turnConfig
+                  ?.pipelineSettings
+                  .studioAgent
+                  .studioControllerContextSize ??
+              0;
+          final visibleMessageIds =
+              StudioStreamInterceptor.computeStudioVisibleMessageIds(
+                inputs.history,
+                contextSize,
+              );
+          final context = const StudioContextPreparer().prepare(
+            inputs: inputs,
+            visibleMessageIds: visibleMessageIds,
+            ledgerPromptInjectionPolicy:
+                turnConfig?.ledgerPromptInjectionPolicy ??
+                inputs.ledgerPromptInjectionPolicy,
+            consumerPath: 'studio-tracker-recovery',
+          );
           final result = await _ref
               .read(memoryStudioServiceProvider)
               .runTrackersOnly(
                 config: studioConfig,
-                promptResult: promptResult,
-                promptPayload: payload,
-                apiConfig: payload.apiConfig,
+                inputs: inputs,
+                context: context,
+                apiConfig: inputs.apiConfig,
                 sessionId: sessionId,
+                turnConfig: turnConfig,
                 cancelToken: token,
               );
           if (result.status == 'ok' || result.status == 'agent_errors') {

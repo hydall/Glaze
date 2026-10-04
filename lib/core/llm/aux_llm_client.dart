@@ -4,10 +4,24 @@ import 'package:dio/dio.dart';
 
 import '../models/pipeline_settings.dart';
 import '../models/extra_request_parameter.dart';
+import '../utils/id_generator.dart';
 import 'aux_retry_runner.dart';
 import 'idle_timeout_guard.dart';
+import 'transport/chat_transport.dart';
 import 'transport/chat_transport_request.dart';
+import 'transport/llm_capture_context.dart';
+import 'transport/llm_call_event.dart';
+import 'transport/llm_protocol.dart';
 import 'transport/transport_factory.dart';
+
+typedef AuxTransportPicker = ChatTransport Function(String protocol);
+
+/// Receives the provider's own response fields for a non-streaming aux call:
+/// the separate reasoning stream (when the model emitted one) and the raw JSON
+/// payload. Callers use them for diagnostics when the assistant text alone does
+/// not explain a failure.
+typedef AuxRawResponseSink =
+    void Function(String? reasoning, String? rawResponseJson);
 
 /// Resolved auxiliary API configuration for a non-streaming LLM call.
 class AuxApiConfig {
@@ -15,7 +29,16 @@ class AuxApiConfig {
   final String apiKey;
   final String model;
   final String protocol;
+  final int maxTokens;
   final bool useResponsesApi;
+
+  /// Whether the connection forbids a `temperature` field. Aux calls pin their
+  /// own temperature, but a provider that rejects the parameter outright
+  /// (OpenAI reasoning models, several proxies) rejects it here too — so a
+  /// connection the chat can talk to would answer an aux call with HTTP 400
+  /// unless this travels with it.
+  final bool omitTemperature;
+
   final List<ExtraRequestParameter> extraRequestParameters;
 
   const AuxApiConfig({
@@ -23,7 +46,9 @@ class AuxApiConfig {
     required this.apiKey,
     required this.model,
     required this.protocol,
+    this.maxTokens = 8000,
     this.useResponsesApi = false,
+    this.omitTemperature = false,
     this.extraRequestParameters = const [],
   });
 }
@@ -42,7 +67,7 @@ class AuxApiConfig {
 /// const client = AuxLlmClient();
 /// final resolver = StudioSlotResolver();
 /// final config = await resolver.resolve(
-///   apiConfigId: studioConfig.cleanerApiConfigId,
+///   apiConfigId: studioPreset.cleanerApiConfigId,
 ///   modelOverride: pipeline.cleaner.postCleanerModel,
 /// );
 /// final raw = await client.callOnce(
@@ -55,7 +80,13 @@ class AuxApiConfig {
 /// );
 /// ```
 class AuxLlmClient {
-  const AuxLlmClient();
+  final AuxTransportPicker transportPicker;
+  final AuxRetryPolicy retryPolicy;
+
+  const AuxLlmClient({
+    this.transportPicker = pickChatTransport,
+    this.retryPolicy = const AuxRetryPolicy(),
+  });
 
   /// Resolves the post-cleaner timeout from settings.
   ///
@@ -104,21 +135,30 @@ class AuxLlmClient {
   ///
   /// Prefer [callOnceWithLog] when the caller wants the per-attempt log for
   /// the agentic operations UI.
+  ///
+  /// Pass [messages] instead of [prompt] for a call that needs a full chat
+  /// (a `system` prompt plus the user turn) rather than a single user message.
   Future<String> callOnce({
     required AuxApiConfig config,
-    required String prompt,
+    String prompt = '',
+    List<Map<String, String>>? messages,
     required int maxTokens,
     required double temperature,
     required int timeoutMs,
     CancelToken? cancelToken,
+    LlmCaptureContext? captureContext,
+    AuxRawResponseSink? onRawResponse,
   }) async {
     final outcome = await callOnceWithLog(
       config: config,
       prompt: prompt,
+      messages: messages,
       maxTokens: maxTokens,
       temperature: temperature,
       timeoutMs: timeoutMs,
       cancelToken: cancelToken,
+      captureContext: captureContext,
+      onRawResponse: onRawResponse,
     );
     if (outcome.isOk && outcome.text != null) return outcome.text!;
     throw _descriptiveError(outcome);
@@ -128,7 +168,8 @@ class AuxLlmClient {
   /// log so callers can record it in the agentic operations log.
   Future<AuxCallOutcome> callOnceWithLog({
     required AuxApiConfig config,
-    required String prompt,
+    String prompt = '',
+    List<Map<String, String>>? messages,
     required int maxTokens,
     required double temperature,
     required int timeoutMs,
@@ -136,23 +177,44 @@ class AuxLlmClient {
     bool omitReasoning = false,
     bool omitReasoningEffort = true,
     bool requestReasoning = false,
+    bool omitTopP = true,
+    LlmCaptureContext? captureContext,
+    AuxRawResponseSink? onRawResponse,
+    FutureOr<void> Function(int attempt, int maxAttempts)? onAttemptStart,
   }) async {
-    if (config.endpoint.isEmpty || config.model.isEmpty) {
-      throw Exception('Aux API not configured');
+    _requireConfigured(config);
+    if (messages == null && prompt.isEmpty) {
+      throw ArgumentError('Provide a prompt or messages');
     }
-    final runner = const AuxRetryRunner();
+    final runner = AuxRetryRunner(policy: retryPolicy);
+    final identifiedContext = _identifiedContext(captureContext);
     return runner.run(
       cancelToken: cancelToken,
-      attempt: (i) => _callOnce(
+      captureContext: identifiedContext,
+      onAttemptStart: onAttemptStart,
+      onAttemptComplete: identifiedContext == null
+          ? null
+          : (attempt, responseText) => LlmCallEventCapture.record(
+              LlmCallEvent.transport(
+                context: identifiedContext,
+                attempt: attempt,
+                responseText: responseText,
+              ),
+            ),
+      attemptWithCancelToken: (i, attemptCancelToken) => _callOnce(
         config: config,
         prompt: prompt,
+        messages: messages,
         maxTokens: maxTokens,
         temperature: temperature,
         timeoutMs: timeoutMs,
-        cancelToken: cancelToken,
+        cancelToken: attemptCancelToken,
         omitReasoning: omitReasoning,
         omitReasoningEffort: omitReasoningEffort,
         requestReasoning: requestReasoning,
+        omitTopP: omitTopP,
+        captureContext: identifiedContext?.withAttempt(i + 1),
+        onRawResponse: onRawResponse,
       ),
     );
   }
@@ -182,32 +244,68 @@ class AuxLlmClient {
     bool omitReasoning = false,
     bool omitReasoningEffort = true,
     bool requestReasoning = false,
+    LlmCaptureContext? captureContext,
   }) async {
-    if (config.endpoint.isEmpty || config.model.isEmpty) {
-      throw Exception('Aux API not configured');
-    }
-    final runner = const AuxRetryRunner();
+    _requireConfigured(config);
+    final runner = AuxRetryRunner(policy: retryPolicy);
+    final identifiedContext = _identifiedContext(captureContext);
     return runner.run(
       cancelToken: cancelToken,
-      attempt: (i) => _callStream(
+      captureContext: identifiedContext,
+      onAttemptComplete: identifiedContext == null
+          ? null
+          : (attempt, responseText) => LlmCallEventCapture.record(
+              LlmCallEvent.transport(
+                context: identifiedContext,
+                attempt: attempt,
+                responseText: responseText,
+              ),
+            ),
+      attemptWithCancelToken: (i, attemptCancelToken) => _callStream(
         config: config,
         prompt: prompt,
         maxTokens: maxTokens,
         temperature: temperature,
         timeoutMs: timeoutMs,
-        cancelToken: cancelToken,
+        cancelToken: attemptCancelToken,
         onChunk: onChunk,
         omitReasoning: omitReasoning,
         omitReasoningEffort: omitReasoningEffort,
         requestReasoning: requestReasoning,
+        captureContext: identifiedContext?.withAttempt(i + 1),
       ),
+    );
+  }
+
+  /// OpenRouter's transport hardcodes its base URL and ignores the config's
+  /// endpoint, so an empty endpoint is legitimate there — and a connection the
+  /// chat can talk to must not fail every auxiliary call with "not configured".
+  static void _requireConfigured(AuxApiConfig config) {
+    final endpointRequired = config.protocol != LlmProtocol.openrouter;
+    if ((endpointRequired && config.endpoint.isEmpty) || config.model.isEmpty) {
+      throw Exception('Aux API not configured');
+    }
+  }
+
+  static LlmCaptureContext? _identifiedContext(LlmCaptureContext? context) {
+    if (context == null) return null;
+    return context.withCallIdentity(
+      pipelineRunId: context.pipelineRunId ?? 'llm-pipeline-${generateId()}',
+      callId: context.callId ?? 'llm-call-${generateId()}',
     );
   }
 
   /// Builds a descriptive exception from a non-ok [AuxCallOutcome] so the
   /// caller's `catch` block can fall back to the original text with a useful
   /// error message.
+  ///
+  /// The last attempt's own exception is preferred when there is one: a
+  /// [DioException] still carries the provider's response body, which
+  /// `formatError()` renders as `HTTP 400: <provider message>` instead of the
+  /// generic status text a reconstructed exception would produce.
   Object _descriptiveError(AuxCallOutcome outcome) {
+    final original = outcome.lastError;
+    if (original != null) return original;
     if (outcome.attempts.isEmpty) return Exception('Aux call failed');
     final last = outcome.attempts.last;
     if (last.status == 'timeout') {
@@ -229,7 +327,8 @@ class AuxLlmClient {
 
   Future<String> _callOnce({
     required AuxApiConfig config,
-    required String prompt,
+    String prompt = '',
+    List<Map<String, String>>? messages,
     required int maxTokens,
     required double temperature,
     required int timeoutMs,
@@ -237,58 +336,105 @@ class AuxLlmClient {
     bool omitReasoning = false,
     bool omitReasoningEffort = true,
     bool requestReasoning = false,
+    bool omitTopP = true,
+    LlmCaptureContext? captureContext,
+    AuxRawResponseSink? onRawResponse,
   }) async {
-    final completer = Completer<String>();
-    final transport = pickChatTransport(config.protocol);
+    final transport = transportPicker(config.protocol);
+    String? result;
+    Object? transportError;
+    var callbackReceived = false;
+    var acceptingCallbacks = true;
+    var timedOut = false;
 
     // Idle timeout: cancel the timer on the first chunk (text OR reasoning)
     // so a long (but progressing) generation is never cut off. Mirrors
-    // AgentStreamRunner's pattern.
-    final guard = IdleTimeoutGuard(timeoutMs, () {
-      if (!completer.isCompleted) {
-        completer.completeError(
-          TimeoutException('Aux call timed out (idle) after ${timeoutMs}ms'),
-        );
-      }
-    });
+    // AgentStreamRunner's pattern. `timeoutMs <= 0` means the caller owns the
+    // deadline itself (a single long request whose answer only arrives at the
+    // end, such as a lorebook rebuild) — no guard is armed at all.
+    final guard = timeoutMs > 0
+        ? IdleTimeoutGuard(timeoutMs, () {
+            if (acceptingCallbacks) {
+              timedOut = true;
+              acceptingCallbacks = false;
+              cancelToken?.cancel('Aux call idle timeout');
+            }
+          })
+        : null;
 
-    unawaited(
-      transport.stream(
+    try {
+      // Deliberately await the transport itself, not a callback completer. On
+      // timeout the request is cancelled above and fully drained here before
+      // this attempt may return and the retry runner may start another one.
+      await transport.stream(
         request: ChatTransportRequest(
           endpoint: config.endpoint,
           apiKey: config.apiKey,
           model: config.model,
-          messages: [
-            {'role': 'user', 'content': prompt},
-          ],
+          messages:
+              messages ??
+              [
+                {'role': 'user', 'content': prompt},
+              ],
           maxTokens: maxTokens,
           temperature: temperature,
+          omitTemperature: config.omitTemperature,
           topP: 1.0,
+          // Aux calls pin their own temperature and deliberately don't steer
+          // top_p. Say so explicitly — the transports no longer treat 1.0 as
+          // "unset".
+          omitTopP: omitTopP,
           stream: false,
           requestReasoning: requestReasoning,
           useResponsesApi: config.useResponsesApi,
           omitReasoning: omitReasoning,
           omitReasoningEffort: omitReasoningEffort,
           extraRequestParameters: config.extraRequestParameters,
+          // 0 also disables the transport-level HTTP receive timeout, so a
+          // caller that opted out of the idle guard is not cut off by Dio
+          // instead.
+          receiveTimeoutMs: timeoutMs > 0 ? timeoutMs : 0,
+          captureContext: captureContext,
         ),
         cancelToken: cancelToken,
         onUpdate: (delta, reasoningDelta) {
+          if (!acceptingCallbacks || cancelToken?.isCancelled == true) return;
           if (delta.isNotEmpty || reasoningDelta?.isNotEmpty == true) {
-            guard.cancel();
+            guard?.cancel();
           }
         },
-        onComplete: (text, _, {rawResponseJson}) {
-          guard.dispose();
-          if (!completer.isCompleted) completer.complete(text);
+        onComplete: (text, reasoning, {rawResponseJson}) {
+          guard?.dispose();
+          if (!acceptingCallbacks || cancelToken?.isCancelled == true) return;
+          callbackReceived = true;
+          result = text;
+          // Handed to the caller even on a "successful" empty answer: a build
+          // that parses the text needs the provider payload to explain why
+          // there was nothing in it.
+          onRawResponse?.call(reasoning, rawResponseJson);
         },
         onError: (error) {
-          guard.dispose();
-          if (!completer.isCompleted) completer.completeError(error);
+          guard?.dispose();
+          if (!acceptingCallbacks || cancelToken?.isCancelled == true) return;
+          callbackReceived = true;
+          transportError = error;
         },
-      ),
-    );
-
-    return completer.future.whenComplete(guard.dispose);
+      );
+    } catch (e) {
+      if (acceptingCallbacks) transportError = e;
+    } finally {
+      acceptingCallbacks = false;
+      guard?.dispose();
+    }
+    if (timedOut) {
+      throw TimeoutException('Aux call timed out (idle) after ${timeoutMs}ms');
+    }
+    if (cancelToken?.isCancelled == true) throw cancelToken!.cancelError!;
+    if (transportError != null) throw transportError!;
+    if (!callbackReceived) {
+      throw StateError('Aux transport ended without a result');
+    }
+    return result ?? '';
   }
 
   /// Streaming variant of [_callOnce]. Calls `transport.stream` with
@@ -305,24 +451,29 @@ class AuxLlmClient {
     bool omitReasoning = false,
     bool omitReasoningEffort = true,
     bool requestReasoning = false,
+    LlmCaptureContext? captureContext,
   }) async {
-    final completer = Completer<String>();
-    final transport = pickChatTransport(config.protocol);
+    final transport = transportPicker(config.protocol);
     final accumulated = StringBuffer();
+    String? result;
+    Object? transportError;
+    var callbackReceived = false;
+    var acceptingCallbacks = true;
+    var timedOut = false;
 
     // Idle timeout: cancel the timer on the first chunk (text OR reasoning)
     // so a long (but progressing) generation is never cut off. Mirrors
     // AgentStreamRunner's pattern.
     final guard = IdleTimeoutGuard(timeoutMs, () {
-      if (!completer.isCompleted) {
-        completer.completeError(
-          TimeoutException('Aux stream timed out (idle) after ${timeoutMs}ms'),
-        );
+      if (acceptingCallbacks) {
+        timedOut = true;
+        acceptingCallbacks = false;
+        cancelToken?.cancel('Aux stream idle timeout');
       }
     });
 
-    unawaited(
-      transport.stream(
+    try {
+      await transport.stream(
         request: ChatTransportRequest(
           endpoint: config.endpoint,
           apiKey: config.apiKey,
@@ -332,21 +483,27 @@ class AuxLlmClient {
           ],
           maxTokens: maxTokens,
           temperature: temperature,
+          omitTemperature: config.omitTemperature,
           topP: 1.0,
+          // See `_callOnce` — top_p is intentionally not steered here.
+          omitTopP: true,
           stream: true,
           requestReasoning: requestReasoning,
           useResponsesApi: config.useResponsesApi,
           omitReasoning: omitReasoning,
           omitReasoningEffort: omitReasoningEffort,
           extraRequestParameters: config.extraRequestParameters,
+          receiveTimeoutMs: timeoutMs,
+          captureContext: captureContext,
         ),
         cancelToken: cancelToken,
         onUpdate: (delta, reasoningDelta) {
+          if (!acceptingCallbacks || cancelToken?.isCancelled == true) return;
           if (delta.isNotEmpty) {
             guard.cancel();
             accumulated.write(delta);
             final text = accumulated.toString();
-            if (onChunk != null && !completer.isCompleted) {
+            if (onChunk != null) {
               try {
                 onChunk(text);
               } catch (_) {
@@ -363,18 +520,19 @@ class AuxLlmClient {
           // like trimming or final newline normalization). Fall back to our
           // own accumulation if the transport returned empty.
           final finalText = text.isNotEmpty ? text : accumulated.toString();
-          if (!completer.isCompleted) {
+          if (acceptingCallbacks && cancelToken?.isCancelled != true) {
             if (onChunk != null && finalText != accumulated.toString()) {
               try {
                 onChunk(finalText);
               } catch (_) {}
             }
-            completer.complete(finalText);
+            callbackReceived = true;
+            result = finalText;
           }
         },
         onError: (error) {
           guard.dispose();
-          if (!completer.isCompleted) {
+          if (acceptingCallbacks && cancelToken?.isCancelled != true) {
             // Flush any partially-accumulated text to the chunk callback so
             // callers that rely on the onChunk side-channel (e.g. the cleaner's
             // _lastStreamedText partial-save) can recover content that arrived
@@ -388,12 +546,27 @@ class AuxLlmClient {
                 // Callback errors must not mask the real transport error.
               }
             }
-            completer.completeError(error);
+            callbackReceived = true;
+            transportError = error;
           }
         },
-      ),
-    );
-
-    return completer.future.whenComplete(guard.dispose);
+      );
+    } catch (e) {
+      if (acceptingCallbacks) transportError = e;
+    } finally {
+      acceptingCallbacks = false;
+      guard.dispose();
+    }
+    if (timedOut) {
+      throw TimeoutException(
+        'Aux stream timed out (idle) after ${timeoutMs}ms',
+      );
+    }
+    if (cancelToken?.isCancelled == true) throw cancelToken!.cancelError!;
+    if (transportError != null) throw transportError!;
+    if (!callbackReceived) {
+      throw StateError('Aux stream transport ended without a result');
+    }
+    return result ?? accumulated.toString();
   }
 }

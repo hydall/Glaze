@@ -1,8 +1,10 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
+import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/sheet_view.dart';
+import '../../../shared/widgets/glaze_sheet.dart';
 
 /// Sheet helpers for editing / deleting an ext-block from the chat WebView's
 /// ext-blocks panel. Extracted from `chat_webview_widget.dart` so the widget
@@ -18,7 +20,7 @@ class ExtBlockDialogs {
     required String blockName,
     required String initialContent,
   }) {
-    return showModalBottomSheet<String>(
+    return showGlazeSheet<String>(
       context: context,
       isScrollControlled: true,
       useRootNavigator: true,
@@ -120,7 +122,13 @@ class _ExtBlockEditSheetState extends State<_ExtBlockEditSheet> {
             ),
           ),
           const SizedBox(height: 16),
-          FilledButton(onPressed: _save, child: Text('btn_save'.tr())),
+          GlazeActionButton(
+            icon: Icons.check_rounded,
+            label: 'btn_save'.tr(),
+            tone: GlazeActionTone.primary,
+            expand: true,
+            onTap: _save,
+          ),
         ],
       ),
     );

@@ -5,7 +5,7 @@ import 'package:glaze_flutter/core/llm/agent_runner.dart';
 import 'package:glaze_flutter/core/llm/memory_studio_service.dart';
 import 'package:glaze_flutter/core/llm/studio/agent_config_resolver.dart';
 import 'package:glaze_flutter/core/llm/studio_turn_config_snapshot.dart';
-import 'package:glaze_flutter/core/llm/tracker_batcher.dart';
+import 'package:glaze_flutter/core/llm/controller_batcher.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/models/pipeline_settings.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
@@ -23,7 +23,6 @@ class _FakeAgentRunner extends AgentRunner {
             loadApiConfigs: () async => const [],
             readActiveApiConfig: () => null,
             readPipelineSettings: () => const PipelineSettings(),
-            readRunApiConfigId: (_) async => '',
           ),
           readPipelineSettings: () => const PipelineSettings(),
         );
@@ -166,7 +165,7 @@ void main() {
     });
   });
 
-  group('TrackerBatcher.groupAgents — postProcessingDataKey (phase)', () {
+  group('ControllerBatcher.groupAgents — postProcessingDataKey (phase)', () {
     late ProviderContainer container;
 
     setUp(() {
@@ -180,7 +179,7 @@ void main() {
       // its context, the pre-gen one does not. The `|<phase>` suffix in the
       // grouping key separates them.
             final runner = _FakeAgentRunner();
-      final batcher = TrackerBatcher(runner);
+      final batcher = ControllerBatcher(runner);
 
       final apiConfig = _stubApiConfig(model: 'same-model');
       final agents = [
@@ -227,7 +226,7 @@ void main() {
       // Backward compat: pre-gen agents on the same model still batch together
       // (the `|pre_generation` suffix is uniform, so it does not split them).
             final runner = _FakeAgentRunner();
-      final batcher = TrackerBatcher(runner);
+      final batcher = ControllerBatcher(runner);
 
       final apiConfig = _stubApiConfig(model: 'same-model');
       final agents = [
@@ -260,7 +259,7 @@ void main() {
       // Two post-gen agents on the same model DO batch together (they both
       // receive mainResponse; uniform phase suffix keeps them in one group).
             final runner = _FakeAgentRunner();
-      final batcher = TrackerBatcher(runner);
+      final batcher = ControllerBatcher(runner);
 
       final apiConfig = _stubApiConfig(model: 'same-model');
       final agents = [

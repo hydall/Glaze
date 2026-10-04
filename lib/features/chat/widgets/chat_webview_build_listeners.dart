@@ -2,7 +2,9 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/llm/generation_phase.dart';
 import '../../../core/models/chat_message.dart';
+import '../../../core/models/persona.dart';
 import '../../../core/models/preset.dart';
 import '../../../core/state/active_regex_provider.dart';
 import '../../../core/state/character_provider.dart';
@@ -11,11 +13,14 @@ import '../../extensions/models/info_block.dart';
 import '../../extensions/providers/extension_presets_provider.dart';
 import '../../extensions/providers/extensions_settings_provider.dart';
 import '../../extensions/providers/info_blocks_provider.dart';
+import '../../personas/persona_list_provider.dart';
 import '../bridge/chat_bridge_controller.dart';
 import '../chat_provider.dart';
 import '../chat_state.dart';
 import '../editing_message_provider.dart';
 import '../services/continuation_message_merger.dart';
+import '../state/context_window_marker.dart';
+import '../state/generation_phase_provider.dart';
 import 'chat_message_sync.dart';
 import 'chat_streaming_bridge_sync.dart';
 import 'chat_webview_sync_dispatcher.dart';
@@ -43,6 +48,8 @@ class ChatWebViewBuildListeners {
     required this.visibleStartIndex,
     required this.onRefreshExtBlocksPanel,
     required this.onSyncExtBlockPanels,
+    required this.onReconcileActiveGeneration,
+    required this.onDomReset,
     this.isCurrentBridge,
   });
 
@@ -63,27 +70,43 @@ class ChatWebViewBuildListeners {
   final Future<void> Function(String sessionId, String messageId)
   onRefreshExtBlocksPanel;
   final Future<void> Function() onSyncExtBlockPanels;
+  final Future<void> Function(ChatBridgeController bridge)
+  onReconcileActiveGeneration;
+  final void Function() onDomReset;
   final bool Function(ChatBridgeController bridge)? isCurrentBridge;
 
   /// Attach all `ref.listen` callbacks for the current build. Call
   /// from the top of `State.build` after the `ref.watch` reads.
   void attach() {
     _listenDisplayRegexes();
+    _listenPersonaRoster();
     _listenEditingMessage();
+    _listenGenerationPhase();
+    _listenContextWindowStart();
     _listenStreaming();
     _listenInfoBlocks();
     _listenExtSettingsAndPresets();
-}
+  }
+
   void _listenDisplayRegexes() {
     ref.listen<AsyncValue<List<PresetRegex>>>(displayRegexesProvider, (
       prev,
       next,
     ) {
       final b = bridge;
-      if (b == null || !ready()) return;
       final oldList = prev?.value ?? const <PresetRegex>[];
       final newList = next.value ?? const <PresetRegex>[];
-      if (_regexListChanged(oldList, newList)) {
+      if (b == null || !ready()) {
+        // Defer to the post-init check in [ChatWebViewWidget], which compares
+        // the list the initializer actually painted with against the latest
+        // value. This branch must not flag every change by itself: the
+        // initializer *awaits* this provider, so its first resolution is not a
+        // stale render — the paint carries it. Treating it as one forced a
+        // second full render of every first open, which a large chat shows as
+        // a reload.
+        return;
+      }
+      if (displayRegexListsDiffer(oldList, newList)) {
         final character = ref.read(characterByIdProvider(charId));
         final effectivePersona = ref.read(
           effectivePersonaForChatProvider((
@@ -96,12 +119,48 @@ class ChatWebViewBuildListeners {
         // full re-render of every message. Preserve the current scroll position
         // so the chat stays put instead of jumping (see restoreAnchor in the
         // webview virtual list).
-        b.setMessages(
+        unawaited(() async {
+          onDomReset();
+          await b.setMessages(
+            messages,
+            visibleStartIndex: visibleStartIndex,
+            preserveScroll: true,
+          );
+          if (isCurrentBridge?.call(b) == false || !ready()) return;
+          await onReconcileActiveGeneration(b);
+        }());
+      }
+    });
+  }
+
+  /// Keeps rendered messages in step with the persona roster. A user message
+  /// stores the id of the persona it was sent as, and the WebView resolves that
+  /// id when it renders: renaming a persona must rename its own past messages,
+  /// and deleting one must drop those messages back to a letter avatar while
+  /// keeping the name stored on them. Neither reaches the page on its own —
+  /// the maps are built in Dart — so the roster is re-pushed and the messages
+  /// re-rendered here.
+  void _listenPersonaRoster() {
+    ref.listen<AsyncValue<List<Persona>>>(personaListProvider, (prev, next) {
+      final b = bridge;
+      if (b == null || !ready()) return;
+      final oldList = prev?.value ?? const <Persona>[];
+      final newList = next.value ?? const <Persona>[];
+      if (!_personaRosterChanged(oldList, newList)) return;
+      b.setPersonaRoster(newList);
+      // Same reasoning as the display-regex re-render above: every message map
+      // is affected, so the batch is a full re-render that keeps the scroll
+      // position.
+      unawaited(() async {
+        onDomReset();
+        await b.setMessages(
           messages,
           visibleStartIndex: visibleStartIndex,
           preserveScroll: true,
         );
-      }
+        if (isCurrentBridge?.call(b) == false || !ready()) return;
+        await onReconcileActiveGeneration(b);
+      }());
     });
   }
 
@@ -144,6 +203,34 @@ class ChatWebViewBuildListeners {
     });
   }
 
+  /// Pushes the live generation phase into the typing bubble, so its label
+  /// tracks the work the app is actually doing (assembling the prompt,
+  /// retrieving memory, waiting on the model) instead of claiming the reply
+  /// is being written from the moment the bubble appears.
+  /// Keeps the CONTEXT LIMIT rule on the message the prompt actually starts
+  /// at. The boundary moves whenever a prompt is built — a turn, the inspector
+  /// preview, the drawer's recount — and is cleared with the breakdown itself
+  /// (a delete, a changed connection): pushing the null through is what retires
+  /// a rule the trim no longer draws.
+  void _listenContextWindowStart() {
+    ref.listen<String?>(contextWindowStartProvider(charId), (prev, next) {
+      final b = bridge;
+      if (b == null || !ready()) return;
+      if (prev == next) return;
+      unawaited(b.setContextWindowStart(next));
+    });
+  }
+
+  void _listenGenerationPhase() {
+    ref.listen<GenerationPhase>(generationPhaseProvider(charId), (prev, next) {
+      final b = bridge;
+      if (b == null || !ready() || isCurrentBridge?.call(b) == false) return;
+      final label = generationPhaseLabel(next);
+      if (label == b.generationPhaseLabel) return;
+      unawaited(b.setGenerationPhase(label));
+    });
+  }
+
   void _listenStreaming() {
     final listenerEpoch = syncState.streamEpoch;
     ref.listen<StreamingState>(streamingStateProvider(charId), (prev, next) {
@@ -168,8 +255,15 @@ class ChatWebViewBuildListeners {
             reasoning: next.reasoning ?? original.reasoning,
             isTyping: true,
           );
-          b.updateMessage(updated);
-          syncState.regenStreamingSent = true;
+          unawaited(
+            _pushStreamingMessage(
+              b,
+              updated,
+              listenerEpoch,
+              updateInPlace: true,
+              markRegenStreamingSent: true,
+            ),
+          );
         }
         return;
       }
@@ -185,13 +279,23 @@ class ChatWebViewBuildListeners {
           final original = messages[idx];
           final updated = original.copyWith(
             content: joinContinuation(original.content, next.text),
-            reasoning: next.reasoning ?? original.reasoning,
+            // Stream the reasoning exactly the way the merge will persist it:
+            // the continuation's thinking is filed under its own `Continue`
+            // header rather than replacing the original turn's (INV-CM5).
+            reasoning:
+                joinContinuationReasoning(original.reasoning, next.reasoning) ??
+                original.reasoning,
             isTyping: true,
           );
-          b.updateMessage(updated);
-          // No virtual streaming message was appended for this run, so the
-          // falling edge must not try to remove one.
-          syncState.regenStreamingSent = true;
+          unawaited(
+            _pushStreamingMessage(
+              b,
+              updated,
+              listenerEpoch,
+              updateInPlace: true,
+              markRegenStreamingSent: true,
+            ),
+          );
           return;
         }
       }
@@ -207,7 +311,14 @@ class ChatWebViewBuildListeners {
         if (idx >= 0) {
           final original = messages[idx];
           final updated = original.copyWith(content: next.text, isTyping: true);
-          b.updateMessage(updated);
+          unawaited(
+            _pushStreamingMessage(
+              b,
+              updated,
+              listenerEpoch,
+              updateInPlace: true,
+            ),
+          );
         }
         return;
       }
@@ -228,13 +339,17 @@ class ChatWebViewBuildListeners {
   Future<void> _pushStreamingMessage(
     ChatBridgeController bridge,
     ChatMessage message,
-    int epoch,
-  ) => pushStreamingMessageOwned(
+    int epoch, {
+    bool updateInPlace = false,
+    bool markRegenStreamingSent = false,
+  }) => pushStreamingMessageOwned(
     bridge: bridge,
     message: message,
     syncState: syncState,
     epoch: epoch,
     isCurrent: () => ready() && (isCurrentBridge?.call(bridge) ?? true),
+    updateInPlace: updateInPlace,
+    markRegenStreamingSent: markRegenStreamingSent,
   );
 
   void _listenInfoBlocks() {
@@ -273,11 +388,42 @@ class ChatWebViewBuildListeners {
     });
   }
 
-  static bool _regexListChanged(List<PresetRegex> a, List<PresetRegex> b) {
+  /// True when the roster changed in a way a rendered message can show: which
+  /// personas exist, their names, or their avatars. Anything else about a
+  /// persona (its prompt, say) never reaches the chat bubble.
+  static bool _personaRosterChanged(List<Persona> a, List<Persona> b) {
     if (a.length != b.length) return true;
-    for (int i = 0; i < a.length; i++) {
-      if (a[i].id != b[i].id || a[i].disabled != b[i].disabled) return true;
+    final byId = {for (final p in a) p.id: p};
+    for (final p in b) {
+      final old = byId[p.id];
+      if (old == null || old.name != p.name || old.avatarPath != p.avatarPath) {
+        return true;
+      }
     }
     return false;
   }
+
 }
+
+/// True when the two display-regex lists differ in a way a rendered message can
+/// show: which scripts run. A script swapped for a different one with the same
+/// id, or re-enabled, changes the rewrite and must force a re-render.
+bool displayRegexListsDiffer(List<PresetRegex> a, List<PresetRegex> b) {
+  if (a.length != b.length) return true;
+  for (int i = 0; i < a.length; i++) {
+    if (a[i].id != b[i].id || a[i].disabled != b[i].disabled) return true;
+  }
+  return false;
+}
+
+/// Whether the post-init re-render is needed for the display-regex context.
+///
+/// Only a list that moved *after* the initializer's paint leaves the DOM
+/// rewritten by an older list. The list's own first load is already in the
+/// paint — the initializer awaits the provider — so it must not count as a
+/// change. A null [painted] means the initializer never reached its paint (it
+/// will have failed and the view rebuilt), so there is nothing to correct.
+bool displayRegexResyncNeeded(
+  List<PresetRegex>? painted,
+  List<PresetRegex> latest,
+) => painted != null && displayRegexListsDiffer(painted, latest);

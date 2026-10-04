@@ -9,13 +9,14 @@ part 'memory_book_api_settings.g.dart';
 /// Nested inside [PipelineSettings] under the `memoryBookApi` field.
 ///
 /// `generationSource='custom'` → use `generationEndpoint/ApiKey/Model`.
-/// `generationSource='current'` → read the active chat API config and use its
-/// endpoint/key/protocol. `generationModel` overrides the model when
-/// non-empty.
+/// `apiConfigId` selects a saved API connection. An empty or missing id falls
+/// back to the active chat connection. `generationModel` overrides that
+/// connection's model when non-empty.
 @freezed
 abstract class MemoryBookApiSettings with _$MemoryBookApiSettings {
   const factory MemoryBookApiSettings({
     @Default('current') String generationSource,
+    @Default('') String apiConfigId,
     @Default('') String generationModel,
     @Default('') String generationEndpoint,
     @Default('') String generationApiKey,

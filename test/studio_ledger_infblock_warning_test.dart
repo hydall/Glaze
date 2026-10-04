@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/state/db_provider.dart';
 import 'package:glaze_flutter/features/extensions/models/block_config.dart';
+import 'package:glaze_flutter/shared/widgets/menu_group.dart';
 import 'package:glaze_flutter/features/extensions/screens/preset_editor/block_edit_dialog.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -48,13 +49,24 @@ void main() {
   });
 
   group('Test 20 — Fullscreen warning when enabling inject', () {
-    testWidgets('shows fullscreen warning when enabling inject', (tester) async {
+    testWidgets('shows fullscreen warning when enabling inject', (
+      tester,
+    ) async {
+      // The editor now carries the original extension's full settings, so the
+      // form is far taller than a default test viewport. Giving it room keeps
+      // every row built and clear of the sheet's header strip, which a
+      // scrolled-to row can end up hiding under.
+      tester.view.physicalSize = const Size(800, 5000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
       final container = await setupContainer();
 
       final block = const BlockConfig(
         id: 'b1',
         name: 'Test',
-        type: BlockType.infoblock,
+        type: BlockType.generated,
       );
       await tester.pumpWidget(
         UncontrolledProviderScope(
@@ -66,24 +78,19 @@ void main() {
           ),
         ),
       );
-      await tester.pump();
+      await tester.pumpAndSettle();
 
       final injectSwitchFinder = find.ancestor(
         of: find.text('block_inject_title'),
-        matching: find.byType(SwitchListTile),
+        matching: find.byType(MenuSwitchItem),
       );
       expect(injectSwitchFinder, findsOneWidget);
 
-      await tester.scrollUntilVisible(
-        injectSwitchFinder,
-        100,
-        scrollable: find.byType(Scrollable).first,
-      );
       await tester.tap(injectSwitchFinder);
       await tester.pumpAndSettle();
 
-      expect(find.text('Not recommended with Studio Canon'), findsOneWidget);
-      expect(find.text('Continue anyway'), findsOneWidget);
+      expect(find.text('block_inject_warn_title'), findsOneWidget);
+      expect(find.text('block_inject_warn_continue'), findsOneWidget);
       expect(find.byType(Scaffold), findsWidgets);
     });
   });

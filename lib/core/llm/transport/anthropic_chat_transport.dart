@@ -10,6 +10,8 @@ import '../converters/cache_breakpoint_marker.dart';
 import '../converters/thinking_budget.dart';
 import 'chat_transport.dart';
 import 'chat_transport_request.dart';
+import 'endpoint_normalizer.dart';
+import 'endpoint_resolution_cache.dart';
 import 'extra_request_parameters.dart';
 
 /// Result of [AnthropicChatTransport.buildRequest] — body + headers + the
@@ -39,6 +41,9 @@ class AnthropicBuiltRequest {
 ///   When thinking is on, prefill is dropped (Anthropic constraint).
 /// - Cache control: when [ChatTransportRequest.cacheControlTtl] is set, marks
 ///   the last system part and a message at depth=2 with `ephemeral` cache.
+/// - System handling: the leading run of `system` messages goes to the
+///   top-level `system` field unless [ChatTransportRequest.useSystemInstruction]
+///   is off, in which case it stays inline as user turns.
 /// - SSE events: `content_block_delta` → text/reasoning; `message_stop` → done.
 class AnthropicChatTransport implements ChatTransport {
   static const String _apiVersion = '2023-06-01';
@@ -67,16 +72,10 @@ class AnthropicChatTransport implements ChatTransport {
             ),
           );
 
-  static String buildMessagesUrl(String endpoint) {
-    var base = endpoint.trim();
-    if (base.isEmpty) return '';
-    if (!base.startsWith(RegExp(r'https?://'))) base = 'https://$base';
-    while (base.endsWith('/')) {
-      base = base.substring(0, base.length - 1);
-    }
-    if (base.toLowerCase().endsWith('/messages')) return base;
-    return '$base/messages';
-  }
+  static const String _modelsRoute = '/models';
+
+  static String buildMessagesUrl(String endpoint) =>
+      EndpointNormalizer.messagesUrl(endpoint);
 
   @override
   Future<void> stream({
@@ -91,10 +90,24 @@ class AnthropicChatTransport implements ChatTransport {
       return;
     }
 
+    final url = request.endpoint.trim();
+    if (url.isEmpty) {
+      onError?.call(Exception('Endpoint is empty or not a valid URL'));
+      return;
+    }
+
+    final AnthropicBuiltRequest built;
+    try {
+      built = buildRequest(request);
+    } catch (e) {
+      onError?.call(e);
+      return;
+    }
+    final omitReasoning =
+        !(request.showNativeReasoning ?? !request.omitReasoning);
+
     for (var attempt = 0; attempt <= _maxRetries; attempt++) {
       try {
-        final built = buildRequest(request);
-        final url = buildMessagesUrl(request.endpoint);
         if (request.stream) {
           await _streamResponse(
             url,
@@ -104,8 +117,7 @@ class AnthropicChatTransport implements ChatTransport {
             cancelToken: cancelToken,
             onUpdate: onUpdate,
             onComplete: onComplete,
-            omitReasoning:
-                !(request.showNativeReasoning ?? !request.omitReasoning),
+            omitReasoning: omitReasoning,
             receiveTimeoutMs: request.receiveTimeoutMs,
           );
         } else {
@@ -116,12 +128,11 @@ class AnthropicChatTransport implements ChatTransport {
             prefill: built.prefill,
             cancelToken: cancelToken,
             onComplete: onComplete,
-            omitReasoning:
-                !(request.showNativeReasoning ?? !request.omitReasoning),
+            omitReasoning: omitReasoning,
             receiveTimeoutMs: request.receiveTimeoutMs,
           );
         }
-        return; // success — no retry needed
+        return;
       } on DioException catch (e) {
         if (attempt < _maxRetries &&
             e.response?.statusCode == 408 &&
@@ -152,6 +163,7 @@ class AnthropicChatTransport implements ChatTransport {
     final converted = convertClaudeMessages(
       request.messages,
       extractPrefill: !useThinking,
+      useSystemInstruction: request.useSystemInstruction,
     );
 
     var messages = converted.messages;
@@ -182,6 +194,7 @@ class AnthropicChatTransport implements ChatTransport {
           : convertClaudeMessages(
               request.previousMessages!,
               extractPrefill: !useThinking,
+              useSystemInstruction: request.useSystemInstruction,
             ).messages;
       messages = markStablePrefixCacheControl(
         messages,
@@ -206,10 +219,13 @@ class AnthropicChatTransport implements ChatTransport {
       body['session_id'] = request.sessionId;
     }
 
-    if (!request.omitTemperature && request.temperature > 0) {
+    // Gated on the omit* flags only — see the note in
+    // `OpenAiChatTransport.buildBody`. top_k keeps its `> 0` guard because
+    // Anthropic rejects `top_k: 0`.
+    if (!request.omitTemperature) {
       body['temperature'] = request.temperature;
     }
-    if (!request.omitTopP && request.topP > 0 && request.topP < 1) {
+    if (!request.omitTopP) {
       body['top_p'] = request.topP;
     }
     if (!request.omitTopK && request.topK > 0) {
@@ -321,11 +337,20 @@ class AnthropicChatTransport implements ChatTransport {
     StreamSubscription<List<int>>? subscription;
     var buffer = '';
 
+    Future<void> finishAfterCancel([Object? error, StackTrace? stack]) async {
+      await subscription?.cancel();
+      if (completer.isCompleted) return;
+      if (error == null) {
+        completer.complete();
+      } else {
+        completer.completeError(error, stack);
+      }
+    }
+
     subscription = stream.listen(
       (chunk) {
         if (cancelToken?.isCancelled == true) {
-          subscription?.cancel();
-          if (!completer.isCompleted) completer.complete();
+          unawaited(finishAfterCancel());
           return;
         }
         buffer += utf8.decode(chunk, allowMalformed: true);
@@ -333,9 +358,8 @@ class AnthropicChatTransport implements ChatTransport {
         buffer = lines.removeLast();
 
         for (final line in lines) {
-          final trimmed = line.trim();
-          if (!trimmed.startsWith('data:')) continue;
-          final payload = trimmed.substring(5).trim();
+          final payload = _sseData(line);
+          if (payload == null) continue;
           if (payload.isEmpty) continue;
           lastRawJsonPayload = payload;
 
@@ -379,8 +403,7 @@ class AnthropicChatTransport implements ChatTransport {
                 );
                 doneReceived = true;
               }
-              subscription?.cancel();
-              if (!completer.isCompleted) completer.complete();
+              unawaited(finishAfterCancel());
               return;
             } else if (type == 'error') {
               throw DioException(
@@ -397,20 +420,16 @@ class AnthropicChatTransport implements ChatTransport {
           }
         }
       },
-      onDone: () {
-        if (!completer.isCompleted) completer.complete();
-      },
-      onError: (Object e) {
-        if (!completer.isCompleted) completer.completeError(e);
-      },
+      onDone: () => unawaited(finishAfterCancel()),
+      onError: (Object e, StackTrace stack) =>
+          unawaited(finishAfterCancel(e, stack)),
       cancelOnError: true,
     );
 
     if (cancelToken != null) {
       unawaited(
-        cancelToken.whenCancel.then((_) {
-          subscription?.cancel();
-          if (!completer.isCompleted) completer.complete();
+        cancelToken.whenCancel.then((_) async {
+          await finishAfterCancel();
         }),
       );
     }
@@ -437,6 +456,15 @@ class AnthropicChatTransport implements ChatTransport {
         type: DioExceptionType.connectionError,
       );
     }
+  }
+
+  String? _sseData(String line) {
+    final normalized = line.endsWith('\r')
+        ? line.substring(0, line.length - 1)
+        : line;
+    if (!normalized.startsWith('data:')) return null;
+    final value = normalized.substring(5);
+    return value.startsWith(' ') ? value.substring(1) : value;
   }
 
   Future<void> _oneShotResponse(
@@ -518,23 +546,28 @@ class AnthropicChatTransport implements ChatTransport {
     required String apiKey,
   }) async {
     if (apiKey.isEmpty || endpoint.trim().isEmpty) return const [];
-    var base = endpoint.trim();
-    if (!base.startsWith(RegExp(r'https?://'))) base = 'https://$base';
-    while (base.endsWith('/')) {
-      base = base.substring(0, base.length - 1);
+    final urls = EndpointResolutionCache.order(
+      endpoint,
+      _modelsRoute,
+      EndpointNormalizer.modelsCandidates(endpoint),
+    );
+    for (final url in urls) {
+      try {
+        final response = await _dio.get<Map<String, dynamic>>(
+          url,
+          options: Options(
+            headers: {'x-api-key': apiKey, 'anthropic-version': _apiVersion},
+          ),
+        );
+        final data = response.data?['data'] as List?;
+        if (data == null) continue;
+        EndpointResolutionCache.record(endpoint, _modelsRoute, url);
+        return data.cast<Map<String, dynamic>>();
+      } catch (_) {
+        continue;
+      }
     }
-    try {
-      final response = await _dio.get<Map<String, dynamic>>(
-        '$base/models',
-        options: Options(
-          headers: {'x-api-key': apiKey, 'anthropic-version': _apiVersion},
-        ),
-      );
-      final data = response.data?['data'] as List?;
-      return data?.cast<Map<String, dynamic>>() ?? const [];
-    } catch (_) {
-      return const [];
-    }
+    return const [];
   }
 
   // ── helpers ───────────────────────────────────────────────────────────────

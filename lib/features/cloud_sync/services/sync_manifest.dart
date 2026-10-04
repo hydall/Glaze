@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../settings/app_settings_provider.dart';
 import 'sync_serialization.dart';
 import '../sync_models.dart';
 import '../sync_repo_interfaces.dart';
@@ -26,8 +27,11 @@ class SyncManifestBuilder implements SyncManifestProvider {
   final SyncStudioPresetStore? _studioPresetStore;
   final SyncChatSummaryStore? _chatSummaryStore;
   final SyncCharacterFolderStore? _characterFolderStore;
+  final SyncFolderStore? _folderStore;
   final SyncMemoryGraphStore? _memoryGraphStore;
   final SyncCharacterKnowledgeStore? _characterKnowledgeStore;
+  final SyncSessionLorebookOverlayStore? _sessionLorebookOverlayStore;
+  final SyncReconciliationStateStore? _reconciliationStateStore;
   final SyncImageStore? _imageStore;
 
   static const _manifestKey = 'gz_sync_manifest_v2';
@@ -52,8 +56,11 @@ class SyncManifestBuilder implements SyncManifestProvider {
     this._studioPresetStore,
     this._chatSummaryStore,
     this._characterFolderStore,
+    this._folderStore,
     this._memoryGraphStore,
     this._characterKnowledgeStore,
+    this._sessionLorebookOverlayStore,
+    this._reconciliationStateStore,
     this._imageStore,
   });
 
@@ -72,7 +79,10 @@ class SyncManifestBuilder implements SyncManifestProvider {
   /// [cloudManifest] — when pulling, used to avoid bumping updatedAt to now for
   /// entities that only differ from a stale local manifest but match cloud.
   @override
-  Future<SyncManifest> buildLocalManifest({SyncManifest? cloudManifest}) async {
+  Future<SyncManifest> buildLocalManifest({
+    SyncManifest? cloudManifest,
+    bool applyAcceptedHashes = true,
+  }) async {
     final deviceId = await getDeviceId();
     final now = DateTime.now().millisecondsSinceEpoch;
     final entries = <String, SyncManifestEntry>{};
@@ -222,11 +232,13 @@ class SyncManifestBuilder implements SyncManifestProvider {
       );
     }
 
-    final trackerSnapshotSessionIds = await _trackerSnapshotStore
-        .getAllSessionIds();
+    final chatSessionIds = sessions.map((session) => session.sessionId).toSet();
+    final trackerSnapshotSessionIds = {
+      ...chatSessionIds,
+      ...await _trackerSnapshotStore.getAllSessionIds(),
+    };
     for (final sessionId in trackerSnapshotSessionIds) {
       final snapshots = await _trackerSnapshotStore.getBySessionId(sessionId);
-      if (snapshots.isEmpty) continue;
       final payload = {'__trackerSnapshots': true, 'items': snapshots};
       final hash = SyncSerialization.computeSyncHash(payload);
       final key = entryKey('tracker_snapshot', sessionId);
@@ -248,10 +260,12 @@ class SyncManifestBuilder implements SyncManifestProvider {
       );
     }
 
-    final trackerValueSessionIds = await _trackerValueStore.getAllSessionIds();
+    final trackerValueSessionIds = {
+      ...chatSessionIds,
+      ...await _trackerValueStore.getAllSessionIds(),
+    };
     for (final sessionId in trackerValueSessionIds) {
       final trackers = await _trackerValueStore.getBySessionId(sessionId);
-      if (trackers.isEmpty) continue;
       final payload = {'__trackerValues': true, 'items': trackers};
       final hash = SyncSerialization.computeSyncHash(payload);
       final key = entryKey('tracker_value', sessionId);
@@ -275,11 +289,9 @@ class SyncManifestBuilder implements SyncManifestProvider {
 
     final studioConfigs = await _studioConfigStore.getAll();
     for (final config in studioConfigs) {
-      final id = config.profileId.isNotEmpty
-          ? config.profileId
-          : config.sessionId;
+      final id = config.sessionId;
       final json = config.toJson();
-      final hash = SyncSerialization.computeSyncHash(json);
+      final hash = SyncSerialization.computeStudioConfigHash(json);
       final key = entryKey('studio_config', id);
       final prevEntry = previous.entries[key];
       final cloudEntry = cloudManifest?.entries[key];
@@ -407,14 +419,122 @@ class SyncManifestBuilder implements SyncManifestProvider {
       }
     }
 
+    if (_sessionLorebookOverlayStore != null) {
+      final sessionIds = await _sessionLorebookOverlayStore.getAllSessionIds();
+      for (final sessionId in sessionIds) {
+        final overlays = await _sessionLorebookOverlayStore.getBySessionId(
+          sessionId,
+        );
+        if (overlays == null) continue;
+        final hash = SyncSerialization.computeSyncHash(overlays);
+        final key = entryKey('session_lorebook_overlays', sessionId);
+        final updatedAt = _resolveUpdatedAt(
+          hash: hash,
+          prevEntry: previous.entries[key],
+          cloudEntry: cloudManifest?.entries[key],
+          now: now,
+        );
+        entries[key] = SyncManifestEntry(
+          type: 'session_lorebook_overlays',
+          id: sessionId,
+          path: cloudPath('session_lorebook_overlays', sessionId),
+          updatedAt: updatedAt,
+          hash: hash,
+        );
+      }
+      final chatSessionIds = sessions
+          .map((session) => session.sessionId)
+          .toSet();
+      for (final previousEntry in previous.entries.values) {
+        if (previousEntry.type != 'session_lorebook_overlays' ||
+            entries.containsKey(previousEntry.key) ||
+            !chatSessionIds.contains(previousEntry.id)) {
+          continue;
+        }
+        final cloudEntry = cloudManifest?.entries[previousEntry.key];
+        if (cloudEntry == null ||
+            cloudEntry.deleted ||
+            cloudEntry.hash != previousEntry.hash ||
+            await isDeleted(previousEntry.type, previousEntry.id) ||
+            await isDeleted('chat', previousEntry.id)) {
+          continue;
+        }
+        // An accepted empty aggregate has no local rows to rebuild from.
+        entries[previousEntry.key] = cloudEntry;
+      }
+    }
+
+    if (_reconciliationStateStore != null) {
+      final sessionIds = await _reconciliationStateStore.getAllSessionIds();
+      for (final sessionId in sessionIds) {
+        final state = await _reconciliationStateStore.getBySessionId(sessionId);
+        if (state == null) continue;
+        final hash = SyncSerialization.computeSyncHash(state);
+        final key = entryKey('reconciliation_state', sessionId);
+        final prevEntry = previous.entries[key];
+        final cloudEntry = cloudManifest?.entries[key];
+        final updatedAt = _resolveUpdatedAt(
+          hash: hash,
+          prevEntry: prevEntry,
+          cloudEntry: cloudEntry,
+          now: now,
+        );
+        entries[key] = SyncManifestEntry(
+          type: 'reconciliation_state',
+          id: sessionId,
+          path: cloudPath('reconciliation_state', sessionId),
+          updatedAt: updatedAt,
+          hash: hash,
+        );
+      }
+      final chatSessionIds = sessions
+          .map((session) => session.sessionId)
+          .toSet();
+      for (final previousEntry in previous.entries.values) {
+        if (previousEntry.type != 'reconciliation_state' ||
+            entries.containsKey(previousEntry.key) ||
+            !chatSessionIds.contains(previousEntry.id)) {
+          continue;
+        }
+        final cloudEntry = cloudManifest?.entries[previousEntry.key];
+        if (cloudEntry == null ||
+            cloudEntry.deleted ||
+            cloudEntry.hash != previousEntry.hash ||
+            await isDeleted(previousEntry.type, previousEntry.id) ||
+            await isDeleted('chat', previousEntry.id)) {
+          continue;
+        }
+        // A cloud state may normalize to no durable runs (for example, stale
+        // legacy anchors). Keep its accepted manifest marker so it is not
+        // downloaded and rejected again on every pull.
+        entries[previousEntry.key] = cloudEntry;
+      }
+    }
+
     await _addSingletons(entries, previous, now, cloudManifest);
     await _addDeletedEntries(entries, now);
+
+    final acceptedLocalHashes = <String, String>{};
+    if (applyAcceptedHashes) {
+      for (final accepted in previous.acceptedLocalHashes.entries) {
+        final entry = entries[accepted.key];
+        final previousEntry = previous.entries[accepted.key];
+        if (entry == null ||
+            previousEntry == null ||
+            entry.hash != accepted.value) {
+          continue;
+        }
+        entries[accepted.key] = previousEntry;
+        acceptedLocalHashes[accepted.key] = accepted.value;
+      }
+    }
 
     return SyncManifest(
       deviceId: deviceId,
       createdAt: previous.createdAt,
       lastSync: previous.lastSync,
       entries: entries,
+      acceptedLocalHashes: acceptedLocalHashes,
     );
   }
 
@@ -492,7 +612,8 @@ class SyncManifestBuilder implements SyncManifestProvider {
   ) async {
     final singletons = <String, dynamic>{};
 
-    final lorebooks = await _lorebookRepo.getAll();
+    final lorebooks = await _lorebookRepo.getAll()
+      ..sort((a, b) => a.id.compareTo(b.id));
     singletons['lorebooks'] = lorebooks.map((l) => l.toJson()).toList();
 
     final apiConfigs = await _apiRepo.getAll();
@@ -580,6 +701,30 @@ class SyncManifestBuilder implements SyncManifestProvider {
       );
     }
 
+    // Generic + preset folders — singleton (all folders + members in one JSON).
+    if (_folderStore != null) {
+      const type = 'folders';
+      final data = await _folderStore.getAll();
+      final hash = SyncSerialization.computeSyncHash(data);
+      final key = entryKey(type, type);
+      final prevEntry = previous.entries[key];
+      final cloudEntry = cloudManifest?.entries[key];
+      final updatedAt = _resolveUpdatedAt(
+        hash: hash,
+        prevEntry: prevEntry,
+        cloudEntry: cloudEntry,
+        now: now,
+      );
+
+      entries[key] = SyncManifestEntry(
+        type: type,
+        id: type,
+        path: cloudPath(type, type),
+        updatedAt: updatedAt,
+        hash: hash,
+      );
+    }
+
     final prefs = await SharedPreferences.getInstance();
     final pipelineSettings = prefs.getString(
       SyncSerialization.pipelineSettingsKey,
@@ -587,11 +732,23 @@ class SyncManifestBuilder implements SyncManifestProvider {
     final activeStudioPresetId = prefs.getString(
       SyncSerialization.activeStudioPresetKey,
     );
-    if (pipelineSettings != null || activeStudioPresetId != null) {
+    final globalRegexScripts = prefs.getString(
+      SyncSerialization.globalRegexScriptsKey,
+    );
+    final studioRegexScripts = prefs.getString(
+      SyncSerialization.studioRegexScriptsKey,
+    );
+    final appSettings = AppSettingsPreferences.encode(
+      AppSettingsPreferences.read(prefs),
+    );
+    {
       const type = 'local_storage';
       final payload = SyncSerialization.localStoragePayload(
         pipelineSettings: pipelineSettings,
         activeStudioPresetId: activeStudioPresetId,
+        globalRegexScripts: globalRegexScripts,
+        studioRegexScripts: studioRegexScripts,
+        appSettings: appSettings,
       );
       final hash = SyncSerialization.computeSyncHash(payload);
       final key = entryKey(type, type);
@@ -679,5 +836,14 @@ class SyncManifestBuilder implements SyncManifestProvider {
   Future<void> clearDeleted() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_deletedKey);
+  }
+
+  @override
+  Future<bool> isDeleted(String type, String id) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_deletedKey);
+    if (raw == null) return false;
+    final deleted = (jsonDecode(raw) as List).cast<Map<String, dynamic>>();
+    return deleted.any((row) => row['type'] == type && row['id'] == id);
   }
 }

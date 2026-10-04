@@ -5,13 +5,12 @@ import 'dart:ui';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_foreground_task/flutter_foreground_task.dart'
-    hide NotificationVisibility;
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart'
+    show NotificationResponse;
 
 import '../platform/haptics.dart';
-import '../utils/platform_paths.dart';
+import 'notifications/message_notification_presenter.dart';
 
 class NotificationNavigationData {
   final String charId;
@@ -39,6 +38,59 @@ class ActiveChatContext {
   final int revision;
 }
 
+class GenerationForegroundLease {
+  GenerationForegroundLease._(this._service, this._foregroundAcquired);
+
+  final GenerationNotificationService _service;
+  final bool _foregroundAcquired;
+  bool _released = false;
+
+  Future<void> release() async {
+    if (_released) return;
+    _released = true;
+    await _service._releaseGenerationLease(_foregroundAcquired);
+  }
+}
+
+class PostGenerationForegroundLease {
+  PostGenerationForegroundLease._(this._service, this._foregroundAcquired);
+
+  final GenerationNotificationService _service;
+  final bool _foregroundAcquired;
+  bool _released = false;
+
+  Future<void> release() async {
+    if (_released) return;
+    _released = true;
+    if (_foregroundAcquired) await _service._releaseForeground();
+  }
+}
+
+/// Decides when the user should be told a reply landed, and keeps the Android
+/// foreground service alive while one is being generated.
+///
+/// Presentation lives in [MessageNotificationPresenter]; this class owns the
+/// policy around it — app lifecycle, which chat is on screen, and the
+/// foreground/wake-lock leases the generation pipeline takes out.
+/// A foreground hold for long work that is not a chat reply.
+///
+/// Deliberately does not count towards [GenerationNotificationService
+/// .isGenerating]: the process must stay alive, but nothing else should start
+/// treating the app as mid-generation.
+class ForegroundWorkHold {
+  ForegroundWorkHold._(this._service, this._acquired);
+
+  final GenerationNotificationService _service;
+  final bool _acquired;
+  bool _released = false;
+
+  Future<void> release() async {
+    if (_released) return;
+    _released = true;
+    if (_acquired) await _service._releaseForeground();
+  }
+}
+
 class GenerationNotificationService {
   GenerationNotificationService._();
   static final GenerationNotificationService instance =
@@ -46,22 +98,19 @@ class GenerationNotificationService {
 
   static const _generationChannelId = 'glaze_generation';
   static const _generationChannelName = 'Generation';
-  static const _messageChannelId = 'glaze_message';
-  static const _messageChannelName = 'New Messages';
   static const _iosAudioChannel = MethodChannel(
     'com.hydall.glaze/background_audio',
   );
 
-  final FlutterLocalNotificationsPlugin _notifications =
-      FlutterLocalNotificationsPlugin();
+  MessageNotificationPresenter _presenter = MessageNotificationPresenter();
   final StreamController<NotificationNavigationData> _navigationController =
       StreamController<NotificationNavigationData>.broadcast();
   final StreamController<void> _activeContextChanges =
       StreamController<void>.broadcast();
 
-  bool _isGenerating = false;
-  bool _initialized = false;
   int _foregroundHoldCount = 0;
+  int _generationLeaseCount = 0;
+  Future<void> _foregroundTransition = Future<void>.value();
   AppLifecycleState _lifecycleState = AppLifecycleState.resumed;
   NotificationNavigationData? _pendingNotificationData;
   String? _activeCharId;
@@ -76,6 +125,23 @@ class GenerationNotificationService {
 
   bool get _isMobile => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
+  /// Why the last message notification failed to reach the OS, if it did.
+  String? get lastNotificationError => _presenter.lastError;
+
+  /// Which form of the notification the OS accepted last — "plain" means this
+  /// device refused the messaging style or the sender avatar.
+  String? get lastDeliveredNotificationForm => _presenter.lastDeliveredForm;
+
+  /// Whether this platform has a notification backend at all.
+  bool get notificationsSupported => _presenter.isSupported;
+
+  /// Swaps in a fake presenter so the notification *policy* — which reply
+  /// warrants telling the user — can be tested without a platform channel.
+  @visibleForTesting
+  void debugSetPresenter(MessageNotificationPresenter presenter) {
+    _presenter = presenter;
+  }
+
   /// Stable notification ID in range 1..2147483646, mirrors Vue stableIdFromString.
   int _stableId(String str) {
     int hash = 0;
@@ -87,132 +153,43 @@ class GenerationNotificationService {
   }
 
   Future<void> init() async {
-    if (!_isMobile) return;
-
-    // Resource name only — flutter_local_notifications resolves it via
-    // Resources.getIdentifier(name, "drawable", pkg), which rejects the
-    // "@drawable/" XML-reference prefix (returns 0 → init throws and aborts
-    // channel setup, leaving _initialized=false).
-    const androidSettings = AndroidInitializationSettings(
-      'ic_stat_icon_config_sample',
-    );
-    const iosSettings = DarwinInitializationSettings(
-      requestAlertPermission: true,
-      requestBadgePermission: true,
-      requestSoundPermission: true,
-    );
-    const settings = InitializationSettings(
-      android: androidSettings,
-      iOS: iosSettings,
-    );
-
-    try {
-      await _notifications.initialize(
-        settings: settings,
-        onDidReceiveNotificationResponse: _onNotificationTapped,
-      );
-      _initialized = true;
-    } catch (e, st) {
-      // Local notifications (message alerts) failed to init, but keep going:
-      // the foreground generation channel is owned by flutter_foreground_task
-      // and must still be configured below regardless.
-      debugPrint('NOTIF: initialize failed: $e\n$st');
-    }
-
-    try {
-      if (!kIsWeb && Platform.isAndroid) {
-        final androidPlugin = _notifications
-            .resolvePlatformSpecificImplementation<
-              AndroidFlutterLocalNotificationsPlugin
-            >();
-        if (androidPlugin != null) {
-          await androidPlugin.createNotificationChannel(
-            const AndroidNotificationChannel(
-              _messageChannelId,
-              _messageChannelName,
-              description: 'Notifications for new chat messages',
-              // Mirror Vue sc_message_channel: importance High (sound + heads-up)
-              // with vibration enabled.
-              importance: Importance.high,
-              enableVibration: true,
-            ),
-          );
-          await androidPlugin.requestNotificationsPermission();
-        }
-      } else if (!kIsWeb && Platform.isIOS) {
-        final iosPlugin = _notifications
-            .resolvePlatformSpecificImplementation<
-              IOSFlutterLocalNotificationsPlugin
-            >();
-        await iosPlugin?.requestPermissions(
-          alert: true,
-          badge: true,
-          sound: true,
-        );
-      }
-
-      if (_isMobile) {
-        FlutterForegroundTask.init(
-          androidNotificationOptions: AndroidNotificationOptions(
-            channelId: _generationChannelId,
-            channelName: _generationChannelName,
-            channelDescription: 'Shows when the app is generating text',
-            // Mirror Vue: Importance.Min + silent so the ongoing generation
-            // notice never makes a sound or heads-up popup.
-            channelImportance: NotificationChannelImportance.MIN,
-            priority: NotificationPriority.MIN,
-            onlyAlertOnce: true,
-          ),
-          iosNotificationOptions: const IOSNotificationOptions(
-            showNotification: false,
-            playSound: false,
-          ),
-          foregroundTaskOptions: ForegroundTaskOptions(
-            eventAction: ForegroundTaskEventAction.nothing(),
-            allowWakeLock: true,
-          ),
-        );
-      }
+    // Message notifications run everywhere Glaze ships, desktop included; the
+    // foreground service below is Android/iOS only.
+    if (_presenter.isSupported) {
+      await _presenter.ensureInitialized(onTap: _onNotificationTapped);
 
       // Restore pending data when app is cold-launched from a notification tap.
-      final launchDetails = await _notifications
-          .getNotificationAppLaunchDetails();
-      if (launchDetails?.didNotificationLaunchApp == true) {
-        final payload = launchDetails!.notificationResponse?.payload;
-        if (payload != null) _pendingNotificationData = _parsePayload(payload);
-      }
-
-      await _maybeRequestBatteryExemption();
-    } catch (e, st) {
-      debugPrint('NOTIF: platform init failed: $e\n$st');
+      final payload = await _presenter.consumeLaunchPayload();
+      if (payload != null) _pendingNotificationData = _parsePayload(payload);
     }
-  }
 
-  /// Asks the user (once) to exempt Glaze from battery optimization / Doze.
-  /// Without the exemption Android may freeze the process while the screen is
-  /// off, stalling a background generation even though a foreground service +
-  /// wake lock are held. Gated by a SharedPreferences flag so the system
-  /// dialog is offered a single time.
-  Future<void> _maybeRequestBatteryExemption() async {
-    if (kIsWeb || !Platform.isAndroid) return;
+    if (!_isMobile) return;
+
     try {
-      final prefs = await SharedPreferences.getInstance();
-      const promptedKey = 'battery_optimization_prompted';
-      if (prefs.getBool(promptedKey) ?? false) return;
+      FlutterForegroundTask.init(
+        androidNotificationOptions: AndroidNotificationOptions(
+          channelId: _generationChannelId,
+          channelName: _generationChannelName,
+          channelDescription: 'Shows when the app is generating text',
+          // Mirror Vue: Importance.Min + silent so the ongoing generation
+          // notice never makes a sound or heads-up popup.
+          channelImportance: NotificationChannelImportance.MIN,
+          priority: NotificationPriority.MIN,
+          onlyAlertOnce: true,
+        ),
+        iosNotificationOptions: const IOSNotificationOptions(
+          showNotification: false,
+          playSound: false,
+        ),
+        foregroundTaskOptions: ForegroundTaskOptions(
+          eventAction: ForegroundTaskEventAction.nothing(),
+          allowWakeLock: true,
+          allowWifiLock: true,
+        ),
+      );
 
-      final alreadyIgnoring =
-          await FlutterForegroundTask.isIgnoringBatteryOptimizations;
-      if (alreadyIgnoring) {
-        await prefs.setBool(promptedKey, true);
-        return;
-      }
-
-      await FlutterForegroundTask.requestIgnoreBatteryOptimization();
-      // Mark prompted regardless of the user's choice — the dialog is only
-      // meant to appear once; the user can still change it in system settings.
-      await prefs.setBool(promptedKey, true);
-    } catch (e) {
-      debugPrint('NOTIF: battery optimization request failed: $e');
+    } catch (e, st) {
+      debugPrint('NOTIF: foreground task init failed: $e\n$st');
     }
   }
 
@@ -228,8 +205,10 @@ class GenerationNotificationService {
     final charId = _activeCharId;
     final sessionId = _activeSessionId;
     if (_lifecycleState != AppLifecycleState.resumed ||
-        charId == null || charId.isEmpty ||
-        sessionId == null || sessionId.isEmpty) {
+        charId == null ||
+        charId.isEmpty ||
+        sessionId == null ||
+        sessionId.isEmpty) {
       return null;
     }
     return ActiveChatContext(
@@ -241,7 +220,8 @@ class GenerationNotificationService {
 
   bool isCurrentActiveChatContext(ActiveChatContext context) {
     final current = activeChatContext;
-    return current != null && current.charId == context.charId &&
+    return current != null &&
+        current.charId == context.charId &&
         current.sessionId == context.sessionId &&
         current.revision == context.revision;
   }
@@ -258,20 +238,35 @@ class GenerationNotificationService {
 
   /// Call when the user opens / focuses a chat screen to suppress redundant
   /// notifications for that character+session. Pass nulls when leaving.
+  ///
+  /// Focusing a chat also dismisses whatever notification that character has
+  /// already posted: the user is looking at the message it points to, so
+  /// leaving it in the shade would send them back to a chat they are in.
   void setActiveContext(String? charId, String? sessionId) {
     if (_activeCharId == charId && _activeSessionId == sessionId) return;
     _activeCharId = charId;
     _activeSessionId = sessionId;
     _activeContextRevision++;
     _activeContextChanges.add(null);
+    if (charId != null && charId.isNotEmpty) {
+      unawaited(clearMessageNotifications(charId));
+    }
   }
 
-  Future<void> onGenerationStarted(String charName) async {
-    _isGenerating = true;
-    await _acquireForeground(
+  Future<GenerationForegroundLease> acquireGenerationLease(
+    String charName,
+  ) async {
+    _generationLeaseCount++;
+    final acquired = await _acquireForeground(
       notificationTitle: charName,
       notificationText: 'notification_generating'.tr(),
     );
+    return GenerationForegroundLease._(this, acquired);
+  }
+
+  Future<void> _releaseGenerationLease(bool foregroundAcquired) async {
+    if (_generationLeaseCount > 0) _generationLeaseCount--;
+    if (foregroundAcquired) await _releaseForeground();
   }
 
   Future<void> onGenerationCompleted(
@@ -282,47 +277,50 @@ class GenerationNotificationService {
     String? msgId,
     String? avatarPath,
   }) async {
-    _isGenerating = false;
-    await _releaseForeground();
-
     // Buzz the moment the bot's reply lands, whether the app is foregrounded
     // (user watching the chat) or backgrounded (paired with the notification
     // below). Gated by the user's incoming-message vibration toggle.
     await Haptics.messageReceived();
 
-    if (_isMobile && _lifecycleState != AppLifecycleState.resumed) {
-      await sendMessageNotification(
-        charName,
-        messagePreview ?? 'New message received',
-        avatarPath,
-        charId,
-        sessionId: sessionId,
-        msgId: msgId,
-      );
-    }
-  }
-
-  Future<void> onGenerationAborted() async {
-    _isGenerating = false;
-    await _releaseForeground();
-  }
-
-  /// Acquire an additional foreground hold for post-generation tasks
-  /// (post-cleaner, Ledger, extension blocks, image tags). These run
-  /// fire-and-forget AFTER [onGenerationCompleted] releases the generation
-  /// hold. Without this, the OS may suspend the app mid-task when the screen
-  /// turns off, causing crashes.
-  Future<void> onPostGenStarted() async {
-    await _acquireForeground(
-      notificationTitle: 'Glaze',
-      notificationText: 'Processing response...',
+    // No lifecycle gate here: a reply is worth a notification whenever the user
+    // is not looking at the chat it landed in, and being in *another* chat (or
+    // on the character list) counts. [sendMessageNotification] owns that check
+    // — it compares the target chat against the one on screen, which is the
+    // only comparison that distinguishes "already read it" from "did not see
+    // it". Gating on `AppLifecycleState.resumed` here made that check dead code
+    // and dropped every notification while Glaze was open.
+    await sendMessageNotification(
+      charName,
+      messagePreview ?? 'New message received',
+      avatarPath,
+      charId,
+      sessionId: sessionId,
+      msgId: msgId,
     );
   }
 
-  /// Release the post-generation foreground hold. Must be called exactly once
-  /// for each [onPostGenStarted] call, after ALL post-gen tasks complete.
-  Future<void> onPostGenFinished() async {
-    await _releaseForeground();
+  /// Acquire an additional foreground hold for detached post-generation work.
+  /// The main pipeline keeps its original hold through awaited post-gen phases.
+  Future<PostGenerationForegroundLease> acquirePostGenerationLease() async {
+    final acquired = await _acquireForeground(
+      notificationTitle: 'Glaze',
+      notificationText: 'Processing response...',
+    );
+    return PostGenerationForegroundLease._(this, acquired);
+  }
+
+  /// Holds the foreground for [title]/[text] until the returned hold is
+  /// released. On desktop this is a no-op that still hands back a hold, so
+  /// callers need no platform branch.
+  Future<ForegroundWorkHold> acquireWorkHold({
+    required String title,
+    required String text,
+  }) async {
+    final acquired = await _acquireForeground(
+      notificationTitle: title,
+      notificationText: text,
+    );
+    return ForegroundWorkHold._(this, acquired);
   }
 
   Future<void> onSyncStarted() async {
@@ -336,12 +334,12 @@ class GenerationNotificationService {
     await _releaseForeground();
   }
 
-  bool get isGenerating => _isGenerating;
+  bool get isGenerating => _generationLeaseCount > 0;
 
-  /// Shows a message notification. Suppressed while the app is foregrounded
-  /// and the user is viewing the same charId+sessionId (mirrors Vue.js
-  /// visibility + activeContext check).
-  Future<void> sendMessageNotification(
+  /// Shows a message notification. Suppressed only while the user is actually
+  /// looking at that chat — the app is resumed *and* the same charId+sessionId
+  /// is the one on screen (mirrors Vue.js visibility + activeContext check).
+  Future<bool> sendMessageNotification(
     String title,
     String body,
     String? avatarPath,
@@ -352,89 +350,83 @@ class GenerationNotificationService {
     if (_lifecycleState == AppLifecycleState.resumed) {
       if (_activeCharId == charId &&
           (sessionId == null || _activeSessionId == sessionId)) {
-        return;
+        return false;
       }
     }
+    return _post(
+      title: title,
+      body: body,
+      avatarPath: avatarPath,
+      charId: charId,
+      sessionId: sessionId,
+      msgId: msgId,
+    );
+  }
 
-    if (!_isMobile || !_initialized) return;
+  /// Posts a notification for the user's own "test notification" action,
+  /// bypassing the on-screen-chat suppression. Returns whether it reached the
+  /// OS; on failure [lastNotificationError] says why.
+  Future<bool> sendTestNotification(String title, String body) => _post(
+    title: title,
+    body: body,
+    avatarPath: null,
+    charId: '__glaze_notification_self_test__',
+    sessionId: null,
+    msgId: null,
+    // No chat behind this one, so give the tap nothing to navigate to.
+    payloadOverride: '',
+  );
 
-    try {
-      final notifId = _stableId(charId);
-      final payload = _buildPayload(charId, sessionId, msgId);
-      final resolvedAvatar = resolveGlazeFilePath(avatarPath);
-
-      final NotificationDetails details;
-      if (Platform.isAndroid) {
-        final personIcon =
-            resolvedAvatar != null && File(resolvedAvatar).existsSync()
-            ? BitmapFilePathAndroidIcon(resolvedAvatar)
-            : null;
-        final person = Person(name: title, icon: personIcon);
-        final messagingStyle = MessagingStyleInformation(
-          person,
-          messages: [Message(body, DateTime.now(), person)],
-          conversationTitle: title,
-        );
-        details = NotificationDetails(
-          android: AndroidNotificationDetails(
-            _messageChannelId,
-            _messageChannelName,
-            channelDescription: 'Notifications for new chat messages',
-            importance: Importance.high,
-            priority: Priority.high,
-            styleInformation: messagingStyle,
-            icon: 'new_message',
-            autoCancel: true,
-            groupKey: charId,
-            // Mirror Vue: messaging content type + public lock-screen
-            // visibility + vibration.
-            category: AndroidNotificationCategory.message,
-            visibility: NotificationVisibility.public,
-            enableVibration: true,
-          ),
-          iOS: const DarwinNotificationDetails(
-            presentAlert: true,
-            presentBadge: true,
-            presentSound: true,
-          ),
-        );
-      } else {
-        final attachments =
-            resolvedAvatar != null && File(resolvedAvatar).existsSync()
-            ? [DarwinNotificationAttachment(resolvedAvatar)]
-            : <DarwinNotificationAttachment>[];
-        details = NotificationDetails(
-          iOS: DarwinNotificationDetails(
-            attachments: attachments,
-            presentAlert: true,
-            presentBadge: true,
-            presentSound: true,
-          ),
-        );
-      }
-
-      await _notifications.show(
-        id: notifId,
-        title: title,
-        body: body,
-        notificationDetails: details,
-        payload: payload,
-      );
-    } catch (e) {
-      debugPrint('NOTIF: sendMessageNotification failed: $e');
+  Future<bool> _post({
+    required String title,
+    required String body,
+    required String? avatarPath,
+    required String charId,
+    required String? sessionId,
+    required String? msgId,
+    String? payloadOverride,
+  }) async {
+    if (!_presenter.isSupported) return false;
+    // Retry initialization rather than staying dead for the process: a failure
+    // during startup (missing drawable, permission not yet granted) must not
+    // cost every notification afterwards.
+    if (!await _presenter.ensureInitialized(onTap: _onNotificationTapped)) {
+      return false;
     }
+    return _presenter.show(
+      id: _stableId(charId),
+      title: title,
+      body: body,
+      payload: payloadOverride ?? _buildPayload(charId, sessionId, msgId),
+      groupKey: charId,
+      avatarPath: avatarPath,
+    );
+  }
+
+  /// Whether the OS currently lets Glaze post notifications (`null` where the
+  /// platform cannot answer). Used by the settings self-test to tell a blocked
+  /// app apart from a broken notification.
+  Future<bool?> areNotificationsEnabled() =>
+      _presenter.areNotificationsEnabled();
+
+  /// Whether this platform asks the user before it will post notifications —
+  /// i.e. whether onboarding has anything to offer on the subject.
+  bool get notificationsNeedPermission =>
+      _presenter.isSupported && MessageNotificationPresenter.promptsForPermission;
+
+  /// Shows the OS permission dialog. Called from the onboarding slide that
+  /// explains what notifications are for — never at startup (see
+  /// [MessageNotificationPresenter.requestPermission]).
+  Future<bool> requestNotificationPermission() async {
+    if (!_presenter.isSupported) return false;
+    await _presenter.ensureInitialized(onTap: _onNotificationTapped);
+    return _presenter.requestPermission();
   }
 
   /// Cancels delivered notifications for a character (e.g. when the user
   /// opens that chat). Mirrors Vue.js clearMessageNotifications.
-  Future<void> clearMessageNotifications(String charId) async {
-    if (!_isMobile) return;
-    try {
-      await _notifications.cancel(id: _stableId(charId));
-    } catch (e) {
-      debugPrint('NOTIF: clearMessageNotifications failed: $e');
-    }
-  }
+  Future<void> clearMessageNotifications(String charId) =>
+      _presenter.cancel(_stableId(charId));
 
   /// Returns and clears the notification data from the last tap — used to
   /// navigate on app launch from a background/terminated notification.
@@ -444,39 +436,60 @@ class GenerationNotificationService {
     return data;
   }
 
-  Future<void> _acquireForeground({
+  Future<bool> _acquireForeground({
     required String notificationTitle,
     required String notificationText,
   }) async {
-    if (!_isMobile) return;
-    _foregroundHoldCount++;
-    if (_foregroundHoldCount > 1) return;
-    try {
-      if (!await FlutterForegroundTask.isRunningService) {
-        await FlutterForegroundTask.startService(
-          // Must match android:foregroundServiceType="dataSync" in the manifest
-          // (mirrors Vue's dataSync foreground service for background generation).
-          serviceTypes: const [ForegroundServiceTypes.dataSync],
-          notificationTitle: notificationTitle,
-          notificationText: notificationText,
-          notificationIcon: const NotificationIcon(
-            metaDataName: 'com.hydall.glaze.ic_generation',
-          ),
-          callback: _foregroundTaskCallback,
-        );
+    return _serializeForegroundTransition(() async {
+      if (!_isMobile) return true;
+      _foregroundHoldCount++;
+      if (_foregroundHoldCount > 1) return true;
+      try {
+        if (!await FlutterForegroundTask.isRunningService) {
+          await FlutterForegroundTask.startService(
+            // Must match android:foregroundServiceType="dataSync" in the manifest
+            // (mirrors Vue's dataSync foreground service for background generation).
+            serviceTypes: const [ForegroundServiceTypes.dataSync],
+            notificationTitle: notificationTitle,
+            notificationText: notificationText,
+            notificationIcon: const NotificationIcon(
+              metaDataName: 'com.hydall.glaze.ic_generation',
+            ),
+            callback: _foregroundTaskCallback,
+          );
+        }
+      } catch (e) {
+        _foregroundHoldCount--;
+        debugPrint('NOTIF: foreground task start failed: $e');
+        return false;
       }
-    } catch (e) {
-      debugPrint('NOTIF: foreground task start failed: $e');
-    }
-    await _startSilentAudio();
+      await _startSilentAudio();
+      return true;
+    });
   }
 
   Future<void> _releaseForeground() async {
-    if (!_isMobile) return;
-    if (_foregroundHoldCount <= 0) return;
-    _foregroundHoldCount--;
-    if (_foregroundHoldCount > 0) return;
-    await _stopForegroundTask();
+    await _serializeForegroundTransition(() async {
+      if (!_isMobile) return;
+      if (_foregroundHoldCount <= 0) return;
+      _foregroundHoldCount--;
+      if (_foregroundHoldCount > 0) return;
+      await _stopForegroundTask();
+    });
+  }
+
+  Future<T> _serializeForegroundTransition<T>(
+    Future<T> Function() action,
+  ) async {
+    final previous = _foregroundTransition;
+    final completer = Completer<void>();
+    _foregroundTransition = completer.future;
+    await previous;
+    try {
+      return await action();
+    } finally {
+      completer.complete();
+    }
   }
 
   Future<void> _stopForegroundTask() async {

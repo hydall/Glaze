@@ -159,7 +159,9 @@ class _ErrorDialogContentState extends ConsumerState<_ErrorDialogContent> {
                         ),
                         const SizedBox(width: 6),
                         Text(
-                          _copied ? 'Copied' : 'Copy',
+                          _copied
+                              ? 'action_copied'.tr()
+                              : 'action_copy'.tr(),
                           style: TextStyle(
                             fontFamily: uiFont,
                             fontSize: 13,

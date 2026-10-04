@@ -2,20 +2,29 @@
 
 Native LLM frontend for AI roleplay. Flutter rewrite of the original Vue + Capacitor
 app, which is archived on the `legacy-vue` branch.
-**Stack:** Flutter 3.44 + Riverpod 2 + Drift (SQLite) + GoRouter. **Language:** Dart only. **License:** AGPL-3.0.
+**Stack:** Flutter 3.44 + Riverpod 3 + Drift (SQLite) + GoRouter. **Language:** Dart only. **License:** AGPL-3.0.
 
 Architecture: `docs/ARCHITECTURE.md`. Workflow (git, PRs, Trello): `docs/WORKFLOW.md`.
 
+## Answering
+
+- Write plainly and concisely. Plain language, no buzzwords, no jargon padding.
+- Do not quote code or cite `file:line` references in answers unless the user
+  asks for them. Describe what the code does in words instead.
+- These rules apply to chat replies only, not to commit messages, PR bodies, or
+  code comments.
+
 ## Commands
 
-Flutter SDK is at `Z:\GlazeProject\flutter`. The agent's shell may not have `flutter` on PATH. Try `flutter` first; if it fails with "not recognized", fall back to the full path.
+Flutter and Dart must be available on `PATH`. Alternatively, set
+`FLUTTER_ROOT` to the local Flutter SDK directory.
 
 ```powershell
 # Preferred — try PATH first:
 flutter analyze
 
-# Fallback if flutter is not on PATH:
-& "Z:\GlazeProject\flutter\bin\flutter.bat" <subcommand>
+# Optional PowerShell fallback when FLUTTER_ROOT is set:
+& "$env:FLUTTER_ROOT\bin\flutter.bat" <subcommand>
 ```
 
 Full examples:
@@ -28,28 +37,27 @@ flutter test test/bar_test.dart          # Run single test file
 flutter build windows                    # Production build
 dart run build_runner build              # Regenerate after editing freezed/drift models
 
-# Same commands via full path (fallback if flutter not on PATH):
-& "Z:\GlazeProject\flutter\bin\flutter.bat" analyze
-& "Z:\GlazeProject\flutter\bin\flutter.bat" test
-& "Z:\GlazeProject\flutter\bin\flutter.bat" test test/bar_test.dart
-& "Z:\GlazeProject\flutter\bin\flutter.bat" build windows
-& "Z:\GlazeProject\flutter\bin\dart.bat" run build_runner build
+# Same commands via FLUTTER_ROOT (fallback if Flutter is not on PATH):
+& "$env:FLUTTER_ROOT\bin\flutter.bat" analyze
+& "$env:FLUTTER_ROOT\bin\flutter.bat" test
+& "$env:FLUTTER_ROOT\bin\flutter.bat" test test/bar_test.dart
+& "$env:FLUTTER_ROOT\bin\flutter.bat" build windows
+& "$env:FLUTTER_ROOT\bin\dart.bat" run build_runner build
 ```
 
 For `flutter run` (dev server), see below — the agent cannot run it.
 
-**`flutter run` and `flutter test --watch` are permanently unavailable to the agent.**
+**`flutter run` is unavailable to the agent because it is long-running and
+interactive.** Use only one-shot commands such as:
 
-Reason: both commands are **long-running / blocking**. `flutter run` starts a persistent dev server and keeps the terminal occupied until the app is manually closed. The agent session would freeze indefinitely, unable to continue any work, issue further commands, or report results.
+- `flutter analyze`
+- `flutter test`
+- `dart run build_runner build --delete-conflicting-outputs`
+- `dart run easy_localization:generate -S assets/translations -s en.json -f keys -o locale_keys.g.dart`
 
-Only run one-shot, non-interactive commands:
-- `flutter analyze` (with optional file path argument)
-- `flutter test` (non-watch, one-shot)
-- `dart run build_runner build` when required
-
-(Fall back to the full `& "Z:\GlazeProject\flutter\bin\flutter.bat"` path if `flutter` is not on PATH.)
-
-If you need to verify runtime behavior or hot-reload changes, ask the user to run `flutter run -d <platform>` in a separate terminal and report back. The agent cannot drive or observe a live Flutter session.
+Fall back to `& "$env:FLUTTER_ROOT\bin\flutter.bat"` if `flutter` is not on
+`PATH`. If runtime or hot-reload verification is required, ask the user to run
+`flutter run -d <platform>` in a separate terminal and report the result.
 
 Web is **not** a target platform — `lib/` imports `dart:io` without conditional stubs, and Drift/`sqlite3_flutter_libs`, `photo_manager` and the WebView bridge have no web support. Target Windows, Android, iOS, macOS or Linux.
 
@@ -95,6 +103,7 @@ flutter analyze 2>&1 | Tee-Object -FilePath analyze_full.txt -Encoding UTF8; Get
 ## Code Conventions
 
 ### Flutter Widgets
+- **Build on the Glaze UI kit** (`lib/shared/widgets/`) — `GlazeScaffold`, `SheetView` / `GlazeBottomSheet`, `GlazeTabBar`, `GlassSurface`, `MenuGroup`, `GlazeToast`… Reach for bare Material only when the kit has no equivalent. What-instead-of-what table: `docs/UI_KIT.md`
 - **ConsumerWidget / ConsumerStatefulWidget** for anything that reads Riverpod
 - **StatelessWidget / StatefulWidget** for pure UI with no state
 - Keep widgets small — extract sub-widgets when > 200 lines
@@ -124,7 +133,7 @@ flutter analyze 2>&1 | Tee-Object -FilePath analyze_full.txt -Encoding UTF8; Get
 
 ### Theme
 - Material 3 with `colorSchemeSeed`
-- Dark theme only for MVP
+- Light, dark, and system theme modes are supported; each theme preset can also select its preferred mode
 - Colors in `lib/shared/theme/app_colors.dart`
 - Theme in `lib/shared/theme/app_theme.dart`
 
@@ -134,10 +143,46 @@ flutter analyze 2>&1 | Tee-Object -FilePath analyze_full.txt -Encoding UTF8; Get
 |------|---------|---------|
 | Characters | Drift `Characters` table | Repository |
 | Chat sessions | Drift `ChatSessions` table | Repository |
-| Presets | Drift `Presets` table | Repository |
+| Regular presets | Drift `presets` table | `PresetRepo` |
+| Studio presets | Drift `studio_preset_rows` table | `StudioPresetRepo` |
 | API config | Drift `ApiConfigs` table | Repository |
 | Personas | Drift `Personas` table | Repository |
 | Images | File system (`dart:io` Platform) | Image storage service |
+
+### Runtime data location
+
+- The SQLite database is `glaze.db` under the data root returned by
+  `getAppDataDir()` in `lib/core/utils/platform_paths.dart`; do not assume it is
+  inside the repository.
+- On Windows, use these canonical environment-relative paths directly. Agents
+  should not search the codebase merely to rediscover them:
+  - local development, feature branches, and nightly: `%APPDATA%\Glaze-nightly\glaze.db`
+  - staging: `%APPDATA%\Glaze-staging\glaze.db`
+  - stable: `%APPDATA%\Glaze\glaze.db`
+  In PowerShell, resolve `%APPDATA%` through `$env:APPDATA`; never hard-code a
+  user's profile directory.
+- Desktop data roots are build-channel-specific: stable uses `Glaze`, while
+  staging/nightly use `Glaze-<channel>`. `buildChannel` defaults to `nightly`
+  when no `BUILD_CHANNEL` dart define is supplied, so local development and
+  feature-branch runs normally use the nightly data root. See
+  `lib/core/constants/build_channel.dart`.
+- Android and iOS separate channels by application/bundle ID and keep the
+  inner data folder named `Glaze`.
+
+### Preset storage and code
+
+Regular roleplay presets and Studio presets are separate domains even though
+both are stored in the same `glaze.db` database. Their IDs may overlap; never
+read or write one through the other domain's table or repository.
+
+| Domain | Drift table | Repository | Main code directories |
+|--------|-------------|------------|-----------------------|
+| Regular presets | `presets` | `lib/core/db/repositories/preset_repo.dart` | `lib/features/presets/`, `lib/core/models/preset.dart` |
+| Studio presets | `studio_preset_rows` | `lib/core/db/repositories/studio_preset_repo.dart` | `lib/features/studio/`, Studio-specific files under `lib/features/presets/`, and `lib/core/models/studio_*` |
+
+The table declarations for both domains live in
+`lib/core/db/tables/studio_and_presets.dart`. Studio seed data lives separately
+in `lib/core/db/studio_preset_seed.dart`.
 
 ## Architecture Layers
 
@@ -161,9 +206,11 @@ When editing files matching a pattern below, READ the corresponding rule file FI
 | Drift reads/writes, repositories | `docs/rules/database.md` |
 | Architecture details, full flow | `docs/ARCHITECTURE.md` |
 | Formal invariants with code references | `docs/INVARIANTS.md` |
-| Custom `==...==` markdown markers, message rendering | `docs/markdown-markers.md` |
+| Message rendering — `assets/chat_webview/formatter/`, `renderer/`, `useVirtualScroll.js` | `docs/rules/message-rendering.md` + `docs/INVARIANTS.md` (INV-MR1–8) |
+| Custom `==...==` markdown markers | `docs/markdown-markers.md` |
 | Windows/build failures, dependency overrides | `docs/BUILD_NOTES.md` |
 | Class/file organization, decomposition | `docs/CODE_STYLE.md` |
+| Any screen, sheet or dialog — which widget to reach for | `docs/UI_KIT.md` |
 | JS extension bridge (`glaze.*`), panel iframe, headless engine, capability permissions, periodic/afterUser triggers, `executeCommand`, audio, connection profiles | `docs/ARCHITECTURE.md` § 9 + `docs/INVARIANTS.md` (INV-EG1–8, INV-JS1–6) |
 | Variable storage (`chat` / `character` / `global` / `message` scopes) | `docs/rules/database.md` (atomic repo methods) |
 | Build channels, dev-mode / watermark defaults, `--dart-define` wiring | `docs/RELEASE_CHANNELS.md` |
@@ -174,7 +221,7 @@ When editing files matching a pattern below, READ the corresponding rule file FI
 - **Feature branches are always based on `nightly`** — `stable` is the default branch, so a fresh clone starts there; check the base first, and `git rebase origin/nightly` a branch that was cut from the wrong one before opening the PR.
 - Open PRs only against upstream repository `hydall/Glaze` (base: `hydall/Glaze:nightly`), not against fork repos.
 - PR title and body are **in English**, and the body lists the changes as bullets (one bullet per change, `##` headings when a PR carries several independent fixes) plus how it was verified. Full rules: `docs/WORKFLOW.md` § PR title and body.
-- PRs are squash-merged and gated on CI (`.github/workflows/ci.yml` — `flutter analyze` + `flutter test`); a red check blocks the merge.
+- PRs are squash-merged and gated on CI (`.github/workflows/ci.yml` — `flutter analyze` + `flutter test` + the WebView render suite in `test/webview_js`); a red check blocks the merge.
 - Release branches are `nightly` → `staging` → `stable`, one per build channel; features enter at `nightly` and are promoted by merge. Channel semantics: `docs/RELEASE_CHANNELS.md`.
 - Run `dart run build_runner build` after changing any freezed/drift model.
 - Single responsibility: split a class before it grows past ~200-250 lines (thin orchestrators, fat specialists, constructor injection). Details: `docs/CODE_STYLE.md`.
@@ -187,8 +234,8 @@ When editing files matching a pattern below, READ the corresponding rule file FI
 - Store API keys in plain text in Drift
 - Mutate state directly — use immutable patterns with freezed
 - Forget `ref.watch` select for streaming UI (causes full rebuild per chunk)
+- Build a screen or sheet on bare Material (`TabBar`, `Card`, `OutlinedButton`, `Chip`, `SnackBar`, `AlertDialog`…) when `lib/shared/widgets/` has the Glaze equivalent — check `docs/UI_KIT.md` first
 - Commit directly to `nightly`, `staging` or `stable` — always use a feature branch
-- Use the `gh` CLI — GitHub operations go through GitHub MCP tools
 - Bypass `_requireCapability` in the JS bridge — every `glaze.*` method must enforce the matching capability (default-deny)
 - Run user JS in a same-origin iframe — panel/sandbox scripts go in `sandbox="allow-scripts"` (no `allow-same-origin`)
 - Read-modify-write a `ChatSession` / `Character` from outside the dedicated atomic repo methods (chat/character variable scopes)

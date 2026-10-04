@@ -84,6 +84,11 @@ class Win32Window {
                                   WPARAM const wparam,
                                   LPARAM const lparam) noexcept;
 
+  // Releases the Win32 mouse capture when it is held by the hosted Flutter
+  // view. A leaked capture makes the whole desktop stop responding to the
+  // mouse, because every mouse event is routed to the capturing window.
+  void ReleaseChildContentCapture();
+
   // Retrieves a class instance pointer for |window|
   static Win32Window* GetThisFromHandle(HWND const window) noexcept;
 

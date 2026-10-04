@@ -1,25 +1,48 @@
+import 'dart:async';
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/platform/haptics.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_action_button.dart';
+import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/glass_surface.dart';
 import '../chat_provider.dart';
+import '../composer_pins_provider.dart';
+import '../hidden_composer_actions_provider.dart';
+import '../quick_reply_icons.dart';
 import '../quick_replies_provider.dart';
+import 'action_glyph.dart';
 import 'drawer_panel_scaffold.dart';
 import 'magic_drawer_models.dart';
 import 'magic_drawer_widgets.dart';
 
 class QuickRepliesPanel extends ConsumerStatefulWidget {
   final String charId;
-  final bool disableEffects;
   final VoidCallback? onClose;
+  final Future<bool> Function()? beforeGeneration;
+
+  /// Edit mode, owned by the hosting [ChatDrawerPanel] so one pencil toggles
+  /// both tabs at once.
+  final bool editing;
+
+  /// Asks the host to turn edit mode on when a long-press drag starts a
+  /// reorder.
+  final VoidCallback? onEditingRequested;
+
+  /// See [ChatDrawerPanel.listLayout].
+  final bool listLayout;
 
   const QuickRepliesPanel({
     super.key,
     required this.charId,
     this.onClose,
-    this.disableEffects = false,
+    this.beforeGeneration,
+    this.editing = false,
+    this.onEditingRequested,
+    this.listLayout = false,
   });
 
   @override
@@ -27,7 +50,6 @@ class QuickRepliesPanel extends ConsumerStatefulWidget {
 }
 
 class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
-  bool _editing = false;
   int? _draggingIndex;
   int? _hoverIndex;
   final _scrollController = ScrollController();
@@ -38,20 +60,29 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
     super.dispose();
   }
 
-  void _toggleEditing() {
-    setState(() => _editing = !_editing);
+  /// Runs one of the composer's own buttons from its card.
+  ///
+  /// Attach, fullscreen and guidance all land on the composer, so the drawer
+  /// hands them back to it through [ComposerActionBridge] and then gets out of
+  /// the way — every one of them wants the message box next.
+  void _handleActionTap(ComposerAction action) {
+    if (widget.editing) return;
+    ref.read(composerActionBridgeProvider).run(action);
+    widget.onClose?.call();
   }
 
-  void _handleTap(QuickReply reply) {
-    if (_editing) {
-      _showEditSheet(existing: reply);
+  Future<void> _handleTap(QuickReply reply) async {
+    if (widget.editing) {
+      await _showEditSheet(existing: reply);
       return;
     }
     final notifier = ref.read(chatProvider(widget.charId).notifier);
+    if (await widget.beforeGeneration?.call() == false) return;
+    if (!mounted) return;
     if (reply.isContinueAction) {
-      notifier.continueMessage();
+      await notifier.continueMessage();
     } else if (reply.text.trim().isNotEmpty) {
-      notifier.sendMessage(reply.text);
+      await notifier.sendMessage(reply.text);
     }
     widget.onClose?.call();
   }
@@ -60,132 +91,87 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
     await ref.read(quickRepliesProvider.notifier).remove(id);
   }
 
-  Future<void> _moveItem(int from, int to) async {
+  /// Puts a built-in insert action away. Reversible from the "+" sheet.
+  void _hideAction(ComposerAction action) {
+    Haptics.mediumImpact();
+    unawaited(ref.read(hiddenComposerActionsProvider.notifier).hide(action));
+  }
+
+  /// Reorders by reply id, not by grid position: the grid hides replies that
+  /// are pinned to the composer row, so a drop's display index is not an index
+  /// into the stored list.
+  Future<void> _moveItem(
+    List<QuickReply> all,
+    String movingId,
+    String targetId,
+  ) async {
+    final from = all.indexWhere((r) => r.id == movingId);
+    final to = all.indexWhere((r) => r.id == targetId);
+    if (from < 0 || to < 0 || from == to) return;
     await ref.read(quickRepliesProvider.notifier).reorder(from, to);
     if (mounted) setState(() => _hoverIndex = null);
   }
 
-  Future<void> _showEditSheet({QuickReply? existing}) async {
-    final labelCtrl = TextEditingController(text: existing?.label ?? '');
-    final textCtrl = TextEditingController(text: existing?.text ?? '');
-    final isNew = existing == null;
-    await showModalBottomSheet<void>(
-      context: context,
-      useRootNavigator: true,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (sheetCtx) {
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.viewInsetsOf(sheetCtx).bottom,
-          ),
-          child: Container(
-            decoration: BoxDecoration(
-              color: context.cs.surfaceContainerHigh,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(20),
-              ),
-            ),
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Center(
-                  child: Container(
-                    width: 32,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: context.cs.outlineVariant.withValues(alpha: 0.4),
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  isNew ? 'action_create_new'.tr() : 'action_edit'.tr(),
-                  style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700,
-                    color: context.cs.onSurface,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: labelCtrl,
-                  autofocus: isNew,
-                  decoration: InputDecoration(
-                    labelText: 'label_block_name'.tr(),
-                    hintText: 'placeholder_block_name'.tr(),
-                    border: const OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: textCtrl,
-                  maxLines: 4,
-                  minLines: 2,
-                  decoration: InputDecoration(
-                    labelText: 'label_content'.tr(),
-                    hintText: 'placeholder_prompt_text'.tr(),
-                    border: const OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                Row(
-                  children: [
-                    if (!isNew)
-                      TextButton.icon(
-                        onPressed: () async {
-                          Navigator.of(sheetCtx).pop();
-                          await _remove(existing.id);
-                        },
-                        icon: const Icon(
-                          Icons.delete_outline,
-                          color: Colors.redAccent,
-                        ),
-                        label: Text(
-                          'btn_delete'.tr(),
-                          style: const TextStyle(color: Colors.redAccent),
-                        ),
-                      ),
-                    const Spacer(),
-                    TextButton(
-                      onPressed: () => Navigator.of(sheetCtx).pop(),
-                      child: Text('btn_cancel'.tr()),
-                    ),
-                    const SizedBox(width: 8),
-                    FilledButton(
-                      onPressed: () async {
-                        final label = labelCtrl.text.trim();
-                        final text = textCtrl.text;
-                        if (label.isEmpty) return;
-                        Navigator.of(sheetCtx).pop();
-                        final notifier = ref.read(
-                          quickRepliesProvider.notifier,
-                        );
-                        if (isNew) {
-                          await notifier.add(label, text);
-                        } else {
-                          await notifier.edit(
-                            existing.id,
-                            label: label,
-                            text: text,
-                          );
-                        }
-                      },
-                      child: Text(isNew ? 'action_add'.tr() : 'btn_save'.tr()),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        );
-      },
+  /// The "+" sheet: create a quick reply, or bring back a hidden insert action.
+  ///
+  /// One entry point instead of a bare create form, because a hidden button has
+  /// nowhere else to be restored from — it is gone from the grid by design.
+  Future<void> _showAddSheet() async {
+    final hiddenIds =
+        ref.read(hiddenComposerActionsProvider).value ?? const <String>{};
+    final hiddenActions = [
+      for (final action in ComposerAction.values)
+        if (action.isInsert && hiddenIds.contains(action.id)) action,
+    ];
+    final result = await GlazeBottomSheet.show<_AddSheetResult>(
+      context,
+      title: 'action_add'.tr(),
+      child: _ActionsAddSheet(hiddenActions: hiddenActions),
     );
-    labelCtrl.dispose();
-    textCtrl.dispose();
+    if (!mounted || result == null) return;
+    final restore = result.restore;
+    if (restore != null) {
+      await ref.read(hiddenComposerActionsProvider.notifier).show(restore);
+    } else {
+      await _showEditSheet();
+    }
+  }
+
+  Future<void> _showEditSheet({QuickReply? existing}) async {
+    final reply = existing;
+    final isNew = reply == null;
+    // Uses the shared Glaze sheet (glass surface + handle + header) instead of
+    // a bare Material sheet, which rendered as a plain light slab.
+    await GlazeBottomSheet.show<void>(
+      context,
+      title: isNew ? 'action_create_new'.tr() : 'action_edit'.tr(),
+      child: _QuickReplyEditForm(
+        initialLabel: reply?.label ?? '',
+        initialText: reply?.text ?? '',
+        initialIconId: reply?.iconId,
+        isNew: isNew,
+        // Continue runs the app's continue-generation call; it has no prompt
+        // body to edit and no delete button, so the form drops both.
+        builtIn: reply?.isBuiltIn ?? false,
+        onSubmit: (label, text, iconId) async {
+          final notifier = ref.read(quickRepliesProvider.notifier);
+          if (isNew) {
+            await notifier.add(label, text, iconId: iconId);
+          } else {
+            await notifier.edit(
+              reply.id,
+              label: label,
+              text: text,
+              iconId: iconId,
+              clearIcon: iconId == null,
+            );
+          }
+        },
+        onDelete: (isNew || reply.isBuiltIn)
+            ? null
+            : () => _remove(reply.id),
+      ),
+    );
   }
 
   String _previewText(QuickReply reply) {
@@ -197,36 +183,36 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
   @override
   Widget build(BuildContext context) {
     final repliesAsync = ref.watch(quickRepliesProvider);
-    final replies = repliesAsync.value ?? const <QuickReply>[];
+    final allReplies = repliesAsync.value ?? const <QuickReply>[];
+    final pins = ref.watch(composerPinsProvider).value ?? const <ComposerPin>[];
+    final hiddenIds =
+        ref.watch(hiddenComposerActionsProvider).value ?? const <String>{};
 
-    final cards = <MagicDrawerCardItem>[
-      for (final r in replies)
-        MagicDrawerCardItem(
-          def: MagicDrawerItemDef(
-            id: r.id,
-            label: r.label,
-            icon: r.isContinueAction
-                ? Icons.keyboard_double_arrow_right
-                : Icons.bolt,
-            category: MagicDrawerCategory.session,
-          ),
-          status: _previewText(r),
-        ),
-      if (_editing)
-        MagicDrawerCardItem(
-          def: MagicDrawerItemDef(
-            id: '__add__',
-            label: 'action_add'.tr(),
-            icon: Icons.add,
-            category: MagicDrawerCategory.session,
-          ),
-          isAddButton: true,
-        ),
+    // Anything pinned to the composer's row is dropped from the grid: the two
+    // must never offer the same button twice. The stored order is untouched, so
+    // the row's down-arrow puts a card back exactly where it came from.
+    //
+    // Attach / fullscreen / guidance lead the grid as a fixed block. They are
+    // composer behaviour rather than user content, so they have a home rather
+    // than a position: nothing to reorder, nothing to delete. The two insert
+    // buttons sit in the same block but may be hidden — they have no feature
+    // behind them to lose, so edit mode offers them a hide badge, and the "+"
+    // sheet below is where a hidden one comes back.
+    final actions = [
+      for (final action in ComposerAction.demotable)
+        if (!pins.contains(ComposerPin.action(action)) &&
+            !hiddenIds.contains(action.id))
+          action,
     ];
+    final replies = [
+      for (final reply in allReplies)
+        if (!pins.contains(ComposerPin.reply(reply.id))) reply,
+    ];
+    final list = widget.listLayout;
 
     final content = RawScrollbar(
       controller: _scrollController,
-      padding: const EdgeInsets.only(top: 60),
+      padding: const EdgeInsets.only(top: kDrawerContentTopInset),
       thickness: 3,
       radius: const Radius.circular(3),
       thumbColor: Colors.white24,
@@ -234,83 +220,173 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
         behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
         child: LayoutBuilder(
           builder: (context, constraints) {
-            final itemWidth = (constraints.maxWidth - 24 - 12) / 3;
+            final itemWidth = list
+                ? constraints.maxWidth
+                : (constraints.maxWidth - 24 - 12) / 3;
+            var cellIndex = 0;
             return SingleChildScrollView(
               controller: _scrollController,
               padding: EdgeInsets.fromLTRB(
-                12,
-                60,
-                12,
+                list ? 0 : 12,
+                kDrawerContentTopInset,
+                list ? 0 : 12,
                 16 + MediaQuery.of(context).padding.bottom,
               ),
               child: MagicCardGrid(
-                columns: 3,
-                cells: List.generate(cards.length, (index) {
-                  final item = cards[index];
-                  if (item.isAddButton) {
-                    return SizedBox(
+                columns: list ? 1 : 3,
+                runSpacing: list ? 0 : 8,
+                cells: [
+                  for (final action in actions)
+                    SizedBox(
                       width: itemWidth,
-                      child: AddMagicCard(onTap: () => _showEditSheet()),
-                    );
-                  }
-                  final reply = replies.firstWhere((r) => r.id == item.def.id);
-                  final card = MagicCard(
-                    item: item,
-                    editing: _editing,
-                    hovered: _hoverIndex == index && _draggingIndex != index,
-                    onTap: () => _handleTap(reply),
-                    onDelete: () => _remove(reply.id),
-                  );
-
-                  return SizedBox(
-                    width: itemWidth,
-                    child: DragTarget<int>(
-                      onWillAcceptWithDetails: (details) {
-                        setState(() => _hoverIndex = index);
-                        return details.data != index;
-                      },
-                      onLeave: (_) {
-                        if (_hoverIndex == index) {
-                          setState(() => _hoverIndex = null);
-                        }
-                      },
-                      onAcceptWithDetails: (details) {
-                        _moveItem(details.data, index);
-                      },
-                      builder: (context, _, _) {
-                        return LongPressDraggable<int>(
-                          data: index,
-                          delay: const Duration(milliseconds: 300),
-                          onDragStarted: () {
-                            Haptics.mediumImpact();
-                            setState(() {
-                              if (!_editing) _editing = true;
-                              _draggingIndex = index;
-                            });
-                          },
-                          onDragEnd: (_) {
-                            setState(() {
-                              _draggingIndex = null;
-                              _hoverIndex = null;
-                            });
-                          },
-                          feedback: SizedBox(
-                            width: itemWidth,
-                            child: Material(
-                              color: Colors.transparent,
-                              child: Opacity(opacity: 0.92, child: card),
+                      child: Builder(
+                        builder: (context) {
+                          final card = MagicCard(
+                            key: ValueKey('action-${action.id}'),
+                            item: MagicDrawerCardItem(
+                              def: MagicDrawerItemDef(
+                                id: action.id,
+                                label: action.label,
+                                icon: action.icon,
+                                glyph: action.glyph,
+                                category: MagicDrawerCategory.session,
+                              ),
                             ),
-                          ),
-                          childWhenDragging: Opacity(
-                            opacity: 0.25,
+                            editing: widget.editing,
+                            hovered: false,
+                            onTap: () => _handleActionTap(action),
+                            onDelete: () {},
+                            deletable: false,
+                            onHide: action.isInsert
+                                ? () => _hideAction(action)
+                                : null,
+                            listRow: list,
+                          );
+                          // Draggable but not a drop target: this block has a
+                          // fixed home order, so the only move it accepts is
+                          // upwards, into the composer's row.
+                          return LongPressDraggable<ComposerPin>(
+                            data: ComposerPin.action(action),
+                            delay: const Duration(milliseconds: 300),
+                            onDragStarted: () {
+                              Haptics.mediumImpact();
+                              if (!widget.editing) {
+                                widget.onEditingRequested?.call();
+                              }
+                            },
+                            feedback: MagicDragFeedback(
+                              width: itemWidth,
+                              listRow: list,
+                              child: card,
+                            ),
+                            childWhenDragging: Opacity(
+                              opacity: 0.25,
+                              child: card,
+                            ),
                             child: card,
+                          );
+                        },
+                      ),
+                    ),
+                  for (final reply in replies)
+                    Builder(
+                      builder: (context) {
+                        final index = cellIndex++;
+                        final card = MagicCard(
+                          item: MagicDrawerCardItem(
+                            def: MagicDrawerItemDef(
+                              id: reply.id,
+                              label: reply.label,
+                              icon: reply.icon,
+                              category: MagicDrawerCategory.session,
+                            ),
+                            status: _previewText(reply),
                           ),
-                          child: card,
+                          editing: widget.editing,
+                          hovered:
+                              _hoverIndex == index && _draggingIndex != index,
+                          onTap: () => _handleTap(reply),
+                          onDelete: () => _remove(reply.id),
+                          deletable: !reply.isBuiltIn,
+                          listRow: list,
+                        );
+
+                        return SizedBox(
+                          width: itemWidth,
+                          // [ComposerPin] payload, so the very same drag can
+                          // end in the composer's row — the only way to pin a
+                          // card now that the grid carries no badge for it.
+                          // Drops that stay here are guarded to replies this
+                          // grid is showing, so neither a pinned button nor a
+                          // Tools card can reshuffle it.
+                          child: DragTarget<ComposerPin>(
+                            onWillAcceptWithDetails: (details) {
+                              final incoming = details.data;
+                              if (incoming.kind != ComposerPinKind.reply ||
+                                  incoming.refId == reply.id ||
+                                  !replies.any(
+                                    (r) => r.id == incoming.refId,
+                                  )) {
+                                return false;
+                              }
+                              setState(() => _hoverIndex = index);
+                              return true;
+                            },
+                            onLeave: (_) {
+                              if (_hoverIndex == index) {
+                                setState(() => _hoverIndex = null);
+                              }
+                            },
+                            onAcceptWithDetails: (details) {
+                              _moveItem(
+                                allReplies,
+                                details.data.refId,
+                                reply.id,
+                              );
+                            },
+                            builder: (context, _, _) {
+                              return LongPressDraggable<ComposerPin>(
+                                data: ComposerPin.reply(reply.id),
+                                delay: const Duration(milliseconds: 300),
+                                onDragStarted: () {
+                                  Haptics.mediumImpact();
+                                  if (!widget.editing) {
+                                    widget.onEditingRequested?.call();
+                                  }
+                                  setState(() => _draggingIndex = index);
+                                },
+                                onDragEnd: (_) {
+                                  setState(() {
+                                    _draggingIndex = null;
+                                    _hoverIndex = null;
+                                  });
+                                },
+                                feedback: MagicDragFeedback(
+                                  width: itemWidth,
+                                  listRow: list,
+                                  child: card,
+                                ),
+                                childWhenDragging: Opacity(
+                                  opacity: 0.25,
+                                  child: card,
+                                ),
+                                child: card,
+                              );
+                            },
+                          ),
                         );
                       },
                     ),
-                  );
-                }),
+                  // Always last, never gated on edit mode: the "+" in the grid
+                  // is how a new user learns this tab is theirs to fill.
+                  SizedBox(
+                    width: itemWidth,
+                    child: AddMagicCard(
+                      onTap: () => _showAddSheet(),
+                      listRow: list,
+                    ),
+                  ),
+                ],
               ),
             );
           },
@@ -318,85 +394,412 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
       ),
     );
 
-    return DrawerPanelScaffold(
-      disableEffects: widget.disableEffects,
-      loading: repliesAsync.isLoading && replies.isEmpty,
-      onDismiss: widget.onClose,
-      header: QuickRepliesHeader(
-        editing: _editing,
-        onToggleEditing: _toggleEditing,
-      ),
-      content: content,
+    // The chrome (background, drag handle, header) belongs to the hosting
+    // [ChatDrawerPanel] — this is only the tab body.
+    return PanelLoadingOverlay(
+      loading: repliesAsync.isLoading && allReplies.isEmpty,
+      child: content,
     );
   }
 }
 
-/// Header for the Quick Replies panel. Mirrors [MagicDrawerHeader]
-/// visually but with its own title.
-class QuickRepliesHeader extends StatelessWidget {
-  final bool editing;
-  final VoidCallback onToggleEditing;
+/// Add / edit form for a single quick reply, hosted inside a
+/// [GlazeBottomSheet]. Owns its text controllers so the sheet can be dismissed
+/// (and the form disposed) without the caller having to keep them alive.
+class _QuickReplyEditForm extends StatefulWidget {
+  final String initialLabel;
+  final String initialText;
 
-  const QuickRepliesHeader({
-    super.key,
-    required this.editing,
-    required this.onToggleEditing,
+  /// The card's chosen glyph, or null for the built-in default.
+  final String? initialIconId;
+  final bool isNew;
+
+  /// True for a built-in action: the prompt field is replaced by a note
+  /// explaining what the card does, since its text is never sent.
+  final bool builtIn;
+  final Future<void> Function(String label, String text, String? iconId)
+  onSubmit;
+  final Future<void> Function()? onDelete;
+
+  const _QuickReplyEditForm({
+    required this.initialLabel,
+    required this.initialText,
+    required this.isNew,
+    required this.onSubmit,
+    this.initialIconId,
+    this.builtIn = false,
+    this.onDelete,
   });
+
+  @override
+  State<_QuickReplyEditForm> createState() => _QuickReplyEditFormState();
+}
+
+class _QuickReplyEditFormState extends State<_QuickReplyEditForm> {
+  late final TextEditingController _labelCtrl;
+  late final TextEditingController _textCtrl;
+
+  /// Null until the card picks a glyph — and again if it picks the same one
+  /// twice, which is how the default is chosen back.
+  String? _iconId;
+
+  @override
+  void initState() {
+    super.initState();
+    _labelCtrl = TextEditingController(text: widget.initialLabel);
+    _textCtrl = TextEditingController(text: widget.initialText);
+    _iconId = widget.initialIconId;
+  }
+
+  @override
+  void dispose() {
+    _labelCtrl.dispose();
+    _textCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final label = _labelCtrl.text.trim();
+    if (label.isEmpty) return;
+    final text = _textCtrl.text;
+    // Captured before the pop — this State is disposed by the time the write
+    // completes, so `widget` must not be touched afterwards.
+    final onSubmit = widget.onSubmit;
+    final iconId = _iconId;
+    Navigator.of(context).pop();
+    await onSubmit(label, text, iconId);
+  }
+
+  Future<void> _delete() async {
+    final onDelete = widget.onDelete;
+    if (onDelete == null) return;
+    Navigator.of(context).pop();
+    await onDelete();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'sheet_title_quick_replies'.tr(),
-            style: TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.w700,
-              color: context.cs.onSurface,
-              letterSpacing: -0.2,
+          TextField(
+            controller: _labelCtrl,
+            autofocus: widget.isNew,
+            textInputAction: TextInputAction.next,
+            decoration: InputDecoration(
+              labelText: 'label_block_name'.tr(),
+              hintText: 'placeholder_block_name'.tr(),
+              border: const OutlineInputBorder(),
             ),
           ),
-          const Spacer(),
-          GestureDetector(
-            onTap: onToggleEditing,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              height: 34,
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              decoration: BoxDecoration(
-                color: editing
-                    ? context.cs.primary.withValues(alpha: 0.22)
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(17),
-                border: Border.all(
-                  color: editing
-                      ? context.cs.primary.withValues(alpha: 0.38)
-                      : Colors.white.withValues(alpha: 0.18),
+          const SizedBox(height: 12),
+          _IconPicker(
+            selected: _iconId,
+            // Tapping the selected glyph clears it, so the built-in default is
+            // reachable without a "none" swatch that would have to explain
+            // itself.
+            onSelect: (id) => setState(() => _iconId = _iconId == id ? null : id),
+          ),
+          const SizedBox(height: 12),
+          if (widget.builtIn)
+            _BuiltInNote(text: 'quick_reply_builtin_note'.tr())
+          else
+            TextField(
+              controller: _textCtrl,
+              maxLines: 4,
+              minLines: 2,
+              decoration: InputDecoration(
+                labelText: 'label_content'.tr(),
+                hintText: 'placeholder_prompt_text'.tr(),
+                border: const OutlineInputBorder(),
+              ),
+            ),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              if (widget.onDelete != null)
+                GlazeActionButton(
+                  icon: Icons.delete_outline,
+                  label: 'btn_delete'.tr(),
+                  tone: GlazeActionTone.destructive,
+                  onTap: _delete,
+                ),
+              const Spacer(),
+              GlazeActionButton(
+                icon: Icons.close_rounded,
+                label: 'btn_cancel'.tr(),
+                tone: GlazeActionTone.neutral,
+                onTap: () => Navigator.of(context).pop(),
+              ),
+              const SizedBox(width: 8),
+              GlazeActionButton(
+                icon: Icons.check_rounded,
+                label: widget.isNew ? 'action_add'.tr() : 'btn_save'.tr(),
+                tone: GlazeActionTone.primary,
+                onTap: _submit,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Glyph swatches for the card being edited.
+///
+/// One scrolling row rather than a wrap of all thirty-odd: this form sits in a
+/// bottom sheet with the keyboard up, and a five-row grid pushed the prompt
+/// field and the Save button off the bottom of it. A picker sheet on top of a
+/// picker sheet would be worse again.
+class _IconPicker extends StatefulWidget {
+  final String? selected;
+  final ValueChanged<String> onSelect;
+
+  const _IconPicker({required this.selected, required this.onSelect});
+
+  @override
+  State<_IconPicker> createState() => _IconPickerState();
+}
+
+class _IconPickerState extends State<_IconPicker> {
+  final _controller = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    // Open on the card's own glyph rather than at the start of the strip: a
+    // card edited a second time should show what it already has.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _revealSelected());
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _revealSelected() {
+    final selected = widget.selected;
+    if (selected == null || !mounted || !_controller.hasClients) return;
+    final index = kQuickReplyIcons.keys.toList().indexOf(selected);
+    if (index < 0) return;
+    const stride = 48.0; // swatch + spacing
+    final viewport = _controller.position.viewportDimension;
+    _controller.jumpTo(
+      (index * stride - viewport / 2 + stride / 2).clamp(
+        _controller.position.minScrollExtent,
+        _controller.position.maxScrollExtent,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'quick_reply_icon'.tr(),
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: context.cs.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          height: 40,
+          child: ListView.separated(
+            controller: _controller,
+            scrollDirection: Axis.horizontal,
+            itemCount: kQuickReplyIcons.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 8),
+            itemBuilder: (context, index) {
+              final entry = kQuickReplyIcons.entries.elementAt(index);
+              return _IconSwatch(
+                icon: entry.value,
+                active: entry.key == widget.selected,
+                onTap: () => widget.onSelect(entry.key),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _IconSwatch extends StatelessWidget {
+  final IconData icon;
+  final bool active;
+  final VoidCallback onTap;
+
+  const _IconSwatch({
+    required this.icon,
+    required this.active,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = context.cs.primary;
+    return SizedBox(
+      width: 40,
+      height: 40,
+      child: GlassSurface(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        tint: active ? accent : context.cs.surface,
+        border: Border.all(
+          color: active
+              ? accent.withValues(alpha: 0.6)
+              : context.cs.onSurface.withValues(alpha: 0.08),
+        ),
+        child: Center(
+          child: Icon(
+            icon,
+            size: 20,
+            color: active ? Colors.white : context.cs.onSurface,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// What the Actions tab's "+" sheet returns: a request to create a reply, or
+/// the hidden insert action the user picked to bring back.
+class _AddSheetResult {
+  final ComposerAction? restore;
+
+  const _AddSheetResult.createReply() : restore = null;
+
+  const _AddSheetResult.restore(this.restore);
+}
+
+/// The "+" sheet body: the create-reply row, then the hidden insert actions.
+class _ActionsAddSheet extends StatelessWidget {
+  final List<ComposerAction> hiddenActions;
+
+  const _ActionsAddSheet({required this.hiddenActions});
+
+  void _pop(BuildContext context, _AddSheetResult result) {
+    Navigator.of(context, rootNavigator: true).pop(result);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _AddSheetRow(
+            icon: Icons.add,
+            label: 'action_create_new'.tr(),
+            onTap: () => _pop(context, const _AddSheetResult.createReply()),
+          ),
+          if (hiddenActions.isNotEmpty) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 6),
+              child: Text(
+                'composer_action_hidden'.tr().toUpperCase(),
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.6,
+                  color: context.cs.onSurfaceVariant.withValues(alpha: 0.8),
                 ),
               ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    editing ? Icons.check : Icons.edit,
-                    size: 16,
-                    color: editing ? context.cs.primary : context.cs.onSurface,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    editing ? 'btn_ok'.tr() : 'action_edit'.tr(),
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: editing
-                          ? context.cs.primary
-                          : context.cs.onSurface,
-                    ),
-                  ),
-                ],
+            ),
+            for (final action in hiddenActions)
+              _AddSheetRow(
+                icon: action.icon,
+                glyph: action.glyph,
+                label: action.label,
+                onTap: () => _pop(context, _AddSheetResult.restore(action)),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _AddSheetRow extends StatelessWidget {
+  final IconData icon;
+  final String? glyph;
+  final String label;
+  final VoidCallback onTap;
+
+  const _AddSheetRow({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.glyph,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        child: Row(
+          children: [
+            ActionGlyph(
+              icon: icon,
+              glyph: glyph,
+              size: 20,
+              color: context.cs.onSurface.withValues(alpha: 0.85),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(fontSize: 15, color: context.cs.onSurface),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Explains why a built-in action has no prompt body and no delete button,
+/// standing in for the text field the other cards get.
+class _BuiltInNote extends StatelessWidget {
+  final String text;
+
+  const _BuiltInNote({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        color: context.cs.primary.withValues(alpha: 0.08),
+        border: Border.all(color: context.cs.primary.withValues(alpha: 0.24)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.lock_outline, size: 16, color: context.cs.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.35,
+                color: context.cs.onSurfaceVariant,
               ),
             ),
           ),

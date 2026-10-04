@@ -13,13 +13,11 @@ class StudioApiConfigResolver {
   const StudioApiConfigResolver({required this.apiConfigs, this.activeConfig});
 
   /// Resolve the [ApiConfig] used to RUN trackers / agents: the studio's
-  /// `runApiConfigId` if it resolves to a saved config, otherwise the active
+  /// [apiConfigId] if it resolves to a saved config, otherwise the active
   /// chat config. Returns `null` when neither is available.
-  ApiConfig? resolveRunConfig(String runApiConfigId) {
-    if (runApiConfigId.isNotEmpty) {
-      final byRunId = apiConfigs
-          .where((c) => c.id == runApiConfigId)
-          .firstOrNull;
+  ApiConfig? resolveRunConfig(String apiConfigId) {
+    if (apiConfigId.isNotEmpty) {
+      final byRunId = apiConfigs.where((c) => c.id == apiConfigId).firstOrNull;
       if (byRunId != null) return byRunId;
     }
     return activeConfig;
@@ -39,10 +37,10 @@ class StudioApiConfigResolver {
   /// config + optional model override (from PipelineSettings, not per-agent).
   ResolvedAgentConfig resolveAgentConfig(
     ApiConfig current,
-    String runApiConfigId,
+    String apiConfigId,
     String modelOverride,
   ) {
-    final active = resolveRunConfig(runApiConfigId) ?? current;
+    final active = resolveRunConfig(apiConfigId) ?? current;
     return ResolvedAgentConfig.fromApiConfig(
       active,
       modelOverride: modelOverride,

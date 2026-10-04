@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
+import 'greeting_normalizer.dart';
 import 'janitor_webview_proxy.dart';
 import '../catalog_models.dart';
 
@@ -150,10 +151,78 @@ const _fallbackTagMap = <int, String>{
   61: 'Movies/TV',
 };
 
+/// The popular free-text tags JanitorAI reports as `top_custom_tags`.
+///
+/// Curated tags (`/hampter/tags`) are searched by numeric id; a custom tag is
+/// searched by its own text through `custom_tags[]`, which
+/// [janitorSearch] has always sent and the filter sheet has always accepted —
+/// but only if the reader typed it. Nothing offered the popular ones, so the
+/// whole half of JanitorAI's tag vocabulary was reachable only by knowing it
+/// in advance.
+List<String> _cachedTopCustomTags = [];
+
+/// Names in the order JanitorAI ranked them, which is the point: these are the
+/// popular ones, and sorting them alphabetically would throw that away.
+List<String> getCachedJanitorTopCustomTags() => _cachedTopCustomTags;
+
+/// Reads `top_custom_tags` out of a listing payload. Entries arrive as bare
+/// strings or as objects carrying a name; both are accepted rather than
+/// guessed at, and anything else is skipped instead of crashing a search.
+List<String> parseTopCustomTags(Object? raw) {
+  if (raw is! List) return const [];
+  final names = <String>[];
+  final seen = <String>{};
+  for (final entry in raw) {
+    final name = switch (entry) {
+      String value => value,
+      Map<Object?, Object?> value =>
+        (value['name'] ?? value['tag'] ?? value['slug'])?.toString() ?? '',
+      _ => '',
+    }.trim();
+    if (name.isEmpty) continue;
+    if (!seen.add(name.toLowerCase())) continue;
+    names.add(name);
+  }
+  return names;
+}
+
+/// [curated] followed by the [popular] custom tags it does not already
+/// cover.
+///
+/// After, never mixed in: a custom tag is a different kind of thing — it has
+/// no id and is searched as text — and the curated ones are what a reader
+/// looks for first. Rank order is preserved within each group, because the
+/// whole value of `top_custom_tags` is that JanitorAI ranked it.
+List<CatalogTag> withPopularCustomTags(
+  List<CatalogTag> curated,
+  List<String> popular,
+) {
+  final known = {for (final tag in curated) tag.name.toLowerCase()};
+  return [
+    ...curated,
+    for (final name in popular)
+      if (known.add(name.toLowerCase())) CatalogTag(name: name),
+  ];
+}
+
 List<CatalogTag> _cachedJanitorTags = [];
 Map<int, String> _janitorTagMap = Map.from(_fallbackTagMap);
 bool _tagsFetched = false;
 List<CatalogTag> getCachedJanitorTags() => _cachedJanitorTags;
+
+/// The popular custom tags, fetching one listing page if no search has
+/// happened yet. Failure is not an error worth surfacing — the sheet simply
+/// offers the curated tags alone, exactly as it did before.
+Future<List<String>> fetchJanitorTopCustomTags() async {
+  if (_cachedTopCustomTags.isNotEmpty) return _cachedTopCustomTags;
+  try {
+    final data = await _janitorFetch('$_hampterUrl?page=1&mode=sfw&sort=trending24');
+    if (data is Map) {
+      _cachedTopCustomTags = parseTopCustomTags(data['top_custom_tags']);
+    }
+  } catch (_) {}
+  return _cachedTopCustomTags;
+}
 
 Future<List<CatalogTag>> fetchJanitorTags() async {
   if (_tagsFetched) return _cachedJanitorTags;
@@ -228,6 +297,11 @@ Future<CatalogSearchResult> janitorSearch({
     hits = data;
   } else {
     hits = (data['characters'] as List?) ?? (data['data'] as List?) ?? [];
+    // Harvested from the search that was going to happen anyway: the listing
+    // carries the popular custom tags for the mode and sort being browsed, so
+    // no separate request is needed to offer them.
+    final top = parseTopCustomTags(data['top_custom_tags']);
+    if (top.isNotEmpty) _cachedTopCustomTags = top;
   }
 
   return CatalogSearchResult(
@@ -260,6 +334,14 @@ bool janitorDefinitionPublic(Map<String, dynamic> meta) {
   return personality.isNotEmpty || scenario.isNotEmpty;
 }
 
+/// Whether the creator allows this character to run on an external (proxy)
+/// model. `/hampter/characters/{id}` returns `allow_proxy: false` for a card
+/// locked to JanitorAI's own model — JanitorAI then refuses to assemble the
+/// prompt (`403 Proxies are forbidden for this character`), so the closed card
+/// and its closed lorebooks can never be captured. Absent field = allowed.
+bool janitorAllowsProxy(Map<String, dynamic>? meta) =>
+    meta == null || meta['allow_proxy'] != false;
+
 Future<DownloadedCharacter> janitorFetchCharacter(String id) async {
   final data = await janitorFetchCharacterMeta(id);
   return _convertToGlaze(data);
@@ -290,48 +372,16 @@ String? resolveJanitorUserAvatar(String? url) {
 /// Page size used for the reviews endpoint, mirroring the JanitorAI web client
 /// (`size=20`). A full page is the signal there *may* be more — see
 /// [janitorFetchReviews].
-const kJanitorReviewsPageSize = 20;
-
-/// A single user comment ("review") on a JanitorAI character, returned by
-/// `/hampter/reviews/{characterId}`. [replyCount] is the API's `comment_count`
-/// (replies to this comment); [likeCount] drives the default `sortBy=likes`
-/// order. Pinned comments come first in the response.
-class JanitorReview {
-  final String id;
-  final String content;
-  final String authorName;
-  final String authorUserName;
-  final String? avatarUrl;
-  final int likeCount;
-  final int replyCount;
-  final bool isPinned;
-  final bool isVerified;
-  final bool hasPlus;
-  final DateTime? createdAt;
-
-  const JanitorReview({
-    required this.id,
-    required this.content,
-    required this.authorName,
-    required this.authorUserName,
-    this.avatarUrl,
-    this.likeCount = 0,
-    this.replyCount = 0,
-    this.isPinned = false,
-    this.isVerified = false,
-    this.hasPlus = false,
-    this.createdAt,
-  });
-}
+const kCatalogCommentsPageSize = 20;
 
 /// Fetches one page of comments for [characterId]. The endpoint paginates and
 /// returns a bare JSON array (no total/`hasMore`), so callers detect the end by
 /// a short page: fewer than [size] items means there are no further pages.
 /// Defaults match the web client (`size=20&sortBy=likes`).
-Future<List<JanitorReview>> janitorFetchReviews(
+Future<List<CatalogComment>> janitorFetchReviews(
   String characterId, {
   int page = 1,
-  int size = kJanitorReviewsPageSize,
+  int size = kCatalogCommentsPageSize,
   String sortBy = 'likes',
 }) async {
   final url =
@@ -344,12 +394,12 @@ Future<List<JanitorReview>> janitorFetchReviews(
       .toList();
 }
 
-JanitorReview _normalizeReview(Map<String, dynamic> m) {
+CatalogComment _normalizeReview(Map<String, dynamic> m) {
   final profile = (m['user_profiles'] as Map<String, dynamic>?) ?? const {};
   final name = (profile['name'] ?? profile['user_name'] ?? 'Anonymous')
       .toString()
       .trim();
-  return JanitorReview(
+  return CatalogComment(
     id: (m['id'] ?? '') as String,
     content: (m['content'] ?? '') as String,
     authorName: name.isEmpty ? 'Anonymous' : name,
@@ -432,22 +482,32 @@ DownloadedCharacter _convertToGlaze(Map<String, dynamic> m) {
     tags.addAll((m['custom_tags'] as List).map((t) => '#$t'));
   }
 
+  // `first_messages` is the whole set *including* the opening line, so
+  // mapping it straight onto the alternates listed that greeting twice.
+  final greetings = normalizeGreetings(
+    primary: (m['first_message'] ?? m['first_mes'] ?? '') as String?,
+    others: greetingList(m['first_messages']),
+  );
+
   return DownloadedCharacter(
     charData: CharacterData(
       name: (m['name'] ?? m['chat_name'] ?? 'Unknown') as String,
-      description: '',
-      personality: (m['personality'] ?? m['description'] ?? '') as String,
+      // Only take the real definition field. A CLOSED card hides `personality`,
+      // so falling back to the row's `description` here would dump the public
+      // bio/blurb (often HTML) into the prompt. The bio is already surfaced via
+      // creatorNotes below; leaving the definition empty correctly signals that
+      // it is unavailable without local extraction.
+      description: (m['personality'] ?? '') as String,
+      personality: '',
       scenario: (m['scenario'] ?? '') as String,
-      firstMes: (m['first_message'] ?? m['first_mes'] ?? '') as String,
+      firstMes: greetings.firstMes,
       mesExample:
           (m['example_dialogs'] ?? m['mes_example'] ?? m['example_dialogs'] ?? '')
               as String,
       creatorNotes: (m['description'] ?? m['creator_notes'] ?? '') as String,
       systemPrompt: '',
       postHistoryInstructions: '',
-      alternateGreetings: m['first_messages'] is List
-          ? (m['first_messages'] as List).whereType<String>().toList()
-          : <String>[],
+      alternateGreetings: greetings.alternates,
       tags: tags.toSet().toList(),
       creator: (m['creator_name'] ?? m['creator'] ?? '') as String,
       creatorId: (m['creator_id'] ?? '') as String,

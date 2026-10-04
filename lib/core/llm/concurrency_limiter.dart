@@ -1,4 +1,4 @@
-/// Generic concurrency-limited gather, extracted from `TrackerBatcher` (plan
+/// Generic concurrency-limited gather, extracted from `ControllerBatcher` (plan
 /// §4). Runs at most [limit] jobs in flight at once. Port of Marinara
 /// `settleAgentJobsWithConcurrencyLimit`.
 ///

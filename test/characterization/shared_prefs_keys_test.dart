@@ -14,16 +14,25 @@ void main() {
       'hideTokenCount': bool,
       'dialogGrouping': bool,
       'batterySaver': bool,
+      'batterySaverMode': String,
       'hideTooltips': bool,
       'disableSwipeRegeneration': bool,
       'allowMessageScripts': bool,
+      'confirmMessageDelete': bool,
       'language': String,
       'virtualKeyboardSend': bool,
-      'tokenizerHidePercent': double,
-      'tokenizerHistoryFillThreshold': double,
       'showOurPicks': bool,
       'gz_force_mobile_layout': bool,
+      'gz_chat_max_width': double,
       'addBlockAtTop': bool,
+      'openCardAfterImport': bool,
+      'hapticFeedback': bool,
+      'messageVibration': bool,
+      'janitorSource': String,
+      'lorebookBuildPrompt': String,
+      'lorebookBuildPromptJs': String,
+      'useStandardRandomizer': bool,
+      'hideContextCard': bool,
     };
 
     test('AppSettings defaults match SharedPrefs fallbacks', () {
@@ -35,10 +44,19 @@ void main() {
         switch (entry.value) {
           // ignore: type_literal_in_constant_pattern
           case bool:
+            // gz_force_mobile_layout defaults to FALSE: wide windows get the
+            // desktop three-column layout unless the user opts back out.
+            // `batterySaver` used to default to true; it is the *resolved*
+            // value of `batterySaverMode` now, and under the System default it
+            // starts off until the platform says otherwise.
+            // `dialogGrouping` groups dialogs by character out of the box.
             if (entry.key == 'enterToSend' ||
                 entry.key == 'showOurPicks' ||
-                entry.key == 'gz_force_mobile_layout' ||
-                entry.key == 'batterySaver') {
+                entry.key == 'openCardAfterImport' ||
+                entry.key == 'hapticFeedback' ||
+                entry.key == 'messageVibration' ||
+                entry.key == 'confirmMessageDelete' ||
+                entry.key == 'dialogGrouping') {
               expect(
                 _getBoolDefault(defaults, entry.key),
                 isTrue,
@@ -55,13 +73,16 @@ void main() {
           case String:
             if (entry.key == 'language') {
               expect(defaults.language, 'en');
+            } else if (entry.key == 'janitorSource') {
+              // DataCat by default: it needs no Janitor.AI account.
+              expect(defaults.janitorSource, ExtractionSource.datacat);
+            } else if (entry.key == 'batterySaverMode') {
+              expect(defaults.batterySaverMode, BatterySaverMode.system);
             }
           // ignore: type_literal_in_constant_pattern
           case double:
-            if (entry.key == 'tokenizerHidePercent') {
-              expect(defaults.tokenizerHidePercent, 30);
-            } else if (entry.key == 'tokenizerHistoryFillThreshold') {
-              expect(defaults.tokenizerHistoryFillThreshold, 85);
+            if (entry.key == 'gz_chat_max_width') {
+              expect(defaults.chatMaxWidth, 900);
             }
         }
       }
@@ -72,25 +93,21 @@ void main() {
         enterToSend: false,
         hideMessageId: true,
         language: 'ru',
-        tokenizerHidePercent: 50,
       );
       final copy = original.copyWith();
       expect(copy.enterToSend, original.enterToSend);
       expect(copy.hideMessageId, original.hideMessageId);
       expect(copy.language, original.language);
-      expect(copy.tokenizerHidePercent, original.tokenizerHidePercent);
     });
 
     test('all expected SharedPrefs keys are covered', () {
-      expect(expectedKeys.length, 16);
+      expect(expectedKeys.keys.toSet(), AppSettingsPreferences.keys);
     });
 
     test('legacy string values are accepted', () async {
       SharedPreferences.setMockInitialValues({
         'enterToSend': 'false',
         'hideMessageId': '1',
-        'tokenizerHidePercent': '45.5',
-        'tokenizerHistoryFillThreshold': '90',
         'gz_force_mobile_layout': '0',
         'addBlockAtTop': 'true',
         'allowMessageScripts': 'true',
@@ -102,8 +119,6 @@ void main() {
 
       expect(settings.enterToSend, isFalse);
       expect(settings.hideMessageId, isTrue);
-      expect(settings.tokenizerHidePercent, 45.5);
-      expect(settings.tokenizerHistoryFillThreshold, 90);
       expect(settings.forceMobileLayout, isFalse);
       expect(settings.addBlockAtTop, isTrue);
       expect(settings.allowMessageScripts, isTrue);
@@ -212,16 +227,17 @@ void main() {
         'hideTokenCount',
         'dialogGrouping',
         'batterySaver',
+        'batterySaverMode',
         'hideTooltips',
         'disableSwipeRegeneration',
         'language',
         'virtualKeyboardSend',
-        'tokenizerHidePercent',
-        'tokenizerHistoryFillThreshold',
         'showOurPicks',
         'gz_force_mobile_layout',
         'addBlockAtTop',
         'activeApiConfigId',
+        'activeEmbeddingConfigId',
+        'embeddingPresetsSeeded',
         'activePresetId',
         'activePersonaId',
         'globalVars',
@@ -231,6 +247,7 @@ void main() {
         'lorebookActivations',
         'lorebookSettings',
         'gz_global_regex_scripts',
+        'gz_studio_regex_scripts',
         'gz_imggen_settings',
         'gz_sync_provider',
         'gz_sync_auto',
@@ -285,6 +302,8 @@ bool _getBoolDefault(AppSettings s, String key) {
       return s.hideTooltips;
     case 'disableSwipeRegeneration':
       return s.disableSwipeRegeneration;
+    case 'confirmMessageDelete':
+      return s.confirmMessageDelete;
     case 'virtualKeyboardSend':
       return s.virtualKeyboardSend;
     case 'showOurPicks':
@@ -293,6 +312,16 @@ bool _getBoolDefault(AppSettings s, String key) {
       return s.forceMobileLayout;
     case 'addBlockAtTop':
       return s.addBlockAtTop;
+    case 'openCardAfterImport':
+      return s.openCardAfterImport;
+    case 'hapticFeedback':
+      return s.hapticFeedback;
+    case 'messageVibration':
+      return s.messageVibration;
+    case 'useStandardRandomizer':
+      return s.useStandardRandomizer;
+    case 'hideContextCard':
+      return s.hideContextCard;
     default:
       return false;
   }

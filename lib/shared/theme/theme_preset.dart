@@ -18,8 +18,7 @@ abstract class ThemePreset with _$ThemePreset {
     required String name,
     @Default('') String author,
     @Default('dark') String themeMode,
-    @Default('#7996CE') String accentColor,
-    @Default(0.85) double bgOpacity,
+    @Default('#C42A4A') String accentColor,
     @Default(0) double bgBlur,
     @Default(0.8) double elementOpacity,
     @Default(12) double elementBlur,
@@ -72,7 +71,12 @@ abstract class ThemePreset with _$ThemePreset {
     @Default(0.8) double noiseIntensity,
     @Default(0.03) double bgNoiseOpacity,
     @Default(0.4) double bgNoiseIntensity,
-    @Default(0) double bgDim,
+    // Background darkening: a black overlay painted *over* the background
+    // image (0 = untouched image, 1 = solid black). Replaces the old
+    // `bgOpacity`, which faded the image itself and let whatever was painted
+    // behind it (the Flutter surface under the transparent WebView) show
+    // through instead of darkening it.
+    @Default(0.15) double bgDim,
     String? bgImage,
     // Chat-area background. Independent of the global UI background.
     //   'inherit' → reuse the global background (default)
@@ -90,6 +94,26 @@ abstract class ThemePreset with _$ThemePreset {
 
   factory ThemePreset.fromJson(Map<String, dynamic> json) =>
       _$ThemePresetFromJson(json);
+}
+
+/// Decode a preset stored/exported by an older build, migrating dropped
+/// fields to their current equivalents before handing the map to
+/// [ThemePreset.fromJson].
+///
+/// * `bgOpacity` (image visibility) → [ThemePreset.bgDim] (`1 - opacity`),
+///   since the background is now darkened by an overlay instead of being
+///   faded out. Presets written before the switch always carry `bgDim: 0`,
+///   so the migrated value wins.
+ThemePreset themePresetFromStoredJson(Map<String, dynamic> json) {
+  final legacyOpacity = json['bgOpacity'];
+  if (legacyOpacity is! num) return ThemePreset.fromJson(json);
+  final migrated = Map<String, dynamic>.from(json)..remove('bgOpacity');
+  final dim = (1.0 - legacyOpacity.toDouble()).clamp(0.0, 1.0);
+  final storedDim = migrated['bgDim'];
+  migrated['bgDim'] = storedDim is num && storedDim > dim
+      ? storedDim.toDouble()
+      : dim;
+  return ThemePreset.fromJson(migrated);
 }
 
 /// A parsed 2-stop bubble gradient. [angle] is in CSS degrees
@@ -175,7 +199,7 @@ Color _parseHex(String hex) {
   if (clean.length == 8) {
     return Color(int.parse(clean, radix: 16));
   }
-  return const Color(0xFF7996CE);
+  return const Color(0xFFC42A4A);
 }
 
 Color? _parseNullableHex(String? hex) {

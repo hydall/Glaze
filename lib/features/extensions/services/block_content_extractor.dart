@@ -8,14 +8,28 @@ String blockTagName(BlockConfig blockConfig, String resolvedTemplate) {
   return blockConfig.name.trim();
 }
 
+/// Elements that *are* the content, even with no text around them. A block
+/// that draws a picture or hosts a panel is legitimately markup-only, and the
+/// tag stripper below would otherwise call its whole reply empty — which is
+/// exactly how an image block surfaces "LLM returned empty block" after a
+/// perfectly good generation.
+final _renderableElement = RegExp(
+  r'<(img|picture|source|iframe|video|audio|canvas|svg|embed|object)\b',
+  caseSensitive: false,
+);
+
 /// True when [content] has no visible text after stripping HTML/markdown noise.
+///
+/// Markup-only is not empty while it carries a renderable element: an
+/// `<img>` card has nothing to read but plenty to show.
 bool isBlankBlockContent(String content) {
   var text = content;
   text = text.replaceAll(RegExp(r'<[^>]+>'), ' ');
   text = text.replaceAll(RegExp(r'```[\s\S]*?```'), ' ');
   text = text.replaceAll('&nbsp;', ' ');
   text = text.replaceAll(RegExp(r'\s+'), ' ');
-  return text.trim().isEmpty;
+  if (text.trim().isNotEmpty) return false;
+  return !_renderableElement.hasMatch(content);
 }
 
 /// Extracts inner HTML/text from `<tag>...</tag>`. Returns null when tags are

@@ -1,6 +1,7 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
-import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/menu_group.dart';
 import '../image_gen_models.dart';
 import 'rows.dart' as rows;
 
@@ -17,134 +18,201 @@ typedef ShowOptionsCallback =
     });
 
 /// Model-field rows for the Naistera image-gen API.
+///
+/// The model list comes from the catalog loaded via the refresh button
+/// (`GET /api/models`) and falls back to the shipped shortlist until then —
+/// mirroring the upstream extension, which also stopped hardcoding the
+/// Naistera model names.
 List<Widget> buildNaisteraModelFields(
-  ImageGenSettings s,
-  ValueChanged<ImageGenSettings> onUpdate,
-  ShowOptionsCallback showOptions,
-) {
+  ImageGenSettings s, {
+  required bool isFetching,
+  required VoidCallback onFetchModels,
+  required ValueChanged<ImageGenSettings> onUpdate,
+  required ShowOptionsCallback showOptions,
+}) {
+  // Settings written by older builds can still hold a retired model label
+  // ('nano banana'), so the selector matches on the normalized id.
+  final catalog = s.naisteraModels.map((m) => m.id).toList();
+  final model = catalog.contains(s.naisteraModel)
+      ? s.naisteraModel
+      : NaisteraConstants.normalizeModel(s.naisteraModel);
+  final items = catalog.isEmpty
+      ? NaisteraConstants.models.map((e) => e.$1).toList()
+      : catalog;
+
   return [
-    rows.ImageGenSelectorRow(
-      label: 'Model',
-      value: NaisteraConstants.models
-          .firstWhere(
-            (e) => e.$1 == s.naisteraModel,
-            orElse: () => (s.naisteraModel, s.naisteraModel),
-          )
-          .$2,
-      onTap: () => showOptions<String>(
-        title: 'Model',
-        items: NaisteraConstants.models.map((e) => e.$1).toList(),
-        labelBuilder: (v) =>
-            NaisteraConstants.models.firstWhere((e) => e.$1 == v).$2,
-        isSelected: (v) => s.naisteraModel == v,
-        onSelected: (v) => onUpdate(s.copyWith(naisteraModel: v)),
-      ),
+    // MenuSelectorItem has no trailing slot, so the refresh button sits
+    // beside it in a row of its own.
+    Row(
+      children: [
+        Expanded(
+          child: MenuSelectorItem(
+            label: 'imggen_model'.tr(),
+            currentValue: s.naisteraModelLabel(model),
+            onTap: () => showOptions<String>(
+              title: 'imggen_model'.tr(),
+              items: items,
+              labelBuilder: s.naisteraModelLabel,
+              isSelected: (v) => model == v,
+              onSelected: (v) => onUpdate(s.copyWith(naisteraModel: v)),
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(right: 16),
+          child: rows.ImageGenFetchButton(
+            isFetching: isFetching,
+            onPressed: onFetchModels,
+          ),
+        ),
+      ],
     ),
-    rows.ImageGenSelectorRow(
-      label: 'Aspect Ratio',
-      value: s.naisteraAspectRatio,
+    MenuSelectorItem(
+      label: 'imggen_aspect_ratio'.tr(),
+      currentValue: s.naisteraAspectRatio,
       onTap: () => showOptions<String>(
-        title: 'Aspect Ratio',
+        title: 'imggen_aspect_ratio'.tr(),
         items: NaisteraConstants.aspectRatios,
         labelBuilder: (v) => v,
         isSelected: (v) => s.naisteraAspectRatio == v,
         onSelected: (v) => onUpdate(s.copyWith(naisteraAspectRatio: v)),
       ),
     ),
+    // Only models whose catalog entry has `negative_prompt: true` take one.
+    // Same row as the NovelAI provider field.
+    if (s.naisteraSupportsNegativePrompt)
+      rows.ImageGenTextFieldItem(
+        label: 'Negative prompt',
+        value: s.naisteraNegativePrompt,
+        hint: 'lowres, bad anatomy',
+        clearable: true,
+        onChanged: (v) => onUpdate(s.copyWith(naisteraNegativePrompt: v)),
+      ),
+    MenuSelectorItem(
+      label: 'imggen_char_descriptions'.tr(),
+      description: 'imggen_char_descriptions_desc'.tr(),
+      currentValue: _descriptionsModeLabel(s.naisteraCharacterDescriptionsMode),
+      onTap: () => showOptions<CharacterDescriptionsMode>(
+        title: 'imggen_char_descriptions'.tr(),
+        items: CharacterDescriptionsMode.values,
+        labelBuilder: _descriptionsModeLabel,
+        isSelected: (v) => s.naisteraCharacterDescriptionsMode == v,
+        onSelected: (v) =>
+            onUpdate(s.copyWith(naisteraCharacterDescriptionsMode: v)),
+      ),
+    ),
   ];
 }
 
-/// Model-field rows for the rout.my image-gen API. The Russian variant
-/// shares the same shape and only differs in the settings field it
-/// writes to, controlled by [isRu].
+String _descriptionsModeLabel(CharacterDescriptionsMode mode) => switch (mode) {
+  CharacterDescriptionsMode.none => 'imggen_char_descriptions_none'.tr(),
+  CharacterDescriptionsMode.asIs => 'imggen_char_descriptions_as_is'.tr(),
+  CharacterDescriptionsMode.characterPrompt =>
+    'imggen_char_descriptions_prompt'.tr(),
+};
+
+/// Model-field rows for the rout.my image-gen API. The model list comes from
+/// the catalog loaded via the refresh button (`GET /v1/models`) and falls back
+/// to the shipped shortlist until then.
 List<Widget> buildRoutmyModelFields(
   ImageGenSettings s, {
-  required bool isRu,
+  required bool isFetching,
+  required VoidCallback onFetchModels,
   required ValueChanged<ImageGenSettings> onUpdate,
   required ShowOptionsCallback showOptions,
 }) {
-  final model = isRu ? s.ruRoutmyModel : s.routmyModel;
-  final aspect = isRu ? s.ruRoutmyAspectRatio : s.routmyAspectRatio;
-  final size = isRu ? s.ruRoutmyImageSize : s.routmyImageSize;
-  final quality = isRu ? s.ruRoutmyQuality : s.routmyQuality;
-  final constantsModels = isRu
-      ? RuRoutMyConstants.models
-      : RoutMyConstants.models;
-  final aspectRatios = isRu
-      ? RuRoutMyConstants.aspectRatios
-      : RoutMyConstants.aspectRatios;
-  final imageSizes = isRu
-      ? RuRoutMyConstants.imageSizes
-      : RoutMyConstants.imageSizes;
-  final availableImageSizes = model == 'bytedance/seedream-5.0-pro'
+  const seedreamModel = 'bytedance/seedream-5.0-pro';
+  final model = s.routmyModel;
+  final aspect = s.routmyAspectRatio;
+  final size = s.routmyImageSize;
+  final quality = s.routmyQuality;
+  final catalog = s.routmyModels.map((m) => m.id).toList();
+  final items = catalog.isEmpty
+      ? RoutMyConstants.models.map((e) => e.$1).toList()
+      : catalog;
+  final availableImageSizes = model == seedreamModel
       ? RoutMyConstants.seedreamImageSizes
-      : imageSizes;
+      : RoutMyConstants.imageSizes;
 
   return [
-    rows.ImageGenSelectorRow(
-      label: 'Model',
-      value: constantsModels
-          .firstWhere((e) => e.$1 == model, orElse: () => (model, model))
-          .$2,
-      onTap: () => showOptions<String>(
-        title: 'Model',
-        items: constantsModels.map((e) => e.$1).toList(),
-        labelBuilder: (v) => constantsModels.firstWhere((e) => e.$1 == v).$2,
-        isSelected: (v) => model == v,
-        onSelected: (v) {
-          final seedreamSize =
-              v == 'bytedance/seedream-5.0-pro' &&
-                  !RoutMyConstants.seedreamImageSizes.contains(size)
-              ? '2K'
-              : size;
-          isRu
-              ? onUpdate(
-                  s.copyWith(ruRoutmyModel: v, ruRoutmyImageSize: seedreamSize),
-                )
-              : onUpdate(
+    // MenuSelectorItem has no trailing slot, so the refresh button sits
+    // beside it in a row of its own.
+    Row(
+      children: [
+        Expanded(
+          child: MenuSelectorItem(
+            label: 'Model',
+            currentValue: s.routmyModelLabel(model),
+            onTap: () => showOptions<String>(
+              title: 'Model',
+              items: items,
+              labelBuilder: s.routmyModelLabel,
+              isSelected: (v) => model == v,
+              onSelected: (v) {
+                final seedreamSize =
+                    v == seedreamModel &&
+                        size != customImageSizeOption &&
+                        !RoutMyConstants.seedreamImageSizes.contains(size)
+                    ? '2K'
+                    : size;
+                onUpdate(
                   s.copyWith(routmyModel: v, routmyImageSize: seedreamSize),
                 );
-        },
-      ),
+              },
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(right: 16),
+          child: rows.ImageGenFetchButton(
+            isFetching: isFetching,
+            onPressed: onFetchModels,
+          ),
+        ),
+      ],
     ),
-    rows.ImageGenSelectorRow(
+    MenuSelectorItem(
       label: 'Aspect Ratio',
-      value: aspect,
+      currentValue: aspect,
       onTap: () => showOptions<String>(
         title: 'Aspect Ratio',
-        items: aspectRatios,
+        items: RoutMyConstants.aspectRatios,
         labelBuilder: (v) => v,
         isSelected: (v) => aspect == v,
-        onSelected: (v) => isRu
-            ? onUpdate(s.copyWith(ruRoutmyAspectRatio: v))
-            : onUpdate(s.copyWith(routmyAspectRatio: v)),
+        onSelected: (v) => onUpdate(s.copyWith(routmyAspectRatio: v)),
       ),
     ),
-    rows.ImageGenSelectorRow(
+    MenuSelectorItem(
       label: 'Resolution',
-      value: size,
+      currentValue: size == customImageSizeOption
+          ? customImageSizeOption
+          : size,
       onTap: () => showOptions<String>(
         title: 'Resolution',
-        items: availableImageSizes,
-        labelBuilder: (v) => v,
+        items: [...availableImageSizes, customImageSizeOption],
+        labelBuilder: (v) =>
+            v == customImageSizeOption ? 'imggen_size_custom'.tr() : v,
         isSelected: (v) => size == v,
-        onSelected: (v) => isRu
-            ? onUpdate(s.copyWith(ruRoutmyImageSize: v))
-            : onUpdate(s.copyWith(routmyImageSize: v)),
+        onSelected: (v) => onUpdate(s.copyWith(routmyImageSize: v)),
       ),
     ),
-    if (model != 'bytedance/seedream-5.0-pro')
-      rows.ImageGenSelectorRow(
+    if (size == customImageSizeOption)
+      ...rows.imageGenCustomSizeFields(
+        width: s.routmyCustomWidth,
+        height: s.routmyCustomHeight,
+        onWidthChanged: (v) => onUpdate(s.copyWith(routmyCustomWidth: v)),
+        onHeightChanged: (v) => onUpdate(s.copyWith(routmyCustomHeight: v)),
+      ),
+    if (model != seedreamModel)
+      MenuSelectorItem(
         label: 'Quality',
-        value: quality == 'hd' ? 'HD' : 'Standard',
+        currentValue: quality == 'hd' ? 'HD' : 'Standard',
         onTap: () => showOptions<String>(
           title: 'Quality',
           items: ['standard', 'hd'],
           labelBuilder: (v) => v == 'hd' ? 'HD' : 'Standard',
           isSelected: (v) => quality == v,
-          onSelected: (v) => isRu
-              ? onUpdate(s.copyWith(ruRoutmyQuality: v))
-              : onUpdate(s.copyWith(routmyQuality: v)),
+          onSelected: (v) => onUpdate(s.copyWith(routmyQuality: v)),
         ),
       ),
   ];
@@ -154,7 +222,6 @@ List<Widget> buildRoutmyModelFields(
 /// suffix is rendered inline — the spinner is bound to [isFetching]
 /// and the refresh icon calls [onFetchModels].
 List<Widget> buildOpenaiModelFields(
-  BuildContext context,
   ImageGenSettings s, {
   required bool isFetching,
   required VoidCallback onFetchModels,
@@ -167,43 +234,35 @@ List<Widget> buildOpenaiModelFields(
       value: s.customModel,
       hint: 'dall-e-3',
       onChanged: (v) => onUpdate(s.copyWith(customModel: v)),
-      suffix: InkWell(
-        onTap: onFetchModels,
-        borderRadius: BorderRadius.circular(8),
-        child: Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: context.cs.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.black12),
-          ),
-          child: isFetching
-              ? const Center(
-                  child: SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                )
-              : Icon(Icons.refresh, size: 18, color: context.cs.primary),
-        ),
+      suffix: rows.ImageGenFetchButton(
+        isFetching: isFetching,
+        onPressed: onFetchModels,
       ),
     ),
-    rows.ImageGenSelectorRow(
+    MenuSelectorItem(
       label: 'Image Size',
-      value: s.openaiSize,
+      currentValue: s.openaiSize == customImageSizeOption
+          ? customImageSizeOption
+          : s.openaiSize,
       onTap: () => showOptions<String>(
         title: 'Image Size',
-        items: OpenAIConstants.sizes,
-        labelBuilder: (v) => v,
+        items: [...OpenAIConstants.sizes, customImageSizeOption],
+        labelBuilder: (v) =>
+            v == customImageSizeOption ? 'imggen_size_custom'.tr() : v,
         isSelected: (v) => s.openaiSize == v,
         onSelected: (v) => onUpdate(s.copyWith(openaiSize: v)),
       ),
     ),
-    rows.ImageGenSelectorRow(
+    if (s.openaiSize == customImageSizeOption)
+      ...rows.imageGenCustomSizeFields(
+        width: s.openaiCustomWidth,
+        height: s.openaiCustomHeight,
+        onWidthChanged: (v) => onUpdate(s.copyWith(openaiCustomWidth: v)),
+        onHeightChanged: (v) => onUpdate(s.copyWith(openaiCustomHeight: v)),
+      ),
+    MenuSelectorItem(
       label: 'Quality',
-      value: s.openaiQuality == 'hd' ? 'HD' : 'Standard',
+      currentValue: s.openaiQuality == 'hd' ? 'HD' : 'Standard',
       onTap: () => showOptions<String>(
         title: 'Quality',
         items: OpenAIConstants.qualities,
@@ -230,9 +289,9 @@ List<Widget> buildGeminiModelFields(
       hint: 'imagen-3.0-generate-002',
       onChanged: (v) => onUpdate(s.copyWith(customModel: v)),
     ),
-    rows.ImageGenSelectorRow(
+    MenuSelectorItem(
       label: 'Aspect Ratio',
-      value: s.geminiAspectRatio,
+      currentValue: s.geminiAspectRatio,
       onTap: () => showOptions<String>(
         title: 'Aspect Ratio',
         items: GeminiConstants.aspectRatios,
@@ -241,16 +300,26 @@ List<Widget> buildGeminiModelFields(
         onSelected: (v) => onUpdate(s.copyWith(geminiAspectRatio: v)),
       ),
     ),
-    rows.ImageGenSelectorRow(
+    MenuSelectorItem(
       label: 'Resolution',
-      value: s.geminiImageSize,
+      currentValue: s.geminiImageSize == customImageSizeOption
+          ? customImageSizeOption
+          : s.geminiImageSize,
       onTap: () => showOptions<String>(
         title: 'Resolution',
-        items: GeminiConstants.imageSizes,
-        labelBuilder: (v) => v,
+        items: [...GeminiConstants.imageSizes, customImageSizeOption],
+        labelBuilder: (v) =>
+            v == customImageSizeOption ? 'imggen_size_custom'.tr() : v,
         isSelected: (v) => s.geminiImageSize == v,
         onSelected: (v) => onUpdate(s.copyWith(geminiImageSize: v)),
       ),
     ),
+    if (s.geminiImageSize == customImageSizeOption)
+      ...rows.imageGenCustomSizeFields(
+        width: s.geminiCustomWidth,
+        height: s.geminiCustomHeight,
+        onWidthChanged: (v) => onUpdate(s.copyWith(geminiCustomWidth: v)),
+        onHeightChanged: (v) => onUpdate(s.copyWith(geminiCustomHeight: v)),
+      ),
   ];
 }

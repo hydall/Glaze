@@ -28,7 +28,7 @@ class ExtensionPresetsNotifier extends StateNotifier<List<ExtensionPreset>> {
   Future<void> _persistTail = Future<void>.value();
 
   ExtensionPresetsRepository get _repo =>
-      ExtensionPresetsRepository(_ref.read(appDbProvider));
+      _ref.read(extensionPresetsRepoProvider);
 
   Future<void> _load() async {
     state = await _repo.getAll();

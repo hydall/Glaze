@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:collection/collection.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
@@ -8,6 +9,7 @@ import 'package:path/path.dart' as p;
 import '../../core/constants/image_gen_patterns.dart';
 import '../../core/models/chat_message.dart';
 import '../../core/state/db_provider.dart';
+import '../../core/utils/platform_paths.dart';
 import '../../core/utils/time_helpers.dart';
 import '../image_gen/services/image_tag_markup.dart';
 import 'services/image_gen_processor.dart';
@@ -144,22 +146,26 @@ class ImageRecoveryService {
       ImgGenPatterns.imgSrcGenRegex,
       '[IMG:ERROR:${jsonEncode({'error': 'Generation interrupted'})}]',
     );
-    result = result.replaceAllMapped(ImgGenPatterns.htmlIigTagRegex, (m) {
-      final instruction = m.group(1) ?? '';
+    // Only elements still waiting for a picture; the same element with an
+    // image in its `src` is a finished block, which an interrupted generation
+    // must never turn into an error card.
+    String interrupted(Match m) {
+      if (!ImgGenPatterns.isPendingIigElement(m.group(0)!)) return m.group(0)!;
       final errorJson = jsonEncode({
         'error': 'Generation interrupted',
-        'instruction': instruction,
+        'instruction': m.group(1) ?? '',
       });
       return '[IMG:ERROR:$errorJson]';
-    });
-    result = result.replaceAllMapped(ImgGenPatterns.htmlIigTagDoubleRegex, (m) {
-      final instruction = m.group(1) ?? '';
-      final errorJson = jsonEncode({
-        'error': 'Generation interrupted',
-        'instruction': instruction,
-      });
-      return '[IMG:ERROR:$errorJson]';
-    });
+    }
+
+    result = result.replaceAllMapped(
+      ImgGenPatterns.htmlIigTagRegex,
+      interrupted,
+    );
+    result = result.replaceAllMapped(
+      ImgGenPatterns.htmlIigTagDoubleRegex,
+      interrupted,
+    );
     result = result.replaceAllMapped(ImgGenPatterns.imgGenRegex, (m) {
       final instruction = m.group(1) ?? '';
       final errorJson = instruction.isNotEmpty
@@ -174,54 +180,106 @@ class ImageRecoveryService {
   }
 
   static String replaceFirstImgErrorOrGen(String text, String resultPath) {
+    final replacement = ImageTagMarkup.encodeResultElement(
+      ImageBlockPayload(paths: [resultPath]),
+    );
     if (ImgGenPatterns.imgErrorRegex.hasMatch(text)) {
-      return text.replaceFirst(
-        ImgGenPatterns.imgErrorRegex,
-        '[IMG:RESULT:$resultPath]',
-      );
+      return text.replaceFirst(ImgGenPatterns.imgErrorRegex, replacement);
     }
     if (ImgGenPatterns.imgGenHtmlRegex.hasMatch(text)) {
-      return text.replaceFirst(
-        ImgGenPatterns.imgGenHtmlRegex,
-        '[IMG:RESULT:$resultPath]',
-      );
+      return text.replaceFirst(ImgGenPatterns.imgGenHtmlRegex, replacement);
     }
     if (text.contains('[IMG:GEN]')) {
-      return text.replaceFirst('[IMG:GEN]', '[IMG:RESULT:$resultPath]');
+      return text.replaceFirst('[IMG:GEN]', replacement);
     }
     if (ImgGenPatterns.imgGenRegex.hasMatch(text)) {
-      return text.replaceFirst(
-        ImgGenPatterns.imgGenRegex,
-        '[IMG:RESULT:$resultPath]',
-      );
+      return text.replaceFirst(ImgGenPatterns.imgGenRegex, replacement);
     }
     return text;
   }
 
-  static String resetImgTagsToGen(String text) {
-    var result = text;
-    result = result.replaceAllMapped(ImgGenPatterns.imgErrorRegex, (m) {
-      final data = m.group(1) ?? '';
-      String instruction = '';
-      try {
-        final parsed = jsonDecode(data);
-        instruction = (parsed['instruction'] ?? '') as String;
-      } catch (_) {}
-      if (instruction.isNotEmpty) {
-        return '[IMG:GEN:$instruction]';
-      }
-      return '[IMG:GEN]';
-    });
-    result = result.replaceAllMapped(ImgGenPatterns.imgResultRegex, (m) {
-      final raw = m.group(1) ?? '';
-      final pipeIdx = raw.indexOf('|');
-      final instr = pipeIdx != -1 ? raw.substring(pipeIdx + 1) : '';
-      if (instr.isNotEmpty) {
-        return '[IMG:GEN:$instr]';
-      }
-      return '[IMG:GEN]';
-    });
-    return result;
+  /// Turns only the failed blocks back into pending tags, leaving the images
+  /// that did arrive in place. This is what the error card's regenerate button
+  /// runs: retrying one block must not throw away its finished siblings.
+  /// Only the failed blocks go back to pending; finished images stay.
+  static String resetImgErrorTagsToGen(String text) =>
+      ImageTagMarkup.resetImageErrorTags(text);
+
+  /// Every block of the message goes back to pending, keeping its prompt and
+  /// the images it already holds.
+  static String resetImgTagsToGen(String text) =>
+      ImageTagMarkup.resetErrorTags(text);
+
+  /// A regeneration carries forward only the images that are still on disk.
+  ///
+  /// A path that names no file can do nothing but render as a broken picture
+  /// and pad the block's switcher, and a regeneration is the one moment the
+  /// block is rewritten anyway — so this is where such a path is dropped
+  /// instead of being carried through yet another attempt.
+  static String dropMissingImages(String text) =>
+      ImageTagMarkup.dropCarriedImages(text, imageFileExists);
+
+  /// Whether an image a block carries can still be shown. Only local files can
+  /// go missing; a data URL or a remote picture is taken at its word.
+  static bool imageFileExists(String path) {
+    if (path.isEmpty) return false;
+    if (path.startsWith('data:') ||
+        path.startsWith('http://') ||
+        path.startsWith('https://')) {
+      return true;
+    }
+    return File(resolveGlazeFilePath(path) ?? path).existsSync();
+  }
+
+  /// Puts another image of one block on screen — the block-level counterpart
+  /// of a message swipe.
+  ///
+  /// The page has already swapped the picture when this arrives, so the write
+  /// only has to make the choice durable: the active swipe of the message is
+  /// rewritten in place, exactly like a regeneration does, and no swipe is
+  /// added for it.
+  Future<void> selectImageVariant(
+    String messageId,
+    int blockIndex,
+    int variantIndex,
+  ) async {
+    final current = _getState().value;
+    final session = current?.session;
+    if (current == null || session == null) return;
+
+    final message = session.messages.firstWhereOrNull((m) => m.id == messageId);
+    if (message == null || message.role != 'assistant') return;
+    if (ImageTagMarkup.setImageBlockVariant(
+          message.content,
+          blockIndex,
+          variantIndex,
+        ) ==
+        message.content) {
+      return;
+    }
+
+    final updated = await _ref
+        .read(chatRepoProvider)
+        .mutateMessage(
+          sessionId: session.id,
+          messageId: messageId,
+          updatedAt: currentTimestampSeconds(),
+          mutate: (stored) {
+            if (stored.role != 'assistant') return null;
+            final content = ImageTagMarkup.setImageBlockVariant(
+              stored.content,
+              blockIndex,
+              variantIndex,
+            );
+            if (content == stored.content) return null;
+            return ImageGenProcessor.replaceActiveImageContent(stored, content);
+          },
+        );
+    if (updated == null) return;
+    ChatSessionService.updateCache(updated);
+    final liveState = _getState().value;
+    if (liveState == null || liveState.session?.id != updated.id) return;
+    _setState(AsyncData(liveState.copyWith(session: updated)));
   }
 
   Future<void> retryImageGeneration() async {
@@ -243,10 +301,11 @@ class ImageRecoveryService {
     final hasRetryableContent =
         ImageTagMarkup.hasImageGenTags(lastMsg.content) ||
         lastMsg.content.contains('[IMG:ERROR:') ||
-        lastMsg.content.contains('[IMG:RESULT:');
+        lastMsg.content.contains('[IMG:RESULT:') ||
+        ImageTagMarkup.scanResultElements(lastMsg.content).isNotEmpty;
     if (!hasRetryableContent) return;
 
-    final resetContent = resetImgTagsToGen(lastMsg.content);
+    final resetContent = dropMissingImages(resetImgTagsToGen(lastMsg.content));
     if (resetContent == lastMsg.content &&
         !ImageTagMarkup.hasImageGenTags(resetContent)) {
       return;
@@ -260,12 +319,14 @@ class ImageRecoveryService {
           updatedAt: currentTimestampSeconds(),
           mutate: (message) {
             if (message.role != 'assistant') return null;
-            final content = resetImgTagsToGen(message.content);
+            final content = dropMissingImages(
+              resetImgTagsToGen(message.content),
+            );
             if (content == message.content &&
                 !ImageTagMarkup.hasImageGenTags(content)) {
               return null;
             }
-            return ImageGenProcessor.appendImageRegenerationSwipe(
+            return ImageGenProcessor.resetImageContentInPlace(
               message,
               content,
             );
@@ -324,7 +385,29 @@ class ImageRecoveryService {
     }
   }
 
-  Future<void> retryImageGenerationForMessage(String messageId) async {
+  /// Regenerates the image blocks of [messageId].
+  ///
+  /// [blockIndex] narrows the work to a single image — the block the user
+  /// tapped — leaving every other image of the message alone. Without it,
+  /// [failedOnly] still restricts the reset to the blocks that failed, and
+  /// with neither the whole message is generated again.
+  Future<void> retryImageGenerationForMessage(
+    String messageId, {
+    bool failedOnly = false,
+    int? blockIndex,
+  }) async {
+    String reset(String content) {
+      final pending = blockIndex != null
+          ? ImageTagMarkup.resetImageBlockAt(content, blockIndex)
+          : failedOnly
+          ? resetImgErrorTagsToGen(content)
+          : resetImgTagsToGen(content);
+      // An unchanged text is the caller's "nothing to do" signal, so the
+      // pruning below must not be what makes this look like a change.
+      if (pending == content) return content;
+      return dropMissingImages(pending);
+    }
+
     var current = _getState().value;
     if (current == null || current.session == null || current.isGenerating) {
       return;
@@ -354,7 +437,7 @@ class ImageRecoveryService {
     final msg = current.messages[messageIndex];
     if (msg.role != 'assistant') return;
 
-    var resetContent = resetImgTagsToGen(msg.content);
+    final resetContent = reset(msg.content);
     if (resetContent == msg.content) return;
 
     final resetSession = await _ref
@@ -365,9 +448,9 @@ class ImageRecoveryService {
           updatedAt: currentTimestampSeconds(),
           mutate: (message) {
             if (message.role != 'assistant') return null;
-            final content = resetImgTagsToGen(message.content);
+            final content = reset(message.content);
             if (content == message.content) return null;
-            return ImageGenProcessor.appendImageRegenerationSwipe(
+            return ImageGenProcessor.resetImageContentInPlace(
               message,
               content,
             );
@@ -427,7 +510,18 @@ class ImageRecoveryService {
     }
   }
 
-  Future<void> findImageOnDisk(String messageId, String instruction) async {
+  /// Attaches an orphaned file from the generated folder to a block that has
+  /// no image. [blockIndex] targets the block the user tapped; without it the
+  /// first block still waiting for an image is used.
+  Future<void> findImageOnDisk(
+    String messageId,
+    String instruction, {
+    int? blockIndex,
+  }) async {
+    String attach(String content, String path) => blockIndex != null
+        ? ImageTagMarkup.replaceImageBlockWithResult(content, blockIndex, path)
+        : replaceFirstImgErrorOrGen(content, path);
+
     final current = _getState().value;
     if (current == null || current.session == null) return;
 
@@ -475,8 +569,15 @@ class ImageRecoveryService {
       }
     }
 
+    // Stored paths are relative to the Glaze data root while the directory
+    // listing is absolute, so both sides are compared on the resolved path —
+    // without that every file reads as unclaimed and an image already shown in
+    // the message can be attached to a second block.
+    final claimedAbsolute = claimedPaths
+        .map((path) => resolveGlazeFilePath(path) ?? path)
+        .toSet();
     final unclaimed =
-        files.where((f) => !claimedPaths.contains(f.path)).toList()..sort(
+        files.where((f) => !claimedAbsolute.contains(f.path)).toList()..sort(
           (a, b) => b.lastAccessedSync().compareTo(a.lastAccessedSync()),
         );
 
@@ -501,11 +602,10 @@ class ImageRecoveryService {
 
     if (bestMatch == null) return;
 
-    final foundPath = bestMatch.path;
+    // Stored relative to the data root, like every other image path.
+    final foundPath = relativeGlazeFilePath(bestMatch.path);
 
-    var updatedContent = msg.content;
-    updatedContent = replaceFirstImgErrorOrGen(updatedContent, foundPath);
-
+    final updatedContent = attach(msg.content, foundPath);
     if (updatedContent == msg.content) return;
 
     final sessionId = current.session!.id;
@@ -516,10 +616,7 @@ class ImageRecoveryService {
           messageId: messageId,
           updatedAt: currentTimestampSeconds(),
           mutate: (message) {
-            final content = replaceFirstImgErrorOrGen(
-              message.content,
-              foundPath,
-            );
+            final content = attach(message.content, foundPath);
             if (content == message.content) return null;
             return ImageGenProcessor.replaceImageContentAt(
               message,

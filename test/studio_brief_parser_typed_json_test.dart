@@ -7,13 +7,13 @@ void main() {
   final logs = <String>[];
   final narrativeAgent = const StudioAgent(
     id: 'narrative',
+    controllerId: 'narrative',
     name: 'Narrative / Pacing / Style Controller',
-    sourceBlockNames: 'narrative_task',
   );
   final dialogueAgent = const StudioAgent(
     id: 'dialogue',
+    controllerId: 'dialogue',
     name: 'Dialogue Controller',
-    sourceBlockNames: 'dialogue_task',
   );
 
   setUp(() {
@@ -24,7 +24,10 @@ void main() {
   group('typed-JSON brief parsing (semantic keys)', () {
     test('parses JSON with capitalized Focus key', () {
       const raw = '{"Focus":["Beat: action, tempo: medium"]}';
-      final result = parser.sanitizeIntermediateAgentOutput(narrativeAgent, raw);
+      final result = parser.sanitizeIntermediateAgentOutput(
+        narrativeAgent,
+        raw,
+      );
 
       expect(result, isNotNull);
       expect(result, contains('Focus:'));
@@ -39,7 +42,10 @@ void main() {
 "target_length":"800-1400 words","target_paragraphs":"6-10",
 "avoid_repeating":"bar atmosphere paragraphs"}
 ''';
-      final result = parser.sanitizeIntermediateAgentOutput(narrativeAgent, raw);
+      final result = parser.sanitizeIntermediateAgentOutput(
+        narrativeAgent,
+        raw,
+      );
 
       expect(result, isNotNull);
       expect(result, contains('Focus:'));
@@ -73,7 +79,10 @@ void main() {
 
     test('unknown semantic keys go to constraints', () {
       const raw = '{"custom_key":"some value","another_key":"another value"}';
-      final result = parser.sanitizeIntermediateAgentOutput(narrativeAgent, raw);
+      final result = parser.sanitizeIntermediateAgentOutput(
+        narrativeAgent,
+        raw,
+      );
 
       expect(result, isNotNull);
       expect(result, contains('Constraints:'));
@@ -85,7 +94,10 @@ void main() {
       const raw = '''
 {"Focus":["Beat: social"],"beat_type":"social","avoid":["neon"],"avoid_repeating":"neon"}
 ''';
-      final result = parser.sanitizeIntermediateAgentOutput(narrativeAgent, raw);
+      final result = parser.sanitizeIntermediateAgentOutput(
+        narrativeAgent,
+        raw,
+      );
 
       expect(result, isNotNull);
       expect(result, contains('Focus:'));
@@ -105,8 +117,10 @@ void main() {
 
     test('still rejects truly empty JSON', () {
       const raw = '{"focus":[],"constraints":[],"avoid":[],"options":[]}';
-      final result =
-          parser.sanitizeIntermediateAgentOutput(narrativeAgent, raw);
+      final result = parser.sanitizeIntermediateAgentOutput(
+        narrativeAgent,
+        raw,
+      );
 
       expect(logs, isNotEmpty);
       expect(result, contains('Apply the default'));

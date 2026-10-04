@@ -31,6 +31,7 @@ void main() {
     bool enabled = true,
     int injectionPosition = 0,
     int injectionDepth = 4,
+    bool? marker,
   }) => {
     'identifier': identifier,
     'name': name ?? identifier,
@@ -39,6 +40,9 @@ void main() {
     'enabled': enabled,
     'injection_position': injectionPosition,
     'injection_depth': injectionDepth,
+    // SillyTavern omits the field entirely on non-marker prompts, so only
+    // write it when the test wants it present.
+    'marker': ?marker,
   };
 
   Set<String> blockIds(Preset p) => p.blocks.map((b) => b.id).toSet();
@@ -75,8 +79,8 @@ void main() {
       final mainBlock = preset.blocks.firstWhere((b) => b.id == 'main');
       expect(
         mainBlock.content,
-        equals(''),
-        reason: 'main is a mandatory block, content is cleared on import',
+        equals('Write next reply'),
+        reason: 'main is an ordinary text prompt in ST, content is preserved',
       );
 
       final wib = preset.blocks.firstWhere((b) => b.id == 'worldInfoBefore');
@@ -238,8 +242,8 @@ void main() {
     final mainBlock = preset.blocks.firstWhere((b) => b.id == 'main');
     expect(
       mainBlock.content,
-      equals(''),
-      reason: 'main is mandatory, content cleared on import',
+      equals('Write {{char}}\'s next reply'),
+      reason: 'main is an ordinary text prompt in ST, content is preserved',
     );
 
     final jb = preset.blocks.firstWhere((b) => b.id == 'jailbreak');
@@ -380,11 +384,155 @@ void main() {
     final preset = parseSillyTavernPreset(json, 'disabled.json');
     final nsfw = preset.blocks.firstWhere((b) => b.id == 'nsfw');
     expect(nsfw.enabled, isFalse);
+    expect(nsfw.isStashed, isFalse);
     expect(
       nsfw.content,
-      equals(''),
-      reason: 'nsfw is mandatory, content cleared',
+      equals('NSFW prompt'),
+      reason: 'nsfw is ST\'s "Auxiliary Prompt" — ordinary text, preserved',
     );
+  });
+
+  test('prompts omitted from prompt_order are stashed without disabling', () {
+    final json = makeStPreset(
+      name: 'Stash Test',
+      prompts: [
+        makePrompt(identifier: 'main', content: 'Active'),
+        makePrompt(identifier: 'orphan', content: 'Latent', enabled: true),
+        makePrompt(identifier: 'disabledOrphan', enabled: false),
+        makePrompt(identifier: 'chatHistory'),
+      ],
+      promptOrder: [
+        {'identifier': 'main', 'enabled': true},
+        {'identifier': 'chatHistory', 'enabled': true},
+      ],
+    );
+
+    final preset = parseSillyTavernPreset(json, 'stash.json');
+    final orphan = preset.blocks.firstWhere((b) => b.id == 'orphan');
+    final disabledOrphan = preset.blocks.firstWhere(
+      (b) => b.id == 'disabledOrphan',
+    );
+
+    expect(orphan.enabled, isTrue);
+    expect(orphan.isStashed, isTrue);
+    expect(disabledOrphan.enabled, isFalse);
+    expect(disabledOrphan.isStashed, isTrue);
+  });
+
+  test('Glaze format preserves independent stash and enabled state', () {
+    final preset = parseSillyTavernPreset({
+      'name': 'Glaze Stash',
+      'prompts': [
+        {
+          'name': 'Latent',
+          'role': 'system',
+          'content': 'Hidden',
+          'enabled': true,
+          'isStashed': true,
+          'insertion_mode': 'relative',
+        },
+      ],
+    }, 'glaze-stash.json');
+
+    final block = preset.blocks.firstWhere((b) => b.name == 'Latent');
+    expect(block.enabled, isTrue);
+    expect(block.isStashed, isTrue);
+  });
+
+  test('nsfw slot carrying a custom jailbreak keeps its content', () {
+    // Regression: presets in the wild park arbitrary prompts on the built-in
+    // `nsfw` identifier (ST labels it "Auxiliary Prompt"). Glaze used to treat
+    // that identifier as a marker and wipe the text on import.
+    final json = makeStPreset(
+      name: 'Candy',
+      prompts: [
+        makePrompt(
+          identifier: 'nsfw',
+          name: '| 🛑 | 🍫 | GEMENI {{CONFIRMATION}}',
+          role: 'user',
+          content: '<[YOUR REPLY STARTS HERE]>',
+        ),
+        makePrompt(identifier: 'chatHistory', marker: true),
+      ],
+      promptOrder: [
+        {'identifier': 'nsfw', 'enabled': true},
+        {'identifier': 'chatHistory', 'enabled': true},
+      ],
+    );
+
+    final block = parseSillyTavernPreset(
+      json,
+      'candy.json',
+    ).blocks.firstWhere((b) => b.id == 'nsfw');
+
+    expect(block.content, equals('<[YOUR REPLY STARTS HERE]>'));
+    expect(block.name, equals('| 🛑 | 🍫 | GEMENI {{CONFIRMATION}}'));
+    expect(block.role, equals('user'));
+    expect(block.isStatic, isFalse);
+  });
+
+  test('marker:true on an unknown identifier clears content', () {
+    final json = makeStPreset(
+      name: 'Marker Test',
+      prompts: [
+        makePrompt(
+          identifier: 'somethingNew',
+          name: 'Something New',
+          content: 'placeholder text',
+          marker: true,
+        ),
+        makePrompt(identifier: 'chatHistory', marker: true),
+      ],
+      promptOrder: [
+        {'identifier': 'somethingNew', 'enabled': true},
+        {'identifier': 'chatHistory', 'enabled': true},
+      ],
+    );
+
+    final block = parseSillyTavernPreset(
+      json,
+      'marker.json',
+    ).blocks.firstWhere((b) => b.id == 'somethingNew');
+
+    expect(
+      block.content,
+      equals(''),
+      reason: 'an explicit marker flag makes the block a placeholder',
+    );
+  });
+
+  test('custom prompt named like a marker keeps its content', () {
+    // `_blockNameToId` maps "Scenario" onto the scenario insertion point. A
+    // custom prompt that merely shares the name must not be swallowed by it.
+    final json = makeStPreset(
+      name: 'Name Collision',
+      prompts: [
+        makePrompt(
+          identifier: 'af3c1e70-0000-4000-8000-000000000001',
+          name: 'Scenario',
+          content: 'A rainy night in Prague.',
+        ),
+        makePrompt(identifier: 'scenario', marker: true),
+        makePrompt(identifier: 'chatHistory', marker: true),
+      ],
+      promptOrder: [
+        {'identifier': 'af3c1e70-0000-4000-8000-000000000001', 'enabled': true},
+        {'identifier': 'scenario', 'enabled': true},
+        {'identifier': 'chatHistory', 'enabled': true},
+      ],
+    );
+
+    final preset = parseSillyTavernPreset(json, 'collision.json');
+
+    final custom = preset.blocks.firstWhere(
+      (b) => b.id == 'af3c1e70-0000-4000-8000-000000000001',
+    );
+    expect(custom.content, equals('A rainy night in Prague.'));
+    expect(custom.isStatic, isFalse);
+
+    final marker = preset.blocks.firstWhere((b) => b.id == 'scenario');
+    expect(marker.content, equals(''));
+    expect(marker.isStatic, isTrue);
   });
 
   test('finalizeImportedPreset does not overwrite existing custom blocks', () {

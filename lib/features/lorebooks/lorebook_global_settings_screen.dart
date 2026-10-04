@@ -4,10 +4,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/models/lorebook.dart';
+import '../../../core/state/lorebook_embedding_provider.dart';
 import '../../../core/state/lorebook_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_scaffold.dart';
 import '../../../shared/widgets/help_tip.dart';
+import '../../../shared/widgets/list_controls.dart';
+import 'widgets/lorebook_option_sheet.dart';
 
 class LorebookGlobalSettingsScreen extends ConsumerStatefulWidget {
   const LorebookGlobalSettingsScreen({super.key});
@@ -30,196 +33,138 @@ class _LorebookGlobalSettingsScreenState
   @override
   Widget build(BuildContext context) {
     final settings = _settings;
+    // Vector knobs only exist while the active API preset has semantic search
+    // switched on; otherwise the screen is keyword-only.
+    final vectorAvailable = ref.watch(vectorSearchAvailableProvider);
 
-    return Scaffold(
-      backgroundColor: context.cs.surface,
-      body: Column(
+    return GlazeScaffold(
+      title: 'title_lorebook_settings'.tr(),
+      onBack: () {
+        if (context.canPop()) {
+          context.pop();
+        } else {
+          context.go('/tools/lorebooks');
+        }
+      },
+      body: ListView(
+        padding: const EdgeInsets.all(16),
         children: [
-          SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-              child: GlazeAppBar(
-                title: 'title_lorebook_settings'.tr(),
-                leading: BackButton(
-                  onPressed: () {
-                    if (context.canPop()) {
-                      context.pop();
-                    } else {
-                      context.go('/tools/lorebooks');
-                    }
-                  },
-                ),
-              ),
-            ),
+          _SectionHeader('lorebook_matching'.tr(), helpTerm: 'lorebook-keys'),
+          _DropdownField<String>(
+            label: 'label_key_search_mode'.tr(),
+            value: settings.keySearchMode,
+            options: [
+              LorebookOption('tavern', 'match_whole_words_st'.tr()),
+              LorebookOption('glaze', 'match_whole_words_glaze'.tr()),
+            ],
+            onChanged: (v) => _update(settings.copyWith(keySearchMode: v)),
           ),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                _SectionHeader('search'.tr(), helpTerm: 'lorebook-keys'),
-                _DropdownField<String>(
-                  label: 'label_key_search_mode'.tr(),
-                  value: settings.keySearchMode,
-                  items: [
-                    DropdownMenuItem(
-                      value: 'tavern',
-                      child: Text('match_whole_words_st'.tr()),
-                    ),
-                    DropdownMenuItem(
-                      value: 'glaze',
-                      child: Text('match_whole_words_glaze'.tr()),
-                    ),
-                  ],
-                  onChanged: (v) =>
-                      _update(settings.copyWith(keySearchMode: v)),
-                ),
-                const SizedBox(height: 12),
-                _DropdownField<String>(
-                  label: 'label_search_type'.tr(),
-                  value: settings.searchType,
-                  items: [
-                    DropdownMenuItem(value: 'keyword', child: Text('search_type_keys'.tr())),
-                    DropdownMenuItem(value: 'vector', child: Text('search_type_vector'.tr())),
-                    DropdownMenuItem(
-                      value: 'both',
-                      child: Text('search_type_both'.tr()),
-                    ),
-                  ],
-                  onChanged: (v) => _update(settings.copyWith(searchType: v)),
-                ),
-                const SizedBox(height: 12),
-                _NumberField(
-                  label: settings.searchType == 'vector'
-                      ? 'label_vector_scan_depth'.tr()
-                      : 'label_scan_depth_lore'.tr(),
-                  value: settings.scanDepth,
-                  min: 1,
-                  max: 100,
-                  onChanged: (v) => _update(settings.copyWith(scanDepth: v)),
-                ),
-                const SizedBox(height: 24),
-
-                _SectionHeader('section_injection_rules'.tr()),
-                _NumberField(
-                  label: 'label_max_injected_entries'.tr(),
-                  value: settings.maxInjectedEntries,
-                  min: 1,
-                  max: 100,
-                  onChanged: (v) =>
-                      _update(settings.copyWith(maxInjectedEntries: v)),
-                ),
-                const SizedBox(height: 12),
-                _DropdownField<String>(
-                  label: 'label_injection_position'.tr(),
-                  value: settings.injectionPosition,
-                  items: [
-                    DropdownMenuItem(
-                      value: 'worldInfoBefore',
-                      child: Text('pos_before_char'.tr()),
-                    ),
-                    DropdownMenuItem(
-                      value: 'worldInfoAfter',
-                      child: Text('pos_after_char'.tr()),
-                    ),
-                    DropdownMenuItem(
-                      value: 'lorebooksMacro',
-                      child: Text('pos_lorebooks_macro'.tr()),
-                    ),
-                  ],
-                  onChanged: (v) =>
-                      _update(settings.copyWith(injectionPosition: v)),
-                ),
-                const SizedBox(height: 24),
-
-                _SectionHeader('lorebook_token_budget'.tr(), helpTerm: 'lorebook-budget'),
-                _DropdownField<String>(
-                  label: 'label_lorebook_reserve_mode'.tr(),
-                  value: settings.reserveMode,
-                  items: [
-                    DropdownMenuItem(
-                      value: 'percent',
-                      child: Text('lorebook_reserve_percent'.tr()),
-                    ),
-                    DropdownMenuItem(
-                      value: 'tokens',
-                      child: Text('lorebook_reserve_absolute'.tr()),
-                    ),
-                  ],
-                  onChanged: (v) => _update(settings.copyWith(reserveMode: v)),
-                ),
-                const SizedBox(height: 12),
-                _NumberField(
-                  label: settings.reserveMode == 'percent'
-                      ? 'label_lorebook_reserve_percent'.tr()
-                      : 'label_lorebook_reserve_tokens'.tr(),
-                  value: settings.reserveValue,
-                  min: 0,
-                  max: settings.reserveMode == 'percent' ? 100 : 2147483647,
-                  onChanged: (v) => _update(settings.copyWith(reserveValue: v)),
-                ),
-                const SizedBox(height: 24),
-
-                if (settings.searchType != 'keyword') ...[
-                  _SectionHeader('section_vector_search'.tr()),
-                  _SliderField(
-                    label: 'label_similarity_threshold'.tr(),
-                    value: settings.vectorThreshold,
-                    min: 0.0,
-                    max: 1.0,
-                    divisions: 20,
-                    displayText: settings.vectorThreshold.toStringAsFixed(2),
-                    onChanged: (v) =>
-                        _update(settings.copyWith(vectorThreshold: v)),
-                  ),
-                  const SizedBox(height: 12),
-                  _NumberField(
-                    label: 'label_top_k'.tr(),
-                    value: settings.vectorTopK,
-                    min: 1,
-                    max: 50,
-                    onChanged: (v) => _update(settings.copyWith(vectorTopK: v)),
-                  ),
-                  if (settings.searchType == 'both') ...[
-                    const SizedBox(height: 12),
-                    _SliderField(
-                      label: 'label_kw_vector_split'.tr(),
-                      value: settings.keywordVectorSplit.toDouble(),
-                      min: 0,
-                      max: 100,
-                      divisions: 20,
-                      displayText:
-                          '${settings.keywordVectorSplit}% key / ${100 - settings.keywordVectorSplit}% vec',
-                      onChanged: (v) => _update(
-                        settings.copyWith(keywordVectorSplit: v.round()),
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 24),
-                ],
-
-                _SectionHeader('lorebook_matching'.tr()),
-                _SwitchField(
-                  label: 'label_case_sensitive'.tr(),
-                  value: settings.caseSensitive,
-                  onChanged: (v) =>
-                      _update(settings.copyWith(caseSensitive: v)),
-                ),
-                _SwitchField(
-                  label: 'label_recursive_scan'.tr(),
-                  value: settings.recursiveScan,
-                  onChanged: (v) =>
-                      _update(settings.copyWith(recursiveScan: v)),
-                ),
-                _SwitchField(
-                  label: 'label_match_whole_words'.tr(),
-                  value: settings.matchWholeWords,
-                  onChanged: (v) =>
-                      _update(settings.copyWith(matchWholeWords: v)),
-                ),
+          if (vectorAvailable) ...[
+            const SizedBox(height: 12),
+            _DropdownField<String>(
+              label: 'label_search_type'.tr(),
+              value: settings.searchType,
+              options: [
+                LorebookOption('keyword', 'search_type_keys'.tr()),
+                LorebookOption('vector', 'search_type_vector'.tr()),
+                LorebookOption('both', 'search_type_both'.tr()),
               ],
+              onChanged: (v) => _update(settings.copyWith(searchType: v)),
             ),
+          ],
+          const SizedBox(height: 12),
+          _NumberField(
+            label: vectorAvailable && settings.searchType == 'vector'
+                ? 'label_vector_scan_depth'.tr()
+                : 'label_scan_depth_lore'.tr(),
+            value: settings.scanDepth,
+            min: 1,
+            max: 100,
+            onChanged: (v) => _update(settings.copyWith(scanDepth: v)),
           ),
+          const SizedBox(height: 12),
+          _SwitchField(
+            label: 'label_case_sensitive'.tr(),
+            value: settings.caseSensitive,
+            onChanged: (v) => _update(settings.copyWith(caseSensitive: v)),
+          ),
+          _SwitchField(
+            label: 'label_recursive_scan'.tr(),
+            value: settings.recursiveScan,
+            onChanged: (v) => _update(settings.copyWith(recursiveScan: v)),
+          ),
+          _SwitchField(
+            label: 'label_match_whole_words'.tr(),
+            value: settings.matchWholeWords,
+            onChanged: (v) => _update(settings.copyWith(matchWholeWords: v)),
+          ),
+          const SizedBox(height: 24),
+
+          if (vectorAvailable && settings.searchType != 'keyword') ...[
+            _SectionHeader('section_vector_search'.tr()),
+            _SliderField(
+              label: 'label_similarity_threshold'.tr(),
+              value: settings.vectorThreshold,
+              min: 0.0,
+              max: 1.0,
+              divisions: 20,
+              displayText: settings.vectorThreshold.toStringAsFixed(2),
+              onChanged: (v) => _update(settings.copyWith(vectorThreshold: v)),
+            ),
+            const SizedBox(height: 12),
+            _NumberField(
+              label: 'label_top_k'.tr(),
+              value: settings.vectorTopK,
+              min: 1,
+              max: 50,
+              onChanged: (v) => _update(settings.copyWith(vectorTopK: v)),
+            ),
+            const SizedBox(height: 24),
+          ],
+
+          _SectionHeader('section_injection_rules'.tr()),
+          _NumberField(
+            label: 'label_max_injected_entries'.tr(),
+            value: settings.maxInjectedEntries,
+            min: 1,
+            max: 100,
+            onChanged: (v) => _update(settings.copyWith(maxInjectedEntries: v)),
+          ),
+          const SizedBox(height: 12),
+          _DropdownField<String>(
+            label: 'label_injection_position'.tr(),
+            value: settings.injectionPosition,
+            options: [
+              LorebookOption('worldInfoBefore', 'pos_before_char'.tr()),
+              LorebookOption('worldInfoAfter', 'pos_after_char'.tr()),
+              LorebookOption('lorebooksMacro', 'pos_lorebooks_macro'.tr()),
+            ],
+            onChanged: (v) =>
+                _update(settings.copyWith(injectionPosition: v)),
+          ),
+          const SizedBox(height: 24),
+
+          _SectionHeader('lorebook_token_budget'.tr(), helpTerm: 'lorebook-budget'),
+          _DropdownField<String>(
+            label: 'label_lorebook_reserve_mode'.tr(),
+            value: settings.reserveMode,
+            options: [
+              LorebookOption('percent', 'lorebook_reserve_percent'.tr()),
+              LorebookOption('tokens', 'lorebook_reserve_absolute'.tr()),
+            ],
+            onChanged: (v) => _update(settings.copyWith(reserveMode: v)),
+          ),
+          const SizedBox(height: 12),
+          _NumberField(
+            label: settings.reserveMode == 'percent'
+                ? 'label_lorebook_reserve_percent'.tr()
+                : 'label_lorebook_reserve_tokens'.tr(),
+            value: settings.reserveValue,
+            min: 0,
+            max: settings.reserveMode == 'percent' ? 100 : 2147483647,
+            onChanged: (v) => _update(settings.copyWith(reserveValue: v)),
+          ),
+          const SizedBox(height: 24),
         ],
       ),
     );
@@ -367,18 +312,22 @@ class _NumberFieldState extends State<_NumberField> {
 class _DropdownField<T> extends StatelessWidget {
   final String label;
   final T value;
-  final List<DropdownMenuItem<T>> items;
+  final List<LorebookOption<T>> options;
   final ValueChanged<T> onChanged;
 
   const _DropdownField({
     required this.label,
     required this.value,
-    required this.items,
+    required this.options,
     required this.onChanged,
   });
 
   @override
   Widget build(BuildContext context) {
+    final current = options.firstWhere(
+      (o) => o.value == value,
+      orElse: () => options.first,
+    );
     return Row(
       children: [
         Expanded(
@@ -388,29 +337,20 @@ class _DropdownField<T> extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 8),
-        Flexible(
-          flex: 2,
-          child: DropdownButtonFormField<T>(
-            initialValue: value,
-            items: items,
-            isExpanded: true,
-            onChanged: (v) {
-              if (v != null) onChanged(v);
-            },
-            style: TextStyle(color: context.cs.onSurface, fontSize: 13),
-            dropdownColor: context.cs.surface,
-            decoration: InputDecoration(
-              isDense: true,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 10,
-                vertical: 6,
-              ),
-              filled: true,
-              fillColor: Colors.white.withValues(alpha: 0.05),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
+        GlazeDropdownChip(
+          label: current.label,
+          onTap: () => showGlazePickerSheet(
+            context,
+            title: label,
+            items: [
+              for (final option in options)
+                GlazePickerItem(
+                  label: option.label,
+                  isActive: option.value == value,
+                  value: option.value,
+                ),
+            ],
+            onSelect: (v) => onChanged(v as T),
           ),
         ),
       ],

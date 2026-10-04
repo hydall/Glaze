@@ -53,22 +53,25 @@ abstract class MemoryGlobalSettings with _$MemoryGlobalSettings {
   }) = _MemoryGlobalSettings;
 
   factory MemoryGlobalSettings.fromJson(Map<String, dynamic> json) =>
-      _$MemoryGlobalSettingsFromJson(_migrateInjectionTargetInPlace(json));
+      _$MemoryGlobalSettingsFromJson(_migrateLegacyValuesInPlace(json));
 }
 
 /// Translates the legacy `summary_block` / `summary_macro` enum values
 /// (pre-{{memory}}-split) to `hard_block` / `macro` in-place. The old
 /// values were misleadingly named because the "summary" prefix was
 /// about *where* memory goes, not about the summary feature itself.
-Map<String, dynamic> _migrateInjectionTargetInPlace(Map<String, dynamic> json) {
-  final raw = json['injectionTarget'];
+Map<String, dynamic> _migrateLegacyValuesInPlace(Map<String, dynamic> json) {
+  var result = json;
+  final raw = result['injectionTarget'];
   if (raw == 'summary_block') {
-    return {...json, 'injectionTarget': 'hard_block'};
+    result = {...result, 'injectionTarget': 'hard_block'};
+  } else if (raw == 'summary_macro') {
+    result = {...result, 'injectionTarget': 'macro'};
   }
-  if (raw == 'summary_macro') {
-    return {...json, 'injectionTarget': 'macro'};
+  if (result['memoryMode'] == 'agentic') {
+    result = {...result, 'memoryMode': 'deep'};
   }
-  return json;
+  return result;
 }
 
 final memoryGlobalSettingsProvider =

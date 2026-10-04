@@ -5,18 +5,21 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/models/gallery_entry.dart';
 import '../../core/utils/platform_paths.dart';
+import '../../shared/widgets/glaze_spinner.dart';
 import 'gallery_provider.dart';
+import '../../shared/widgets/glaze_sheet.dart';
 
 Future<GalleryEntry?> showCharacterGalleryImagePicker(
   BuildContext context, {
   required String charId,
 }) {
-  return showModalBottomSheet<GalleryEntry>(
+  return showGlazeSheet<GalleryEntry>(
     context: context,
     useRootNavigator: true,
     useSafeArea: true,
     isScrollControlled: true,
     backgroundColor: Theme.of(context).colorScheme.surface,
+    windowChrome: false,
     builder: (_) => _GalleryImagePicker(charId: charId),
   );
 }
@@ -29,8 +32,11 @@ class _GalleryImagePicker extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final gallery = ref.watch(galleryProvider(charId));
+    final inWindow = GlazeSheetWindowScope.of(context);
     return SizedBox(
-      height: MediaQuery.sizeOf(context).height * 0.75,
+      height: inWindow
+          ? double.infinity
+          : MediaQuery.sizeOf(context).height * 0.75,
       child: Column(
         children: [
           Padding(
@@ -52,7 +58,7 @@ class _GalleryImagePicker extends ConsumerWidget {
           ),
           Expanded(
             child: gallery.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
+              loading: () => const Center(child: GlazeSpinner()),
               error: (error, _) => Center(child: Text(error.toString())),
               data: (entries) {
                 if (entries.isEmpty) {

@@ -70,11 +70,11 @@ class CleanerPromptBuilder {
         ..writeln();
     }
 
-    // Authoritative style rules from the active preset.
+    // Authoritative style rules from the active Studio preset.
     if (rules.isNotEmpty) {
       buffer
         ..writeln(
-          'AUTHORITATIVE RULES (from the active preset — follow these exactly; '
+          'AUTHORITATIVE RULES (from the active Studio preset — follow these exactly; '
           'they OVERRIDE the generic guidance below, especially for output '
           'language and formatting):',
         )

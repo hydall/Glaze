@@ -5,7 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:glaze_flutter/core/db/app_db.dart';
-import 'package:glaze_flutter/core/llm/aux_llm_client.dart' show AuxApiConfig;
 import 'package:glaze_flutter/core/llm/prompt/main_model_context_snapshot.dart';
 import 'package:glaze_flutter/core/llm/studio_ledger_reconciliation.dart';
 import 'package:glaze_flutter/core/llm/studio_turn_config_snapshot.dart';
@@ -55,7 +54,6 @@ class _RecordingLedgerStage extends LedgerStage {
     required String finalAssistantText,
     required ChatMessage targetMessage,
     bool isManualRerun = false,
-    AuxApiConfig? resolvedConfig,
     CancelToken? cancelToken,
     StudioTurnConfigSnapshot? studioTurnConfig,
   }) async {
@@ -94,14 +92,22 @@ void main() {
                 ),
           );
 
+      // The turn just generated follows five completed interaction chunks.
+      // The opening assistant belongs to the first chunk; the fresh a6 is only
+      // the acceptance trigger and remains outside the reconciliation range.
       const assistant = ChatMessage(
-        id: 'a7',
+        id: 'a6',
         role: 'assistant',
         content: 'Raw direct response',
         timestamp: 1,
       );
       final messages = <ChatMessage>[
-        for (var turn = 1; turn <= 6; turn++) ...[
+        const ChatMessage(
+          id: 'a0',
+          role: 'assistant',
+          content: 'Opening message',
+        ),
+        for (var turn = 1; turn <= 5; turn++) ...[
           ChatMessage(id: 'u$turn', role: 'user', content: 'User turn $turn'),
           ChatMessage(
             id: 'a$turn',
@@ -109,7 +115,7 @@ void main() {
             content: 'Assistant turn $turn',
           ),
         ],
-        const ChatMessage(id: 'u7', role: 'user', content: 'User turn 7'),
+        const ChatMessage(id: 'u6', role: 'user', content: 'User turn 6'),
         assistant,
       ];
       const session = ChatSession(
@@ -174,7 +180,7 @@ void main() {
         currentAssistantMessageId: ledger.targetMessage!.id,
       );
       expect(plan, isNotNull);
-      expect(plan!.endMessage.id, 'a6');
+      expect(plan!.endMessage.id, 'a5');
     },
   );
 }

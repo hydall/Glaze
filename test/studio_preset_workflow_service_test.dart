@@ -1,9 +1,15 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:glaze_flutter/core/application/sync_repo_interfaces.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
 import 'package:glaze_flutter/features/studio/services/studio_preset_workflow_service.dart';
 
 void main() {
+  setUp(() {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    SharedPreferences.setMockInitialValues({});
+  });
+
   group('StudioPresetWorkflowService', () {
     test('creates a copy of the global active preset and selects it', () async {
       final store = _MemoryStudioPresetStore([
@@ -13,7 +19,6 @@ void main() {
           name: 'Source',
           blocks: [StudioPresetBlock(id: 'block', content: 'source')],
           agentEnabled: {'continuity': false},
-          executionMode: StudioExecutionMode.assisted,
           updatedAt: 12,
         ),
       ]);
@@ -35,7 +40,6 @@ void main() {
       expect(result.preset.name, 'My Copy');
       expect(result.preset.blocks.single.content, 'source');
       expect(result.preset.agentEnabled, {'continuity': false});
-      expect(result.preset.executionMode, StudioExecutionMode.assisted);
       expect(result.preset.updatedAt, 100);
       expect(activeId, 'studio_100');
       expect((await store.getById('active'))!.updatedAt, 12);
@@ -47,7 +51,7 @@ void main() {
     });
 
     test(
-      'import normalizes identity only and duplicate timestamp overwrites',
+      'import normalizes identity and keeps presets landing in the same second',
       () async {
         final store = _MemoryStudioPresetStore();
         var activeId = 'default';
@@ -60,16 +64,14 @@ void main() {
         const first = StudioPreset(
           id: 'exported-id',
           name: 'Exported',
-          blocks: [StudioPresetBlock(id: 'first')],
+          blocks: [StudioPresetBlock(id: 'first', content: 'First')],
           agentEnabled: {'final': false},
-          executionMode: StudioExecutionMode.direct,
           updatedAt: 1,
         );
         const second = StudioPreset(
           id: 'other-exported-id',
           name: 'Other',
-          blocks: [StudioPresetBlock(id: 'second')],
-          executionMode: StudioExecutionMode.assisted,
+          blocks: [StudioPresetBlock(id: 'second', content: 'Second')],
           updatedAt: 2,
         );
 
@@ -85,15 +87,24 @@ void main() {
         expect(firstResult!.preset.id, 'studio_200');
         expect(firstResult.preset.name, 'Imported');
         expect(firstResult.preset.agentEnabled, {'final': false});
-        expect(firstResult.preset.executionMode, StudioExecutionMode.direct);
-        expect(secondResult!.presets, hasLength(1));
-        expect(secondResult.presets.single.name, 'Replacement');
-        expect(secondResult.presets.single.blocks.single.id, 'second');
+        // The clock only ticks in seconds, so importing several files at once
+        // hands them all the same stamp — the id has to step past the taken one
+        // instead of overwriting the preset already stored under it.
+        expect(secondResult!.preset.id, 'studio_201');
+        expect(secondResult.presets, hasLength(2));
+        expect(secondResult.presets.map((preset) => preset.name), [
+          'Imported',
+          'Replacement',
+        ]);
         expect(
-          secondResult.presets.single.executionMode,
-          StudioExecutionMode.assisted,
+          secondResult.presets
+              .firstWhere((preset) => preset.name == 'Replacement')
+              .blocks
+              .single
+              .id,
+          'second',
         );
-        expect(activeId, 'studio_200');
+        expect(activeId, 'studio_201');
       },
     );
 
@@ -130,12 +141,12 @@ void main() {
           readActive: () async => globalActiveId,
           writeActive: (id) async => globalActiveId = id,
         );
-        const firstConfig = StudioConfig(
-          sessionId: 'session-a',
+        const firstConfig = StudioPreset(
+          id: 'session-a',
           expensiveApiConfigId: 'api-a',
         );
-        const secondConfig = StudioConfig(
-          sessionId: 'session-b',
+        const secondConfig = StudioPreset(
+          id: 'session-b',
           expensiveApiConfigId: 'api-b',
         );
 
@@ -148,6 +159,32 @@ void main() {
         expect(secondConfig.expensiveApiConfigId, 'api-b');
       },
     );
+
+    test('rejects invalid typed blocks before persistence', () async {
+      final store = _MemoryStudioPresetStore();
+      var activeId = 'default';
+      final service = _service(
+        store: store,
+        readActive: () async => activeId,
+        writeActive: (id) async => activeId = id,
+      );
+
+      await expectLater(
+        service.importPreset(
+          imported: const StudioPreset(
+            id: 'invalid',
+            blocks: [
+              StudioPresetBlock(id: 'context', type: StudioBlockType.context),
+            ],
+          ),
+          name: 'Invalid',
+        ),
+        throwsA(isA<FormatException>()),
+      );
+
+      expect(await store.getAll(), isEmpty);
+      expect(activeId, 'default');
+    });
   });
 }
 

@@ -15,6 +15,7 @@ import '../../db/repositories/persona_repo.dart';
 import '../../db/repositories/preset_repo.dart';
 import '../../import/silly_tavern_preset_parser.dart';
 import '../../models/api_config.dart';
+import '../../llm/transport/llm_protocol.dart';
 import '../../models/chat_message.dart';
 import '../../models/lorebook.dart';
 import '../../models/persona.dart';
@@ -88,12 +89,11 @@ class TavoBackupImporter {
     onProgress?.call('backup_progress_reading'.tr());
     final mdbFile = zip.files.firstWhere(
       (f) => f.isFile && f.name.toLowerCase().endsWith('data.mdb'),
-      orElse: () => throw const FormatException(
-          'No data.mdb found in Tavo backup zip.'),
+      orElse: () =>
+          throw const FormatException('No data.mdb found in Tavo backup zip.'),
     );
     final mdbContent = mdbFile.content;
-    final tavoData = parseTavoLmdb(
-        mdbContent);
+    final tavoData = parseTavoLmdb(mdbContent);
 
     final charEntityIdToGlazeId = <int, String>{};
 
@@ -155,7 +155,9 @@ class TavoBackupImporter {
   }
 
   Future<Uint8List?> _readAvatarFromZip(
-      Archive zip, String? charaCardPath) async {
+    Archive zip,
+    String? charaCardPath,
+  ) async {
     if (charaCardPath == null || charaCardPath.isEmpty) return null;
     final filename = charaCardPath.split('/').last.toLowerCase();
     for (final f in zip.files) {
@@ -171,7 +173,10 @@ class TavoBackupImporter {
   }
 
   Future<void> _importPersonas(
-      TavoData data, Archive zip, TavoImportResult result) async {
+    TavoData data,
+    Archive zip,
+    TavoImportResult result,
+  ) async {
     final personas = data.categories['persona_ref'];
     if (personas == null || personas.isEmpty) return;
 
@@ -190,7 +195,9 @@ class TavoBackupImporter {
         if (name.isEmpty && description.isEmpty) {
           // Fallback to extracted text strings
           final strings = pref.fields
-              .where((f) => f.type == 'text' && (f.data as String).trim().isNotEmpty)
+              .where(
+                (f) => f.type == 'text' && (f.data as String).trim().isNotEmpty,
+              )
               .map((f) => f.data as String)
               .toList();
           if (strings.isEmpty) continue;
@@ -227,13 +234,15 @@ class TavoBackupImporter {
           }
         }
 
-        await _personaRepo.put(Persona(
-          id: id,
-          name: finalName,
-          prompt: finalPrompt,
-          avatarPath: savedAvatarPath,
-          createdAt: currentTimestampSeconds(),
-        ));
+        await _personaRepo.put(
+          Persona(
+            id: id,
+            name: finalName,
+            prompt: finalPrompt,
+            avatarPath: savedAvatarPath,
+            createdAt: currentTimestampSeconds(),
+          ),
+        );
         result.personas++;
       } catch (e) {
         result.errors.add('Tavo Persona: $e');
@@ -242,7 +251,9 @@ class TavoBackupImporter {
   }
 
   Future<void> _importApiEndpoints(
-      TavoData data, TavoImportResult result) async {
+    TavoData data,
+    TavoImportResult result,
+  ) async {
     final endpoints = data.categories['endpoint'];
     if (endpoints == null || endpoints.isEmpty) return;
 
@@ -267,31 +278,44 @@ class TavoBackupImporter {
         if (seen.contains(dedupKey)) continue;
         seen.add(dedupKey);
 
-        final temperature = (params['temperature'] as num?)?.toDouble() ?? 0.7;
-        final topP = (params['top_p'] as num?)?.toDouble() ?? 0.9;
+        final temperature = (params['temperature'] as num?)?.toDouble() ?? 1.0;
+        final topP = (params['top_p'] as num?)?.toDouble() ?? 1.0;
         final topK = (params['top_k'] as num?)?.toInt() ?? 0;
         final frequencyPenalty =
             (params['frequency_penalty'] as num?)?.toDouble() ?? 0.0;
         final presencePenalty =
             (params['presence_penalty'] as num?)?.toDouble() ?? 0.0;
-        final maxTokens = (params['max_tokens'] as num?)?.toInt() ?? 8000;
-        final contextSize = (params['context_length'] as num?)?.toInt() ?? 32000;
+        final maxTokens = (params['max_tokens'] as num?)?.toInt() ?? 1500;
+        final contextSize =
+            (params['context_length'] as num?)?.toInt() ?? 32000;
 
-        await _apiRepo.put(ApiConfig(
-          id: 'tavo_${_uniqueId()}',
-          name: name.isNotEmpty ? name : (url.isNotEmpty ? url : 'Tavo Endpoint'),
-          providerId: 'openai_compatible',
-          endpoint: url,
-          model: model,
-          maxTokens: maxTokens,
-          contextSize: contextSize,
-          temperature: temperature,
-          topP: topP,
-          topK: topK,
-          frequencyPenalty: frequencyPenalty,
-          presencePenalty: presencePenalty,
-          stream: true,
-        ));
+        await _apiRepo.put(
+          ApiConfig(
+            id: 'tavo_${_uniqueId()}',
+            name: name.isNotEmpty
+                ? name
+                : (url.isNotEmpty ? url : 'Tavo Endpoint'),
+            providerId: 'custom_chat_completion',
+            protocol: LlmProtocol.customChatCompletion,
+            endpoint: url,
+            model: model,
+            maxTokens: maxTokens,
+            contextSize: contextSize,
+            temperature: temperature,
+            topP: topP,
+            topK: topK,
+            frequencyPenalty: frequencyPenalty,
+            presencePenalty: presencePenalty,
+            // The imported connection's sampling is meant to be used, so the
+            // switches are off rather than inheriting the new table defaults.
+            omitTemperature: false,
+            omitTopP: false,
+            omitTopK: false,
+            omitFrequencyPenalty: false,
+            omitPresencePenalty: false,
+            stream: true,
+          ),
+        );
         result.apis++;
       } catch (e) {
         result.errors.add('Tavo API: $e');
@@ -299,8 +323,7 @@ class TavoBackupImporter {
     }
   }
 
-  Future<void> _importRegexes(
-      TavoData data, TavoImportResult result) async {
+  Future<void> _importRegexes(TavoData data, TavoImportResult result) async {
     final regexes = data.categories['regex'];
     if (regexes == null || regexes.isEmpty) return;
 
@@ -369,8 +392,9 @@ class TavoBackupImporter {
 
           final trimList = rule['trimStrings'];
           final trimOut = trimList is List ? trimList.join('\n') : '';
-          final finalName =
-              groupName.isNotEmpty ? '[$groupName] $ruleName' : ruleName;
+          final finalName = groupName.isNotEmpty
+              ? '[$groupName] $ruleName'
+              : ruleName;
 
           final raw = <String, dynamic>{
             'id': id,
@@ -400,8 +424,7 @@ class TavoBackupImporter {
     }
   }
 
-  Future<void> _importLorebooks(
-      TavoData data, TavoImportResult result) async {
+  Future<void> _importLorebooks(TavoData data, TavoImportResult result) async {
     final lorebooks = data.categories['lorebook'];
     if (lorebooks == null || lorebooks.isEmpty) return;
 
@@ -437,43 +460,51 @@ class TavoBackupImporter {
               ? (e['keywords'] as List).map((k) => k.toString()).toList()
               : <String>[];
           final secondary = (e['secondaryKeywords'] is List)
-              ? (e['secondaryKeywords'] as List).map((k) => k.toString()).toList()
+              ? (e['secondaryKeywords'] as List)
+                    .map((k) => k.toString())
+                    .toList()
               : <String>[];
 
-          entries.add(LorebookEntry(
-            id: 'tavo_${e['identifier'] ?? _uniqueId()}',
-            keys: keys,
-            secondaryKeys: secondary,
-            content: (e['content'] as String?) ?? '',
-            comment: (e['name'] as String?) ?? '',
-            enabled: e['enabled'] != false,
-            constant: e['strategy'] == 'constant',
-            selectiveLogic: 0,
-            order: 100,
-            probability: (e['probability'] is num)
-                ? (e['probability'] as num).toInt()
-                : 100,
-            scanDepth: (e['scanDepth'] is num)
-                ? (e['scanDepth'] as num).toInt()
-                : 2,
-            caseSensitive: e['caseSensitive'] as bool? ?? false,
-            matchWholeWords: e['matchWholeWord'] as bool? ?? false,
-            sticky: (e['sticky'] is num) ? (e['sticky'] as num).toInt() : 0,
-            cooldown: (e['cooldown'] is num) ? (e['cooldown'] as num).toInt() : 0,
-            delay: (e['delay'] is num) ? (e['delay'] as num).toInt() : 0,
-            group: (e['groupName'] as String?) ?? '',
-            preventRecursion: e['preventRecursion'] as bool? ?? false,
-          ));
+          entries.add(
+            LorebookEntry(
+              id: 'tavo_${e['identifier'] ?? _uniqueId()}',
+              keys: keys,
+              secondaryKeys: secondary,
+              content: (e['content'] as String?) ?? '',
+              comment: (e['name'] as String?) ?? '',
+              enabled: e['enabled'] != false,
+              constant: e['strategy'] == 'constant',
+              selectiveLogic: 0,
+              order: 100,
+              probability: (e['probability'] is num)
+                  ? (e['probability'] as num).toInt()
+                  : 100,
+              scanDepth: (e['scanDepth'] is num)
+                  ? (e['scanDepth'] as num).toInt()
+                  : 2,
+              caseSensitive: e['caseSensitive'] as bool? ?? false,
+              matchWholeWords: e['matchWholeWord'] as bool? ?? false,
+              sticky: (e['sticky'] is num) ? (e['sticky'] as num).toInt() : 0,
+              cooldown: (e['cooldown'] is num)
+                  ? (e['cooldown'] as num).toInt()
+                  : 0,
+              delay: (e['delay'] is num) ? (e['delay'] as num).toInt() : 0,
+              group: (e['groupName'] as String?) ?? '',
+              preventRecursion: e['preventRecursion'] as bool? ?? false,
+            ),
+          );
         }
 
-        await _lorebookRepo.put(Lorebook(
-          id: 'tavo_lb_${lb.entityId}',
-          name: lbName.isNotEmpty ? lbName : 'Tavo Lorebook',
-          enabled: true,
-          activationScope: 'global',
-          entries: entries,
-          updatedAt: DateTime.now().millisecondsSinceEpoch,
-        ));
+        await _lorebookRepo.put(
+          Lorebook(
+            id: 'tavo_lb_${lb.entityId}',
+            name: lbName.isNotEmpty ? lbName : 'Tavo Lorebook',
+            enabled: true,
+            activationScope: 'global',
+            entries: entries,
+            updatedAt: DateTime.now().millisecondsSinceEpoch,
+          ),
+        );
         result.lorebooks++;
       } catch (e) {
         result.errors.add('Tavo Lorebook: $e');
@@ -481,8 +512,7 @@ class TavoBackupImporter {
     }
   }
 
-  Future<void> _importPresets(
-      TavoData data, TavoImportResult result) async {
+  Future<void> _importPresets(TavoData data, TavoImportResult result) async {
     final presets = data.categories['preset'];
     if (presets == null || presets.isEmpty) return;
 
@@ -492,6 +522,16 @@ class TavoBackupImporter {
         final s = pre.structured;
         String name = (s['name'] as String?) ?? 'Tavo Preset';
         List<dynamic>? promptsJson;
+        Map<String, dynamic> formatJson = {};
+        final formatStr = s['format_json'] as String?;
+        if (formatStr != null) {
+          try {
+            final decoded = jsonDecode(formatStr);
+            if (decoded is Map) {
+              formatJson = Map<String, dynamic>.from(decoded);
+            }
+          } catch (_) {}
+        }
         final promptsStr = s['prompts_json'] as String?;
         if (promptsStr != null) {
           try {
@@ -521,10 +561,11 @@ class TavoBackupImporter {
 
         if (promptsJson == null) continue;
 
-        final preset = parseSillyTavernPreset(
-          {'name': name, 'prompts': promptsJson},
-          name,
-        );
+        final preset = parseSillyTavernPreset({
+          ...formatJson,
+          'name': name,
+          'prompts': promptsJson,
+        }, name);
         await _presetRepo.put(preset);
         result.presets++;
       } catch (e) {
@@ -574,12 +615,20 @@ class TavoBackupImporter {
           cardData.addAll(v2Data);
         } else if ((s['name'] as String?)?.isNotEmpty == true) {
           cardData['name'] = s['name'];
-          if (s['description'] != null) cardData['description'] = s['description'];
+          if (s['description'] != null) {
+            cardData['description'] = s['description'];
+          }
           if (s['first_mes'] != null) cardData['first_mes'] = s['first_mes'];
           if (s['scenario'] != null) cardData['scenario'] = s['scenario'];
-          if (s['personality'] != null) cardData['personality'] = s['personality'];
-          if (s['mes_example'] != null) cardData['mes_example'] = s['mes_example'];
-          if (s['system_prompt'] != null) cardData['system_prompt'] = s['system_prompt'];
+          if (s['personality'] != null) {
+            cardData['personality'] = s['personality'];
+          }
+          if (s['mes_example'] != null) {
+            cardData['mes_example'] = s['mes_example'];
+          }
+          if (s['system_prompt'] != null) {
+            cardData['system_prompt'] = s['system_prompt'];
+          }
           final altGreet = s['alternate_greetings'];
           if (altGreet is String) {
             try {
@@ -597,8 +646,9 @@ class TavoBackupImporter {
         } else {
           // No structured + no v2 — best-effort heuristic from extracted strings
           final strings = ch.fields
-              .where((f) => f.type == 'text' &&
-                  (f.data as String).trim().isNotEmpty)
+              .where(
+                (f) => f.type == 'text' && (f.data as String).trim().isNotEmpty,
+              )
               .map((f) => f.data as String)
               .toList();
           if (strings.length < 2) continue;
@@ -614,10 +664,10 @@ class TavoBackupImporter {
           cardData['name'] = rem.isNotEmpty ? rem.removeLast() : 'Unknown';
           final sortedByLen = [...rem]
             ..sort((a, b) => b.length.compareTo(a.length));
-          cardData['description'] =
-              sortedByLen.isNotEmpty ? sortedByLen[0] : '';
-          cardData['first_mes'] =
-              sortedByLen.length > 1 ? sortedByLen[1] : '';
+          cardData['description'] = sortedByLen.isNotEmpty
+              ? sortedByLen[0]
+              : '';
+          cardData['first_mes'] = sortedByLen.length > 1 ? sortedByLen[1] : '';
         }
 
         if ((cardData['name'] as String?)?.isEmpty ?? true) {
@@ -631,7 +681,10 @@ class TavoBackupImporter {
 
         final wrapped = {'spec': 'chara_card_v2', 'data': cardData};
         final bytes = Uint8List.fromList(utf8.encode(jsonEncode(wrapped)));
-        final imported = await _charImporter.importFromBytes(bytes, 'card.json');
+        final imported = await _charImporter.importFromBytes(
+          bytes,
+          'card.json',
+        );
         await _charRepo.put(imported.character);
         charEntityIdToGlazeId[ch.entityId] = imported.character.id;
         result.characters++;
@@ -670,25 +723,29 @@ class TavoBackupImporter {
           final isUser = (st['characterId'] as int?) == 0;
           final ts = tm.timestamp ?? DateTime.now().millisecondsSinceEpoch;
 
-          messages.add(ChatMessage(
-            id: 'tavo_${tm.entityId}_$i',
-            role: isUser ? 'user' : 'assistant',
-            content: text,
-            timestamp: ts,
-          ));
+          messages.add(
+            ChatMessage(
+              id: 'tavo_${tm.entityId}_$i',
+              role: isUser ? 'user' : 'assistant',
+              content: text,
+              timestamp: ts,
+            ),
+          );
         }
         if (messages.isEmpty) continue;
 
         final idx = (nextIdxByChar[glazeCharId] ?? 0) + 1;
         nextIdxByChar[glazeCharId] = idx;
 
-        await _chatRepo.put(ChatSession(
-          id: '${glazeCharId}_$idx',
-          characterId: glazeCharId,
-          sessionIndex: idx,
-          messages: messages,
-          updatedAt: currentTimestampSeconds(),
-        ));
+        await _chatRepo.put(
+          ChatSession(
+            id: '${glazeCharId}_$idx',
+            characterId: glazeCharId,
+            sessionIndex: idx,
+            messages: messages,
+            updatedAt: currentTimestampSeconds(),
+          ),
+        );
         result.chats++;
       } catch (e) {
         result.errors.add('Tavo Chat: $e');
@@ -700,7 +757,8 @@ class TavoBackupImporter {
       final character = await _charRepo.getById(entry.key);
       if (character != null) {
         await _charRepo.put(
-            character.copyWith(currentSessionIndex: entry.value));
+          character.copyWith(currentSessionIndex: entry.value),
+        );
       }
     }
   }

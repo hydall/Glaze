@@ -30,6 +30,13 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
     return ThemePresetStorage(prefs);
   }
 
+  /// Accent the built-in themes carried before the cherry rebrand. Matching on
+  /// exactly this value lets the migration bump an untouched built-in without
+  /// overwriting a theme the user changed by hand.
+  static const _legacyDefaultAccent = '#7996CE';
+
+  bool _builtinsChanged = false;
+
   @override
   Future<List<ThemePreset>> loadAll() async {
     final raw = _prefs.getString(_presetsKey);
@@ -37,9 +44,17 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
     try {
       final list = jsonDecode(raw) as List;
       final presets = list
-          .map((e) => ThemePreset.fromJson(e as Map<String, dynamic>))
+          .map((e) => themePresetFromStoredJson(e as Map<String, dynamic>))
           .toList();
-      return _withBuiltins(presets);
+      _builtinsChanged = false;
+      final merged = _withBuiltins(presets);
+      // The built-ins are written to storage on first run and kept as-is
+      // afterwards, so a rebrand of the default accent would never reach an
+      // install that already had a copy. Persist the re-accent once.
+      if (_builtinsChanged) {
+        await saveAll(merged);
+      }
+      return merged;
     } catch (_) {
       return _withBuiltins([]);
     }
@@ -48,17 +63,41 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
   /// Guarantee the built-in standard themes are always present and pinned to
   /// the top of the list (Default first, then Material You). Existing user
   /// copies of a built-in id are kept as-is so customised fonts/effects
-  /// survive a reload.
+  /// survive a reload — only an accent still sitting on the pre-rebrand default
+  /// is moved to the current one.
   List<ThemePreset> _withBuiltins(List<ThemePreset> presets) {
     final result = List<ThemePreset>.from(presets);
-    if (!result.any((p) => p.id == 'default')) {
-      result.insert(0, _defaultPreset);
-    }
-    if (!result.any((p) => p.id == kMaterialYouPresetId)) {
-      final defaultIdx = result.indexWhere((p) => p.id == 'default');
-      result.insert(defaultIdx + 1, _materialYouPreset);
-    }
+    _seedOrReaccent(result, 'default', _defaultPreset, 0);
+    final defaultIdx = result.indexWhere((p) => p.id == 'default');
+    _seedOrReaccent(
+      result,
+      kMaterialYouPresetId,
+      _materialYouPreset,
+      defaultIdx + 1,
+    );
     return result;
+  }
+
+  void _seedOrReaccent(
+    List<ThemePreset> presets,
+    String id,
+    ThemePreset builtin,
+    int insertAt,
+  ) {
+    final idx = presets.indexWhere((p) => p.id == id);
+    if (idx == -1) {
+      presets.insert(insertAt, builtin);
+      _builtinsChanged = true;
+      return;
+    }
+    final existing = presets[idx];
+    if (existing.accentColor.toUpperCase() != _legacyDefaultAccent) return;
+    if (existing.accentColor.toUpperCase() ==
+        builtin.accentColor.toUpperCase()) {
+      return;
+    }
+    presets[idx] = existing.copyWith(accentColor: builtin.accentColor);
+    _builtinsChanged = true;
   }
 
   @override
@@ -91,25 +130,41 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
     }
 
     final content = utf8.decode(bytes);
-    final json = jsonDecode(content) as Map<String, dynamic>;
+    final json = _decodeJsonObject(content);
     return _fromThemeJson(json);
   }
 
   Future<ThemePreset> importFromJson(String jsonStr) async {
-    final json = jsonDecode(jsonStr) as Map<String, dynamic>;
+    final json = _decodeJsonObject(jsonStr);
     return _fromThemeJson(json);
+  }
+
+  Map<String, dynamic> _decodeJsonObject(String content) {
+    final value = jsonDecode(content);
+    if (value is! Map) {
+      throw const FormatException('Theme file must contain a JSON object');
+    }
+    return value.map((key, value) => MapEntry(key.toString(), value));
   }
 
   ThemePreset _fromThemeJson(Map<String, dynamic> json, {Archive? archive}) {
     final isSillyCradle = json['_type'] == 'silly_cradle_theme';
     final isTavo = json['spec'] == 'tavo_theme_v1';
-    if (!isSillyCradle && !isTavo && json.containsKey('accentColor') == false) {
+    final isMoonlit = json['moonlitEchoesPreset'] == true;
+    final isSillyTavern = _isSillyTavernTheme(json);
+    if (!isSillyCradle &&
+        !isTavo &&
+        !isMoonlit &&
+        !isSillyTavern &&
+        json.containsKey('accentColor') == false) {
       throw const FormatException('Not a valid theme file');
     }
 
     if (isTavo) {
       return _fromTavoThemeJson(json, archive: archive);
     }
+    if (isMoonlit) return _fromMoonlitThemeJson(json);
+    if (isSillyTavern) return _fromSillyTavernThemeJson(json);
 
     final id = 'imported_${DateTime.now().millisecondsSinceEpoch}';
     final name = json['name'] as String? ?? 'Imported Theme';
@@ -122,7 +177,143 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
     stripped['id'] = id;
     stripped['name'] = name;
 
-    return ThemePreset.fromJson(stripped);
+    return themePresetFromStoredJson(stripped);
+  }
+
+  bool _isSillyTavernTheme(Map<String, dynamic> json) {
+    const markers = [
+      'main_text_color',
+      'blur_tint_color',
+      'user_mes_blur_tint_color',
+      'bot_mes_blur_tint_color',
+    ];
+    return json['name'] is String &&
+        markers.where(json.containsKey).length >= 3;
+  }
+
+  ThemePreset _fromMoonlitThemeJson(Map<String, dynamic> json) {
+    final settings = _asMap(json['settings']);
+    if (settings.isEmpty) {
+      throw const FormatException('Moonlit Echoes theme has no settings');
+    }
+    final accent = _cssColor(settings['customThemeColor']) ?? '#C42A4A';
+    final ui = _cssColor(settings['customTopBarColor']);
+    final text = _cssColor(settings['customThemeColor2']);
+    final userBubble = _cssColorWithAlpha(settings['customBgColor1']);
+    final charBubble = _cssColorWithAlpha(settings['customBgColor2']);
+    final shell = _parseCssColor(settings['sheldBackgroundColor']);
+
+    return ThemePreset(
+      id: 'imported_${DateTime.now().millisecondsSinceEpoch}',
+      name: json['presetName'] is String
+          ? json['presetName'] as String
+          : 'Imported Moonlit Theme',
+      author: 'Moonlit Echoes',
+      themeMode: _guessThemeModeFromCss(
+        settings['customTopBarColor'] ?? settings['sheldBackgroundColor'],
+      ),
+      accentColor: accent,
+      uiColor: ui,
+      bgColor: shell?.hex,
+      userBubbleColor: userBubble,
+      charBubbleColor: charBubble,
+      userTextColor: text,
+      charTextColor: text,
+      uiTextColor: text,
+      elementOpacity: shell?.alpha ?? 0.8,
+      elementBlur: _cssNumber(settings['sheldBlurStrength']) ?? 0,
+      chatFontSize: _cssNumber(settings['messageTextFontSize']) ?? 'system',
+    );
+  }
+
+  ThemePreset _fromSillyTavernThemeJson(Map<String, dynamic> json) {
+    final mainText = _cssColor(json['main_text_color']);
+    final italic = _cssColor(json['italics_text_color']);
+    final quote = _cssColor(json['quote_text_color']);
+    final ui = _parseCssColor(json['blur_tint_color']);
+    final border = _parseCssColor(json['border_color']);
+    final userBubble = _cssColorWithAlpha(json['user_mes_blur_tint_color']);
+    final charBubble = _cssColorWithAlpha(json['bot_mes_blur_tint_color']);
+
+    return ThemePreset(
+      id: 'imported_${DateTime.now().millisecondsSinceEpoch}',
+      name: json['name'] as String,
+      author: 'SillyTavern',
+      themeMode: _guessThemeModeFromCss(json['blur_tint_color']),
+      accentColor: quote ?? border?.hex ?? '#C42A4A',
+      uiColor: ui?.hex,
+      bgColor: _cssColor(json['chat_tint_color']),
+      elementOpacity: ui?.alpha ?? 0.8,
+      elementBlur: _asDouble(json['blur_strength']) ?? 0,
+      userBubbleColor: userBubble,
+      charBubbleColor: charBubble,
+      userTextColor: mainText,
+      charTextColor: mainText,
+      userItalicColor: italic,
+      charItalicColor: italic,
+      userQuoteColor: quote,
+      charQuoteColor: quote,
+      uiTextColor: mainText,
+      borderWidth: _asDouble(json['shadow_width']) ?? 1,
+      borderColor: border?.hex,
+      borderOpacity: border?.alpha ?? 0.1,
+      showUserAvatar: !(_asBool(json['hideChatAvatars_enabled']) ?? false),
+      showCharAvatar: !(_asBool(json['hideChatAvatars_enabled']) ?? false),
+      hideMessageId: !(_asBool(json['mesIDDisplay_enabled']) ?? true),
+      hideGenerationTime: !(_asBool(json['timer_enabled']) ?? true),
+      hideTokenCount: !(_asBool(json['message_token_count_enabled']) ?? true),
+    );
+  }
+
+  ({String hex, double alpha})? _parseCssColor(Object? value) {
+    if (value is! String) return null;
+    final match = RegExp(
+      r'^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*(\d*\.?\d+))?\s*\)$',
+      caseSensitive: false,
+    ).firstMatch(value.trim());
+    if (match == null) return null;
+    final r = int.parse(match.group(1)!).clamp(0, 255);
+    final g = int.parse(match.group(2)!).clamp(0, 255);
+    final b = int.parse(match.group(3)!).clamp(0, 255);
+    final alpha = (double.tryParse(match.group(4) ?? '1') ?? 1)
+        .clamp(0.0, 1.0)
+        .toDouble();
+    final hex =
+        '#${r.toRadixString(16).padLeft(2, '0')}'
+                '${g.toRadixString(16).padLeft(2, '0')}'
+                '${b.toRadixString(16).padLeft(2, '0')}'
+            .toUpperCase();
+    return (hex: hex, alpha: alpha);
+  }
+
+  String? _cssColor(Object? value) => _parseCssColor(value)?.hex;
+
+  String? _cssColorWithAlpha(Object? value) {
+    final color = _parseCssColor(value);
+    if (color == null) return null;
+    final alpha = (color.alpha * 255).round().clamp(0, 255);
+    if (alpha == 255) return color.hex;
+    return '#${alpha.toRadixString(16).padLeft(2, '0').toUpperCase()}'
+        '${color.hex.substring(1)}';
+  }
+
+  double? _cssNumber(Object? value) {
+    if (value is num) return value.toDouble();
+    if (value is! String) return null;
+    return double.tryParse(
+      RegExp(r'-?\d+(?:\.\d+)?').firstMatch(value)?.group(0) ?? '',
+    );
+  }
+
+  String _guessThemeModeFromCss(Object? value) {
+    final color = _parseCssColor(value);
+    if (color == null) return 'dark';
+    final hex = color.hex.substring(1);
+    final r = int.parse(hex.substring(0, 2), radix: 16);
+    final g = int.parse(hex.substring(2, 4), radix: 16);
+    final b = int.parse(hex.substring(4, 6), radix: 16);
+    final luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+    return luminance > 0.55 ? 'light' : 'dark';
   }
 
   Archive? _tryDecodeArchive(Uint8List bytes) {
@@ -144,7 +335,10 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
     }
   }
 
-  ThemePreset _fromTavoThemeJson(Map<String, dynamic> json, {Archive? archive}) {
+  ThemePreset _fromTavoThemeJson(
+    Map<String, dynamic> json, {
+    Archive? archive,
+  }) {
     final id = 'imported_${DateTime.now().millisecondsSinceEpoch}';
     final name = json['name'] as String? ?? 'Imported Tavo Theme';
 
@@ -182,16 +376,23 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
 
     final bgColor = _hexOrNull(bgColorInt);
     final uiColor = _hexOrNull(uiColorInt);
-    final accent = _hexOrNull(userBubbleInt) ??
+    final accent =
+        _hexOrNull(userBubbleInt) ??
         _hexOrNull(_asInt(console['sendColor'])) ??
-        '#7996CE';
-    final bgImage =
-        _resolveBackgroundImage(background['image'] as String?, archive);
-    final bgOpacity = _asDouble(background['imageOpacity']) ??
+        '#C42A4A';
+    final bgImage = _resolveBackgroundImage(
+      background['image'] as String?,
+      archive,
+    );
+    // Tavo stores image visibility; Glaze darkens the background instead.
+    final bgOpacity =
+        _asDouble(background['imageOpacity']) ??
         _opacityFromArgb(bgColorInt) ??
         0.85;
+    final bgDim = (1.0 - bgOpacity).clamp(0.0, 1.0).toDouble();
     final bgBlur = _asDouble(background['blur']) ?? 0;
-    final elementBlur = _firstNonNullDouble([
+    final elementBlur =
+        _firstNonNullDouble([
           _asDouble(console['blur']),
           _averageDouble(
             _asDouble(userBubble['blur']),
@@ -204,9 +405,9 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
       statusBgInt,
       thinkingBgInt,
     ]);
-    final borderColor = _hexOrNull(statusBgInt) ?? _hexOrNull(uiTextGrayColorInt) ?? uiColor;
-    final borderOpacity =
-        ((elementOpacity * 0.3).clamp(0.08, 0.25)).toDouble();
+    final borderColor =
+        _hexOrNull(statusBgInt) ?? _hexOrNull(uiTextGrayColorInt) ?? uiColor;
+    final borderOpacity = ((elementOpacity * 0.3).clamp(0.08, 0.25)).toDouble();
     final themeMode = _guessThemeMode(bgColorInt ?? uiColorInt);
     final chatLayout = _mapChatLayout(
       bubbleDisplayType: bubbleDisplayType,
@@ -222,7 +423,8 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
       _asDouble(characterFont['fontSize']),
     );
     final borderWidth = _borderWidthFromOpacity(elementOpacity);
-    final uiFontWeight = _firstNonNullInt([
+    final uiFontWeight =
+        _firstNonNullInt([
           _normalizeFontWeight(console['fontWeight']),
           _normalizeFontWeight(statusBar['fontWeight']),
           _normalizeFontWeight(thinking['fontWeight']),
@@ -241,7 +443,7 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
       author: 'Tavo',
       themeMode: themeMode,
       accentColor: accent,
-      bgOpacity: bgOpacity.clamp(0.0, 1.0).toDouble(),
+      bgDim: bgDim,
       bgBlur: bgBlur,
       elementOpacity: elementOpacity.clamp(0.0, 1.0).toDouble(),
       elementBlur: elementBlur,
@@ -279,9 +481,7 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
   Map<String, dynamic> _asMap(Object? value) {
     if (value is Map<String, dynamic>) return value;
     if (value is Map) {
-      return value.map(
-        (key, value) => MapEntry(key.toString(), value),
-      );
+      return value.map((key, value) => MapEntry(key.toString(), value));
     }
     return const <String, dynamic>{};
   }
@@ -344,8 +544,7 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
     final r = (argb >> 16) & 0xFF;
     final g = (argb >> 8) & 0xFF;
     final b = argb & 0xFF;
-    final luminance =
-        (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0;
+    final luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0;
     return luminance > 0.55 ? 'light' : 'dark';
   }
 
@@ -452,8 +651,8 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
 final _defaultPreset = ThemePreset(
   id: 'default',
   name: 'Default',
-  accentColor: '#7996CE',
-  bgOpacity: 0.85,
+  accentColor: '#C42A4A',
+  bgDim: 0.15,
   elementOpacity: 0.8,
   elementBlur: 12,
   chatLayout: 'default',
@@ -473,8 +672,8 @@ final _defaultPreset = ThemePreset(
 final _materialYouPreset = ThemePreset(
   id: kMaterialYouPresetId,
   name: 'Material You',
-  accentColor: '#7996CE',
-  bgOpacity: 0.85,
+  accentColor: '#C42A4A',
+  bgDim: 0.15,
   elementOpacity: 0.8,
   elementBlur: 12,
   chatLayout: 'default',

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
@@ -11,6 +12,7 @@ import '../../../core/models/chat_message.dart';
 import '../../../core/models/persona.dart';
 import '../../../core/models/preset.dart';
 import '../../extensions/services/js_bridge_service.dart';
+import '../../image_gen/services/image_tag_markup.dart';
 import 'chat_webview_environment.dart';
 import 'chat_message_mapper.dart';
 import 'bridge_handlers.dart';
@@ -52,15 +54,47 @@ class ChatBridgeController {
   bool isGenerating = false;
   bool isGeneratingImage = false;
   bool isPostGenRunning = false;
+
+  /// Mirrors `ChatState.continuationTargetId` while a `continueMessage()` run
+  /// streams, so every message map the bridge builds during that window flags
+  /// the extended bubble (INV-CM6).
+  String? continuationTargetId;
+
+  /// Mirrors [ChatState.isSendPending] for the message mapper. Set from the
+  /// sync dispatcher *before* any message mapping can read it, because the
+  /// renderer draws (or withholds) the Regenerate button from the map alone.
+  bool isSendPending = false;
+
+  /// Last send-window value the *page* received, level-reconciled next to
+  /// `isGenerating` / `isPostGenRunning` / `isGeneratingImage`. Kept apart
+  /// from [isSendPending], which the dispatcher has already overwritten by the
+  /// time the flags are pushed — comparing against that one would always find
+  /// them equal and never push anything.
+  bool isSendPendingInPage = false;
+
+  /// Last generation-phase label pushed to the page ('' = the page's own
+  /// default). Kept here so the listener can skip a redundant eval, the same
+  /// way the isGenerating flags are reconciled against the bridge.
+  String generationPhaseLabel = '';
+
   final Set<String> _coveredMemoryIds = {};
   final Set<String> _pendingMemoryIds = {};
   final Set<String> _draftMemoryIds = {};
   final Map<String, String> _blockStatusByMessageId = {};
   final Map<String, List<TriggeredEntry>> _triggeredRegexesByMessageId = {};
 
+  /// Every persona that still exists, by id, with its avatar already resolved
+  /// to a WebView URL. User messages carry the id of the persona they were
+  /// sent as; this is what that id is resolved against, so a renamed persona
+  /// renames its own past messages and a deleted one leaves them with their
+  /// stored name and a letter avatar. Refreshed from `personaListProvider`.
+  Map<String, PersonaIdentity> _personasById = const {};
+
   List<PresetRegex> _displayRegexes = [];
   Character? _regexCharacter;
   Persona? _regexPersona;
+  Map<String, String> _regexSessionVars = const {};
+  Map<String, String> _regexGlobalVars = const {};
 
   /// Origin marker ("Created on" / "Branched on") for the current session,
   /// prepended by [MessageBridgeCommands.setMessages] as the first synthetic
@@ -90,6 +124,8 @@ class ChatBridgeController {
   List<PresetRegex> get displayRegexes => _displayRegexes;
   Character? get regexCharacter => _regexCharacter;
   Persona? get regexPersona => _regexPersona;
+  Map<String, String> get regexSessionVars => _regexSessionVars;
+  Map<String, String> get regexGlobalVars => _regexGlobalVars;
   JsBridgeService get extensionBridgeService => _jsBridgeService;
 
   List<TriggeredEntry> triggeredRegexesFor(String messageId) =>
@@ -125,11 +161,14 @@ class ChatBridgeController {
     personaAvatarDataUrl: _personaAvatarUrl,
     isGenerating: isGenerating,
     isPostGenRunning: isPostGenRunning,
+    isSendPending: isSendPending,
+    personasById: _personasById,
     coveredMemoryIds: _coveredMemoryIds,
     pendingMemoryIds: _pendingMemoryIds,
     draftMemoryIds: _draftMemoryIds,
     greetingTotal: currentGreetingTotal,
     blockStatusByMessageId: Map.unmodifiable(_blockStatusByMessageId),
+    continuationTargetId: continuationTargetId,
   );
 
   /// Builds the origin separator marker for [session], or null when it has no
@@ -149,14 +188,44 @@ class ChatBridgeController {
     };
   }
 
+  /// Replaces the persona roster the message mapper resolves `personaId`
+  /// against. Avatar paths are resolved here, once per roster change, rather
+  /// than per message.
+  void setPersonaRoster(List<Persona> personas) {
+    _personasById = {
+      for (final p in personas)
+        p.id: PersonaIdentity(
+          name: p.name,
+          avatarUrl: _rosterAvatarUrl(p.avatarPath),
+        ),
+    };
+  }
+
+  /// Null unless [path] resolves to a URL the page can actually load — an
+  /// empty string would reach the renderer as a present-but-blank avatar and
+  /// suppress the letter fallback the persona is owed.
+  String? _rosterAvatarUrl(String? path) {
+    if (path == null || path.isEmpty) return null;
+    final url = resolveLocalFileUrl(path);
+    return (url == null || url.isEmpty) ? null : url;
+  }
+
   void setRegexContext(
     List<PresetRegex> regexes,
     Character? char,
-    Persona? persona,
-  ) {
+    Persona? persona, {
+    Map<String, String> sessionVars = const {},
+    Map<String, String> globalVars = const {},
+  }) {
     _displayRegexes = regexes;
     _regexCharacter = char;
     _regexPersona = persona;
+    // Chat/global variables ride along so `{{getvar::…}}` resolves the same
+    // way in a rendered message (and in a display regex's replacement) as it
+    // does in the prompt. Without them the macro engine would silently expand
+    // every variable macro to an empty string.
+    _regexSessionVars = sessionVars;
+    _regexGlobalVars = globalVars;
   }
 
   void resolveRequest(String requestId, dynamic result) {
@@ -185,16 +254,21 @@ class ChatBridgeController {
   // private state of the host.
 
   Future<String> resolveImgResults(String text) async {
-    return text.replaceAllMapped(
-      RegExp(r'\[IMG:RESULT:([^\]|]+)(\|[^\]]*)?\]'),
-      (match) {
-        final path = match.group(1) ?? '';
-        final suffix = match.group(2) ?? '';
-        final resolved = resolveLocalFileUrl(path);
-        return resolved == null ? '' : '[IMG:RESULT:$resolved$suffix]';
-      },
-    );
+    return ImageTagMarkup.rewriteResultPaths(text, resolveLocalFileUrl);
   }
+
+  /// Inverse of [resolveImgResults] for text on its way back from the page.
+  ///
+  /// The page holds the images as `/__glaze_file__` URLs on a loopback port
+  /// that only exists for this app launch. Saving one (an edited message used
+  /// to be stored exactly as the page had it) leaves a picture that is broken
+  /// from the next start onwards — and stays broken across a restart, because
+  /// the port is gone. Every text the WebView hands back is therefore put into
+  /// its stored spelling first: the served file, relative to the data root.
+  String restoreImgResults(String text) => ImageTagMarkup.rewriteResultPaths(
+    text,
+    restoreChatWebViewLocalFilePath,
+  );
 
   String? resolveLocalFileUrl(String? source) {
     return chatWebViewResolveLocalFileUrl(source);
@@ -257,6 +331,15 @@ class ChatBridgeController {
   void Function()? onLoadMore;
   void Function(bool hidden)? onHeaderScroll;
   void Function(bool visible)? onScrollToBottomVisibility;
+
+  /// Whether the scroll-to-top button should be on screen. JS arms it once the
+  /// reader scrolls up away from the first message.
+  void Function(bool visible)? onScrollToTopVisibility;
+
+  /// A rendered message carried a `<script>` while message script execution is
+  /// off. Fired at most once per WebView load so the app can offer to enable
+  /// execution.
+  void Function()? onMessageScriptBlocked;
   void Function(String url)? onLinkClick;
   void Function(String url)? onImageClick;
   void Function(String src)? onImgDownload;
@@ -284,10 +367,25 @@ class ChatBridgeController {
   void Function(String id)? onToggleImageHidden;
   void Function(List<String> ids)? onSelectionChange;
   void Function(String id)? onInjectClick;
-  void Function(String instruction, String messageId)? onImgRetry;
-  void Function(String instruction, String messageId)? onImgFind;
-  void Function(String instruction, String messageId)? onImgRegen;
-  void Function(String src, String instruction, String messageId)? onImgOptions;
+  // `blockIndex` addresses one image block of the message; null when the tap
+  // did not come from an image gen block.
+  void Function(String instruction, String messageId, int? blockIndex)?
+  onImgRetry;
+  void Function(String instruction, String messageId, int? blockIndex)?
+  onImgEnableRetry;
+  void Function(String instruction, String messageId, int? blockIndex)?
+  onImgFind;
+  void Function(String instruction, String messageId, int? blockIndex)?
+  onImgRegen;
+  void Function(
+    String src,
+    String instruction,
+    String messageId,
+    int? blockIndex,
+  )?
+  onImgOptions;
+  void Function(String messageId, int blockIndex, int variantIndex)?
+  onImgVariant;
   void Function()? onImgCancel;
   void Function()? onStop;
   void Function(String messageId)? onExtBlocksRunAll;
@@ -322,12 +420,14 @@ class ChatBridgeController {
       final spec = entry.value;
       _controller.addJavaScriptHandler(
         handlerName: name,
-        callback: (args) => _dispatch(name, spec, args),
+        callback: (JavaScriptHandlerFunctionData data) =>
+            _dispatch(name, spec, data.args),
       );
     }
     _controller.addJavaScriptHandler(
       handlerName: 'glazeBridge',
-      callback: (args) async {
+      callback: (JavaScriptHandlerFunctionData data) async {
+        final args = data.args;
         final raw = args.isNotEmpty ? args.first : const <String, dynamic>{};
         final request = raw is Map<String, dynamic>
             ? raw
@@ -374,6 +474,8 @@ class ChatBridgeController {
         onStop?.call();
       case 'onImgCancel':
         onImgCancel?.call();
+      case 'onMessageScriptBlocked':
+        onMessageScriptBlocked?.call();
     }
   }
 
@@ -385,6 +487,8 @@ class ChatBridgeController {
         onHeaderScroll?.call(v);
       case 'onScrollToBottomVisibility':
         onScrollToBottomVisibility?.call(v);
+      case 'onScrollToTopVisibility':
+        onScrollToTopVisibility?.call(v);
     }
   }
 
@@ -425,7 +529,7 @@ class ChatBridgeController {
             data['id'] as String? ?? '',
             data['isUser'] as bool? ?? false,
             data['isSystem'] as bool? ?? false,
-            data['content'] as String? ?? '',
+            restoreImgResults(data['content'] as String? ?? ''),
           );
         case 'onSwipe':
           onSwipe?.call(
@@ -440,7 +544,7 @@ class ChatBridgeController {
         case 'onSelectionAction':
           onSelectionAction?.call(
             data['action'] as String? ?? 'copy',
-            data['text'] as String? ?? '',
+            restoreImgResults(data['text'] as String? ?? ''),
           );
         case 'onPanelResize':
           final panelId = data['panelId'] as String? ?? '';
@@ -452,7 +556,16 @@ class ChatBridgeController {
             data['src'] as String? ?? '',
             data['instruction'] as String? ?? '',
             data['messageId'] as String? ?? '',
+            _blockIndex(data['imgIndex']),
           );
+        case 'onImgVariant':
+          final messageId = data['messageId'] as String? ?? '';
+          final blockIndex = _blockIndex(data['imgIndex']);
+          final variantIndex = _blockIndex(data['variantIndex']);
+          if (messageId.isEmpty || blockIndex == null || variantIndex == null) {
+            return;
+          }
+          onImgVariant?.call(messageId, blockIndex, variantIndex);
         case 'onPanelEvent':
           final panelId = data['panelId'] as String? ?? '';
           final event = data['event'] as String? ?? 'action';
@@ -472,7 +585,7 @@ class ChatBridgeController {
     final s = args[1] as String? ?? '';
     switch (name) {
       case 'onEditSave':
-        onEditSave?.call(id, s);
+        onEditSave?.call(id, restoreImgResults(s));
       case 'onRegenerate':
         onRegenerate?.call(id, s);
     }
@@ -511,20 +624,30 @@ class ChatBridgeController {
     }
   }
 
+  /// Reads the optional image-block position sent alongside an image action.
+  /// The webview sends -1 for elements that are not image gen blocks.
+  static int? _blockIndex(dynamic raw) {
+    final value = raw is num ? raw.toInt() : int.tryParse('$raw');
+    return value != null && value >= 0 ? value : null;
+  }
+
   void _dispatchImageAction(String name, HandlerSpec spec, List<dynamic> args) {
     if (args.length < 2) return;
     final instr = args[0] as String? ?? '';
     final msgId = args[1] as String? ?? '';
+    final blockIndex = args.length > 2 ? _blockIndex(args[2]) : null;
     if (spec.debugPrint != null) {
       debugPrint(spec.debugPrint!.replaceAll('\$args', args.toString()));
     }
     switch (name) {
       case 'onImgRetry':
-        onImgRetry?.call(instr, msgId);
+        onImgRetry?.call(instr, msgId, blockIndex);
+      case 'onImgEnableRetry':
+        onImgEnableRetry?.call(instr, msgId, blockIndex);
       case 'onImgFind':
-        onImgFind?.call(instr, msgId);
+        onImgFind?.call(instr, msgId, blockIndex);
       case 'onImgRegen':
-        onImgRegen?.call(instr, msgId);
+        onImgRegen?.call(instr, msgId, blockIndex);
       case 'onExtBlockStop':
         onExtBlockStop?.call(instr, msgId);
       case 'onExtBlockRegen':
@@ -568,6 +691,11 @@ class ChatBridgeController {
     preserveScroll: preserveScroll,
   );
   Future<void> appendMessage(ChatMessage m) => messages.appendMessage(m);
+  Future<void> setGenerationPhase(String label) {
+    generationPhaseLabel = label;
+    return messages.setGenerationPhase(label);
+  }
+
   Future<void> appendMessages(List<ChatMessage> m, {int startIndex = 0}) =>
       messages.appendMessages(m, startIndex: startIndex);
   Future<void> prependMessages(
@@ -586,10 +714,16 @@ class ChatBridgeController {
   Future<void> updateMessageContent(String id, String text, bool isUser) =>
       messages.updateMessageContent(id, text, isUser);
   Future<void> removeMessage(String id) => messages.removeMessage(id);
+  Future<void> retireTypingPlaceholder() =>
+      messages.retireTypingPlaceholder();
   Future<void> setLastMessage(String? id) => messages.setLastMessage(id);
-  Future<void> clearAll() => messages.clearAll();
+  Future<void> setContextWindowStart(String? id) =>
+      messages.setContextWindowStart(id);
+  Future<void> clearAll({bool keepPlaceholder = true}) =>
+      messages.clearAll(keepPlaceholder: keepPlaceholder);
   Future<void> scrollToBottom({bool smooth = false}) =>
       messages.scrollToBottom(smooth: smooth);
+  Future<void> scrollToTop() => messages.scrollToTop();
   Future<void> requestScrollToBottomOnAppend() =>
       messages.requestScrollToBottomOnAppend();
   Future<void> scrollToMessage(String id, {bool highlight = false}) =>
@@ -599,8 +733,8 @@ class ChatBridgeController {
   // Theme
   Future<void> setBackgroundNoise(double opacity, double intensity) =>
       theme.setBackgroundNoise(opacity, intensity);
-  Future<void> setBackgroundImage(String? src, int blur, double opacity) =>
-      theme.setBackgroundImage(src, blur, opacity);
+  Future<void> setBackgroundImage(String? src, int blur) =>
+      theme.setBackgroundImage(src, blur);
   Future<void> setChatFont({
     String? fontName,
     String? fontDataUrl,
@@ -637,8 +771,15 @@ class ChatBridgeController {
   Future<void> applyLayout(String l) => identity.applyLayout(l);
 
   // Layout
-  Future<void> setSearch({required String query, int activeIndex = -1}) =>
-      layout.setSearch(query: query, activeIndex: activeIndex);
+  Future<void> setSearch({
+    required String query,
+    int activeIndex = -1,
+    bool scroll = true,
+  }) => layout.setSearch(
+    query: query,
+    activeIndex: activeIndex,
+    scroll: scroll,
+  );
   Future<void> setBottomPadding(double px, {double viewportHeight = 0}) =>
       layout.setBottomPadding(px, viewportHeight: viewportHeight);
   Future<void> setTopPadding(double px) => layout.setTopPadding(px);
@@ -665,17 +806,30 @@ class ChatBridgeController {
       layout.setSelectionMode(enabled);
   Future<void> toggleMessageSelection(String id) =>
       layout.toggleMessageSelection(id);
+  Future<void> selectMessagesAbove() => layout.selectMessagesAbove();
+  Future<void> selectMessagesBelow() => layout.selectMessagesBelow();
+  Future<void> trackpadScroll({
+    required double dx,
+    required double dy,
+    required double x,
+    required double y,
+  }) => layout.trackpadScroll(dx: dx, dy: dy, x: x, y: y);
 
   // Memory
-  void updateMemoryBookData({
+  Future<void> updateMemoryBookData({
     required List<Map<String, dynamic>> entries,
     required List<Map<String, dynamic>> pendingDrafts,
+    bool patchMessages = true,
   }) => memory.updateMemoryBookData(
     entries: entries,
     pendingDrafts: pendingDrafts,
+    patchMessages: patchMessages,
   );
 
-  // Ext Blocks
+  Future<void> patchMemoryStatuses(Map<String, String?> statuses) =>
+      callJs('patchMemoryStatuses', jsonEncode(statuses));
+
+  // External Blocks
 
   /// Sends block panel data to JS so the inline panel renders/updates.
   Future<void> showExtBlocksPanel(
@@ -690,6 +844,7 @@ class ChatBridgeController {
       'messageId': messageId,
       'blocks': resolvedBlocks,
       'canRunAll': canRunAll,
+      'imageGenLabel': 'image_gen_generating'.tr(),
     });
     await callJs('showExtBlocksPanel', payload);
   }

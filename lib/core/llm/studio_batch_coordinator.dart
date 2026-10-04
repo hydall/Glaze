@@ -2,14 +2,11 @@ import 'package:dio/dio.dart';
 
 import '../models/api_config.dart';
 import '../models/studio_config.dart';
-import '../utils/error_format.dart';
 import 'agent_runner.dart';
-import 'prompt_builder.dart';
-import 'studio_agent_executor.dart';
-import 'studio_context_bucketizer.dart';
 import 'studio_message_builder.dart';
-import 'tracker_batcher.dart';
+import 'controller_batcher.dart';
 import 'studio_turn_config_snapshot.dart';
+import 'studio/studio_context.dart';
 
 /// Runs a batch group of Studio chat-time trackers: builds the batched
 /// system prompt + per-agent task text, fires a single LLM request, parses
@@ -17,24 +14,19 @@ import 'studio_turn_config_snapshot.dart';
 /// tracker failures to the Studio pipeline. Extracted from `MemoryStudioService`
 /// (plan §2.9).
 ///
-/// Deps: the injected [TrackerBatcher], [AgentRunner],
-/// [StudioContextBucketizer], [StudioMessageBuilder], and
-/// [StudioAgentExecutor]. `_log` is injected as a callback so this specialist
+/// Deps: the injected [ControllerBatcher], [AgentRunner], and
+/// [StudioMessageBuilder]. `_log` is injected as a callback so this specialist
 /// does not own the host's debug-print sink.
 class StudioBatchCoordinator {
-  final TrackerBatcher _batcher;
+  final ControllerBatcher _batcher;
   final AgentRunner _runner;
-  final StudioContextBucketizer _bucketizer;
   final StudioMessageBuilder _messageBuilder;
-  final StudioAgentExecutor _executor;
   final void Function(String message) _log;
 
   StudioBatchCoordinator(
     this._batcher,
     this._runner,
-    this._bucketizer,
     this._messageBuilder,
-    this._executor,
     this._log,
   );
 
@@ -43,12 +35,11 @@ class StudioBatchCoordinator {
   /// `<result>` blocks, and retry the batch twice for any transport failure or
   /// missing/unparseable tracker result. Exhausted retries return failed
   /// tracker results; the caller turns that into a hard Studio error.
-  Future<List<TrackerBatchResult>> runBatchGroup({
-    required TrackerBatchGroup group,
+  Future<List<ControllerBatchResult>> runBatchGroup({
+    required ControllerBatchGroup group,
     required StudioConfig config,
     required StudioPreset studioPreset,
-    required PromptResult promptResult,
-    required PromptPayload promptPayload,
+    required StudioContext context,
     required ApiConfig apiConfig,
     required String sessionId,
     required CancelToken cancelToken,
@@ -56,16 +47,8 @@ class StudioBatchCoordinator {
     String? apiConfigId,
     StudioTurnConfigSnapshot? turnConfig,
   }) async {
-    final context = _bucketizer.bucketize(
-      promptResult,
-      promptPayload: promptPayload,
-      studioConfig: config,
-    );
     final sharedMessages = _messageBuilder.buildSharedBatchMessages(
-      config: config,
       context: context,
-      promptPayload: promptPayload,
-      promptResult: promptResult,
       batchContextSize: batchContextSize,
     );
     final perAgentTask = <String, String>{};
@@ -74,8 +57,6 @@ class StudioBatchCoordinator {
         agent: agent,
         config: config,
         studioPreset: studioPreset,
-        promptResult: promptResult,
-        promptPayload: promptPayload,
         context: context,
       );
     }
@@ -83,44 +64,35 @@ class StudioBatchCoordinator {
       config,
       studioPreset,
       context,
-      promptPayload,
-      promptResult,
     );
-    final batcher = _batcher;
-    final systemPrompt = batcher.buildBatchSystemPrompt(
+    final systemPrompt = _batcher.buildBatchSystemPrompt(
       group: group,
       sharedMessages: sharedMessages,
       perAgentTaskText: perAgentTask,
       roleText: roleText,
     );
-    // The batch instructions are the system prompt; we also send an explicit
-    // user turn that triggers the batched response. A system-only message list
-    // is rejected with HTTP 400 by several providers (e.g. z-ai/GLM), which
-    // require at least one user message — so this user turn is mandatory, not
-    // cosmetic. See docs/PLAN_AGENTIC_STUDIO.md Phase 5.
-    final batchMessages = <Map<String, dynamic>>[
-      {'role': 'system', 'content': systemPrompt},
-      {
-        'role': 'user',
-        'content':
-            'Produce the required <result> blocks now, one per agent_task '
-            'listed above, in order.',
-      },
-    ];
-    // Use a synthetic StudioAgent for the batch request: carry the group's
-    // budget/temperature. The AgentRunner will resolve the API config from
-    // this agent's fields (modelSource='current' → use the group's resolved
-    // (provider, model) via runApiConfigId). We override maxTokens/temperature
-    // on a per-call basis by passing them through ChatTransportRequest — but
-    // AgentRunner.runAgent reads them off the agent. So we synthesize a
-    // per-batch agent that carries the batch budget.
-    final batchAgent = group.agents.first.copyWith(
-      maxTokens: group.batchMaxTokens,
-      temperature: group.batchTemperature,
-      contextSize: batchContextSize,
+    final batchMessages = _messageBuilder.applyRegexesForStages(
+      messages: <Map<String, dynamic>>[
+        {'role': 'system', 'content': systemPrompt},
+        {
+          'role': 'user',
+          'content':
+              'Produce the required <result> blocks now, one per agent_task '
+              'listed above, in order.',
+        },
+      ],
+      stages: const {'pregen', 'specificAgent'},
+      context: context,
     );
-    final runner = _runner;
-    List<TrackerBatchResult>? lastParsed;
+    // The batch runs under the first agent's identity (the API config is
+    // resolved from the group's `resolved` config anyway), but with the
+    // group's own budget: the summed token allowance and the lowest
+    // temperature. Those are passed explicitly rather than copied onto a
+    // synthetic agent — an agent carries no generation parameters of its own
+    // (§4). The shared history is already trimmed to [batchContextSize] by
+    // `buildSharedBatchMessages` above.
+    final batchAgent = group.agents.first;
+    List<ControllerBatchResult>? lastParsed;
     String? lastError;
     for (var attempt = 1; attempt <= 3; attempt++) {
       if (cancelToken.isCancelled) {
@@ -131,7 +103,7 @@ class StudioBatchCoordinator {
         );
       }
       try {
-        final result = await runner.runAgent(
+        final result = await _runner.runAgent(
           agent: batchAgent,
           messages: batchMessages,
           apiConfig: apiConfig,
@@ -140,40 +112,28 @@ class StudioBatchCoordinator {
           cancelToken: cancelToken,
           preResolvedConfig: group.resolved,
           turnConfig: turnConfig,
+          batchMaxTokens: group.batchMaxTokens,
+          batchTemperature: group.batchTemperature,
+          charName: context.macroContext.charName,
+          userName: context.macroContext.userName,
         );
-        final parsed = batcher.parseBatchResponse(result.text, group);
-        if (_allOk(parsed)) {
-          return parsed;
-        }
+        final parsed = _batcher.parseBatchResponse(result.text, group);
+        if (_allOk(parsed)) return parsed;
         lastParsed = parsed;
-        final failedCount = parsed.where((r) => r.status != 'ok').length;
-        lastError =
-            '$failedCount tracker result(s) were missing or unparseable';
-        if (attempt < 3) {
-          _log(
-            'batch group ${group.key} had $failedCount failed agents on '
-            'attempt $attempt — retrying batch',
-          );
-        }
-      } on AgentRunFailedException catch (e) {
+        final failedCount = parsed
+            .where((result) => result.status != 'ok')
+            .length;
+        lastError = '$failedCount tracker result(s) missing or invalid';
+      } on AgentRunFailedException catch (error) {
         if (cancelToken.isCancelled) rethrow;
-        lastError = e.reason;
-        if (attempt < 3) {
-          _log(
-            'batch group ${group.key} request failed on attempt $attempt '
-            '(${e.reason}) — retrying batch',
-          );
-        }
+        lastError = error.reason;
+        _log('batch ${group.key} attempt $attempt failed: $lastError');
       }
     }
-    _log(
-      'batch group ${group.key} failed after 2 retries: '
-      '${lastError ?? 'unknown tracker error'}',
-    );
     return lastParsed ??
         group.agents
             .map(
-              (agent) => TrackerBatchResult.failed(
+              (agent) => ControllerBatchResult.failed(
                 agentId: agent.id,
                 agentName: agent.name,
                 reason: lastError ?? 'tracker batch failed after 2 retries',
@@ -182,59 +142,7 @@ class StudioBatchCoordinator {
             .toList(growable: false);
   }
 
-  /// Legacy test seam for per-agent reruns. The chat-time Studio pipeline no
-  /// longer falls back from failed batches to individual tracker calls.
-  Future<List<TrackerBatchResult>> retryFailedIndividually({
-    required List<StudioAgent> agents,
-    required StudioConfig config,
-    required StudioPreset studioPreset,
-    required PromptResult promptResult,
-    required PromptPayload promptPayload,
-    required ApiConfig apiConfig,
-    required String sessionId,
-    required CancelToken cancelToken,
-    String? apiConfigId,
-    StudioTurnConfigSnapshot? turnConfig,
-  }) async {
-    if (agents.isEmpty) return const [];
-    final batcher = _batcher;
-    return batcher.settleWithConcurrencyLimit(
-      items: agents,
-      limit: 2,
-      run: (agent) async {
-        try {
-          final brief = await _executor.runTracker(
-            agent: agent,
-            promptResult: promptResult,
-            promptPayload: promptPayload,
-            apiConfig: apiConfig,
-            config: config,
-            studioPreset: studioPreset,
-            sessionId: sessionId,
-            cancelToken: cancelToken,
-            apiConfigId: apiConfigId,
-            turnConfig: turnConfig,
-            onIntermediateUpdate: null,
-          );
-          return TrackerBatchResult(
-            agentId: agent.id,
-            agentName: agent.name,
-            text: brief.brief,
-            status: brief.status,
-            error: brief.error,
-          );
-        } catch (e) {
-          return TrackerBatchResult.failed(
-            agentId: agent.id,
-            agentName: agent.name,
-            reason: formatError(e),
-          );
-        }
-      },
-    );
-  }
-
-  bool _allOk(List<TrackerBatchResult> results) {
+  bool _allOk(List<ControllerBatchResult> results) {
     return results.every((r) => r.status == 'ok' && r.text.isNotEmpty);
   }
 }

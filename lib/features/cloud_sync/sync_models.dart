@@ -107,13 +107,23 @@ class SyncManifest {
   ///   8 — added `studio_preset` entity type (DB-backed StudioPresetRows).
   ///   9 — added `local_storage` singleton for global PipelineSettings.
   ///  11 — added `character_knowledge` (atomic facts + session baseline).
-  static const int currentVersion = 11;
+  ///  12 — added merge-only `reconciliation_state` provenance.
+  ///  13 — added immutable reconciliation effects to reconciliation state.
+  ///  14 — added current session-local lorebook overlay projections.
+  static const int currentVersion = 14;
 
   final int version;
   final String deviceId;
   final int? lastSync;
   final int createdAt;
   final Map<String, SyncManifestEntry> entries;
+
+  /// Local canonical hashes recorded when a cloud payload was accepted.
+  ///
+  /// A pulled payload can normalize while being decoded or reconciled. The
+  /// cloud hash remains the sync baseline, while this map identifies the
+  /// unchanged local representation produced by that pull.
+  final Map<String, String> acceptedLocalHashes;
 
   /// Whether the last cloud push included API/embedding keys in api_presets.
   final bool apiKeysIncluded;
@@ -124,6 +134,7 @@ class SyncManifest {
     this.lastSync,
     required this.createdAt,
     this.entries = const {},
+    this.acceptedLocalHashes = const {},
     this.apiKeysIncluded = false,
   });
 
@@ -133,6 +144,7 @@ class SyncManifest {
     int? lastSync,
     int? createdAt,
     Map<String, SyncManifestEntry>? entries,
+    Map<String, String>? acceptedLocalHashes,
     bool? apiKeysIncluded,
   }) => SyncManifest(
     version: version ?? this.version,
@@ -140,16 +152,19 @@ class SyncManifest {
     lastSync: lastSync ?? this.lastSync,
     createdAt: createdAt ?? this.createdAt,
     entries: entries ?? this.entries,
+    acceptedLocalHashes: acceptedLocalHashes ?? this.acceptedLocalHashes,
     apiKeysIncluded: apiKeysIncluded ?? this.apiKeysIncluded,
   );
 
-  Map<String, dynamic> toJson() => {
+  Map<String, dynamic> toJson({bool includeLocalState = true}) => {
     'version': version,
     'deviceId': deviceId,
     'lastSync': lastSync,
     'createdAt': createdAt,
     'apiKeysIncluded': apiKeysIncluded,
     'entries': entries.map((k, v) => MapEntry(k, v.toJson())),
+    if (includeLocalState && acceptedLocalHashes.isNotEmpty)
+      'acceptedLocalHashes': acceptedLocalHashes,
   };
 
   factory SyncManifest.fromJson(Map<String, dynamic> m) => SyncManifest(
@@ -159,6 +174,11 @@ class SyncManifest {
     createdAt: m['createdAt'] as int? ?? DateTime.now().millisecondsSinceEpoch,
     apiKeysIncluded: m['apiKeysIncluded'] as bool? ?? false,
     entries: _parseEntries(m['entries'] as Map<String, dynamic>?),
+    acceptedLocalHashes:
+        (m['acceptedLocalHashes'] as Map<String, dynamic>?)?.map(
+          (key, value) => MapEntry(key, value as String),
+        ) ??
+        const {},
   );
 
   static Map<String, SyncManifestEntry> _parseEntries(Map<String, dynamic>? m) {
@@ -218,10 +238,16 @@ String cloudPath(String type, String id) {
       return '$cloudBase/chat_summaries/$id.json';
     case 'character_folders':
       return '$cloudBase/character_folders.json';
+    case 'folders':
+      return '$cloudBase/folders.json';
     case 'memory_graph':
       return '$cloudBase/memory_graphs/$id.json';
     case 'character_knowledge':
       return '$cloudBase/character_knowledge/$id.json';
+    case 'session_lorebook_overlays':
+      return '$cloudBase/session_lorebook_overlays/$id.json';
+    case 'reconciliation_state':
+      return '$cloudBase/reconciliation_state/$id.json';
     case 'lorebooks':
       return '$cloudBase/lorebooks.json';
     case 'api_presets':
@@ -266,3 +292,8 @@ String galleryCloudPath(String charId, String imgId, String ext) =>
 
 String personaAvatarCloudPath(String personaId, String ext) =>
     '$cloudBase/persona_avatars/$personaId/avatar.$ext';
+
+/// Cover image of an LLM preset. Presets themselves travel as the single
+/// `theme_presets` entry, so their binaries are keyed by preset id here.
+String presetImageCloudPath(String presetId, String ext) =>
+    '$cloudBase/preset_images/$presetId/cover.$ext';

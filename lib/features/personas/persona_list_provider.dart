@@ -1,7 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/models/folder.dart';
 import '../../core/models/persona.dart';
 import '../../core/state/db_provider.dart';
+import '../../core/state/folder_provider.dart';
 import '../../core/utils/id_generator.dart';
 import '../../core/utils/sync_deletion_tracker.dart';
 import '../../core/utils/time_helpers.dart';
@@ -44,6 +46,9 @@ class PersonaListNotifier extends AsyncNotifier<List<Persona>> {
   Future<void> remove(String id) async {
     await ref.read(personaRepoProvider).delete(id);
     await SyncDeletionTracker.record('persona', id);
+    await ref
+        .read(folderRepoProvider)
+        .deleteMembersForMember(FolderDomain.persona, id);
     ref.invalidateSelf();
   }
 }

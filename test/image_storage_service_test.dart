@@ -19,6 +19,18 @@ Uint8List makePng(int width, int height) {
   return Uint8List.fromList(img.encodePng(image));
 }
 
+/// A PNG whose cut-out leaves the top half fully transparent.
+Uint8List makeTransparentPng(int width, int height) {
+  final image = img.Image(width: width, height: height, numChannels: 4);
+  for (final p in image) {
+    p.r = 255;
+    p.g = 100;
+    p.b = 50;
+    p.a = p.y < height ~/ 2 ? 0 : 255;
+  }
+  return Uint8List.fromList(img.encodePng(image));
+}
+
 void main() {
   late Directory tmpDir;
   late ImageStorageService service;
@@ -146,12 +158,48 @@ void main() {
     expect(await File(thumbPath!).exists(), isTrue);
   });
 
+  test('transparent avatar keeps a PNG thumbnail with alpha', () async {
+    final png = makeTransparentPng(400, 400);
+    final avatarPath = await service.saveAvatar('alpha1', png);
+    final thumbPath = service.thumbnailPath(avatarPath);
+
+    expect(thumbPath, isNotNull);
+    expect(thumbPath, endsWith('alpha1.png'));
+    expect(await File(thumbPath!).exists(), isTrue);
+
+    final thumb = img.decodeImage(await File(thumbPath).readAsBytes())!;
+    expect(thumb.hasAlpha, isTrue);
+    expect(thumb.getPixel(0, 0).a, 0);
+    expect(thumb.getPixel(0, thumb.height - 1).a, 255);
+  });
+
+  test('opaque avatar stays a JPEG thumbnail', () async {
+    final avatarPath = await service.saveAvatar('opaque1', makePng(400, 400));
+    final thumbPath = service.thumbnailPath(avatarPath);
+    expect(thumbPath, endsWith('opaque1.jpg'));
+  });
+
+  test('re-saving transparent art as opaque drops the stale PNG thumb', () async {
+    await service.saveAvatar('flip1', makeTransparentPng(200, 200));
+    expect(
+      await File(p.join(tmpDir.path, 'thumbnails', 'flip1.png')).exists(),
+      isTrue,
+    );
+
+    final avatarPath = await service.saveAvatar('flip1', makePng(200, 200));
+    expect(service.thumbnailPath(avatarPath), endsWith('flip1.jpg'));
+    expect(
+      await File(p.join(tmpDir.path, 'thumbnails', 'flip1.png')).exists(),
+      isFalse,
+    );
+  });
+
   test('thumbnail bounds both axes while preserving extreme aspect ratio', () {
     final portrait = img.decodeJpg(
-      resizeAvatarBytes(makePng(500, 5000), 768)!,
+      resizeAvatarBytes(makePng(500, 5000), 768)!.bytes,
     )!;
     final landscape = img.decodeJpg(
-      resizeAvatarBytes(makePng(5000, 500), 768)!,
+      resizeAvatarBytes(makePng(5000, 500), 768)!.bytes,
     )!;
 
     expect(portrait.width, 410);
@@ -173,7 +221,7 @@ void main() {
       1,
     );
     var prefs = await SharedPreferences.getInstance();
-    expect(prefs.getBool('gz_thumb_v6_backfilled'), isNot(true));
+    expect(prefs.getBool('gz_thumb_v7_backfilled'), isNot(true));
 
     await retry.writeAsBytes(makePng(100, 100));
     expect(
@@ -181,7 +229,7 @@ void main() {
       1,
     );
     prefs = await SharedPreferences.getInstance();
-    expect(prefs.getBool('gz_thumb_v6_backfilled'), isTrue);
+    expect(prefs.getBool('gz_thumb_v7_backfilled'), isTrue);
   });
 
   test(
@@ -196,14 +244,14 @@ void main() {
       await service.migrateOldThumbnails(prefs);
 
       expect(await thumbnail.exists(), isTrue);
-      expect(prefs.getBool('gz_thumb_v6_migrated'), isTrue);
+      expect(prefs.getBool('gz_thumb_v7_migrated'), isTrue);
       expect(
-        await File(p.join(tmpDir.path, '.thumbnails-v6-migrated')).exists(),
+        await File(p.join(tmpDir.path, '.thumbnails-v7-migrated')).exists(),
         isTrue,
       );
       expect(
         await File(
-          p.join(tmpDir.path, '.thumbnails-v6-refresh-required'),
+          p.join(tmpDir.path, '.thumbnails-v7-refresh-required'),
         ).exists(),
         isTrue,
       );
@@ -211,20 +259,20 @@ void main() {
   );
 
   test(
-    'adopting an existing v6 library only backfills missing files',
+    'adopting an existing v7 library only backfills missing files',
     () async {
       SharedPreferences.setMockInitialValues({
-        'gz_thumb_v6_migrated': true,
-        'gz_thumb_v6_backfilled': true,
+        'gz_thumb_v7_migrated': true,
+        'gz_thumb_v7_backfilled': true,
       });
       final prefs = await SharedPreferences.getInstance();
 
       await service.migrateOldThumbnails(prefs);
 
-      expect(prefs.getBool('gz_thumb_v6_backfilled'), isFalse);
+      expect(prefs.getBool('gz_thumb_v7_backfilled'), isFalse);
       expect(
         await File(
-          p.join(tmpDir.path, '.thumbnails-v6-refresh-required'),
+          p.join(tmpDir.path, '.thumbnails-v7-refresh-required'),
         ).exists(),
         isFalse,
       );

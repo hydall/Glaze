@@ -5,6 +5,9 @@ part 'lorebook.g.dart';
 
 @freezed
 abstract class LorebookEntry with _$LorebookEntry {
+  // json_serializable applies this annotation to the generated implementation.
+  // ignore: invalid_annotation_target
+  @JsonSerializable(explicitToJson: true)
   const factory LorebookEntry({
     required String id,
     @Default('') String comment,
@@ -27,6 +30,11 @@ abstract class LorebookEntry with _$LorebookEntry {
     @Default('') String group,
     @Default(0) int groupProminence,
     LorebookCharacterFilter? characterFilter,
+
+    /// The entry opts out of the entry caps: neither the book's own
+    /// `maxInjectedEntries` nor the global one can cut it, and it spends no
+    /// slot, so it never pushes another activated entry out. It still has to
+    /// activate first — by key, by being constant, or through the vector pass.
     @Default(false) bool ignoreBudget,
     @Default(false) bool vectorSearch,
     @Default(true) bool useKeywordSearch,
@@ -95,6 +103,12 @@ abstract class LorebookGlobalSettings with _$LorebookGlobalSettings {
     @Default('worldInfoBefore') String injectionPosition,
     @Default('tokens') String reserveMode,
     @Default(0) int reserveValue,
+
+    /// Not read by anything. The prompt build fills keyword slots first and
+    /// gives the remainder to the vector pass, capped by [vectorTopK] — it has
+    /// never split the budget by percentage. The field stays so a backup or a
+    /// sync payload written by an older build still round-trips; its editor
+    /// was removed.
     @Default(50) int keywordVectorSplit,
     @Default(0.45) double vectorThreshold,
     @Default(10) int vectorTopK,
@@ -138,9 +152,26 @@ abstract class LorebookSettings with _$LorebookSettings {
     @Default(false) bool useGroupScoring,
     @Default(false) bool alertOnOverflow,
     @Default('both') String searchType,
+
+    /// Which field of an entry is embedded: `content` (the entry body, the
+    /// default and SillyTavern's only behaviour), `comment` (the title),
+    /// `keys`, or `both` (title and body). Resolved by
+    /// `lorebookEmbeddingText`, which falls back to the body when the chosen
+    /// field is empty on a given entry.
     @Default('content') String embeddingTarget,
+
+    /// Embed every entry of this book, not just the ones whose own
+    /// vector-search flag is set. SillyTavern's `enabled_for_all`; off by
+    /// default there and here.
+    @Default(false) bool vectorizeAllEntries,
     @Default(0.45) double vectorThreshold,
     @Default(10) int vectorTopK,
+
+    /// Not read by anything. The prompt build fills keyword slots first and
+    /// gives the remainder to the vector pass, capped by [vectorTopK] — it has
+    /// never split the budget by percentage. The field stays so a backup or a
+    /// sync payload written by an older build still round-trips; its editor
+    /// was removed.
     @Default(65) int keywordVectorSplit,
     @Default(5) int vectorScanDepth,
     @Default(true) bool vectorSearchEnabled,

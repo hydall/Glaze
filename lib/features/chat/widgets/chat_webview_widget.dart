@@ -1,12 +1,16 @@
 import 'dart:async';
 
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/debug/perf_debug.dart';
 import '../../../core/state/active_regex_provider.dart';
+import '../../../core/state/active_selection_provider.dart';
 import '../../../core/state/character_provider.dart';
 import '../../../core/state/persona_resolution.dart';
+import '../../personas/persona_list_provider.dart';
 import '../../../../shared/theme/theme_font_provider.dart';
 import '../../../../shared/theme/theme_preset.dart';
 import '../bridge/chat_bridge_controller.dart';
@@ -18,17 +22,27 @@ import '../../../shared/widgets/glaze_error_dialog.dart';
 import '../../extensions/services/panel_host_service.dart';
 import '../bridge/chat_bridge_registry.dart';
 import '../chat_provider.dart';
+import '../state/generation_phase_provider.dart';
 import 'chat_message_sync.dart';
+import 'chat_streaming_bridge_sync.dart';
 import 'chat_webview_build_listeners.dart';
 import 'chat_webview_callbacks.dart';
 import 'chat_webview_ext_block_callbacks.dart';
 import 'chat_webview_initializer.dart';
 import 'chat_webview_panel_refresher.dart';
+import 'chat_webview_recovery.dart';
 import 'chat_webview_surface.dart';
 import 'chat_webview_sync_dispatcher.dart';
+import 'message_scripts_prompt_sheet.dart';
+import 'webview_bridge_probe.dart';
 import 'webview_callbacks.dart';
 
 const String _kStreamingId = '__streaming__';
+
+/// The expression that tells the handshake the page's JS bridge is up. Shared
+/// by the fast-path probe and the polling fallback so the two can never drift.
+const String _kJsBridgeReadyProbe =
+    'typeof window.bridge !== "undefined" && window.bridge != null';
 const Duration _kBridgeOpTimeout = Duration(seconds: 15);
 const Duration _kWebViewInitTimeout = Duration(seconds: 45);
 const Duration _kJsBridgeReadyTimeout = Duration(seconds: 30);
@@ -44,7 +58,6 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
   final String? personaAvatarPath;
   final String? bgImagePath;
   final double bgBlur;
-  final double bgOpacity;
   final double bgNoiseOpacity;
   final double bgNoiseIntensity;
   final double bgDim;
@@ -54,6 +67,11 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
   final bool isGenerating;
   final bool isGeneratingImage;
   final bool isPostGenRunning;
+
+  /// Mirrors [ChatState.isSendPending] — a send is painted but its generation
+  /// has not been published yet. Treated as busy wherever [isGenerating] is,
+  /// so the just-sent user message does not flash a Regenerate button.
+  final bool isSendPending;
   final double bottomInset;
 
   /// Height of the box this WebView is laid out in. Pushed alongside
@@ -71,6 +89,12 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
   final List<ChatOverlayBlurRegion> blurRegions;
   final String? searchQuery;
   final int searchCurrentIndex;
+
+  /// Bumped by `ChatSearchDelegate` whenever the match list is recounted over
+  /// a changed message list. The query and the active index can both survive
+  /// such a recount unchanged while the highlights in the page are stale, so
+  /// this is what tells the sync dispatcher to re-run the highlight pass.
+  final int searchRevision;
   final String? chatLayout;
 
   /// Changes when preset colors/layout tokens affecting the WebView change.
@@ -94,6 +118,11 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
   final String? chatFontDataUrl;
   final double chatFontSize;
   final double chatLetterSpacing;
+
+  /// Width the messages keep to, centred, on desktop (see [ChatColumnWidth]);
+  /// 0 lets them span the WebView. The WebView itself always spans the
+  /// column, so the chat's background is one surface edge to edge.
+  final double chatColumnWidth;
   final List<dynamic> memoryEntries;
   final List<dynamic> memoryDrafts;
   final String? sessionId;
@@ -133,7 +162,6 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
     this.personaAvatarPath,
     this.bgImagePath,
     this.bgBlur = 0.0,
-    this.bgOpacity = 1.0,
     this.bgNoiseOpacity = 0.0,
     this.bgNoiseIntensity = 1.0,
     this.bgDim = 0.0,
@@ -143,12 +171,14 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
     required this.isGenerating,
     this.isGeneratingImage = false,
     this.isPostGenRunning = false,
+    this.isSendPending = false,
     this.bottomInset = 0,
     this.viewportHeight = 0,
     this.topInset = 0,
     this.blurRegions = const [],
     this.searchQuery,
     this.searchCurrentIndex = 0,
+    this.searchRevision = 0,
     this.chatLayout,
     this.themeSyncKey,
     this.elementOpacity = 0.8,
@@ -170,6 +200,7 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
     this.chatFontDataUrl,
     this.chatFontSize = 15.0,
     this.chatLetterSpacing = 0.0,
+    this.chatColumnWidth = 0,
     this.memoryEntries = const [],
     this.memoryDrafts = const [],
     this.sessionId,
@@ -199,9 +230,18 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
   ChatBridgeController? _bridge;
   bool _ready = false;
   bool _sessionSwitching = false;
+  int _sessionSwitchEpoch = 0;
   Future<void>? _initFuture;
   ChatWebViewWidget? _deferredSwitchFrom;
   bool _bridgeFailureNotified = false;
+
+  /// Rations rebuilds of the native view: see [ChatWebViewRecovery].
+  final ChatWebViewRecovery _recovery = ChatWebViewRecovery();
+
+  /// Bumped to hand the surface a brand new WebView after the old page died.
+  int _rebuildGeneration = 0;
+  bool _lifecycleActive = true;
+  int _lifecycleEpoch = 0;
   VoidCallback? _clearBridgeRegistry;
   final ChatWebViewSyncState _syncState = ChatWebViewSyncState();
   late final ChatWebViewSyncDispatcher _syncDispatcher =
@@ -239,8 +279,8 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
 
   /// Polls for the bridge (set by the surface's `onWebViewCreated`) and runs
   /// the idempotent init once it exists. Bounded so it can never spin forever.
-  /// If the bridge never appears (e.g. WebView2 not installed on Windows), an
-  /// error dialog is shown so the user is not left with a blank screen.
+  /// A timeout diagnoses an incomplete native initialization; it cannot infer
+  /// the installation state of WebView2, which is also hit by lifecycle races.
   Future<void> _kickInitWhenReady() async {
     for (var i = 0; i < 50; i++) {
       if (!mounted) return;
@@ -251,21 +291,22 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       }
       await Future<void>.delayed(const Duration(milliseconds: 100));
     }
-    // Bridge never appeared after 5 seconds of polling — the native WebView
-    // could not be created (e.g. WebView2 Runtime missing on Windows, or
-    // environment setup failed at app startup). Show a diagnostic dialog
-    // instead of leaving a blank page.
-    if (!mounted || _bridgeFailureNotified) return;
-    _bridgeFailureNotified = true;
+    // Bridge never appeared after 5 seconds of polling. This can be an actual
+    // platform failure, but can also be a native-view lifecycle race during a
+    // rapid route change, so do not claim a missing runtime without evidence.
+    if (!mounted) return;
     debugPrint(
       '[ChatWebView] bridge was not created after 5s — '
-      'native WebView failed to initialize (WebView2 missing?)',
+      'native WebView did not finish initializing',
     );
-    GlazeErrorDialog.show(
-      context,
-      'Chat view could not be initialized. '
-      'On Windows, ensure "Microsoft Edge WebView2 Runtime" is installed.',
-      prefix: 'Chat view failed to load',
+    if (_recovery.requestRebuild()) {
+      setState(() => _rebuildGeneration++);
+      WidgetsBinding.instance.addPostFrameCallback((_) => _kickInitWhenReady());
+      return;
+    }
+    _notifyWebViewFailure(
+      'Chat view is still initializing. Please return to the chat once more. '
+      'If this keeps happening, restart Glaze and check the diagnostic log.',
     );
   }
 
@@ -297,10 +338,59 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     overlayContextResolver: () => context,
     currentSessionId: () => widget.sessionId,
     currentCharacterId: () => widget.charId,
+    isActive: () => mounted && _lifecycleActive,
   );
 
   @override
+  void activate() {
+    super.activate();
+    _lifecycleActive = true;
+    ++_lifecycleEpoch;
+    _reverifyBridgeOnReactivate();
+  }
+
+  @override
+  void deactivate() {
+    _lifecycleActive = false;
+    ++_lifecycleEpoch;
+    super.deactivate();
+  }
+
+  /// The chat page is a keep-alive singleton. While this widget sat
+  /// deactivated (another route on top, or the app in the background) the OS
+  /// can kill the render process, and the death callback that would rebuild
+  /// the view is dropped while `_lifecycleActive` is false — so the chat comes
+  /// back to a dead page that still accepts calls but never answers them, and
+  /// delete / regenerate do nothing until the app is restarted.
+  ///
+  /// On re-activation, probe the page once (bounded) and rebuild the native
+  /// view if `window.bridge` is gone. A live page answers in one call, so this
+  /// is a no-op for every ordinary tab switch.
+  void _reverifyBridgeOnReactivate() {
+    final bridge = _bridge;
+    if (bridge == null || !_ready || !mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !identical(_bridge, bridge) || !_ready) return;
+      unawaited(() async {
+        bool alive;
+        try {
+          alive = await probeWebViewJsBridge(
+            () => bridge.evalJsWithResult(_kJsBridgeReadyProbe),
+            timeout: _kBridgeOpTimeout,
+          );
+        } catch (_) {
+          alive = false;
+        }
+        if (!mounted || !identical(_bridge, bridge)) return;
+        if (!alive) _handlePageProcessGone();
+      }());
+    });
+  }
+
+  @override
   void dispose() {
+    _lifecycleActive = false;
+    ++_lifecycleEpoch;
     PerfDebug.chatWebViewWidgetDisposed();
     // Unregister bridge so the service doesn't hold a stale reference.
     _clearBridgeRegistry?.call();
@@ -324,10 +414,19 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
 
     // Fast path: JS already fired onWebViewReady (keep-alive preload case —
     // the page was loaded before the chat screen opened).
-    final alreadyReady = await bridge.evalJsWithResult(
-      'typeof window.bridge !== "undefined" && window.bridge != null',
+    //
+    // Bounded, because this is the first read of a page that may already be
+    // dead: the OS can kill the render process of the shared keep-alive
+    // WebView while no chat is mounted, and a dead page accepts the call
+    // without ever answering it. Unbounded, that hang is terminal — the init
+    // future is already claimed, so `_kickInitWhenReady` backs off and the
+    // rebuild path never runs. A timeout throws out of here into the same
+    // `_handleWebViewFailure(rebuildable: true)` the init timeout uses.
+    final alreadyReady = await probeWebViewJsBridge(
+      () => bridge.evalJsWithResult(_kJsBridgeReadyProbe),
+      timeout: _kBridgeOpTimeout,
     );
-    if (alreadyReady == true) {
+    if (alreadyReady) {
       PerfDebug.chatWebViewJsBridgeReady();
       return;
     }
@@ -351,9 +450,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       while (!completer.isCompleted && DateTime.now().isBefore(deadline)) {
         await Future<void>.delayed(const Duration(milliseconds: 200));
         if (completer.isCompleted) return;
-        final ready = await bridge.evalJsWithResult(
-          'typeof window.bridge !== "undefined" && window.bridge != null',
-        );
+        final ready = await bridge.evalJsWithResult(_kJsBridgeReadyProbe);
         if (ready == true && !completer.isCompleted) completer.complete();
       }
     }());
@@ -379,6 +476,9 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     final bridge = _bridge;
     if (bridge == null) return;
     final initSessionId = widget.sessionId;
+    final initMessages = List<ChatMessage>.of(widget.messages);
+    final initVisibleStartIndex = widget.visibleStartIndex;
+    _resetStreamingPresentationState();
     PerfDebug.chatWebViewInitAttempted();
     try {
       await _waitForJsBridgeReady();
@@ -387,7 +487,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       // before the initial render, or the load's jump to the bottom reads as a
       // downward scroll and this chat opens with its header already gone.
       await _showChatHeader(bridge);
-      await ChatWebViewInitializer(
+      final initializer = ChatWebViewInitializer(
         ref: ref,
         bridge: bridge,
         input: ChatWebViewInitInput(
@@ -402,7 +502,6 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
           greetingTotal: widget.greetingTotal,
           bgImagePath: widget.bgImagePath,
           bgBlur: widget.bgBlur,
-          bgOpacity: widget.bgOpacity,
           bgNoiseOpacity: widget.bgNoiseOpacity,
           bgNoiseIntensity: widget.bgNoiseIntensity,
           chatFontName: widget.chatFontName,
@@ -429,23 +528,39 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
           isGenerating: widget.isGenerating,
           isGeneratingImage: widget.isGeneratingImage,
           isPostGenRunning: widget.isPostGenRunning,
+          isSendPending: widget.isSendPending,
         ),
-        onReady: () => _ready = true,
+        onReady: () {
+          if (!mounted || !identical(_bridge, bridge)) return;
+          _ready = true;
+          // The page is alive and painted: whatever it took to get here is no
+          // longer evidence of a rebuild storm.
+          _recovery.noteHealthy();
+          // Do not expose the controller to background services or the Windows
+          // trackpad sink until the page bridge and its DOM are initialized.
+          ref.read(chatBridgeRegistryProvider(widget.charId).notifier).state =
+              bridge;
+        },
         onSyncExtBlockPanels: _syncExtBlockPanels,
         applyTheme: _applyThemeToBridge,
-      ).run().timeout(_kWebViewInitTimeout);
+      );
+      await initializer.run().timeout(_kWebViewInitTimeout);
+      // The list the first frame was rewritten with, for the post-init
+      // staleness check below.
+      _syncState.paintedDisplayRegexes = initializer.paintedDisplayRegexes;
       PerfDebug.chatWebViewInitCompleted();
     } on TimeoutException catch (e, st) {
-      _handleWebViewFailure(e, st, phase: 'init');
+      _handleWebViewFailure(e, st, phase: 'init', rebuildable: true);
       return;
     } catch (e, st) {
-      _handleWebViewFailure(e, st, phase: 'init');
+      _handleWebViewFailure(e, st, phase: 'init', rebuildable: true);
       return;
     } finally {
       if (!_ready) _initFuture = null;
     }
 
     if (!mounted) return;
+    await _reconcileActiveGenerationPresentation(bridge);
     // Init can take longer than the rebaseline window opened above, and the
     // list settles for a few more frames after it. Re-arm once everything is in
     // place so the chat is guaranteed to open with the header showing.
@@ -462,33 +577,105 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     final deferred = _deferredSwitchFrom;
     _deferredSwitchFrom = null;
     if (deferred != null) {
-      unawaited(_applySessionSwitch(deferred));
+      unawaited(_applySessionSwitch(deferred, epoch: _sessionSwitchEpoch));
     } else if (initSessionId != widget.sessionId) {
       unawaited(_syncCurrentSessionToBridge());
     } else {
       // On Windows (no keep-alive), init can take several seconds. During
       // that time didUpdateWidget may fire with new messages, but the sync
-      // dispatcher skips them because _ready is false. After init completes,
-      // re-sync the current messages to catch any changes that were missed
-      // during the init window. The ChatWebViewInitializer already pushed
-      // the messages captured at init-construction time, but if the widget
-      // received newer messages since then, this ensures they reach the JS
-      // bridge. On mobile (keep-alive) this is a no-op when messages match.
-      unawaited(_resyncMessagesAfterInit());
+      // dispatcher skips them because _ready is false. Re-sync only when data
+      // changed since the initializer captured it; an unconditional second
+      // setMessages causes a visible duplicate first-chat render on Windows.
+      //
+      // The display-script check compares the list the first paint was built
+      // with against the provider's latest value. The initializer awaits the
+      // provider, so the list's first load is already in the DOM and must not
+      // count as a change; only a list that moved *after* the paint leaves the
+      // messages rewritten by an older list and needs the re-render.
+      final regexContextStale = displayRegexResyncNeeded(
+        _syncState.paintedDisplayRegexes,
+        ref.read(displayRegexesProvider).value ?? const [],
+      );
+      if (regexContextStale ||
+          initVisibleStartIndex != widget.visibleStartIndex ||
+          !chatMessageListsIdentical(initMessages, widget.messages)) {
+        unawaited(_resyncMessagesAfterInit());
+      }
     }
+  }
+
+  /// The page behind the chat died. Nothing on screen is real any more: the
+  /// DOM is gone, `window.bridge` with it, and every call the app makes into
+  /// the page from here on returns without doing anything — which is why the
+  /// symptom was a chat with no messages whose edit and regenerate buttons did
+  /// nothing until it was reopened.
+  ///
+  /// So the Dart side stops believing in it (nothing is pushed into a dead
+  /// page, and no background service gets the controller out of the registry),
+  /// and the native view is replaced. [ChatWebViewRecovery] decides when to
+  /// stop trying and tell the reader instead.
+  void _handlePageProcessGone() {
+    if (!mounted) return;
+    _ready = false;
+    _initFuture = null;
+    _resetStreamingPresentationState();
+    _syncState.resetMutations();
+    _clearBridgeRegistry?.call();
+    _bridge = null;
+    if (!_recovery.requestRebuild()) {
+      debugPrint('[ChatWebView] page died too often; not rebuilding again');
+      _notifyWebViewFailure(
+        'The chat view keeps being closed by the system, usually because the '
+        'device is low on memory. Reopen the chat, and restart Glaze if it '
+        'happens again.',
+      );
+      return;
+    }
+    setState(() => _rebuildGeneration++);
+    // The replacement view normally reports itself through
+    // `onWebViewCreated`; this is the same safety net used at startup for the
+    // case where it does not.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _kickInitWhenReady());
+  }
+
+  /// Tells the reader the chat view could not be brought up, once per widget.
+  void _notifyWebViewFailure(Object message) {
+    if (!mounted || _bridgeFailureNotified) return;
+    _bridgeFailureNotified = true;
+    GlazeErrorDialog.show(
+      context,
+      message,
+      prefix: "${'error_chat_view_load_failed'.tr()}: ",
+    );
   }
 
   void _handleWebViewFailure(
     Object e,
     StackTrace? st, {
     required String phase,
+    bool rebuildable = false,
   }) {
     debugPrint('[ChatWebView] $phase failed: $e\n$st');
+    _setSessionSwitching(false);
     if (!mounted) return;
-    setState(() => _sessionSwitching = false);
-    if (_bridgeFailureNotified) return;
-    _bridgeFailureNotified = true;
-    GlazeErrorDialog.show(context, e, prefix: 'Chat view failed to load');
+    // An init that could not reach the page is the same situation as a page
+    // that died under it: the JS bridge handshake it waited 30s for will not
+    // answer a second attempt against that same page either. So the view is
+    // replaced and init runs again on a live one, and the reader hears about
+    // it only once the rebuild budget is spent.
+    if (rebuildable && _recovery.requestRebuild()) {
+      debugPrint('[ChatWebView] rebuilding the view after a failed $phase');
+      _ready = false;
+      _initFuture = null;
+      _resetStreamingPresentationState();
+      _syncState.resetMutations();
+      _bridge = null;
+      _clearBridgeRegistry?.call();
+      setState(() => _rebuildGeneration++);
+      WidgetsBinding.instance.addPostFrameCallback((_) => _kickInitWhenReady());
+      return;
+    }
+    _notifyWebViewFailure(e);
   }
 
   /// Re-shows the chat header and re-baselines the JS hide-on-scroll tracker.
@@ -520,11 +707,12 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     final bridge = _bridge;
     if (bridge == null || !_ready) return;
     try {
-      if (mounted) setState(() => _sessionSwitching = true);
+      _setSessionSwitching(true);
       // Same reasoning as on open: the replace below jumps the list, which the
       // header tracker would otherwise read as the user scrolling down.
       await _showChatHeader(bridge);
       await _bridgeOp(bridge.clearAll(), label: 'clearAll');
+      _resetStreamingPresentationState();
       await _bridgeOp(
         bridge.setMessages(
           widget.messages,
@@ -532,10 +720,11 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
         ),
         label: 'setMessages',
       );
+      await _reconcileActiveGenerationPresentation(bridge);
       unawaited(_syncExtBlockPanels());
       await _bridgeOp(bridge.scrollToBottom(), label: 'scrollToBottom');
     } finally {
-      if (mounted) setState(() => _sessionSwitching = false);
+      _setSessionSwitching(false);
     }
   }
 
@@ -549,17 +738,23 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
   Future<void> _resyncMessagesAfterInit() async {
     final bridge = _bridge;
     if (bridge == null || !_ready || !mounted) return;
+    // The dispatcher skips every update while `_ready` is false, so this
+    // catch-up pass is the first thing to map messages after a slow init —
+    // it has to carry the send window itself.
+    bridge.isSendPending = widget.isSendPending;
     await _bridgeOp(
       _messageSync.sync(
         bridge: bridge,
         oldMsgs: const <ChatMessage>[],
         newMsgs: widget.messages,
         visibleStartIndex: widget.visibleStartIndex,
-        isGenerating: widget.isGenerating,
+        busy: widget.isGenerating || widget.isSendPending,
         sessionSwitching: false,
+        onDomReset: _resetStreamingPresentationState,
       ),
       label: 'resyncMessagesAfterInit',
     );
+    await _reconcileActiveGenerationPresentation(bridge);
   }
 
   void _bindBridgeCallbacks() {
@@ -580,6 +775,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     bridge.onChangeGreeting = callbacks.onChangeGreeting;
     bridge.onHeaderScroll = callbacks.onHeaderScroll;
     bridge.onScrollToBottomVisibility = callbacks.onScrollToBottomVisibility;
+    bridge.onScrollToTopVisibility = callbacks.onScrollToTopVisibility;
     bridge.onRegenerate = callbacks.onRegenerate;
     bridge.onRerunCleaner = callbacks.onRerunCleaner;
     bridge.onSelectionAction = callbacks.onSelectionAction;
@@ -595,13 +791,19 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     bridge.onToggleImageHidden = callbacks.onToggleImageHidden;
     bridge.onInjectClick = callbacks.onInjectClick;
     bridge.onImgRetry = callbacks.onImgRetry;
+    bridge.onImgEnableRetry = callbacks.onImgEnableRetry;
     bridge.onImgFind = callbacks.onImgFind;
     bridge.onImgRegen = callbacks.onImgRegen;
     bridge.onImgOptions = callbacks.onImgOptions;
+    bridge.onImgVariant = callbacks.onImgVariant;
     bridge.onImgCancel = callbacks.onImgCancel;
     bridge.onStop = callbacks.onStop;
     bridge.onLinkClick = callbacks.onLinkClick;
     bridge.onLoadMore = callbacks.onLoadMore;
+    bridge.onMessageScriptBlocked = () {
+      if (!mounted) return;
+      unawaited(maybeShowMessageScriptsPrompt(context, ref));
+    };
 
     final extBlocks = ChatWebViewExtBlockCallbacks(
       ref: ref,
@@ -677,35 +879,40 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     );
   }
 
-  Future<void> _applySessionSwitch(ChatWebViewWidget old) async {
+  Future<void> _applySessionSwitch(
+    ChatWebViewWidget old, {
+    required int epoch,
+  }) async {
     final bridge = _bridge;
-    if (bridge == null) return;
+    bool ownsSwitch() => mounted && epoch == _sessionSwitchEpoch;
+    // `didUpdateWidget` raises the cover synchronously before calling this, and
+    // the cover both hides the surface and swallows every touch on it. Any exit
+    // that leaves it up is indistinguishable from a hung chat, so the two early
+    // returns below have to lower it themselves — only the deferred path may
+    // keep it up, and the init it waits on is bounded by `_kWebViewInitTimeout`.
+    if (bridge == null) {
+      if (ownsSwitch()) _setSessionSwitching(false);
+      return;
+    }
     if (!_ready) {
       _deferredSwitchFrom = old;
       return;
     }
 
-    // A streaming append may already be crossing the platform channel. The
-    // dispatcher invalidated its epoch synchronously; wait for the call to
-    // settle before replacing the DOM so a late old-session bubble cannot land
-    // after the new session's setMessages.
-    final pendingMessageMutation = _syncState.messageMutationPending;
-    if (pendingMessageMutation != null) {
-      try {
-        await pendingMessageMutation;
-      } catch (_) {}
-    }
-
-    // Drop any interactive panels from the previous session before clearing
-    // the WebView DOM. JS-side `clearAll()` also closes panels, but the
-    // Dart-side registry has to be reset so the next `openPanel` call can
-    // bind fresh handlers on the (potentially new) bridge.
-    unawaited(PanelHostService.instance.disposeAll(charId: old.charId));
     try {
-      if (mounted) setState(() => _sessionSwitching = true);
+      await _awaitPendingMessageMutation();
+      if (!ownsSwitch()) return;
+
+      // Drop any interactive panels from the previous session before clearing
+      // the WebView DOM. JS-side `clearAll()` also closes panels, but the
+      // Dart-side registry has to be reset so the next `openPanel` call can
+      // bind fresh handlers on the (potentially new) bridge.
+      unawaited(PanelHostService.instance.disposeAll(charId: old.charId));
+      _setSessionSwitching(true);
       // Same reasoning as on open: the replace below jumps the list, which the
       // header tracker would otherwise read as the user scrolling down.
       await _showChatHeader(bridge);
+      if (!ownsSwitch()) return;
       if (widget.charId != old.charId) {
         await _bridgeOp(
           bridge.setIdentity(
@@ -719,7 +926,9 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
           ),
           label: 'setIdentity',
         );
+        if (!ownsSwitch()) return;
         await _bridgeOp(_applyThemeToBridge(), label: 'applyTheme');
+        if (!ownsSwitch()) return;
         await _bridgeOp(
           bridge.setBackgroundNoise(
             widget.bgNoiseOpacity,
@@ -727,6 +936,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
           ),
           label: 'setBackgroundNoise',
         );
+        if (!ownsSwitch()) return;
         await _bridgeOp(
           bridge.setChatFont(
             fontName: widget.chatFontName,
@@ -736,6 +946,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
           ),
           label: 'setChatFont',
         );
+        if (!ownsSwitch()) return;
       } else {
         await _bridgeOp(
           bridge.setIdentity(
@@ -749,9 +960,19 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
           ),
           label: 'setIdentity',
         );
+        if (!ownsSwitch()) return;
       }
 
-      await _bridgeOp(bridge.clearAll(), label: 'clearAll');
+      // The chat itself is being replaced, so the page must drop the typing
+      // bubble instead of parking it for the setMessages below: it belongs to
+      // the session being left, and carried over it shows a reply on its way
+      // in a chat where nothing is running.
+      await _bridgeOp(
+        bridge.clearAll(keepPlaceholder: false),
+        label: 'clearAll',
+      );
+      if (!ownsSwitch()) return;
+      _resetStreamingPresentationState();
       await _bridgeOp(
         bridge.setMessages(
           widget.messages,
@@ -759,14 +980,116 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
         ),
         label: 'setMessages',
       );
+      if (!ownsSwitch()) return;
+      await _reconcileActiveGenerationPresentation(bridge);
+      if (!ownsSwitch()) return;
       unawaited(_syncExtBlockPanels());
       await _bridgeOp(bridge.scrollToBottom(), label: 'scrollToBottom');
     } finally {
-      if (mounted) setState(() => _sessionSwitching = false);
+      if (ownsSwitch()) _setSessionSwitching(false);
     }
-    _syncState.wasGenerating = widget.isGenerating;
+  }
+
+  Future<void> _reconcileActiveGenerationPresentation(
+    ChatBridgeController bridge, {
+    bool enqueue = true,
+  }) async {
+    if (!mounted || !identical(_bridge, bridge) || !_ready) return;
+    final charId = widget.charId;
+    final sessionId = widget.sessionId;
+    final epoch = _syncState.streamEpoch;
+    final isBusy = widget.isGenerating || widget.isSendPending;
+    final regenTargetId = widget.regenTargetId;
+    final continuationTargetId = widget.continuationTargetId;
+    final messages = List<ChatMessage>.of(widget.messages);
+    final streaming = ref.read(streamingStateProvider(charId));
+    final isImpersonating = ref.read(impersonationStateProvider(charId)).active;
+
+    bool isCurrent() =>
+        mounted &&
+        identical(_bridge, bridge) &&
+        _ready &&
+        widget.charId == charId &&
+        widget.sessionId == sessionId &&
+        _syncState.streamEpoch == epoch &&
+        (widget.isGenerating || widget.isSendPending) == isBusy &&
+        widget.regenTargetId == regenTargetId &&
+        widget.continuationTargetId == continuationTargetId;
+
+    Future<void> reconcile() async {
+      if (!isCurrent()) return;
+      await bridge.setGenerationPhase(
+        generationPhaseLabel(ref.read(generationPhaseProvider(charId))),
+      );
+      if (!isCurrent()) return;
+      await reconcileActiveGenerationBridge(
+        bridge: bridge,
+        syncState: _syncState,
+        isBusy: isBusy,
+        isImpersonating: isImpersonating,
+        regenTargetId: regenTargetId,
+        continuationTargetId: continuationTargetId,
+        streaming: streaming,
+        messages: messages,
+        streamingId: _kStreamingId,
+        isCurrent: isCurrent,
+      );
+    }
+
+    if (enqueue) {
+      await _syncState.enqueueMessageMutation(reconcile);
+    } else {
+      await reconcile();
+    }
+  }
+
+  void _resetStreamingPresentationState() {
+    _syncState.wasBusy = widget.isGenerating || widget.isSendPending;
     _syncState.streamingSent = false;
     _syncState.regenStreamingSent = false;
+  }
+
+  /// Raises/lowers the switch cover, from anywhere.
+  ///
+  /// `_applySessionSwitch` can reach this synchronously out of
+  /// `didUpdateWidget` (its early returns run before the first await), and
+  /// `setState` during the build phase is an assertion failure. The field is
+  /// written either way — the build that is already running reads the new
+  /// value — and only the rebuild is deferred.
+  void _setSessionSwitching(bool value) {
+    if (_sessionSwitching == value) return;
+    _sessionSwitching = value;
+    if (!mounted) return;
+    if (WidgetsBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      return;
+    }
+    setState(() {});
+  }
+
+  /// Waits for the queued message-list mutations to reach the WebView before
+  /// the DOM is replaced, so a late bubble from the old session cannot land
+  /// after the new session's `setMessages`.
+  ///
+  /// Bounded: the queue is a chain of platform-channel calls, and one that
+  /// never settles (a WebView torn down mid-delete, a frozen backgrounded page)
+  /// would otherwise park this method forever with the cover up — a chat that
+  /// is blank and eats every tap. Giving up on the wait only risks the ordering
+  /// this await protects; the full `clearAll` + `setMessages` below still
+  /// rebuilds the DOM from the current session.
+  Future<void> _awaitPendingMessageMutation() async {
+    final pending = _syncState.messageMutationPending;
+    if (pending == null) return;
+    try {
+      await pending.timeout(_kBridgeOpTimeout);
+    } on TimeoutException {
+      debugPrint(
+        '[ChatWebView] pending message mutation did not settle in '
+        '${_kBridgeOpTimeout.inSeconds}s — switching session anyway',
+      );
+    } catch (_) {
+      // The queue reports its own failures; this wait only needs it to finish.
+    }
   }
 
   ChatWebViewWidgetFields _fieldsFor(ChatWebViewWidget w) {
@@ -779,7 +1102,6 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       personaAvatarPath: w.personaAvatarPath,
       bgImagePath: w.bgImagePath,
       bgBlur: w.bgBlur,
-      bgOpacity: w.bgOpacity,
       bgDim: w.bgDim,
       bgNoiseOpacity: w.bgNoiseOpacity,
       bgNoiseIntensity: w.bgNoiseIntensity,
@@ -789,6 +1111,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       blurRegions: w.blurRegions,
       searchQuery: w.searchQuery,
       searchCurrentIndex: w.searchCurrentIndex,
+      searchRevision: w.searchRevision,
       chatLayout: w.chatLayout,
       themeSyncKey: w.themeSyncKey,
       elementOpacity: w.elementOpacity,
@@ -806,6 +1129,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       chatFontDataUrl: w.chatFontDataUrl,
       chatFontSize: w.chatFontSize,
       chatLetterSpacing: w.chatLetterSpacing,
+      chatColumnWidth: w.chatColumnWidth,
       isSelectionMode: w.isSelectionMode,
       batterySaver: w.batterySaver,
       hideMessageId: w.hideMessageId,
@@ -819,6 +1143,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       isGenerating: w.isGenerating,
       isGeneratingImage: w.isGeneratingImage,
       isPostGenRunning: w.isPostGenRunning,
+      isSendPending: w.isSendPending,
       regenTargetId: w.regenTargetId,
       continuationTargetId: w.continuationTargetId,
       greetingTotal: w.greetingTotal,
@@ -873,10 +1198,11 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       // surface's stale content, instead of waiting for the async switch below
       // to flip it a frame or two later.
       _sessionSwitching = true;
+      final epoch = ++_sessionSwitchEpoch;
       if (!_ready) {
         _deferredSwitchFrom = oldWidget;
       } else {
-        unawaited(_applySessionSwitch(oldWidget));
+        unawaited(_applySessionSwitch(oldWidget, epoch: epoch));
       }
       return;
     }
@@ -884,11 +1210,14 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     final oldMessages = oldWidget.messages;
     final newMessages = widget.messages;
     final visibleStartIndex = widget.visibleStartIndex;
-    final isGenerating = widget.isGenerating;
+    // The Regenerate button belongs to an idle chat, and a send whose reply is
+    // still being persisted is not idle — see ChatMessageSync.sync's [busy].
+    final busy = widget.isGenerating || widget.isSendPending;
     final sessionSwitching = _sessionSwitching;
     if (result.runMessageSync) unawaited(_syncExtBlockPanels());
     if (bridge != null &&
         (result.runMessageSync ||
+            result.rehighlightSearch ||
             (result.appendPlaceholder && result.placeholder != null))) {
       final charId = widget.charId;
       final sessionId = widget.sessionId;
@@ -903,7 +1232,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
                 !_sessionSwitching &&
                 widget.charId == charId &&
                 widget.sessionId == sessionId &&
-                widget.isGenerating &&
+                (widget.isGenerating || widget.isSendPending) &&
                 widget.regenTargetId == null &&
                 widget.continuationTargetId == null &&
                 !_syncState.streamingSent;
@@ -912,9 +1241,29 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
                 oldMessages,
                 newMessages: newMessages,
                 visibleStartIndex: visibleStartIndex,
-                isGenerating: isGenerating,
+                busy: busy,
                 sessionSwitching: sessionSwitching,
                 bridge: bridge,
+              );
+              await _reconcileActiveGenerationPresentation(
+                bridge,
+                enqueue: false,
+              );
+            }
+            if (result.rehighlightSearch &&
+                mounted &&
+                identical(_bridge, bridge) &&
+                _ready &&
+                !_sessionSwitching &&
+                widget.charId == charId &&
+                widget.sessionId == sessionId) {
+              // Runs after the message sync above so the highlight pass reads
+              // the edited bubbles: re-numbering the matches over the old text
+              // is what left the counter and the highlights out of step.
+              _syncDispatcher.applySearch(
+                bridge: bridge,
+                fields: _fieldsFor(widget),
+                scroll: false,
               );
             }
             if (placeholder == null || !isCurrent()) return;
@@ -926,7 +1275,8 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
                 identical(_bridge, bridge) &&
                 widget.charId == charId &&
                 widget.sessionId == sessionId &&
-                !widget.isGenerating) {
+                !widget.isGenerating &&
+                !widget.isSendPending) {
               // Stop can land while appendMessage is crossing the platform
               // channel, after the falling edge already tried to remove it.
               await bridge.removeMessage(_kStreamingId);
@@ -947,7 +1297,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     List<ChatMessage> oldMsgs, {
     required List<ChatMessage> newMessages,
     required int visibleStartIndex,
-    required bool isGenerating,
+    required bool busy,
     required bool sessionSwitching,
     required ChatBridgeController? bridge,
   }) {
@@ -956,8 +1306,9 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       oldMsgs: oldMsgs,
       newMsgs: newMessages,
       visibleStartIndex: visibleStartIndex,
-      isGenerating: isGenerating,
+      busy: busy,
       sessionSwitching: sessionSwitching,
+      onDomReset: _resetStreamingPresentationState,
     );
   }
 
@@ -984,13 +1335,24 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
 
     if (_bridge != null) {
       _bindBridgeCallbacks();
-      _bridge!.setRegexContext(displayRegexes, character, effectivePersona);
+      final session = ref.watch(chatProvider(widget.charId)).value?.session;
+      // The roster a message's stored `personaId` is resolved against. Watched
+      // (not read) so a persona renamed or deleted elsewhere reaches the page:
+      // the listener in ChatWebViewBuildListeners re-renders on the same change.
+      _bridge!.setPersonaRoster(
+        ref.watch(personaListProvider).value ?? const [],
+      );
+      _bridge!.setRegexContext(
+        displayRegexes,
+        character,
+        effectivePersona,
+        sessionVars: session?.sessionVars ?? const {},
+        globalVars: ref.watch(globalVarsProvider),
+      );
       // Refresh the origin ("Created on" / "Branched on") marker before any
       // message sync dispatches, so a full setMessages picks up the current
       // session's creation/branch stamp.
-      _bridge!.chatOrigin = ChatBridgeController.originMarkerFor(
-        ref.watch(chatProvider(widget.charId)).value?.session,
-      );
+      _bridge!.chatOrigin = ChatBridgeController.originMarkerFor(session);
     }
 
     ChatWebViewBuildListeners(
@@ -1007,6 +1369,8 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       visibleStartIndex: widget.visibleStartIndex,
       onRefreshExtBlocksPanel: _refreshExtBlocksPanel,
       onSyncExtBlockPanels: _syncExtBlockPanels,
+      onReconcileActiveGeneration: _reconcileActiveGenerationPresentation,
+      onDomReset: _resetStreamingPresentationState,
       isCurrentBridge: (bridge) => identical(_bridge, bridge),
     ).attach();
 
@@ -1027,11 +1391,13 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       imageGenActions: widget.imageGenActions,
       scrollActions: widget.scrollActions,
       miscActions: widget.miscActions,
-      isMounted: () => mounted,
+      isCurrentSession: (sessionId) => widget.sessionId == sessionId,
+      lifecycleEpoch: _lifecycleEpoch,
+      isActive: (epoch) =>
+          mounted && _lifecycleActive && epoch == _lifecycleEpoch,
       sessionSwitching: _sessionSwitching,
       refreshPanel: _refreshExtBlocksPanel,
       bgImageBytes: bgImageBytes,
-      bgOpacity: widget.bgOpacity,
       bgBlur: widget.bgBlur,
       bgDim: widget.bgDim,
       chatBgMode: widget.chatBgMode,
@@ -1040,11 +1406,13 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       bottomInset: widget.bottomInset,
       onBridgeReady: (ChatBridgeController b) => _bridge = b,
       onInitWebView: _initWebView,
+      onPageProcessGone: _handlePageProcessGone,
+      rebuildGeneration: _rebuildGeneration,
     );
   }
 
   Map<String, String> _buildThemeMap() {
-    return ChatWebViewThemeBuilder.build(
+    final theme = ChatWebViewThemeBuilder.build(
       context,
       ChatWebViewThemeInput(
         elementOpacity: widget.elementOpacity,
@@ -1066,6 +1434,12 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
         showCharName: widget.showCharName,
       ),
     );
+    return {
+      ...theme,
+      'chat-column-width': widget.chatColumnWidth > 0
+          ? '${widget.chatColumnWidth.toStringAsFixed(1)}px'
+          : 'none',
+    };
   }
 
   Future<void> _applyThemeToBridge() async {
@@ -1084,6 +1458,12 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     final b = _bridge;
     if (b == null) return Future.value();
     return b.scrollToBottom(smooth: smooth);
+  }
+
+  Future<void> scrollToTop() {
+    final b = _bridge;
+    if (b == null) return Future.value();
+    return b.scrollToTop();
   }
 
   /// Arm a one-shot "stick to bottom on the next append" so sending a message
@@ -1106,6 +1486,21 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     return b.setBottomPadding(px, viewportHeight: viewportHeight);
   }
 
+  /// Pushes the mirrored glass rects at the page directly, bypassing the
+  /// widget property and the rebuild it would take to carry them down.
+  ///
+  /// The chrome moves every frame of a keyboard, drawer or composer-growth
+  /// animation, and the strips have to move with it or they sit where the
+  /// chrome was until it settles. That is affordable frame by frame only
+  /// without a rebuild, which is what this is for. The property path stays as
+  /// the level-triggered one: it re-asserts the same rects when the page is
+  /// (re)initialized or the session switches.
+  Future<void> applyBlurRegions(List<ChatOverlayBlurRegion> regions) {
+    final b = _bridge;
+    if (b == null || !_ready) return Future.value();
+    return b.setOverlayBlurRegions(regions);
+  }
+
   Future<void> scrollToMessage(String id, {bool highlight = false}) {
     final b = _bridge;
     if (b == null) return Future.value();
@@ -1122,5 +1517,20 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     final b = _bridge;
     if (b == null) return Future.value();
     return b.toggleMessageSelection(id);
+  }
+
+  /// Selects every message above the last tapped one; a second call with that
+  /// run already selected deselects it again.
+  Future<void> selectMessagesAbove() {
+    final b = _bridge;
+    if (b == null) return Future.value();
+    return b.selectMessagesAbove();
+  }
+
+  /// Mirror of [selectMessagesAbove] for the messages below the anchor.
+  Future<void> selectMessagesBelow() {
+    final b = _bridge;
+    if (b == null) return Future.value();
+    return b.selectMessagesBelow();
   }
 }

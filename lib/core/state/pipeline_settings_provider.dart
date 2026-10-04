@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 
+import '../models/card_rewriter_settings.dart';
 import '../models/cleaner_settings.dart';
 import '../models/ledger_settings.dart';
 import '../models/memory_book_api_settings.dart';
@@ -17,7 +18,8 @@ import 'shared_prefs_provider.dart';
 ///
 /// The JSON format changed from flat (all fields at the root level) to nested
 /// (fields grouped under `studioAgent`, `cleaner`, `ledger`, `memoryPipeline`,
-/// `memoryBookApi` sub-objects). The [load] method handles both formats
+/// `memoryBookApi`, `cardRewriter` sub-objects). The [load] method handles both
+/// formats
 /// idempotently — flat JSON is migrated to nested on first load and persisted
 /// back so subsequent loads read the nested format directly.
 final pipelineSettingsProvider =
@@ -55,7 +57,8 @@ class PipelineSettingsNotifier extends StateNotifier<PipelineSettings> {
   /// the new nested format and the legacy flat format.
   ///
   /// **Nested format** (current): JSON has `studioAgent`, `cleaner`, `ledger`,
-  /// `memoryPipeline`, `memoryBookApi` sub-objects — parsed directly via
+  /// `memoryPipeline`, `memoryBookApi`, `cardRewriter` sub-objects — parsed
+  /// directly via
   /// [PipelineSettings.fromJson].
   ///
   /// **Flat format** (legacy): All fields at the root level. Each sub-model's
@@ -78,6 +81,7 @@ class PipelineSettingsNotifier extends StateNotifier<PipelineSettings> {
       ledger: LedgerSettings.fromJson(migrated),
       memoryPipeline: MemoryPipelineSettings.fromJson(migrated),
       memoryBookApi: MemoryBookApiSettings.fromJson(migrated),
+      cardRewriter: CardRewriterSettings.fromJson(migrated),
     );
   }
 

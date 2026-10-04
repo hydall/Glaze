@@ -1,11 +1,9 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/llm/context_calculator.dart';
 import '../../../shared/theme/app_colors.dart';
-import '../../../shared/widgets/glaze_bottom_sheet.dart';
-import '../chat_provider.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 
 final kSourceMeta = <String, SourceMeta>{
   'preset': SourceMeta(
@@ -417,246 +415,246 @@ class TokenizerLayout extends StatelessWidget {
   }
 }
 
-class TokenizerActionButtons extends ConsumerWidget {
-  final String charId;
-  final int visibleCount;
-  final int hiddenCount;
-  final double hidePercent;
-  final VoidCallback onRefresh;
+/// Which tokenizer the numbers above were counted with.
+///
+/// Counts differ by 10–30% between model families, so the inspector says whose
+/// vocabulary it used — and, while a new one downloads, that it is still
+/// counting with the previous one.
+class TokenizerInfoTile extends StatelessWidget {
+  /// Name of the tokenizer counting right now.
+  final String activeLabel;
 
-  const TokenizerActionButtons({
+  /// Name of the tokenizer the connection asks for, when it is not the active
+  /// one yet (downloading or failed); null once they agree.
+  final String? pendingLabel;
+
+  final bool isAuto;
+  final bool downloading;
+  final bool failed;
+  final VoidCallback? onRetry;
+  final VoidCallback? onOpenSettings;
+
+  const TokenizerInfoTile({
     super.key,
-    required this.charId,
-    required this.visibleCount,
-    required this.hiddenCount,
-    required this.hidePercent,
-    required this.onRefresh,
+    required this.activeLabel,
+    required this.isAuto,
+    this.pendingLabel,
+    this.downloading = false,
+    this.failed = false,
+    this.onRetry,
+    this.onOpenSettings,
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final hideCount = (visibleCount * hidePercent / 100).ceil().clamp(
-      1,
-      visibleCount > 1 ? visibleCount - 1 : 0,
-    );
-
-    return Row(
-      children: [
-        Expanded(
-          child: FilledButton.icon(
-            onPressed: hideCount > 0
-                ? () => _confirmHide(context, ref, hideCount)
-                : null,
-            icon: const Icon(Icons.visibility_off, size: 16),
-            label: Text('${'label_hide_top_messages'.tr()} $hideCount'),
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF2980b9),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            ),
-          ),
-        ),
-        if (hiddenCount > 0) ...[
-          const SizedBox(width: 8),
-          Expanded(
-            child: OutlinedButton.icon(
-              onPressed: () async {
-                await ref
-                    .read(chatProvider(charId).notifier)
-                    .unhideAllMessages();
-                if (context.mounted) onRefresh();
-              },
-              icon: const Icon(Icons.visibility, size: 16),
-              label: Text(
-                'action_unhide_all_count'.tr(args: ['$hiddenCount']),
-              ),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: context.cs.primary,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-
-  void _confirmHide(BuildContext context, WidgetRef ref, int count) async {
-    final confirmed = await GlazeBottomSheet.show<bool>(
-      context,
-      title: 'action_hide_msg'.tr(),
-      bigInfo: BottomSheetBigInfo(
-        icon: Icons.visibility_off_outlined,
-        description: 'tokenizer_hide_confirm_desc'.tr(args: ['$count']),
-      ),
-      items: [
-        BottomSheetItem(
-          label: '${'action_hide_msg'.tr()} $count',
-          centered: true,
-          onTap: () => Navigator.of(context, rootNavigator: true).pop(true),
-        ),
-        BottomSheetItem(
-          label: 'btn_cancel'.tr(),
-          centered: true,
-          onTap: () => Navigator.of(context, rootNavigator: true).pop(false),
-        ),
-      ],
-    );
-    if (confirmed == true) {
-      await ref.read(chatProvider(charId).notifier).hideTopMessages(count);
-      onRefresh();
-    }
-  }
-}
-
-class CutoffWarning extends StatelessWidget {
-  final int cutoffCount;
-  const CutoffWarning({super.key, required this.cutoffCount});
-
-  @override
   Widget build(BuildContext context) {
+    final accent = failed ? _cutoffAccent : context.cs.onSurfaceVariant;
+    final pending = pendingLabel;
+    final String? note;
+    if (downloading && pending != null) {
+      note = 'tokenizer_inspector_downloading'.tr(args: [pending, activeLabel]);
+    } else if (failed && pending != null) {
+      note = 'tokenizer_inspector_failed'.tr(args: [pending, activeLabel]);
+    } else {
+      note = null;
+    }
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.fromLTRB(12, 8, 6, 8),
       decoration: BoxDecoration(
-        color: Colors.orange.withValues(alpha: 0.08),
+        color: Colors.white.withValues(alpha: 0.03),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.orange.withValues(alpha: 0.25)),
+        border: Border.all(color: accent.withValues(alpha: 0.2)),
       ),
       child: Row(
         children: [
-          const Icon(Icons.warning_amber, size: 18, color: Colors.orange),
+          if (downloading)
+            const GlazeSpinner(size: 16)
+          else
+            Icon(Icons.token_outlined, size: 18, color: accent),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              'count_message_cut'.plural(cutoffCount),
-              style: const TextStyle(fontSize: 13, color: Colors.orange),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text.rich(
+                  TextSpan(
+                    children: [
+                      TextSpan(
+                        text: '${'label_tokenizer'.tr()}: ',
+                        style: TextStyle(color: context.cs.onSurfaceVariant),
+                      ),
+                      TextSpan(
+                        text: pending ?? activeLabel,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: context.cs.onSurface,
+                        ),
+                      ),
+                      if (isAuto)
+                        TextSpan(
+                          text: ' · ${'tokenizer_auto'.tr()}',
+                          style: TextStyle(color: context.cs.onSurfaceVariant),
+                        ),
+                    ],
+                  ),
+                  style: const TextStyle(fontSize: 13),
+                ),
+                if (note != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    note,
+                    style: TextStyle(fontSize: 12, color: accent),
+                  ),
+                ],
+              ],
             ),
           ),
+          if (failed && onRetry != null)
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.refresh, size: 18),
+              color: accent,
+              tooltip: 'action_retry'.tr(),
+              onPressed: onRetry,
+            ),
+          if (onOpenSettings != null)
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.settings_outlined, size: 18),
+              color: context.cs.onSurfaceVariant,
+              tooltip: 'context_open_api_settings'.tr(),
+              onPressed: onOpenSettings,
+            ),
         ],
       ),
     );
   }
 }
 
-class NearLimitWarning extends StatelessWidget {
-  final int hideCount;
-  final int hideTokens;
-  const NearLimitWarning({
+/// Amber accent for the cutoff notice. A semantic status with no token behind
+/// it, hoisted per `docs/UI_KIT.md` § Colours.
+const Color _cutoffAccent = Color(0xFFE0A030);
+
+/// Teal accent for the cache anchor, so it reads as its own status rather than
+/// another amber warning. Hoisted per `docs/UI_KIT.md` § Colours.
+const Color _cacheAccent = Color(0xFF3FA7C4);
+
+/// How much of the history did not make it into the prompt.
+///
+/// Not a failure — it is what a long chat in a finite window looks like. The
+/// gear leads to the connection's Context section, where the window and the
+/// trim mode that produced this number actually live.
+class CutoffWarning extends StatelessWidget {
+  final int cutoffCount;
+  final VoidCallback? onOpenSettings;
+
+  const CutoffWarning({
     super.key,
-    required this.hideCount,
-    required this.hideTokens,
+    required this.cutoffCount,
+    this.onOpenSettings,
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(12, 12, 6, 12),
       decoration: BoxDecoration(
-        color: const Color(0xFFFFB84D).withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: const Color(0xFFFFB84D).withValues(alpha: 0.3),
-        ),
+        color: _cutoffAccent.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _cutoffAccent.withValues(alpha: 0.25)),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Text(
-            'tokenizer_history_limit_warning'.tr(),
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: Color(0xFFFFB84D),
+          const Icon(Icons.warning_amber, size: 18, color: _cutoffAccent),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'count_message_didnt_fit'.plural(cutoffCount),
+              style: const TextStyle(fontSize: 13, color: _cutoffAccent),
             ),
           ),
-          const SizedBox(height: 4),
-          Text(
-            'tokenizer_near_limit_body'.plural(
-              hideCount,
-              args: ['$hideCount', '$hideTokens'],
+          if (onOpenSettings != null)
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.settings_outlined, size: 18),
+              color: _cutoffAccent,
+              tooltip: 'context_open_api_settings'.tr(),
+              onPressed: onOpenSettings,
             ),
-            style: TextStyle(fontSize: 14, color: context.cs.onSurfaceVariant),
-          ),
         ],
       ),
     );
   }
 }
 
-class SettingsSlider extends StatelessWidget {
-  final String label;
-  final double value;
-  final double min;
-  final double max;
-  final String unit;
-  final String description;
-  final ValueChanged<double> onChanged;
+/// Where the history the prompt still carries begins.
+///
+/// Under the stepped trim mode that start is the cache anchor: the prompt keeps
+/// it byte-identical across turns, which is what lets the provider's prompt
+/// cache hit. Shown next to the cutoff notice, since the two are the same
+/// boundary seen from opposite sides — what was dropped, and where the kept
+/// history starts.
+class CacheAnchorTile extends StatelessWidget {
+  /// 1-based position of the anchor in the visible chat.
+  final int messageNumber;
 
-  const SettingsSlider({
+  /// First characters of the anchor message, so it can be recognised in the
+  /// chat without opening anything.
+  final String preview;
+
+  const CacheAnchorTile({
     super.key,
-    required this.label,
-    required this.value,
-    this.min = 1,
-    this.max = 100,
-    this.unit = '%',
-    required this.description,
-    required this.onChanged,
+    required this.messageNumber,
+    required this.preview,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      color: Colors.white.withValues(alpha: 0.03),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
+    final trimmed = preview.trim().replaceAll(RegExp(r'\s+'), ' ');
+    final text = trimmed.length <= 80
+        ? trimmed
+        : '${trimmed.substring(0, 80)}…';
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: _cacheAccent.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _cacheAccent.withValues(alpha: 0.25)),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.anchor, size: 18, color: _cacheAccent),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 14,
+                  'context_cache_anchor'.tr(
+                    namedArgs: {'index': '$messageNumber'},
+                  ),
+                  style: const TextStyle(
+                    fontSize: 13,
                     fontWeight: FontWeight.w600,
-                    color: context.cs.onSurface,
+                    color: _cacheAccent,
                   ),
                 ),
-                Text(
-                  '${value.round()}$unit',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: context.cs.primary,
+                if (text.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    text,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: context.cs.onSurfaceVariant,
+                    ),
                   ),
-                ),
+                ],
               ],
             ),
-            const SizedBox(height: 4),
-            Text(
-              description,
-              style: TextStyle(
-                fontSize: 12,
-                color: context.cs.onSurfaceVariant,
-              ),
-            ),
-            Slider(
-              value: value,
-              min: min,
-              max: max,
-              divisions: (max - min).round(),
-              activeColor: context.cs.primary,
-              onChanged: onChanged,
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -772,59 +770,5 @@ class _BarChartPainter extends CustomPainter {
       }
     }
     return false;
-  }
-}
-
-/// Compact action row shown at the top of the Tokenizer body when it is
-/// embedded inside the Prompt Inspector (replaces the SheetView action slot).
-class TokenizerEmbeddedToolbar extends StatelessWidget {
-  final bool showSettings;
-  final VoidCallback onToggleSettings;
-  final VoidCallback? onRefresh;
-
-  const TokenizerEmbeddedToolbar({
-    super.key,
-    required this.showSettings,
-    required this.onToggleSettings,
-    required this.onRefresh,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 8, 0),
-      child: Row(
-        children: [
-          Text(
-            showSettings ? 'context_settings_title'.tr() : 'tab_context'.tr(),
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: context.cs.onSurfaceVariant,
-            ),
-          ),
-          const Spacer(),
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            icon: Icon(
-              showSettings ? Icons.close : Icons.tune,
-              size: 20,
-              color: showSettings ? context.cs.primary : context.cs.onSurface,
-            ),
-            tooltip: showSettings
-                ? 'action_close_settings'.tr()
-                : 'context_settings_title'.tr(),
-            onPressed: onToggleSettings,
-          ),
-          if (!showSettings)
-            IconButton(
-              visualDensity: VisualDensity.compact,
-              icon: const Icon(Icons.refresh, size: 20),
-              tooltip: 'action_recalculate'.tr(),
-              onPressed: onRefresh,
-            ),
-        ],
-      ),
-    );
   }
 }

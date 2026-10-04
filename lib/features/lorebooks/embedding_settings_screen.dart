@@ -12,8 +12,10 @@ import '../../../core/state/shared_prefs_provider.dart';
 import '../../../core/state/vector_rebuild_provider.dart';
 import '../../../shared/shell/shell_header_provider.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_error_dialog.dart';
 import '../../../shared/widgets/glaze_toast.dart';
+import '../../../shared/widgets/menu_group.dart';
 
 class EmbeddingSettingsScreen extends ConsumerStatefulWidget {
   const EmbeddingSettingsScreen({super.key});
@@ -107,7 +109,7 @@ class _EmbeddingSettingsScreenState
       if (_rebuildRawChat) VectorRebuildSource.rawChat,
     };
     if (sources.isEmpty) {
-      GlazeToast.show(context, 'Select at least one vector source.');
+      GlazeToast.show(context, 'vector_error_select_source'.tr());
       return;
     }
     final controller = ref.read(vectorRebuildControllerProvider.notifier);
@@ -149,7 +151,11 @@ class _EmbeddingSettingsScreenState
       case ApiTestSuccess(:final message):
         GlazeToast.show(context, message);
       case ApiTestFailure(:final error):
-        GlazeErrorDialog.show(context, error, prefix: 'Failed: ');
+        GlazeErrorDialog.show(
+          context,
+          error,
+          prefix: 'settings_err_failed'.tr(),
+        );
     }
     if (mounted) setState(() => _isTesting = false);
   }
@@ -238,23 +244,15 @@ class _EmbeddingSettingsScreenState
                   hint: '8192',
                 ),
                 const SizedBox(height: 8),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: _isTesting ? null : _testConnection,
-                    icon: _isTesting
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.wifi_tethering, size: 18),
-                    label: Text(
-                      _isTesting
-                          ? 'btn_testing'.tr()
-                          : 'btn_test_connection'.tr(),
-                    ),
-                  ),
+                GlazeActionButton(
+                  icon: Icons.wifi_tethering,
+                  label: _isTesting
+                      ? 'btn_testing'.tr()
+                      : 'btn_test_connection'.tr(),
+                  tone: GlazeActionTone.neutral,
+                  expand: true,
+                  busy: _isTesting,
+                  onTap: _testConnection,
                 ),
                 const SizedBox(height: 24),
                 Text(
@@ -282,16 +280,12 @@ class _EmbeddingSettingsScreenState
                 const SizedBox(height: 24),
                 _buildVectorRebuildSection(rebuildState, staleStats),
                 const SizedBox(height: 32),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: context.cs.primary,
-                      foregroundColor: Colors.black,
-                    ),
-                    onPressed: _save,
-                    child: Text('btn_save'.tr()),
-                  ),
+                GlazeActionButton(
+                  icon: Icons.save_outlined,
+                  label: 'btn_save'.tr(),
+                  tone: GlazeActionTone.primary,
+                  expand: true,
+                  onTap: _save,
                 ),
               ],
             ),
@@ -424,36 +418,34 @@ class _EmbeddingSettingsScreenState
             ),
           ),
           const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 6,
-            children: [
-              FilterChip(
-                label: const Text('MemoryBook'),
-                selected: _rebuildMemoryBooks,
-                onSelected: running
-                    ? null
+          MenuGroup(
+            items: [
+              MenuSwitchItem(
+                label: 'MemoryBook',
+                value: _rebuildMemoryBooks,
+                onChanged: running
+                    ? (_) {}
                     : (v) => setState(() => _rebuildMemoryBooks = v),
               ),
-              FilterChip(
-                label: const Text('Lorebooks'),
-                selected: _rebuildLorebooks,
-                onSelected: running
-                    ? null
+              MenuSwitchItem(
+                label: 'Lorebooks',
+                value: _rebuildLorebooks,
+                onChanged: running
+                    ? (_) {}
                     : (v) => setState(() => _rebuildLorebooks = v),
               ),
-              FilterChip(
-                label: const Text('Raw chat'),
-                selected: _rebuildRawChat,
-                onSelected: running
-                    ? null
+              MenuSwitchItem(
+                label: 'Raw chat',
+                value: _rebuildRawChat,
+                onChanged: running
+                    ? (_) {}
                     : (v) => setState(() => _rebuildRawChat = v),
               ),
-              FilterChip(
-                label: const Text('Force'),
-                selected: _forceReindex,
-                onSelected: running
-                    ? null
+              MenuSwitchItem(
+                label: 'Force',
+                value: _forceReindex,
+                onChanged: running
+                    ? (_) {}
                     : (v) => setState(() => _forceReindex = v),
               ),
             ],
@@ -512,10 +504,13 @@ class _EmbeddingSettingsScreenState
           Row(
             children: [
               Expanded(
-                child: FilledButton.icon(
-                  onPressed: running ? null : _startVectorRebuild,
-                  icon: const Icon(Icons.sync, size: 18),
-                  label: const Text('Rebuild selected'),
+                child: GlazeActionButton(
+                  icon: Icons.sync,
+                  label: 'Rebuild selected',
+                  tone: GlazeActionTone.primary,
+                  expand: true,
+                  busy: rebuildState.isRunning,
+                  onTap: running ? null : _startVectorRebuild,
                 ),
               ),
               const SizedBox(width: 8),

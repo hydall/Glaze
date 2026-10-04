@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/services/update_check_service.dart';
 import '../../shared/theme/app_colors.dart';
+import '../../shared/widgets/glaze_action_button.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 
 /// Outcome of the update sheet. [dontRemind] reflects the "don't remind me
@@ -145,24 +146,24 @@ class _UpdateSheetBodyState extends State<_UpdateSheetBody> {
           Row(
             children: [
               Expanded(
-                child: OutlinedButton(
-                  onPressed: () => _close(openedActions: false),
-                  child: Text('update_later'.tr()),
+                child: GlazeActionButton(
+                  icon: Icons.schedule_rounded,
+                  label: 'update_later'.tr(),
+                  onTap: () => _close(openedActions: false),
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: FilledButton.icon(
-                  onPressed: () {
+                child: GlazeActionButton(
+                  icon: Icons.open_in_new_rounded,
+                  label: info.source == UpdateSource.release
+                      ? 'update_open_release'.tr()
+                      : 'update_open_actions'.tr(),
+                  tone: GlazeActionTone.primary,
+                  onTap: () {
                     _openActions();
                     _close(openedActions: true);
                   },
-                  icon: const Icon(Icons.open_in_new_rounded, size: 18),
-                  label: Text(
-                    info.source == UpdateSource.release
-                        ? 'update_open_release'.tr()
-                        : 'update_open_actions'.tr(),
-                  ),
                 ),
               ),
             ],

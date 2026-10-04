@@ -47,6 +47,12 @@
                     "desc": "The smallest piece of text the AI reads and writes — roughly 3/4 of a word. Every message you type and every reply you get is counted in tokens. There's also a limit: once the conversation is too long, the oldest messages get cut off. More tokens = higher cost and slower replies."
                 },
                 {
+                    "id": "token-estimate",
+                    "name": "Why token counts differ",
+                    "alt": "Token estimate, Tokenizer",
+                    "desc": "Glaze counts [[token]]s locally, with the tokenizer of the model family the connection uses: OpenAI's o200k_base for GPT-4o and newer, and the published tokenizers of the other major families for their models. By default the connection's Tokenizer setting is Auto and picks the family from the model name (o200k_base when the name says nothing); you can also pick one by hand under Context Size. The Prompt Inspector shows which one counted. Each tokenizer is downloaded once, the first time it is needed (1–5 MB); until it arrives Glaze keeps counting with the previous one, or at about four characters per token on the very first launch. Claude 3 and newer and Gemini do not publish their exact tokenizers, so their counts stay an estimate for planning — expect a few percent of difference. For what you are actually charged, check your provider's own usage page."
+                },
+                {
                     "id": "context",
                     "name": "Context",
                     "alt": "Context Window, Context Size",
@@ -56,7 +62,19 @@
                     "id": "context-size",
                     "name": "Context Size",
                     "alt": "Context Limit",
-                    "desc": "A local Glaze setting — it is not sent to the provider. It caps how many [[token]]s the whole prompt may use. Glaze trims the chat, dropping the oldest messages, so the assembled prompt fits within this size before it is sent. Set it to match your model's [[context|context window]]; raising it above the model's real limit does not give the model more memory."
+                    "desc": "A local Glaze setting — it is not sent to the provider. It caps how many [[token]]s the whole prompt may use. Glaze trims the chat, dropping the oldest messages, so the assembled prompt fits within this size before it is sent. Set it to match your model's [[context|context window]]; raising it above the model's real limit does not give the model more memory. When trimming chat history, Glaze takes the Context Size, subtracts [[max-tokens|Max Output Tokens]] from it (a provider requirement), and fits as many whole history messages as it can into the number that remains."
+                },
+                {
+                    "id": "history-trim",
+                    "name": "History Trimming",
+                    "alt": "In blocks, Continuous, History trim mode",
+                    "desc": "How Glaze cuts the chat history once it no longer fits the [[context|context window]]. **Continuous** drops exactly what does not fit on every turn — always the most history, but the prompt starts at a different message each turn, so a provider's prompt cache rarely hits. **In blocks** holds the start of the history still and drops a whole block only when the window gets too full. Between jumps the request begins with the same bytes, so a provider's prompt cache can hit: one big miss instead of one per turn. The mode lives on the connection because it trades tokens for cache behaviour. See [[step-size]] and the trim group in the connection's Context section."
+                },
+                {
+                    "id": "step-size",
+                    "name": "Step Size",
+                    "alt": "History freed per step",
+                    "desc": "An **In blocks** setting: how much of the history budget one jump frees when the held window gets too full. A step of 30% leaves the window 70% full, so the next turns have 30% of headroom to grow into — and the prompt keeps the same start for as many turns as it takes to spend it. Bigger steps mean rarer jumps and longer runs where the prompt cache holds, at the cost of showing less history. Works together with the trim trigger (how full the window may get before a jump)."
                 },
                 {
                     "id": "max-tokens",
@@ -79,6 +97,21 @@
                     "id": "apikey",
                     "name": "API Key",
                     "desc": "A secret code that proves you have permission to use an AI service. Never share it — anyone who has it can use the service as if they were you."
+                },
+                {
+                    "id": "system-instruction",
+                    "name": "Send preset instructions as system_instruction",
+                    "desc": "When enabled, the run of `system` prompt blocks at the very start of the prompt is sent in a separate parameter: `system_instruction` on Google Gemini, `system` on Anthropic. Each block goes as its own part; they are not glued together. It does not touch the chat history itself — blocks inside it stay where they are and go as ordinary messages. Note that only a run at the start is lifted: if a `user` block comes first, nothing is."
+                },
+                {
+                    "id": "reasoning-budget",
+                    "name": "Exclude reasoning from the context limit",
+                    "desc": "When [[preset-reasoning|reasoning]] is sent back to the provider, its tokens take up room in the [[context|context window]] and push out older messages. With this on they are still sent but not counted, so more history fits. Token counting is an estimate, so with long reasoning the request can overshoot the provider's real limit. Enable only if you accept that risk."
+                },
+                {
+                    "id": "session-id",
+                    "name": "Send session_id",
+                    "desc": "Sends the provider a session number so the prompt cache stays warm. Requires a compatible provider. Leave it off if you are unsure."
                 },
                 {
                     "id": "streaming",
@@ -259,9 +292,9 @@
                     "desc": "Controls where a block appears in the list of messages sent to the AI. 'Relative' keeps it in its natural order among the blocks. 'Depth' inserts it a fixed number of messages before the end — for example, depth 2 places it just before the last 2 chat messages, giving it strong immediate influence."
                 },
                 {
-                    "id": "preset-merge",
-                    "name": "Merge Prompts",
-                    "desc": "Combines neighboring blocks that share the same role label into one message. Reduces the total message count. Some AI models respond better to fewer, longer messages rather than many short ones. Required for NoAssistant mode."
+                    "id": "prompt-post-processing",
+                    "name": "Prompt Post-Processing",
+                    "desc": "Reshapes the finished prompt right before it goes out, for endpoints that are picky about message structure. 'Merge consecutive roles' glues neighbouring messages that share a role into one — fewer, longer messages, which some models handle better. 'Semi-strict' additionally turns every system message after the first into a user message, so the conversation alternates. 'Strict' does the same and guarantees the prompt opens on a user message, inserting a filler turn if needed — this is what APIs like Anthropic's require. 'Single user message' folds the entire conversation into one message. Offered for custom endpoints only: every built-in protocol already normalizes whatever its wire format requires. Leave it on 'None' unless the endpoint complains."
                 },
                 {
                     "id": "preset-noassistant",
@@ -294,6 +327,24 @@
                     "id": "reasoning-effort",
                     "name": "Reasoning Effort",
                     "desc": "How much effort a reasoning-capable model puts into thinking before it answers. Higher levels (high, max) mean deeper, longer [[preset-reasoning|reasoning]] — usually better on hard tasks, but slower and more expensive. Lower levels (min, low) reply faster and cheaper. 'auto' lets the provider decide. Only affects models that support native reasoning."
+                }
+            ]
+        },
+        {
+            "id": "memorybook",
+            "label": "MemoryBook",
+            "terms": [
+                {
+                    "id": "memorybook-embedding-model",
+                    "name": "MemoryBook Embedding Model",
+                    "alt": "Embedding model, Vector model",
+                    "desc": "The model that converts MemoryBook entries and the retrieval query into numerical vectors for semantic search. Different embedding models create different, incompatible vector spaces. After changing the embedding model, you MUST run [[memorybook-reindex|Reindex]]."
+                },
+                {
+                    "id": "memorybook-reindex",
+                    "name": "Reindex MemoryBook",
+                    "alt": "Reindex, Rebuild embeddings",
+                    "desc": "Recreates vectors for every active MemoryBook entry with the current [[memorybook-embedding-model|embedding model]]. Reindexing is mandatory after initial embedding setup and after every model change: old vectors are incompatible with the new model and can produce incorrect retrieval or ranking. Reindexing does not delete or rewrite memories; it only rebuilds their search index."
                 }
             ]
         },
@@ -374,6 +425,42 @@
                     "id": "regex-macros",
                     "name": "Macros in Find Regex",
                     "desc": "Whether [[macro]] placeholders like {{char}} and {{user}} are expanded in the search pattern before matching. 'Don't substitute' — match the literal text {{char}}. 'Substitute raw' — replace with the actual character name first. 'Substitute escaped' — replace and escape special regex characters so they match literally."
+                }
+            ]
+        },
+        {
+            "id": "extraction",
+            "label": "Import & Extraction",
+            "terms": [
+                {
+                    "id": "janitor-extraction",
+                    "name": "JanitorAI Extraction",
+                    "alt": "Hidden card, Capture",
+                    "desc": "Janitor AI sits behind Cloudflare and never hands out a closed character card through its public API. Glaze works around this the way a browser would: it drives a hidden WebView carrying your signed-in Janitor.AI session, so every request passes Cloudflare exactly as it would in a real tab.\n\nTo recover a card, Glaze creates a throwaway proxy preset, opens a fresh chat with the character, sends a message and intercepts the generateAlpha response — the assembled prompt, which contains the character card wrapped in tags. The chat, the persona and the preset are removed again afterwards, and the account's generation settings are restored.\n\nIt needs “Extract JanitorAI cards with” set to Local in Settings, and a signed-in account. A character whose creator forbade proxies can never be captured: Janitor AI refuses to assemble its prompt at all, and only the public part of such a card can be imported. The same capture is what recovers closed lorebooks — see [[janitor-closed-lorebook]]."
+                },
+                {
+                    "id": "janitor-closed-lorebook",
+                    "name": "Closed Lorebook Extraction",
+                    "alt": "Private lorebook, Hidden lorebook",
+                    "desc": "Closed lorebooks are processed on the Janitor AI server, so pulling them out in their original form is impossible. As a workaround Glaze sends the character card, the catalog description and whatever else you picked into the chat. That text reaches the Janitor AI server, where it triggers lorebook entries; the server injects those entries into the prompt, Glaze intercepts the generateAlpha response and isolates the entries, discarding everything else.\n\nAfter that you can do two things:\n•  download the extracted content as a plain .txt file (no keys or rules);\n•  send the entries to your active model — together with the card and the description as context — and have it build a proper [[lorebook]] for you.\n\nIf the character uses a generic lorebook (a universe lorebook, a sex-positions lorebook…), this method may not trigger every entry automatically. The only way to pull those is to type the keys yourself during entry collection; that same text is then also passed to the model during the build for extra context.\n\nSeveral closed lorebooks are merged into a single one — the capture assembles the whole prompt at once, so their entries arrive mixed together with no way to tell which book each came from. See [[janitor-extract-context]] and [[lorebook-key-context]]."
+                },
+                {
+                    "id": "lorebook-build-prompt",
+                    "name": "Lorebook Build Prompt",
+                    "alt": "Build prompt, Extraction prompt",
+                    "desc": "The system prompt your own model receives when it turns captured lorebook text into keyed World Info entries. It tells the model how to split the text into entries, what to write into content, key, keysecondary, comment and order, and to answer with JSON and nothing else.\n\nThere are two of them: one for text recovered from an assembled prompt (see [[janitor-closed-lorebook]]) and one for a scripted “advanced” lorebook, whose entries have to be recovered from JavaScript source instead. Both can be edited in the extraction settings (the gear in the Lorebooks sheet header); clearing a field restores the built-in prompt.\n\nEdit it when your model needs firmer instructions — stricter JSON, a different language for the keys, fewer or larger entries. Keep the JSON contract intact: Glaze parses the answer as an entries array, so a prompt that stops asking for JSON produces a build that fails to parse. “Preview prompt” in the build stage shows exactly what will be sent, edits included."
+                },
+                {
+                    "id": "janitor-extract-context",
+                    "name": "Extraction Context",
+                    "alt": "Trigger context",
+                    "desc": "What Glaze stuffs into the message it sends into the Janitor AI chat to make the closed lorebook fire. Everything you select is concatenated into one latest user turn, so every keyword stays inside Janitor's scan depth. More text means more entries triggered — and a larger prompt.\n\nThe character card is the strongest trigger: it names the people, places and items the entries are keyed on. The catalog description and the scenario add public context, the first message(s) add the opening scene, and lorebook descriptions add the book's own summary. Custom text is where you type keys the character never says on its own — the only way to reach entries of a generic or universe lorebook. Tap a source to see the exact text it sends and its token count.\n\nThis is a different choice from [[lorebook-key-context]], which is about what the model reads afterwards. See [[janitor-closed-lorebook]]."
+                },
+                {
+                    "id": "lorebook-key-context",
+                    "name": "Context for Key Inference",
+                    "alt": "Build context",
+                    "desc": "Extraction returns the lorebook's text, not its trigger keys — those stay on the Janitor AI server and are never sent. The build model has to infer them, and this is the context it gets to do it with: the character card, the catalog description, the scenario, the first message(s), the descriptions of the attached lorebooks and any notes of your own.\n\nIt is only read, never written back: nothing selected here becomes an entry. It only shapes the [[lorebook-keys]] the model assigns to the entries that were recovered, so sources naming the same people and places as the entries give noticeably better keys. The selection you made for [[janitor-extract-context]] is carried over here after the extraction, and you can change it before building."
                 }
             ]
         },

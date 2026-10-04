@@ -55,7 +55,6 @@ class ReasoningStripper {
     }
     result = result.replaceAll('<think>', 'hidden reasoning');
     result = result.replaceAll('</think>', 'hidden reasoning');
-    result = result.replaceAll(RegExp(r'\s{2,}'), ' ');
     return result.trim();
   }
 

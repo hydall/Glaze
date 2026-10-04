@@ -23,6 +23,12 @@ class FeaturedPreset {
   final String? reasoningStart;
   final String? reasoningEnd;
 
+  /// Bumped when the bundled JSON changes in a way existing installs should
+  /// pick up. The seeder refreshes a preset whose stored revision is older (see
+  /// `seedFeaturedPresets`), so leave it at 1 for a preset that has never
+  /// shipped an update.
+  final int revision;
+
   const FeaturedPreset({
     required this.id,
     required this.name,
@@ -33,6 +39,7 @@ class FeaturedPreset {
     this.reasoningEnabled = false,
     this.reasoningStart,
     this.reasoningEnd,
+    this.revision = 1,
   });
 }
 
@@ -48,6 +55,8 @@ const featuredPresets = <FeaturedPreset>[
     reasoningEnabled: true,
     reasoningStart: '<thinking>',
     reasoningEnd: '</thinking>',
+    // v2: the Gemini 3.8 "flash" rewrite of the bundled Shino preset.
+    revision: 2,
   ),
   FeaturedPreset(
     id: 'default_fawnie',
@@ -73,6 +82,17 @@ const featuredPresets = <FeaturedPreset>[
     imageAsset: 'assets/presets/renri.jpg',
     createdAt: 4,
   ),
+  FeaturedPreset(
+    id: 'default_norimyn',
+    name: 'NoriMyn',
+    author: 'NoriMyn',
+    jsonAsset: 'assets/presets/norimyn.json',
+    imageAsset: 'assets/presets/norimyn.jpg',
+    createdAt: 5,
+    reasoningEnabled: true,
+    reasoningStart: '<think>',
+    reasoningEnd: '</think>',
+  ),
 ];
 
 /// Cover-image asset for a preset id, or `null` when the id is not one of the
@@ -84,6 +104,12 @@ String? featuredPresetImageAsset(String? presetId) {
   }
   return null;
 }
+
+/// Whether [presetId] is one of the bundled featured presets. Their author and
+/// cover image are part of the shipped preset, so the editor must not let the
+/// user change either (a clone gets a fresh id and is fully editable).
+bool isFeaturedPreset(String? presetId) =>
+    presetId != null && featuredPresets.any((f) => f.id == presetId);
 
 /// Loads and parses a featured preset's bundled ST JSON into a [Preset],
 /// stamping the fixed id/name/author/metadata so re-seeding is idempotent.

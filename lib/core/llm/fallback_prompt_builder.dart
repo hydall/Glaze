@@ -1,3 +1,4 @@
+import '../models/chat_message.dart';
 import 'context_calculator.dart';
 import 'history_assembler.dart';
 import 'macro_engine.dart';
@@ -17,6 +18,9 @@ PromptResult buildFallbackPrompt(PromptPayload payload) {
     sessionVars: payload.sessionVars,
     globalVars: payload.globalVars,
     macroName: payload.character.macroName,
+    gameTime: payload.gameTime,
+    gameDate: payload.gameDate,
+    gameDay: payload.gameDay,
   );
 
   const systemMessage = PromptMessage(
@@ -25,7 +29,9 @@ PromptResult buildFallbackPrompt(PromptPayload payload) {
   );
   final history = <PromptMessage>[];
 
-  for (final msg in payload.history) {
+  for (final msg in payload.history.where(
+    (message) => !message.isHidden && !message.isTyping,
+  )) {
     final macroResult = replaceMacros(msg.content, macroCtx);
     history.add(
       PromptMessage(
@@ -34,7 +40,7 @@ PromptResult buildFallbackPrompt(PromptPayload payload) {
         reasoningContent: msg.reasoning,
         isHistory: true,
         sourceMessageId: msg.id,
-        imagePath: msg.imageHidden ? null : msg.imagePath,
+        imagePaths: msg.imageHidden ? const [] : msg.attachments,
       ),
     );
   }
@@ -43,19 +49,52 @@ PromptResult buildFallbackPrompt(PromptPayload payload) {
     contextSize: payload.apiConfig.contextSize,
     maxTokens: payload.apiConfig.maxTokens,
     reasoningHistoryCount: payload.apiConfig.reasoningHistoryCount,
+    excludeReasoningFromContextBudget:
+        payload.apiConfig.excludeReasoningFromContextBudget,
+    historyTrimMode: payload.apiConfig.historyTrimMode,
+    historyAnchorId: payload.sessionVars[ChatSessionX.historyAnchorVarKey],
+    historyTrimTriggerPercent: payload.apiConfig.historyTrimTriggerPercent,
+    historyTrimStepPercent: payload.apiConfig.historyTrimStepPercent,
   );
+  final ledgerMessages = <PromptMessage>[
+    if (payload.characterKnowledgeContent case final content?
+        when content.isNotEmpty)
+      PromptMessage(
+        role: 'system',
+        content: content,
+        blockId: 'current_character_state',
+      ),
+    if (payload.studioSessionStateContent case final content?
+        when content.isNotEmpty)
+      PromptMessage(
+        role: 'system',
+        content: content,
+        blockId: 'studio_session_state',
+      ),
+    if (payload.arcContent case final content? when content.isNotEmpty)
+      PromptMessage(role: 'system', content: content, blockId: 'arc_state'),
+  ];
   final breakdown = calculator.calculate(
-    staticBlocks: const [
-      StaticBlock(
+    staticBlocks: [
+      const StaticBlock(
         id: 'fallback_system',
         content: 'You are a helpful assistant.',
       ),
+      for (final message in ledgerMessages)
+        StaticBlock(id: message.blockId ?? 'preset', content: message.content),
     ],
     historyMessages: history,
   );
 
   return PromptResult(
-    messages: [systemMessage, ...breakdown.trimmedHistory],
+    messages: [
+      systemMessage,
+      ...ledgerMessages,
+      ...insertContinueInstruction(
+        breakdown.trimmedHistory,
+        payload.continueInstruction,
+      ),
+    ],
     breakdown: breakdown,
     sessionVars: payload.sessionVars,
     globalVars: payload.globalVars,

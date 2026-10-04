@@ -54,6 +54,8 @@ const Map<String, HandlerSpec> bridgeHandlers = {
   'onLoadMore': HandlerSpec(HandlerKind.noArgs),
   'onHeaderScroll': HandlerSpec(HandlerKind.boolArg),
   'onScrollToBottomVisibility': HandlerSpec(HandlerKind.boolArg),
+  'onScrollToTopVisibility': HandlerSpec(HandlerKind.boolArg),
+  'onMessageScriptBlocked': HandlerSpec(HandlerKind.noArgs),
   'onLinkClick': HandlerSpec(HandlerKind.stringArg),
   'onImageClick': HandlerSpec(HandlerKind.stringArg),
   'onImgDownload': HandlerSpec(HandlerKind.stringArg),
@@ -78,6 +80,7 @@ const Map<String, HandlerSpec> bridgeHandlers = {
   'onInjectClick': HandlerSpec(HandlerKind.stringArg),
   // Image generation
   'onImgRetry': HandlerSpec(HandlerKind.imageAction),
+  'onImgEnableRetry': HandlerSpec(HandlerKind.imageAction),
   'onImgFind': HandlerSpec(HandlerKind.imageAction),
   'onImgRegen': HandlerSpec(
     HandlerKind.imageAction,
@@ -88,6 +91,7 @@ const Map<String, HandlerSpec> bridgeHandlers = {
     debugPrint: '[BRIDGE] onImgCancel called',
   ),
   'onImgOptions': HandlerSpec(HandlerKind.jsonObject),
+  'onImgVariant': HandlerSpec(HandlerKind.jsonObject),
   // Stop
   'onStop': HandlerSpec(HandlerKind.noArgs),
   // Ext blocks

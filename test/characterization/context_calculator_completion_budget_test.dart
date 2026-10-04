@@ -93,6 +93,45 @@ void main() {
       );
     });
 
+    test(
+      'excludeReasoningFromContextBudget keeps reasoning without trimming',
+      () {
+        final messages = [
+          userTurn('m1', 'older message'),
+          const PromptMessage(
+            role: 'assistant',
+            content: 'recent reply',
+            reasoningContent:
+                'one two three four five six seven eight nine ten',
+            isHistory: true,
+            sourceMessageId: 'm2',
+          ),
+        ];
+        // Without the flag, reasoning tokens eat budget and the older message
+        // is trimmed (same as the test above).
+        final withReasoning = ContextCalculator(
+          contextSize: 20,
+          maxTokens: 5,
+          reasoningHistoryCount: 1,
+        ).calculate(staticBlocks: const [], historyMessages: messages);
+        expect(withReasoning.trimmedHistory, hasLength(1));
+
+        // With the flag, reasoning tokens are excluded from the trim budget
+        // so the older message is retained alongside the reasoning block.
+        final excluded = ContextCalculator(
+          contextSize: 20,
+          maxTokens: 5,
+          reasoningHistoryCount: 1,
+          excludeReasoningFromContextBudget: true,
+        ).calculate(staticBlocks: const [], historyMessages: messages);
+        expect(excluded.trimmedHistory, hasLength(2));
+        // historyTokens still includes reasoning for accurate reporting.
+        expect(
+          excluded.historyTokens,
+          greaterThan(withReasoning.historyTokens),
+        );
+      },
+    );
     test('minus one budgets every retained reasoning block', () {
       const messages = [
         PromptMessage(

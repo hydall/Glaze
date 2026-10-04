@@ -11,6 +11,7 @@ export { MessageUpdateBatcher } from './message_update_batcher.js';
 export { PanelHost } from './panel_host.js';
 export { SelectionManager } from './selection_manager.js';
 export { SwipeGestureHandler } from './swipe_gesture_handler.js';
+export { TrackpadScroll } from './trackpad_scroll.js';
 
 window.Bridge = Bridge;
 

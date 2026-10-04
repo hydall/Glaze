@@ -4,6 +4,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
+import 'package:glaze_flutter/core/models/card_rewriter_settings.dart';
 import 'package:glaze_flutter/core/models/cleaner_settings.dart';
 import 'package:glaze_flutter/core/models/memory_book.dart';
 import 'package:glaze_flutter/core/models/memory_book_api_settings.dart';
@@ -62,6 +63,13 @@ void main() {
                 postCleanerBannedWords: 'suddenly, palpable',
               ),
               memoryPipeline: MemoryPipelineSettings(auxTimeoutMs: 30000),
+              cardRewriter: CardRewriterSettings(
+                enabled: true,
+                lorebookEvolutionEnabled: false,
+                timeoutMs: 180000,
+                apiConfigId: 'rewrite-api',
+                modelOverride: 'rewrite-model',
+              ),
             ),
           );
       container1.dispose();
@@ -73,7 +81,10 @@ void main() {
 
       // Before load(), state is defaults (proves load() is what restores it).
       expect(
-        container2.read(pipelineSettingsProvider).cleaner.postCleanerBannedWords,
+        container2
+            .read(pipelineSettingsProvider)
+            .cleaner
+            .postCleanerBannedWords,
         '',
       );
 
@@ -82,6 +93,11 @@ void main() {
       final loaded = container2.read(pipelineSettingsProvider);
       expect(loaded.cleaner.postCleanerBannedWords, 'suddenly, palpable');
       expect(loaded.memoryPipeline.auxTimeoutMs, 30000);
+      expect(loaded.cardRewriter.enabled, isTrue);
+      expect(loaded.cardRewriter.lorebookEvolutionEnabled, isFalse);
+      expect(loaded.cardRewriter.timeoutMs, 180000);
+      expect(loaded.cardRewriter.apiConfigId, 'rewrite-api');
+      expect(loaded.cardRewriter.modelOverride, 'rewrite-model');
     },
   );
 
@@ -136,11 +152,10 @@ void main() {
         .read(pipelineSettingsProvider.notifier)
         .save(
           const PipelineSettings(
-            memoryPipeline: MemoryPipelineSettings(
-              auxTimeoutMs: 4500,
-            ),
+            memoryPipeline: MemoryPipelineSettings(auxTimeoutMs: 4500),
             memoryBookApi: MemoryBookApiSettings(
               generationSource: 'custom',
+              apiConfigId: 'memory-api',
               generationModel: 'mem-mini',
               generationEndpoint: 'https://mem.example/v1',
               generationApiKey: 'mem-key',
@@ -174,6 +189,7 @@ void main() {
     expect(pipelineMp['auxTimeoutMs'], 4500);
     final pipelineMb = pipelineJson['memoryBookApi'] as Map<String, dynamic>;
     expect(pipelineMb['generationSource'], 'custom');
+    expect(pipelineMb['apiConfigId'], 'memory-api');
     expect(pipelineMb['generationModel'], 'mem-mini');
     expect(pipelineMb['generationEndpoint'], 'https://mem.example/v1');
     expect(pipelineMb['generationApiKey'], 'mem-key');
@@ -211,9 +227,7 @@ void main() {
         .read(pipelineSettingsProvider.notifier)
         .save(
           const PipelineSettings(
-            memoryPipeline: MemoryPipelineSettings(
-              auxTimeoutMs: 4500,
-            ),
+            memoryPipeline: MemoryPipelineSettings(auxTimeoutMs: 4500),
           ),
         );
 
@@ -332,5 +346,38 @@ void main() {
     });
 
     expect(entry.messageRange, const MessageRange(start: 91, end: 105));
+  });
+
+  test('paragraph key maps default safely and survive JSON round-trip', () {
+    final legacy = MemoryEntry.fromJson({
+      'id': 'legacy',
+      'content': 'old entry',
+    });
+    final malformedDraft = MemoryDraft.fromJson({
+      'id': 'draft',
+      'keyParagraphs': {
+        'key': ['2', -1, 'bad', 2, 1],
+        'invalid': 'not a list',
+      },
+    });
+    const entry = MemoryEntry(
+      id: 'scoped',
+      content: 'First.\n\nSecond.',
+      keys: ['key'],
+      keyParagraphs: {
+        'key': [1],
+      },
+      ledgerRange: '15.09.2026 · RP_Day 0 · 21:00',
+    );
+
+    expect(legacy.keyParagraphs, isEmpty);
+    expect(malformedDraft.keyParagraphs, {
+      'key': [1, 2],
+    });
+    expect(MemoryEntry.fromJson(entry.toJson()).keyParagraphs, {
+      'key': [1],
+    });
+    expect(MemoryEntry.fromJson(entry.toJson()).ledgerRange, entry.ledgerRange);
+    expect(legacy.ledgerRange, isEmpty);
   });
 }

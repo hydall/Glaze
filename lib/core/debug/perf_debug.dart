@@ -9,6 +9,7 @@ import 'package:flutter/widgets.dart';
 /// ```
 /// flutter run --profile --dart-define=PERF_LOG_FRAMES=true
 /// flutter run --profile --dart-define=NO_GLASS_BLUR=true
+/// flutter run --profile --dart-define=NO_BG_BLUR=true
 /// flutter run --profile --dart-define=PERF_LOG_CHAT_WEBVIEW=true
 /// ```
 abstract final class PerfDebug {
@@ -24,6 +25,10 @@ abstract final class PerfDebug {
 
   /// Disable the film-grain NoiseOverlay on glass surfaces and backgrounds.
   static const bool noNoise = bool.fromEnvironment('NO_NOISE');
+
+  /// Disable the blur of the app / chat background image, so a profiling run
+  /// can separate it from the per-element glass blur.
+  static const bool noBgBlur = bool.fromEnvironment('NO_BG_BLUR');
 
   /// Collect process-local Chat WebView lifecycle totals. This does not write
   /// to storage or send data anywhere. With this define off, each recorder is

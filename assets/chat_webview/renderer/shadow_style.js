@@ -33,7 +33,7 @@ export const SHADOW_STYLE = `
   }
   .glaze-message .chat-quote,
   .glaze-message .chat-quote-text {
-    color: var(--current-quote-color, var(--quote-color, #7996CE));
+    color: var(--current-quote-color, var(--quote-color, #C42A4A));
   }
   .glaze-message .font-color-block .chat-quote,
   .glaze-message .font-color-block .chat-quote-text,
@@ -42,10 +42,25 @@ export const SHADOW_STYLE = `
     color: var(--current-italic-color, var(--italic-color, #888));
     font-style: italic;
   }
-  .glaze-message a { color: var(--primary-color, #7996CE); text-decoration: underline; }
+  .glaze-message a { color: var(--primary-color, #C42A4A); text-decoration: underline; }
   .glaze-message img { max-width: 100%; height: auto; border-radius: 8px; margin: 8px 0; }
+  /* Media Chromium lays out at a fixed intrinsic width. An audio element is
+     300px wide by default, which is wider than a bubble gets on a phone (88%
+     of the screen, less its padding) - so the player painted straight through
+     the bubble's rounded border. Constraining the element is the fix rather
+     than clipping the bubble: a card is allowed to paint outside it, which is
+     what the CSS-only overlay cards are built on. */
+  .glaze-message audio,
+  .glaze-message video,
+  .glaze-message iframe,
+  .glaze-message canvas,
+  .glaze-message embed,
+  .glaze-message object {
+    max-width: 100%;
+    min-width: 0;
+  }
   .glaze-message .chat-quote-unclosed {
-    color: var(--current-quote-color, var(--quote-color, #7996CE));
+    color: var(--current-quote-color, var(--quote-color, #C42A4A));
     opacity: 0.7;
   }
   .glaze-message .glaze-hc,
@@ -53,11 +68,21 @@ export const SHADOW_STYLE = `
   .glaze-message .glaze-cg,
   .glaze-message .glaze-grad { font-weight: inherit; }
   .glaze-message .glaze-bg { color: #fff; }
-  .glaze-message .glaze-mark { color: var(--current-quote-color, var(--quote-color, #7996CE)); }
+  .glaze-message .glaze-mark { color: var(--current-quote-color, var(--quote-color, #C42A4A)); }
   .glaze-message .glaze-active { background: #ffeb3b; color: #000; padding: 2px 4px; border-radius: 4px; }
+  .glaze-message .glaze-accent { color: var(--primary-color, #C42A4A); font-weight: 600; font-style: normal; }
+  .glaze-message hr {
+    border: 0;
+    border-top: 1px solid var(--border-color, rgba(255,255,255,0.1));
+    margin: 10px 0;
+  }
   .glaze-message .font-style-block,
   .glaze-message .font-color-block { display: inline-block; vertical-align: baseline; color: inherit; }
   .glaze-message .code-block-wrapper { position: relative; margin: 8px 0; }
+  /* Where a card's document.body.appendChild lands (INV-MR6). display:
+     contents so the node lays out where the card expected it to, while
+     staying under the message's own stylesheet. */
+  .glaze-message .glaze-message-overlay { display: contents; }
   .glaze-message .code-lang {
     position: absolute; top: 4px; right: 8px;
     font-size: 10px; opacity: 0.4;
@@ -101,7 +126,11 @@ export const SHADOW_STYLE = `
   .glaze-message .janitor-options-btn svg,
   .glaze-message .imggen-options-btn svg { width: 16px; height: 16px; fill: #fff; pointer-events: none; }
 
-  /* ── Imagen: loading shimmer ── */
+  /* ── Imagen: loading shimmer ──
+     Fallback only. The placeholder moves its content into a shadow root of its
+     own right after insertion (renderer/imggen_placeholder.js), so message CSS
+     cannot restyle it; these rules are what paints the block on an engine that
+     refuses attachShadow. */
   .glaze-message .imggen-loading {
     display: block;
     max-width: 100%;
@@ -155,6 +184,19 @@ export const SHADOW_STYLE = `
     z-index: 3;
   }
   .glaze-message .imggen-stop-btn:active { background: rgba(0,0,0,0.8); }
+  .glaze-message .imggen-queued-hint { display: none; }
+  .glaze-message .imggen-loading.imggen-queued .imggen-loading-hint,
+  .glaze-message .imggen-loading.imggen-queued .imggen-loading-timer,
+  .glaze-message .imggen-loading.imggen-queued .imggen-stop-btn { display: none; }
+  .glaze-message .imggen-loading.imggen-queued .imggen-queued-hint {
+    display: inline-block;
+    padding: 12px 0 0 12px;
+    font-size: 14px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.9);
+    user-select: none;
+  }
+  .glaze-message .imggen-stop-btn svg { width: 14px; height: 14px; fill: currentColor; pointer-events: none; }
   .glaze-message .imggen-loading-prompt {
     position: absolute;
     bottom: 10px;
@@ -177,6 +219,28 @@ export const SHADOW_STYLE = `
     0% { background-position: 100% 0; }
     100% { background-position: -100% 0; }
   }
+
+  /* ── Broken message CSS: author-facing report ── */
+  .glaze-message .glaze-css-error {
+    margin: 8px 0;
+    padding: 8px 10px;
+    border-radius: 8px;
+    box-sizing: border-box;
+    max-width: 100%;
+    background: rgba(255,59,48,0.1);
+    border: 1px solid rgba(255,59,48,0.28);
+    font-family: 'Consolas','Monaco','Courier New',monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    color: rgba(255,59,48,0.9);
+    word-break: break-word;
+  }
+  .glaze-message .glaze-css-error-head {
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    margin-bottom: 3px;
+  }
+  .glaze-message .glaze-css-error-item { opacity: 0.85; }
 
   /* ── Imagen: error card ── */
   .glaze-message .imggen-error {
@@ -217,6 +281,27 @@ export const SHADOW_STYLE = `
     cursor: pointer;
   }
   .glaze-message .imggen-error-retry:active { background: rgba(255,59,48,0.2); }
+  /* Same actions menu as a finished image, on the block that has no image. */
+  .glaze-message .imggen-error-options {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border-radius: 12px;
+    color: rgba(255,59,48,0.95);
+    background: rgba(255,59,48,0.1);
+    border: 1px solid rgba(255,59,48,0.3);
+    cursor: pointer;
+  }
+  .glaze-message .imggen-error-options:active { background: rgba(255,59,48,0.2); }
+  .glaze-message .imggen-error-options svg {
+    width: 14px;
+    height: 14px;
+    fill: rgba(255,59,48,0.95);
+    pointer-events: none;
+  }
 
   /* ── Imagen: result ── */
   .glaze-message .imggen-result-wrapper {
@@ -225,6 +310,53 @@ export const SHADOW_STYLE = `
     margin: 6px 0;
     max-width: 100%;
   }
+  /* Block-level image switcher: the message switcher, shrunk and made
+     see-through so it sits on the picture without covering it. Only rendered
+     when the block holds more than one image. */
+  .glaze-message .imggen-variants {
+    position: absolute;
+    left: 8px;
+    bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 1px;
+    height: 18px;
+    padding: 0 2px;
+    border-radius: 9px;
+    background: rgba(0, 0, 0, 0.38);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 10px;
+    line-height: 1;
+    opacity: 0.45;
+    transition: opacity 0.15s;
+  }
+  .glaze-message .imggen-result-wrapper:hover .imggen-variants { opacity: 1; }
+  .glaze-message .imggen-variant-btn {
+    width: 16px;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    background: none;
+    color: inherit;
+    cursor: pointer;
+  }
+  .glaze-message .imggen-variant-btn svg {
+    width: 12px;
+    height: 12px;
+    fill: currentColor;
+    pointer-events: none;
+  }
+  .glaze-message .imggen-variant-btn:active { opacity: 0.6; }
+  .glaze-message .imggen-variant-count {
+    min-width: 20px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
   .glaze-message .imggen-result {
     max-width: 100%;
     border-radius: 10px;
@@ -234,6 +366,31 @@ export const SHADOW_STYLE = `
   }
   .glaze-message table tbody tr:nth-child(even) { background-color: rgba(255,255,255,0.02); }
   .glaze-message table td { padding: 8px 12px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+  .glaze-message .chat-table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 10px 0;
+    font-size: 0.95em;
+  }
+  .glaze-message .chat-table th {
+    padding: 8px 12px;
+    text-align: left;
+    font-weight: 600;
+    border-bottom: 1px solid rgba(255,255,255,0.18);
+  }
+  /* Message headings stay close to body text — a bubble is not a document. */
+  .glaze-message .chat-heading {
+    margin: 12px 0 6px;
+    line-height: 1.25;
+    font-weight: 700;
+  }
+  .glaze-message .chat-heading:first-child { margin-top: 0; }
+  .glaze-message h1.chat-heading { font-size: 1.35em; }
+  .glaze-message h2.chat-heading { font-size: 1.22em; }
+  .glaze-message h3.chat-heading { font-size: 1.12em; }
+  .glaze-message h4.chat-heading,
+  .glaze-message h5.chat-heading,
+  .glaze-message h6.chat-heading { font-size: 1em; }
   .search-highlight-text {
     background-color: rgba(255, 215, 0, 0.4);
     color: #fff;
@@ -300,6 +457,6 @@ export const SHADOW_STYLE = `
     line-height: 1.6;
     field-sizing: content;
   }
-  .edit-textarea:focus { border-color: var(--primary-color, #7996CE); }
+  .edit-textarea:focus { border-color: var(--primary-color, #C42A4A); }
   .message-section.editing .msg-reasoning { display: none; }
 `;

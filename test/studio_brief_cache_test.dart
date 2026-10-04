@@ -52,6 +52,25 @@ void main() {
     expect(edited, isNot(original));
   });
 
+  test('typed block routing changes the cache key', () {
+    final original = _cacheKey(cache);
+    final context = _cacheKey(
+      cache,
+      preset: _preset.copyWith(
+        blocks: [_preset.blocks.single.copyWith(injectionPoint: 'final')],
+      ),
+    );
+    final targeted = _cacheKey(
+      cache,
+      preset: _preset.copyWith(
+        blocks: [_preset.blocks.single.copyWith(targetAgentId: 'continuity')],
+      ),
+    );
+
+    expect(context, isNot(original));
+    expect(targeted, isNot(original));
+  });
+
   test('agentEnabled map insertion order does not change the cache key', () {
     final first = _cacheKey(
       cache,
@@ -67,6 +86,51 @@ void main() {
     );
 
     expect(second, first);
+  });
+
+  test('controller identity changes the cache key', () {
+    final original = _cacheKey(cache);
+    final changed = cache.cacheKeyForAgent(
+      config: _config,
+      studioPreset: _preset,
+      sessionId: 'session-a',
+      resolvedConfig: _resolvedConfig,
+      trackerContextSize: 5,
+      maxTokensOverride: null,
+      temperatureOverride: null,
+      agent: _agent.copyWith(controllerId: 'narrative'),
+      policy: 'static',
+      sceneKey: '',
+    );
+
+    expect(changed, isNot(original));
+  });
+
+  test('Ledger materialization identity changes the cache key', () {
+    final first = _cacheKey(cache, ledgerInjectionIdentity: 'ledger-a');
+    final second = _cacheKey(cache, ledgerInjectionIdentity: 'ledger-b');
+
+    expect(first, isNot(second));
+  });
+
+  test('Studio regex identity changes the cache key', () {
+    final first = _cacheKey(cache, studioRegexIdentity: 'regex-a');
+    final second = _cacheKey(cache, studioRegexIdentity: 'regex-b');
+
+    expect(first, isNot(second));
+  });
+
+  test('refresh policy uses only the normalized explicit value', () {
+    expect(
+      cache.effectiveRefreshPolicy(
+        const StudioAgent(
+          id: 'meta-looking',
+          name: 'Meta-Weaver forbidden words director',
+          refreshPolicy: 'invalid',
+        ),
+      ),
+      'turn',
+    );
   });
 
   test('older turn cannot overwrite a newer cached brief', () {
@@ -99,29 +163,23 @@ void main() {
   });
 }
 
-const _config = StudioConfig(
-  sessionId: 'profile-storage-id',
-  profileId: 'shared-profile',
-  enabled: true,
-  cheapApiConfigId: 'tracker-api',
-);
+const _config = StudioConfig(sessionId: 'profile-storage-id', enabled: true);
 
 const _agent = StudioAgent(
   id: 'continuity',
+  controllerId: 'continuity',
   name: 'Continuity',
-  sourceBlockNames: 'continuity_rules',
   refreshPolicy: 'static',
 );
 
 const _preset = StudioPreset(
   id: 'preset-id',
-  executionMode: StudioExecutionMode.assisted,
+  cheapApiConfigId: 'tracker-api',
   agentEnabled: {'continuity': true},
   blocks: [
     StudioPresetBlock(
       id: 'continuity-rules',
       section: 'pregen',
-      kind: 'agent_instruction',
       role: 'system',
       order: 2,
       content: 'Original instructions',
@@ -140,6 +198,8 @@ String _cacheKey(
   StudioBriefCache cache, {
   String sessionId = 'session-a',
   StudioPreset preset = _preset,
+  String ledgerInjectionIdentity = '',
+  String studioRegexIdentity = '',
 }) {
   return cache.cacheKeyForAgent(
     config: _config,
@@ -152,6 +212,8 @@ String _cacheKey(
     agent: _agent,
     policy: 'static',
     sceneKey: '',
+    ledgerInjectionIdentity: ledgerInjectionIdentity,
+    studioRegexIdentity: studioRegexIdentity,
   );
 }
 

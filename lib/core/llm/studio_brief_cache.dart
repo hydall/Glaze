@@ -3,14 +3,18 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 
 import '../models/studio_config.dart';
+import '../models/chat_message.dart';
 import '../utils/cast_helpers.dart';
 import 'agent_runner.dart';
+import 'generation_context_inputs.dart';
 import 'prompt_builder.dart';
 import 'studio_brief_parser.dart';
+import 'studio_controller_ontology.dart';
 import 'studio_stage_brief.dart';
+import 'studio/studio_context.dart';
 
 /// Owns the Studio brief cache: probe, persist, key derivation, and
-/// refresh-policy inference. Extracted from [MemoryStudioService] (plan §2):
+/// refresh-policy normalization. Extracted from [MemoryStudioService] (plan §2):
 /// the cache is the single piece of mutable state in the chat-time pipeline,
 /// and the surrounding helpers are pure functions of their parameters.
 ///
@@ -26,7 +30,7 @@ class StudioBriefCache {
   /// Probe the cache for one tracker. [hit] = true when a usable cached brief
   /// exists for this turn; [brief] carries the sanitized cached brief. Used by
   /// the orchestrator to split trackers into cached (skip LLM) vs.
-  /// batchable/individual before invoking `TrackerBatcher`.
+  /// batchable/individual before invoking `ControllerBatcher`.
   CacheProbe probeCache({
     required StudioAgent agent,
     required StudioConfig config,
@@ -39,6 +43,7 @@ class StudioBriefCache {
     required PromptPayload promptPayload,
     required String sceneKey,
     required int turnIndex,
+    String studioRegexIdentity = '',
   }) {
     final policy = effectiveRefreshPolicy(agent);
     final cacheKey = cacheKeyForAgent(
@@ -52,6 +57,7 @@ class StudioBriefCache {
       agent: agent,
       policy: policy,
       sceneKey: sceneKey,
+      studioRegexIdentity: studioRegexIdentity,
     );
     final cached = usableCachedBrief(
       cacheKey: cacheKey,
@@ -80,6 +86,64 @@ class StudioBriefCache {
       );
     }
     return CacheProbe(hit: false, policy: policy, cacheKey: cacheKey);
+  }
+
+  CacheProbe probeCacheFromInputs({
+    required StudioAgent agent,
+    required StudioConfig config,
+    required StudioPreset studioPreset,
+    required String sessionId,
+    required ResolvedAgentConfig resolvedConfig,
+    required int trackerContextSize,
+    required int? maxTokensOverride,
+    required double? temperatureOverride,
+    required GenerationContextInputs inputs,
+    required StudioContext context,
+    required String sceneKey,
+    required int turnIndex,
+    String studioRegexIdentity = '',
+  }) {
+    final policy = effectiveRefreshPolicy(agent);
+    final cacheKey = cacheKeyForAgent(
+      config: config,
+      studioPreset: studioPreset,
+      sessionId: sessionId,
+      resolvedConfig: resolvedConfig,
+      trackerContextSize: trackerContextSize,
+      maxTokensOverride: maxTokensOverride,
+      temperatureOverride: temperatureOverride,
+      agent: agent,
+      policy: policy,
+      sceneKey: sceneKey,
+      ledgerInjectionIdentity: context.diagnostics.ledgerInjectionIdentity,
+      studioRegexIdentity: studioRegexIdentity,
+    );
+    final cached = usableCachedBrief(
+      cacheKey: cacheKey,
+      policy: policy,
+      sceneChanged: lastUserMessageSuggestsSceneChangeFromInputs(inputs),
+      turnIndex: turnIndex,
+    );
+    if (cached == null) {
+      return CacheProbe(hit: false, policy: policy, cacheKey: cacheKey);
+    }
+    return CacheProbe(
+      hit: true,
+      policy: policy,
+      cacheKey: cacheKey,
+      brief: StudioStageBrief(
+        agentId: agent.id,
+        agentName: agent.name,
+        brief: _briefParser.sanitizeIntermediateAgentOutput(
+          agent,
+          cached.brief,
+        ),
+        status: 'cached',
+        refreshPolicy: policy,
+        cacheKey: cacheKey,
+        cacheHit: true,
+      ),
+    );
   }
 
   /// Persist a freshly-fetched brief into the cache if its refresh policy is
@@ -134,7 +198,12 @@ class StudioBriefCache {
     required StudioAgent agent,
     required String policy,
     required String sceneKey,
+    String ledgerInjectionIdentity = '',
+    String studioRegexIdentity = '',
   }) {
+    // Generation parameters live on the agent's spec, not on the agent (§4),
+    // so the cache key must read them from there or it stops noticing changes.
+    final spec = StudioControllerOntology.specForAgent(agent);
     final agentEnabledKeys = studioPreset.agentEnabled.keys.toList()..sort();
     final blocks = studioPreset.blocks.indexed.toList()
       ..sort((a, b) {
@@ -143,12 +212,10 @@ class StudioBriefCache {
         return a.$1.compareTo(b.$1);
       });
     final base = <String, dynamic>{
-      'v': 3,
+      'v': 8,
       'sessionId': sessionId,
-      'profileId': config.profileId,
       'studioConfigId': config.sessionId,
-      'runApiConfigId': config.runApiConfigId,
-      'cheapApiConfigId': config.cheapApiConfigId,
+      'cheapApiConfigId': studioPreset.cheapApiConfigId,
       'resolvedExecution': {
         'endpoint': resolvedConfig.endpoint,
         'model': resolvedConfig.model,
@@ -178,7 +245,6 @@ class StudioBriefCache {
       },
       'preset': {
         'id': studioPreset.id,
-        'executionMode': studioPreset.executionMode.wireName,
         'agentEnabled': {
           for (final key in agentEnabledKeys)
             key: studioPreset.agentEnabled[key],
@@ -187,37 +253,42 @@ class StudioBriefCache {
           for (final (_, block) in blocks)
             {
               'id': block.id,
-              'section': block.section,
-              'kind': block.kind,
+              'title': block.title,
+              'type': block.type.name,
+              'contextSlot': block.contextSlot?.name,
+              'mode': block.mode,
+              'injectionPoint': block.injectionPoint,
+              'targetAgentId': block.targetAgentId,
+              'sourceAgentId': block.sourceAgentId,
               'role': block.role,
               'enabled': block.enabled,
+              'locked': block.locked,
               'order': block.order,
+              'section': block.section,
+              'isStatic': block.isStatic,
+              'groupBoundary': block.groupBoundary,
               'content': block.content,
             },
         ],
       },
       'agent': {
         'id': agent.id,
+        'controllerId': agent.controllerId,
         'name': agent.name,
         'role': agent.role,
         'order': agent.order,
         'enabled': agent.enabled,
-        'endpoint': agent.endpoint,
-        'timeoutMs': agent.timeoutMs,
-        'temperature': agent.temperature,
-        'maxTokens': agent.maxTokens,
-        'sourceBlockNames': agent.sourceBlockNames,
+        'timeoutMs': spec?.timeoutMs ?? 4000,
+        'temperature': spec?.temperature ?? 0.3,
+        'maxTokens': spec?.maxTokens ?? 8000,
         'refreshPolicy': agent.refreshPolicy,
-        'invalidationSignals': agent.invalidationSignals,
-        'contextSize': agent.contextSize,
-        'runInterval': agent.runInterval,
+        'contextSize': StudioControllerOntology.contextSizeOf(spec),
         'maxParallelJobs': agent.maxParallelJobs,
-        'runIndividually': agent.runIndividually,
-        'activationKeywords': agent.activationKeywords,
-        'activationScanDepth': agent.activationScanDepth,
         'phase': agent.phase,
       },
       'refreshPolicy': policy,
+      'ledgerInjectionIdentity': ledgerInjectionIdentity,
+      'studioRegexIdentity': studioRegexIdentity,
       if (policy == 'scene') 'sceneKey': sceneKey,
     };
     return computeHash(jsonEncode(base));
@@ -244,8 +315,36 @@ class StudioBriefCache {
     return payload.history.where((m) => m.role == 'assistant').length;
   }
 
+  String sceneCacheKeyFromInputs(GenerationContextInputs inputs) {
+    final summary = inputs.summaryContent?.trim() ?? '';
+    final authorsNote = inputs.authorsNote?.content.trim() ?? '';
+    final recentAssistants = inputs.history
+        .where((message) => message.role == 'assistant')
+        .length;
+    return computeHash(
+      jsonEncode({
+        'characterId': inputs.character.id,
+        'personaId': inputs.persona?.id ?? '',
+        'summary': summary,
+        'authorsNote': authorsNote,
+        'assistantBucket': recentAssistants ~/ 4,
+      }),
+    );
+  }
+
+  int assistantTurnCountFromInputs(GenerationContextInputs inputs) =>
+      inputs.history.where((message) => message.role == 'assistant').length;
+
+  bool lastUserMessageSuggestsSceneChangeFromInputs(
+    GenerationContextInputs inputs,
+  ) => _historySuggestsSceneChange(inputs.history);
+
   bool lastUserMessageSuggestsSceneChange(PromptPayload payload) {
-    for (final message in payload.history.reversed) {
+    return _historySuggestsSceneChange(payload.history);
+  }
+
+  bool _historySuggestsSceneChange(List<ChatMessage> history) {
+    for (final message in history.reversed) {
       if (message.role != 'user') continue;
       final text = message.content.toLowerCase();
       return RegExp(
@@ -264,37 +363,7 @@ class StudioBriefCache {
   }
 
   String effectiveRefreshPolicy(StudioAgent agent) {
-    final policy = normalizeRefreshPolicy(agent.refreshPolicy);
-    if (policy != 'turn' || agent.invalidationSignals.isNotEmpty) {
-      return policy;
-    }
-
-    final text = [agent.name, agent.sourceBlockNames].join('\n').toLowerCase();
-    if (RegExp(
-      r'ban|banned|forbidden|clich|клиш|запрет|forbidden words',
-      caseSensitive: false,
-    ).hasMatch(text)) {
-      return 'static';
-    }
-    if (RegExp(
-      r'lumia|ghost in the machine|meta-weaver|meta weaver|ooc interface|ooc policy|weaver',
-      caseSensitive: false,
-    ).hasMatch(text)) {
-      return 'scene';
-    }
-    if (RegExp(
-      r'last\s+3|recent chat|last beat|last user|continuity|memory|current scene|anti-loop|anti-echo',
-      caseSensitive: false,
-    ).hasMatch(text)) {
-      return 'turn';
-    }
-    if (RegExp(
-      r'tone|genre|style|romantic|fluff|comfort|lumia|ghost|meta-weaver|meta weaver|director',
-      caseSensitive: false,
-    ).hasMatch(text)) {
-      return 'scene';
-    }
-    return policy;
+    return normalizeRefreshPolicy(agent.refreshPolicy);
   }
 }
 

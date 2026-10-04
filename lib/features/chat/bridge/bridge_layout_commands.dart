@@ -11,9 +11,18 @@ class LayoutBridgeCommands {
 
   LayoutBridgeCommands(this._host);
 
-  Future<void> setSearch({required String query, int activeIndex = -1}) {
+  /// [scroll] brings the active match into view. Pass `false` for a refresh
+  /// pass that only has to re-number the highlights after the messages
+  /// changed — scrolling there would yank the reader away from the message
+  /// they just edited.
+  Future<void> setSearch({
+    required String query,
+    int activeIndex = -1,
+    bool scroll = true,
+  }) {
     return _host.evalJs(
-      'window.bridge?.setSearch("${_host.escape(query)}", $activeIndex)',
+      'window.bridge?.setSearch("${_host.escape(query)}", $activeIndex, '
+      '$scroll)',
     );
   }
 
@@ -79,9 +88,48 @@ class LayoutBridgeCommands {
     return _host.evalJs('window.bridge?.setSelectionMode($enabled)');
   }
 
+  /// Selects (or, when the run is already selected, deselects) every message
+  /// above the last tapped one.
+  Future<void> selectMessagesAbove() {
+    return _host.evalJs('window.bridge?.selectMessagesAbove()');
+  }
+
+  /// Same as [selectMessagesAbove], for everything below the last tapped
+  /// message.
+  Future<void> selectMessagesBelow() {
+    return _host.evalJs('window.bridge?.selectMessagesBelow()');
+  }
+
   Future<void> toggleMessageSelection(String id) {
     return _host.evalJs(
       'window.bridge?.renderer?.toggleMessageSelection("${_host.escape(id)}")',
+    );
+  }
+
+  /// Replays a Windows precision-touchpad pan as a scroll inside the page.
+  ///
+  /// Flutter's win32 embedder reports precision-touchpad scrolling as
+  /// pan/zoom pointer events (`PointerPanZoom*`), not as `PointerScrollEvent`,
+  /// and `flutter_inappwebview_windows` only forwards the latter to WebView2 —
+  /// so a touchpad produces no `wheel` event in the page at all
+  /// (flutter_inappwebview #2503 / #2511, both closed as not planned). The
+  /// Flutter side captures the pan and hands it back here.
+  ///
+  /// [dx]/[dy] are scroll deltas in CSS pixels (already sign-flipped to
+  /// wheel semantics: positive [dy] scrolls the content down). [x]/[y] are
+  /// the pointer's client coordinates, used to pick the element under the
+  /// cursor so nested scrollers (edit textarea, panels) behave as they do
+  /// with a real wheel.
+  Future<void> trackpadScroll({
+    required double dx,
+    required double dy,
+    required double x,
+    required double y,
+  }) {
+    return _host.evalJs(
+      'window.bridge?.trackpadScroll('
+      '${dx.toStringAsFixed(2)}, ${dy.toStringAsFixed(2)}, '
+      '${x.toStringAsFixed(1)}, ${y.toStringAsFixed(1)})',
     );
   }
 }

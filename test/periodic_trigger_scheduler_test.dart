@@ -80,13 +80,12 @@ void main() {
     );
     addTearDown(container.dispose);
 
-    // Seed settings (enabled + active preset). SharedPreferences is the
-    // real platform plugin; we rely on it to persist across both tests
-    // and on setUp's pre-cleared state to keep them isolated. Use the
-    // notifier's API directly.
+    // Seed the active preset. SharedPreferences is the real platform plugin;
+    // we rely on it to persist across both tests and on setUp's pre-cleared
+    // state to keep them isolated. Use the notifier's API directly.
     await container
         .read(extensionsSettingsProvider.notifier)
-        .update(const ExtensionsSettings(enabled: true, activePresetId: 'p1'));
+        .update(const ExtensionsSettings(activePresetId: 'p1'));
 
     // Seed preset with one periodic + one afterAssistant jsRunner + one
     // infoblock (which the scheduler must ignore).
@@ -97,7 +96,7 @@ void main() {
         BlockConfig(
           id: 'b1',
           name: 'Tick',
-          type: BlockType.jsRunner,
+          type: BlockType.script,
           enabled: true,
           trigger: BlockTrigger.periodic,
           prompt: '// js',
@@ -106,7 +105,7 @@ void main() {
         BlockConfig(
           id: 'b2',
           name: 'After assistant',
-          type: BlockType.jsRunner,
+          type: BlockType.script,
           enabled: true,
           trigger: BlockTrigger.afterAssistant,
           prompt: '// not run on tick',
@@ -114,7 +113,7 @@ void main() {
         BlockConfig(
           id: 'b3',
           name: 'Infoblock',
-          type: BlockType.infoblock,
+          type: BlockType.generated,
           enabled: true,
           trigger: BlockTrigger.periodic,
           prompt: '// infoblock, not jsRunner — ignored',
@@ -138,41 +137,6 @@ void main() {
         reason: 'periodic execution uses the active chat character and session');
   });
 
-  test('scheduler drops timers when extensions are disabled', () async {
-    final container = ProviderContainer(
-      overrides: [
-        appDbProvider.overrideWith((ref) => db),
-        extensionPostGenServiceProvider.overrideWith((ref) => _FakePostGen(ref)),
-      ],
-    );
-    addTearDown(container.dispose);
-
-    // Seed preset but leave settings disabled.
-    await container
-        .read(extensionsSettingsProvider.notifier)
-        .update(const ExtensionsSettings(enabled: false, activePresetId: 'p2'));
-    final preset = ExtensionPreset(
-      id: 'p2',
-      name: 'Tick',
-      blocks: [
-        BlockConfig(
-          id: 'b1',
-          name: 'Tick',
-          type: BlockType.jsRunner,
-          enabled: true,
-          trigger: BlockTrigger.periodic,
-          prompt: '// js',
-          periodicIntervalSeconds: 1,
-        ),
-      ],
-    );
-    await container.read(extensionPresetsProvider.notifier).add(preset);
-
-    final scheduler = container.read(periodicTriggerSchedulerProvider);
-    expect(scheduler.activeTimerCount, 0,
-        reason: 'scheduler must not start timers when extensions are off');
-  });
-
   test('scheduler executes only for active chat authority', () async {
     final container = ProviderContainer(
       overrides: [
@@ -185,7 +149,7 @@ void main() {
     final block = BlockConfig(
       id: 'b1',
       name: 'Tick',
-      type: BlockType.jsRunner,
+      type: BlockType.script,
       enabled: true,
       trigger: BlockTrigger.periodic,
       prompt: '// js',

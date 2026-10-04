@@ -34,7 +34,7 @@ git checkout -b feat/xxx
 git push -u origin feat/xxx
 ```
 
-Open the PR against `hydall/Glaze:nightly`, not a fork's branch. Use the **GitHub MCP tools** (`mcp__plugin_github_github__create_pull_request`) or the GitHub web UI. Do **not** use the `gh` CLI — GitHub operations go through GitHub MCP (project + global convention).
+Open the PR against `hydall/Glaze:nightly`, not a fork's branch. Use whatever is at hand: the `gh` CLI (`gh pr create --base nightly`), the GitHub MCP tools when they are connected, or the web UI.
 
 ## PR title and body
 
@@ -60,12 +60,19 @@ Open the PR against `hydall/Glaze:nightly`, not a fork's branch. Use the **GitHu
 ## CI gate
 
 `.github/workflows/ci.yml` runs on every PR into `nightly`, `staging` or
-`stable` and does two things: `flutter analyze` and `flutter test`. A red check
-means the PR is not merged — no exceptions, no "it works on my machine".
+`stable`: `flutter analyze`, `flutter test`, and the WebView render suite
+(`test/webview_js` — Node + Playwright, no Flutter). A red check means the PR
+is not merged — no exceptions, no "it works on my machine".
 
 Only analyzer **errors** fail the run (`--no-fatal-infos --no-fatal-warnings`);
 infos and hints from the strict lint set are not build-breaking and must not be
 allowed to block every PR.
+
+The render suite loads the real `assets/chat_webview/` modules in a headless
+Chromium and asserts on the DOM, the resolved CSS and what a click does. Run it
+with `cd test/webview_js && npm ci && npx playwright install chromium && npm
+test`; the rule that goes with it — every rendering bug becomes a corpus entry
+before it is fixed — is in `docs/rules/message-rendering.md`.
 
 Running `flutter analyze` locally before opening the PR is still useful — it is
 faster feedback — but it is not the gate. The gate is CI, because it cannot be
@@ -117,19 +124,24 @@ selector.
 
 | Workflow | File | Produces |
 |----------|------|----------|
-| *Build (Branch)* | `.github/workflows/build-branch.yml` | Dev build of any branch — APK, Windows ZIP, IPA, Linux DEB + pacman package as run artifacts |
+| *Build (Branch)* | `.github/workflows/build-branch.yml` | Dev build of any branch — APK, Windows ZIP, IPA, Linux pacman package + `.tar.zst` as run artifacts |
 | *Build Release (Publish)* | `.github/workflows/build-release.yml` | The same set, plus a tagged GitHub Release carrying them as assets |
 
 **Platform selection.** Each workflow has an *Android (APK)* / *Windows (ZIP)* /
-*iOS (IPA)* / *Linux (DEB + pacman)* checkbox, all on by default. An unchecked
+*iOS (IPA)* / *Linux (pacman + tar.zst)* checkbox, all on by default. An unchecked
 platform does not build at all, so it costs no runner time and is absent from the
 release and the Telegram post. Unchecking every platform leaves nothing to do and
 the run stops after the metadata job.
 
-The Linux job produces two packages from `scripts/build_linux_packages.sh` — a
-`.deb` (dpkg-deb) and an Arch/CachyOS `.pkg.tar.zst` (makepkg). A format whose
-tooling is missing is skipped with a warning rather than failing the job; the run
-only fails when neither package comes out.
+The Linux job runs in an `archlinux:latest` container, because the
+`flutter_inappwebview` Linux backend needs WPE WebKit at build time and Arch is
+where it is packaged (Ubuntu does not ship it). It produces two packages from
+`scripts/build_linux_packages.sh`: an Arch/CachyOS `.pkg.tar.zst` (makepkg) that
+depends on `wpewebkit`, and a portable `.tar.zst` of the bundle for other rolling
+distros with WPE WebKit installed. DEB and AppImage are not built: a binary built
+against Arch's glibc does not start on Ubuntu/Debian LTS, and neither ships WPE
+WebKit. A format whose tooling is missing is skipped with a warning rather than
+failing the job; the run only fails when neither package comes out.
 
 **Telegram delivery.** `post_to_telegram` announces the build in the public
 group and replies to that announcement with each selected file;

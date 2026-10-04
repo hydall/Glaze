@@ -12,6 +12,8 @@ import '../../../shared/widgets/help_tip.dart';
 import '../../../shared/widgets/sheet_view.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_toast.dart';
+import '../../shared/widgets/glaze_spinner.dart';
+import '../../shared/widgets/glaze_sheet.dart';
 
 class PersonaConnectionsSheet extends ConsumerStatefulWidget {
   final String personaId;
@@ -41,7 +43,7 @@ class _PersonaConnectionsSheetState
         .toList();
 
     return personaListAsync.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
+      loading: () => const Center(child: GlazeSpinner()),
       error: (error, stack) => Center(child: Text("${'title_error'.tr()}: $error")),
       data: (personas) {
         final persona = personas.where((p) => p.id == widget.personaId).firstOrNull ?? Persona(id: widget.personaId, name: 'tab_personas'.tr());
@@ -222,7 +224,7 @@ class _PersonaConnectionsSheetState
 }
 
 void showPersonaConnections(BuildContext context, String personaId) {
-  showModalBottomSheet<void>(
+  showGlazeSheet<void>(
     context: context,
     useRootNavigator: true,
     isScrollControlled: true,

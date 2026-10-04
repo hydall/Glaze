@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../shared/shell/desktop/desktop_floating_provider.dart';
 import '../../shared/shell/shell_header_provider.dart';
 
 final _random = Random();
@@ -121,18 +122,26 @@ class _HallOfFameScreenState extends ConsumerState<HallOfFameScreen>
 
   void _close() {
     _master.reverse().then((_) {
-      if (mounted) {
-        _showHeaderForExit = true;
-        refreshShellHeader();
-        context.go('/menu/about');
-      }
+      if (!mounted) return;
+      // In a desktop window, back to About in that window.
+      if (popDesktopWindow(context)) return;
+      _showHeaderForExit = true;
+      refreshShellHeader();
+      context.go('/menu/about');
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.sizeOf(context);
+    // The crawl is laid out in the space this screen gets, not the app
+    // window's, so it also fits a desktop window.
+    return LayoutBuilder(
+      builder: (context, constraints) =>
+          _buildScreen(context, constraints.biggest),
+    );
+  }
 
+  Widget _buildScreen(BuildContext context, Size size) {
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {

@@ -113,7 +113,7 @@ class _SyncSheetState extends ConsumerState<SyncSheet> {
                       _ctrl.gdriveFolderId != null)
                     _buildFolderIdRow(context),
                   if (conflicts.isNotEmpty)
-                    _buildConflictBanner(context, conflicts),
+                    _buildConflictBanner(context, conflicts, isSyncing),
                   if (_ctrl.syncResult != null)
                     buildSyncResultCard(context, _ctrl.syncResult!),
                   if ((status == SyncStatus.syncing || _ctrl.isWiping) &&
@@ -308,6 +308,7 @@ class _SyncSheetState extends ConsumerState<SyncSheet> {
   Widget _buildConflictBanner(
     BuildContext context,
     List<SyncConflict> conflicts,
+    bool isSyncing,
   ) {
     return Container(
       margin: const EdgeInsets.only(top: 12),
@@ -343,7 +344,9 @@ class _SyncSheetState extends ConsumerState<SyncSheet> {
             children: [
               Expanded(
                 child: TextButton(
-                  onPressed: () => _resolveAllConflicts('local'),
+                  onPressed: isSyncing
+                      ? null
+                      : () => _resolveAllConflicts('local'),
                   style: TextButton.styleFrom(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 8,
@@ -367,7 +370,9 @@ class _SyncSheetState extends ConsumerState<SyncSheet> {
               const SizedBox(width: 8),
               Expanded(
                 child: TextButton(
-                  onPressed: () => _resolveAllConflicts('cloud'),
+                  onPressed: isSyncing
+                      ? null
+                      : () => _resolveAllConflicts('cloud'),
                   style: TextButton.styleFrom(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 8,
@@ -392,35 +397,11 @@ class _SyncSheetState extends ConsumerState<SyncSheet> {
           ),
           const SizedBox(height: 10),
           ...conflicts.map(
-            (c) => Container(
-              margin: const EdgeInsets.only(bottom: 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      c.name,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: Colors.white70,
-                      ),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () => _resolveConflict(c, 'local'),
-                    child: Text(
-                      'sync_keep_local'.tr(),
-                      style: const TextStyle(color: Colors.blueAccent),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () => _resolveConflict(c, 'cloud'),
-                    child: Text(
-                      'sync_keep_cloud'.tr(),
-                      style: const TextStyle(color: Colors.greenAccent),
-                    ),
-                  ),
-                ],
-              ),
+            (c) => SyncConflictRow(
+              conflict: c,
+              enabled: !isSyncing,
+              onLocal: () => _resolveConflict(c, 'local'),
+              onCloud: () => _resolveConflict(c, 'cloud'),
             ),
           ),
         ],
@@ -770,5 +751,69 @@ class _SyncSheetState extends ConsumerState<SyncSheet> {
   void _setIncludeApiKeys(bool val) async {
     await _ctrl.setIncludeApiKeys(val);
     if (mounted) setState(() {});
+  }
+}
+
+@visibleForTesting
+class SyncConflictRow extends StatelessWidget {
+  const SyncConflictRow({
+    super.key,
+    required this.conflict,
+    required this.enabled,
+    required this.onLocal,
+    required this.onCloud,
+  });
+
+  final SyncConflict conflict;
+  final bool enabled;
+  final VoidCallback onLocal;
+  final VoidCallback onCloud;
+
+  @override
+  Widget build(BuildContext context) {
+    final name = Text(
+      conflict.name,
+      key: const Key('sync-conflict-name'),
+      style: const TextStyle(fontSize: 13, color: Colors.white70),
+    );
+    final actions = Wrap(
+      alignment: WrapAlignment.end,
+      children: [
+        TextButton(
+          onPressed: enabled ? onLocal : null,
+          child: Text(
+            'sync_keep_local'.tr(),
+            style: const TextStyle(color: Colors.blueAccent),
+          ),
+        ),
+        TextButton(
+          onPressed: enabled ? onCloud : null,
+          child: Text(
+            'sync_keep_cloud'.tr(),
+            style: const TextStyle(color: Colors.greenAccent),
+          ),
+        ),
+      ],
+    );
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < 420) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [name, const SizedBox(height: 2), actions],
+            );
+          }
+          return Row(
+            children: [
+              Expanded(child: name),
+              actions,
+            ],
+          );
+        },
+      ),
+    );
   }
 }

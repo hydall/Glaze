@@ -5,9 +5,14 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../utils/error_format.dart';
+import '../converters/reasoning_effort.dart';
+import '../converters/structured_response.dart';
 import 'chat_transport.dart';
 import 'chat_transport_request.dart';
+import 'endpoint_normalizer.dart';
+import 'endpoint_resolution_cache.dart';
 import 'extra_request_parameters.dart';
+import 'llm_protocol.dart';
 
 /// OpenAI Chat Completions transport. Also handles any OpenAI-compatible
 /// custom endpoint (LM Studio, Koboldcpp, vLLM, OpenRouter-as-custom, etc.).
@@ -17,6 +22,7 @@ import 'extra_request_parameters.dart';
 /// shim that delegates here.
 class OpenAiChatTransport implements ChatTransport {
   final Dio _dio;
+  final String _protocol;
 
   /// Number of automatic retries on HTTP 408 (Request Timeout) — common on
   /// mobile networks where the upload is too slow for the provider.
@@ -26,36 +32,28 @@ class OpenAiChatTransport implements ChatTransport {
   /// `OpenRouterChatTransport` to inject `HTTP-Referer` and `X-Title`.
   final Map<String, String> _extraHeaders;
 
-  OpenAiChatTransport({Dio? dio, Map<String, String>? extraHeaders})
-    : _dio =
-          dio ??
-          Dio(
-            BaseOptions(
-              connectTimeout: const Duration(seconds: 30),
-              sendTimeout: const Duration(seconds: 60),
-              receiveTimeout: const Duration(seconds: 120),
-            ),
-          ),
-      _extraHeaders = extraHeaders ?? const {};
+  OpenAiChatTransport({
+    Dio? dio,
+    Map<String, String>? extraHeaders,
+    this._protocol = LlmProtocol.openai,
+  }) : _dio =
+           dio ??
+           Dio(
+             BaseOptions(
+               connectTimeout: const Duration(seconds: 30),
+               sendTimeout: const Duration(seconds: 60),
+               receiveTimeout: const Duration(seconds: 120),
+             ),
+           ),
+       _extraHeaders = extraHeaders ?? const {};
 
-  static String normalizeEndpoint(String endpoint) {
-    var normalized = endpoint.trim();
-    if (normalized.isEmpty) return '';
-    if (!normalized.startsWith(RegExp(r'https?://'))) {
-      normalized = 'https://$normalized';
-    }
-    while (normalized.endsWith('/')) {
-      normalized = normalized.substring(0, normalized.length - 1);
-    }
-    return normalized;
-  }
+  static const String _modelsRoute = '/models';
 
-  static String buildChatUrl(String endpoint) {
-    final base = normalizeEndpoint(endpoint);
-    if (base.isEmpty) return '';
-    if (base.toLowerCase().endsWith('/chat/completions')) return base;
-    return '$base/chat/completions';
-  }
+  static String normalizeEndpoint(String endpoint) =>
+      EndpointNormalizer.baseUrl(endpoint);
+
+  static String buildChatUrl(String endpoint) =>
+      EndpointNormalizer.chatCompletionsUrl(endpoint);
 
   @override
   Future<void> stream({
@@ -69,13 +67,70 @@ class OpenAiChatTransport implements ChatTransport {
       onError?.call(Exception('API key is empty'));
       return;
     }
-    final url = buildChatUrl(request.endpoint);
+    final url = request.endpoint.trim();
+    final uri = Uri.tryParse(url);
+    if (url.isEmpty ||
+        uri == null ||
+        !uri.hasAuthority ||
+        (uri.scheme != 'http' && uri.scheme != 'https')) {
+      onError?.call(Exception('Endpoint is empty or not a valid URL'));
+      return;
+    }
 
-    final body = buildBody(request);
+    final Map<String, dynamic> body;
+    try {
+      body = buildBody(request, protocol: _protocol);
+    } catch (e) {
+      onError?.call(e);
+      return;
+    }
+
+    try {
+      await _send(
+        url: url,
+        request: request,
+        body: body,
+        cancelToken: cancelToken,
+        onUpdate: onUpdate,
+        onComplete: onComplete,
+      );
+    } on DioException catch (e) {
+      onError?.call(await decodeStreamingError(e));
+    } catch (e) {
+      onError?.call(e);
+    }
+  }
+
+  /// One POST against [url], with the 408 retry that slow mobile uploads need.
+  Future<void> _send({
+    required String url,
+    required ChatTransportRequest request,
+    required Map<String, dynamic> body,
+    required CancelToken? cancelToken,
+    required ChatTransportOnUpdate? onUpdate,
+    required ChatTransportOnComplete? onComplete,
+  }) async {
+    final omitReasoning =
+        !(request.showNativeReasoning ?? !request.omitReasoning);
+
+    // Structured output is unwrapped from a complete JSON object, so it runs
+    // one-shot regardless of the stream flag.
+    final oneShot = !request.stream || request.responseJsonSchema != null;
 
     for (var attempt = 0; attempt <= _maxRetries; attempt++) {
       try {
-        if (request.stream) {
+        if (oneShot) {
+          await _oneShotResponse(
+            url,
+            request.apiKey,
+            body,
+            cancelToken,
+            onComplete,
+            omitReasoning: omitReasoning,
+            receiveTimeoutMs: request.receiveTimeoutMs,
+            unwrapStructured: request.responseJsonSchema != null,
+          );
+        } else {
           await _streamResponse(
             url,
             request.apiKey,
@@ -83,23 +138,11 @@ class OpenAiChatTransport implements ChatTransport {
             cancelToken,
             onUpdate,
             onComplete,
-            omitReasoning:
-                !(request.showNativeReasoning ?? !request.omitReasoning),
-            receiveTimeoutMs: request.receiveTimeoutMs,
-          );
-        } else {
-          await _oneShotResponse(
-            url,
-            request.apiKey,
-            body,
-            cancelToken,
-            onComplete,
-            omitReasoning:
-                !(request.showNativeReasoning ?? !request.omitReasoning),
+            omitReasoning: omitReasoning,
             receiveTimeoutMs: request.receiveTimeoutMs,
           );
         }
-        return; // success — no retry needed
+        return;
       } on DioException catch (e) {
         if (attempt < _maxRetries &&
             e.response?.statusCode == 408 &&
@@ -110,11 +153,7 @@ class OpenAiChatTransport implements ChatTransport {
           await Future<void>.delayed(const Duration(seconds: 1));
           continue;
         }
-        onError?.call(await decodeStreamingError(e));
-        return;
-      } catch (e) {
-        onError?.call(e);
-        return;
+        rethrow;
       }
     }
   }
@@ -122,7 +161,10 @@ class OpenAiChatTransport implements ChatTransport {
   /// Builds the JSON body for a chat completion request. Public so the
   /// OpenRouter transport (which reuses the same shape with extra fields) and
   /// the request-preview UI can reproduce the exact on-the-wire body.
-  static Map<String, dynamic> buildBody(ChatTransportRequest r) {
+  static Map<String, dynamic> buildBody(
+    ChatTransportRequest r, {
+    String protocol = LlmProtocol.openai,
+  }) {
     final body = <String, dynamic>{
       'model': r.model,
       'messages': r.messages,
@@ -132,27 +174,36 @@ class OpenAiChatTransport implements ChatTransport {
     if (r.maxTokens > 0) {
       body['max_tokens'] = r.maxTokens;
     }
-    if (!r.omitTemperature && r.temperature > 0) {
+    // The omit* flags are the ONLY switch for these — never suppress a
+    // parameter because of its value. `temperature: 0` and `top_p: 1` are
+    // settings the user can pick in the UI, and dropping them silently made
+    // the slider a no-op with no trace in the prompt inspector.
+    if (!r.omitTemperature) {
       body['temperature'] = r.temperature;
     }
-    if (!r.omitTopP && r.topP > 0 && r.topP < 1) {
+    if (!r.omitTopP) {
       body['top_p'] = r.topP;
     }
+    // top_k is the exception: 0 is not a legal value upstream (Anthropic and
+    // Gemini both require >= 1), so 0 keeps meaning "not set".
     if (!r.omitTopK && r.topK > 0) {
       body['top_k'] = r.topK;
     }
-    if (!r.omitFrequencyPenalty && r.frequencyPenalty != 0) {
+    if (!r.omitFrequencyPenalty) {
       body['frequency_penalty'] = r.frequencyPenalty;
     }
-    if (!r.omitPresencePenalty && r.presencePenalty != 0) {
+    if (!r.omitPresencePenalty) {
       body['presence_penalty'] = r.presencePenalty;
     }
-    if (!r.omitReasoning &&
-        r.requestReasoning &&
-        !r.omitReasoningEffort &&
-        r.reasoningEffort != null &&
-        r.reasoningEffort != 'auto') {
-      body['reasoning_effort'] = r.reasoningEffort;
+    if (!r.omitReasoning && r.requestReasoning && !r.omitReasoningEffort) {
+      // Wire values are protocol-specific: official OpenAI caps at `high`,
+      // while a selected Custom Chat Completion protocol keeps `max`.
+      final effort = resolveReasoningEffort(
+        protocol: protocol,
+        effort: r.reasoningEffort,
+        model: r.model,
+      );
+      if (effort != null) body['reasoning_effort'] = effort;
     }
 
     if (r.cacheControlTtl == '5min' || r.cacheControlTtl == '1h') {
@@ -161,19 +212,28 @@ class OpenAiChatTransport implements ChatTransport {
         if (r.cacheControlTtl == '1h') 'ttl': '1h',
       };
     }
-    final shouldSendSessionId =
-        r.sessionId != null &&
-        r.sessionId!.isNotEmpty &&
-        (r.sessionIdMode == 'always' ||
-            (r.sessionIdMode == 'openrouter' &&
-                r.endpoint.contains('openrouter.ai')));
-    if (shouldSendSessionId) {
+    if (r.shouldSendOpenAiSessionId) {
       body['session_id'] = r.sessionId;
+    }
+
+    if (r.stop.isNotEmpty) {
+      body['stop'] = r.stop;
     }
 
     if (r.tools != null && r.tools!.isNotEmpty) {
       body['tools'] = r.tools;
       body['tool_choice'] = r.toolChoice ?? 'auto';
+    }
+
+    if (r.responseJsonSchema != null) {
+      body['response_format'] = <String, dynamic>{
+        'type': 'json_schema',
+        'json_schema': <String, dynamic>{
+          'name': 'glaze_prefill_response',
+          'strict': true,
+          'schema': r.responseJsonSchema,
+        },
+      };
     }
 
     applyExtraRequestParameters(body, r.extraRequestParameters);
@@ -217,111 +277,113 @@ class OpenAiChatTransport implements ChatTransport {
     }
     final responseStream = responseBody.stream;
     final completer = Completer<void>();
-    StreamSubscription<List<int>>? subscription;
+    StreamSubscription<String>? subscription;
     var buffer = '';
     var fullText = '';
     var fullReasoning = '';
     var doneReceived = false;
     String? lastRawJsonPayload;
 
-    subscription = (responseStream as Stream<List<int>>).listen(
-      (chunk) {
-        if (cancelToken?.isCancelled == true) {
-          debugPrint(
-            '[SSE] cancel detected in listen callback, stopping stream',
-          );
-          subscription?.cancel();
-          if (!completer.isCompleted) completer.complete();
-          return;
-        }
-        buffer += utf8.decode(chunk, allowMalformed: true);
-        final lines = buffer.split('\n');
-        buffer = lines.removeLast();
+    Future<void> finishAfterCancel([Object? error, StackTrace? stack]) async {
+      await subscription?.cancel();
+      if (completer.isCompleted) return;
+      if (error == null) {
+        completer.complete();
+      } else {
+        completer.completeError(error, stack);
+      }
+    }
 
-        for (final line in lines) {
-          if (cancelToken?.isCancelled == true) {
-            debugPrint(
-              '[SSE] cancel detected while parsing lines, stopping immediately',
-            );
-            buffer = '';
-            subscription?.cancel();
-            if (!completer.isCompleted) completer.complete();
-            return;
-          }
-          final trimmed = line.trim();
-          if (!trimmed.startsWith('data: ')) continue;
-          final data = trimmed.substring(6).trim();
-          if (data == '[DONE]') {
-            if (cancelToken != null && cancelToken.isCancelled) {
+    subscription = utf8.decoder
+        .bind(responseStream)
+        .listen(
+          (chunk) {
+            if (cancelToken?.isCancelled == true) {
               debugPrint(
-                '[SSE] cancel detected at [DONE], suppressing onComplete',
+                '[SSE] cancel detected in listen callback, stopping stream',
               );
-            } else {
-              onComplete?.call(
-                fullText,
-                fullReasoning.isNotEmpty ? fullReasoning : null,
-                rawResponseJson: _buildAggregatedRawResponse(
-                  fullText: fullText,
-                  fullReasoning: fullReasoning,
-                  fallbackRawJsonPayload: lastRawJsonPayload,
-                ),
-              );
-              doneReceived = true;
+              unawaited(finishAfterCancel());
+              return;
             }
-            subscription?.cancel();
-            if (!completer.isCompleted) completer.complete();
-            return;
-          }
+            buffer += chunk;
+            final lines = buffer.split('\n');
+            buffer = lines.removeLast();
 
-          lastRawJsonPayload = data;
+            for (final line in lines) {
+              if (cancelToken?.isCancelled == true) {
+                debugPrint(
+                  '[SSE] cancel detected while parsing lines, stopping immediately',
+                );
+                buffer = '';
+                unawaited(finishAfterCancel());
+                return;
+              }
+              final data = _sseData(line);
+              if (data == null) continue;
+              if (data == '[DONE]') {
+                if (cancelToken != null && cancelToken.isCancelled) {
+                  debugPrint(
+                    '[SSE] cancel detected at [DONE], suppressing onComplete',
+                  );
+                } else {
+                  onComplete?.call(
+                    fullText,
+                    fullReasoning.isNotEmpty ? fullReasoning : null,
+                    rawResponseJson: _buildAggregatedRawResponse(
+                      fullText: fullText,
+                      fullReasoning: fullReasoning,
+                      fallbackRawJsonPayload: lastRawJsonPayload,
+                    ),
+                  );
+                  doneReceived = true;
+                }
+                unawaited(finishAfterCancel());
+                return;
+              }
 
-          try {
-            final json = jsonDecode(data) as Map<String, dynamic>;
-            final choice = json['choices']?[0];
-            final delta = choice?['delta'];
+              lastRawJsonPayload = data;
 
-            final contentDelta = delta?['content'] as String? ?? '';
-            // When omitReasoning is set, skip native reasoning_content so
-            // inline <think> parsing in StreamAccumulator is not suppressed
-            // by _hasExternalReasoning. The provider may still emit the
-            // field, but we discard it on the response side.
-            final reasoningDelta = omitReasoning
-                ? null
-                : (delta?['reasoning_content'] as String? ??
-                      delta?['reasoning'] as String?);
+              try {
+                final json = jsonDecode(data) as Map<String, dynamic>;
+                final choice = json['choices']?[0];
+                final delta = choice?['delta'];
 
-            if (contentDelta.isNotEmpty) {
-              fullText += contentDelta;
+                final contentDelta = delta?['content'] as String? ?? '';
+                // When omitReasoning is set, skip native reasoning_content so
+                // inline <think> parsing in StreamAccumulator is not suppressed
+                // by _hasExternalReasoning. The provider may still emit the
+                // field, but we discard it on the response side.
+                final reasoningDelta = omitReasoning
+                    ? null
+                    : (delta?['reasoning_content'] as String? ??
+                          delta?['reasoning'] as String?);
+
+                if (contentDelta.isNotEmpty) {
+                  fullText += contentDelta;
+                }
+                if (reasoningDelta != null && reasoningDelta.isNotEmpty) {
+                  fullReasoning += reasoningDelta;
+                }
+
+                if (contentDelta.isNotEmpty || reasoningDelta != null) {
+                  onUpdate?.call(contentDelta, reasoningDelta);
+                }
+              } catch (_) {}
             }
-            if (reasoningDelta != null && reasoningDelta.isNotEmpty) {
-              fullReasoning += reasoningDelta;
-            }
-
-            if (contentDelta.isNotEmpty || reasoningDelta != null) {
-              onUpdate?.call(contentDelta, reasoningDelta);
-            }
-          } catch (_) {}
-        }
-      },
-      onDone: () {
-        if (!completer.isCompleted) completer.complete();
-      },
-      onError: (Object e) {
-        if (!completer.isCompleted) {
-          completer.completeError(e);
-        }
-      },
-      cancelOnError: true,
-    );
+          },
+          onDone: () => unawaited(finishAfterCancel()),
+          onError: (Object e, StackTrace stack) =>
+              unawaited(finishAfterCancel(e, stack)),
+          cancelOnError: true,
+        );
 
     if (cancelToken != null) {
       unawaited(
-        cancelToken.whenCancel.then((_) {
+        cancelToken.whenCancel.then((_) async {
           debugPrint(
             '[SSE] CancelToken fired — cancelling stream subscription',
           );
-          subscription?.cancel();
-          if (!completer.isCompleted) completer.complete();
+          await finishAfterCancel();
         }),
       );
     }
@@ -366,6 +428,7 @@ class OpenAiChatTransport implements ChatTransport {
     ChatTransportOnComplete? onComplete, {
     bool omitReasoning = false,
     int? receiveTimeoutMs,
+    bool unwrapStructured = false,
   }) async {
     final response = await _dio.post<dynamic>(
       url,
@@ -434,8 +497,11 @@ class OpenAiChatTransport implements ChatTransport {
         ? null
         : (reasoningRaw is String ? reasoningRaw : null);
 
+    final unwrapped = unwrapStructured
+        ? unwrapStructuredResponse(content)
+        : content;
     onComplete?.call(
-      content,
+      unwrapped,
       reasoning,
       rawResponseJson: rawResponseJson ?? jsonEncode(data),
     );
@@ -448,9 +514,8 @@ class OpenAiChatTransport implements ChatTransport {
     var fullText = '';
     var fullReasoning = '';
     for (final line in body.split('\n')) {
-      final trimmed = line.trim();
-      if (!trimmed.startsWith('data: ')) continue;
-      final payload = trimmed.substring(6).trim();
+      final payload = _sseData(line);
+      if (payload == null) continue;
       if (payload == '[DONE]') break;
       try {
         final json = jsonDecode(payload) as Map<String, dynamic>;
@@ -527,23 +592,42 @@ class OpenAiChatTransport implements ChatTransport {
     });
   }
 
+  /// Extract an SSE data field without trimming its JSON payload. The optional
+  /// single space after `data:` is framing, not content.
+  String? _sseData(String line) {
+    final normalized = line.endsWith('\r')
+        ? line.substring(0, line.length - 1)
+        : line;
+    if (!normalized.startsWith('data:')) return null;
+    final value = normalized.substring(5);
+    return value.startsWith(' ') ? value.substring(1) : value;
+  }
+
   @override
   Future<List<Map<String, dynamic>>> fetchModels({
     required String endpoint,
     required String apiKey,
   }) async {
-    final base = normalizeEndpoint(endpoint);
-    final url = '$base/models';
+    final urls = EndpointResolutionCache.order(
+      endpoint,
+      _modelsRoute,
+      EndpointNormalizer.modelsCandidates(endpoint),
+    );
 
-    try {
-      final response = await _dio.get<Map<String, dynamic>>(
-        url,
-        options: Options(headers: {'Authorization': 'Bearer $apiKey'}),
-      );
-      final data = response.data?['data'] as List?;
-      return data?.cast<Map<String, dynamic>>() ?? [];
-    } catch (_) {
-      return [];
+    for (final url in urls) {
+      try {
+        final response = await _dio.get<Map<String, dynamic>>(
+          url,
+          options: Options(headers: {'Authorization': 'Bearer $apiKey'}),
+        );
+        final data = response.data?['data'] as List?;
+        if (data == null) continue;
+        EndpointResolutionCache.record(endpoint, _modelsRoute, url);
+        return data.cast<Map<String, dynamic>>();
+      } catch (_) {
+        continue;
+      }
     }
+    return [];
   }
 }

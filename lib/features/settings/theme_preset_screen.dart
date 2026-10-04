@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 
@@ -9,7 +10,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/platform/wallpaper.dart';
 import '../../../core/services/file_export_service.dart';
+import '../../../shared/shell/desktop/desktop_floating_provider.dart';
 import '../../../shared/shell/nav_height_provider.dart';
+import '../../../shared/state/preset_sort.dart';
 import '../../../shared/theme/built_in_themes.dart';
 import '../../../shared/theme/theme_font_provider.dart';
 import '../../../shared/theme/theme_preset.dart';
@@ -23,7 +26,9 @@ import '../../../shared/widgets/swipe_tab_switcher.dart';
 import '../../../shared/widgets/tab_slide_switcher.dart';
 import '../../../shared/widgets/glaze_error_dialog.dart';
 import '../../../shared/widgets/glaze_toast.dart';
+import '../../../shared/widgets/list_controls.dart';
 import 'theme_editor_screen.dart';
+import 'theme_preset_sort.dart';
 
 class ThemePresetScreen extends ConsumerStatefulWidget {
   const ThemePresetScreen({super.key});
@@ -108,23 +113,42 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
   Widget _buildMyThemesList(
     BuildContext context,
     ThemeSettings theme,
-    double bottomPad,
+    double padBottom,
   ) {
-    final presets = theme.presets;
     final activeId = theme.activePreset.id;
+    final sortState =
+        ref.watch(themePresetSortProvider).value ?? const PresetSortState();
+    final presets = sortThemePresets(theme.presets, sortState);
     return ListView(
-      padding: EdgeInsets.only(bottom: bottomPad + 60),
+      padding: EdgeInsets.only(bottom: padBottom + 60),
       children: [
         _buildFontToggle(context),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Text(
-            'theme_all_themes'.tr(),
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: context.cs.onSurfaceVariant,
-            ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'theme_all_themes'.tr(),
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: context.cs.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              GlazeSortIconChip(
+                icon: sortState.mode.icon,
+                tooltip: sortState.mode.label,
+                onTap: () => showPresetSortPicker(
+                  context,
+                  current: sortState.mode,
+                  onSelect: (mode) => unawaited(
+                    ref.read(themePresetSortProvider.notifier).setMode(mode),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
         const SizedBox(height: 8),
@@ -600,12 +624,16 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
         filename: filename,
         subfolder: 'themes',
       );
+      if (path.isEmpty) return; // user cancelled the save dialog
       if (!mounted) return;
       GlazeToast.show(context, 'Theme exported to $path');
     } catch (e) {
-      if (e.toString().contains('cancelled')) return;
       if (!mounted) return;
-      GlazeErrorDialog.show(context, e, prefix: 'Export failed: ');
+      GlazeErrorDialog.show(
+        context,
+        e,
+        prefix: 'error_export_failed_prefix'.tr(),
+      );
     }
   }
 
@@ -614,9 +642,7 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
       _applyPreset(preset);
     }
     if (!mounted) return;
-    await Navigator.of(context, rootNavigator: true).push(
-      MaterialPageRoute<void>(builder: (_) => const ThemeEditorScreen()),
-    );
+    await _pushThemeEditor();
   }
 
   Future<void> _createNewTheme() async {
@@ -627,6 +653,14 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
     await ref.read(themeProvider.notifier).importPreset(preset);
     await ref.read(themeProvider.notifier).applyPreset(preset);
     if (!mounted) return;
+    await _pushThemeEditor();
+  }
+
+  /// Opens the editor on the active theme: in the desktop window this list
+  /// sits in, as every screen reached from the Menu does there, and over the
+  /// whole app on phones.
+  Future<void> _pushThemeEditor() async {
+    if (floatOnDesktop(context, 'theme-editor', push: true)) return;
     await Navigator.of(context, rootNavigator: true).push(
       MaterialPageRoute<void>(builder: (_) => const ThemeEditorScreen()),
     );
@@ -669,7 +703,11 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
       }
     } catch (e) {
       if (mounted) {
-        GlazeErrorDialog.show(context, e, prefix: 'Failed to import: ');
+        GlazeErrorDialog.show(
+          context,
+          e,
+          prefix: 'error_import_failed_prefix'.tr(),
+        );
       }
     }
   }

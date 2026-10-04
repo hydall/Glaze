@@ -1,0 +1,848 @@
+import 'dart:async';
+
+import 'package:easy_localization/easy_localization.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../core/models/chat_message.dart';
+import '../../../core/models/memory_book.dart';
+import '../../../core/utils/error_format.dart';
+import '../../../core/state/db_provider.dart';
+import '../../../core/state/lorebook_embedding_provider.dart';
+import '../../../core/state/memory_settings_provider.dart';
+import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/glaze_error_dialog.dart';
+import '../../../shared/widgets/glaze_filter_chip_bar.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
+import '../../../shared/widgets/glaze_tab_bar.dart';
+import '../../../shared/widgets/glaze_text_field.dart';
+import '../../../shared/widgets/glaze_toast.dart';
+import '../../../shared/widgets/swipe_tab_switcher.dart';
+import '../../../shared/widgets/tab_slide_switcher.dart';
+import '../../memory/controllers/memory_book_controller.dart';
+import '../../memory/state/memory_book_revision_provider.dart';
+import '../../memory/state/memory_draft_jobs_provider.dart';
+import 'memory/memory_books_controls.dart';
+import 'memory/memory_books_toolbar.dart';
+import 'memory/memory_draft_card.dart';
+import 'memory/memory_entry_card.dart';
+import 'memory/memory_list.dart';
+import 'memory/memory_tab_store.dart';
+import 'memory_entry_editor_sheet.dart';
+import 'memory_generation_settings_sheet.dart';
+
+/// What an approved entry can be narrowed to. The counters that used to be
+/// three read-only tiles are these chips: the number is still on screen, and
+/// it now does something.
+enum _EntryFilter { all, active, needsRebuild }
+
+/// The same for drafts — the three states a draft is actually triaged by.
+enum _DraftFilter { all, ready, needsGeneration, failed }
+
+/// One row of the cross-tab search results: an approved entry or a draft, so
+/// the two can be ordered together and rendered through one list body.
+class _SearchHit {
+  final MemoryEntry? entry;
+  final MemoryDraft? draft;
+
+  const _SearchHit.entry(MemoryEntry this.entry) : draft = null;
+  const _SearchHit.draft(MemoryDraft this.draft) : entry = null;
+
+  bool get isEntry => entry != null;
+  String get id => entry?.id ?? draft!.id;
+  String get title => entry?.title ?? draft!.title;
+  int get createdAt => entry?.createdAt ?? draft!.createdAt;
+}
+
+/// What the host sheet drives from its own chrome: the settings button in the
+/// header and the extended FAB over the list. The tab owns the controller, so
+/// it hands these out once it is mounted rather than the sheet reaching into
+/// it.
+class MemoryBooksActions {
+  final VoidCallback openSettings;
+  final VoidCallback scanChat;
+  final VoidCallback addEntry;
+  final VoidCallback reindex;
+  final VoidCallback deleteIndexes;
+  final VoidCallback? deleteAllDrafts;
+  final bool isReindexing;
+  final bool showIndexActions;
+
+  const MemoryBooksActions({
+    required this.openSettings,
+    required this.scanChat,
+    required this.addEntry,
+    required this.reindex,
+    required this.deleteIndexes,
+    required this.deleteAllDrafts,
+    required this.isReindexing,
+    required this.showIndexActions,
+  });
+
+  /// Whether [other] would render the same chrome. The callbacks are stable
+  /// behaviour of the tab's state, so only the values the chrome reads can
+  /// differ — publishing a new set that matches the old one changes nothing on
+  /// screen.
+  bool sameChrome(MemoryBooksActions other) =>
+      isReindexing == other.isReindexing &&
+      showIndexActions == other.showIndexActions &&
+      (deleteAllDrafts == null) == (other.deleteAllDrafts == null);
+}
+
+/// Memory Books tab of the Memory sheet — "Shelf" layout.
+///
+/// The tab strip is pinned above the list, so it stays reachable while
+/// scrolling and stays off `TopEdgeBlur`'s raster path; the configuration, the
+/// toolbar and the rows scroll under it. The search button on its right swaps
+/// that strip for a search bar, and the list below it for one that spans both
+/// tabs. Expects a bounded height from its host.
+class MemoryBooksTab extends ConsumerStatefulWidget {
+  final String sessionId;
+  final String charId;
+  final List<ChatMessage> messages;
+
+  /// Published whenever the set changes, so the host sheet can render the
+  /// header button and the FAB from it.
+  final ValueChanged<MemoryBooksActions>? onActions;
+
+  const MemoryBooksTab({
+    super.key,
+    required this.sessionId,
+    required this.charId,
+    this.messages = const [],
+    this.onActions,
+  });
+
+  @override
+  ConsumerState<MemoryBooksTab> createState() => _MemoryBooksTabState();
+}
+
+class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
+  static const int _tabCount = 2;
+  static const int _tabApproved = 0;
+  static const MemoryTabStore _tabStore = MemoryTabStore.memoryBooks;
+
+  late final MemoryBookController _ctrl;
+  late final TextEditingController _searchCtrl;
+  late final FocusNode _searchFocus;
+  Map<String, String> _embeddingStatuses = {};
+  int _tabIndex = _tabApproved;
+
+  /// Whether the pinned row is the search bar rather than the tab strip.
+  /// While it is, the list underneath is neither tab: it is everything the
+  /// query matches, approved memories and drafts together.
+  bool _searching = false;
+
+  String _query = '';
+  _EntryFilter _entryFilter = _EntryFilter.all;
+  _DraftFilter _draftFilter = _DraftFilter.all;
+
+  /// The generation failure this tab has already put in a toast. Failures are
+  /// published as state rather than handed to a callback, because the request
+  /// may well outlive the sheet that started it; this is what keeps a reopened
+  /// sheet from re-announcing one it already showed — or one that happened
+  /// while it was closed, which the draft's own row already carries.
+  int _reportedFailureSeq = 0;
+
+  /// The last [MemoryBooksActions] handed to the host, so an unchanged set is
+  /// not republished. The host rebuilds from these, and publishing from
+  /// `build` means that rebuild runs this `build` again: without the guard the
+  /// sheet setState'd itself on every frame and never settled.
+  MemoryBooksActions? _publishedActions;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = MemoryBookController(ref, widget.sessionId, widget.charId);
+    _searchCtrl = TextEditingController();
+    _searchFocus = FocusNode();
+    _reportedFailureSeq =
+        ref.read(memoryDraftJobsProvider).lastFailure?.seq ?? 0;
+    _load();
+  }
+
+  Future<void> _load() async {
+    // Both reads are independent, so the prefs round-trip runs alongside the
+    // book load instead of delaying it.
+    final bookLoad = _ctrl.load();
+    final storedTab = await _tabStore.load(_tabCount);
+    await bookLoad;
+    if (!mounted) return;
+    unawaited(_loadEmbeddingStatuses());
+    setState(() => _tabIndex = storedTab);
+  }
+
+  Future<void> _loadEmbeddingStatuses() async {
+    final repo = ref.read(embeddingRepoProvider);
+    final book = _ctrl.book;
+    if (book == null) return;
+    final statuses = <String, String>{};
+    for (final entry in book.entries) {
+      final record = await repo.getByEntryId(entry.id);
+      if (record == null) {
+        statuses[entry.id] = 'none';
+      } else if (record.errorJson != null) {
+        statuses[entry.id] = 'error';
+      } else if (repo.hasUsableVectors(record)) {
+        statuses[entry.id] = 'indexed';
+      } else {
+        statuses[entry.id] = 'none';
+      }
+    }
+    if (mounted) setState(() => _embeddingStatuses = statuses);
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    _searchFocus.dispose();
+    super.dispose();
+  }
+
+  /// Switching sub-tabs also persists the choice, so reopening the sheet comes
+  /// up on the list that was last in use.
+  void _setTab(int index) {
+    if (index == _tabIndex) return;
+    setState(() => _tabIndex = index);
+    unawaited(_tabStore.save(index));
+  }
+
+  /// Swaps the tab strip for the search bar. The tab the reader was on is
+  /// kept, not reset — closing the search puts them back on it.
+  void _openSearch() {
+    setState(() => _searching = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _searchFocus.requestFocus();
+    });
+  }
+
+  /// The cross on the right of the search bar: drops the query with the bar,
+  /// so the list that comes back is not silently narrowed by a search that is
+  /// no longer on screen.
+  void _closeSearch() {
+    _searchCtrl.clear();
+    _searchFocus.unfocus();
+    setState(() {
+      _searching = false;
+      _query = '';
+    });
+  }
+
+  // ─── Filtering ───────────────────────────────────────────────────
+
+  /// Matches the title, the body and the keys — the three places a memory can
+  /// be recognised from. Case-insensitive; an empty query matches everything.
+  bool _matchesQuery(String title, String content, List<String> keys) {
+    if (_query.isEmpty) return true;
+    final needle = _query.toLowerCase();
+    if (title.toLowerCase().contains(needle)) return true;
+    if (content.toLowerCase().contains(needle)) return true;
+    return keys.any((key) => key.toLowerCase().contains(needle));
+  }
+
+  bool _passesEntryFilter(MemoryEntry entry) => switch (_entryFilter) {
+    _EntryFilter.all => true,
+    _EntryFilter.active => entry.status == 'active',
+    _EntryFilter.needsRebuild => entry.status == 'needs_rebuild',
+  };
+
+  bool _passesDraftFilter(MemoryDraft draft) => switch (_draftFilter) {
+    _DraftFilter.all => true,
+    _DraftFilter.ready => draft.content.isNotEmpty,
+    _DraftFilter.needsGeneration =>
+      draft.content.isEmpty && draft.status == 'pending_generation',
+    _DraftFilter.failed => draft.status == 'needs_regeneration',
+  };
+
+  String _entryFilterLabel(_EntryFilter filter, List<MemoryEntry> entries) {
+    final count = switch (filter) {
+      _EntryFilter.all => entries.length,
+      _EntryFilter.active => entries.where((e) => e.status == 'active').length,
+      _EntryFilter.needsRebuild =>
+        entries.where((e) => e.status == 'needs_rebuild').length,
+    };
+    final label = switch (filter) {
+      _EntryFilter.all => 'memory_books_filter_all'.tr(),
+      _EntryFilter.active => 'memory_books_filter_active'.tr(),
+      _EntryFilter.needsRebuild => 'memory_books_filter_rebuild'.tr(),
+    };
+    return '$label $count';
+  }
+
+  String _draftFilterLabel(_DraftFilter filter, List<MemoryDraft> drafts) {
+    final count = switch (filter) {
+      _DraftFilter.all => drafts.length,
+      _DraftFilter.ready => drafts.where((d) => d.content.isNotEmpty).length,
+      _DraftFilter.needsGeneration =>
+        drafts
+            .where((d) => d.content.isEmpty && d.status == 'pending_generation')
+            .length,
+      _DraftFilter.failed =>
+        drafts.where((d) => d.status == 'needs_regeneration').length,
+    };
+    final label = switch (filter) {
+      _DraftFilter.all => 'memory_books_filter_all'.tr(),
+      _DraftFilter.ready => 'memory_books_filter_ready'.tr(),
+      _DraftFilter.needsGeneration => 'memory_books_filter_drafts'.tr(),
+      _DraftFilter.failed => 'memory_books_filter_failed'.tr(),
+    };
+    return '$label $count';
+  }
+
+  // ─── Build ───────────────────────────────────────────────────────
+
+  /// Published after the frame, never during build: the host rebuilds on it.
+  void _publishActions(int draftCount, bool vectorAvailable) {
+    final publish = widget.onActions;
+    if (publish == null) return;
+    final actions = MemoryBooksActions(
+      openSettings: _openSettings,
+      scanChat: _scanChat,
+      addEntry: _addEntry,
+      reindex: _reindexAll,
+      deleteIndexes: _deleteAllMemoryIndexes,
+      deleteAllDrafts: draftCount > 1 ? _deleteAllDrafts : null,
+      isReindexing: _ctrl.isReindexing,
+      showIndexActions: vectorAvailable,
+    );
+    final published = _publishedActions;
+    if (published != null && published.sameChrome(actions)) return;
+    _publishedActions = actions;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) publish(actions);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Both of these change from outside this widget: a generation keeps
+    // running when the sheet is closed, and the auto-create stage writes
+    // drafts during a chat turn.
+    ref.listen(memoryBookRevisionProvider, (_, _) => unawaited(_reloadBook()));
+    ref.listen(
+      memoryDraftJobsProvider.select((jobs) => jobs.lastFailure),
+      (_, failure) => _reportFailure(failure),
+    );
+
+    final book = _ctrl.book;
+    final loading = _ctrl.loading || book == null;
+    if (loading) return const Center(child: GlazeSpinner());
+
+    // Studio Ledger entries (`source == 'studio_ledger'`) are legacy and
+    // excluded from the UI — they were removed from the injection pipeline.
+    final curatedEntries = book.entries
+        .where((e) => e.source != 'studio_ledger')
+        .toList();
+    final scanDrafts = book.pendingDrafts
+        .where((d) => d.source != 'studio_ledger')
+        .toList();
+
+    final draftsNeedingGen = _ctrl.draftsNeedingGeneration;
+    // Watched, not read: the rows, the batch panel and the FAB all follow a
+    // run that this widget does not own.
+    final isGenerating = ref
+        .watch(memoryDraftJobsProvider)
+        .isBusy(widget.sessionId);
+    // Vector affordances (reindex, index badges, the index filter) only make
+    // sense while the active API preset has semantic search switched on.
+    final vectorAvailable = ref.watch(vectorSearchAvailableProvider);
+    _publishActions(scanDrafts.length, vectorAvailable);
+
+    return Column(
+      children: [
+        // The host sheet reports its header height as MediaQuery top padding;
+        // the pinned controls start below it so they do not sit under the
+        // blurred strip the sheet paints over the top of its body.
+        SizedBox(height: MediaQuery.paddingOf(context).top + 8),
+        _buildPinnedControls(curatedEntries, scanDrafts),
+        Expanded(
+          child: _searching
+              ? _buildSearchResults(curatedEntries, scanDrafts)
+              : _buildTabbedList(
+                  entries: curatedEntries,
+                  drafts: scanDrafts,
+                  pendingGeneration: draftsNeedingGen.length,
+                  isGenerating: isGenerating,
+                ),
+        ),
+      ],
+    );
+  }
+
+  /// The two-tab body: one list, showing whichever tab is selected, with the
+  /// batch panel and the status filter scrolling above it.
+  Widget _buildTabbedList({
+    required List<MemoryEntry> entries,
+    required List<MemoryDraft> drafts,
+    required int pendingGeneration,
+    required bool isGenerating,
+  }) {
+    return SwipeTabSwitcher(
+      index: _tabIndex,
+      length: _tabCount,
+      onChanged: _setTab,
+      child: ListView(
+        padding: EdgeInsets.fromLTRB(
+          0,
+          4,
+          0,
+          // Clears the nav bar and the extended FAB the host floats over the
+          // bottom of this list.
+          MediaQuery.paddingOf(context).bottom + 88,
+        ),
+        children: [
+          // Drafts only. On the approved tab there is nothing to generate, so
+          // this was a panel about the other list.
+          if (_tabIndex != _tabApproved &&
+              (pendingGeneration > 0 || isGenerating))
+            MemoryBatchPanel(
+              pendingCount: pendingGeneration,
+              isGenerating: isGenerating,
+              // The global settings, not the book's snapshot: the global copy
+              // is what `MemoryDraftStage` actually gates auto-generation on.
+              autoGenerateEnabled: ref
+                  .watch(memoryGlobalSettingsProvider)
+                  .autoGenerateEnabled,
+              onGenerateBatch: _batchGenerate,
+            ),
+          // Under the batch panel, not above it: the filter narrows the list
+          // it sits on top of, and the panel is about the queue.
+          _buildFilters(entries, drafts),
+          TabSlideSwitcher(
+            index: _tabIndex,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: _tabIndex == _tabApproved
+                  ? _buildApprovedTab(entries)
+                  : _buildDraftsTab(drafts),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The one pinned row above the list: the tab strip with a search button on
+  /// its right, or — once that button is pressed — the search bar that takes
+  /// the row's place, with the cross that gives it back.
+  ///
+  /// The strip is [GlazeTabBarStyle.underline], not the default pill: the host
+  /// sheet already carries a filled pill strip for Summary/Books directly
+  /// above this one, and two identical controls stacked read as one broken
+  /// control. Underline is the kit's answer for a strip that heads a surface
+  /// it does not own.
+  Widget _buildPinnedControls(
+    List<MemoryEntry> entries,
+    List<MemoryDraft> drafts,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: _searching ? _buildSearchBar() : _buildTabStrip(entries, drafts),
+    );
+  }
+
+  Widget _buildTabStrip(List<MemoryEntry> entries, List<MemoryDraft> drafts) {
+    return Row(
+      children: [
+        Expanded(
+          child: GlazeTabBar(
+            style: GlazeTabBarStyle.underline,
+            tabs: [
+              GlazeTabItem(
+                label: 'memory_books_tab_approved'.tr(
+                  args: ['${entries.length}'],
+                ),
+                icon: Icons.check_circle_outline_rounded,
+              ),
+              GlazeTabItem(
+                label: 'memory_books_tab_scan_drafts'.tr(
+                  args: ['${drafts.length}'],
+                ),
+                icon: Icons.drafts_outlined,
+              ),
+            ],
+            activeIndex: _tabIndex,
+            onChanged: _setTab,
+          ),
+        ),
+        const SizedBox(width: 8),
+        MemoryCircleButton(
+          icon: Icons.search_rounded,
+          label: 'memory_books_search_open'.tr(),
+          onTap: _openSearch,
+        ),
+      ],
+    );
+  }
+
+  /// The search bar that replaces the strip. The cross sits where the search
+  /// button was, so the control the reader just pressed is the control that
+  /// undoes it.
+  Widget _buildSearchBar() {
+    return Row(
+      children: [
+        Expanded(
+          child: GlazeTextField(
+            controller: _searchCtrl,
+            focusNode: _searchFocus,
+            hint: 'memory_books_search_hint'.tr(),
+            isDense: true,
+            textInputAction: TextInputAction.search,
+            onChanged: (value) => setState(() => _query = value.trim()),
+          ),
+        ),
+        const SizedBox(width: 8),
+        MemoryCircleButton(
+          icon: Icons.close_rounded,
+          label: 'memory_books_search_close'.tr(),
+          onTap: _closeSearch,
+        ),
+      ],
+    );
+  }
+
+  /// Search results: one list across both tabs, approved memories and then the
+  /// drafts, each row saying which it is under its title. Searching for a
+  /// memory you half remember is not a question about which tab it ended up on,
+  /// so the tab filters and the batch panel stay out of it.
+  Widget _buildSearchResults(
+    List<MemoryEntry> entries,
+    List<MemoryDraft> drafts,
+  ) {
+    final hits = <_SearchHit>[
+      for (final entry in entries)
+        if (_matchesQuery(entry.title, entry.content, entry.keys))
+          _SearchHit.entry(entry),
+      for (final draft in drafts)
+        if (_matchesQuery(draft.title, draft.content, draft.keys))
+          _SearchHit.draft(draft),
+    ];
+    return MemoryListBody<_SearchHit>(
+      scrollable: true,
+      items: hits,
+      idOf: (hit) => hit.id,
+      nameOf: (hit) => hit.title,
+      createdAtOf: (hit) => hit.createdAt,
+      emptyMessage: entries.isEmpty && drafts.isEmpty
+          ? 'memory_books_empty_approved'.tr()
+          : 'memory_books_empty_filtered'.tr(),
+      padding: EdgeInsets.fromLTRB(
+        16,
+        8,
+        16,
+        // Clears the nav bar and the extended FAB the host floats over the
+        // bottom of this list.
+        MediaQuery.paddingOf(context).bottom + 88,
+      ),
+      rowBuilder: (context, hit) => hit.isEntry
+          ? _buildEntryCard(hit.entry!, keyPrefix: 'entry-')
+          : _buildDraftCard(hit.draft!),
+    );
+  }
+
+  /// The status filter, scrolling with the list rather than pinned: it belongs
+  /// to the list it narrows, and under the batch panel rather than above it.
+  Widget _buildFilters(List<MemoryEntry> entries, List<MemoryDraft> drafts) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: _tabIndex == _tabApproved
+          ? GlazeFilterChipBar<_EntryFilter>(
+              current: _entryFilter,
+              options: _EntryFilter.values,
+              labelBuilder: (filter) => _entryFilterLabel(filter, entries),
+              onSelected: (filter) => setState(() => _entryFilter = filter),
+            )
+          : GlazeFilterChipBar<_DraftFilter>(
+              current: _draftFilter,
+              options: _DraftFilter.values,
+              labelBuilder: (filter) => _draftFilterLabel(filter, drafts),
+              onSelected: (filter) => setState(() => _draftFilter = filter),
+            ),
+    );
+  }
+
+  Widget _buildApprovedTab(List<MemoryEntry> entries) {
+    final visible = entries
+        .where(
+          (entry) =>
+              _passesEntryFilter(entry) &&
+              _matchesQuery(entry.title, entry.content, entry.keys),
+        )
+        .toList();
+    return MemoryListBody<MemoryEntry>(
+      items: visible,
+      idOf: (entry) => entry.id,
+      nameOf: (entry) => entry.title,
+      createdAtOf: (entry) => entry.createdAt ?? 0,
+      emptyMessage: entries.isEmpty
+          ? 'memory_books_empty_approved'.tr()
+          : 'memory_books_empty_filtered'.tr(),
+      rowBuilder: (context, entry) => _buildEntryCard(entry),
+    );
+  }
+
+  Widget _buildDraftsTab(List<MemoryDraft> drafts) {
+    final visible = drafts
+        .where(
+          (draft) =>
+              _passesDraftFilter(draft) &&
+              _matchesQuery(draft.title, draft.content, draft.keys),
+        )
+        .toList();
+    return MemoryListBody<MemoryDraft>(
+      items: visible,
+      idOf: (draft) => draft.id,
+      nameOf: (draft) => draft.title,
+      createdAtOf: (draft) => draft.createdAt,
+      emptyMessage: drafts.isEmpty
+          ? 'memory_books_empty_scan_drafts'.tr()
+          : 'memory_books_empty_filtered'.tr(),
+      rowBuilder: (context, draft) => _buildDraftCard(draft),
+    );
+  }
+
+  /// One approved entry row, shared by the approved tab and the search results.
+  /// The key prefix keeps an approved draft (which keeps its id as an entry)
+  /// from colliding with the draft row it came from in the combined search list.
+  Widget _buildEntryCard(MemoryEntry entry, {String keyPrefix = ''}) {
+    final vectorAvailable = ref.watch(vectorSearchAvailableProvider);
+    return MemoryEntryCard(
+      key: ValueKey('$keyPrefix${entry.id}'),
+      entry: entry,
+      // No index badge while semantic search is off in the API — there is
+      // nothing to be indexed against.
+      embeddingStatus: vectorAvailable
+          ? _embeddingStatuses[entry.id]
+          : null,
+      showStatus: keyPrefix.isNotEmpty,
+      onEdit: () => _editEntry(entry),
+      onDelete: () => _deleteEntry(entry.id),
+    );
+  }
+
+  Widget _buildDraftCard(MemoryDraft draft) {
+    final jobs = ref.watch(memoryDraftJobsProvider);
+    return MemoryDraftCard(
+      // Prefixed because the search results put entries and drafts in one
+      // list, and an approved draft keeps its id as the entry's.
+      key: ValueKey('draft-${draft.id}'),
+      draft: draft,
+      isGenerating: jobs.isGenerating(widget.sessionId, draft.id),
+      generatingSince: jobs.startedAt(widget.sessionId, draft.id),
+      onGenerate: () => _generateDraft(draft.id),
+      onRegenerate: () => _generateDraft(draft.id),
+      onCancel: () => _cancelDraft(draft.id),
+      onApprove: () => _approveDraft(draft.id),
+      onEdit: () => _editDraft(draft),
+      onDelete: () => _deleteDraft(draft.id),
+    );
+  }
+
+  // ─── Actions delegating to controller ────────────────────────────
+
+  void _scanChat() async {
+    final msg = await _ctrl.scanChat();
+    if (msg != null && mounted) {
+      setState(() {});
+      GlazeToast.show(context, msg);
+    }
+  }
+
+  /// Starts a generation and leaves it alone: the run belongs to
+  /// [memoryDraftJobsProvider], which this tab watches, so the row updates
+  /// whether or not the sheet is still on screen when the request settles.
+  void _generateDraft(String draftId) =>
+      unawaited(_ctrl.generateDraft(draftId));
+
+  void _cancelDraft(String draftId) => _ctrl.cancelDraftGeneration(draftId);
+
+  void _batchGenerate() => unawaited(_ctrl.batchGenerate());
+
+  /// Re-reads the book after something outside this sheet wrote to it — a
+  /// generation finishing, or the auto-create stage adding drafts during a
+  /// chat turn. Without it the sheet showed the book as it was when it opened,
+  /// and its next save wrote that stale copy back over the new drafts.
+  Future<void> _reloadBook() async {
+    await _ctrl.load();
+    if (mounted) setState(() {});
+  }
+
+  /// Reports a generation failure once, and only to a sheet that is open.
+  void _reportFailure(MemoryDraftJobFailure? failure) {
+    if (failure == null || failure.sessionId != widget.sessionId) return;
+    if (failure.seq <= _reportedFailureSeq) return;
+    _reportedFailureSeq = failure.seq;
+    if (!mounted) return;
+    final label = failure.wasRegeneration
+        ? 'memory_books_regeneration_failed'.tr()
+        : 'error_generation'.tr();
+    GlazeToast.show(context, '$label: ${failure.message}');
+  }
+
+  void _approveDraft(String draftId) async {
+    try {
+      await _ctrl.approveDraft(draftId);
+      if (mounted) setState(() {});
+    } catch (error) {
+      if (mounted) GlazeToast.show(context, formatError(error));
+    }
+  }
+
+  void _deleteDraft(String draftId) async {
+    await _ctrl.deleteDraft(draftId);
+    if (mounted) setState(() {});
+  }
+
+  void _deleteAllDrafts() async {
+    await _ctrl.deleteAllDrafts();
+    if (mounted) setState(() {});
+  }
+
+  void _deleteEntry(String entryId) async {
+    await _ctrl.deleteEntry(entryId);
+    if (mounted) setState(() {});
+  }
+
+  void _openSettings() async {
+    final currentSettings = _ctrl.globalSettingsAsBookSettings();
+    final newResult = await MemoryGenerationSettingsSheet.show(
+      context,
+      settings: currentSettings,
+      sessionId: widget.sessionId,
+    );
+    if (newResult != null && mounted) {
+      await _ctrl.updateSettings(newResult.settings, newResult.vectorThreshold);
+      // The generation slot is global app state, not part of the book, so it
+      // is written where the Agents tab writes it — the sheet only buffers it.
+      final pipeline = ref.read(pipelineSettingsProvider);
+      if (pipeline.memoryBookApi != newResult.memoryBookApi) {
+        await ref
+            .read(pipelineSettingsProvider.notifier)
+            .save(pipeline.copyWith(memoryBookApi: newResult.memoryBookApi));
+      }
+      if (mounted) setState(() {});
+    }
+  }
+
+  /// The outcome is a typed value, so the presentation is chosen structurally —
+  /// this used to match the English prefixes of an already-translated string,
+  /// which meant no locale but English ever reached the error dialog.
+  void _reindexAll() async {
+    setState(() {});
+    final outcome = await _ctrl.reindexAll();
+    if (!mounted) return;
+    setState(() {});
+    switch (outcome) {
+      case ReindexNotReady():
+        break;
+      case ReindexNeedsEmbeddingApi():
+        GlazeErrorDialog.show(
+          context,
+          'memory_books_setup_embedding_first'.tr(),
+        );
+      case ReindexFailed(:final error):
+        GlazeErrorDialog.show(
+          context,
+          error,
+          prefix: 'memory_books_reindex_failed_prefix'.tr(),
+        );
+      case ReindexDone(:final indexed, :final skipped, :final failed):
+        GlazeToast.show(
+          context,
+          'memory_books_reindex_result'.tr(
+            namedArgs: {
+              'indexed': '$indexed',
+              'skipped': '$skipped',
+              'failed': '$failed',
+            },
+          ),
+        );
+    }
+  }
+
+  void _deleteAllMemoryIndexes() async {
+    final confirmed = await GlazeBottomSheet.show<bool>(
+      context,
+      title: 'action_delete_indexes'.tr(),
+      bigInfo: BottomSheetBigInfo(
+        icon: Icons.delete_outline,
+        description: 'action_delete_indexes_confirm'.tr(),
+      ),
+      items: [
+        BottomSheetItem(
+          label: 'btn_delete'.tr(),
+          isDestructive: true,
+          centered: true,
+          onTap: () => Navigator.of(context, rootNavigator: true).pop(true),
+        ),
+        BottomSheetItem(
+          label: 'btn_cancel'.tr(),
+          centered: true,
+          onTap: () => Navigator.of(context, rootNavigator: true).pop(false),
+        ),
+      ],
+    );
+    if (confirmed != true) return;
+    await _ctrl.deleteAllMemoryIndexes();
+    if (mounted) {
+      setState(() => _embeddingStatuses = {});
+      GlazeToast.show(context, 'memory_books_indexes_deleted'.tr());
+    }
+  }
+
+  void _editEntry(MemoryEntry entry) async {
+    final result = await GlazeBottomSheet.show<MemoryEntry>(
+      context,
+      title: entry.title.isNotEmpty ? entry.title : 'action_edit'.tr(),
+      child: MemoryEntryEditorSheet(entry: entry),
+    );
+    if (result != null && mounted) {
+      try {
+        await _ctrl.editEntry(entry, result);
+        if (mounted) setState(() {});
+      } catch (error) {
+        if (mounted) GlazeToast.show(context, formatError(error));
+      }
+    }
+  }
+
+  void _addEntry() async {
+    final entry = MemoryEntry(
+      id: 'mem_${DateTime.now().millisecondsSinceEpoch}',
+      status: 'active',
+      createdAt: DateTime.now().millisecondsSinceEpoch,
+    );
+    final result = await GlazeBottomSheet.show<MemoryEntry>(
+      context,
+      title: 'action_create_new'.tr(),
+      child: MemoryEntryEditorSheet(entry: entry),
+    );
+    if (result != null && mounted) {
+      await _ctrl.addEntry(result);
+      if (mounted) setState(() {});
+    }
+  }
+
+  void _editDraft(MemoryDraft draft) async {
+    final entry = MemoryEntry(
+      id: draft.id,
+      title: draft.title,
+      content: draft.content,
+      keys: draft.keys,
+      keyParagraphs: draft.keyParagraphs,
+      ledgerRange: draft.ledgerRange,
+      messageIds: draft.messageIds,
+      status: 'active',
+      createdAt: draft.createdAt,
+    );
+    final result = await GlazeBottomSheet.show<MemoryEntry>(
+      context,
+      title: 'action_edit'.tr(),
+      child: MemoryEntryEditorSheet(entry: entry),
+    );
+    if (result != null && mounted) {
+      await _ctrl.editDraft(draft, result);
+      if (mounted) setState(() {});
+    }
+  }
+}

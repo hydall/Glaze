@@ -1,34 +1,41 @@
 import 'dart:async';
 
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart';
 
 import '../db/repositories/character_knowledge_fact_repo.dart';
+import '../db/repositories/character_repo.dart';
+import '../db/repositories/chat_repo.dart';
+import '../db/repositories/ledger_debug_run_repo.dart';
 import '../db/repositories/ledger_reconciliation_checkpoint_repo.dart';
+import '../db/repositories/ledger_reconciliation_lease_repo.dart';
+import '../db/repositories/ledger_reconciliation_run_repo.dart';
 import '../db/repositories/memory_book_repo.dart';
+import '../db/repositories/reconciliation_replacement_repo.dart';
 import '../db/repositories/tracker_repo.dart';
 import '../db/repositories/tracker_snapshot_repo.dart';
-import '../models/agent_operation_record.dart';
-import '../models/character_knowledge_fact.dart';
-import '../models/memory_book.dart';
 import '../models/pipeline_settings.dart';
 import '../models/studio_config.dart';
-import '../models/studio_ledger_export.dart';
-import '../models/tracker.dart';
-import '../utils/id_generator.dart';
+import '../models/studio_regex.dart';
+import '../services/card_rewriter/effective_canon_context_loader.dart';
 import 'aux_llm_client.dart';
+import 'ledger/ledger_canon_authority.dart';
+import 'ledger/ledger_in_flight_registry.dart';
 import 'ledger/ledger_op_applier.dart';
-import 'knowledge_cleanup_parser.dart';
+import 'ledger/ledger_output_recovery.dart';
+import 'ledger/ledger_prompt_factory.dart';
+import 'ledger/ledger_reconciliation_committer.dart';
+import 'ledger/ledger_reconciliation_runner.dart';
+import 'ledger/ledger_replacement_basis_resolver.dart';
+import 'ledger/ledger_run_diagnostics.dart';
+import 'ledger/ledger_run_result.dart';
+import 'ledger/ledger_turn_committer.dart';
+import 'ledger/ledger_turn_runner.dart';
 import 'macro_engine.dart';
-import 'prompt/ledger_tracker_loader.dart';
-import 'studio/studio_aux_prompt_assembler.dart';
 import 'studio_ledger_export_parser.dart';
-import 'studio_ledger_prompt.dart';
 import 'studio_ledger_reconciliation.dart';
 
 export 'ledger/ledger_op_applier.dart';
-
-const _ledgerSystemPromptBlockId = 'ledger_system';
+export 'ledger/ledger_run_result.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // StudioLedgerService
@@ -61,37 +68,11 @@ const _ledgerSystemPromptBlockId = 'ledger_system';
 //   - Cancelled/aborted: clean up, no writes.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Result of a single Studio Ledger run.
-class LedgerRunResult {
-  final String
-  status; // 'ok' | 'skipped' | 'disabled' | 'timeout' | 'error' | 'aborted'
-  final String? visibleLedger;
-  final int opsApplied;
-  final String? error;
-  final int elapsedMs;
-  final List<AgentOperationAttempt> attempts;
-  final String? model;
-
-  const LedgerRunResult({
-    required this.status,
-    this.visibleLedger,
-    this.opsApplied = 0,
-    this.error,
-    this.elapsedMs = 0,
-    this.attempts = const [],
-    this.model,
-  });
-
-  static const LedgerRunResult disabled = LedgerRunResult(status: 'disabled');
-  static const LedgerRunResult skipped = LedgerRunResult(status: 'skipped');
-  static const LedgerRunResult aborted = LedgerRunResult(status: 'aborted');
-}
-
 /// Studio Ledger service.
 ///
 /// Thin orchestrator:
 ///   1. Resolve LLM config.
-///   2. Build prompt (via [StudioLedgerPrompt]).
+///   2. Build prompt (via [LedgerPromptFactory]).
 ///   3. Call LLM (via [AuxLlmClient]).
 ///   4. Parse + validate (via [StudioLedgerExportParser]).
 ///   5. Apply ops to [TrackerRepo].
@@ -105,10 +86,17 @@ class StudioLedgerService {
   final TrackerSnapshotRepo _snapshotRepo;
   final CharacterKnowledgeFactRepo _knowledgeFactRepo;
   final LedgerReconciliationCheckpointRepo _reconciliationCheckpointRepo;
-  final LedgerTrackerLoader _ledgerTrackerLoader;
-  final StudioLedgerExportParser _parser;
-  final StudioLedgerPrompt _promptBuilder;
-  final LedgerOpApplier _opApplier;
+  final LedgerReconciliationRunRepo _reconciliationRunRepo;
+  final LedgerCanonAuthority _canonAuthority;
+  final LedgerInFlightRegistry _inFlightRegistry;
+  final LedgerOutputRecovery _outputRecovery;
+  final LedgerRunDiagnostics _runDiagnostics;
+  final LedgerReconciliationLeaseRepo _reconciliationLeaseRepo;
+  final ReconciliationReplacementRepo _replacementRepo;
+  late final LedgerReplacementBasisResolver _replacementBasisResolver;
+  late final LedgerReconciliationCommitter _reconciliationCommitter;
+  late final LedgerReconciliationRunner _reconciliationRunner;
+  late final LedgerTurnRunner _turnRunner;
 
   StudioLedgerService({
     required this._llm,
@@ -117,10 +105,100 @@ class StudioLedgerService {
     required this._snapshotRepo,
     required this._knowledgeFactRepo,
     required this._reconciliationCheckpointRepo,
-    required this._ledgerTrackerLoader,
-  }) : _parser = const StudioLedgerExportParser(),
-       _promptBuilder = const StudioLedgerPrompt(),
-       _opApplier = const LedgerOpApplier();
+    required this._reconciliationRunRepo,
+    required CharacterRepo characterRepo,
+    required ChatRepo chatRepo,
+    required EffectiveCanonContextLoader canonContextLoader,
+    LedgerDebugRunRepo? debugRunRepo,
+    LedgerReconciliationLeaseRepo? reconciliationLeaseRepo,
+    ReconciliationReplacementRepo? replacementRepo,
+    LedgerInFlightRegistry? inFlightRegistry,
+    LedgerPromptFactory? promptFactory,
+    LedgerOutputRecovery? outputRecovery,
+    LedgerRunDiagnostics? runDiagnostics,
+    LedgerCanonAuthority? canonAuthority,
+    LedgerReplacementBasisResolver? replacementBasisResolver,
+    LedgerReconciliationCommitter? reconciliationCommitter,
+    LedgerReconciliationRunner? reconciliationRunner,
+    LedgerTurnRunner? turnRunner,
+    List<StudioRegex> Function()? readStudioRegexes,
+  }) : _inFlightRegistry = inFlightRegistry ?? const LedgerInFlightRegistry(),
+       _outputRecovery = outputRecovery ?? const LedgerOutputRecovery(),
+       _runDiagnostics =
+           runDiagnostics ??
+           LedgerRunDiagnostics(
+             debugRunRepo ?? LedgerDebugRunRepo(_trackerRepo.db),
+           ),
+       _reconciliationLeaseRepo =
+           reconciliationLeaseRepo ??
+           LedgerReconciliationLeaseRepo(_trackerRepo.db),
+       _replacementRepo =
+           replacementRepo ?? ReconciliationReplacementRepo(_trackerRepo.db),
+       _canonAuthority =
+           canonAuthority ??
+           LedgerCanonAuthority(
+             characterRepo: characterRepo,
+             chatRepo: chatRepo,
+             canonContextLoader: canonContextLoader,
+             snapshotRepo: _snapshotRepo,
+             trackerRepo: _trackerRepo,
+           ) {
+    _replacementBasisResolver =
+        replacementBasisResolver ??
+        LedgerReplacementBasisResolver(
+          reconciliationCheckpointRepo: _reconciliationCheckpointRepo,
+          reconciliationRunRepo: _reconciliationRunRepo,
+          replacementRepo: _replacementRepo,
+          snapshotRepo: _snapshotRepo,
+          canonAuthority: _canonAuthority,
+        );
+    _reconciliationCommitter =
+        reconciliationCommitter ??
+        LedgerReconciliationCommitter(
+          trackerRepo: _trackerRepo,
+          snapshotRepo: _snapshotRepo,
+          knowledgeFactRepo: _knowledgeFactRepo,
+          reconciliationCheckpointRepo: _reconciliationCheckpointRepo,
+          reconciliationRunRepo: _reconciliationRunRepo,
+          reconciliationLeaseRepo: _reconciliationLeaseRepo,
+          replacementRepo: _replacementRepo,
+          canonAuthority: _canonAuthority,
+          replacementBasisResolver: _replacementBasisResolver,
+          opApplier: const LedgerOpApplier(),
+        );
+    _reconciliationRunner =
+        reconciliationRunner ??
+        LedgerReconciliationRunner(
+          llm: _llm,
+          snapshotRepo: _snapshotRepo,
+          reconciliationLeaseRepo: _reconciliationLeaseRepo,
+          canonAuthority: _canonAuthority,
+          outputRecovery: _outputRecovery,
+          committer: _reconciliationCommitter,
+          replacementBasisResolver: _replacementBasisResolver,
+          runDiagnostics: _runDiagnostics,
+          parser: const StudioLedgerExportParser(),
+          readStudioRegexes: readStudioRegexes,
+        );
+    _turnRunner =
+        turnRunner ??
+        LedgerTurnRunner(
+          llm: _llm,
+          bookRepo: _bookRepo,
+          knowledgeFactRepo: _knowledgeFactRepo,
+          canonAuthority: _canonAuthority,
+          committer: LedgerTurnCommitter(
+            trackerRepo: _trackerRepo,
+            snapshotRepo: _snapshotRepo,
+            knowledgeFactRepo: _knowledgeFactRepo,
+            canonAuthority: _canonAuthority,
+          ),
+          runDiagnostics: _runDiagnostics,
+          promptFactory: promptFactory ?? const LedgerPromptFactory(),
+          outputRecovery: _outputRecovery,
+          readStudioRegexes: readStudioRegexes,
+        );
+  }
 
   Future<LedgerRunResult> reconcile({
     required String sessionId,
@@ -129,233 +207,82 @@ class StudioLedgerService {
     required LedgerReconciliationPlan plan,
     List<StudioPresetBlock> ledgerBlocks = const [],
     MacroContext? macroCtx,
-    bool Function()? isStillCurrent,
+    FutureOr<bool> Function()? isStillCurrent,
     CancelToken? cancelToken,
-  }) async {
-    final token = cancelToken ?? CancelToken();
-    if (token.isCancelled || isStillCurrent?.call() == false) {
-      return LedgerRunResult.aborted;
+    String? operationIdentity,
+  }) {
+    final request = LedgerReconciliationRequest(
+      sessionId: sessionId,
+      settings: settings,
+      config: config,
+      plan: plan,
+      ledgerBlocks: ledgerBlocks,
+      macroCtx: macroCtx,
+      isStillCurrent: isStillCurrent,
+      cancelToken: cancelToken,
+      purpose: operationIdentity?.startsWith('manual:') == true
+          ? 'manual'
+          : 'normal',
+    );
+    if (operationIdentity == null) {
+      return _reconciliationRunner.reconcile(request);
     }
-    final sw = Stopwatch()..start();
-    try {
-      final endpointSnapshot = await _snapshotRepo.getByAnchor(
-        sessionId: sessionId,
-        messageId: plan.endMessage.id,
-        swipeId: plan.endMessage.swipeId,
-        agentSwipeId: plan.endMessage.agentSwipeId,
-      );
-      _throwIfReconciliationAborted(token, isStillCurrent);
-      if (endpointSnapshot == null || !endpointSnapshot.committed) {
-        return LedgerRunResult(
-          status: 'skipped',
-          error: 'review endpoint snapshot is not committed',
-          elapsedMs: sw.elapsedMilliseconds,
-        );
-      }
-
-      final promptTrackers = await _ledgerTrackerLoader
-          .loadEffectiveLedgerTrackers(sessionId);
-      _throwIfReconciliationAborted(token, isStillCurrent);
-      final reviewMessageIds = plan.messageIds.toSet();
-      final reviewableFacts = await _knowledgeFactRepo.getReviewableForSession(
-        sessionId,
-      );
-      final promptFacts = reviewableFacts
-          .where((fact) => reviewMessageIds.contains(fact.sourceMessageId))
-          .toList();
-      final duplicateRetractions = exactDuplicateKnowledgeRetractions(
-        reviewableFacts,
-      );
-      final staleAnchorRetractions = staleKnowledgeAnchorRetractions(
-        reviewableFacts,
-        plan.messages,
-      );
-      _throwIfReconciliationAborted(token, isStillCurrent);
-      final promptBlock = ledgerBlocks
-          .where(
-            (block) =>
-                block.id == ledgerReconciliationPromptBlockId &&
-                block.enabled &&
-                block.section == 'ledger' &&
-                block.content.trim().isNotEmpty,
-          )
-          .firstOrNull;
-      final systemPrompt = promptBlock == null
-          ? fallbackLedgerReconciliationPrompt
-          : macroCtx == null
-          ? promptBlock.content
-          : replaceMacros(promptBlock.content, macroCtx).text;
-      const reconciliationPrompt = StudioLedgerReconciliationPrompt();
-      final reviewText = plan.messages
-          .map((message) => message.content)
-          .join('\n');
-      final offeredFacts = reconciliationPrompt.relevantKnowledgeFacts(
-        promptFacts,
-        reviewText,
-      );
-      final prompt = reconciliationPrompt.build(
-        systemPrompt: systemPrompt,
-        plan: plan,
-        trackers: promptTrackers,
-        knowledgeFacts: offeredFacts,
-      );
-      _throwIfReconciliationAborted(token, isStillCurrent);
-      final outcome = await _llm.callOnceWithLog(
-        config: config,
-        prompt: prompt,
-        maxTokens: settings.ledger.studioLedgerMaxTokens > 0
-            ? settings.ledger.studioLedgerMaxTokens
-            : 15000,
-        temperature: settings.ledger.studioLedgerTemperature >= 0
-            ? settings.ledger.studioLedgerTemperature
-            : 0.2,
-        timeoutMs: _llm.resolveLedgerTimeout(settings),
-        cancelToken: token,
-        omitReasoning: true,
-      );
-      if (token.isCancelled || isStillCurrent?.call() == false) {
-        return LedgerRunResult.aborted;
-      }
-      if (!outcome.isOk || outcome.text == null || outcome.text!.isEmpty) {
-        final attempt = outcome.attempts.lastOrNull;
-        return LedgerRunResult(
-          status: 'error',
-          error: 'Reconciliation LLM call failed: ${attempt?.status}',
-          elapsedMs: sw.elapsedMilliseconds,
-          attempts: outcome.attempts,
-          model: config.model,
-        );
-      }
-
-      final parsed = _parser.parse(outcome.text!);
-      final isEmptyExport =
-          parsed.rejectionReason == 'empty export (no ops or knowledge facts)';
-      if (!parsed.hasExport && !isEmptyExport) {
-        return LedgerRunResult(
-          status: 'error',
-          visibleLedger: parsed.visibleLedger,
-          error: parsed.rejectionReason,
-          elapsedMs: sw.elapsedMilliseconds,
-          attempts: outcome.attempts,
-          model: config.model,
-        );
-      }
-      final export = parsed.export ?? const StudioLedgerExport();
-      if (export.knowledgeFacts.isNotEmpty) {
-        return LedgerRunResult(
-          status: 'error',
-          error: 'Reconciliation must not emit knowledgeFacts',
-          elapsedMs: sw.elapsedMilliseconds,
-          attempts: outcome.attempts,
-          model: config.model,
-        );
-      }
-      if (token.isCancelled || isStillCurrent?.call() == false) {
-        return LedgerRunResult.aborted;
-      }
-      const cleanupParser = KnowledgeCleanupParser();
-      if (!cleanupParser.hasValidBlock(outcome.text!)) {
-        return LedgerRunResult(
-          status: 'error',
-          error: 'Reconciliation returned no valid knowledge cleanup block',
-          elapsedMs: sw.elapsedMilliseconds,
-          attempts: outcome.attempts,
-          model: config.model,
-        );
-      }
-      final cleanupOps =
-          cleanupParser.parse(
-              output: outcome.text!,
-              offeredFacts: offeredFacts,
-              reviewText: reviewText,
-            )
-            ..addAll(duplicateRetractions)
-            ..addAll(staleAnchorRetractions);
-      final allowedCleanupFactIds = {
-        ...offeredFacts.map((fact) => fact.id),
-        ...duplicateRetractions.map((op) => op.factId),
-        ...staleAnchorRetractions.map((op) => op.factId),
-      };
-
-      var opsApplied = 0;
-      await _trackerRepo.db.transaction(() async {
-        await _trackerRepo.replaceLedgerState(sessionId, promptTrackers);
-        _throwIfReconciliationAborted(token, isStillCurrent);
-        for (final op in export.ops) {
-          _throwIfReconciliationAborted(token, isStillCurrent);
-          await _opApplier.applyOp(
-            op: op,
-            sessionId: sessionId,
-            messageId: plan.endMessage.id,
-            swipeId: plan.endMessage.swipeId,
-            agentSwipeId: plan.endMessage.agentSwipeId,
-            trackerRepo: _trackerRepo,
-          );
-          opsApplied++;
-        }
-        _throwIfReconciliationAborted(token, isStillCurrent);
-        opsApplied += await _knowledgeFactRepo.applyReconciliationCleanup(
-          sessionId: sessionId,
-          ops: cleanupOps,
-          allowedFactIds: allowedCleanupFactIds,
-          endpointMessageId: plan.endMessage.id,
-          messageIds: plan.messageIds,
-        );
-        _throwIfReconciliationAborted(token, isStillCurrent);
-        final updated = await _trackerRepo.getBySessionId(sessionId);
-        _throwIfReconciliationAborted(token, isStillCurrent);
-        await _snapshotRepo.upsertTrackers(
-          sessionId: sessionId,
-          messageId: plan.endMessage.id,
-          swipeId: plan.endMessage.swipeId,
-          agentSwipeId: plan.endMessage.agentSwipeId,
-          trackers: updated,
-          committed: true,
-        );
-        _throwIfReconciliationAborted(token, isStillCurrent);
-        await _reconciliationCheckpointRepo.upsert(
-          LedgerReconciliationCheckpoint(
-            sessionId: sessionId,
-            startMessageId: plan.startMessageId,
-            endMessageId: plan.endMessage.id,
-            endSwipeId: plan.endMessage.swipeId,
-            endAgentSwipeId: plan.endMessage.agentSwipeId,
-            messageIds: plan.messageIds,
-            rangeHash: plan.rangeHash,
-          ),
-        );
-        _throwIfReconciliationAborted(token, isStillCurrent);
-      });
-      return LedgerRunResult(
-        status: 'ok',
-        visibleLedger: parsed.visibleLedger,
-        opsApplied: opsApplied,
-        elapsedMs: sw.elapsedMilliseconds,
-        attempts: outcome.attempts,
-        model: config.model,
-      );
-    } on _LedgerReconciliationAborted {
-      return LedgerRunResult.aborted;
-    } catch (e) {
-      if (token.isCancelled || (e is DioException && CancelToken.isCancel(e))) {
-        return LedgerRunResult.aborted;
-      }
-      debugPrint('[StudioLedger] reconciliation failed: $e');
-      return LedgerRunResult(
-        status: 'error',
-        error: '$e',
-        elapsedMs: sw.elapsedMilliseconds,
-      );
-    }
+    final end = plan.endMessage;
+    final key = _inFlightRegistry.reconciliationKey(
+      operationIdentity: operationIdentity,
+      sessionId: sessionId,
+      rangeHash: plan.rangeHash,
+      endMessageId: end.id,
+      endSwipeId: end.swipeId,
+      endAgentSwipeId: end.agentSwipeId,
+      settings: settings,
+      config: config,
+      ledgerBlocks: ledgerBlocks,
+      macroCtx: macroCtx,
+    );
+    return _inFlightRegistry.join(
+      key,
+      () => _reconciliationRunner.reconcile(request),
+    );
   }
 
-  void _throwIfReconciliationAborted(
-    CancelToken token,
-    bool Function()? isStillCurrent,
-  ) {
-    if (token.isCancelled || isStillCurrent?.call() == false) {
-      throw const _LedgerReconciliationAborted();
-    }
+  /// Regenerates only the expected current logical reconciliation head.
+  /// Generation reads the immutable before-state; replacement writes happen
+  /// later in one short transaction after all guards are revalidated.
+  Future<LedgerRunResult> replaceLatestReconciliation({
+    required String sessionId,
+    required String expectedRunId,
+    required PipelineSettings settings,
+    required AuxApiConfig config,
+    List<StudioPresetBlock> ledgerBlocks = const [],
+    MacroContext? macroCtx,
+    FutureOr<bool> Function()? isStillCurrent,
+    CancelToken? cancelToken,
+    String? operationIdentity,
+  }) {
+    final request = LedgerReconciliationReplacementRequest(
+      sessionId: sessionId,
+      expectedRunId: expectedRunId,
+      settings: settings,
+      config: config,
+      ledgerBlocks: ledgerBlocks,
+      macroCtx: macroCtx,
+      isStillCurrent: isStillCurrent,
+      cancelToken: cancelToken,
+    );
+    final key = _inFlightRegistry.replacementKey(
+      operationIdentity: operationIdentity,
+      sessionId: sessionId,
+      expectedRunId: expectedRunId,
+      settings: settings,
+      config: config,
+      ledgerBlocks: ledgerBlocks,
+      macroCtx: macroCtx,
+    );
+    return _inFlightRegistry.join(
+      key,
+      () => _reconciliationRunner.replaceLatest(request),
+    );
   }
 
   /// Run the Studio Ledger for [sessionId] on [finalAssistantText].
@@ -377,394 +304,52 @@ class StudioLedgerService {
     required int swipeId,
     required int agentSwipeId,
     bool forceEnabled = false,
-    bool Function()? isStillCurrent,
+    FutureOr<bool> Function()? isStillCurrent,
     CancelToken? cancelToken,
     List<StudioPresetBlock> ledgerBlocks = const [],
     MacroContext? macroCtx,
     bool commitSnapshot = false,
-  }) async {
-    // Studio Ledger is always-on when Studio is enabled. forceEnabled is
-    // still respected for manual triggers.
-
-    if (finalAssistantText.trim().isEmpty) {
-      debugPrint('[StudioLedger] skipping — empty assistant text');
-      return LedgerRunResult.skipped;
-    }
-
-    final token = cancelToken ?? CancelToken();
-    if (token.isCancelled) return LedgerRunResult.aborted;
-
-    final sw = Stopwatch()..start();
-
-    try {
-      // ── 1. LLM config is resolved by the caller via StudioSlotResolver ──
-      if (token.isCancelled || isStillCurrent?.call() == false) {
-        return LedgerRunResult.aborted;
-      }
-
-      // ── 2. Load prompt base (committed canon + live manual overrides) ────
-      final promptTrackers = await _ledgerTrackerLoader
-          .loadEffectiveLedgerTrackers(sessionId);
-      final book = await _bookRepo.getBySessionId(sessionId);
-      final recentEntries =
-          book?.entries.where((e) => e.status == 'active').take(20).toList() ??
-          const <MemoryEntry>[];
-
-      if (token.isCancelled || isStillCurrent?.call() == false) {
-        return LedgerRunResult.aborted;
-      }
-
-      // ── 3. Build prompt ─────────────────────────────────────────────────
-      final prompt = _buildLedgerPrompt(
-        finalAssistantText: finalAssistantText,
-        recentHistoryText: recentHistoryText,
-        currentTrackers: promptTrackers,
-        recentMemoryEntries: recentEntries,
-        ledgerBlocks: ledgerBlocks,
-        macroCtx: macroCtx,
-      );
-
-      debugPrint(
-        '[StudioLedger] prompt session=$sessionId '
-        'chars=${prompt.length} '
-        'usingPresetBlocks=${ledgerBlocks.isNotEmpty && macroCtx != null} '
-        'first500=${prompt.length > 500 ? prompt.substring(0, 500) : prompt}',
-      );
-
-      // ── 4. Call LLM ─────────────────────────────────────────────────────
-      final maxTokens = settings.ledger.studioLedgerMaxTokens > 0
-          ? settings.ledger.studioLedgerMaxTokens
-          : 15000;
-      final temperature = settings.ledger.studioLedgerTemperature >= 0
-          ? settings.ledger.studioLedgerTemperature
-          : 0.2;
-      final timeoutMs = _llm.resolveLedgerTimeout(settings);
-
-      debugPrint(
-        '[StudioLedger] starting session=$sessionId '
-        'model=${config.model} '
-        'timeoutMs=$timeoutMs '
-        'textChars=${finalAssistantText.length}',
-      );
-
-      final outcome = await _llm.callOnceWithLog(
-        config: config,
-        prompt: prompt,
-        maxTokens: maxTokens,
-        temperature: temperature,
-        timeoutMs: timeoutMs,
-        cancelToken: token,
-        omitReasoning: true,
-      );
-
-      if (token.isCancelled || isStillCurrent?.call() == false) {
-        return LedgerRunResult.aborted;
-      }
-
-      if (!outcome.isOk || outcome.text == null || outcome.text!.isEmpty) {
-        final lastAttempt = outcome.attempts.lastOrNull;
-        debugPrint(
-          '[StudioLedger] LLM call failed session=$sessionId '
-          'status=${lastAttempt?.status} '
-          'statusCode=${lastAttempt?.statusCode ?? 0} '
-          'elapsedMs=${lastAttempt?.elapsedMs ?? 0} '
-          'error=${lastAttempt?.error ?? "none"}',
-        );
-        return LedgerRunResult(
-          status: 'error',
-          error:
-              'LLM call failed: ${lastAttempt?.status}'
-              '${lastAttempt?.error != null ? ': ${lastAttempt!.error}' : ''}',
-          elapsedMs: sw.elapsedMilliseconds,
-          attempts: outcome.attempts,
-          model: config.model,
-        );
-      }
-
-      // ── 5. Parse + validate ─────────────────────────────────────────────
-      final rawResponse = outcome.text!;
-      debugPrint(
-        '[StudioLedger] raw response session=$sessionId '
-        'chars=${rawResponse.length} '
-        'first1000=${rawResponse.length > 1000 ? rawResponse.substring(0, 1000) : rawResponse}',
-      );
-
-      final parseResult = _parser.parse(rawResponse);
-
-      debugPrint(
-        '[StudioLedger] parsed session=$sessionId '
-        'hasExport=${parseResult.hasExport} '
-        'visibleLedgerChars=${parseResult.visibleLedger.length} '
-        'rejection=${parseResult.rejectionReason ?? "none"}',
-      );
-
-      if (!parseResult.hasExport && !_isNoWriteLedgerOutput(parseResult)) {
-        return LedgerRunResult(
-          status: 'error',
-          visibleLedger: parseResult.visibleLedger,
-          error: parseResult.rejectionReason,
-          elapsedMs: sw.elapsedMilliseconds,
-          attempts: outcome.attempts,
-          model: config.model,
-        );
-      }
-
-      if (token.isCancelled || isStillCurrent?.call() == false) {
-        return LedgerRunResult.aborted;
-      }
-
-      // ── 6. Apply ops to tracker namespace ───────────────────────────────
-      final export = parseResult.export ?? const StudioLedgerExport();
-      var opsApplied = 0;
-
-      // A rejected regeneration may have left different tentative values in
-      // tracker_rows. Always rebuild model-owned state from committed canon
-      // before applying this anchor's patch.
-      await _trackerRepo.replaceLedgerState(sessionId, promptTrackers);
-
-      for (final op in export.ops) {
-        if (token.isCancelled || isStillCurrent?.call() == false) break;
-        try {
-          await _opApplier.applyOp(
-            op: op,
-            sessionId: sessionId,
-            messageId: messageId,
-            swipeId: swipeId,
-            agentSwipeId: agentSwipeId,
-            trackerRepo: _trackerRepo,
-          );
-          opsApplied++;
-        } catch (e) {
-          debugPrint('[StudioLedger] op failed key=${op.key} error=$e');
-        }
-      }
-
-      debugPrint(
-        '[StudioLedger] applied $opsApplied/${export.ops.length} ops '
-        'session=$sessionId',
-      );
-
-      // Atomic facts use the same tentative assistant-swipe anchor as the
-      // tracker snapshot. They become visible only when the next user turn
-      // commits that anchor.
-      if (token.isCancelled == false && isStillCurrent?.call() != false) {
-        try {
-          final facts = export.knowledgeFacts
-              .map(
-                (fact) => CharacterKnowledgeFact(
-                  id: generateId(),
-                  chatSessionId: sessionId,
-                  knowerKey: fact.knowerKey,
-                  knowerName: fact.knowerName,
-                  subjectKey: fact.subjectKey,
-                  subjectName: fact.subjectName,
-                  factClass: CharacterKnowledgeFactClass.fromWireName(
-                    fact.factClass,
-                  ),
-                  scopeKey: fact.scopeKey,
-                  predicate: fact.predicate,
-                  object: fact.object,
-                  epistemicState: CharacterKnowledgeEpistemicState.fromWireName(
-                    fact.epistemicState,
-                  ),
-                  confidence: fact.confidence,
-                  importance: fact.importance,
-                  entities: fact.entities,
-                  topics: fact.topics,
-                  sourceMessageId: messageId,
-                  sourceSwipeId: swipeId,
-                  sourceAgentSwipeId: agentSwipeId,
-                  supersedesId: fact.supersedesId,
-                ),
-              )
-              .toList(growable: false);
-          await _knowledgeFactRepo.replaceTentativeAnchor(
-            sessionId: sessionId,
-            messageId: messageId,
-            swipeId: swipeId,
-            agentSwipeId: agentSwipeId,
-            facts: facts,
-          );
-        } catch (e) {
-          debugPrint('[StudioLedger] knowledge fact write failed: $e');
-        }
-      }
-
-      // ── 7. Snapshot post-ledger tracker state for rollback/swipe safety ──
-      // The mutable tracker_rows table is only the live working store. Prompt
-      // reads use committed tracker_snapshots, so every ledger write must also
-      // capture an immutable snapshot at the assistant output anchor.
-      if (token.isCancelled == false && isStillCurrent?.call() != false) {
-        try {
-          final updatedTrackers = await _trackerRepo.getBySessionId(sessionId);
-          await _snapshotRepo.upsertTrackers(
-            sessionId: sessionId,
-            messageId: messageId,
-            swipeId: swipeId,
-            agentSwipeId: agentSwipeId,
-            trackers: updatedTrackers,
-            committed: commitSnapshot,
-          );
-        } catch (e) {
-          debugPrint('[StudioLedger] snapshot write failed: $e');
-        }
-      }
-
-      sw.stop();
-      debugPrint(
-        '[StudioLedger] done session=$sessionId '
-        'ops=$opsApplied '
-        'elapsedMs=${sw.elapsedMilliseconds}',
-      );
-
-      return LedgerRunResult(
-        status: 'ok',
-        visibleLedger: parseResult.visibleLedger,
-        opsApplied: opsApplied,
-        elapsedMs: sw.elapsedMilliseconds,
-        attempts: outcome.attempts,
-        model: config.model,
-      );
-    } on TimeoutException {
-      sw.stop();
-      debugPrint('[StudioLedger] timeout session=$sessionId');
-      return LedgerRunResult(
-        status: 'timeout',
-        elapsedMs: sw.elapsedMilliseconds,
-      );
-    } catch (e) {
-      sw.stop();
-      if (token.isCancelled || (e is DioException && CancelToken.isCancel(e))) {
-        return LedgerRunResult.aborted;
-      }
-      debugPrint('[StudioLedger] error session=$sessionId: $e');
-      return LedgerRunResult(
-        status: 'error',
-        error: '$e',
-        elapsedMs: sw.elapsedMilliseconds,
-      );
-    }
-  }
-
-  /// Builds the ledger prompt from preset blocks when available, falling
-  /// back to [StudioLedgerPrompt] when no preset blocks are supplied.
-  /// The output structure template (`<glaze_memory_export>` +
-  /// `<studio_ledger>`) is always code-appended — the parser depends on it.
-  String _buildLedgerPrompt({
-    required String finalAssistantText,
-    required String recentHistoryText,
-    required List<Tracker> currentTrackers,
-    required List<MemoryEntry> recentMemoryEntries,
-    List<StudioPresetBlock> ledgerBlocks = const [],
-    MacroContext? macroCtx,
+    StudioLedgerEngine engine = StudioLedgerEngine.currentReconciled,
+    String? operationIdentity,
+    LedgerAttemptCallback? onAttemptStart,
   }) {
-    final hasActiveLedgerBlocks = ledgerBlocks.any(
-      (block) =>
-          block.id == _ledgerSystemPromptBlockId &&
-          block.enabled &&
-          block.section == 'ledger' &&
-          block.content.trim().isNotEmpty,
-    );
-    if (!hasActiveLedgerBlocks || macroCtx == null) {
-      return _promptBuilder.build(
-        finalAssistantText: finalAssistantText,
-        recentHistoryText: recentHistoryText,
-        currentTrackers: currentTrackers,
-        recentMemoryEntries: recentMemoryEntries,
-      );
-    }
-
-    final trackerBlock = _promptBuilder.buildCurrentStateBlock(
-      currentTrackers,
-      '$recentHistoryText\n$finalAssistantText',
-    );
-    final keyCatalog = _promptBuilder.buildExistingKeyCatalog(currentTrackers);
-    final memoryBlock = _buildMemoryBlock(recentMemoryEntries);
-
-    final runtimeSuffix =
-        '''
-<current_state>
-$trackerBlock
-</current_state>
-
-<existing_keys>
-$keyCatalog
-</existing_keys>
-
-<existing_memory>
-$memoryBlock
-</existing_memory>
-
-<recent_chat>
-$recentHistoryText
-</recent_chat>
-
-<final_assistant_response>
-$finalAssistantText
-</final_assistant_response>
-
-Now produce the Studio Ledger output. You MUST return BOTH blocks below.
-The <glaze_memory_export> block is MANDATORY — even when there is nothing
-to write, include it with empty arrays. Do not omit it under any circumstance.
-
-Required response template (follow this exact structure):
-<glaze_memory_export>
-{"ops":[],"knowledgeFacts":[]}
-</glaze_memory_export>
-<studio_ledger>
-Compact continuity snapshot here.
-</studio_ledger>
-
-The <glaze_memory_export> block MUST come first, before <studio_ledger>.
-It must contain a single JSON object with "ops" and "knowledgeFacts" arrays.
-When there are no state changes or knowledge facts, output empty arrays —
-do NOT skip the block.
-
-Ops format:
-{"ops":[{"op":"set","key":"npc:Name.field","value":"…","evidence":"…","eventState":"completed"},…],"knowledgeFacts":[]}
-
-Allowed namespaces: npc:, relationship:, arc:, world:, scene.
-Allowed ops: set, delete. Every set REPLACES the complete current value.
-Never append history to a state value. Keep each value under 1200 characters.
-Never write npc:*.knowledge or relationship:*.knowledge; durable propositions belong in knowledgeFacts.
-Relationship trust/status/attitude and card overrides are current state and must be updated with set whenever they change.
-Reuse an exact key from <current_state> or <existing_keys> for the same fact; update it with set instead of creating a synonym key.
-Allowed eventState: planned, suggested, threatened, attempted, completed, failed, cancelled, unknown (or omit).''';
-
-    return const StudioAuxPromptAssembler().assemble(
-      blocks: ledgerBlocks,
-      section: 'ledger',
+    final request = LedgerTurnRequest(
+      sessionId: sessionId,
+      settings: settings,
+      config: config,
+      finalAssistantText: finalAssistantText,
+      recentHistoryText: recentHistoryText,
+      messageId: messageId,
+      swipeId: swipeId,
+      agentSwipeId: agentSwipeId,
+      forceEnabled: forceEnabled,
+      isStillCurrent: isStillCurrent,
+      cancelToken: cancelToken,
+      ledgerBlocks: ledgerBlocks,
       macroCtx: macroCtx,
-      runtimeSuffix: runtimeSuffix,
-      skipBlockIds: {
-        for (final block in ledgerBlocks)
-          if (block.id != _ledgerSystemPromptBlockId) block.id,
-      },
+      commitSnapshot: commitSnapshot,
+      engine: engine,
+      onAttemptStart: onAttemptStart,
     );
-  }
-
-  String _buildMemoryBlock(List<MemoryEntry> entries) {
-    if (entries.isEmpty) return '(no existing memory)';
-    return entries
-        .take(20)
-        .map((e) {
-          final keys = e.keys.isEmpty ? '' : ' [${e.keys.join(', ')}]';
-          final locked = e.locked ? ' [locked]' : '';
-          return '- ${e.title.isNotEmpty ? e.title : e.id}$keys$locked';
-        })
-        .join('\n');
-  }
-
-  bool _isNoWriteLedgerOutput(LedgerParseResult parseResult) {
-    final reason = parseResult.rejectionReason ?? '';
-    if (reason == 'no <glaze_memory_export> block found') return true;
-    if (reason == 'empty export (no ops or knowledge facts)') {
-      return true;
+    if (operationIdentity == null) {
+      return _turnRunner.run(request);
     }
-    return false;
+    final key = _inFlightRegistry.runKey(
+      operationIdentity: operationIdentity,
+      sessionId: sessionId,
+      messageId: messageId,
+      swipeId: swipeId,
+      agentSwipeId: agentSwipeId,
+      finalAssistantText: finalAssistantText,
+      recentHistoryText: recentHistoryText,
+      forceEnabled: forceEnabled,
+      commitSnapshot: commitSnapshot,
+      engine: engine,
+      settings: settings,
+      config: config,
+      ledgerBlocks: ledgerBlocks,
+      macroCtx: macroCtx,
+    );
+    return _inFlightRegistry.join(key, () => _turnRunner.run(request));
   }
-}
-
-class _LedgerReconciliationAborted implements Exception {
-  const _LedgerReconciliationAborted();
 }

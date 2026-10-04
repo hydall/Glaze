@@ -11,17 +11,20 @@ class KnowledgeCleanupParser {
 
   List<KnowledgeCleanupOp> parse({
     required String output,
-    required List<CharacterKnowledgeFact> offeredFacts,
+    List<CharacterKnowledgeFact> offeredFacts = const [],
     required String reviewText,
+    Set<String>? entityKeys,
   }) {
     final decodedOps = _decodeOps(output);
     if (decodedOps == null) return const [];
 
     final factIds = offeredFacts.map((fact) => fact.id).toSet();
-    final entityKeys = <String>{
-      for (final fact in offeredFacts) fact.knowerKey,
-      for (final fact in offeredFacts) fact.subjectKey,
-    };
+    final effectiveEntityKeys =
+        entityKeys ??
+        <String>{
+          for (final fact in offeredFacts) fact.knowerKey,
+          for (final fact in offeredFacts) fact.subjectKey,
+        };
     final normalizedReview = reviewText.toLowerCase();
     final result = <KnowledgeCleanupOp>[];
     for (final rawOp in decodedOps.take(50)) {
@@ -37,7 +40,7 @@ class KnowledgeCleanupParser {
       final to = rawOp['toKey']?.toString() ?? '';
       final name = rawOp['canonicalName']?.toString().trim() ?? '';
       final validKey = RegExp(r'^entity:[a-z0-9_:-]+$');
-      if (!entityKeys.contains(from) ||
+      if (!effectiveEntityKeys.contains(from) ||
           !_isResolvableAliasKey(from) ||
           !validKey.hasMatch(to) ||
           from == to ||

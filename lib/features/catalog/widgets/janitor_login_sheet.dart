@@ -6,16 +6,22 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import '../../chat/bridge/chat_webview_environment.dart';
 import '../catalog_provider.dart';
 import '../janitor_account_provider.dart';
 import '../services/janitor_webview_proxy.dart';
+import '../../../shared/widgets/glaze_sheet.dart';
 
 /// Entry point for the menu's "JanitorAI Account" item. When a session already
 /// exists, shows a small log-out / cancel sheet instead of the login WebView;
 /// otherwise opens the WebView so the user can sign in.
-Future<void> openJanitorAccountSheet(BuildContext context, WidgetRef ref) async {
+Future<void> openJanitorAccountSheet(
+  BuildContext context,
+  WidgetRef ref,
+) async {
   if (!ref.read(janitorAccountProvider).isLoggedIn) {
     await showJanitorLoginSheet(context);
     return;
@@ -53,7 +59,7 @@ Future<void> openJanitorAccountSheet(BuildContext context, WidgetRef ref) async 
 /// account session (if any) is active for catalog requests. On a successful
 /// sign-in the sheet refreshes the catalog itself, so callers don't need to.
 Future<void> showJanitorLoginSheet(BuildContext context) {
-  return showModalBottomSheet<void>(
+  return showGlazeSheet<void>(
     context: context,
     isScrollControlled: true,
     useRootNavigator: true,
@@ -116,6 +122,10 @@ class _JanitorLoginSheetState extends ConsumerState<JanitorLoginSheet> {
     if (userName != null) {
       await ref.read(janitorAccountProvider.notifier).setUserName(userName);
     }
+    // Commit the session cookies the login just wrote. Android holds them in
+    // memory and writes them out on its own schedule, so an app killed shortly
+    // after signing in comes back signed out.
+    await JanitorWebViewProxy.flushCookies();
     // Drop the anonymous catalog results so the now-authenticated character set
     // is fetched — mirrors the logout path. Fires regardless of which entry
     // point (menu or catalog) opened this sheet.
@@ -126,12 +136,17 @@ class _JanitorLoginSheetState extends ConsumerState<JanitorLoginSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final height = MediaQuery.of(context).size.height * 0.92;
+    final inWindow = GlazeSheetWindowScope.of(context);
+    final height = inWindow
+        ? double.infinity
+        : MediaQuery.of(context).size.height * 0.92;
     return Container(
       height: height,
       decoration: BoxDecoration(
         color: context.cs.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: inWindow
+            ? BorderRadius.circular(16)
+            : const BorderRadius.vertical(top: Radius.circular(20)),
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
@@ -143,8 +158,9 @@ class _JanitorLoginSheetState extends ConsumerState<JanitorLoginSheet> {
           ),
           Expanded(
             child: InAppWebView(
-              initialUrlRequest:
-                  URLRequest(url: WebUri(JanitorLoginSheet._loginUrl)),
+              initialUrlRequest: URLRequest(
+                url: WebUri(JanitorLoginSheet._loginUrl),
+              ),
               initialSettings: InAppWebViewSettings(
                 javaScriptEnabled: true,
                 domStorageEnabled: true,
@@ -160,8 +176,8 @@ class _JanitorLoginSheetState extends ConsumerState<JanitorLoginSheet> {
               ),
               webViewEnvironment:
                   defaultTargetPlatform == TargetPlatform.windows
-                      ? chatWebViewEnvironment
-                      : null,
+                  ? chatWebViewEnvironment
+                  : null,
               // Claim vertical (and horizontal) drags so the WebView scrolls
               // instead of the enclosing modal sheet eating the gesture.
               gestureRecognizers: {
@@ -222,19 +238,14 @@ class _Header extends StatelessWidget {
           if (busy)
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 12),
-              child: SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
+              child: SizedBox(width: 18, height: 18, child: GlazeSpinner()),
             )
           else
-            TextButton(
-              onPressed: onLogout,
-              child: Text(
-                'janitor_auth_logout'.tr(),
-                style: TextStyle(color: context.cs.error),
-              ),
+            GlazeActionButton(
+              icon: Icons.logout_rounded,
+              label: 'janitor_auth_logout'.tr(),
+              tone: GlazeActionTone.destructive,
+              onTap: onLogout,
             ),
         ],
       ),

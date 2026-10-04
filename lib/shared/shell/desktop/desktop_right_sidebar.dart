@@ -2,62 +2,66 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../features/chat/widgets/magic_drawer.dart';
+import '../../../core/platform/desktop_window.dart';
+import '../../../features/chat/bridge/chat_bridge_registry.dart';
+import '../../../features/chat/widgets/chat_drawer_panel.dart';
+import '../../../features/chat/widgets/magic_drawer_widgets.dart';
 import '../../../features/tools/tools_screen.dart';
-import '../../../shared/theme/app_colors.dart';
+import '../../theme/app_colors.dart';
+import 'desktop_sidebar_surface.dart';
+import '../shell_header_provider.dart';
 import 'sidebar_drag_handle.dart';
 import 'sidebar_resizer.dart';
 import 'sidebar_sheet_provider.dart';
+import 'sidebar_tool_panels.dart';
 
-class DesktopRightSidebar extends ConsumerStatefulWidget {
-  const DesktopRightSidebar({super.key});
+/// Width of the icon strip that sits beside an open panel — Vue's
+/// `.magic-drawer-sidebar.icon-only.left-icon-strip`.
+const double _stripWidth = 64;
+
+/// Height of the back button over the strip: the open panel's header row (a
+/// flush [GlazeAppBar]), which the button lines up with.
+const double _stripBackHeight = 56;
+
+class DesktopRightSidebar extends ConsumerWidget {
+  /// See [DesktopLeftSidebar.width].
+  final double width;
+
+  const DesktopRightSidebar({super.key, required this.width});
 
   @override
-  ConsumerState<DesktopRightSidebar> createState() =>
-      _DesktopRightSidebarState();
-}
-
-class _DesktopRightSidebarState extends ConsumerState<DesktopRightSidebar> {
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final controller = ref.watch(rightSidebarControllerProvider);
-    final sheet = ref.watch<Widget?>(rightSidebarSheetProvider);
-    final location = GoRouterState.of(context).uri.toString();
-    final isChat = location.startsWith('/chat/');
-    final collapsed = controller.collapsed;
-
-    // Auto-expand / restore for sheets
-    if (sheet != null && collapsed) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        controller.autoExpand();
-      });
+    final panel = ref.watch(rightSidebarPanelProvider);
+    final location = GoRouterState.of(context).uri;
+    final charId = _extractCharId(location);
+    // A panel needs room, so borrow the expanded width while one is open and
+    // give it back when it closes (Vue's wasAutoExpanded dance).
+    if (panel != null && controller.collapsed) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => controller.autoExpand(),
+      );
     }
-    if (sheet == null && controller.wasAutoExpanded) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        controller.restoreCollapse();
-      });
+    if (panel == null && controller.wasAutoExpanded) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => controller.restoreCollapse(),
+      );
     }
 
     return ListenableBuilder(
       listenable: controller,
-      builder: (context, _) => Container(
-        width: controller.width,
-        color: Colors.black.withValues(alpha: 0.2),
+      builder: (context, _) => DesktopSidebarSurface(
+        width: width,
+        edge: SidebarEdge.right,
+        animate: !controller.dragging,
         child: Stack(
           children: [
-            if (sheet != null)
-              _buildSheetHost(sheet)
-            else if (controller.collapsed)
-              _buildCollapsed(isChat)
-            else
-              _buildExpanded(isChat, location),
+            Positioned.fill(child: _buildBody(context, ref, panel, charId)),
             Positioned(
               top: 0,
               bottom: 0,
-              left: 0,
-              child: SidebarDragHandle.right(
-                rightController: controller,
-              ),
+              left: -SidebarDragHandle.width / 2,
+              child: SidebarDragHandle.right(rightController: controller),
             ),
           ],
         ),
@@ -65,213 +69,204 @@ class _DesktopRightSidebarState extends ConsumerState<DesktopRightSidebar> {
     );
   }
 
-  Widget _buildSheetHost(Widget sheet) {
-    return Material(color: Colors.transparent, child: sheet);
-  }
+  Widget _buildBody(
+    BuildContext context,
+    WidgetRef ref,
+    SidebarPanel? panel,
+    String? charId,
+  ) {
+    final collapsed = width < kSidebarCollapseThreshold;
+    if (charId != null) {
+      return _buildChatBody(context, ref, panel, charId, collapsed: collapsed);
+    }
 
-  Widget _buildExpanded(bool isChat, String location) {
-    return RepaintBoundary(
-      child: Material(
+    // Collapsed: nothing but the strip — which is the whole point of the
+    // collapsed state.
+    if (collapsed) return _buildToolStrip(context, ref, activeId: panel?.id);
+
+    if (panel == null) {
+      return const Material(
         color: Colors.transparent,
-        child: isChat ? _buildChatPanel(location) : const ToolsScreen(),
-      ),
-    );
-  }
-
-  Widget _buildChatPanel(String location) {
-    final charId = _extractCharId(location);
-    if (charId == null) return const SizedBox.shrink();
-    return MagicDrawerPanel(charId: charId);
-  }
-
-  Widget _buildCollapsed(bool isChat) {
-    if (isChat) {
-      return Center(
-        child: Icon(
-          Icons.auto_awesome,
-          size: 28,
-          color: context.cs.onSurface.withValues(alpha: 0.5),
-        ),
+        child: ToolsScreen(inSidebar: true),
       );
     }
-    return _buildToolStrip();
-  }
 
-  /// Port of Vue `.tools-strip` (DesktopRightSidebar.vue lines 418-517).
-  /// 5 icons: Personas, Presets, API, Lorebook, Regex.
-  Widget _buildToolStrip() {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _buildStripIcon(
-            _ToolStripSvg.personas,
-            'Personas',
-            active: _isActiveRoute('/tools/personas'),
-            onTap: () => context.push('/tools/personas'),
+    // Expanded with a panel: the strip shrinks to a rail on the left and the
+    // panel takes the rest, so switching tools never needs a round trip
+    // through the hub.
+    return Row(
+      // Stretch, not the default centre: the strip shrink-wraps its icons, so
+      // a centred row floated the rail into the middle of the sidebar with a
+      // gap above it. Vue's `.left-icon-strip` is pinned top-to-bottom and its
+      // icons stack from the top.
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          width: _stripWidth,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _StripBackButton(panel: panel),
+              Expanded(
+                child: _buildToolStrip(context, ref, activeId: panel.id),
+              ),
+            ],
           ),
-          _buildStripIcon(
-            _ToolStripSvg.presets,
-            'Presets',
-            active: _isActiveRoute('/tools/presets'),
-            onTap: () => context.push('/tools/presets'),
-          ),
-          _buildStripIcon(
-            _ToolStripSvg.api,
-            'API',
-            active: _isActiveRoute('/tools/api'),
-            onTap: () => context.push('/tools/api'),
-          ),
-          _buildStripIcon(
-            _ToolStripSvg.lorebook,
-            'Lorebooks',
-            active: _isActiveRoute('/tools/lorebooks'),
-            onTap: () => context.push('/tools/lorebooks'),
-          ),
-          _buildStripIcon(
-            _ToolStripSvg.regex,
-            'Regex',
-            active: _isActiveRoute('/tools/regex'),
-            onTap: () => context.push('/tools/regex'),
-          ),
-        ],
-      ),
+        ),
+        ..._buildPanel(context, ref, panel),
+      ],
     );
   }
 
-  bool _isActiveRoute(String path) {
-    final location = GoRouterState.of(context).uri.toString();
-    return location.contains(path);
-  }
-
-  Widget _buildStripIcon(
-    String svgPath,
-    String tooltip, {
-    bool active = false,
-    VoidCallback? onTap,
+  /// The chat's Magic Drawer: a list, which shrinks to a strip of its icons
+  /// beside an open card's screen and in the collapsed sidebar.
+  ///
+  /// The list and the strip are one drawer, kept mounted at the head of the
+  /// row in every state and only told to drop its labels — its rows, their
+  /// height and its scroll are the same either way, so every icon stays where
+  /// the list drew it. (Collapsing the sidebar to a width other than the
+  /// strip's moves them sideways, to the middle of it.)
+  Widget _buildChatBody(
+    BuildContext context,
+    WidgetRef ref,
+    SidebarPanel? panel,
+    String charId, {
+    required bool collapsed,
   }) {
-    return Tooltip(
-      message: tooltip,
-      preferBelow: false,
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          width: 64,
-          height: 48,
-          decoration: BoxDecoration(
-            color: active
-                ? const Color(0x14528BCC) // rgba(82,139,204,0.08)
-                : Colors.transparent,
-            border: Border(
-              bottom: BorderSide(color: Colors.white.withValues(alpha: 0.05)),
-            ),
-          ),
-          child: Center(
-            child: Container(
-              width: 28,
-              height: 28,
-              padding: const EdgeInsets.all(5),
-              decoration: BoxDecoration(
-                color: active
-                    ? const Color(0x26528BCC) // rgba(82,139,204,0.15)
-                    : Colors.white.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(8),
+    final showPanel = panel != null && !collapsed;
+    final drawer = ChatDrawerPanel(
+      key: ValueKey('magic-$charId'),
+      charId: charId,
+      // The app's title bar draws the edge above the sidebar.
+      showTopBorder: !usesCustomAppTitleBar,
+      listLayout: true,
+      rail: collapsed || showPanel,
+      // The Ledger diagnostics' "jump to source message" needs the chat
+      // WebView, which the sidebar does not own — reach it through the
+      // bridge registry the chat screen publishes into.
+      onScrollToMessage: (id) async {
+        final bridge = ref.read(chatBridgeRegistryProvider(charId));
+        await bridge?.scrollToMessage(id, highlight: true);
+      },
+    );
+    return Material(
+      color: Colors.transparent,
+      child: LayoutBuilder(
+        builder: (context, constraints) => Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // The same widgets at the head of the row in every state, so the
+            // drawer is updated in place rather than built anew.
+            SizedBox(
+              width: showPanel ? _stripWidth : constraints.maxWidth,
+              child: Stack(
+                children: [
+                  Positioned.fill(child: drawer),
+                  // In the room the drawer's tabs leave above the strip.
+                  if (showPanel)
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      child: _StripBackButton(panel: panel),
+                    ),
+                ],
               ),
-              child: _svgIcon(svgPath),
             ),
-          ),
+            if (showPanel) ..._buildPanel(context, ref, panel),
+          ],
         ),
       ),
     );
   }
 
-  Widget _svgIcon(String path) {
-    return CustomPaint(
-      size: const Size(18, 18),
-      painter: _SvgPathPainter(path),
+  /// An open panel and the rule between it and the strip on its left.
+  List<Widget> _buildPanel(
+    BuildContext context,
+    WidgetRef ref,
+    SidebarPanel panel,
+  ) {
+    return [
+      VerticalDivider(
+        width: 1,
+        color: Theme.of(context).colorScheme.outlineVariant,
+      ),
+      Expanded(
+        child: DetachedShellHost(
+          child: Material(
+            color: Colors.transparent,
+            child: SidebarPanelScope(
+              onClose: () => closeRightSidebarPanel(ref),
+              back: panel.back,
+              child: Builder(builder: panel.builder),
+            ),
+          ),
+        ),
+      ),
+    ];
+  }
+
+  Widget _buildToolStrip(
+    BuildContext context,
+    WidgetRef ref, {
+    String? activeId,
+  }) {
+    return ScrollConfiguration(
+      behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final tool in sidebarTools)
+              MagicDrawerStripIcon(
+                icon: tool.icon,
+                label: tool.label(),
+                active: activeId == tool.id,
+                onTap: () => togglePanelInRightSidebar(ref, tool.panel),
+              ),
+          ],
+        ),
+      ),
     );
   }
 
-  String? _extractCharId(String location) {
-    // Parse the URI so query parameters (e.g. ?session=1) are NOT included
-    // in the charId. The previous regex `/chat/([^/]+)` captured the query
-    // string too, producing a polluted charId like "mq9ua9qr?session=1" that
-    // created phantom chatProvider instances and phantom DB sessions.
-    final uri = Uri.parse(location);
+  /// Parses the URI so query parameters (e.g. `?session=1`) are NOT included in
+  /// the charId. A regex over the raw location captured the query string too,
+  /// producing a polluted charId like `mq9ua9qr?session=1` that created phantom
+  /// chatProvider instances and phantom DB sessions.
+  String? _extractCharId(Uri uri) {
     final segments = uri.pathSegments;
-    if (segments.length >= 2 && segments[0] == 'chat') {
-      return segments[1];
-    }
+    if (segments.length >= 2 && segments[0] == 'chat') return segments[1];
     return null;
   }
 }
 
-/// Minimal SVG path painter for tool strip icons.
-class _SvgPathPainter extends CustomPainter {
-  final String path;
-  _SvgPathPainter(this.path);
+/// The open panel's back button, over the strip beside it — where Vue drew the
+/// sheet's back arrow, its header running across the strip. It takes the
+/// panel header's row and lines up with it; the panel's own header draws none.
+class _StripBackButton extends ConsumerWidget {
+  final SidebarPanel panel;
+
+  const _StripBackButton({required this.panel});
 
   @override
-  void paint(Canvas canvas, Size size) {
-    final paint =
-        Paint()
-          ..color = Colors.white.withValues(alpha: 0.8)
-          ..style = PaintingStyle.fill;
-    // Scale to fit
-    canvas.save();
-    canvas.scale(size.width / 24, size.height / 24);
-    _drawSvgPath(canvas, paint, path);
-    canvas.restore();
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Container(
+      height: _stripBackHeight,
+      alignment: Alignment.center,
+      decoration: usesCustomAppTitleBar
+          ? BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: context.cs.outlineVariant),
+              ),
+            )
+          : null,
+      child: IconButton(
+        icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
+        color: context.cs.primary,
+        tooltip: MaterialLocalizations.of(context).backButtonTooltip,
+        onPressed: () => panel.back.run(() => closeRightSidebarPanel(ref)),
+      ),
+    );
   }
-
-  @override
-  bool shouldRepaint(covariant _SvgPathPainter oldDelegate) =>
-      oldDelegate.path != path;
-}
-
-/// Simple SVG path parser — handles M, C, L, Z commands.
-void _drawSvgPath(Canvas canvas, Paint paint, String d) {
-  final path = Path();
-  final parts = d.split(RegExp(r'[,\s]+'));
-  int i = 0;
-  while (i < parts.length) {
-    final cmd = parts[i];
-    if (cmd == 'M') {
-      path.moveTo(double.parse(parts[i + 1]), double.parse(parts[i + 2]));
-      i += 3;
-    } else if (cmd == 'C') {
-      path.cubicTo(
-        double.parse(parts[i + 1]),
-        double.parse(parts[i + 2]),
-        double.parse(parts[i + 3]),
-        double.parse(parts[i + 4]),
-        double.parse(parts[i + 5]),
-        double.parse(parts[i + 6]),
-      );
-      i += 7;
-    } else if (cmd == 'L') {
-      path.lineTo(double.parse(parts[i + 1]), double.parse(parts[i + 2]));
-      i += 3;
-    } else if (cmd == 'Z' || cmd == 'z') {
-      path.close();
-      i += 1;
-    } else {
-      i += 1; // Skip unknown
-    }
-  }
-  canvas.drawPath(path, paint);
-}
-
-/// SVG paths matching ToolsView.vue icons.
-abstract final class _ToolStripSvg {
-  static const personas =
-      'M19 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm6 12H6v-1c0-2 4-3.1 6-3.1s6 1.1 6 3.1v1z';
-  static const presets =
-      'M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6h-6V2zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z';
-  static const api =
-      'M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z';
-  static const lorebook =
-      'M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z';
-  static const regex =
-      'M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z';
 }

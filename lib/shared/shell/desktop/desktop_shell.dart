@@ -1,12 +1,20 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/platform/desktop_window.dart';
 import '../../../core/state/shared_prefs_provider.dart';
+import '../../widgets/glass_surface.dart';
 import '../../widgets/glaze_background.dart';
 import '../../widgets/glaze_scaffold.dart' show GlazeAppBar;
 import '../animated_header_below.dart';
 import '../shell_header_provider.dart';
+import '../title_bar_header.dart';
+import 'desktop_active_surface_provider.dart';
+import 'desktop_file_drop.dart';
 import 'desktop_floating_provider.dart';
 import 'desktop_glossary_popup.dart';
 import 'desktop_layout_provider.dart';
@@ -14,6 +22,7 @@ import 'desktop_left_sidebar.dart';
 import 'desktop_right_sidebar.dart';
 import 'desktop_window_view.dart';
 import 'sidebar_resizer.dart';
+import 'sidebar_sheet_provider.dart';
 
 class DesktopShell extends ConsumerStatefulWidget {
   final Widget child;
@@ -25,90 +34,313 @@ class DesktopShell extends ConsumerStatefulWidget {
 }
 
 class _DesktopShellState extends ConsumerState<DesktopShell> {
-  LeftSidebarController? _leftController;
-  RightSidebarController? _rightController;
-  bool _controllersLoaded = false;
+  late LeftSidebarController _leftController;
+  late RightSidebarController _rightController;
 
   @override
   void initState() {
     super.initState();
-    _initControllers();
+    // Prefs are usually already resolved by the time the first frame builds, so
+    // read them synchronously when we can: awaiting here rendered a frame of
+    // the *phone* layout before the sidebars appeared, which read as a jump on
+    // every cold start. When they are genuinely not ready yet, start from the
+    // defaults and adopt the stored widths as soon as they land.
+    final cached = ref.read(sharedPreferencesProvider).value;
+    _leftController = LeftSidebarController.fromPrefs(cached);
+    _rightController = RightSidebarController.fromPrefs(cached);
+    if (cached == null) _adoptStoredWidths();
   }
 
-  Future<void> _initControllers() async {
+  Future<void> _adoptStoredWidths() async {
     final prefs = await ref.read(sharedPreferencesProvider.future);
     if (!mounted) return;
-    _leftController = LeftSidebarController.fromPrefs(prefs);
-    _rightController = RightSidebarController.fromPrefs(prefs);
-    setState(() => _controllersLoaded = true);
+    setState(() {
+      _leftController.applyPrefs(prefs);
+      _rightController.applyPrefs(prefs);
+    });
+  }
+
+  /// On desktop the `/` branch (chat history) is already the left sidebar, so a
+  /// window that grows past the breakpoint — or a user turning "force mobile
+  /// layout" off — would be left staring at a duplicate list in the middle
+  /// column. The router's redirect only fires on navigation, so migrate here
+  /// too, exactly as the Vue app's `checkDesktop()` did.
+  void _migrateRootRoute(BuildContext context) {
+    if (GoRouterState.of(context).uri.path != '/') return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (GoRouterState.of(context).uri.path != '/') return;
+      context.go('/characters');
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final forceMobile = ref.watch(forceMobileLayoutProvider);
+    // Watched here, not inside the LayoutBuilder: that builder runs during
+    // layout rather than build, where `ref.watch` does not register a
+    // dependency and the layout would not react to the panel opening.
+    final hasPanel = ref.watch(rightSidebarPanelProvider) != null;
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final width = constraints.maxWidth;
-        final isDesktop = width >= 768 && !forceMobile;
+    // The sidebars render the widths [_fitSidebars] works out here, so a drag
+    // on either grip has to rebuild this layout, not just the sidebar dragged.
+    return ListenableBuilder(
+      listenable: Listenable.merge([_leftController, _rightController]),
+      builder: (context, _) => LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.maxWidth;
+          final isDesktop =
+              isDesktopViewportSize(Size(width, constraints.maxHeight)) &&
+              !forceMobile;
 
-        if (!isDesktop || !_controllersLoaded || _leftController == null) {
-          return DesktopScope(isDesktop: false, child: widget.child);
-        }
+          if (!isDesktop) {
+            return DesktopScope(isDesktop: false, child: widget.child);
+          }
 
-        return DesktopScope(
-          isDesktop: true,
-          child: ProviderScope(
-            overrides: [
-              leftSidebarControllerProvider
-                  .overrideWithValue(_leftController!),
-              if (_rightController != null)
-                rightSidebarControllerProvider
-                    .overrideWithValue(_rightController!),
-            ],
-            child: _buildDesktopLayout(context),
-          ),
-        );
-      },
+          _migrateRootRoute(context);
+
+          return DesktopScope(
+            isDesktop: true,
+            child: ProviderScope(
+              overrides: [
+                leftSidebarControllerProvider.overrideWithValue(
+                  _leftController,
+                ),
+                rightSidebarControllerProvider.overrideWithValue(
+                  _rightController,
+                ),
+              ],
+              child: _buildDesktopLayout(context, width, hasPanel),
+            ),
+          );
+        },
+      ),
     );
   }
 
-  Widget _buildDesktopLayout(BuildContext context) {
-    return GlazeBackground(
-      child: Stack(
-        children: [
-          Row(
-            children: [
-              DesktopLeftSidebar(),
-              const VerticalDivider(width: 1, color: Colors.white10),
-              Expanded(
-                child: RepaintBoundary(
-                  child: Stack(
-                    children: [
-                      widget.child,
-                      Positioned(
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        child: _DesktopHeader(),
-                      ),
-                    ],
+  /// Which sidebar entry should read as active, derived from the route (plus
+  /// the floating-window state, which does not change the route).
+  String _currentView(BuildContext context) {
+    if (ref.watch(desktopWindowsProvider).any((w) => !w.minimized)) {
+      return 'menu';
+    }
+    final segments = GoRouterState.of(context).uri.pathSegments;
+    if (segments.isEmpty) return 'dialogs';
+    switch (segments.first) {
+      case 'characters':
+        return 'characters';
+      case 'chat':
+        return 'chat';
+      case 'tools':
+        return 'tools';
+      case 'menu':
+        return 'menu';
+      default:
+        return '';
+    }
+  }
+
+  /// Desktop keyboard handling for the overlays in this stack.
+  ///
+  /// Escape closes the topmost desktop overlay, innermost first. Flutter's
+  /// default `DismissIntent` only pops modal *routes*; the floating windows,
+  /// the glossary popup and the sidebar panel are all plain widgets in this
+  /// stack, so Escape did nothing for them. Mirrors the Vue app's hierarchical
+  /// Escape handler. For the focused floating window it steps back first and
+  /// closes from the window's root.
+  ///
+  /// Ctrl+Tab / Ctrl+Shift+Tab switch between floating windows and Ctrl+W
+  /// closes the focused one.
+  KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+    final key = event.logicalKey;
+    final keyboard = HardwareKeyboard.instance;
+    final windows = ref.read(desktopWindowsProvider.notifier);
+    final focusedWindow = windows.focused;
+
+    if (keyboard.isControlPressed && windows.isOpen) {
+      if (key == LogicalKeyboardKey.tab) {
+        windows.cycle(backwards: keyboard.isShiftPressed);
+        return KeyEventResult.handled;
+      }
+      if (key == LogicalKeyboardKey.keyW && focusedWindow != null) {
+        windows.close(focusedWindow.id);
+        return KeyEventResult.handled;
+      }
+    }
+
+    if (event is! KeyDownEvent || key != LogicalKeyboardKey.escape) {
+      return KeyEventResult.ignored;
+    }
+    if (focusedWindow != null) {
+      windows.pop(focusedWindow.id);
+      return KeyEventResult.handled;
+    }
+    if (ref.read(glossaryPopupVisibleProvider)) {
+      ref.read(glossaryPopupVisibleProvider.notifier).state = false;
+      return KeyEventResult.handled;
+    }
+    if (ref.read(rightSidebarPanelProvider) != null) {
+      ref.read(rightSidebarPanelProvider.notifier).state = null;
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  /// Minimum the middle column must keep before a sidebar gives up width.
+  static const double _middleMinWidth = 420;
+
+  /// Fits both sidebars into [total], shrinking them to their icon strips when
+  /// the window cannot afford the widths the user dragged them to.
+  ///
+  /// The breakpoint is 768px (as in the Vue app), but two 280/300px sidebars
+  /// leave barely 200px of content there — the character grid's header row
+  /// overflowed outright. The right sidebar yields first, then the left.
+  ({double left, double right}) _fitSidebars(double total, bool hasPanel) {
+    double snap(double value) =>
+        value < kSidebarCollapseThreshold ? kSidebarCollapsedWidth : value;
+
+    var left = _leftController.width;
+    // A mounted tool panel needs a floor, whatever width the sidebar was
+    // dragged to (Vue auto-expanded the sidebar when a sheet opened in it).
+    var right = hasPanel
+        ? math.max(
+            _rightController.width,
+            RightSidebarController.widthWithPanel,
+          )
+        : _rightController.width;
+    if (total - left - right >= _middleMinWidth) {
+      return (left: left, right: right);
+    }
+
+    right = snap(
+      math.max(
+        kSidebarCollapsedWidth,
+        math.min(right, total - _middleMinWidth - left),
+      ),
+    );
+    if (total - left - right >= _middleMinWidth) {
+      return (left: left, right: right);
+    }
+
+    left = snap(
+      math.max(
+        kSidebarCollapsedWidth,
+        math.min(left, total - _middleMinWidth - right),
+      ),
+    );
+    return (left: left, right: right);
+  }
+
+  Widget _buildDesktopLayout(
+    BuildContext context,
+    double availableWidth,
+    bool hasPanel,
+  ) {
+    final widths = _fitSidebars(availableWidth, hasPanel);
+    // The app draws edge-to-edge, so the status bar floats over the content.
+    // Inset the desktop chrome by its height — on a tablet held in landscape it
+    // would otherwise cover the header row. [GlazeBackground] stays full-bleed
+    // behind the inset.
+    final topInset = MediaQuery.paddingOf(context).top;
+    return Focus(
+      autofocus: true,
+      canRequestFocus: false,
+      skipTraversal: true,
+      onKeyEvent: _handleKey,
+      child: DesktopFileDrop(
+        child: GlazeBackground(
+          child: Padding(
+            padding: EdgeInsets.only(top: topInset),
+            // The inset is spent here, once. Left in the MediaQuery, every
+            // screen in the columns added it again — the chat header and the
+            // character list's first row slid down by a whole title bar.
+            child: MediaQuery.removePadding(
+              context: context,
+              removeTop: true,
+              child: Stack(
+                children: [
+                  // A press on the columns makes the main window the active
+                  // one again. Presses inside a floating window never reach
+                  // here: the window stack above takes them.
+                  Listener(
+                    onPointerDown: (_) => ref
+                        .read(desktopActiveSurfaceProvider.notifier)
+                        .activate(kDesktopMainSurface),
+                    child: Row(
+                      children: [
+                        DesktopLeftSidebar(
+                          currentView: _currentView(context),
+                          width: widths.left,
+                        ),
+                        Expanded(
+                          child: RepaintBoundary(
+                            child: _middleColumn(
+                              Stack(
+                                children: [
+                                  widget.child,
+                                  Positioned(
+                                    top: 0,
+                                    left: 0,
+                                    right: 0,
+                                    child: _DesktopHeader(),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        DesktopRightSidebar(width: widths.right),
+                      ],
+                    ),
                   ),
-                ),
+                  // Floating windows. Not modal: presses outside a window fall
+                  // through to the columns underneath.
+                  const Positioned.fill(child: DesktopWindowView()),
+                ],
               ),
-              const VerticalDivider(width: 1, color: Colors.white10),
-              DesktopRightSidebar(),
-            ],
+            ),
           ),
-          // Floating window overlay
-          DesktopWindowView(
-            onClose: () {
-              ref.read(desktopFloatingProvider).close();
-            },
-          ),
-          // Glossary corner popup
-          const DesktopGlossaryPopup(),
-        ],
+        ),
+      ),
+    );
+  }
+
+  /// With the app's own title bar showing the header (Windows), the screens in
+  /// the middle column hand it their title row (see [TitleBarHeaderScope]).
+  /// They still lay out around that row, so the column keeps its strip but
+  /// moves it above its top edge, out of sight under the title bar.
+  Widget _middleColumn(Widget column) {
+    if (!usesCustomAppTitleBar) return column;
+    return TitleBarHeaderScope(
+      child: _HiddenTopStrip(
+        height: kTitleBarHiddenHeaderHeight,
+        child: column,
+      ),
+    );
+  }
+}
+
+/// Lays [child] out [height] taller than the space it gets and aligns it to
+/// the bottom, clipped, so its top [height] pixels sit above the visible area.
+class _HiddenTopStrip extends StatelessWidget {
+  final double height;
+  final Widget child;
+
+  const _HiddenTopStrip({required this.height, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) => ClipRect(
+        child: OverflowBox(
+          alignment: Alignment.bottomCenter,
+          minHeight: constraints.maxHeight + height,
+          maxHeight: constraints.maxHeight + height,
+          child: child,
+        ),
       ),
     );
   }
@@ -138,12 +370,13 @@ class _DesktopHeader extends ConsumerWidget {
       // rows stay flush with the header's top edge during the cross-fade.
       layoutBuilder: (currentChild, previousChildren) => Stack(
         alignment: Alignment.topCenter,
-        children: [
-          ...previousChildren,
-          ?currentChild,
-        ],
+        children: [...previousChildren, ?currentChild],
       ),
-      child: entry == null || entry.config.hidden
+      child: usesCustomAppTitleBar
+          // The title bar draws the row; its height stays so the slot under
+          // it sits where the screens expect it.
+          ? const SizedBox(height: kTitleBarHiddenHeaderHeight)
+          : entry == null || entry.config.hidden
           ? const SizedBox.shrink(key: ValueKey('desktop-header-empty'))
           : KeyedSubtree(
               key: ObjectKey(entry.key),
@@ -153,24 +386,38 @@ class _DesktopHeader extends ConsumerWidget {
                 actions: entry.config.actions,
                 showBack: entry.config.showBack,
                 onBack: entry.config.onBack,
+                leading: entry.config.leading,
                 borderRadius: BorderRadius.zero,
               ),
             ),
     );
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        appBar,
-        // Decoupled from the app bar's cross-fade so that switching to a screen
-        // without a segmented control slides the control up and out on its own,
-        // instead of plain-fading with the rest of the header.
-        AnimatedHeaderBelow(
-          below: entry == null || entry.config.hidden
-              ? null
-              : entry.config.below,
+    // Same grouping as the mobile shell header: the app-bar row and the slot
+    // under it are painted one after the other and never overlap, so they can
+    // share one backdrop capture. See [GlassBackdropGroup].
+    //
+    // The header floats over the column outside any screen's Scaffold, so the
+    // slot under the app bar gets its Material here: without it, text there
+    // (the tab row's Add) falls back to the debug style, and fields have
+    // nothing to draw on.
+    return Material(
+      type: MaterialType.transparency,
+      child: GlassBackdropGroup(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            appBar,
+            // Decoupled from the app bar's cross-fade so that switching to a
+            // screen without a segmented control slides the control up and out
+            // on its own, instead of plain-fading with the rest of the header.
+            AnimatedHeaderBelow(
+              below: entry == null || entry.config.hidden
+                  ? null
+                  : entry.config.below,
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 }

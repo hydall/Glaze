@@ -3,21 +3,27 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:easy_localization/easy_localization.dart';
 
+import '../../shared/shell/desktop/desktop_floating_provider.dart';
+import '../../shared/shell/desktop/sidebar_sheet_provider.dart';
+import '../../core/models/folder.dart';
 import '../../core/models/persona.dart';
 import '../../core/services/persona_character_converter.dart';
 import '../../core/utils/platform_paths.dart';
 import '../../core/state/active_selection_provider.dart';
 import '../../core/state/db_provider.dart';
+import '../../core/state/folder_provider.dart';
 import '../../core/state/shared_prefs_provider.dart';
+import '../../shared/widgets/folder_section.dart';
+import '../../shared/widgets/glaze_spinner.dart';
 import 'persona_connections_sheet.dart';
 import 'persona_list_provider.dart';
 import '../../core/utils/id_generator.dart';
 import '../../core/utils/time_helpers.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/generic_editor.dart';
+import '../../shared/widgets/glaze_action_button.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_scaffold.dart';
 import '../../shared/widgets/glaze_toast.dart';
@@ -25,85 +31,224 @@ import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/help_tip.dart';
 import '../../shared/widgets/sheet_view.dart';
 
-
-class PersonaListScreen extends ConsumerWidget {
+class PersonaListScreen extends ConsumerStatefulWidget {
   final bool startExpanded;
   const PersonaListScreen({super.key, this.startExpanded = false});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<PersonaListScreen> createState() => _PersonaListScreenState();
+}
+
+class _PersonaListScreenState extends ConsumerState<PersonaListScreen> {
+  /// Folder currently being browsed, or null at the top level.
+  String? _currentFolderId;
+
+  void _openFolder(String id) => setState(() => _currentFolderId = id);
+
+  void _leaveFolder() => setState(() => _currentFolderId = null);
+
+  void _handleBack() {
+    if (_currentFolderId != null) {
+      _leaveFolder();
+      return;
+    }
+    if (widget.startExpanded) {
+      closeExpandedToolScreen(context, ref);
+    } else {
+      Navigator.of(context).maybePop();
+    }
+  }
+
+  String? _folderName(String id) {
+    final folders = ref.watch(foldersProvider(FolderDomain.persona)).value;
+    return folders?.where((f) => f.id == id).firstOrNull?.name;
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final personas = ref.watch(personaListProvider);
+    final folderId = _currentFolderId;
 
     return SheetView(
-      startExpanded: startExpanded,
+      startExpanded: widget.startExpanded,
       showRouteBackground: false,
-      titleWidget: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            'menu_personas'.tr(),
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              color: context.cs.onSurface,
+      titleWidget: folderId == null
+          ? Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'menu_personas'.tr(),
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: context.cs.onSurface,
+                  ),
+                ),
+                const HelpTip(term: 'persona'),
+              ],
+            )
+          : Text(
+              _folderName(folderId) ?? 'menu_personas'.tr(),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: context.cs.onSurface,
+              ),
             ),
-          ),
-          const HelpTip(term: 'persona'),
-        ],
-      ),
       showBack: true,
-      onBack: startExpanded
-          ? () => context.go('/tools')
-          : () => Navigator.of(context).maybePop(),
+      canPop: folderId == null,
+      onBack: _handleBack,
       actions: [
+        if (folderId == null)
+          SheetViewAction(
+            icon: const Icon(Icons.create_new_folder_outlined, size: 20),
+            tooltip: 'folder_new'.tr(),
+            onPressed: () =>
+                showCreateFolderDialog(context, ref, FolderDomain.persona),
+          ),
         SheetViewAction(
           icon: const Icon(Icons.add, size: 20),
           tooltip: "${'create_new'.tr()} ${'tab_personas'.tr()}",
-          onPressed: () => _showEditor(context, ref),
+          onPressed: () => _showEditor(context),
         ),
       ],
       body: personas.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () => const Center(child: GlazeSpinner()),
         error: (e, _) => Center(child: Text("${'title_error'.tr()}: $e")),
-        data: (list) => list.isEmpty
-            ? Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text('no_results'.tr()),
-                    const SizedBox(height: 8),
-                    FilledButton.tonal(
-                      onPressed: () => _showEditor(context, ref),
-                      child: Text("${'create_new'.tr()} ${'tab_personas'.tr()}"),
-                    ),
-                  ],
-                ),
-              )
-            : Builder(
-                builder: (context) => ListView.builder(
-                  padding: EdgeInsets.fromLTRB(16, startExpanded ? 16 : 0, 16, 16).add(
-                    EdgeInsets.only(
-                      top: MediaQuery.paddingOf(context).top,
-                      bottom: MediaQuery.paddingOf(context).bottom,
-                    ),
+        data: (all) {
+          final memberships =
+              ref.watch(folderMembershipsProvider(FolderDomain.persona)).value ??
+              FolderMemberships.empty;
+          final hasFolders =
+              (ref.watch(foldersProvider(FolderDomain.persona)).value ??
+                      const [])
+                  .isNotEmpty;
+
+          final List<Persona> list;
+          if (folderId != null) {
+            final ids = memberships.membersIn(folderId);
+            list = all.where((p) => ids.contains(p.id)).toList();
+          } else {
+            list = all
+                .where((p) => memberships.foldersOf(p.id).isEmpty)
+                .toList();
+          }
+
+          if (all.isEmpty && !hasFolders) {
+            return Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('no_results'.tr()),
+                  const SizedBox(height: 8),
+                  GlazeActionButton(
+                    icon: Icons.add_rounded,
+                    label:
+                        "${'create_new'.tr()} ${'tab_personas'.tr()}",
+                    tone: GlazeActionTone.primary,
+                    onTap: () => _showEditor(context),
                   ),
-                  itemCount: list.length,
-                  itemBuilder: (_, i) => _PersonaTile(
-                    persona: list[i],
-                    openEditor: (persona) => _showEditor(context, ref, persona),
-                  ),
-                ),
+                ],
               ),
+            );
+          }
+
+          return Builder(
+            builder: (context) {
+              final mediaPad = EdgeInsets.only(
+                top: MediaQuery.paddingOf(context).top,
+                bottom: MediaQuery.paddingOf(context).bottom,
+              );
+              final header = <Widget>[
+                if (folderId == null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+                    child: FolderSection(
+                      domain: FolderDomain.persona,
+                      onOpenFolder: _openFolder,
+                      icon: Icons.person_outline,
+                    ),
+                  ),
+              ];
+              final rows = <Widget>[
+                for (final persona in list)
+                  _PersonaTile(
+                    persona: persona,
+                    openEditor: (persona) => _showEditor(context, persona),
+                  ),
+              ];
+              return ListView(
+                padding: EdgeInsets.fromLTRB(
+                  16,
+                  widget.startExpanded ? 16 : 0,
+                  16,
+                  16,
+                ).add(mediaPad),
+                children: [
+                  ...header,
+                  if (list.isEmpty)
+                    const FolderEmptyState()
+                  else
+                    ...rows,
+                ],
+              );
+            },
+          );
+        },
       ),
     );
   }
 
-  void _showEditor(BuildContext context, WidgetRef ref, [Persona? existing]) {
-    Navigator.of(context, rootNavigator: !startExpanded).push(
-      MaterialPageRoute<void>(
-        builder: (_) => _PersonaEditorScreen(existing: existing),
-      ),
+  void _showEditor(BuildContext context, [Persona? existing]) {
+    openPersonaEditor(
+      context,
+      existing: existing,
+      rootNavigator: !widget.startExpanded,
     );
+  }
+}
+
+/// Opens the editor for [existing], or for a new persona: on desktop in a
+/// floating window of its own beside the list (opening one already open brings
+/// it to the front), elsewhere as a page pushed on [rootNavigator] or the
+/// nearest one.
+void openPersonaEditor(
+  BuildContext context, {
+  Persona? existing,
+  bool rootNavigator = true,
+}) {
+  final view = Uri(
+    path: 'persona-editor',
+    queryParameters: existing == null
+        ? {'new': generateId()}
+        : {'id': existing.id},
+  ).toString();
+  if (floatOnDesktop(context, view)) return;
+  Navigator.of(context, rootNavigator: rootNavigator).push(
+    MaterialPageRoute<void>(
+      builder: (_) => _PersonaEditorScreen(existing: existing),
+    ),
+  );
+}
+
+/// The persona editor in a desktop floating window (`persona-editor`): the
+/// persona [personaId] names, or a new one when it is null.
+class PersonaEditorWindow extends ConsumerWidget {
+  final String? personaId;
+
+  const PersonaEditorWindow({super.key, this.personaId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final id = personaId;
+    if (id == null) return const _PersonaEditorScreen();
+    final personas = ref.watch(personaListProvider).value;
+    if (personas == null) return const Center(child: GlazeSpinner());
+    final persona = personas.where((p) => p.id == id).firstOrNull;
+    if (persona == null) return const SizedBox.shrink();
+    return _PersonaEditorScreen(existing: persona);
   }
 }
 
@@ -111,10 +256,7 @@ class _PersonaTile extends ConsumerWidget {
   final Persona persona;
   final void Function(Persona persona) openEditor;
 
-  const _PersonaTile({
-    required this.persona,
-    required this.openEditor,
-  });
+  const _PersonaTile({required this.persona, required this.openEditor});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -126,8 +268,8 @@ class _PersonaTile extends ConsumerWidget {
     final rawAvatarPath = persona.avatarPath?.trim();
     final resolvedAvatarPath =
         (rawAvatarPath != null && rawAvatarPath.isNotEmpty)
-            ? resolveGlazeFilePath(rawAvatarPath)
-            : null;
+        ? resolveGlazeFilePath(rawAvatarPath)
+        : null;
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: GlassSurface(
@@ -145,15 +287,19 @@ class _PersonaTile extends ConsumerWidget {
               : context.cs.outline,
         ),
         child: ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          onTap: () =>
-              setActivePersona(ref, isActive ? null : persona.id),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 4,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          onTap: () => setActivePersona(ref, isActive ? null : persona.id),
           leading: CircleAvatar(
             radius: 24,
             backgroundColor: context.cs.primary.withValues(alpha: 0.18),
-            backgroundImage: resolvedAvatarPath != null &&
-                    resolvedAvatarPath.isNotEmpty
+            backgroundImage:
+                resolvedAvatarPath != null && resolvedAvatarPath.isNotEmpty
                 ? FileImage(File(resolvedAvatarPath))
                 : null,
             child: resolvedAvatarPath == null || resolvedAvatarPath.isEmpty
@@ -203,6 +349,18 @@ class _PersonaTile extends ConsumerWidget {
                         },
                       ),
                       BottomSheetItem(
+                        label: 'action_add_to_folder'.tr(),
+                        icon: Icons.create_new_folder_outlined,
+                        onTap: () {
+                          Navigator.of(context, rootNavigator: true).pop();
+                          showAddToFolderSheet(
+                            context,
+                            domain: FolderDomain.persona,
+                            targets: [persona.id],
+                          );
+                        },
+                      ),
+                      BottomSheetItem(
                         label: 'action_clone_persona'.tr(),
                         icon: Icons.copy_outlined,
                         onTap: () async {
@@ -231,7 +389,9 @@ class _PersonaTile extends ConsumerWidget {
                         isDestructive: true,
                         onTap: () {
                           Navigator.of(context, rootNavigator: true).pop();
-                          ref.read(personaListProvider.notifier).remove(persona.id);
+                          ref
+                              .read(personaListProvider.notifier)
+                              .remove(persona.id);
                         },
                       ),
                     ],
@@ -270,29 +430,30 @@ class _PersonaEditorScreenState extends ConsumerState<_PersonaEditorScreen> {
   }
 
   List<GenericEditorSection> get _config => [
-        GenericEditorSection(
-          title: 'section_basic_info'.tr(),
-          fields: [
-            GenericEditorField(
-              key: 'name',
-              label: 'label_name'.tr(),
-              placeholder: 'placeholder_enter_name'.tr(),
-            ),
-            GenericEditorField(
-              key: 'display_name',
-              label: 'Display Name',
-              placeholder: 'Name shown in lists',
-            ),
-            GenericEditorField(
-              key: 'prompt',
-              label: "${'tab_personas'.tr()} ${'label_char_prompt'.tr().replaceAll(RegExp(r'Character |Персонажа ', caseSensitive: false), '')}",
-              type: 'textarea',
-              rows: 12,
-              placeholder: 'placeholder_prompt_text'.tr(),
-            ),
-          ],
+    GenericEditorSection(
+      title: 'section_basic_info'.tr(),
+      fields: [
+        GenericEditorField(
+          key: 'name',
+          label: 'label_name'.tr(),
+          placeholder: 'placeholder_enter_name'.tr(),
         ),
-      ];
+        GenericEditorField(
+          key: 'display_name',
+          label: 'Display Name',
+          placeholder: 'Name shown in lists',
+        ),
+        GenericEditorField(
+          key: 'prompt',
+          label:
+              "${'tab_personas'.tr()} ${'label_char_prompt'.tr().replaceAll(RegExp(r'Character |Персонажа ', caseSensitive: false), '')}",
+          type: 'textarea',
+          rows: 12,
+          placeholder: 'placeholder_prompt_text'.tr(),
+        ),
+      ],
+    ),
+  ];
 
   @override
   void initState() {
@@ -320,7 +481,12 @@ class _PersonaEditorScreenState extends ConsumerState<_PersonaEditorScreen> {
 
     final imageStorage = await ref.read(imageStorageProvider.future);
     final bytes = await File(filePath).readAsBytes();
-    final savedPath = await imageStorage.saveAvatar('persona_$_personaId', bytes);
+    // Reusing persona_<id>.png leaves the WebView on its cached image and the
+    // persona roster cannot observe a change because avatarPath stays equal.
+    final savedPath = await imageStorage.saveAvatar(
+      'persona_${_personaId}_${DateTime.now().microsecondsSinceEpoch}',
+      bytes,
+    );
     await FileImage(File(savedPath)).evict();
     final thumbPath = imageStorage.thumbnailPath(savedPath);
     if (thumbPath != null) await FileImage(File(thumbPath)).evict();
@@ -358,7 +524,9 @@ class _PersonaEditorScreenState extends ConsumerState<_PersonaEditorScreen> {
   @override
   Widget build(BuildContext context) {
     return GlazeScaffold(
-      title: widget.existing != null ? "${'action_edit'.tr()} ${'tab_personas'.tr()}" : "${'create_new'.tr()} ${'tab_personas'.tr()}",
+      title: widget.existing != null
+          ? "${'action_edit'.tr()} ${'tab_personas'.tr()}"
+          : "${'create_new'.tr()} ${'tab_personas'.tr()}",
       onBack: () => Navigator.of(context).pop(),
       body: GenericEditor(
         item: _item,

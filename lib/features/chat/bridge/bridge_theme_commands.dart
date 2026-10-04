@@ -16,9 +16,12 @@ class ThemeBridgeCommands {
     );
   }
 
-  Future<void> setBackgroundImage(String? src, int blur, double opacity) {
+  /// Background darkening is not passed here — it rides on the `bg-dim`
+  /// theme variable ([applyTheme]), which paints a black overlay over the
+  /// in-WebView background copy instead of making it translucent.
+  Future<void> setBackgroundImage(String? src, int blur) {
     if (src == null || src.isEmpty) {
-      return _host.evalJs('window.bridge?.setBackgroundImage(null, 0, 1)');
+      return _host.evalJs('window.bridge?.setBackgroundImage(null, 0)');
     }
     String? url;
     if (src.startsWith('data:') ||
@@ -30,14 +33,14 @@ class ThemeBridgeCommands {
       url = _host.resolveLocalFileUrl(src);
     }
     if (url == null) {
-      return _host.evalJs('window.bridge?.setBackgroundImage(null, 0, 1)');
+      return _host.evalJs('window.bridge?.setBackgroundImage(null, 0)');
     }
     // Pass through JSON encoder — data URIs can be megabytes long and
     // may contain characters that the lightweight escape helper doesn't
     // handle.
     final encoded = jsonEncode(url);
     return _host.evalJs(
-      'window.bridge?.setBackgroundImage($encoded, $blur, $opacity)',
+      'window.bridge?.setBackgroundImage($encoded, $blur)',
     );
   }
 

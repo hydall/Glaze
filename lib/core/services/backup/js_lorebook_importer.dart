@@ -158,7 +158,13 @@ class JsLorebookImporter extends BackupHelpers {
               lorebookId: cbId,
               name: cbRaw['name'] as String? ??
                   '${char['name'] ?? 'Char'} Lorebook',
-              enabled: Value(cbRaw['enabled'] as bool? ?? false),
+              // Never carried over from the card. `enabled` here is Glaze's
+              // Global switch, while `character_book.enabled` on a card means
+              // "this card's own book is on" — copying one into the other is
+              // what made an imported character's lorebook fire in every chat.
+              // The character scope below is what activates it where it
+              // belongs.
+              enabled: const Value(false),
               activationScope: Value('character'),
               activationTargetId: Value(charId),
               entriesJson: jsonEncode(mappedEntries),

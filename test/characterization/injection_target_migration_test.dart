@@ -86,6 +86,11 @@ void main() {
   });
 
   group('MemoryGlobalSettings.injectionTarget migration', () {
+    test('removed agentic memory mode migrates to deep', () {
+      final result = MemoryGlobalSettings.fromJson({'memoryMode': 'agentic'});
+      expect(result.memoryMode, 'deep');
+    });
+
     test('summary_block -> hard_block', () {
       final result = MemoryGlobalSettings.fromJson({
         'injectionTarget': 'summary_block',

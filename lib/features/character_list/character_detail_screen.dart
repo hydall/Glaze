@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:easy_localization/easy_localization.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -15,9 +16,12 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/models/character.dart';
 import '../../core/services/chat_import_export.dart';
+import '../../shared/widgets/glaze_spinner.dart';
+import '../catalog/catalog_models.dart';
 import '../catalog/services/janitor_provider.dart';
 import '../catalog/services/janitor_public_lorebook.dart';
-import '../catalog/widgets/janitor_comments_section.dart';
+import '../catalog/widgets/catalog_comments_section.dart';
+import '../catalog/widgets/datacat/datacat_community_section.dart';
 import '../catalog/widgets/janitor_lorebooks_tab.dart';
 import '../../core/services/persona_character_converter.dart';
 import '../../core/utils/html_to_markdown.dart';
@@ -25,6 +29,7 @@ import '../../core/utils/platform_paths.dart';
 import '../../core/state/character_provider.dart';
 import '../../core/state/chat_session_ops_provider.dart';
 import '../../features/chat/chat_actions_service.dart';
+import '../../features/chat/widgets/session_picker_sheet.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/theme/theme_preset.dart';
 import '../../shared/theme/theme_provider.dart';
@@ -36,17 +41,22 @@ import '../../shared/widgets/tab_slide_switcher.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/image_viewer.dart';
+import '../../shared/widgets/nsfw_blur.dart';
 import '../../shared/widgets/sheet_view.dart';
 import '../../shared/widgets/colored_markdown.dart';
+import '../../shared/widgets/variation_chip.dart';
+import '../../shared/utils/variant_label.dart';
 import 'character_editor_screen.dart';
+import '../../shared/shell/desktop/desktop_layout_provider.dart';
 import '../character_gallery/widgets/character_gallery_view.dart';
 import 'widgets/character_variations_sheet.dart';
 import 'widgets/character_hiding_onboarding_sheet.dart';
+import '../../shared/widgets/glaze_sheet.dart';
 
 // ─── Colour tokens ─────────────────────────────────────────────────────────
 
-const _kAccentDim = Color(0x1F7996CE);
-const _kAccentBorder = Color(0x337996CE);
+const _kAccentDim = Color(0x1FC42A4A);
+const _kAccentBorder = Color(0x33C42A4A);
 const _kNsfw = Color(0xFFFF4444);
 const _kNsfwBg = Color(0x33FF4444);
 const _kNsfwBorder = Color(0x4DFF4444);
@@ -105,11 +115,13 @@ class _CharacterDetailSheetLauncherState
   Future<void> _show() async {
     final location = GoRouterState.of(context).uri.path;
     final isSubRoute =
-        location.endsWith('/edit') || location.endsWith('/gallery');
+        location.endsWith('/edit') ||
+        location.endsWith('/gallery') ||
+        location.startsWith('/character/${widget.charId}/rewrite/');
     if (isSubRoute) return;
     String? navTarget;
     try {
-      navTarget = await showModalBottomSheet<String>(
+      navTarget = await showGlazeSheet<String>(
         context: context,
         isScrollControlled: true,
         useRootNavigator: true,
@@ -138,7 +150,7 @@ class _CharacterDetailSheetLauncherState
   Widget build(BuildContext context) {
     return const Scaffold(
       backgroundColor: Colors.transparent,
-      body: Center(child: CircularProgressIndicator()),
+      body: Center(child: GlazeSpinner()),
     );
   }
 }
@@ -152,9 +164,14 @@ class CharacterDetailScreen extends ConsumerStatefulWidget {
   final Character? previewCharacter;
   final String? previewAvatarUrl;
 
+  /// Preview-only: draw the hero image and the images inside the bio through a
+  /// blur. Set by the catalog when the global blur setting is on and this is an
+  /// adult row; it changes nothing about the character or the import.
+  final bool previewBlurNsfwImages;
+
   /// External URL of the character's source page (e.g. its Janitor page).
-  /// When set in preview mode, an "open in browser" button replaces the
-  /// three-dots actions menu in the floating header.
+  /// When set in preview mode, an "open in browser" button appears in the
+  /// floating header, next to the three-dots menu a blurred preview adds.
   final String? previewSourceUrl;
 
   /// External URL of the creator's profile page. When set, tapping the
@@ -171,9 +188,30 @@ class CharacterDetailScreen extends ConsumerStatefulWidget {
   /// extraction + LLM build of the closed lorebook.
   final JanitorLorebookArgs? janitorLorebookArgs;
 
-  /// Runs the import. [includeLorebooks] is chosen via the import-options bottom
-  /// sheet when the previewed character has attached lorebooks.
-  final Future<void> Function({bool includeLorebooks})? onImport;
+  /// DataCat kudos and comments for this preview, when it is a DataCat
+  /// character. Its own section rather than the comment list above: it also
+  /// writes, so it owns its loading, its composer and the account state they
+  /// depend on.
+  final DatacatCommunityArgs? datacatCommunityArgs;
+
+  /// Opens the creator inside the app instead of in a browser. Set for a
+  /// source that has a creator screen of its own; when null the author line
+  /// falls back to [previewAuthorUrl] and the system browser.
+  final VoidCallback? onOpenCreator;
+
+  /// Runs the import in the given [CatalogImportMode], chosen via the
+  /// import-options bottom sheet when the previewed character has attached
+  /// lorebooks (it starts immediately in [CatalogImportMode.character] when it
+  /// has none).
+  final Future<void> Function({CatalogImportMode mode})? onImport;
+
+  /// Asked once when the Import button is tapped, before the mode is chosen.
+  /// Returning false aborts the tap — the source uses it to explain that this
+  /// character cannot be imported the way the user expects (JanitorAI cards
+  /// that forbid proxies), so the warning lands on the first tap instead of
+  /// after the options sheet.
+  final Future<bool> Function()? onBeforeImport;
+
   final bool importing;
 
   /// Current phase label while [importing] (e.g. local extraction progress).
@@ -184,11 +222,15 @@ class CharacterDetailScreen extends ConsumerStatefulWidget {
     required this.charId,
     this.previewCharacter,
     this.previewAvatarUrl,
+    this.previewBlurNsfwImages = false,
     this.previewSourceUrl,
     this.previewAuthorUrl,
     this.janitorReviewCharId,
     this.janitorLorebookArgs,
+    this.datacatCommunityArgs,
+    this.onOpenCreator,
     this.onImport,
+    this.onBeforeImport,
     this.importing = false,
     this.importPhase,
   });
@@ -203,12 +245,20 @@ class CharacterDetailScreen extends ConsumerStatefulWidget {
 class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
   int _activeTabIndex = 0;
 
+  /// Whether the reader has revealed the adult imagery for this preview view.
+  /// The blur setting still applies to the grid and to the next preview; this
+  /// only lifts it here, and the sheet's menu can put it back.
+  bool _nsfwRevealed = false;
+
+  /// The blur actually painted: the setting's answer unless revealed here.
+  bool get _blurNsfwActive => widget.previewBlurNsfwImages && !_nsfwRevealed;
+
   /// Owns the body's scroll so we can drive lazy comment paging from the
   /// near-bottom position (see [_onScroll]).
   final ScrollController _scrollController = ScrollController();
 
   // ─── Comments paging state (JanitorAI previews only) ──────────────────────
-  final List<JanitorReview> _comments = [];
+  final List<CatalogComment> _comments = [];
   int _commentPage = 1;
   bool _commentsLoading = false;
   bool _commentsHasMore = true;
@@ -216,6 +266,12 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
 
   bool get _hasComments => widget.janitorReviewCharId != null;
   bool get _hasLorebooks => widget.janitorLorebookArgs != null;
+  bool get _hasDatacatCommunity => widget.datacatCommunityArgs != null;
+
+  /// Stand-in URL for an author line that navigates in-app. The hero only
+  /// checks that the target is non-empty before making the name tappable; the
+  /// value itself is never opened.
+  static const _inAppAuthorTarget = 'in-app';
 
   /// Whether the previewed character actually lists attached lorebooks (not just
   /// that it is a JanitorAI preview). Drives the import-options bottom sheet.
@@ -265,7 +321,7 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
       setState(() {
         _comments.addAll(batch);
         // A full page means there may be more; a short page is the end.
-        _commentsHasMore = batch.length >= kJanitorReviewsPageSize;
+        _commentsHasMore = batch.length >= kCatalogCommentsPageSize;
         _commentPage += 1;
         _commentsLoading = false;
       });
@@ -300,6 +356,42 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
     await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
+  /// The preview sheet's three-dots menu: open the character on its source
+  /// site, and lift (or restore) the blur on this adult preview's imagery for
+  /// this view only.
+  void _openPreviewActionsMenu() {
+    final rootNav = Navigator.of(context, rootNavigator: true);
+    final revealed = _nsfwRevealed;
+    final sourceUrl = widget.previewSourceUrl;
+    GlazeBottomSheet.show<void>(
+      context,
+      items: [
+        if (sourceUrl != null)
+          BottomSheetItem(
+            icon: Icons.open_in_new_rounded,
+            label: 'catalog_open_source'.tr(),
+            onTap: () {
+              rootNav.pop();
+              _openExternal(sourceUrl);
+            },
+          ),
+        if (widget.previewBlurNsfwImages)
+          BottomSheetItem(
+            icon: revealed
+                ? Icons.visibility_off_outlined
+                : Icons.visibility_outlined,
+            label: (revealed ? 'catalog_nsfw_reblur' : 'catalog_nsfw_unblur')
+                .tr(),
+            onTap: () {
+              rootNav.pop();
+              if (!mounted) return;
+              setState(() => _nsfwRevealed = !revealed);
+            },
+          ),
+      ],
+    );
+  }
+
   /// Opens the character editor stacked ABOVE this detail sheet.
   ///
   /// The detail sheet is itself an imperative modal route (opened via
@@ -310,6 +402,13 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
   /// same root navigator puts it on top; popping it (its own back button, the
   /// system back gesture, or `context.pop`) returns to the still-open sheet.
   void _openEditor() {
+    // On desktop the editor is a floating window, and those sit under a
+    // modal one like this: step aside for it.
+    if (isDesktopLayout(context)) {
+      unawaited(openCharacterEditor(context, widget.charId));
+      Navigator.of(context).pop();
+      return;
+    }
     final isIos = !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
     final editor = CharacterEditorScreen(charId: widget.charId);
     Navigator.of(context, rootNavigator: true).push(
@@ -448,12 +547,15 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
     }
   }
 
+  /// Label of the variation this sheet shows, or null when the character has no
+  /// variations and there is nothing to disambiguate — same rule as the card.
+  String? _variationLabelOf(Character char) =>
+      _variantCount(char) > 1 ? variantLabel(char) : null;
+
   /// Number of variations in [char]'s group (1 for a standalone character).
   int _variantCount(Character? char) {
     if (char == null) return 1;
-    final groupId = char.variantGroupId.isEmpty
-        ? char.id
-        : char.variantGroupId;
+    final groupId = char.variantGroupId.isEmpty ? char.id : char.variantGroupId;
     return ref.read(variantGroupStatsProvider).value?[groupId]?.count ?? 1;
   }
 
@@ -472,19 +574,26 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
   }
 
   /// Import FAB tap. When the previewed character ships attached lorebooks the
-  /// user first picks whether to pull them along; otherwise the import starts
-  /// immediately.
-  void _handleImportTap() {
+  /// user first picks what to pull; otherwise the import starts immediately.
+  Future<void> _handleImportTap() async {
     if (widget.importing) return;
+    final gate = widget.onBeforeImport;
+    if (gate != null && !await gate()) return;
+    if (!mounted) return;
     if (_previewHasLorebooks) {
       _showImportOptions();
     } else {
-      widget.onImport?.call();
+      await widget.onImport?.call(mode: CatalogImportMode.character);
     }
   }
 
   void _showImportOptions() {
     final rootNav = Navigator.of(context, rootNavigator: true);
+    void run(CatalogImportMode mode) {
+      rootNav.pop();
+      widget.onImport?.call(mode: mode);
+    }
+
     GlazeBottomSheet.show<void>(
       context,
       title: 'catalog_import_options_title'.tr(),
@@ -493,19 +602,21 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
           icon: Icons.auto_stories_outlined,
           label: 'catalog_import_with_lorebooks'.tr(),
           hint: 'catalog_import_with_lorebooks_hint'.tr(),
-          onTap: () {
-            rootNav.pop();
-            widget.onImport?.call(includeLorebooks: true);
-          },
+          onTap: () => run(CatalogImportMode.characterAndLorebooks),
         ),
         BottomSheetItem(
           icon: Icons.person_outline_rounded,
           label: 'catalog_import_char_only'.tr(),
           hint: 'catalog_import_char_only_hint'.tr(),
-          onTap: () {
-            rootNav.pop();
-            widget.onImport?.call(includeLorebooks: false);
-          },
+          onTap: () => run(CatalogImportMode.character),
+        ),
+        // Lorebooks on their own: the character is already in the library (or
+        // the user only wants the world info), so nothing is added to it.
+        BottomSheetItem(
+          icon: Icons.menu_book_outlined,
+          label: 'catalog_import_lorebooks_only'.tr(),
+          hint: 'catalog_import_lorebooks_only_hint'.tr(),
+          onTap: () => run(CatalogImportMode.lorebooks),
         ),
       ],
     );
@@ -518,57 +629,39 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
   /// there opens that variation's sheet), so a prompt here would be the same
   /// question twice.
   Future<void> _openChat(BuildContext context, String cId) async {
-    final sessions = await ref
-        .read(chatSessionOpsProvider.notifier)
-        .getSessionMetadataByCharacter(cId);
-    if (!context.mounted) return;
+    // The same picker the magic drawer opens — see `showSessionPickerSheet`.
+    // This sheet used to list bare "Session #N" entries with a message count
+    // and no name, preview, time or actions, which made the same list look
+    // like two different features depending on where you opened it.
+    //
+    // The picker resolves after its own route is gone; the outer
+    // CharacterDetailScreen modal is popped exactly once afterwards. Two
+    // chained Navigator.pop() calls (one immediate + one via
+    // addPostFrameCallback) race against the inner sheet's exit animation and
+    // can drop the route on the floor.
+    final result = await showSessionPickerSheet(context, charId: cId);
+    if (result == null || !context.mounted) return;
 
-    // Inner sheet pops with a value; the outer CharacterDetailScreen modal
-    // is popped exactly once afterwards. Two chained Navigator.pop() calls
-    // (one immediate + one via addPostFrameCallback) race against the inner
-    // sheet's exit animation and can drop the route on the floor.
-    final result = await GlazeBottomSheet.show<String>(
-      context,
-      title: 'btn_open_chat'.tr(),
-      items: [
-        BottomSheetItem(
-          icon: Icons.add,
-          label: 'btn_new_chat'.tr(),
-          onTap: () => Navigator.of(context, rootNavigator: true).pop('new'),
-        ),
-        BottomSheetItem(
-          icon: Icons.file_download,
-          label: 'action_import'.tr(),
-          onTap: () => Navigator.of(context, rootNavigator: true).pop('import'),
-        ),
-        ...sessions.map(
-          (s) => BottomSheetItem(
-            icon: Icons.chat_bubble_outline,
-            label: 'session_name'.tr(
-              namedArgs: {'id': '${s.sessionIndex + 1}'},
-            ),
-            hint:
-                '${s.messageCount} ${'count_messages'.plural(s.messageCount)}',
-            onTap: () => Navigator.of(
-              context,
-              rootNavigator: true,
-            ).pop('session:${s.sessionIndex}'),
-          ),
-        ),
-      ],
-    );
-
-    if (result == null) return;
-    if (!context.mounted) return;
-
-    if (result == 'import') {
+    if (result.action == SessionPickerAction.importChat) {
       unawaited(_importChat(cId));
       return;
     }
 
-    final route = result == 'new'
-        ? (sessions.isEmpty ? '/chat/$cId' : '/chat/$cId?new=1')
-        : '/chat/$cId?session=${result.substring('session:'.length)}';
+    final String route;
+    if (result.action == SessionPickerAction.newSession) {
+      // `?new=1` asks the chat screen to *add* a session; a character with none
+      // yet gets its first one from the plain route instead. Re-read the count
+      // here rather than before the sheet — the picker can delete sessions.
+      final hasSessions =
+          (await ref
+                  .read(chatSessionOpsProvider.notifier)
+                  .getSessionMetadataByCharacter(cId))
+              .isNotEmpty;
+      if (!context.mounted) return;
+      route = hasSessions ? '/chat/$cId?new=1' : '/chat/$cId';
+    } else {
+      route = '/chat/$cId?session=${result.session!.sessionIndex}';
+    }
     Navigator.of(context, rootNavigator: true).pop<String>(route);
   }
 
@@ -659,7 +752,7 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
     Character? char,
   ) {
     if (!widget.isPreview && charactersAsync.isLoading && char == null) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: GlazeSpinner());
     }
     if (char == null) {
       return Center(
@@ -682,8 +775,17 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
             _HeroSection(
               character: char,
               previewAvatarUrl: widget.previewAvatarUrl,
-              authorUrl: widget.previewAuthorUrl,
-              onOpenAuthor: _openExternal,
+              blurNsfw: _blurNsfwActive,
+              // An in-app creator screen wins over the external link: the
+              // author line is the same affordance either way, it just lands
+              // somewhere better when the source has a page for it.
+              authorUrl: widget.onOpenCreator != null
+                  ? _inAppAuthorTarget
+                  : widget.previewAuthorUrl,
+              onOpenAuthor: widget.onOpenCreator != null
+                  ? (_) => widget.onOpenCreator!()
+                  : _openExternal,
+              variationLabel: _variationLabelOf(char),
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
@@ -729,13 +831,23 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _InfoTab(character: char),
+            _InfoTab(
+              character: char,
+              blurNsfwImages: _blurNsfwActive,
+            ),
+            if (_hasDatacatCommunity) ...[
+              _TabSectionHeader(
+                icon: Icons.forum_outlined,
+                label: 'section_community'.tr(),
+              ),
+              DatacatCommunitySection(args: widget.datacatCommunityArgs!),
+            ],
             if (_hasComments) ...[
               _TabSectionHeader(
                 icon: Icons.forum_outlined,
                 label: 'section_comments'.tr(),
               ),
-              JanitorCommentsView(
+              CatalogCommentsView(
                 comments: _comments,
                 loading: _commentsLoading,
                 hasMore: _commentsHasMore,
@@ -794,10 +906,11 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
                 )
               else if (widget.isPreview &&
                   char != null &&
-                  widget.previewSourceUrl != null)
+                  (widget.previewBlurNsfwImages ||
+                      widget.previewSourceUrl != null))
                 _DetailHeaderButton(
-                  icon: Icons.open_in_new_rounded,
-                  onTap: () => _openExternal(widget.previewSourceUrl!),
+                  icon: Icons.more_vert_rounded,
+                  onTap: _openPreviewActionsMenu,
                 ),
             ],
           ),
@@ -880,10 +993,7 @@ class _ImportFab extends StatelessWidget {
               const SizedBox(
                 width: 18,
                 height: 18,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2.5,
-                  color: Colors.white,
-                ),
+                child: GlazeSpinner(color: Colors.white),
               )
             else
               const Icon(Icons.download_rounded, color: Colors.white, size: 20),
@@ -973,13 +1083,26 @@ class _DetailHeaderButtonState extends ConsumerState<_DetailHeaderButton>
 class _HeroSection extends StatelessWidget {
   final Character character;
   final String? previewAvatarUrl;
+
+  /// Draw the hero image through [NsfwBlur]. Only ever set on an adult catalog
+  /// preview while the blur setting is on.
+  final bool blurNsfw;
   final String? authorUrl;
   final void Function(String url)? onOpenAuthor;
+
+  /// Name of the variation this sheet belongs to, or null when the character
+  /// has none. Shown as a plain chip above the name, mirroring the card you
+  /// arrived from; it is a label, not a control — the sheet is already the
+  /// variation it names.
+  final String? variationLabel;
+
   const _HeroSection({
     required this.character,
     this.previewAvatarUrl,
+    this.blurNsfw = false,
     this.authorUrl,
     this.onOpenAuthor,
+    this.variationLabel,
   });
 
   String get _displayName {
@@ -1016,7 +1139,7 @@ class _HeroSection extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            _buildImage(),
+            NsfwBlur(enabled: blurNsfw, child: _buildImage()),
             const DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
@@ -1039,17 +1162,11 @@ class _HeroSection extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    _displayName,
-                    style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                      shadows: [
-                        Shadow(blurRadius: 6, color: Color(0xCC000000)),
-                      ],
-                    ),
-                  ),
+                  if (variationLabel != null) ...[
+                    VariationChip(name: variationLabel!, maxWidth: 180),
+                    const SizedBox(height: 6),
+                  ],
+                  _HeroName(name: _displayName),
                   if (character.creator != null &&
                       character.creator!.isNotEmpty)
                     _buildAuthorLabel(context),
@@ -1104,6 +1221,179 @@ class _HeroSection extends StatelessWidget {
   }
 }
 
+/// The character's name over the hero image.
+///
+/// The caption column is pinned to the *bottom* of a fixed-height image, so
+/// every extra line a long name wraps onto pushes the name upward — past the
+/// top of the hero and under the back button. This caps it at
+/// [_kHeroNameMaxLines] and, when the name needs more room than that, scrolls
+/// it from the top to the bottom and starts over instead of growing.
+class _HeroName extends StatefulWidget {
+  final String name;
+
+  const _HeroName({required this.name});
+
+  @override
+  State<_HeroName> createState() => _HeroNameState();
+}
+
+const _kHeroNameMaxLines = 2;
+const _kHeroNameStyle = TextStyle(
+  fontSize: 22,
+  fontWeight: FontWeight.w700,
+  color: Colors.white,
+  shadows: [Shadow(blurRadius: 6, color: Color(0xCC000000))],
+);
+
+/// How long the name rests at each end before the next leg of the loop.
+const _kHeroNameHold = Duration(milliseconds: 1600);
+
+/// Scroll speed, in logical pixels per second. Slow enough to read.
+const _kHeroNameSpeed = 26.0;
+
+/// Measures a hero name capped to [maxLines] and reports the height of that
+/// cap ([viewport]) plus how much taller the name is than the cap ([overflow]).
+///
+/// The measurement has to use the *rendered* style and text scale. A bare
+/// [TextPainter] ignores both the ambient [DefaultTextStyle] (which [Text]
+/// merges in, including any `height`) and the accessibility text scale [Text]
+/// applies — so at a larger system font the painter thinks a name needs two
+/// lines while it is really laid out taller, and the fixed clip cuts through
+/// the second line.
+({double viewport, double overflow}) measureHeroName({
+  required String name,
+  required TextStyle style,
+  required double maxWidth,
+  required ui.TextDirection textDirection,
+  required TextScaler textScaler,
+  int maxLines = _kHeroNameMaxLines,
+}) {
+  final painter = TextPainter(
+    text: TextSpan(text: name, style: style),
+    textDirection: textDirection,
+    textScaler: textScaler,
+  )..layout(maxWidth: maxWidth);
+  final viewport = painter.preferredLineHeight * maxLines;
+  final overflow = painter.height - viewport;
+  painter.dispose();
+  return (viewport: viewport, overflow: overflow);
+}
+
+/// Where the name sits in its loop after [elapsedMs]: held at the top for
+/// [holdMs], scrolled down over [scrollMs], held at the bottom for another
+/// [holdMs], then back to the top. Returns the distance scrolled, from 0 to
+/// [overflow].
+double heroNameScrollOffset({
+  required double elapsedMs,
+  required double overflow,
+  required double holdMs,
+  required double scrollMs,
+}) {
+  if (overflow <= 0 || scrollMs <= 0) return 0;
+  final t = elapsedMs % (holdMs * 2 + scrollMs);
+  if (t < holdMs) return 0;
+  if (t >= holdMs + scrollMs) return overflow;
+  return overflow * ((t - holdMs) / scrollMs);
+}
+
+class _HeroNameState extends State<_HeroName>
+    with SingleTickerProviderStateMixin {
+  late final _ticker = createTicker(_onTick);
+
+  /// Milliseconds since the ticker started. A plain notifier rather than
+  /// setState: the offset changes every frame and nothing else in the hero
+  /// needs to rebuild for it.
+  final ValueNotifier<double> _elapsedMs = ValueNotifier(0);
+
+  void _onTick(Duration elapsed) {
+    _elapsedMs.value = elapsed.inMicroseconds / 1000.0;
+  }
+
+  /// Whether the name is long enough to scroll is known only once it has been
+  /// laid out, so the ticker is started (and stopped again) after the frame
+  /// that measured it rather than from [initState].
+  void _setTicking(bool ticking) {
+    if (ticking == _ticker.isActive) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || ticking == _ticker.isActive) return;
+      if (ticking) {
+        _ticker.start();
+      } else {
+        _ticker.stop();
+        _elapsedMs.value = 0;
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _ticker.dispose();
+    _elapsedMs.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // A reader who has asked the platform to reduce motion gets the name
+    // clipped to the same height instead — still better than a name climbing
+    // off the top of the image. Battery Saver is deliberately *not* consulted:
+    // it defaults to on, so honouring it here would leave the overflowing name
+    // unreadable for almost everyone, and this ticker only runs while a sheet
+    // whose name actually overflows is on screen.
+    final animate = !MediaQuery.disableAnimationsOf(context);
+    // Match what [Text] actually renders: the ambient style merged with the
+    // hero style, at the ambient text scale.
+    final style = DefaultTextStyle.of(context).style.merge(_kHeroNameStyle);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final layout = measureHeroName(
+          name: widget.name,
+          style: style,
+          maxWidth: constraints.maxWidth,
+          textDirection: Directionality.of(context),
+          textScaler: MediaQuery.textScalerOf(context),
+        );
+
+        final text = Text(widget.name, style: style);
+        if (layout.overflow <= 0.5) {
+          _setTicking(false);
+          return text;
+        }
+
+        final clipped = SizedBox(height: layout.viewport, child: text);
+        if (!animate) {
+          _setTicking(false);
+          return ClipRect(child: clipped);
+        }
+
+        _setTicking(true);
+        final scrollMs = layout.overflow / _kHeroNameSpeed * 1000.0;
+        final holdMs = _kHeroNameHold.inMilliseconds.toDouble();
+
+        return ClipRect(
+          child: ValueListenableBuilder<double>(
+            valueListenable: _elapsedMs,
+            child: clipped,
+            builder: (context, elapsed, child) => Transform.translate(
+              offset: Offset(
+                0,
+                -heroNameScrollOffset(
+                  elapsedMs: elapsed,
+                  overflow: layout.overflow,
+                  holdMs: holdMs,
+                  scrollMs: scrollMs,
+                ),
+              ),
+              child: child,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 class _HeroPlaceholder extends StatelessWidget {
   final String name;
   const _HeroPlaceholder({required this.name});
@@ -1111,7 +1401,7 @@ class _HeroPlaceholder extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ColoredBox(
-      color: const Color(0x147996CE),
+      color: const Color(0x14C42A4A),
       child: Center(
         child: Text(
           name.isNotEmpty ? name[0].toUpperCase() : '?',
@@ -1162,7 +1452,8 @@ class _TabSectionHeader extends StatelessWidget {
 
 class _InfoTab extends StatelessWidget {
   final Character character;
-  const _InfoTab({required this.character});
+  final bool blurNsfwImages;
+  const _InfoTab({required this.character, this.blurNsfwImages = false});
 
   @override
   Widget build(BuildContext context) {
@@ -1197,7 +1488,13 @@ class _InfoTab extends StatelessWidget {
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-            child: _BioMarkdown(notes),
+            child: _BioMarkdown(
+              notes,
+              // Rebuild the markdown when the blur is toggled so the image
+              // builder is re-run instead of keeping the blurred subtree.
+              key: ValueKey('bio-blur-$blurNsfwImages'),
+              blurImages: blurNsfwImages,
+            ),
           ),
         ],
         if (tags.isEmpty && !hasNotes)
@@ -1223,7 +1520,8 @@ class _InfoTab extends StatelessWidget {
 /// this keeps alignment out of its parser (worst case: a run isn't centred).
 class _BioMarkdown extends StatelessWidget {
   final String notes;
-  const _BioMarkdown(this.notes);
+  final bool blurImages;
+  const _BioMarkdown(this.notes, {super.key, this.blurImages = false});
 
   TextAlign? _mapAlign(String a) {
     switch (a) {
@@ -1249,7 +1547,8 @@ class _BioMarkdown extends StatelessWidget {
           await launchUrl(uri, mode: LaunchMode.externalApplication);
         }
       },
-      imageBuilder: _bioImageBuilder,
+      imageBuilder: (context, url, width, height) =>
+          _bioImageBuilder(context, url, width, height, blur: blurImages),
       // A custom inlineComponents list replaces gpt_markdown's built-in inline
       // set, so emphasis parsers are listed explicitly. LinkedImageMd MUST come
       // before LinkMd (see its doc). Colours are left null so emphasis inherits
@@ -1275,44 +1574,54 @@ class _BioMarkdown extends StatelessWidget {
   Widget build(BuildContext context) {
     final md = hasHtmlTags(notes) ? htmlToMarkdown(notes) : notes;
     final segments = splitBioAlignment(md);
-    return Container(
-      // JanitorAI's default bio block (`.characterInfoMarkdownContent`):
-      // translucent black panel, faint purple border, rounded, 1rem pad.
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0x7B000000),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0x1A8B5CF6)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          for (var i = 0; i < segments.length; i++) ...[
-            if (i > 0) const SizedBox(height: 8),
-            _segment(context, segments[i]),
+    // The bio is selectable so its text can be copied; gpt_markdown's rich
+    // text only joins a selection when a [SelectionArea] is above it.
+    return SelectionArea(
+      child: Container(
+        // JanitorAI's default bio block (`.characterInfoMarkdownContent`):
+        // translucent black panel, faint purple border, rounded, 1rem pad.
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0x7B000000),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0x1A8B5CF6)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (var i = 0; i < segments.length; i++) ...[
+              if (i > 0) const SizedBox(height: 8),
+              _segment(context, segments[i]),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
 }
 
 /// Shared image renderer for bio markdown: network (`http`/`https`), `data:`
-/// URIs, and local files. Used by every bio segment's `GptMarkdown`.
+/// URIs, and local files. Used by every bio segment's `GptMarkdown`. When
+/// [blur] is set (an adult catalog preview with the blur setting on), the image
+/// is drawn through [NsfwBlur] before it is clipped.
 Widget _bioImageBuilder(
   BuildContext context,
   String url,
   double? width,
-  double? height,
-) {
+  double? height, {
+  bool blur = false,
+}) {
   if (url.startsWith('http://') || url.startsWith('https://')) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
-      child: CachedNetworkImage(
-        imageUrl: url,
-        width: width,
-        height: height,
-        fit: BoxFit.contain,
+      child: NsfwBlur(
+        enabled: blur,
+        child: CachedNetworkImage(
+          imageUrl: url,
+          width: width,
+          height: height,
+          fit: BoxFit.contain,
+        ),
       ),
     );
   }
@@ -1323,11 +1632,14 @@ Widget _bioImageBuilder(
         final bytes = Uri.parse(url).data!.contentAsBytes();
         return ClipRRect(
           borderRadius: BorderRadius.circular(8),
-          child: Image.memory(
-            bytes,
-            width: width,
-            height: height,
-            fit: BoxFit.contain,
+          child: NsfwBlur(
+            enabled: blur,
+            child: Image.memory(
+              bytes,
+              width: width,
+              height: height,
+              fit: BoxFit.contain,
+            ),
           ),
         );
       } catch (_) {}
@@ -1337,11 +1649,14 @@ Widget _bioImageBuilder(
   if (file.existsSync()) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
-      child: Image.file(
-        file,
-        width: width,
-        height: height,
-        fit: BoxFit.contain,
+      child: NsfwBlur(
+        enabled: blur,
+        child: Image.file(
+          file,
+          width: width,
+          height: height,
+          fit: BoxFit.contain,
+        ),
       ),
     );
   }
@@ -1435,8 +1750,7 @@ class _PromptsTabState extends State<_PromptsTab> {
   @override
   Widget build(BuildContext context) {
     final sections = _sections;
-    final firstMes = widget.character.firstMes ?? '';
-    final altGreetings = widget.character.alternateGreetings;
+    final firstMessages = characterFirstMessages(widget.character);
 
     return Column(
       children: [
@@ -1450,29 +1764,159 @@ class _PromptsTabState extends State<_PromptsTab> {
                 setState(() => _expanded[s.key] = !(_expanded[s.key] ?? false)),
           ),
         ),
-        if (firstMes.isNotEmpty)
-          _AccordionCard(
-            key: const ValueKey('firstMes'),
-            label: 'label_first_mes'.tr(),
-            text: firstMes,
-            expanded: _expanded['firstMes'] ?? false,
+        if (firstMessages.isNotEmpty)
+          _FirstMessagesCard(
+            key: const ValueKey('firstMessages'),
+            messages: firstMessages,
+            expanded: _expanded['firstMessages'] ?? false,
             onToggle: () => setState(
-              () => _expanded['firstMes'] = !(_expanded['firstMes'] ?? false),
+              () => _expanded['firstMessages'] =
+                  !(_expanded['firstMessages'] ?? false),
+            ),
+            isMessageExpanded: (n) => _expanded['firstMessage_$n'] ?? false,
+            onToggleMessage: (n) => setState(
+              () => _expanded['firstMessage_$n'] =
+                  !(_expanded['firstMessage_$n'] ?? false),
             ),
           ),
-        for (int i = 0; i < altGreetings.length; i++)
-          if (altGreetings[i].isNotEmpty)
-            _AccordionCard(
-              key: ValueKey('altGreeting_$i'),
-              label: '${'placeholder_greeting'.tr()} ${i + 2}',
-              text: altGreetings[i],
-              expanded: _expanded['altGreeting_$i'] ?? false,
-              onToggle: () => setState(
-                () => _expanded['altGreeting_$i'] =
-                    !(_expanded['altGreeting_$i'] ?? false),
-              ),
-            ),
         const SizedBox(height: 16),
+      ],
+    );
+  }
+}
+
+/// The opening lines a character carries, numbered the way the character
+/// editor numbers them: slot 1 is `firstMes`, the alternate greetings follow.
+/// Empty slots are dropped but do not renumber the ones after them, so the
+/// message shown as "#3" in the sheet is the one the editor opens as "#3".
+List<({int number, String text})> characterFirstMessages(Character c) {
+  final all = [c.firstMes ?? '', ...c.alternateGreetings];
+  return [
+    for (var i = 0; i < all.length; i++)
+      if (all[i].isNotEmpty) (number: i + 1, text: all[i]),
+  ];
+}
+
+/// Every opening line in one card instead of one loose card per greeting, each
+/// numbered `First message #N`. The old layout gave the character's own first
+/// message a different label from the alternates that follow it, and labelled
+/// those with the *placeholder* string, ellipsis and all ("Greeting... 2").
+class _FirstMessagesCard extends StatelessWidget {
+  final List<({int number, String text})> messages;
+  final bool expanded;
+  final VoidCallback onToggle;
+  final bool Function(int number) isMessageExpanded;
+  final ValueChanged<int> onToggleMessage;
+
+  const _FirstMessagesCard({
+    super.key,
+    required this.messages,
+    required this.expanded,
+    required this.onToggle,
+    required this.isMessageExpanded,
+    required this.onToggleMessage,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // A character with a single opening line has nothing to choose between, so
+    // opening the card shows it rather than asking for a second tap.
+    final single = messages.length == 1;
+    return _AccordionShell(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _AccordionHeader(
+            label: 'label_first_messages'.tr(),
+            expanded: expanded,
+            onToggle: onToggle,
+            badge: messages.length > 1 ? '${messages.length}' : null,
+          ),
+          AnimatedCrossFade(
+            crossFadeState: expanded
+                ? CrossFadeState.showSecond
+                : CrossFadeState.showFirst,
+            duration: const Duration(milliseconds: 280),
+            sizeCurve: Curves.easeOutCubic,
+            firstChild: const SizedBox(width: double.infinity),
+            secondChild: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final m in messages)
+                  _FirstMessageRow(
+                    key: ValueKey(m.number),
+                    number: m.number,
+                    text: m.text,
+                    expanded: single || isMessageExpanded(m.number),
+                    onToggle: single ? null : () => onToggleMessage(m.number),
+                  ),
+                const SizedBox(height: 4),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One opening line inside [_FirstMessagesCard]. Collapsible in its own right —
+/// a character with a dozen greetings is a wall of text otherwise — unless it
+/// is the only one, in which case [onToggle] is null and it stays open.
+class _FirstMessageRow extends StatelessWidget {
+  final int number;
+  final String text;
+  final bool expanded;
+  final VoidCallback? onToggle;
+
+  const _FirstMessageRow({
+    super.key,
+    required this.number,
+    required this.text,
+    required this.expanded,
+    required this.onToggle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(height: 1, thickness: 1, color: _kBorderLine),
+        GestureDetector(
+          onTap: onToggle,
+          behavior: HitTestBehavior.opaque,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 12, 10),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'label_first_message_n'.tr(args: ['$number']),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.5,
+                      color: _kText50,
+                    ),
+                  ),
+                ),
+                if (onToggle != null)
+                  AnimatedRotation(
+                    turns: expanded ? 0.0 : 0.5,
+                    duration: const Duration(milliseconds: 280),
+                    curve: Curves.easeOutCubic,
+                    child: const Icon(
+                      Icons.keyboard_arrow_up_rounded,
+                      color: _kText35,
+                      size: 20,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        _CollapsibleText(text: text, expanded: expanded),
       ],
     );
   }
@@ -1494,6 +1938,30 @@ class _AccordionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return _AccordionShell(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _AccordionHeader(
+            label: label,
+            expanded: expanded,
+            onToggle: onToggle,
+          ),
+          _CollapsibleText(text: text, expanded: expanded),
+        ],
+      ),
+    );
+  }
+}
+
+/// The card the prompt accordions are drawn on.
+class _AccordionShell extends StatelessWidget {
+  final Widget child;
+
+  const _AccordionShell({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
       decoration: BoxDecoration(
@@ -1501,82 +1969,133 @@ class _AccordionCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: _kBorderLine),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          GestureDetector(
-            onTap: onToggle,
-            behavior: HitTestBehavior.opaque,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      label.toUpperCase(),
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.65,
-                        color: context.cs.primary,
-                      ),
-                    ),
-                  ),
-                  AnimatedRotation(
-                    turns: expanded ? 0.0 : 0.5,
-                    duration: const Duration(milliseconds: 280),
-                    curve: Curves.easeOutCubic,
-                    child: const Icon(
-                      Icons.keyboard_arrow_up_rounded,
-                      color: _kText50,
-                      size: 24,
-                    ),
-                  ),
-                ],
+      child: child,
+    );
+  }
+}
+
+/// Title row of a prompt accordion: the label, an optional count, and the
+/// chevron that turns as the card opens.
+class _AccordionHeader extends StatelessWidget {
+  final String label;
+  final bool expanded;
+  final VoidCallback onToggle;
+  final String? badge;
+
+  const _AccordionHeader({
+    required this.label,
+    required this.expanded,
+    required this.onToggle,
+    this.badge,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onToggle,
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                label.toUpperCase(),
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.65,
+                  color: context.cs.primary,
+                ),
               ),
             ),
-          ),
-          AnimatedCrossFade(
-            crossFadeState: expanded
-                ? CrossFadeState.showSecond
-                : CrossFadeState.showFirst,
-            duration: const Duration(milliseconds: 280),
-            sizeCurve: Curves.easeOutCubic,
-            firstChild: ShaderMask(
-              shaderCallback: (bounds) => const LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                stops: [0.45, 1.0],
-                colors: [Colors.white, Colors.transparent],
-              ).createShader(bounds),
-              blendMode: BlendMode.dstIn,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+            if (badge != null) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 7,
+                  vertical: 2,
+                ),
+                decoration: BoxDecoration(
+                  color: _kAccentDim,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: _kAccentBorder),
+                ),
                 child: Text(
-                  text,
-                  maxLines: 3,
-                  overflow: TextOverflow.clip,
-                  style: const TextStyle(
-                    fontSize: 13.5,
-                    height: 1.55,
-                    color: _kText75,
+                  badge!,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: context.cs.primary,
                   ),
                 ),
               ),
-            ),
-            secondChild: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              child: SelectableText(
-                text,
-                style: const TextStyle(
-                  fontSize: 13.5,
-                  height: 1.55,
-                  color: _kText75,
-                ),
+              const SizedBox(width: 8),
+            ],
+            AnimatedRotation(
+              turns: expanded ? 0.0 : 0.5,
+              duration: const Duration(milliseconds: 280),
+              curve: Curves.easeOutCubic,
+              child: const Icon(
+                Icons.keyboard_arrow_up_rounded,
+                color: _kText50,
+                size: 24,
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Body of a prompt accordion: a faded three-line taste when closed, the whole
+/// selectable text when open.
+class _CollapsibleText extends StatelessWidget {
+  final String text;
+  final bool expanded;
+
+  const _CollapsibleText({required this.text, required this.expanded});
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedCrossFade(
+      crossFadeState: expanded
+          ? CrossFadeState.showSecond
+          : CrossFadeState.showFirst,
+      duration: const Duration(milliseconds: 280),
+      sizeCurve: Curves.easeOutCubic,
+      firstChild: ShaderMask(
+        shaderCallback: (bounds) => const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          stops: [0.45, 1.0],
+          colors: [Colors.white, Colors.transparent],
+        ).createShader(bounds),
+        blendMode: BlendMode.dstIn,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+          child: Text(
+            text,
+            maxLines: 3,
+            overflow: TextOverflow.clip,
+            style: const TextStyle(
+              fontSize: 13.5,
+              height: 1.55,
+              color: _kText75,
+            ),
           ),
-        ],
+        ),
+      ),
+      secondChild: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        child: SelectableText(
+          text,
+          style: const TextStyle(
+            fontSize: 13.5,
+            height: 1.55,
+            color: _kText75,
+          ),
+        ),
       ),
     );
   }

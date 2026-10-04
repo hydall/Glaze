@@ -124,7 +124,13 @@ List<Tracker> _makeTrackers(
 }
 
 List<ChatMessage> _conversation(int assistantCount) {
-  final messages = <ChatMessage>[];
+  final messages = <ChatMessage>[
+    const ChatMessage(
+      id: 'a0',
+      role: 'assistant',
+      content: 'Opening assistant message',
+    ),
+  ];
   for (var i = 1; i <= assistantCount; i++) {
     messages.add(ChatMessage(id: 'u$i', role: 'user', content: 'User turn $i'));
     messages.add(
@@ -140,6 +146,20 @@ List<ChatMessage> _conversation(int assistantCount) {
 
 void main() {
   const parser = StudioLedgerExportParser();
+
+  test('reconciliation range hash is shared with exact reconstruction', () {
+    final messages = _conversation(1);
+    final plan = const LedgerReconciliationPlanner().planForEndpoint(
+      messages: messages,
+      endAssistantMessageId: messages.last.id,
+    );
+
+    expect(plan, isNotNull);
+    expect(
+      plan!.rangeHash,
+      computeLedgerReconciliationRangeHash(plan.messages),
+    );
+  });
 
   group('StudioLedgerPrompt', () {
     test('injects full values only for relevant existing state', () {
@@ -172,6 +192,7 @@ void main() {
       expect(prompt, contains('delete npc:Name.location'));
       expect(prompt, contains('never use it as a backlog'));
       expect(prompt, contains('accepted assistant prose as evidence'));
+      expect(prompt, contains('1–5 minutes'));
     });
 
     test('rejects append histories and legacy knowledge tracker keys', () {
@@ -187,12 +208,73 @@ void main() {
       final result = parser.parse(raw);
       expect(result.export, isNull);
       expect(result.rejectionReason, contains('all ops rejected'));
+      // Which ops were dropped is the only way to tell a prompt-shape problem
+      // from a model regression, so the reasons must survive the parse.
+      expect(result.rejectedOps, hasLength(2));
+      expect(result.rejectedOps.join('\n'), contains('append_unique'));
+      expect(result.rejectedOps.join('\n'), contains('npc:Lucy.knowledge'));
+    });
+
+    test('legacy per-turn compatibility profile is parser-compatible', () {
+      final prompt = const StudioLedgerPrompt().buildLegacyTurnOnly(
+        finalAssistantText: 'Lucy closes the door.',
+        recentHistoryText: 'User: Leave now.',
+        currentTrackers: const [],
+        recentMemoryEntries: const [],
+      );
+
+      expect(prompt, contains('<glaze_memory_export>'));
+      expect(prompt, contains('{"ops":[],"knowledgeFacts":[]}'));
+      expect(prompt, contains('Allowed ops: set, delete'));
+      expect(prompt, isNot(contains('rename_entity')));
+      expect(prompt, isNot(contains('accepted assistant prose as evidence')));
+    });
+
+    test('clock history block renders ordered entries and is omitted when empty', () {
+      final withEntries = const StudioLedgerPrompt().build(
+        finalAssistantText: 'Lucy closes the door.',
+        recentHistoryText: '',
+        currentTrackers: const [],
+        recentMemoryEntries: const [],
+        gameClockHistory: const [
+          '14.09.0755 · day 0 · 12:11',
+          '28.09.0755 · day 14 · 12:11',
+        ],
+      );
+      expect(withEntries, contains('<clock_history>'));
+      expect(withEntries, contains('14.09.0755 · day 0 · 12:11'));
+      expect(withEntries, contains('28.09.0755 · day 14 · 12:11'));
+      expect(withEntries, contains('A timeskip already applied in a prior turn is consummated'));
+      expect(withEntries, contains('Treat <clock_history> as the authoritative recent trajectory'));
+
+      final withoutEntries = const StudioLedgerPrompt().build(
+        finalAssistantText: 'Lucy closes the door.',
+        recentHistoryText: '',
+        currentTrackers: const [],
+        recentMemoryEntries: const [],
+      );
+      expect(withoutEntries, isNot(contains('</clock_history>')));
+      expect(withoutEntries, isNot(contains('14.09.0755 · day 0 · 12:11')));
+    });
+
+    test('buildGameClockHistoryBlock is empty for no entries', () {
+      expect(
+        StudioLedgerPrompt.buildGameClockHistoryBlock(const []),
+        isEmpty,
+      );
+      expect(
+        StudioLedgerPrompt.buildGameClockHistoryBlock([
+          '29.09.0755 · day 15 · 08:00',
+        ]),
+        contains('29.09.0755 · day 15 · 08:00'),
+      );
     });
   });
 
   group('Ledger reconciliation', () {
-    test('manual plan ends at the requested assistant and stays bounded', () {
+    test('manual plan ends at the requested assistant with five chunks', () {
       final messages = <ChatMessage>[
+        const ChatMessage(id: 'a0', role: 'assistant', content: 'Opening'),
         for (var i = 1; i <= 12; i++) ...[
           ChatMessage(id: 'u$i', role: 'user', content: 'User $i'),
           ChatMessage(id: 'a$i', role: 'assistant', content: 'Assistant $i'),
@@ -206,28 +288,41 @@ void main() {
 
       expect(plan, isNotNull);
       expect(plan!.endMessage.id, 'a12');
-      expect(plan.messages, hasLength(20));
-      expect(plan.startMessageId, 'u3');
+      expect(plan.messages, hasLength(10));
+      expect(plan.startMessageId, 'u8');
     });
 
     const planner = LedgerReconciliationPlanner();
 
-    test('runs on N+1 once for the previous six assistant turns', () {
+    test('runs after each five new assistants and excludes the trigger', () {
       final messages = [
-        ..._conversation(6),
-        const ChatMessage(id: 'u7', role: 'user', content: 'User turn 7'),
+        ..._conversation(5),
+        const ChatMessage(id: 'u6', role: 'user', content: 'User turn 6'),
         const ChatMessage(
-          id: 'a7',
+          id: 'a6',
           role: 'assistant',
-          content: 'Assistant turn 7',
+          content: 'Assistant turn 6',
         ),
       ];
       final plan = planner.plan(
         messages: messages,
-        currentAssistantMessageId: 'a7',
+        currentAssistantMessageId: 'a6',
       );
       expect(plan, isNotNull);
-      expect(plan!.endMessage.id, 'a6');
+      expect(plan!.endMessage.id, 'a5');
+      expect(plan.messageIds, [
+        'a0',
+        'u1',
+        'a1',
+        'u2',
+        'a2',
+        'u3',
+        'a3',
+        'u4',
+        'a4',
+        'u5',
+        'a5',
+      ]);
 
       final checkpoint = LedgerReconciliationCheckpoint(
         sessionId: 's',
@@ -241,18 +336,40 @@ void main() {
       expect(
         planner.plan(
           messages: messages,
-          currentAssistantMessageId: 'a7',
+          currentAssistantMessageId: 'a6',
           checkpoint: checkpoint,
         ),
         isNull,
       );
+      final nextMessages = [
+        ..._conversation(10),
+        const ChatMessage(id: 'u11', role: 'user', content: 'User turn 11'),
+        const ChatMessage(
+          id: 'a11',
+          role: 'assistant',
+          content: 'Assistant turn 11',
+        ),
+      ];
+      final next = planner.plan(
+        messages: nextMessages,
+        currentAssistantMessageId: 'a11',
+        previousEndMessageId: 'a5',
+        checkpoint: checkpoint,
+      );
+      expect(next, isNotNull);
+      expect(next!.endMessage.id, 'a10');
+      expect(next.messageIds, isNot(contains('a11')));
+      expect(next.messages, hasLength(10));
+      expect(next.startMessageId, 'u6');
+      expect(next.messageIds, isNot(contains('a5')));
+      expect(next.messageIds, isNot(contains('a0')));
       expect(
         planner.plan(
           messages: [
-            ..._conversation(7),
-            const ChatMessage(id: 'a8', role: 'assistant', content: 'Current'),
+            ..._conversation(6),
+            const ChatMessage(id: 'a7', role: 'assistant', content: 'Current'),
           ],
-          currentAssistantMessageId: 'a8',
+          currentAssistantMessageId: 'a7',
           checkpoint: checkpoint,
         ),
         isNull,
@@ -261,12 +378,17 @@ void main() {
 
     test('changed accepted content invalidates the range fingerprint', () {
       final messages = [
-        ..._conversation(6),
-        const ChatMessage(id: 'a7', role: 'assistant', content: 'Current'),
+        ..._conversation(5),
+        const ChatMessage(id: 'u6', role: 'user', content: 'User turn 6'),
+        const ChatMessage(
+          id: 'a6',
+          role: 'assistant',
+          content: 'Assistant turn 6',
+        ),
       ];
       final original = planner.plan(
         messages: messages,
-        currentAssistantMessageId: 'a7',
+        currentAssistantMessageId: 'a6',
       )!;
       final checkpoint = LedgerReconciliationCheckpoint(
         sessionId: 's',
@@ -278,11 +400,11 @@ void main() {
         rangeHash: original.rangeHash,
       );
       final changed = [...messages];
-      changed[11] = changed[11].copyWith(content: 'Changed accepted swipe');
+      changed[10] = changed[10].copyWith(content: 'Changed accepted swipe');
       expect(
         planner.plan(
           messages: changed,
-          currentAssistantMessageId: 'a7',
+          currentAssistantMessageId: 'a6',
           checkpoint: checkpoint,
         ),
         isNotNull,
@@ -291,47 +413,56 @@ void main() {
 
     test('hidden assistant messages do not advance cadence', () {
       final messages = [
-        ..._conversation(6),
+        ..._conversation(5),
         const ChatMessage(
           id: 'hidden',
           role: 'assistant',
           content: 'Internal',
           isHidden: true,
         ),
-        const ChatMessage(id: 'a7', role: 'assistant', content: 'Current'),
+        const ChatMessage(id: 'u6', role: 'user', content: 'User turn 6'),
+        const ChatMessage(
+          id: 'a6',
+          role: 'assistant',
+          content: 'Assistant turn 6',
+        ),
       ];
       final plan = planner.plan(
         messages: messages,
-        currentAssistantMessageId: 'a7',
+        currentAssistantMessageId: 'a6',
       );
       expect(plan, isNotNull);
-      expect(plan!.endMessage.id, 'a6');
+      expect(plan!.endMessage.id, 'a5');
       expect(plan.messageIds, isNot(contains('hidden')));
     });
 
-    test('review range is bounded to twenty messages', () {
-      final messages = [
-        ..._conversation(12),
-        const ChatMessage(id: 'a13', role: 'assistant', content: 'Current'),
-      ];
+    test('review range contains only the five unprocessed chunks', () {
+      final messages = _conversation(11);
       final plan = planner.plan(
         messages: messages,
-        currentAssistantMessageId: 'a13',
+        currentAssistantMessageId: 'a11',
+        previousEndMessageId: 'a5',
       )!;
-      expect(plan.messages, hasLength(20));
-      expect(plan.endMessage.id, 'a12');
+      expect(plan.messages, hasLength(10));
+      expect(plan.startMessageId, 'u6');
+      expect(plan.endMessage.id, 'a10');
     });
 
     test(
       'prompt includes stale placeholder state outside direct name match',
       () {
         final messages = [
-          ..._conversation(6),
-          const ChatMessage(id: 'a7', role: 'assistant', content: 'Current'),
+          ..._conversation(5),
+          const ChatMessage(id: 'u6', role: 'user', content: 'User turn 6'),
+          const ChatMessage(
+            id: 'a6',
+            role: 'assistant',
+            content: 'Assistant turn 6',
+          ),
         ];
         final plan = planner.plan(
           messages: messages,
-          currentAssistantMessageId: 'a7',
+          currentAssistantMessageId: 'a6',
         )!;
         final prompt = const StudioLedgerReconciliationPrompt().build(
           systemPrompt: 'DB PROMPT',
@@ -344,6 +475,8 @@ void main() {
         expect(prompt, contains('DB PROMPT'));
         expect(prompt, contains('npc:Unidentified Netrunner.location'));
         expect(prompt, contains('npc:Rebecca.location'));
+        expect(prompt, contains('never add their'));
+        expect(prompt, contains('elapsed time again'));
         final state = RegExp(
           r'<committed_state>([\s\S]*?)</committed_state>',
         ).firstMatch(prompt)!.group(1)!;
@@ -353,6 +486,7 @@ void main() {
 
     test('candidate keys include mentioned entity siblings and provenance', () {
       final messages = [
+        const ChatMessage(id: 'a0', role: 'assistant', content: 'Opening.'),
         const ChatMessage(id: 'u1', role: 'user', content: 'Where is Lucy?'),
         const ChatMessage(id: 'a1', role: 'assistant', content: 'Lucy waits.'),
       ];
@@ -394,6 +528,7 @@ void main() {
 
     test('candidate keys and values share a hard bounded set', () {
       final messages = [
+        const ChatMessage(id: 'a0', role: 'assistant', content: 'Opening.'),
         const ChatMessage(id: 'u1', role: 'user', content: 'Continue.'),
         const ChatMessage(id: 'a1', role: 'assistant', content: 'Continued.'),
       ];
@@ -667,12 +802,17 @@ void main() {
 
     test('prompt offers relevant inferred and placeholder facts', () {
       final messages = [
-        ..._conversation(6),
-        const ChatMessage(id: 'a7', role: 'assistant', content: 'Current'),
+        ..._conversation(5),
+        const ChatMessage(id: 'u6', role: 'user', content: 'User turn 6'),
+        const ChatMessage(
+          id: 'a6',
+          role: 'assistant',
+          content: 'Assistant turn 6',
+        ),
       ];
       final plan = planner.plan(
         messages: messages,
-        currentAssistantMessageId: 'a7',
+        currentAssistantMessageId: 'a6',
       )!;
       const placeholder = CharacterKnowledgeFact(
         id: 'placeholder',
@@ -787,6 +927,28 @@ $_validJson
       final result = parser.parse(bad);
       expect(result.export, isNull);
       expect(result.wasRejected, isTrue);
+      expect(result.failure, LedgerParseFailure.incompleteJson);
+    });
+
+    test('distinguishes missing, malformed, and semantic rejection', () {
+      expect(
+        parser.parse('no block').failure,
+        LedgerParseFailure.missingExport,
+      );
+      expect(
+        parser
+            .parse('<glaze_memory_export>{not json}</glaze_memory_export>')
+            .failure,
+        LedgerParseFailure.malformedJson,
+      );
+      expect(
+        parser
+            .parse(
+              '<glaze_memory_export>{"ops":[{"op":"bad"}]}</glaze_memory_export>',
+            )
+            .failure,
+        LedgerParseFailure.semanticSchema,
+      );
     });
 
     test('normalizes non-string LLM fields before generated parsing', () {
@@ -876,6 +1038,108 @@ Ledger text.
       final result = parser.parse(badNs);
       expect(result.export, isNull);
       expect(result.wasRejected, isTrue);
+    });
+
+    test('accepts the documented world day clock key', () {
+      const raw = '''
+<glaze_memory_export>
+{
+  "ops": [
+    {
+      "op": "set",
+      "key": "world:day",
+      "value": "2",
+      "evidence": "The story crossed midnight twice.",
+      "eventState": "completed"
+    }
+  ]
+}
+</glaze_memory_export>''';
+
+      final result = parser.parse(raw);
+
+      expect(result.wasRejected, isFalse);
+      expect(result.export!.ops.single.key, 'world:day');
+    });
+
+    test('rejects model-owned tracker and arc state for the focal user', () {
+      const raw = '''
+<glaze_memory_export>
+{
+  "ops": [
+    {"op":"set","key":"npc:Danvi.current_goal","value":"Protect Chloe","evidence":"Model inference","eventState":"planned"},
+    {"op":"set","key":"arc:Danvi.status","value":"active","evidence":"Model inference","eventState":"planned"},
+    {"op":"set","key":"relationship:Chloe:Danvi.trust","value":"cautious","evidence":"They spoke","eventState":"completed"}
+  ]
+}
+</glaze_memory_export>''';
+
+      final result = parser.parse(raw, focalUserName: 'Danvi');
+
+      expect(result.export, isNotNull);
+      expect(result.export!.ops, hasLength(1));
+      expect(result.export!.ops.single.key, 'relationship:Chloe:Danvi.trust');
+    });
+
+    test(
+      'rejects literal user macro state even without a resolved persona',
+      () {
+        const raw = '''
+<glaze_memory_export>
+{"ops":[{"op":"set","key":"npc:{{user}}.current_goal","value":"Fix everything","evidence":"Model inference","eventState":"planned"}]}
+</glaze_memory_export>''';
+
+        final result = parser.parse(raw);
+
+        expect(result.export, isNull);
+        expect(result.failure, LedgerParseFailure.semanticSchema);
+      },
+    );
+
+    test('allows focal-user knowledge only as explicit information access', () {
+      const raw = '''
+<glaze_memory_export>
+{
+  "ops": [],
+  "knowledgeFacts": [
+    {
+      "knowerKey":"entity:danvi",
+      "knowerName":"Danvi",
+      "subjectKey":"entity:chloe",
+      "subjectName":"Chloe",
+      "factClass":"knowledge",
+      "scopeKey":"knowledge:chloe:doping_policy",
+      "predicate":"heard_doping_policy",
+      "object":"Chloe explained the doping policy.",
+      "epistemicState":"heard_claim",
+      "confidence":0.9,
+      "importance":0.6
+    },
+    {
+      "knowerKey":"entity:danvi",
+      "knowerName":"Danvi",
+      "subjectKey":"entity:chloe",
+      "subjectName":"Chloe",
+      "factClass":"goal",
+      "scopeKey":"goal:danvi",
+      "predicate":"wants_to_help",
+      "object":"Danvi wants to solve Chloe's problem.",
+      "epistemicState":"inferred",
+      "confidence":0.7,
+      "importance":0.7
+    }
+  ]
+}
+</glaze_memory_export>''';
+
+      final result = parser.parse(raw, focalUserName: 'Danvi');
+
+      expect(result.export, isNotNull);
+      expect(result.export!.knowledgeFacts, hasLength(1));
+      expect(
+        result.export!.knowledgeFacts.single.predicate,
+        'heard_doping_policy',
+      );
     });
 
     test('rejects oversized current-state values', () {

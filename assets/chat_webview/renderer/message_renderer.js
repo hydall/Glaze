@@ -1,7 +1,11 @@
+import { reportCssErrors } from './css_diagnostics.js';
 import { ICON } from './icon_library.js';
-import { createImageAttachment, setImageAttachmentHidden } from './image_embed.js';
+import { createImageAttachments, setImageAttachmentHidden } from './image_embed.js';
+import { isolateImgGenPlaceholders } from './imggen_placeholder.js';
+import { retryFailedLocalImages } from './local_image_retry.js';
 import { writeShadowContent } from './markdown.js';
 import { sanitizeMessageHtml } from '../bridge/html_sanitizer.js';
+import { rewriteTargetSelectors } from './target_toggle.js';
 import {
   defaultName,
   formatDate,
@@ -12,6 +16,7 @@ import {
   roleKey,
 } from './message_template.js';
 import { SHADOW_STYLE } from './shadow_style.js';
+import { DEFAULT_TYPING_TEXT } from './typing_phase.js';
 
 /* ============================================================
  * Renderer — produces DOM matching Glaze/src/components/chat/ChatMessage.vue
@@ -37,9 +42,23 @@ export class Renderer {
     this.searchQuery = null;
     this.activeSearchIndex = -1;
     this.searchMatches = [];
+    // How many highlights the last full pass numbered. The arrow keys only
+    // move which one is active, and that is only safe to do in place while the
+    // highlights still in the DOM are the ones that pass counted.
+    this.searchTotal = 0;
     this._lastTimestamps = { date: null, idx: -1 };
     this.selectionManager = null;
     this.allowMessageScripts = false;
+    // Id of the oldest message the next prompt still carries. Every render of
+    // that message draws the CONTEXT LIMIT rule above it; null draws none.
+    // Held here rather than on the message map so a re-render (a preset switch,
+    // a scrollback batch) keeps the rule without Flutter re-sending it.
+    this.contextStartId = null;
+  }
+
+  /** Sets which message opens the prompt window; '' or null clears the rule. */
+  setContextWindowStart(messageId) {
+    this.contextStartId = messageId || null;
   }
 
   /* ----- Public: render a message ----- */
@@ -87,7 +106,7 @@ export class Renderer {
       id, role, text, reasoning,
       isError, isHidden, isLast, isTyping,
       guidanceText, guidanceType,
-      imagePath, imageHidden,
+      imagePath, imagePaths, imageHidden,
     } = messageData;
 
     const layout = this._currentLayout();
@@ -95,15 +114,31 @@ export class Renderer {
     const section = document.createElement('div');
     section.dataset.messageId = id;
     section.dataset.rawText = text || '';
+    // Present only when the stored text differs from what is rendered (macros
+    // expanded, display regexes applied). The editor opens this instead of
+    // rawText so a display-only rewrite is never saved over the source.
+    if (messageData.sourceText != null) {
+      section.dataset.sourceText = messageData.sourceText;
+    }
     if (reasoning) section.dataset.reasoning = reasoning;
     if (isLast && this._roleKey(role) === 'char') section.dataset.isLast = 'true';
     if (messageData.personaName) section.dataset.personaName = messageData.personaName;
+    // Sent as a named persona: the message keeps that persona's avatar (or, if
+    // it was deleted or has no picture, its letter) instead of following the
+    // currently active persona. `avatarPinned` is what setIdentity checks
+    // before it repaints avatars.
+    if (messageData.personaId) section.dataset.personaId = messageData.personaId;
+    if (messageData.avatarUrl) section.dataset.avatarUrl = messageData.avatarUrl;
+    if (messageData.avatarUrl || messageData.avatarFallback) section.dataset.avatarPinned = '1';
     if (messageData.messageIndex != null) section.dataset.messageIndex = String(messageData.messageIndex);
     if (messageData.swipeIndex != null) section.dataset.swipeId = String(messageData.swipeIndex);
     if (messageData.swipeTotal != null) section.dataset.swipeTotal = String(messageData.swipeTotal);
     if (messageData.agentSwipeIndex != null) section.dataset.agentSwipeId = String(messageData.agentSwipeIndex);
     if (messageData.agentSwipeTotal != null) section.dataset.agentSwipeTotal = String(messageData.agentSwipeTotal);
     if (messageData.greetingTotal != null) section.dataset.greetingTotal = String(messageData.greetingTotal);
+    // Mirrors swipeId: the greeting arrows need the current index to know when
+    // they sit on an edge, since greeting navigation no longer wraps around.
+    if (messageData.greetingIndex != null) section.dataset.greetingId = String(messageData.greetingIndex);
 
     const classes = ['message-section', this._roleKey(role), `layout-${layout}`];
     if (isError) classes.push('error');
@@ -113,6 +148,12 @@ if (messageData.isEditing) classes.push('editing');
     section.className = classes.join(' ');
     section.classList.add('msg-appear');
     section.addEventListener('animationend', () => section.classList.remove('msg-appear'), { once: true });
+
+    /* --- Context-window rule: the chat above it is out of the prompt --- */
+    if (id && id === this.contextStartId) {
+      section.dataset.contextStart = '1';
+      section.appendChild(this.createContextLimitMarker());
+    }
 
     /* --- Header --- */
     section.appendChild(this._createHeader(messageData));
@@ -131,6 +172,11 @@ if (messageData.isEditing) classes.push('editing');
       stack.appendChild(this._createReasoningBlock(reasoning, this._isUser(role)));
     }
 
+    /* --- In-game clock (between reasoning and the main body) --- */
+    if (messageData.gameTime) {
+      stack.appendChild(this._createGameTimeBlock(messageData.gameTime));
+    }
+
     const wrapper = document.createElement('div');
     wrapper.className = 'msg-transition-wrapper';
 
@@ -144,12 +190,18 @@ if (messageData.isEditing) classes.push('editing');
     } else {
       const content = this._createContentContainer();
       body.appendChild(content);
-      this._writeShadowContent(content, text, this._isUser(role), false);
+      this._writeShadowContent(content, text, this._isUser(role), false, {
+        messageId: id,
+      });
     }
 
-    if (imagePath) {
-      body.appendChild(this._createImageAttachment(imagePath, imageHidden));
-    }
+    // `imagePaths` is the whole set; `imagePath` is the first one, still sent
+    // for anything that only knows the single-attachment shape.
+    const attachments = this._createImageAttachment(
+      imagePaths && imagePaths.length ? imagePaths : imagePath,
+      imageHidden,
+    );
+    if (attachments) body.appendChild(attachments);
 
     if (layout === 'bubble') {
       body.appendChild(this._createBubbleMeta(messageData));
@@ -161,6 +213,10 @@ if (messageData.isEditing) classes.push('editing');
     /* --- Footer --- */
     stack.appendChild(this._createFooter(messageData));
     section.appendChild(stack);
+
+    // Avatars and attachments are the message's light-DOM pictures, so the
+    // body's own pass (writeShadowContent) never sees them.
+    retryFailedLocalImages(section);
 
     return section;
   }
@@ -176,11 +232,15 @@ if (messageData.isEditing) classes.push('editing');
     const roleKey = this._roleKey(m.role);
     const finalName = m.displayName || m.personaName || this._getDefaultName(m.role);
     const identity = window.bridge || null;
-    const avatarUrl = m.avatarUrl || (roleKey === 'user'
+    // `avatarFallback` means the message names a persona with no avatar to
+    // show — deleted, or never given a picture. It renders the letter rather
+    // than borrowing the active persona's avatar.
+    const pinnedAvatar = !!(m.avatarUrl || m.avatarFallback);
+    const avatarUrl = m.avatarUrl || (pinnedAvatar ? null : (roleKey === 'user'
       ? (identity && identity._personaAvatarUrl)
       : roleKey === 'char'
         ? (identity && identity._charAvatarUrl)
-        : null);
+        : null));
     if (avatarUrl) {
       const img = document.createElement('img');
       img.src = avatarUrl;
@@ -300,7 +360,9 @@ if (messageData.isEditing) classes.push('editing');
 
     const shadowHost = this._createContentContainer();
     inner.appendChild(shadowHost);
-    this._writeShadowContent(shadowHost, reasoning, isUser, false);
+    this._writeShadowContent(shadowHost, reasoning, isUser, false, {
+      isReasoning: true,
+    });
 
     wrap.appendChild(inner);
     content.appendChild(wrap);
@@ -308,6 +370,26 @@ if (messageData.isEditing) classes.push('editing');
     block.appendChild(header);
     block.appendChild(content);
     return block;
+  }
+
+  /* ----- Continue footer -----
+   * Shown on the message a continuation run is extending, for the whole
+   * streaming window. Lives in the footer meta column next to the gen/token
+   * stats so it never displaces the body text mid-stream.
+   */
+  _createContinuingBadge() {
+    const badge = document.createElement('span');
+    badge.className = 'msg-continuing';
+    badge.textContent = 'Continuing…';
+    return badge;
+  }
+
+  /* ----- In-game clock (ledger-stamped, display-only) ----- */
+  _createGameTimeBlock(gameTime) {
+    const el = document.createElement('div');
+    el.className = 'msg-game-time';
+    el.textContent = `⏱ ${gameTime}`;
+    return el;
   }
 
   /* ----- Error window ----- */
@@ -341,14 +423,16 @@ if (messageData.isEditing) classes.push('editing');
     content.className = 'error-content';
     const host = this._createContentContainer();
     content.appendChild(host);
-    this._writeShadowContent(host, m.text || '', this._isUser(m.role), false);
+    this._writeShadowContent(host, m.text || '', this._isUser(m.role), false, {
+      messageId: m.id,
+    });
     win.appendChild(content);
     return win;
   }
 
   /* ----- Image attachment ----- */
   _createImageAttachment(src, hidden) {
-    return createImageAttachment(src, hidden, ICON);
+    return createImageAttachments(src, hidden, ICON);
   }
 
   /* Flip an existing attachment between "sent to the model" and "hidden from
@@ -363,13 +447,20 @@ if (messageData.isEditing) classes.push('editing');
   }
 
   /* ----- Typing container ----- */
+  /* The label names the phase the generation is actually in — Flutter pushes
+   * it through bridge.setGenerationPhase() as the run walks from prompt
+   * assembly to streaming. A bubble rendered mid-run (scrollback, re-render)
+   * reads the current label off the bridge so it never rewinds to the
+   * default. */
   _createTypingContainer() {
     const wrap = document.createElement('div');
     wrap.className = 'typing-container';
     wrap.innerHTML = `
       <svg class="typing-icon" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
-      <span class="typing-text">Generating...</span>
+      <span class="typing-text"></span>
     `;
+    wrap.querySelector('.typing-text').textContent =
+      window.bridge?.generationPhaseText || DEFAULT_TYPING_TEXT;
     return wrap;
   }
 
@@ -378,34 +469,73 @@ if (messageData.isEditing) classes.push('editing');
     stat.className = 'gen-stat';
     const hasGen = genTime && genTime !== '0s';
     const hasTokens = tokenCount && tokenCount > 0;
-    if (hasGen) {
-      const clock = document.createElement('span');
-      clock.innerHTML = ICON.clock;
-      clock.firstChild.style.cssText = `width:12px;height:12px;fill:currentColor;margin-right:${clockMargin};`;
-      stat.appendChild(clock.firstChild);
-      const gw = document.createElement('span');
-      gw.className = 'gen-time-wrapper';
-      const rn = new RollingNumber(genTime);
-      rn.el.classList.add('gen-time');
-      rn.el.classList.add('gen-time-badge');
-      gw.rollingNumber = rn;
-      gw.appendChild(rn.el);
-      stat.appendChild(gw);
-    }
-    if (hasTokens) {
-      const tc = document.createElement('div');
-      tc.className = 'token-count-inline';
-      if (hasGen) tc.style.marginLeft = '6px';
-      const doc = document.createElement('span');
-      doc.innerHTML = ICON.doc;
-      doc.firstChild.style.cssText = 'width:12px;height:12px;fill:currentColor;margin-right:2px;';
-      tc.appendChild(doc.firstChild);
-      const t = document.createElement('span');
-      t.textContent = `${tokenCount}t`;
-      tc.appendChild(t);
-      stat.appendChild(tc);
-    }
+    if (hasGen) stat.appendChild(this._buildGenTime(genTime, clockMargin));
+    if (hasTokens) stat.appendChild(this._createTokenCount(tokenCount, hasGen));
     return stat;
+  }
+
+  /* Clock icon + rolling elapsed-time badge as one fragment. The clock leads
+     the gen-stat, so callers insert this at the front rather than append. */
+  _buildGenTime(genTime, clockMargin = '2px') {
+    const frag = document.createDocumentFragment();
+    const clock = document.createElement('span');
+    clock.innerHTML = ICON.clock;
+    clock.firstChild.style.cssText = `width:12px;height:12px;fill:currentColor;margin-right:${clockMargin};`;
+    frag.appendChild(clock.firstChild);
+    const gw = document.createElement('span');
+    gw.className = 'gen-time-wrapper';
+    const rn = new RollingNumber(genTime);
+    rn.el.classList.add('gen-time');
+    rn.el.classList.add('gen-time-badge');
+    gw.rollingNumber = rn;
+    gw.appendChild(rn.el);
+    frag.appendChild(gw);
+    return frag;
+  }
+
+  /* Doc icon + `Nt` token count. Built standalone so `updateMessageMeta` can
+     put it back into a gen-stat the streaming window stripped it out of. */
+  _createTokenCount(tokenCount, hasGen) {
+    const tc = document.createElement('div');
+    tc.className = 'token-count-inline';
+    if (hasGen) tc.style.marginLeft = '6px';
+    const doc = document.createElement('span');
+    doc.innerHTML = ICON.doc;
+    doc.firstChild.style.cssText = 'width:12px;height:12px;fill:currentColor;margin-right:2px;';
+    tc.appendChild(doc.firstChild);
+    const t = document.createElement('span');
+    t.textContent = `${tokenCount}t`;
+    tc.appendChild(t);
+    return tc;
+  }
+
+  /* Make `stat` show `tokenCount`, whether or not it still has the element:
+     retext when present, re-create when the streaming window removed it. */
+  _reconcileTokenCount(stat, tokenCount, hasGen) {
+    if (!stat) return;
+    const existing = stat.querySelector('.token-count-inline span:last-child');
+    if (existing) {
+      existing.textContent = `${tokenCount}t`;
+      return;
+    }
+    stat.appendChild(this._createTokenCount(tokenCount, hasGen));
+  }
+
+  /* Same contract for the elapsed-time badge: a gen-stat that was built from
+     a token count alone has no clock to retext, so build one. */
+  _reconcileGenTime(stat, genTime, clockMargin) {
+    if (!stat) return;
+    const wrapper = stat.querySelector('.gen-time-wrapper');
+    if (wrapper && wrapper.rollingNumber) {
+      wrapper.rollingNumber.setValue(genTime);
+      return;
+    }
+    const badge = stat.querySelector('.gen-time-badge');
+    if (badge) {
+      badge.textContent = genTime;
+      return;
+    }
+    stat.insertBefore(this._buildGenTime(genTime, clockMargin), stat.firstChild);
   }
 
   /* ----- Bubble meta (inside body) ----- */
@@ -459,6 +589,7 @@ if (messageData.isEditing) classes.push('editing');
       const stat = this._createGenStat(m.genTime, m.tokens, '4px');
       metaCol.appendChild(stat);
     }
+    if (m.isContinuing) metaCol.appendChild(this._createContinuingBadge());
     footer.appendChild(metaCol);
 
     /* --- Center controls --- */
@@ -469,7 +600,11 @@ if (messageData.isEditing) classes.push('editing');
     const hasSwipes = isChar && m.swipeTotal && m.swipeTotal > 1;
     const hasAgentSwipes = isChar && m.agentSwipeFinalCount && m.agentSwipeFinalCount > 1;
     const hasGreetings = isChar && m.messageIndex === 0 && m.greetingTotal && m.greetingTotal > 1;
-    const showRegen = ((!isChar && m.isLast) || m.isError) && !m.isGenerating && !m.isEditing;
+    // `isSendPending` is the window between the user's bubble being painted
+    // and its generation being published: nothing streams yet, but the reply
+    // is on its way, so this message is not one to offer a re-roll of.
+    const showRegen = ((!isChar && m.isLast) || m.isError)
+      && !m.isGenerating && !m.isSendPending && !m.isEditing;
 
     if (hasSwipes) {
       center.appendChild(this._createSwitcher(m.id, m.swipeIndex || 0, m.swipeTotal, 'swipe'));
@@ -613,12 +748,26 @@ if (messageData.isEditing) classes.push('editing');
     return host;
   }
 
-  _writeShadowContent(host, text, isUser, isTyping) {
+  // [isReasoning] marks the split-out `message.reasoning` panel: the same
+  // formatter, but image tags there stay text (INV-IG11).
+  // [messageId] is passed rather than looked up: a section is built and its
+  // content written before it is appended, so a placeholder inside it has no
+  // `data-message-id` above it yet and its elapsed clock would have nothing to
+  // be keyed on (see renderer/imggen_placeholder.js).
+  _writeShadowContent(
+    host,
+    text,
+    isUser,
+    isTyping,
+    { isReasoning = false, messageId } = {},
+  ) {
     writeShadowContent({
       host,
       text,
       isUser,
       isTyping,
+      isReasoning,
+      messageId,
       formatter: this.formatter,
       searchQuery: this.searchQuery,
       applySearchHighlight: (html) => this._applySearchHighlight(html),
@@ -634,7 +783,15 @@ if (messageData.isEditing) classes.push('editing');
 
     const isError = sectionEl.classList.contains('error');
 
-    if (!isTyping && !isError && !animate) {
+    // A typing bubble with nothing in it yet is not a content bubble: it is the
+    // pencil and the phase label the run pushes through setGenerationPhase().
+    // Reusing the existing content host for it writes an empty shadow root and
+    // leaves the bubble blank, which is what swallowed the phase label on
+    // regenerate / continue / post-clean runs — those start from a bubble that
+    // already has a host, so they never reached the rebuild below.
+    const isTypingPlaceholder = isTyping && (!text || !text.trim());
+
+    if (!isError && !animate && !isTypingPlaceholder) {
       // Only reuse the bubble's OWN content host (a direct child of the body).
       // A ':scope >' guard is essential: the error window nests its own
       // `.message-content` (body > .error-window > … > .message-content), so a
@@ -646,13 +803,25 @@ if (messageData.isEditing) classes.push('editing');
       if (existingHost && existingHost.shadowRoot) {
         const glazeMsg = existingHost.shadowRoot.querySelector('.glaze-message');
         if (glazeMsg) {
-          this._writeShadowContent(existingHost, text, isUser, false);
+          this._writeShadowContent(existingHost, text, isUser, isTyping, {
+            messageId: sectionEl.dataset.messageId,
+          });
           if (reasoning && reasoning.trim()) {
             let reasoningEl = sectionEl.querySelector('.msg-reasoning');
             if (reasoningEl) {
               const rHost = reasoningEl.querySelector('.msg-reasoning-inner .message-content');
-              if (rHost) this._writeShadowContent(rHost, reasoning, isUser, false);
+              if (rHost) {
+                this._writeShadowContent(rHost, reasoning, isUser, isTyping, {
+                  isReasoning: true,
+                });
+              }
+            } else {
+              reasoningEl = this._createReasoningBlock(reasoning, isUser);
+              const contentStack = sectionEl.querySelector('.msg-content-stack');
+              contentStack.insertBefore(reasoningEl, contentStack.firstChild);
             }
+          } else {
+            sectionEl.querySelector('.msg-reasoning')?.remove();
           }
           return;
         }
@@ -674,7 +843,9 @@ if (messageData.isEditing) classes.push('editing');
     } else {
       const host = this._createContentContainer();
       body.appendChild(host);
-      this._writeShadowContent(host, text, isUser, false);
+      this._writeShadowContent(host, text, isUser, false, {
+        messageId: sectionEl.dataset.messageId,
+      });
     }
 
     if (image) body.appendChild(image);
@@ -689,7 +860,11 @@ if (messageData.isEditing) classes.push('editing');
         contentStack.insertBefore(reasoningEl, contentStack.firstChild);
       } else {
         const host = reasoningEl.querySelector('.msg-reasoning-inner .message-content');
-        if (host) this._writeShadowContent(host, reasoning, isUser, false);
+        if (host) {
+          this._writeShadowContent(host, reasoning, isUser, false, {
+            isReasoning: true,
+          });
+        }
       }
     } else if (reasoningEl) {
       reasoningEl.remove();
@@ -721,6 +896,32 @@ if (messageData.isEditing) classes.push('editing');
   }
 
   updateMessageMeta(sectionEl, msg) {
+    // In-game clock: the ledger stamps the message after the turn, so the
+    // element usually appears (or updates) via this live path rather than at
+    // initial render.
+    const stack = sectionEl.querySelector('.msg-content-stack');
+    if (stack) {
+      let clock = stack.querySelector('.msg-game-time');
+      if (Object.prototype.hasOwnProperty.call(msg, 'gameTime')) {
+        if (msg.gameTime) {
+          if (!clock) {
+            clock = this._createGameTimeBlock(msg.gameTime);
+            // The reasoning panel nests its own `.msg-transition-wrapper`, so a
+            // plain descendant query matches that one first and insertBefore
+            // throws (the node is not a direct child of the stack) whenever a
+            // reasoning message is stamped with a clock. Scope to the stack's
+            // own body wrapper: the clock belongs between reasoning and body.
+            const wrapper = stack.querySelector(':scope > .msg-transition-wrapper');
+            stack.insertBefore(clock, wrapper || null);
+          } else {
+            clock.textContent = `⏱ ${msg.gameTime}`;
+          }
+        } else {
+          clock?.remove();
+        }
+      }
+    }
+
     if (msg.messageIndex !== undefined && msg.messageIndex !== null) {
       sectionEl.dataset.messageIndex = String(msg.messageIndex);
       const idxStr = `#${msg.messageIndex + 1}`;
@@ -768,37 +969,18 @@ if (messageData.isEditing) classes.push('editing');
       let genStatFooter = footerMeta?.querySelector('.gen-stat');
 
       if (hasGen) {
-        const timeStr = msg.genTime;
-        if (genStatBubble) {
-          const wrapper = genStatBubble.querySelector('.gen-time-wrapper');
-          if (wrapper && wrapper.rollingNumber) {
-            wrapper.rollingNumber.setValue(timeStr);
-          } else {
-            const badge = genStatBubble.querySelector('.gen-time-badge');
-            if (badge) badge.textContent = timeStr;
-          }
-        }
-        if (genStatFooter) {
-          const wrapper = genStatFooter.querySelector('.gen-time-wrapper');
-          if (wrapper && wrapper.rollingNumber) {
-            wrapper.rollingNumber.setValue(timeStr);
-          } else {
-            const badge = genStatFooter.querySelector('.gen-time-badge');
-            if (badge) badge.textContent = timeStr;
-          }
-        }
+        this._reconcileGenTime(genStatBubble, msg.genTime, '2px');
+        this._reconcileGenTime(genStatFooter, msg.genTime, '4px');
       }
 
       if (hasTokens) {
-        const tokenStr = `${msg.tokens}t`;
-        if (genStatBubble) {
-          const tc = genStatBubble.querySelector('.token-count-inline span:last-child');
-          if (tc) tc.textContent = tokenStr;
-        }
-        if (genStatFooter) {
-          const tc = genStatFooter.querySelector('.token-count-inline span:last-child');
-          if (tc) tc.textContent = tokenStr;
-        }
+        // Level-reconcile, don't just retext: the streaming window strips
+        // `.token-count-inline` out of a gen-stat that survives (the clock
+        // keeps `hasGen` true), so after a Continue or Regenerate the element
+        // is gone while its parent is not. Updating text in place would then
+        // find nothing and the badge would never come back.
+        this._reconcileTokenCount(genStatBubble, msg.tokens, hasGen);
+        this._reconcileTokenCount(genStatFooter, msg.tokens, hasGen);
       }
 
       if (!genStatBubble && bubbleMeta && (hasGen || hasTokens)) {
@@ -810,6 +992,18 @@ if (messageData.isEditing) classes.push('editing');
       if (!genStatFooter && footerMeta && (hasGen || hasTokens)) {
         const stat = this._createGenStat(msg.genTime, msg.tokens, '4px');
         footerMeta.appendChild(stat);
+      }
+    }
+
+    // Level-reconcile the Continue footer. `role` marks a full message map:
+    // partial patches (memory badges, plain content updates) carry no
+    // `isContinuing` and must leave the badge exactly as it is.
+    if (msg.role !== undefined) {
+      const existing = sectionEl.querySelector('.msg-continuing');
+      if (msg.isContinuing && !existing) {
+        if (footerMeta) footerMeta.appendChild(this._createContinuingBadge());
+      } else if (!msg.isContinuing && existing) {
+        existing.remove();
       }
     }
 
@@ -855,6 +1049,8 @@ if (messageData.isEditing) classes.push('editing');
         badge.className = `msg-memory-badge ${cls}`;
         badge.textContent = msg.memoryStatus;
       }
+    } else {
+      sectionEl.querySelector('.msg-memory-badge')?.remove();
     }
 
     if (msg.isHidden !== undefined) {
@@ -906,6 +1102,16 @@ if (messageData.isEditing) classes.push('editing');
     return el;
   }
 
+  /// The rule the first in-prompt message wears. Built like a date separator
+  /// so the two read as the same kind of divider, and public because the bridge
+  /// stamps it onto an already-rendered row when the boundary moves.
+  createContextLimitMarker() {
+    const el = document.createElement('div');
+    el.className = 'context-limit-marker';
+    el.innerHTML = `<div class="date-separator-line"></div><span class="date-separator-label">Context limit</span><div class="date-separator-line"></div>`;
+    return el;
+  }
+
   _createOriginSeparator(data) {
     const el = document.createElement('div');
     el.className = 'date-separator origin-separator';
@@ -929,6 +1135,47 @@ if (messageData.isEditing) classes.push('editing');
 
   resetDateTracking() { this._lastTimestamps = { date: null, idx: -1 }; }
 
+  /**
+   * Re-writes every message body (and reasoning block) from the raw text kept
+   * on the section's dataset. Used when `allowMessageScripts` flips, so the
+   * messages already on screen pick up the new policy instead of waiting for
+   * the next content update.
+   */
+  rerenderMessageBodies() {
+    // `virtualList.items` also covers messages the list has not mounted, so a
+    // scroll back up does not reveal content rendered under the old policy.
+    const items = (window.bridge && window.bridge.virtualList)
+      ? window.bridge.virtualList.items.map(it => it.el)
+      : document.querySelectorAll('.message-section');
+
+    items.forEach(section => {
+      if (!section) return;
+      const isUser = section.classList.contains('user');
+
+      const reasoningHost = section.querySelector('.msg-reasoning-inner .message-content');
+      if (reasoningHost) {
+        this._writeShadowContent(
+          reasoningHost,
+          section.dataset.reasoning || '',
+          isUser,
+          false,
+          { isReasoning: true },
+        );
+      }
+
+      const bodyHost = section.querySelector('.msg-body .message-content');
+      if (bodyHost) {
+        this._writeShadowContent(
+          bodyHost,
+          section.dataset.rawText || '',
+          isUser,
+          false,
+          { messageId: section.dataset.messageId },
+        );
+      }
+    });
+  }
+
   _applySearchHighlight(html, globalState) {
     if (!this.searchQuery) return html;
     const escapedQuery = this.searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -944,13 +1191,30 @@ if (messageData.isEditing) classes.push('editing');
     });
   }
 
-  setSearch(query, activeIndex = -1, _retried = false) {
+  // `scroll` brings the active match into view. A refresh pass (the messages
+  // changed under an open search) passes false: it only has to re-number the
+  // highlights, and scrolling would yank the reader away from the message they
+  // just edited.
+  setSearch(query, activeIndex = -1, scroll = true, _retried = false) {
     // Nothing highlighted and nothing to highlight: skip the full re-render.
     // This is the common path when a chat opens without an active search.
     if (!query && !this.searchQuery) {
       this.searchQuery = query;
       this.activeSearchIndex = -1;
       this.searchMatches = [];
+      this.searchTotal = 0;
+      return;
+    }
+
+    // Walking the hits with the prev/next arrows changes exactly one thing
+    // about the page: which highlight is the active one. The full pass below
+    // re-formats and re-writes the shadow body of *every message in the chat*
+    // to arrive at that — hundreds of milliseconds on a long chat, once per
+    // press, while the presses arrive faster than the passes finish. That is
+    // what made the arrows feel dead and the list feel unable to reach the
+    // hit. Move the class instead, and let the scroll be the only work.
+    if (query && query === this.searchQuery && !_retried &&
+        this._moveActiveMatch(activeIndex, scroll)) {
       return;
     }
 
@@ -966,34 +1230,41 @@ if (messageData.isEditing) classes.push('editing');
       ? window.bridge.virtualList.items.map(it => it.el)
       : document.querySelectorAll('.message-section');
 
-    let activeMessageId = null;
-
     items.forEach(section => {
       if (!section) return;
       const isUser = section.classList.contains('user');
       
-      const processHost = (host, rawText) => {
+      const processHost = (host, rawText, isReasoning = false) => {
         if (host && host.shadowRoot) {
           const root = host.shadowRoot.querySelector('.glaze-message');
           if (root) {
-            const formatted = this.formatter.format(rawText, isUser);
-            const prevMatchIndex = globalState.matchIndex;
+            const formatted = this.formatter.format(rawText, isUser, isReasoning);
             const highlighted = this._applySearchHighlight(formatted, globalState);
-            root.innerHTML = this.allowMessageScripts
-              ? highlighted
-              : sanitizeMessageHtml(highlighted);
+            // Same policy as a normal render (see writeShadowContent), so a
+            // search pass renders the message exactly like the pass before it:
+            // the scripts it keeps are dropped right after, unexecuted.
+            root.innerHTML = sanitizeMessageHtml(highlighted, {
+              allowScripts: this.allowMessageScripts,
+            });
             root.querySelectorAll('script').forEach(script => script.remove());
-            
-            if (activeIndex >= prevMatchIndex && activeIndex < globalState.matchIndex) {
-              activeMessageId = section.dataset.messageId || section.dataset.vlId;
-            }
+            // The rewrite dropped the re-keyed `:target` rules with the rest
+            // of the body; put them back so a search pass cannot leave a
+            // card's toggles dead (see renderer/target_toggle.js).
+            rewriteTargetSelectors(root);
+            // The rewrite dropped the placeholders' shadow roots with the rest
+            // of the body; re-isolate so a search pass cannot expose them to
+            // the message stylesheet.
+            isolateImgGenPlaceholders(root, section.dataset.messageId);
+            // The rewrite dropped the CSS report with the rest of the body;
+            // put it back so searching does not hide a broken stylesheet.
+            if (!window.bridge?.isGenerating) reportCssErrors(root);
           }
         }
       };
 
       const reasoningHost = section.querySelector('.msg-reasoning-inner .message-content');
       if (reasoningHost) {
-        processHost(reasoningHost, section.dataset.reasoning || '');
+        processHost(reasoningHost, section.dataset.reasoning || '', true);
       }
 
       const bodyHost = section.querySelector('.msg-body .message-content');
@@ -1003,25 +1274,145 @@ if (messageData.isEditing) classes.push('editing');
     });
 
     const total = globalState.matchIndex;
+    this.searchTotal = total;
 
     // Flutter counts matches over the raw message text while this pass counts
     // them over the formatted HTML, so the two can drift apart (markdown
     // syntax, display regexes). Rather than leaving the arrows dead when the
     // requested index overshoots, clamp into range and re-run once.
     if (!_retried && activeIndex >= total && total > 0) {
-      this.setSearch(query, total - 1, true);
+      this.setSearch(query, total - 1, scroll, true);
       return;
     }
 
-    if (activeMessageId && window.bridge) {
-      // The match may live in a message the virtual list has not mounted:
-      // scrollToMessage renders the window around it first, so only then can
-      // the highlight itself be brought into view.
-      window.bridge.scrollToMessage(activeMessageId);
-      setTimeout(() => this._scrollToActiveMatch(), 250);
-    } else {
-      this._scrollToActiveMatch();
+    if (!scroll) return;
+
+    // Same reveal the arrows use — this pass just rebuilt the highlights, so
+    // the nodes it numbered are the ones in the page right now.
+    if (this.activeSearchIndex >= 0 && this._moveActiveMatch(this.activeSearchIndex, true)) {
+      return;
     }
+    // The numbering found nothing to reveal at that index. A highlight may
+    // still be marked active in the page from an earlier pass; take that.
+    this._scrollToActiveMatch();
+  }
+
+  /* The sections the highlight numbering runs over: every message, not only
+   * the ones the virtual list currently mounts. `items` keeps the (possibly
+   * detached) element of each message, and a detached element keeps its shadow
+   * root — so a match in an unmounted message is still countable and still
+   * findable. */
+  _searchSections() {
+    return (window.bridge && window.bridge.virtualList)
+      ? window.bridge.virtualList.items.map(it => it.el)
+      : Array.from(document.querySelectorAll('.message-section'));
+  }
+
+  /* The highlight nodes in the numbering the last pass gave them: message
+   * order, reasoning before body, document order within each. Re-collected on
+   * demand rather than cached — a message re-render (an edit, a swipe, a
+   * scrollback batch) replaces the nodes, and a handful of querySelectorAll
+   * calls over shadow roots is nothing next to re-formatting the chat. */
+  _collectSearchHighlights() {
+    const found = [];
+    for (const section of this._searchSections()) {
+      if (!section) continue;
+      const hosts = [
+        section.querySelector('.msg-reasoning-inner .message-content'),
+        section.querySelector('.msg-body .message-content'),
+      ];
+      for (const host of hosts) {
+        const root = host && host.shadowRoot &&
+          host.shadowRoot.querySelector('.glaze-message');
+        if (!root) continue;
+        for (const node of root.querySelectorAll('.search-highlight-text')) {
+          found.push({ node, section });
+        }
+      }
+    }
+    return found;
+  }
+
+  /* Moves the active highlight without re-rendering anything. Returns false
+   * when the highlights in the DOM are not the set the last pass numbered —
+   * a message was re-rendered with a different number of hits, say — which is
+   * the caller's cue to run the full pass instead of moving a class onto the
+   * wrong word. */
+  _moveActiveMatch(activeIndex, scroll) {
+    if (activeIndex < 0) return false;
+    const found = this._collectSearchHighlights();
+    if (found.length === 0 || found.length !== this.searchTotal) return false;
+
+    // Flutter numbers matches over the raw text and can overshoot what the
+    // formatted HTML holds; clamp rather than leaving the arrow dead.
+    const index = Math.min(activeIndex, found.length - 1);
+    this.activeSearchIndex = index;
+    found.forEach((m, i) => m.node.classList.toggle('active-search-match', i === index));
+    if (scroll) this._revealMatch(found[index]);
+    return true;
+  }
+
+  /* Brings one hit into view — through the virtual list, in one move.
+   *
+   * The match may live in a message the list has not mounted at all, so the row
+   * has to be rendered before anything about it can be measured; and its height
+   * is not final until images and fonts have landed, so where the hit sits
+   * inside it keeps moving for a few hundred milliseconds after that. Handing
+   * the node itself to the jump lets every correction pass aim at the word
+   * rather than at the middle of the message — and keeps the list the only
+   * thing writing scrollTop, which is what a second, independent scroll used to
+   * fight. */
+  _revealMatch(match) {
+    if (!match || !match.node) return;
+    const vl = window.bridge && window.bridge.virtualList;
+    const section = match.section;
+    const id = section && (section.dataset.messageId || section.dataset.vlId);
+    const known = vl && id && typeof vl.scrollToMessage === 'function' &&
+      (typeof vl.hasMessage !== 'function' || vl.hasMessage(id));
+    if (!known) {
+      this._alignHighlight(match.node);
+      return;
+    }
+    vl.scrollToMessage(id, false, { fineTarget: match.node });
+  }
+
+  /* Centres the highlight itself, measured live against the scroll container.
+   *
+   * Not `scrollIntoView`: the node sits in a shadow root inside a virtualised
+   * row, and its smooth animation runs against the list's own scrolling — the
+   * two used to fight, which is how a hit ended up landing anywhere but on the
+   * match. A measured delta on the container is a single, final move. */
+  _alignHighlight(node) {
+    const vl = window.bridge && window.bridge.virtualList;
+    const container = (vl && vl.container) || document.getElementById('chat-container');
+    if (!container || !node || !node.isConnected) return;
+    const apply = () => {
+      const rect = node.getBoundingClientRect();
+      // No box to aim at (a hit inside a collapsed reasoning block, say): the
+      // row is already centred, which is as close as this gets.
+      if (rect.height === 0) return;
+      const cRect = container.getBoundingClientRect();
+      const delta = (rect.top - cRect.top) - (cRect.height / 2) + (rect.height / 2);
+      if (Math.abs(delta) < 2) return;
+      container.scrollTop = Math.max(0, container.scrollTop + delta);
+    };
+    // Claim the scroll for the duration: the list must read these as its own
+    // moves, not as the reader scrolling away. Never while a jump of the list's
+    // own is in flight, though — that one owns the flag, and handing it back
+    // early would let the rest of its corrections read as the reader scrolling.
+    const claimed = !!vl && !vl._settleActive;
+    if (claimed) vl.isProgrammaticScrolling = true;
+    apply();
+    clearTimeout(this._matchAlignTimer);
+    // One late correction — the row's own height can still be settling
+    // (images, fonts) after the list reports it landed.
+    this._matchAlignTimer = setTimeout(() => {
+      apply();
+      if (claimed) {
+        vl.isProgrammaticScrolling = false;
+        vl._lastScrollTop = container.scrollTop;
+      }
+    }, 120);
   }
 
   _scrollToActiveMatch() {
@@ -1030,7 +1421,7 @@ if (messageData.isEditing) classes.push('editing');
       if (!host.shadowRoot) continue;
       const active = host.shadowRoot.querySelector('.search-highlight-text.active-search-match');
       if (!active) continue;
-      active.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      this._revealMatch({ node: active, section: host.closest('.message-section') });
       return;
     }
   }

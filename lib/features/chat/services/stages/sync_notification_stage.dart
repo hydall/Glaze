@@ -20,12 +20,18 @@ class SyncNotificationStage {
     required int genId,
     required Character? character,
     required GenerationNotificationService notifService,
+    required String completedMessageId,
   }) async {
     if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) return;
 
     notifySyncMessageGenerated(ctx.ref);
 
-    final preview = buildMessagePreview(result.session?.messages ?? const []);
+    final completedMessage = findNotificationMessage(
+      result.session?.messages ?? const [],
+      completedMessageId,
+    );
+    if (completedMessage == null) return;
+    final preview = buildMessagePreview(completedMessage);
     final sessionId = result.session?.id;
     // Snapshot BEFORE the notification pipeline: it awaits platform channels
     // and SharedPreferences, and the user may leave the chat during that gap.
@@ -36,9 +42,7 @@ class SyncNotificationStage {
       ctx.charId,
       messagePreview: preview,
       sessionId: sessionId,
-      msgId: result.session?.messages.isNotEmpty == true
-          ? result.session!.messages.last.id
-          : null,
+      msgId: completedMessage.id,
       avatarPath: character?.avatarPath,
     );
 

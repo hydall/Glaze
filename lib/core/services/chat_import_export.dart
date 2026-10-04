@@ -5,11 +5,10 @@ import 'package:path/path.dart' as p;
 
 import '../models/chat_message.dart';
 import '../models/character.dart';
+import 'file_export_result.dart';
 
-class ChatExportResult {
-  final String filePath;
-  ChatExportResult({required this.filePath});
-}
+@Deprecated('Use FileExportResult instead.')
+typedef ChatExportResult = FileExportResult;
 
 class ChatImportResult {
   final List<ChatMessage> messages;
@@ -17,7 +16,7 @@ class ChatImportResult {
   ChatImportResult({required this.messages, this.userName});
 }
 
-Future<ChatExportResult> exportChatAsJsonl({
+Future<FileExportResult> exportChatAsJsonl({
   required ChatSession session,
   required Character character,
   required String outputDir,
@@ -37,15 +36,32 @@ Future<ChatExportResult> exportChatAsJsonl({
   lines.add(jsonEncode(metadata));
 
   for (final msg in session.messages) {
-    if (msg.isHidden) continue;
     final isUser = msg.role == 'user';
-    final name = isUser ? userName : character.name;
+    // A user message names the persona it was actually sent as; [userName] is
+    // only the fallback for the ones that carry none (chats written before
+    // messages stored a persona, or an import that had nothing to store).
+    final messagePersona = msg.personaName?.trim();
+    final name = isUser
+        ? (messagePersona == null || messagePersona.isEmpty
+              ? userName
+              : messagePersona)
+        : character.name;
+
+    // SillyTavern (and every reader built on its format, Tavo included) has
+    // no hidden flag of its own: `/hide` just sets `is_system` on the message
+    // and the prompt builder drops every `is_system` line. So `is_system` is
+    // where our [ChatMessage.isHidden] has to land, alongside the messages
+    // that are genuinely system-role. Exporting hidden messages at all is the
+    // point — they used to be skipped outright, which lost them silently.
+    final isSystem = msg.isHidden || msg.role == 'system';
 
     final stMsg = <String, dynamic>{
       'name': name,
       'is_user': isUser,
-      'is_system': msg.role == 'system',
-      'send_date': _formatSTDate(DateTime.fromMillisecondsSinceEpoch(msg.timestamp ?? 0)),
+      'is_system': isSystem,
+      'send_date': _formatSTDate(
+        DateTime.fromMillisecondsSinceEpoch(msg.timestamp ?? 0),
+      ),
       'mes': msg.content,
       'swipe_id': msg.swipeId,
       'swipes': msg.swipes,
@@ -58,6 +74,14 @@ Future<ChatExportResult> exportChatAsJsonl({
     if (msg.id.isNotEmpty) {
       stMsg['extra']!['glazeMessageId'] = msg.id;
     }
+    // `is_system` flattens two distinct Glaze states (hidden, and system-role)
+    // into one flag, so a Glaze -> Glaze round trip needs both spelled out to
+    // come back unchanged. Foreign files carry neither and fall back to the
+    // SillyTavern reading of `is_system` on import.
+    if (isSystem) {
+      stMsg['extra']!['glazeHidden'] = msg.isHidden;
+      stMsg['extra']!['glazeRole'] = msg.role;
+    }
 
     if (msg.swipes.isNotEmpty && msg.swipes.length > 1) {
       stMsg['swipe_info'] = msg.swipes.map((_) => <String, dynamic>{}).toList();
@@ -68,12 +92,16 @@ Future<ChatExportResult> exportChatAsJsonl({
 
   final fileContent = lines.join('\n');
   final safeName = character.name.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
-  final dateStr = DateTime.now().toIso8601String().replaceAll(RegExp(r'[:T]'), '-').split('.').first;
+  final dateStr = DateTime.now()
+      .toIso8601String()
+      .replaceAll(RegExp(r'[:T]'), '-')
+      .split('.')
+      .first;
   final filename = '$safeName - $dateStr.jsonl';
   final filePath = p.join(outputDir, filename);
 
   await File(filePath).writeAsString(fileContent);
-  return ChatExportResult(filePath: filePath);
+  return FileExportResult(filePath: filePath);
 }
 
 Future<ChatImportResult> importChatFromJsonl(String filePath) async {
@@ -125,14 +153,34 @@ ChatMessage? convertStMessage(Map<String, dynamic> obj, int index) {
     final text = (obj['mes'] as String?) ?? '';
     final sendDate = obj['send_date'] as String?;
 
+    final extra = obj['extra'];
+    final extraMap = extra is Map<String, dynamic>
+        ? extra
+        : const <String, dynamic>{};
+    // Written by our own export when `is_system` had to carry two states at
+    // once. Present only on Glaze-written files, and authoritative there.
+    final glazeRole = extraMap['glazeRole'] as String?;
+    final glazeHidden = extraMap['glazeHidden'];
+
     String role;
-    if (isSystem) {
-      role = 'system';
+    if (glazeRole != null && glazeRole.isNotEmpty) {
+      role = glazeRole;
     } else if (isUser) {
+      // `is_user` outranks `is_system`: SillyTavern leaves `is_user` alone when
+      // it hides a message, so both flags together is a hidden user message,
+      // never a system one (its own system lines are always `is_user: false`).
       role = 'user';
+    } else if (isSystem) {
+      role = 'system';
     } else {
       role = 'assistant';
     }
+
+    // In the SillyTavern format `is_system` means "kept out of the prompt" —
+    // that is exactly [ChatMessage.isHidden], not our system role, which we do
+    // send. So a foreign `is_system` line imports as hidden; without this an
+    // ST/Tavo hidden message came back visible *and* went to the model.
+    final isHidden = glazeHidden is bool ? glazeHidden : isSystem;
 
     if (text.trim().isEmpty) return null;
 
@@ -144,14 +192,11 @@ ChatMessage? convertStMessage(Map<String, dynamic> obj, int index) {
         : <String>[];
     final swipeId = _parseInt(obj['swipe_id']) ?? 0;
 
-    String? reasoning;
-    final extra = obj['extra'];
-    if (extra is Map<String, dynamic>) {
-      reasoning = extra['reasoning'] as String?;
-    }
+    final reasoning = extraMap['reasoning'] as String?;
 
     return ChatMessage(
-      id: (extra is Map ? extra['glazeMessageId'] as String? : null) ??
+      id:
+          extraMap['glazeMessageId'] as String? ??
           'imp_${DateTime.now().millisecondsSinceEpoch}_$index',
       role: role,
       content: text,
@@ -159,6 +204,7 @@ ChatMessage? convertStMessage(Map<String, dynamic> obj, int index) {
       swipes: swipes,
       swipeId: swipeId,
       reasoning: reasoning,
+      isHidden: isHidden,
     );
   } catch (_) {
     return null;

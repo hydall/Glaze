@@ -3,77 +3,14 @@ import 'package:flutter/foundation.dart';
 import '../models/studio_config.dart';
 import 'studio_controller_ontology.dart';
 
-/// Pure agent-gating specialist extracted from `MemoryStudioService`
-/// (plan §2): keyword-based tracker activation + the 3-phase agent split.
+/// Pure agent-gating specialist: keyword-based tracker activation +
+/// the 3-phase agent split. Execution modes (Direct/Assisted/Legacy)
+/// have been removed — agent toggles are the sole topology control.
 ///
-/// Stateless, no `Ref`. `MemoryStudioService` keeps static
-/// `@visibleForTesting` delegators (`matchesActivationKeywords`,
-/// `splitAgentsByPhase`) and re-exports [AgentPhaseSplit] because tests
-/// reference them via `MemoryStudioService.<name>`.
+/// Stateless, no `Ref`.
 class StudioActivationGate {
   StudioActivationGate._();
 
-  /// Whether a controller belongs to [mode]'s pre-generation topology.
-  ///
-  /// This deliberately says nothing about post-generation processing: the
-  /// Post Cleaner / fact-checker switch remains an independent pipeline
-  /// setting in every Studio mode.
-  static bool isControllerAllowed(String specId, StudioExecutionMode mode) {
-    return switch (mode) {
-      StudioExecutionMode.legacy => true,
-      StudioExecutionMode.direct => specId == 'final',
-      StudioExecutionMode.assisted =>
-        specId == 'final' ||
-            specId == 'continuity' ||
-            specId == 'narrative' ||
-            specId == 'beauty',
-    };
-  }
-
-  /// Applies an explicit preset topology to persisted runtime agents.
-  /// Runtime `agents_json` can outlive a preset switch, so Direct must not
-  /// rely on callers having already disabled individual pregen agents.
-  static List<StudioAgent> applyExecutionMode(
-    List<StudioAgent> agents,
-    StudioExecutionMode mode,
-  ) {
-    return agents
-        .map((agent) {
-          final specId = StudioControllerOntology.specForAgent(agent).id;
-          final isPreGen = agent.phase == 'pre_generation';
-          final disabled = isPreGen && !isControllerAllowed(specId, mode);
-          return disabled ? agent.copyWith(enabled: false) : agent;
-        })
-        .toList(growable: false);
-  }
-
-  /// True if at least one of [keywords] appears (case-insensitive substring
-  /// match) in the last [scanDepth] entries of [historyContents]. When
-  /// [scanDepth] is 0 or negative, scans the entire list. When [keywords]
-  /// is empty, returns true (always activate).
-  static bool matchesActivationKeywords(
-    List<String> keywords,
-    List<String> historyContents,
-    int scanDepth,
-  ) {
-    if (keywords.isEmpty) return true;
-    if (historyContents.isEmpty) return false;
-    final effectiveDepth = scanDepth <= 0 ? historyContents.length : scanDepth;
-    final start = historyContents.length - effectiveDepth;
-    final window = historyContents.sublist(start < 0 ? 0 : start);
-    final loweredKeywords = keywords
-        .map((k) => k.trim().toLowerCase())
-        .where((k) => k.isNotEmpty)
-        .toList();
-    if (loweredKeywords.isEmpty) return true;
-    for (final content in window) {
-      final lowered = content.toLowerCase();
-      for (final keyword in loweredKeywords) {
-        if (lowered.contains(keyword)) return true;
-      }
-    }
-    return false;
-  }
 
   /// Feature 6 — split a sorted (by `order`) list of enabled agents into the
   /// three pipeline phases.
@@ -84,7 +21,8 @@ class StudioActivationGate {
   /// - `postGenTrackers` = agents whose normalized phase is `'post_processing'`.
   /// - `preGenTrackers` = agents whose normalized phase is `'pre_generation'`,
   ///   EXCLUDING the final generator.
-  /// - `finalAgent` = the LAST enabled pre-gen agent (the generator).
+  /// - `finalAgent` = the agent whose spec has `isFinal: true`, if any.
+  ///   Falls back to the last enabled pre-gen agent (migration compat).
   /// - Fallback: if NO pre-gen agent exists, the last enabled agent overall is
   ///   the generator (and is removed from `postGenTrackers`).
   static AgentPhaseSplit splitAgentsByPhase(List<StudioAgent> agents) {
@@ -110,7 +48,22 @@ class StudioActivationGate {
         .toList();
 
     if (preGen.isNotEmpty) {
-      // Last pre-gen agent = generator; the rest are pre-gen trackers.
+      final finalIdx = preGen.indexWhere(
+        (a) => StudioControllerOntology.specForAgent(a)?.isFinal ?? false,
+      );
+      if (finalIdx >= 0) {
+        final finalAgent = preGen[finalIdx];
+        final preGenTrackers = <StudioAgent>[
+          for (var i = 0; i < preGen.length; i++)
+            if (i != finalIdx) preGen[i],
+        ];
+        return AgentPhaseSplit(
+          preGenTrackers: preGenTrackers,
+          postGenTrackers: postGen,
+          finalAgent: finalAgent,
+        );
+      }
+      // Fallback: last pre-gen agent = generator (migration compat).
       final finalAgent = preGen.last;
       final preGenTrackers = preGen.sublist(0, preGen.length - 1);
       return AgentPhaseSplit(

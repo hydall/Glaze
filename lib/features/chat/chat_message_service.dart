@@ -1,11 +1,16 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/llm/tokenizer.dart';
 import '../../core/models/chat_message.dart';
+import '../../core/models/tracker.dart';
 import '../../core/models/tracker_snapshot.dart';
 import '../../core/utils/time_helpers.dart';
 import '../../core/state/db_provider.dart';
+import '../../core/state/lorebook_embedding_provider.dart';
+import '../../core/db/repositories/lorebook_use_manifest_repo.dart';
 import '../extensions/providers/info_blocks_provider.dart';
 import 'chat_session_service.dart';
 
@@ -61,10 +66,39 @@ class ChatMessageService {
         ? (List<String>.from(msg.swipes)..[swipeIdx] = text)
         : msg.swipes;
     final updatedSwipesMeta = List<Map<String, dynamic>>.from(msg.swipesMeta);
+    while (updatedSwipesMeta.length < msg.swipes.length) {
+      updatedSwipesMeta.add(<String, dynamic>{});
+    }
+    final updatedTokens = estimateTokens(text);
+    final updatedAgentSwipes = List<AgentSwipe>.from(msg.agentSwipes);
+    if (msg.agentSwipeId >= 0 && msg.agentSwipeId < updatedAgentSwipes.length) {
+      final active = updatedAgentSwipes[msg.agentSwipeId];
+      updatedAgentSwipes[msg.agentSwipeId] = AgentSwipe(
+        content: text,
+        kind: active.kind,
+        reasoning: newReasoning,
+        genTime: active.genTime,
+        tokens: updatedTokens,
+        time: active.time,
+        studioOutputs: active.studioOutputs,
+        parentSwipeId: active.parentSwipeId,
+      );
+    }
     if (swipeIdx >= 0 && swipeIdx < updatedSwipesMeta.length) {
       updatedSwipesMeta[swipeIdx] = {
         ...updatedSwipesMeta[swipeIdx],
         'reasoning': newReasoning,
+        'tokens': updatedTokens,
+        // A hand-edit rewrites the text, so an index into the pre-edit string
+        // no longer points at the continuation. Drop it rather than slice the
+        // new text at a stale offset (INV-CM7).
+        'continuationOffset': null,
+        if (updatedAgentSwipes.isNotEmpty) ...{
+          'agentSwipes': updatedAgentSwipes
+              .map((swipe) => swipe.toJson())
+              .toList(),
+          'agentSwipeId': msg.agentSwipeId,
+        },
       };
     }
     newMessages[index] = msg.copyWith(
@@ -73,7 +107,9 @@ class ChatMessageService {
       isAllReasoning: isAllReasoning,
       swipes: updatedSwipes,
       swipesMeta: updatedSwipesMeta,
-      tokens: estimateTokens(text),
+      agentSwipes: updatedAgentSwipes,
+      tokens: updatedTokens,
+      continuationOffset: null,
     );
     return _persist(session, newMessages);
   }
@@ -131,6 +167,10 @@ class ChatMessageService {
         .map((message) => message.id)
         .where((id) => id.isNotEmpty)
         .toSet();
+    final deletedMessageIds = validIndices
+        .map((index) => session.messages[index].id)
+        .where((id) => id.isNotEmpty)
+        .toSet();
     final newMessages = <ChatMessage>[
       for (var i = 0; i < session.messages.length; i++)
         if (!validIndices.contains(i)) session.messages[i],
@@ -154,6 +194,7 @@ class ChatMessageService {
       deletedIndices: validIndices,
       earliestDeletedIndex: earliestDeletedIndex,
       invalidatedMessageIds: invalidatedMessageIds,
+      deletedMessageIds: deletedMessageIds,
     );
   }
 
@@ -174,9 +215,11 @@ class ChatMessageService {
     final checkpointRepo = _ref.read(
       ledgerReconciliationCheckpointRepoProvider,
     );
+    final infoBlocksRepo = _ref.read(infoBlocksRepoProvider);
     final chatRepo = _ref.read(chatRepoProvider);
     final updated = plan.session;
     final invalidatedMessageIds = plan.invalidatedMessageIds;
+    var wakeLoreEmbeddingWorker = false;
 
     // Select the rollback base by chat order. Snapshot timestamps have
     // second-level precision and cannot reliably order adjacent turns.
@@ -196,20 +239,65 @@ class ChatMessageService {
     }
 
     await chatRepo.transaction(() async {
+      await _ref
+          .read(cardEvolutionProposalRunRepoProvider)
+          .cancelPendingForMessageMutationInTransaction(
+            sessionId: session.id,
+            messageIds: invalidatedMessageIds,
+          );
       await knowledgeRepo.rollbackReconciliationCleanupForMessages(
         session.id,
         invalidatedMessageIds,
       );
+      await _ref
+          .read(ledgerReconciliationRunRepoProvider)
+          .invalidateForMessageMutation(
+            sessionId: session.id,
+            // Deleting an earlier message changes the causal transcript for
+            // every later reconciliation range, even when the deleted message
+            // itself was not one of that run's anchors. Conversely, deleting
+            // only a trailing trigger must leave an already-completed range
+            // intact.
+            messageIds: invalidatedMessageIds,
+            reason: 'message_deleted',
+            createdAt: currentTimestampSeconds(),
+          );
       await knowledgeRepo.retractForMessages(session.id, invalidatedMessageIds);
       await memoryBookRepo.deleteForMessages(session.id, invalidatedMessageIds);
       await snapshotRepo.deleteForMessages(session.id, invalidatedMessageIds);
-      await checkpointRepo.deleteBySessionId(session.id);
-      await trackerRepo.replaceLedgerState(
+      await infoBlocksRepo.deleteByMessageIds(
         session.id,
-        fallbackSnapshot?.trackers ?? const [],
+        invalidatedMessageIds,
       );
-      await chatRepo.put(updated);
+      await _deleteManifestProvenanceForMessages(
+        sessionId: session.id,
+        messageIds: invalidatedMessageIds,
+      );
+      await checkpointRepo.deleteForMessages(session.id, invalidatedMessageIds);
+      // Rolling back before the first committed snapshot restores the original
+      // clock seed. Legacy sessions without one retain a complete live clock as
+      // a best-effort baseline, but must not promote it to an initial seed.
+      var committedBase = fallbackSnapshot?.trackers ?? const <Tracker>[];
+      if (fallbackSnapshot == null) {
+        committedBase = await trackerRepo.getInitialGameTimeSeed(session.id);
+        if (committedBase.isEmpty) {
+          committedBase = await trackerRepo.getCompleteGameTime(session.id);
+        }
+      }
+      await trackerRepo.replaceLedgerState(session.id, committedBase);
+      final survivors = await _writeDeletion(session, plan);
+      final canonRollback = await _ref
+          .read(sessionCanonRollbackRepoProvider)
+          .reconcileInTransaction(
+            sessionId: session.id,
+            survivingMessages: survivors,
+          );
+      wakeLoreEmbeddingWorker = canonRollback.shouldWakeLoreEmbeddingWorker;
     });
+
+    if (wakeLoreEmbeddingWorker) {
+      unawaited(_ref.read(sessionLorebookEmbeddingWorkerProvider).drain());
+    }
 
     // Current chunk indices no longer map to the same message ranges. Drop the
     // session index now; post-generation indexing will rebuild current chunks.
@@ -221,8 +309,63 @@ class ChatMessageService {
       debugPrint('[ChatMessageService] failed to clear message index: $e');
     }
 
-    ChatSessionService.updateCache(updated);
-    return updated;
+    // ExtBlock panels are keyed by message id. The transaction deleted the
+    // rows for every invalidated message; reload the provider so a deleted
+    // message's panel cannot be re-rendered from the in-memory cache.
+    if (invalidatedMessageIds.isNotEmpty) {
+      await _ref.read(infoBlocksProvider(session.id).notifier).refresh();
+    }
+
+    final durable = await chatRepo.getById(session.id) ?? updated;
+    ChatSessionService.updateCache(durable);
+    return durable;
+  }
+
+  /// Applies [plan] to the durable row and returns the surviving messages.
+  ///
+  /// The deletion is re-applied by message id against the row as it is *now*,
+  /// rather than writing the shortened list the plan carries. The plan was
+  /// computed on the frame of the tap, and the transaction around this can run
+  /// for a while on a long chat — long enough for a reply to finish streaming
+  /// into the row, or for a variation switch to commit. Writing the plan
+  /// wholesale wrote those back out again: the delete undid work it had nothing
+  /// to do with, and the row disagreed with the screen until the chat was
+  /// reopened.
+  ///
+  /// The deleted count is read from the durable row for the same reason — two
+  /// deletions in flight each add their own, instead of the later one
+  /// overwriting the earlier one's total.
+  ///
+  /// Messages written before ids existed carry an empty one and cannot be
+  /// addressed this way. When the plan holds any of those, the shortened list
+  /// is written as before: an index-based delete is only correct against the
+  /// snapshot it was computed from, so nothing is gained by being clever here.
+  Future<List<ChatMessage>> _writeDeletion(
+    ChatSession session,
+    MessageDeletionPlan plan,
+  ) async {
+    final chatRepo = _ref.read(chatRepoProvider);
+    if (plan.deletedMessageIds.length != plan.deletedIndices.length) {
+      await chatRepo.put(plan.session);
+      return plan.session.messages;
+    }
+    final durable = await chatRepo.mutateSession(
+      sessionId: session.id,
+      updatedAt: plan.session.updatedAt,
+      mutate: (current) {
+        final remaining = current.messages
+            .where((message) => !plan.deletedMessageIds.contains(message.id))
+            .toList();
+        final vars = Map<String, String>.from(current.sessionVars)
+          ..[ChatSessionX.deletedMessagesVarKey] =
+              (current.deletedMessageCount + plan.deletedIndices.length)
+                  .toString();
+        return current.copyWith(messages: remaining, sessionVars: vars);
+      },
+    );
+    // No row: the session was deleted from under the delete. Nothing survives,
+    // and the rollback below has nothing to reconcile against.
+    return durable?.messages ?? const [];
   }
 
   ChatSession toggleMessageHidden(ChatSession session, int index) {
@@ -241,7 +384,7 @@ class ChatMessageService {
   ChatSession toggleImageHidden(ChatSession session, int index) {
     if (index < 0 || index >= session.messages.length) return session;
     final msg = session.messages[index];
-    if (msg.imagePath == null || msg.imagePath!.isEmpty) return session;
+    if (!msg.hasAttachments) return session;
     final newMessages = List<ChatMessage>.from(session.messages);
     newMessages[index] = msg.copyWith(imageHidden: !msg.imageHidden);
     return _persist(session, newMessages);
@@ -296,9 +439,18 @@ class ChatMessageService {
     // swipe's meta, then load (or seed) agentSwipes for the incoming swipe.
     // Save outgoing agentSwipes.
     if (msg.agentSwipes.isNotEmpty && msg.swipeId < swipesMeta.length) {
+      final outgoingAgentSwipes = List<AgentSwipe>.from(msg.agentSwipes);
+      if (msg.agentSwipeId >= 0 &&
+          msg.agentSwipeId < outgoingAgentSwipes.length &&
+          outgoingAgentSwipes[msg.agentSwipeId].time == null &&
+          msg.time != null) {
+        outgoingAgentSwipes[msg.agentSwipeId] =
+            outgoingAgentSwipes[msg.agentSwipeId].copyWith(time: msg.time);
+      }
       swipesMeta[msg.swipeId] = {
         ...swipesMeta[msg.swipeId],
-        'agentSwipes': msg.agentSwipes.map((e) => e.toJson()).toList(),
+        'time': msg.time,
+        'agentSwipes': outgoingAgentSwipes.map((e) => e.toJson()).toList(),
         'agentSwipeId': msg.agentSwipeId,
       };
     }
@@ -318,6 +470,7 @@ class ChatMessageService {
           reasoning: meta?['reasoning'] as String?,
           genTime: meta?['genTime'] as String?,
           tokens: meta?['tokens'] as int?,
+          time: meta?['time'] as String?,
           studioOutputs: _studioOutputsFromMeta(meta),
         ),
       ];
@@ -329,6 +482,9 @@ class ChatMessageService {
         ? nextAgentSwipes[nextAgentSwipeId.clamp(0, nextAgentSwipes.length - 1)]
               .content
         : msg.swipes[swipeId];
+    final activeAgentSwipe = nextAgentSwipes.isNotEmpty
+        ? nextAgentSwipes[nextAgentSwipeId.clamp(0, nextAgentSwipes.length - 1)]
+        : null;
 
     final updated = msg.copyWith(
       swipeId: swipeId,
@@ -362,6 +518,16 @@ class ChatMessageService {
                 )]
                 .tokens
           : meta?['tokens'] as int?,
+      // Per-swipe, like the counts above: only the variation a Continue run
+      // extended carries a boundary, so swiping to a sibling must clear it
+      // rather than slice that sibling at a stale offset (INV-CM7).
+      continuationOffset: meta?['continuationOffset'] as int?,
+      time: activeAgentSwipe?.time,
+      // The guided-swipe instruction is per-variation: each swipe shows the
+      // one it was generated with, and a variation generated without an
+      // instruction shows none.
+      guidanceText: _guidanceTextFromMeta(meta),
+      guidanceType: _guidanceTypeFromMeta(meta),
       triggeredLorebooks: _triggeredFromMeta(meta, 'triggeredLorebooks'),
       triggeredMemories: _triggeredFromMeta(meta, 'triggeredMemories'),
       studioOutputs: nextAgentSwipes.isNotEmpty
@@ -423,11 +589,12 @@ class ChatMessageService {
         agentSwipeId >= msg.agentSwipes.length) {
       return session;
     }
-    final swipe = msg.agentSwipes[agentSwipeId];
+    final agentSwipes = _withActiveTime(msg);
+    final swipe = agentSwipes[agentSwipeId];
     final swipesMeta = _syncAgentSwipesToMeta(
       msg.swipesMeta,
       msg.swipeId,
-      msg.agentSwipes,
+      agentSwipes,
       agentSwipeId,
     );
     final updated = msg.copyWith(
@@ -438,7 +605,9 @@ class ChatMessageService {
       reasoning: swipe.reasoning,
       genTime: swipe.genTime,
       tokens: swipe.tokens,
+      time: swipe.time,
       studioOutputs: swipe.studioOutputs,
+      agentSwipes: agentSwipes,
       swipesMeta: swipesMeta,
     );
     final newMessages = List<ChatMessage>.from(session.messages);
@@ -488,8 +657,10 @@ class ChatMessageService {
     final facts = _ref.read(characterKnowledgeFactRepoProvider);
     final memory = _ref.read(memoryBookRepoProvider);
     final blocks = _ref.read(infoBlocksRepoProvider);
+    final manifests = _ref.read(lorebookUseManifestRepoProvider);
     late ChatSession updatedSession;
     late ChatMessage updatedMessage;
+    var wakeLoreEmbeddingWorker = false;
 
     await chatRepo.transaction(() async {
       final latest = await chatRepo.getById(session.id);
@@ -515,8 +686,29 @@ class ChatMessageService {
           ..[messageIndex] = replacement,
         updatedAt: currentTimestampSeconds(),
       );
+      await _ref
+          .read(cardEvolutionProposalRunRepoProvider)
+          .cancelPendingForMessageMutationInTransaction(
+            sessionId: session.id,
+            messageIds: {messageId},
+          );
+      await _ref
+          .read(ledgerReconciliationRunRepoProvider)
+          .invalidateForMessageMutation(
+            sessionId: session.id,
+            messageIds: {messageId},
+            reason: 'variation_deleted',
+            createdAt: currentTimestampSeconds(),
+          );
 
       if (!removeAgentSwipe) {
+        // Manifest anchors are immutable. Green-index compaction would make
+        // later anchors identify different variations, so fail closed.
+        await _deleteManifestVariations(
+          manifests,
+          sessionId: session.id,
+          message: original,
+        );
         await snapshots.deleteSwipe(
           sessionId: session.id,
           messageId: messageId,
@@ -543,6 +735,14 @@ class ChatMessageService {
           removedSwipeId: removedSwipeId,
         );
       } else {
+        // Blue-index compaction has the same identity problem, scoped to this
+        // green variation. Drop its immutable provenance before shifting.
+        await _deleteManifestVariations(
+          manifests,
+          sessionId: session.id,
+          message: original,
+          swipeIds: {removedSwipeId},
+        );
         await snapshots.deleteAnchor(
           sessionId: session.id,
           messageId: messageId,
@@ -581,7 +781,18 @@ class ChatMessageService {
           .read(embeddingRepoProvider)
           .deleteBySource('chat_message', session.id);
       await chatRepo.put(updatedSession);
+      final canonRollback = await _ref
+          .read(sessionCanonRollbackRepoProvider)
+          .reconcileInTransaction(
+            sessionId: updatedSession.id,
+            survivingMessages: updatedSession.messages,
+          );
+      wakeLoreEmbeddingWorker = canonRollback.shouldWakeLoreEmbeddingWorker;
     });
+
+    if (wakeLoreEmbeddingWorker) {
+      unawaited(_ref.read(sessionLorebookEmbeddingWorkerProvider).drain());
+    }
 
     final activeSnapshot = await snapshots.getByAnchor(
       sessionId: session.id,
@@ -603,6 +814,66 @@ class ChatMessageService {
     _ref.invalidate(memoryBookProvider(session.id));
     await _ref.read(infoBlocksProvider(session.id).notifier).refresh();
     return updatedSession;
+  }
+
+  /// Removes every immutable manifest anchor represented by [message].
+  /// An absent nested list is the legacy/default agent variation zero.
+  Future<void> _deleteManifestVariations(
+    LorebookUseManifestRepo manifests, {
+    required String sessionId,
+    required ChatMessage message,
+    Set<int>? swipeIds,
+  }) async {
+    final greenCount = message.swipes.isEmpty ? 1 : message.swipes.length;
+    for (var swipeId = 0; swipeId < greenCount; swipeId++) {
+      if (swipeIds != null && !swipeIds.contains(swipeId)) continue;
+      final meta = swipeId < message.swipesMeta.length
+          ? message.swipesMeta[swipeId]
+          : const <String, dynamic>{};
+      final nested = meta['agentSwipes'];
+      final agentCount = nested is List && nested.isNotEmpty
+          ? nested.length
+          : 1;
+      for (var agentSwipeId = 0; agentSwipeId < agentCount; agentSwipeId++) {
+        await manifests.deleteByVariation(
+          sessionId: sessionId,
+          messageId: message.id,
+          swipeId: swipeId,
+          agentSwipeId: agentSwipeId,
+        );
+      }
+    }
+  }
+
+  /// Ordinary message deletion invalidates the causal suffix, including every
+  /// immutable provenance anchor on those messages. Query exact stored anchors
+  /// first, then use the manifest repository's child-first deletion API.
+  Future<void> _deleteManifestProvenanceForMessages({
+    required String sessionId,
+    required Set<String> messageIds,
+  }) async {
+    if (messageIds.isEmpty) return;
+    final db = _ref.read(appDbProvider);
+    // An acceptance is also invalid once its accepting user turn is removed,
+    // even when the referenced assistant variation remains in the prefix.
+    await (db.delete(db.lorebookUseAcceptanceRecords)
+          ..where((row) => row.sessionId.equals(sessionId))
+          ..where((row) => row.acceptedByUserMessageId.isIn(messageIds)))
+        .go();
+    final rows =
+        await (db.select(db.lorebookUseManifests)
+              ..where((row) => row.sessionId.equals(sessionId))
+              ..where((row) => row.messageId.isIn(messageIds)))
+            .get();
+    final manifests = _ref.read(lorebookUseManifestRepoProvider);
+    for (final row in rows) {
+      await manifests.deleteByVariation(
+        sessionId: sessionId,
+        messageId: row.messageId,
+        swipeId: row.swipeId,
+        agentSwipeId: row.agentSwipeId,
+      );
+    }
   }
 
   @visibleForTesting
@@ -637,6 +908,7 @@ class ChatMessageService {
               reasoning: nextMeta['reasoning'] as String?,
               genTime: nextMeta['genTime'] as String?,
               tokens: nextMeta['tokens'] as int?,
+              time: nextMeta['time'] as String?,
               studioOutputs: _studioOutputsFromMeta(nextMeta),
             ),
           ]
@@ -663,6 +935,11 @@ class ChatMessageService {
           active.content.isEmpty && (active.reasoning?.isNotEmpty ?? false),
       genTime: active.genTime,
       tokens: active.tokens,
+      // The surviving swipe owns its own boundary — or none (INV-CM7).
+      continuationOffset: nextMeta['continuationOffset'] as int?,
+      guidanceText: _guidanceTextFromMeta(nextMeta),
+      guidanceType: _guidanceTypeFromMeta(nextMeta),
+      time: active.time,
       studioOutputs: active.studioOutputs,
       isError: nextMeta['isError'] == true,
       triggeredLorebooks: _triggeredFromMeta(nextMeta, 'triggeredLorebooks'),
@@ -698,6 +975,7 @@ class ChatMessageService {
         reasoning: swipe.reasoning,
         genTime: swipe.genTime,
         tokens: swipe.tokens,
+        time: swipe.time,
         studioOutputs: swipe.studioOutputs,
         parentSwipeId: parent,
       );
@@ -727,6 +1005,7 @@ class ChatMessageService {
           active.content.isEmpty && (active.reasoning?.isNotEmpty ?? false),
       genTime: active.genTime,
       tokens: active.tokens,
+      time: active.time,
       studioOutputs: active.studioOutputs,
       swipes: greenSwipes,
       swipesMeta: meta,
@@ -753,6 +1032,34 @@ class ChatMessageService {
       'agentSwipeId': agentSwipeId,
     };
     return meta;
+  }
+
+  static List<AgentSwipe> _withActiveTime(ChatMessage message) {
+    final swipes = List<AgentSwipe>.from(message.agentSwipes);
+    if (message.time == null ||
+        message.agentSwipeId < 0 ||
+        message.agentSwipeId >= swipes.length ||
+        swipes[message.agentSwipeId].time != null) {
+      return swipes;
+    }
+    swipes[message.agentSwipeId] = swipes[message.agentSwipeId].copyWith(
+      time: message.time,
+    );
+    return swipes;
+  }
+
+  /// The guided-swipe instruction a variation was generated with, if any.
+  /// Only a guided swipe leaves one: a reply steered from the composer is
+  /// described by the user message that carries the instruction.
+  static String? _guidanceTextFromMeta(Map<String, dynamic>? meta) {
+    final text = meta?['guidanceText'];
+    if (text is! String || text.isEmpty) return null;
+    return meta?['guidanceType'] == 'SWIPE' ? text : null;
+  }
+
+  static String _guidanceTypeFromMeta(Map<String, dynamic>? meta) {
+    final type = meta?['guidanceType'];
+    return type is String && type.isNotEmpty ? type : 'GENERATION';
   }
 
   /// Parse the per-swipe triggered entries stored in [swipesMeta]. Each
@@ -848,24 +1155,26 @@ class ChatMessageService {
         ? (dir > 0 ? 'slide-next' : 'slide-prev')
         : 'fade';
 
-    var newIndex = msg.agentSwipeId + dir;
+    final newIndex = msg.agentSwipeId + dir;
 
-    // Wrap-around: index < 0 → last; index >= length → 0.
-    if (newIndex < 0) {
-      newIndex = msg.agentSwipes.length - 1;
-    } else if (newIndex >= msg.agentSwipes.length) {
+    // No wrap-around, same as the green swipes above: the first variation is a
+    // hard left edge and the last one a hard right edge. Wrapping made a tap on
+    // an already-exhausted arrow jump to the opposite end of the list, which
+    // reads as the switcher glitching rather than as navigation.
+    if (newIndex >= msg.agentSwipes.length && isLastMessage) {
       // Right-edge on the last message → full regen (new green swipe).
-      if (isLastMessage) {
-        return const ChangeSwipeResult.needsRegen();
-      }
-      newIndex = 0;
+      return const ChangeSwipeResult.needsRegen();
+    }
+    if (newIndex < 0 || newIndex >= msg.agentSwipes.length) {
+      return const ChangeSwipeResult.noop();
     }
 
-    final swipe = msg.agentSwipes[newIndex];
+    final agentSwipes = _withActiveTime(msg);
+    final swipe = agentSwipes[newIndex];
     final swipesMeta = _syncAgentSwipesToMeta(
       msg.swipesMeta,
       msg.swipeId,
-      msg.agentSwipes,
+      agentSwipes,
       newIndex,
     );
     final updated = msg.copyWith(
@@ -874,7 +1183,9 @@ class ChatMessageService {
       reasoning: swipe.reasoning,
       genTime: swipe.genTime,
       tokens: swipe.tokens,
+      time: swipe.time,
       studioOutputs: swipe.studioOutputs,
+      agentSwipes: agentSwipes,
       swipeDirection: animDir,
       swipesMeta: swipesMeta,
     );
@@ -893,9 +1204,10 @@ class ChatMessageService {
       return session;
     }
     if (resolvedGreetings.length <= 1) return session;
-    var idx = newGreetingIndex;
-    if (idx < 0) idx = resolvedGreetings.length - 1;
-    if (idx >= resolvedGreetings.length) idx = 0;
+    // Hard edges, no wrap — the first greeting stays put on a back step and the
+    // last one on a forward step, matching the swipe switchers.
+    final idx = newGreetingIndex;
+    if (idx < 0 || idx >= resolvedGreetings.length) return session;
 
     final msg = session.messages[messageIndex];
     final newText = resolvedGreetings[idx];
@@ -935,7 +1247,8 @@ class ChatMessageService {
     }
     final messageId = snapshot.messages[messageIndex].id;
     final repo = _ref.read(chatRepoProvider);
-    final durable = await repo.mutateMessages(
+    var wakeLoreEmbeddingWorker = false;
+    final durable = await repo.mutateMessagesWithBeforeWrite(
       sessionId: snapshot.id,
       updatedAt: currentTimestampSeconds(),
       mutate: (messages) {
@@ -944,8 +1257,21 @@ class ChatMessageService {
         final latest = snapshot.copyWith(messages: messages);
         return mutate(latest, latestIndex).messages;
       },
+      beforeWrite: (before, after) async {
+        await _invalidateChangedReconciliationAnchors(before, after);
+        final canonRollback = await _ref
+            .read(sessionCanonRollbackRepoProvider)
+            .reconcileInTransaction(
+              sessionId: after.id,
+              survivingMessages: after.messages,
+            );
+        wakeLoreEmbeddingWorker = canonRollback.shouldWakeLoreEmbeddingWorker;
+      },
     );
     if (durable == null) return snapshot;
+    if (wakeLoreEmbeddingWorker) {
+      unawaited(_ref.read(sessionLorebookEmbeddingWorkerProvider).drain());
+    }
     ChatSessionService.updateCache(durable);
     return durable;
   }
@@ -956,16 +1282,68 @@ class ChatMessageService {
     ChatSession Function(ChatSession latest) mutate,
   ) async {
     final repo = _ref.read(chatRepoProvider);
-    final durable = await repo.mutateMessages(
+    final durable = await repo.mutateMessagesWithBeforeWrite(
       sessionId: snapshot.id,
       updatedAt: currentTimestampSeconds(),
       mutate: (messages) =>
           mutate(snapshot.copyWith(messages: messages)).messages,
+      beforeWrite: _invalidateChangedReconciliationAnchors,
     );
     if (durable == null) return snapshot;
     ChatSessionService.updateCache(durable);
     return durable;
   }
+
+  Future<void> _invalidateChangedReconciliationAnchors(
+    ChatSession before,
+    ChatSession after,
+  ) async {
+    final beforeById = {
+      for (final message in before.messages) message.id: message,
+    };
+    final afterById = {
+      for (final message in after.messages) message.id: message,
+    };
+    final beforeIndexById = {
+      for (final entry in before.messages.indexed) entry.$2.id: entry.$1,
+    };
+    final afterIndexById = {
+      for (final entry in after.messages.indexed) entry.$2.id: entry.$1,
+    };
+    final changedIds = <String>{};
+    for (final entry in beforeById.entries) {
+      final next = afterById[entry.key];
+      if (next == null ||
+          beforeIndexById[entry.key] != afterIndexById[entry.key] ||
+          !_sameReconciliationEvidence(entry.value, next)) {
+        if (entry.key.isNotEmpty) changedIds.add(entry.key);
+      }
+    }
+    if (changedIds.isEmpty) return;
+    await _ref
+        .read(cardEvolutionProposalRunRepoProvider)
+        .cancelPendingForMessageMutationInTransaction(
+          sessionId: before.id,
+          messageIds: changedIds,
+        );
+    await _ref
+        .read(ledgerReconciliationRunRepoProvider)
+        .invalidateForMessageMutation(
+          sessionId: before.id,
+          messageIds: changedIds,
+          reason: 'message_evidence_changed',
+          createdAt: currentTimestampSeconds(),
+        );
+  }
+
+  static bool _sameReconciliationEvidence(ChatMessage a, ChatMessage b) =>
+      a.role == b.role &&
+      a.content == b.content &&
+      a.swipeId == b.swipeId &&
+      a.agentSwipeId == b.agentSwipeId &&
+      a.isHidden == b.isHidden &&
+      a.isError == b.isError &&
+      a.isTyping == b.isTyping;
 }
 
 /// Everything a message deletion needs, computed synchronously by
@@ -991,11 +1369,17 @@ class MessageDeletionPlan {
   /// facts and ext blocks anchored to these ids no longer describe the chat.
   final Set<String> invalidatedMessageIds;
 
+  /// Only physically deleted messages. Reconciliation invalidation matches
+  /// these against immutable anchors; the wider causal suffix is used by the
+  /// mutable Ledger/memory rollback only.
+  final Set<String> deletedMessageIds;
+
   const MessageDeletionPlan({
     required this.session,
     required this.deletedIndices,
     required this.earliestDeletedIndex,
     required this.invalidatedMessageIds,
+    required this.deletedMessageIds,
   });
 }
 

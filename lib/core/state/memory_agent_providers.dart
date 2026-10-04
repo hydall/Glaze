@@ -10,15 +10,15 @@ import '../llm/memory_provenance.dart';
 import '../llm/memory_cadence_service.dart';
 import '../llm/memory_post_turn_service.dart';
 import '../llm/memory_agentic_service.dart';
-import '../llm/memory_dedup_service.dart';
 import '../llm/memory_studio_service.dart';
 import '../llm/post_cleaner_service.dart';
 import '../llm/prompt/ledger_tracker_loader.dart';
 import '../llm/studio_ledger_service.dart';
 import '../llm/studio/agent_config_resolver.dart';
-import '../llm/tracker_batcher.dart';
+import '../llm/controller_batcher.dart';
 import '../models/api_config.dart';
 import 'db_provider.dart';
+import 'studio_regex_provider.dart';
 
 /// Provider for the entity graph builder.
 final memoryGraphBuilderProvider = Provider<MemoryGraphBuilder>((ref) {
@@ -63,38 +63,34 @@ final agentRunnerProvider = Provider<AgentRunner>((ref) {
       },
       readActiveApiConfig: () => ref.read(activeApiConfigProvider),
       readPipelineSettings: () => ref.read(pipelineSettingsProvider),
-      readRunApiConfigId: (sessionId) async {
-        final config = await ref
-            .read(studioConfigRepoProvider)
-            .getBySessionId(sessionId);
-        return config?.runApiConfigId ?? '';
-      },
     ),
     readPipelineSettings: () => ref.read(pipelineSettingsProvider),
   );
 });
 
-final trackerBatcherProvider = Provider<TrackerBatcher>((ref) {
-  return TrackerBatcher(ref.read(agentRunnerProvider));
+final controllerBatcherProvider = Provider<ControllerBatcher>((ref) {
+  return ControllerBatcher(ref.read(agentRunnerProvider));
 });
 
 final memoryStudioServiceProvider = Provider<MemoryStudioService>((ref) {
   return MemoryStudioService(
     ref,
     ref.read(agentRunnerProvider),
-    ref.read(trackerBatcherProvider),
+    ref.read(controllerBatcherProvider),
   );
 });
 
 /// POST-cleaner service (Stage 4). Rewrites the final assistant message
 /// to remove clichés and repetition. Fire-and-forget after generation.
 final postCleanerServiceProvider = Provider<PostCleanerService>((ref) {
+  final studioRegexes = ref.watch(studioRegexProvider).value ?? const [];
   return PostCleanerService(
     llm: const AuxLlmClient(),
     chatRepo: ref.read(chatRepoProvider),
     snapshotRepo: ref.read(trackerSnapshotRepoProvider),
     onSessionUpdated: ChatSessionService.updateCache,
     invalidateChatHistory: () => ref.invalidate(chatHistoryProvider),
+    readStudioRegexes: () => studioRegexes,
   );
 });
 
@@ -107,6 +103,7 @@ final ledgerTrackerLoaderProvider = Provider<LedgerTrackerLoader>((ref) {
 });
 
 final studioLedgerServiceProvider = Provider<StudioLedgerService>((ref) {
+  final studioRegexes = ref.watch(studioRegexProvider).value ?? const [];
   return StudioLedgerService(
     llm: const AuxLlmClient(),
     trackerRepo: ref.read(trackerRepoProvider),
@@ -116,22 +113,10 @@ final studioLedgerServiceProvider = Provider<StudioLedgerService>((ref) {
     reconciliationCheckpointRepo: ref.read(
       ledgerReconciliationCheckpointRepoProvider,
     ),
-    ledgerTrackerLoader: ref.read(ledgerTrackerLoaderProvider),
-  );
-});
-
-/// Memory dedup service. Cosine pre-filter + batch LLM call to merge/drop/keep
-/// near-duplicate memory entries. Runs on-demand (UI button) or automatically
-/// after generation (delayed, fire-and-forget).
-final memoryDedupServiceProvider = Provider<MemoryDedupService>((ref) {
-  return MemoryDedupService(
-    llm: const AuxLlmClient(),
-    embeddingRepo: ref.read(embeddingRepoProvider),
-    bookRepo: ref.read(memoryBookRepoProvider),
-    loadApiConfigs: () async {
-      await ref.read(apiListProvider.future);
-      return ref.read(apiListProvider).value ?? const <ApiConfig>[];
-    },
-    activeApiConfig: () => ref.read(activeApiConfigProvider),
+    reconciliationRunRepo: ref.read(ledgerReconciliationRunRepoProvider),
+    characterRepo: ref.read(characterRepoProvider),
+    chatRepo: ref.read(chatRepoProvider),
+    canonContextLoader: ref.read(effectiveCanonContextLoaderProvider),
+    readStudioRegexes: () => studioRegexes,
   );
 });

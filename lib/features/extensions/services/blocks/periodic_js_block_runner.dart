@@ -8,6 +8,7 @@ import '../../../../core/models/chat_message.dart';
 import '../../../../core/services/generation_notification_service.dart';
 import '../../../chat/bridge/chat_bridge_registry.dart';
 import '../../models/block_config.dart';
+import '../../models/block_modes.dart';
 
 class PeriodicJsBlockRunner {
   const PeriodicJsBlockRunner({required this.ref});
@@ -22,12 +23,18 @@ class PeriodicJsBlockRunner {
     bool Function()? isAuthorized,
   }) async {
     if (!(isAuthorized?.call() ?? true)) return null;
-    if (block.type != BlockType.jsRunner) {
+    if (block.type != BlockType.script) {
       throw ArgumentError(
-        'runJsBlock only supports BlockType.jsRunner (got ${block.type.name})',
+        'runJsBlock only supports script blocks (got ${block.type.name})',
       );
     }
-    final script = block.prompt.isNotEmpty ? block.prompt : block.script;
+    // A periodic block never asks the model, so whichever field its source
+    // names is read as the script itself. That is what the old
+    // "prompt, else script" fallback amounted to, with the difference that a
+    // block carrying both now runs the one its author picked.
+    final script = block.source == BlockSource.carried
+        ? block.script
+        : block.prompt;
     if (script.isEmpty) {
       return null;
     }

@@ -17,13 +17,31 @@ class MagicDrawerLayoutService {
   /// (deduped) so the card survives the upgrade instead of vanishing.
   static const _legacyToInspector = {'context', 'preview', 'coverage'};
 
+  /// Same idea for the Memory sheet, which absorbed the separate Summary and
+  /// Memory Books cards.
+  static const _legacyToMemory = {'summary', 'memory-books'};
+
+  static const _legacyGroups = {
+    'inspector': _legacyToInspector,
+    'memory': _legacyToMemory,
+  };
+
   List<String> _migrateIds(List<String> ids) {
     final out = <String>[];
     for (final id in ids) {
-      final mapped = _legacyToInspector.contains(id) ? 'inspector' : id;
+      final mapped = _mergedIdFor(id) ?? id;
       if (!out.contains(mapped)) out.add(mapped);
     }
     return out;
+  }
+
+  /// The surviving id a legacy id was merged into, or null when [id] is not a
+  /// legacy id.
+  static String? _mergedIdFor(String id) {
+    for (final entry in _legacyGroups.entries) {
+      if (entry.value.contains(id)) return entry.key;
+    }
+    return null;
   }
 
   Future<({List<String> itemIds, Set<String> deletedIds})> loadLayout(
@@ -33,18 +51,19 @@ class MagicDrawerLayoutService {
     final savedOrder = prefs.getStringList(itemsKey);
     final savedDeleted = prefs.getStringList(deletedItemsKey) ?? const [];
 
-    // Inspector is treated as deleted only if every legacy id was deleted.
-    final legacyDeleted = savedDeleted
-        .where((id) => _legacyToInspector.contains(id))
-        .toSet();
-    final allLegacyDeleted =
-        legacyDeleted.length == _legacyToInspector.length;
-
+    // A merged card is treated as deleted only if every legacy id that fed
+    // into it was deleted — losing one of two merged cards must not hide the
+    // survivor.
     final deletedIds = savedDeleted
-        .where((id) => !_legacyToInspector.contains(id))
+        .where((id) => _mergedIdFor(id) == null)
         .where((id) => allItems.any((item) => item.id == id))
         .toSet();
-    if (allLegacyDeleted) deletedIds.add('inspector');
+    for (final entry in _legacyGroups.entries) {
+      final deletedLegacy = savedDeleted.where(entry.value.contains).toSet();
+      if (deletedLegacy.length == entry.value.length) {
+        deletedIds.add(entry.key);
+      }
+    }
 
     final defaultIds = allItems.map((item) => item.id).toList();
     if (savedOrder == null || savedOrder.isEmpty) {

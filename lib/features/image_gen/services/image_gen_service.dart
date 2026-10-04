@@ -1,26 +1,32 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
-import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 
-import '../../../core/services/image_storage_service.dart';
-import '../../../core/utils/platform_paths.dart';
+import '../../../core/llm/transport/llm_capture_context.dart';
 import '../../../core/models/character.dart';
 import '../../../core/models/persona.dart';
-import 'image_tag_markup.dart';
-import 'naistera_image_provider.dart';
-import 'openai_image_provider.dart';
-import 'gemini_image_provider.dart';
-import 'routmy_image_provider.dart';
+import '../../../core/services/image_storage_service.dart';
+import '../../../core/utils/error_format.dart';
 import '../image_gen_models.dart';
+import 'image_gen_dispatcher.dart';
+import 'image_prompt_builder.dart';
+import 'image_reference_collector.dart';
+import 'image_tag_markup.dart';
+import 'reference_matcher.dart';
 
+/// Turns `[IMG:GEN]` tags in a message into generated images.
+///
+/// Prompt assembly (style block, reference descriptions, critical reference
+/// instruction) lives in [image_prompt_builder], reference collection in
+/// [ImageReferenceCollector] and the provider calls in [ImageGenDispatcher].
 class ImageGenService {
-  final ImageStorageService _imageStorage;
-
   ImageGenService(this._imageStorage);
+
+  final ImageStorageService _imageStorage;
+  final ImageReferenceCollector _references = const ImageReferenceCollector();
+  final ImageGenDispatcher _dispatcher = const ImageGenDispatcher();
 
   Future<String> processMessageImages({
     required String text,
@@ -35,571 +41,290 @@ class ImageGenService {
     void Function(String updatedText)? onUpdate,
     void Function(String error)? onError,
   }) async {
-    if (!settings.enabled) return text;
+    if (!settings.enabled) {
+      final disabledText = ImageTagMarkup.replaceAllImageGenTagsWithDisabled(
+        text,
+      );
+      if (disabledText != text) onUpdate?.call(disabledText);
+      return disabledText;
+    }
 
     final instructions = ImageTagMarkup.extractImageGenInstructions(text);
     if (instructions.isEmpty) return text;
 
     String currentText = text;
+    // A tag is "resolved" once it carries a result or an error token, which
+    // takes it out of the pending set the next replacement indexes into.
+    final resolved = List<bool>.filled(instructions.length, false);
 
-    for (int i = 0; i < instructions.length; i++) {
+    // Writes an outcome into the tag its instruction came from. Only that one
+    // tag is rewritten: a failure leaves the block in place as a retryable
+    // error card instead of dropping it, and the tags of the still-running
+    // images stay pending.
+    void applyOutcome(int index, _ImageOutcome outcome) {
+      var pendingIndex = 0;
+      for (var i = 0; i < index; i++) {
+        if (!resolved[i]) pendingIndex++;
+      }
+      final updated = outcome.error == null
+          ? ImageTagMarkup.replaceTagWithResult(
+              currentText,
+              pendingIndex,
+              outcome.imagePath!,
+            )
+          : ImageTagMarkup.replaceTagWithError(
+              currentText,
+              pendingIndex,
+              outcome.error!,
+            );
+      resolved[index] = true;
+      if (updated == currentText) return;
+      currentText = updated;
+      onUpdate?.call(currentText);
+    }
+
+    Future<_ImageOutcome> run(Map<String, dynamic> instruction) => _runOne(
+      instruction: instruction,
+      settings: settings,
+      llmEndpoint: llmEndpoint,
+      llmApiKey: llmApiKey,
+      llmModel: llmModel,
+      character: character,
+      persona: persona,
+      recentImageContexts: recentImageContexts,
+      cancelToken: cancelToken,
+    );
+
+    if (settings.concurrentGeneration) {
+      // Every request is already in flight; awaiting them in order only fixes
+      // the order the finished images are written back in.
+      final inFlight = instructions.map(run).toList();
+      for (var i = 0; i < inFlight.length; i++) {
+        final outcome = await inFlight[i];
+        if (outcome.cancelled) continue;
+        applyOutcome(i, outcome);
+        if (outcome.error != null) onError?.call(outcome.error!);
+      }
+      return currentText;
+    }
+
+    for (var i = 0; i < instructions.length; i++) {
       if (cancelToken?.isCancelled == true) break;
-
-      final instruction = instructions[i];
-      final rawPrompt = instruction['prompt'] as String? ?? '';
-
-      if (rawPrompt.isEmpty) {
-        currentText = ImageTagMarkup.replaceTagWithError(
-          currentText,
-          0,
-          'Image prompt is empty',
-        );
-        onUpdate?.call(currentText);
-        onError?.call('Image prompt is empty');
-        continue;
-      }
-
-      final style = instruction['style'] as String? ?? '';
-      var cleanPrompt = rawPrompt.replaceFirst(
-        RegExp(r'^SCENE_PROMPT:\s*'),
-        '',
-      );
-      final prompt = style.isNotEmpty ? '$style, $cleanPrompt' : cleanPrompt;
-      final instructionAspectRatio = instruction['aspect_ratio'] as String?;
-      final instructionImageSize = instruction['image_size'] as String?;
-
-      try {
-        final imageBytes = await generateImage(
-          settings: settings,
-          prompt: prompt,
-          llmEndpoint: llmEndpoint,
-          llmApiKey: llmApiKey,
-          llmModel: llmModel,
-          character: character,
-          persona: persona,
-          recentImageContexts: recentImageContexts,
-          instructionAspectRatio: instructionAspectRatio,
-          instructionImageSize: instructionImageSize,
-          cancelToken: cancelToken,
-        );
-        if (cancelToken?.isCancelled == true) break;
-
-        final filename = 'imggen_${DateTime.now().microsecondsSinceEpoch}.png';
-        final savedPath = await _saveGeneratedImage(filename, imageBytes);
-        if (cancelToken?.isCancelled == true) break;
-
-        currentText = ImageTagMarkup.replaceTagWithResult(
-          currentText,
-          0,
-          savedPath,
-        );
-        onUpdate?.call(currentText);
-      } on DioException catch (e) {
-        if (CancelToken.isCancel(e)) break;
-        final errorMsg = _formatError(e);
-        currentText = ImageTagMarkup.replaceTagWithError(
-          currentText,
-          0,
-          errorMsg,
-        );
-        onUpdate?.call(currentText);
-        onError?.call(errorMsg);
-      } catch (e) {
-        final errorMsg = _formatErrorString(e.toString());
-        currentText = ImageTagMarkup.replaceTagWithError(
-          currentText,
-          0,
-          errorMsg,
-        );
-        onUpdate?.call(currentText);
-        onError?.call(errorMsg);
-      }
+      final outcome = await run(instructions[i]);
+      if (outcome.cancelled) break;
+      applyOutcome(i, outcome);
+      if (outcome.error != null) onError?.call(outcome.error!);
     }
 
     return currentText;
   }
 
-  String _formatError(DioException e) {
-    final data = e.response?.data;
-    String? responseMessage;
-    if (data is Map) {
-      final error = data['error'];
-      if (error is Map) {
-        responseMessage = error['message']?.toString();
-      } else if (error != null) {
-        responseMessage = error.toString();
-      }
-      responseMessage ??= data['message']?.toString();
-      responseMessage ??= data['detail']?.toString();
-    } else if (data != null) {
-      responseMessage = data.toString();
-    }
-    final status = e.response?.statusCode;
-    final msg = responseMessage?.trim().isNotEmpty == true
-        ? [if (status != null) 'HTTP $status', responseMessage!].join(': ')
-        : status != null
-        ? [
-            'HTTP $status',
-            if (e.response?.statusMessage?.trim().isNotEmpty == true)
-              e.response!.statusMessage!.trim(),
-          ].join(': ')
-        : e.message ?? e.toString();
-    return _formatErrorString(msg);
-  }
-
-  String _formatErrorString(String msg) {
-    if (msg.length > 200) msg = '${msg.substring(0, 197)}...';
-    return msg;
-  }
-
-  Future<Uint8List> generateImage({
+  /// Generates and persists the image for a single instruction.
+  ///
+  /// Never throws: every failure comes back as [_ImageOutcome.failure] so the
+  /// caller can turn it into an error card and keep going.
+  Future<_ImageOutcome> _runOne({
+    required Map<String, dynamic> instruction,
     required ImageGenSettings settings,
-    required String prompt,
     required String llmEndpoint,
     required String llmApiKey,
     required String llmModel,
     Character? character,
     Persona? persona,
     List<String>? recentImageContexts,
-    String? instructionAspectRatio,
-    String? instructionImageSize,
     CancelToken? cancelToken,
   }) async {
-    final isRoutmy =
-        settings.apiType == ImageGenApiType.routmy ||
-        settings.apiType == ImageGenApiType.ruRoutmy;
-    final refs = isRoutmy
-        ? await _buildRoutmyRefs(
-            settings: settings,
-            prompt: prompt,
-            character: character,
-            persona: persona,
-            recentImageContexts: recentImageContexts,
-          )
-        : _buildReferences(
-            settings: settings,
-            prompt: prompt,
-            character: character,
-            persona: persona,
-            recentImageContexts: recentImageContexts,
-          );
-    final injectedRefs = refs.take(routmyMaxInjectedReferenceImages).toList();
-    final referenceAwarePrompt = isRoutmy
-        ? imagePromptWithReferenceLabels(prompt, injectedRefs)
-        : prompt;
-    switch (settings.apiType) {
-      case ImageGenApiType.openai:
-        return _generateOpenai(
-          settings,
-          prompt,
-          llmEndpoint,
-          llmApiKey,
-          cancelToken,
-        );
-      case ImageGenApiType.gemini:
-        return _generateGemini(
-          settings,
-          prompt,
-          llmEndpoint,
-          llmApiKey,
-          instructionAspectRatio,
-          instructionImageSize,
-          cancelToken,
-        );
-      case ImageGenApiType.naistera:
-        return _generateNaistera(
-          settings,
-          prompt,
-          refs,
-          instructionAspectRatio,
-          cancelToken,
-        );
-      case ImageGenApiType.routmy:
-        return _generateRoutmy(
-          settings,
-          referenceAwarePrompt,
-          injectedRefs,
-          instructionAspectRatio,
-          instructionImageSize,
-          cancelToken,
-        );
-      case ImageGenApiType.ruRoutmy:
-        return _generateRuRoutmy(
-          settings,
-          referenceAwarePrompt,
-          injectedRefs,
-          instructionAspectRatio,
-          instructionImageSize,
-          cancelToken,
-        );
-    }
-  }
-
-  Future<Uint8List> _generateOpenai(
-    ImageGenSettings settings,
-    String prompt,
-    String llmEndpoint,
-    String llmApiKey,
-    CancelToken? cancelToken,
-  ) async {
-    final endpoint = settings.useSameEndpoint
-        ? llmEndpoint
-        : settings.customEndpoint;
-    final apiKey = settings.useSameEndpoint ? llmApiKey : settings.customApiKey;
-    final model = settings.useSameEndpoint
-        ? 'dall-e-3'
-        : (settings.customModel.isEmpty ? 'dall-e-3' : settings.customModel);
-
-    return OpenaiImageProvider().generate(
-      endpoint: endpoint,
-      apiKey: apiKey,
-      model: model,
-      prompt: prompt,
-      size: settings.openaiSize,
-      quality: settings.openaiQuality,
-      cancelToken: cancelToken,
-    );
-  }
-
-  Future<Uint8List> _generateGemini(
-    ImageGenSettings settings,
-    String prompt,
-    String llmEndpoint,
-    String llmApiKey,
-    String? instructionAspectRatio,
-    String? instructionImageSize,
-    CancelToken? cancelToken,
-  ) async {
-    final endpoint = settings.useSameEndpoint
-        ? llmEndpoint
-        : settings.customEndpoint;
-    final apiKey = settings.useSameEndpoint ? llmApiKey : settings.customApiKey;
-    final model = settings.useSameEndpoint
-        ? 'imagen-3.0-generate-002'
-        : (settings.customModel.isEmpty
-              ? 'imagen-3.0-generate-002'
-              : settings.customModel);
-
-    return GeminiImageProvider().generate(
-      endpoint: endpoint,
-      apiKey: apiKey,
-      model: model,
-      prompt: prompt,
-      aspectRatio: _validOverride(
-        instructionAspectRatio,
-        GeminiConstants.aspectRatios,
-        settings.geminiAspectRatio,
-      ),
-      imageSize: _validOverride(
-        instructionImageSize,
-        GeminiConstants.imageSizes,
-        settings.geminiImageSize,
-      ),
-      cancelToken: cancelToken,
-    );
-  }
-
-  Future<Uint8List> _generateNaistera(
-    ImageGenSettings settings,
-    String prompt,
-    List<Map<String, String>> refs,
-    String? instructionAspectRatio,
-    CancelToken? cancelToken,
-  ) async {
-    return NaisteraImageProvider().generate(
-      apiKey: settings.naisteraApiKey,
-      model: settings.naisteraModel,
-      prompt: prompt,
-      aspectRatio: _validOverride(
-        instructionAspectRatio,
-        NaisteraConstants.aspectRatios,
-        settings.naisteraAspectRatio,
-      ),
-      references: refs.isNotEmpty ? refs : null,
-      cancelToken: cancelToken,
-    );
-  }
-
-  Future<Uint8List> _generateRoutmy(
-    ImageGenSettings settings,
-    String prompt,
-    List<Map<String, String>> refs,
-    String? instructionAspectRatio,
-    String? instructionImageSize,
-    CancelToken? cancelToken,
-  ) async {
-    return RoutmyImageProvider(baseUrl: RoutMyConstants.baseUrl).generate(
-      apiKey: settings.routmyApiKey,
-      model: settings.routmyModel,
-      prompt: prompt,
-      aspectRatio: _validOverride(
-        instructionAspectRatio,
-        RoutMyConstants.aspectRatios,
-        settings.routmyAspectRatio,
-      ),
-      imageSize: _validOverride(
-        instructionImageSize,
-        RoutMyConstants.imageSizes,
-        settings.routmyImageSize,
-      ),
-      quality: settings.routmyQuality,
-      referenceImages: refs.isNotEmpty
-          ? refs.map((r) => r['image']!).where((s) => s.isNotEmpty).toList()
-          : null,
-      cancelToken: cancelToken,
-    );
-  }
-
-  Future<Uint8List> _generateRuRoutmy(
-    ImageGenSettings settings,
-    String prompt,
-    List<Map<String, String>> refs,
-    String? instructionAspectRatio,
-    String? instructionImageSize,
-    CancelToken? cancelToken,
-  ) async {
-    return RoutmyImageProvider(baseUrl: RuRoutMyConstants.baseUrl).generate(
-      apiKey: settings.ruRoutmyApiKey,
-      model: settings.ruRoutmyModel,
-      prompt: prompt,
-      aspectRatio: _validOverride(
-        instructionAspectRatio,
-        RuRoutMyConstants.aspectRatios,
-        settings.ruRoutmyAspectRatio,
-      ),
-      imageSize: _validOverride(
-        instructionImageSize,
-        RuRoutMyConstants.imageSizes,
-        settings.ruRoutmyImageSize,
-      ),
-      quality: settings.ruRoutmyQuality,
-      referenceImages: refs.isNotEmpty
-          ? refs.map((r) => r['image']!).where((s) => s.isNotEmpty).toList()
-          : null,
-      cancelToken: cancelToken,
-    );
-  }
-
-  List<Map<String, String>> _buildReferences({
-    required ImageGenSettings settings,
-    required String prompt,
-    Character? character,
-    Persona? persona,
-    List<String>? recentImageContexts,
-  }) {
-    final refs = <Map<String, String>>[];
-    final promptLower = prompt.toLowerCase();
-
-    if (settings.apiType == ImageGenApiType.naistera) {
-      if (settings.naisteraSendCharAvatar && character?.avatarPath != null) {
-        refs.add({
-          'name': character!.name,
-          'image': _fileToBase64(character.avatarPath!),
-        });
-      }
-      if (settings.naisteraSendUserAvatar && persona?.avatarPath != null) {
-        refs.add({
-          'name': persona!.name,
-          'image': _fileToBase64(persona.avatarPath!),
-        });
-      }
-      for (final ref in settings.additionalReferences) {
-        final name = ref.name.trim();
-        final triggers = _referenceTriggers(name);
-        if (ref.imageData.isNotEmpty &&
-            (ref.matchMode == 'always' || triggers.any(promptLower.contains))) {
-          refs.add({
-            'name': name,
-            'image': _extractBase64FromDataUrl(ref.imageData),
-          });
-        }
-      }
+    final rawPrompt = instruction['prompt'] as String? ?? '';
+    if (rawPrompt.isEmpty) {
+      return _ImageOutcome.failure('Image prompt is empty');
     }
 
-    // routmy / ruRoutmy refs are built asynchronously (resized) — see _buildRoutmyRefs
+    final prompt = rawPrompt.replaceFirst(RegExp(r'^SCENE_PROMPT:\s*'), '');
 
-    if (settings.imageContextEnabled && recentImageContexts != null) {
-      final count = settings.imageContextCount.clamp(1, 3);
-      for (final ctx in recentImageContexts.take(count)) {
-        final path = ImageTagMarkup.normalizeImageResultPayload(ctx);
-        final encoded = _fileToBase64(path);
-        if (encoded.isNotEmpty) {
-          refs.add({'name': 'context', 'image': encoded});
-        }
-      }
-    }
-
-    return refs;
-  }
-
-  /// Async variant of [_buildReferences] for routmy/ruRoutmy.
-  /// Resizes avatar/context images to 512px before base64-encoding so that
-  /// the JSON payload stays within provider limits.
-  Future<List<Map<String, String>>> _buildRoutmyRefs({
-    required ImageGenSettings settings,
-    required String prompt,
-    Character? character,
-    Persona? persona,
-    List<String>? recentImageContexts,
-  }) async {
-    final refs = <Map<String, String>>[];
-    final promptLower = prompt.toLowerCase();
-    final isRu = settings.apiType == ImageGenApiType.ruRoutmy;
-
-    final sendChar = isRu
-        ? settings.ruRoutmySendCharAvatar
-        : settings.routmySendCharAvatar;
-    final sendUser = isRu
-        ? settings.ruRoutmySendUserAvatar
-        : settings.routmySendUserAvatar;
-
-    if (sendChar && character?.avatarPath != null) {
-      final img = await _fileToBase64Resized(character!.avatarPath!);
-      if (img.isNotEmpty) refs.add({'name': character.name, 'image': img});
-    }
-    if (sendUser && persona?.avatarPath != null) {
-      final img = await _fileToBase64Resized(persona!.avatarPath!);
-      if (img.isNotEmpty) refs.add({'name': persona.name, 'image': img});
-    }
-    for (final ref in settings.routmyAdditionalRefs) {
-      final name = ref.name.trim();
-      final triggers = _referenceTriggers(name);
-      if (ref.imageData.isNotEmpty &&
-          (ref.matchMode == 'always' || triggers.any(promptLower.contains))) {
-        final raw = _extractBase64FromDataUrl(ref.imageData);
-        if (raw.isNotEmpty) refs.add({'name': name, 'image': raw});
-      }
-    }
-
-    if (settings.imageContextEnabled && recentImageContexts != null) {
-      final count = settings.imageContextCount.clamp(1, 3);
-      for (final ctx in recentImageContexts.take(count)) {
-        final path = ImageTagMarkup.normalizeImageResultPayload(ctx);
-        final encoded = await _fileToBase64Resized(path);
-        if (encoded.isNotEmpty) refs.add({'name': 'context', 'image': encoded});
-      }
-    }
-
-    return refs;
-  }
-
-  List<String> _referenceTriggers(String value) => value
-      .split(',')
-      .map((trigger) => trigger.trim().toLowerCase())
-      .where((trigger) => trigger.isNotEmpty)
-      .toList();
-
-  String _validOverride(
-    String? override,
-    List<String> allowed,
-    String fallback,
-  ) {
-    final value = override?.trim();
-    return value != null && allowed.contains(value) ? value : fallback;
-  }
-
-  String _fileToBase64(String path) {
     try {
-      final resolved = resolveGlazeFilePath(path) ?? path;
-      final file = File(resolved);
-      if (!file.existsSync()) return '';
-      return base64Encode(file.readAsBytesSync());
-    } catch (_) {
-      return '';
-    }
-  }
-
-  /// Reads an image file, resizes so the longest side ≤ [maxSide] px,
-  /// re-encodes as JPEG at [jpegQuality] (0–100), and returns bare base64.
-  /// Falls back to the raw file bytes on any error.
-  Future<String> _fileToBase64Resized(
-    String path, {
-    int maxSide = 512,
-    int jpegQuality = 85,
-  }) async {
-    try {
-      final resolved = resolveGlazeFilePath(path) ?? path;
-      final file = File(resolved);
-      if (!file.existsSync()) return '';
-      final bytes = file.readAsBytesSync();
-
-      final decoded = await compute(
-        _decodeAndResizeJpeg,
-        _ResizeArgs(bytes, maxSide, jpegQuality),
+      final imageBytes = await generateImage(
+        settings: settings,
+        prompt: prompt,
+        tagStyle: instruction['style'] as String?,
+        llmEndpoint: llmEndpoint,
+        llmApiKey: llmApiKey,
+        llmModel: llmModel,
+        character: character,
+        persona: persona,
+        recentImageContexts: recentImageContexts,
+        instructionAspectRatio: instruction['aspect_ratio'] as String?,
+        instructionImageSize: instruction['image_size'] as String?,
+        cancelToken: cancelToken,
       );
-      if (decoded == null) return base64Encode(bytes);
-      return base64Encode(decoded);
-    } catch (_) {
-      return _fileToBase64(path);
+      if (cancelToken?.isCancelled == true) return _ImageOutcome.cancelled();
+      if (imageBytes.isEmpty) {
+        return _ImageOutcome.failure('Provider returned no image data');
+      }
+
+      final savedPath = await _saveGeneratedImage(imageBytes);
+      if (cancelToken?.isCancelled == true) return _ImageOutcome.cancelled();
+      return _ImageOutcome.success(savedPath);
+    } on DioException catch (e) {
+      if (CancelToken.isCancel(e)) return _ImageOutcome.cancelled();
+      return _ImageOutcome.failure(_formatError(e));
+    } catch (e) {
+      return _ImageOutcome.failure(_formatErrorString(e.toString()));
     }
   }
 
-  String _extractBase64FromDataUrl(String dataUrl) {
-    final commaIndex = dataUrl.indexOf(',');
-    if (commaIndex == -1) return dataUrl;
-    return dataUrl.substring(commaIndex + 1);
+  /// Generates a single image for [prompt].
+  ///
+  /// [tagStyle] is the `style` field of the image tag; the active style from
+  /// the style library overrides it, and with "no style" selected it is used
+  /// as written.
+  Future<Uint8List> generateImage({
+    required ImageGenSettings settings,
+    required String prompt,
+    required String llmEndpoint,
+    required String llmApiKey,
+    required String llmModel,
+    String? tagStyle,
+    Character? character,
+    Persona? persona,
+    List<String>? recentImageContexts,
+    String? instructionAspectRatio,
+    String? instructionImageSize,
+    CancelToken? cancelToken,
+    LlmCaptureContext? captureContext,
+  }) async {
+    final collected = await _references.collect(
+      settings: settings,
+      prompt: prompt,
+      character: character,
+      persona: persona,
+      recentImageContexts: recentImageContexts,
+    );
+
+    final isNaistera = settings.apiType == ImageGenApiType.naistera;
+    final descriptionsMode = isNaistera
+        ? settings.naisteraCharacterDescriptionsMode
+        : CharacterDescriptionsMode.asIs;
+
+    // Outside "as-is" the avatars travel without their caption: the
+    // descriptions are carried by the prompt block instead, so leaving them on
+    // the images would send each one twice.
+    final references = descriptionsMode == CharacterDescriptionsMode.asIs
+        ? collected
+        : _withoutAvatarDescriptions(collected);
+
+    var finalPrompt = buildFinalGenerationPrompt(
+      prompt: prompt,
+      tagStyle: tagStyle,
+      settings: settings,
+      references: references,
+      // NovelAI parses the whole prompt as tags — the [STYLE: ...] wrapper
+      // would reach the sampler verbatim.
+      wrapStyle:
+          !(settings.apiType == ImageGenApiType.novelai ||
+              (isNaistera &&
+                  NaisteraConstants.isNovelAIModel(settings.naisteraModel))),
+    );
+    if (isNaistera && settings.sendRefDescriptions) {
+      finalPrompt = appendPromptBlock(
+        finalPrompt,
+        buildCharacterDescriptionPromptBlock(
+          mode: descriptionsMode,
+          references: references,
+          charDescription: _appearanceOf(character?.name, settings),
+          userDescription: _appearanceOf(persona?.name, settings),
+        ),
+      );
+    }
+    finalPrompt = withReferenceInstruction(
+      finalPrompt,
+      settings,
+      hasReferences: references.isNotEmpty,
+    );
+
+    return _dispatcher.generate(
+      settings: settings,
+      prompt: finalPrompt,
+      references: references,
+      llmEndpoint: llmEndpoint,
+      llmApiKey: llmApiKey,
+      instructionAspectRatio: instructionAspectRatio,
+      instructionImageSize: instructionImageSize,
+      cancelToken: cancelToken,
+      captureContext: captureContext,
+    );
   }
 
-  Future<String> _saveGeneratedImage(String filename, Uint8List bytes) async {
+  /// Appearance blurb for a character or persona: the description of the
+  /// reference-library entry whose aliases name them. Glaze has no separate
+  /// appearance field, and a library entry is exactly where a user writes one.
+  static String _appearanceOf(String? name, ImageGenSettings settings) {
+    final target = normalizeTriggerText(name ?? '');
+    if (target.isEmpty) return '';
+    for (final ref in settings.references) {
+      if (!ref.enabled) continue;
+      if (!parseReferenceAliases(ref.name).contains(target)) continue;
+      final description = ref.description.trim();
+      if (description.isNotEmpty) return description;
+    }
+    return '';
+  }
+
+  static List<Map<String, String>> _withoutAvatarDescriptions(
+    List<Map<String, String>> references,
+  ) {
+    return references.map((ref) {
+      final source = ref['source'];
+      if (source != 'char' && source != 'user') return ref;
+      return {...ref, 'description': ''};
+    }).toList();
+  }
+
+  /// Delegates to the shared [formatError] — the same helper the chat and the
+  /// ext blocks use — so a failed image generation reads like every other
+  /// provider failure (localized status line, provider message on its own
+  /// line) instead of a Dio dump. The length cap stays: this string is
+  /// rendered inline in the message card.
+  String _formatError(DioException e) => _formatErrorString(formatError(e));
+
+  String _formatErrorString(String msg) {
+    if (msg.length > 200) msg = '${msg.substring(0, 197)}...';
+    return msg;
+  }
+
+  Future<String> _saveGeneratedImage(Uint8List bytes) async {
     final dir = Directory(p.join(_imageStorage.baseDir, 'generated'));
     if (!await dir.exists()) {
       await dir.create(recursive: true);
     }
     final extension = imageExtensionForBytes(bytes);
-    final path = p.join(
-      dir.path,
-      '${p.basenameWithoutExtension(filename)}.$extension',
-    );
+    // Concurrent generations can land inside the same microsecond, so the
+    // counter — not the clock alone — is what keeps the names unique.
+    final name = 'imggen_${DateTime.now().microsecondsSinceEpoch}_$_saveSeq';
+    _saveSeq++;
+    final path = p.join(dir.path, '$name.$extension');
     await File(path).writeAsBytes(bytes);
-    return path;
+    // Stored relative to the Glaze data root, never as the absolute path it
+    // was just written to: the root moves under an installed app (a new iOS
+    // container UUID, a database carried between desktop build channels) and
+    // an absolute path silently stops pointing at a file, while a relative one
+    // is re-joined onto the current root by resolveGlazeFilePath.
+    return p.url.join('generated', '$name.$extension');
   }
+
+  static int _saveSeq = 0;
 }
 
-String imagePromptWithReferenceLabels(
-  String prompt,
-  List<Map<String, String>> references,
-) {
-  if (references.isEmpty) return prompt;
-  final labels = <String>[];
-  for (var i = 0; i < references.length; i++) {
-    final rawName = references[i]['name']?.trim() ?? '';
-    if (rawName.isEmpty || rawName == 'context') continue;
-    final name = rawName
-        .replaceAll(RegExp(r'[\r\n\t]+'), ' ')
-        .replaceAll('"', "'");
-    labels.add('Reference image ${i + 1} shows "$name".');
-  }
-  if (labels.isEmpty) return prompt;
-  return '${labels.join(' ')} Preserve these exact identities and assign each '
-      'person the role and position stated in the prompt.\n\n$prompt';
-}
+/// Result of one image request: a saved file, a message for the error card, or
+/// a cancellation that leaves the tag pending for the caller to resolve.
+class _ImageOutcome {
+  const _ImageOutcome._({this.imagePath, this.error, this.cancelled = false});
 
-// ─── Isolate helpers for JPEG resize ────────────────────────────────────────
+  factory _ImageOutcome.success(String imagePath) =>
+      _ImageOutcome._(imagePath: imagePath);
+  factory _ImageOutcome.failure(String error) => _ImageOutcome._(error: error);
+  factory _ImageOutcome.cancelled() => const _ImageOutcome._(cancelled: true);
 
-class _ResizeArgs {
-  const _ResizeArgs(this.bytes, this.maxSide, this.jpegQuality);
-  final Uint8List bytes;
-  final int maxSide;
-  final int jpegQuality;
-}
-
-/// Runs in a separate isolate via [compute]. Decodes the image, resizes to fit
-/// within [args.maxSide] px on the longest side, and encodes as JPEG.
-/// Returns null on any error so the caller can fall back to the raw bytes.
-Uint8List? _decodeAndResizeJpeg(_ResizeArgs args) {
-  try {
-    final src = img.decodeImage(args.bytes);
-    if (src == null) return null;
-    final resized = img.copyResize(
-      src,
-      width: src.width >= src.height ? args.maxSide : -1,
-      height: src.height > src.width ? args.maxSide : -1,
-      interpolation: img.Interpolation.linear,
-    );
-    return Uint8List.fromList(
-      img.encodeJpg(resized, quality: args.jpegQuality),
-    );
-  } catch (_) {
-    return null;
-  }
+  final String? imagePath;
+  final String? error;
+  final bool cancelled;
 }

@@ -11,7 +11,7 @@
   --text-gray: #9aa0b0;
   --text-dark-gray: #c5cbd6;
 
-  --vk-blue: #7996CE;
+  --vk-blue: #C42A4A;
   --vk-blue-rgb: 121, 150, 206;
   --ui-bg-rgb: 30, 30, 46;
   --element-opacity: 0.8;
@@ -19,16 +19,16 @@
 
   --char-bubble-color-rgb: 60, 70, 100;
   --user-bubble-color-rgb: 121, 150, 206;
-  --char-quote-color: #7996CE;
+  --char-quote-color: #C42A4A;
   --char-italic-color: #aaaaaa;
   --user-quote-color: #b8c8e8;
   --user-italic-color: #cccccc;
   --char-text-color: #e0e0e0;
   --user-text-color: #ffffff;
 
-  --quote-color: #7996CE;
+  --quote-color: #C42A4A;
   --italic-color: #aaaaaa;
-  --primary-color: #7996CE;
+  --primary-color: #C42A4A;
   --error-color: #ff453a;
   --border-color: rgba(255, 255, 255, 0.1);
 
@@ -69,6 +69,34 @@
 }
 .msg-image-attachment.image-hidden img { opacity: 0.35; }
 
+/* Several attachments on one message: a tile grid rather than a stack of
+ * full-width pictures. `aspect-ratio` on the container gives the `1fr` rows a
+ * definite height, so the tiles are square-ish whatever the source images are;
+ * `object-fit: cover` fills each tile without letterboxing. The eye toggle is
+ * absolutely positioned, so it never becomes a grid item. */
+.msg-image-attachment.multi {
+  display: grid;
+  gap: 3px;
+  width: min(100%, 320px);
+  grid-template-columns: 1fr 1fr;
+}
+.msg-image-attachment.multi img {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  border-radius: 0;
+  object-fit: cover;
+}
+.msg-image-attachment.count-2 { aspect-ratio: 2 / 1; }
+.msg-image-attachment.count-3,
+.msg-image-attachment.count-4 {
+  grid-template-rows: 1fr 1fr;
+  aspect-ratio: 1 / 1;
+}
+/* Three: one tall tile on the left, two stacked on the right. */
+.msg-image-attachment.count-3 img:first-child { grid-row: span 2; }
+
 .image-ctx-toggle {
   position: absolute;
   top: 6px;
@@ -90,6 +118,16 @@
 /* ============================================================
  * Message section (root)
  * ============================================================ */
+/* Desktop's capped chat column (ChatColumnWidth in Flutter). The WebView
+ * spans the whole middle column so the chat background is one surface edge to
+ * edge; the rows — and the virtual list's spacers beside them — keep to the
+ * column here, centred. `none` (the default) leaves them full width. */
+#chat-container > * {
+  max-width: var(--chat-column-width, none);
+  margin-left: auto;
+  margin-right: auto;
+}
+
 .message-section {
   padding: 12px 16px;
   display: flex;
@@ -261,21 +299,23 @@
 
 /* ============================================================
  * Ext Blocks badge + inline panel
+ * Same glassmorphism + accordion language as .msg-reasoning and
+ * .msg-studio-output, so blocks read as part of the chat chrome.
  * ============================================================ */
 
 .ext-blocks-panel {
   margin-top: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  padding-top: 8px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
 }
 
+/* Interactive (iframe) panel still keeps its own framed card, but on the
+ * same radius / border the rest of the chrome uses. */
 .interactive-panel {
   margin-top: 8px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
+  border-radius: 12px;
   background: rgba(0, 0, 0, 0.18);
   overflow: hidden;
   contain: layout style;
@@ -286,105 +326,193 @@
   border: 0;
   background: transparent;
 }
+
+/* Toolbar — "Run all" pill, right-aligned, accent like the switcher/regenerate
+ * chrome (not the old yellow). */
 .ext-blocks-toolbar {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
-  margin-bottom: 2px;
+  gap: 8px;
+  padding: 0 2px;
 }
 .ext-blocks-run-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 12px;
+  font-size: 11px;
   font-weight: 600;
-  color: rgba(255, 215, 0, 0.95);
-  border-color: rgba(255, 215, 0, 0.35);
+  line-height: 1;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--primary-color, #C42A4A);
+  background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
+  backdrop-filter: blur(var(--element-blur, 12px));
+  -webkit-backdrop-filter: blur(var(--element-blur, 12px));
+  border: 1px solid rgba(var(--primary-rgb, 121, 150, 206), 0.45);
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+  -webkit-tap-highlight-color: transparent;
+  tap-highlight-color: transparent;
 }
+.ext-blocks-run-all:hover {
+  background-color: rgba(var(--primary-rgb, 121, 150, 206), 0.18);
+  border-color: rgba(var(--primary-rgb, 121, 150, 206), 0.65);
+}
+.ext-blocks-run-all:active { transform: scale(0.95); }
+.ext-blocks-run-all svg { width: 13px; height: 13px; fill: currentColor; pointer-events: none; }
 
+/* One block = one MenuGroup-style glass card: rounded 20, outlineVariant
+ * border, glass surface. */
 .ext-block-item {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  padding: 8px 10px;
+  background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
+  backdrop-filter: blur(var(--element-blur, 12px));
+  -webkit-backdrop-filter: blur(var(--element-blur, 12px));
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+  border-radius: 20px;
+  overflow: hidden;
 }
-.ext-block-item.running { border-color: rgba(255, 215, 0, 0.3); }
-.ext-block-item.pending { border-color: rgba(255, 255, 255, 0.15); border-style: dashed; }
-.ext-block-item.error   { border-color: rgba(255, 123, 123, 0.3); }
-.ext-block-item.done    { border-color: rgba(76, 175, 80, 0.2); }
-.ext-block-item.running .ext-block-status {
-  color: rgba(255, 215, 0, 0.9);
-  animation: pending-pulse 2s ease-in-out infinite;
-}
-.ext-block-item.pending .ext-block-status {
-  color: rgba(255, 255, 255, 0.45);
-  font-style: italic;
-  text-transform: none;
-}
+/* Status tints the outer edge, subtle enough to sit inside the chat. */
+.ext-block-item.running { border-color: rgba(255, 215, 0, 0.28); }
+.ext-block-item.pending { border-color: rgba(255, 255, 255, 0.14); border-style: dashed; }
+.ext-block-item.error   { border-color: rgba(255, 123, 123, 0.32); }
+.ext-block-item.done    { border-color: var(--border-color, rgba(255, 255, 255, 0.1)); }
 
+/* Header row — a MenuGroup-style title row: no dark strip, no rule, just the
+ * name (bold, on-surface) and its trailing controls on the card glass. */
 .ext-block-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 6px;
+  padding: 14px 16px 10px;
   cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
-  padding: 2px 0;
-  border-radius: 4px;
+  transition: background-color 0.2s;
+  -webkit-tap-highlight-color: transparent;
+  tap-highlight-color: transparent;
 }
-.ext-block-header:hover { background: rgba(255, 255, 255, 0.03); }
+.ext-block-header:hover { background-color: rgba(255, 255, 255, 0.04); }
+
 .ext-block-caret {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.45);
-  display: inline-block;
-  width: 12px;
-  transition: transform 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--text-gray);
+  opacity: 0.8;
+  transition: transform 0.3s ease;
+  flex-shrink: 0;
 }
-.ext-block-item.collapsed .ext-block-caret { transform: rotate(0deg); }
-.ext-block-item:not(.collapsed) .ext-block-caret { transform: rotate(90deg); }
-.ext-block-item.collapsed .ext-block-body { display: none; }
-.ext-block-body {
-  margin-top: 4px;
-  padding-left: 20px;
-  border-left: 1px solid rgba(255, 255, 255, 0.08);
-}
+.ext-block-caret svg { width: 16px; height: 16px; fill: currentColor; }
+.ext-block-item.collapsed .ext-block-caret { transform: rotate(-90deg); }
+
 .ext-block-name {
-  font-size: 12px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.8);
-  flex: 1;
-}
-.ext-block-status {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.4);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-.ext-block-actions { display: flex; gap: 4px; }
-.ext-block-btn {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.7);
-  cursor: pointer;
-  font-family: inherit;
-}
-.ext-block-btn:hover { background: rgba(255, 255, 255, 0.1); }
-.ext-block-btn-icon {
-  padding: 1px 6px;
-  font-size: 12px;
-  line-height: 1;
-}
-.ext-block-btn-danger {
-  border-color: rgba(255, 123, 123, 0.25);
-  color: rgba(255, 123, 123, 0.8);
-}
-.ext-block-btn-danger:hover {
-  background: rgba(255, 123, 123, 0.15);
-  border-color: rgba(255, 123, 123, 0.45);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-color, #e0e0e0);
 }
 
+/* Absorbs the free space so the trailing buttons pin right while the name and
+ * its timer hug the left edge. */
+.ext-block-spacer { flex: 1 1 0; min-width: 0; }
+
+/* Header marker — a live elapsed clock while running (mirrors the .gen-stat
+ * clock under a message), a muted pill for the pre-run/stopped states, and
+ * nothing for done. Errors drop the marker entirely: the body turns into an
+ * error window instead. */
+.ext-block-status {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.5);
+  background: transparent;
+}
+
+/* Live elapsed timer — same clock + seconds as the generation stat under a
+ * message. */
+.ext-block-timer {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-gray);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.ext-block-timer svg { width: 12px; height: 12px; fill: currentColor; }
+
+/* Actions — circular glass buttons matching the chat input bar's round
+ * buttons (_CircleBtn in input_bar.dart): surface glass, hairline border,
+ * primary-colored icon. */
+.ext-block-actions { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.ext-block-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 50%;
+  background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
+  backdrop-filter: blur(var(--element-blur, 12px));
+  -webkit-backdrop-filter: blur(var(--element-blur, 12px));
+  color: var(--primary-color, #C42A4A);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+  -webkit-tap-highlight-color: transparent;
+  tap-highlight-color: transparent;
+  font-family: inherit;
+  flex-shrink: 0;
+}
+.ext-block-btn:hover { background-color: rgba(var(--primary-rgb, 121, 150, 206), 0.16); }
+.ext-block-btn:active { transform: scale(0.9); }
+.ext-block-btn svg { width: 14px; height: 14px; fill: currentColor; pointer-events: none; }
+.ext-block-btn-danger { color: #ff6b6b; }
+.ext-block-btn-danger:hover { background-color: rgba(255, 107, 107, 0.16); }
+
+/* Collapsible body — animated like reasoning, not display:none. */
+.ext-block-collapse {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.ext-block-item.collapsed .ext-block-collapse { grid-template-rows: 0fr; }
+.ext-block-body {
+  overflow: hidden;
+  min-height: 0;
+}
+.ext-block-inner {
+  padding: 0 16px 16px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.62);
+  line-height: 1.5;
+}
+/* A failed block replaces its content with the message-style error window;
+ * the inner padding already provides the spacing its margin-top was for. */
+.ext-block-inner > .error-window { margin-top: 0; }
+
+/* Block content — the wrapper the sanitizer scopes block CSS under. */
 .ext-block-content {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.6);
+  color: rgba(255, 255, 255, 0.62);
   line-height: 1.5;
 }
 .ext-block-content.empty {
@@ -431,11 +559,39 @@
   color: rgba(255, 255, 255, 0.85);
   padding: 2px 0;
 }
-.ext-block-image-pending {
-  opacity: 0.75;
-  font-style: italic;
-  margin-top: 8px;
-  color: rgba(255, 255, 255, 0.6);
+
+/* JS block: script source + result. */
+.ext-block-js-source {
+  margin: 4px 0;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+.ext-block-js-source summary {
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.7);
+}
+.ext-block-js-source pre {
+  white-space: pre-wrap;
+  font-size: 12px;
+  opacity: 0.9;
+  margin-top: 6px;
+}
+.ext-block-js-result {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.62);
+}
+.ext-block-js-result pre {
+  white-space: pre-wrap;
+  font-family: inherit;
+  margin: 0;
 }
 
 .ext-block-js-pending {
@@ -445,23 +601,88 @@
   color: rgba(255, 255, 255, 0.6);
 }
 
-.ext-block-js-source summary {
-  cursor: pointer;
-  opacity: 0.85;
-  margin-bottom: 6px;
+/* Image generation placeholder — the same shimmer surface as the inline imggen
+ * placeholder a message renders, but self-contained: the block header already
+ * carries the elapsed clock and stop button, so this only paints the shimmer,
+ * the hint and the prompt. */
+.ext-block-imagegen {
+  position: relative;
+  min-height: 120px;
+  border-radius: 12px;
+  overflow: hidden;
+  margin: 4px 0;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.ext-block-imagegen-surface {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background-color: rgba(128, 128, 128, 0.12);
+  background-image: linear-gradient(90deg,
+    rgba(128, 128, 128, 0.00) 25%,
+    rgba(128, 128, 128, 0.16) 50%,
+    rgba(128, 128, 128, 0.00) 75%);
+  background-size: 200% 100%;
+  animation: ext-block-imagegen-shimmer 1.5s infinite linear;
+  pointer-events: none;
+}
+.ext-block-imagegen-head {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 12px 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-color, #e0e0e0);
+  opacity: 0.9;
+}
+.ext-block-imagegen-prompt {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  right: 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  opacity: 0.6;
+  max-height: 2.8em;
+  overflow: hidden;
+  word-break: break-word;
+}
+@keyframes ext-block-imagegen-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
 }
 
-.ext-block-js-source pre {
-  white-space: pre-wrap;
+/* A picture that failed inside a block. The shared image pipeline leaves a
+ * card in place of the tag instead of failing the whole block, so this sits
+ * alongside the block's other content; the header's "regenerate image" control
+ * is what redraws it. */
+.ext-block-image-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 123, 123, 0.10);
+  color: rgba(255, 123, 123, 0.95);
   font-size: 12px;
-  opacity: 0.9;
+  line-height: 1.5;
+}
+.ext-block-image-error-icon {
+  flex: none;
+}
+.ext-block-image-error-msg {
+  word-break: break-word;
 }
 
 .ext-block-image {
   display: block;
   max-width: 100%;
   width: 100%;
-  border-radius: 6px;
+  border-radius: 8px;
   margin-top: 4px;
   cursor: pointer;
 }
@@ -557,6 +778,23 @@
 }
 .reasoning-arrow { transition: transform 0.3s ease; }
 .msg-reasoning.collapsed .reasoning-arrow { transform: rotate(-90deg); }
+
+/* ============================================================
+ * In-game clock (ledger-stamped game time between reasoning and body)
+ * ============================================================ */
+.msg-game-time {
+  font-size: 0.78em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-gray);
+  background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 3px 10px;
+  margin-bottom: 6px;
+  align-self: flex-start;
+  user-select: none;
+}
 
 .msg-studio-outputs {
   display: flex;
@@ -697,6 +935,22 @@
   display: inline-flex;
   align-items: center;
 }
+/* Continue: live status on the message a continuation run is extending.
+   Deliberately NOT a .gen-stat — it is feedback, not a statistic, so the
+   bubble layout and the hide-gen-time/hide-token-count settings must not
+   sweep it away with the timing chrome. */
+.msg-continuing {
+  font-size: 11px;
+  color: var(--primary-color, #C42A4A);
+  display: inline-flex;
+  align-items: center;
+  animation: msg-continuing-pulse 1.4s ease-in-out infinite;
+}
+@keyframes msg-continuing-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
 .gen-time-wrapper { display: inline-block; }
 .gen-time { transition: opacity 0.15s; }
 .token-count-inline { display: inline-flex; align-items: center; }
@@ -921,7 +1175,7 @@
   field-sizing: content;
   overscroll-behavior: contain;
 }
-.edit-textarea:focus { border-color: var(--primary-color, #7996CE); }
+.edit-textarea:focus { border-color: var(--primary-color, #C42A4A); }
 .message-section.editing .msg-reasoning,
 .message-section.editing .msg-studio-outputs { display: none !important; }
 
@@ -930,6 +1184,26 @@
   justify-self: end;
   gap: 8px;
   grid-column: 3;
+  min-height: 28px;
+}
+
+/* The Save/Cancel row is part of the edited message's own layout box: it keeps
+   a full-height row plus a gap beneath it, so the message measures taller while
+   it is being edited. The chat container's bottom inset (input bar + keyboard)
+   then clears those controls exactly like it clears any other content — no
+   edit-specific padding has to be reserved on the Flutter side. */
+.message-section.editing .msg-footer {
+  row-gap: 8px;
+  min-height: 32px;
+  margin-bottom: 8px;
+}
+/* Bubble layout: the footer is a wrapping flex row whose width follows the
+   bubble, so a narrow bubble would squeeze the two buttons against the meta /
+   switcher columns. Give them a row of their own, aligned to the same side as
+   the rest of the footer (left for char, right for user). */
+.message-section.layout-bubble.editing .edit-buttons {
+  flex: 1 0 100%;
+  justify-content: inherit;
 }
 .edit-btn {
   width: 28px;
@@ -1085,6 +1359,34 @@
   100% { transform: translateX(0); }
 }
 .typing-text { font-size: 0.9em; }
+
+/* Phase label swap: the old phase drops away, the new one rises in. Keep
+ * .phase-out's duration in sync with SWAP_OUT_MS in renderer/typing_phase.js —
+ * the text is replaced when that animation ends. */
+.typing-text.phase-out {
+  animation: typingPhaseOut 0.13s ease-in both;
+}
+.typing-text.phase-in {
+  animation: typingPhaseIn 0.18s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes typingPhaseOut {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(3px); }
+}
+@keyframes typingPhaseIn {
+  from { opacity: 0; transform: translateY(-3px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+/* Battery saver swaps the label outright (see _applyGenerationPhase), and
+ * reduced-motion asks for the same. */
+.battery-saver .typing-text.phase-out,
+.battery-saver .typing-text.phase-in {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .typing-text.phase-out,
+  .typing-text.phase-in { animation: none; }
+}
 
 .typing-dots-bounce {
   display: inline-block;
@@ -1412,6 +1714,7 @@
 .message-section.native-lite .msg-reasoning {
   border-color: rgba(255, 255, 255, 0.08);
 }
+.message-section.native-lite .msg-continuing { animation: none; opacity: 1; }
 .message-section.native-lite .msg-memory-badge.pending { animation: none; }
 .message-section.native-lite .msg-ext-badge.running { animation: none; }
 .message-section.native-lite .msg-reasoning-content { transition: none; }
@@ -1562,6 +1865,28 @@
 }
 .origin-separator .date-separator-label {
   opacity: 0.55;
+}
+
+/* ============================================================
+ * Context-limit rule
+ * Drawn inside the oldest message the next prompt still carries: the
+ * chat above it is history the model no longer sees. Amber matches the
+ * cutoff notice in the tokenizer sheet, which counts the same messages.
+ * ============================================================ */
+.context-limit-marker {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 10px;
+  user-select: none;
+}
+.context-limit-marker .date-separator-line {
+  background: rgba(224, 160, 48, 0.35);
+}
+.context-limit-marker .date-separator-label {
+  color: #e0a030;
+  opacity: 0.85;
+  font-weight: 600;
 }
 
 /* ============================================================

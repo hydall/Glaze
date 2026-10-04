@@ -6,9 +6,12 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/glossary/glossary_models.dart';
 import '../../core/glossary/glossary_provider.dart';
 import '../../shared/theme/app_colors.dart';
+import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/sheet_view.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../settings/app_settings_provider.dart';
+import '../../shared/widgets/glaze_sheet.dart';
+import '../../shared/shell/desktop/sidebar_sheet_provider.dart';
 
 /// Bottom-sheet glossary viewer — port of `GlossarySheet.vue`.
 ///
@@ -18,10 +21,17 @@ class GlossarySheet extends ConsumerStatefulWidget {
   final String? initialTerm;
   final bool startExpanded;
 
+  /// Closes the glossary when it is hosted outside a route — the desktop
+  /// glossary window, whose title bar has the close button. Stepping back out
+  /// of the top level calls this instead of popping a route that is not the
+  /// glossary's.
+  final VoidCallback? onDismiss;
+
   const GlossarySheet({
     super.key,
     this.initialTerm,
     this.startExpanded = false,
+    this.onDismiss,
   });
 
   /// Convenience launcher used by `HelpTip` and menu entries.
@@ -30,7 +40,7 @@ class GlossarySheet extends ConsumerStatefulWidget {
     String? initialTerm,
     bool startExpanded = false,
   }) {
-    return showModalBottomSheet<void>(
+    return showGlazeSheet<void>(
       context: context,
       useRootNavigator: true,
       useSafeArea: true,
@@ -118,6 +128,19 @@ class _GlossarySheetState extends ConsumerState<GlossarySheet> {
     return null;
   }
 
+  void _dismiss() {
+    final onDismiss = widget.onDismiss;
+    if (onDismiss != null) {
+      onDismiss();
+      return;
+    }
+    // A pop, not maybePop(): when presented as a fullscreen route the host
+    // SheetView wraps us in a PopScope with canPop:false, so maybePop()
+    // re-invokes this same handler and spins an unbounded microtask loop
+    // (hard UI freeze). In a desktop sidebar panel it closes the panel.
+    closeSheet(context);
+  }
+
   void _goBack() {
     if (_stack.isNotEmpty) {
       final prev = _stack.removeLast();
@@ -129,16 +152,8 @@ class _GlossarySheetState extends ConsumerState<GlossarySheet> {
       });
       return;
     }
-    if (_openedViaHelptip) {
-      // Use pop(), not maybePop(): when presented as a fullscreen route the
-      // host SheetView wraps us in a PopScope with canPop:false, so maybePop()
-      // re-invokes this same handler and spins an unbounded microtask loop
-      // (hard UI freeze). pop() bypasses PopScope and dismisses the route.
-      Navigator.of(context).pop();
-      return;
-    }
-    if (_view == _View.categories) {
-      Navigator.of(context).pop();
+    if (_openedViaHelptip || _view == _View.categories) {
+      _dismiss();
       return;
     }
     setState(() {
@@ -161,6 +176,7 @@ class _GlossarySheetState extends ConsumerState<GlossarySheet> {
     'chat': Icons.chat_bubble_outline,
     'presets': Icons.tune_rounded,
     'lorebooks': Icons.menu_book_outlined,
+    'extraction': Icons.travel_explore_rounded,
     'regex': Icons.code_rounded,
     'interface': Icons.edit_outlined,
     'faq': Icons.help_outline_rounded,
@@ -173,6 +189,7 @@ class _GlossarySheetState extends ConsumerState<GlossarySheet> {
     'chat': (Color(0x2EECC94B), Color(0xFFECC94B)),
     'presets': (Color(0x2E9F7AEA), Color(0xFF9F7AEA)),
     'lorebooks': (Color(0x2EED6464), Color(0xFFED6464)),
+    'extraction': (Color(0x2E7F9CF5), Color(0xFF7F9CF5)),
     'regex': (Color(0x2E38BDB2), Color(0xFF38BDB2)),
     'interface': (Color(0x2EED64A6), Color(0xFFED64A6)),
     'faq': (Color(0x2E48BB78), Color(0xFF48BB78)),
@@ -211,7 +228,7 @@ class _GlossarySheetState extends ConsumerState<GlossarySheet> {
     return asyncCats.when(
       loading: () => SheetView(
         title: _safeTr('menu_glossary', fallback: 'Glossary'),
-        body: const Center(child: CircularProgressIndicator()),
+        body: const Center(child: GlazeSpinner()),
       ),
       error: (e, _) => SheetView(
         title: _safeTr('menu_glossary', fallback: 'Glossary'),
@@ -240,7 +257,12 @@ class _GlossarySheetState extends ConsumerState<GlossarySheet> {
           title: _title(),
           showBack:
               _view != _View.categories ||
-              ModalRoute.of(context) is! ModalBottomSheetRoute,
+              (widget.onDismiss == null &&
+                  ModalRoute.of(context) is! ModalBottomSheetRoute),
+          // A back gesture steps out of the terms list or the article one level
+          // at a time, the way the header's back button does, instead of
+          // dismissing the whole sheet from underneath the reader.
+          canPop: _view == _View.categories,
           onBack: _goBack,
           startExpanded: widget.startExpanded,
           headerBottom: showSearch ? _buildSearchBar(context) : null,

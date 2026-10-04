@@ -6,6 +6,7 @@ import '../../application/session_deletion_store.dart';
 import '../../models/chat_message.dart';
 import '../app_db.dart';
 import 'session_deletion_queries.dart';
+import 'card_evolution_proposal_run_repo.dart';
 
 class SessionDeletionRepo implements SessionDeletionStore {
   final AppDatabase _db;
@@ -49,6 +50,15 @@ class SessionDeletionRepo implements SessionDeletionStore {
     final sessionVarsJson = sessionVars.isEmpty
         ? null
         : jsonEncode(sessionVars);
+    await CardEvolutionProposalRunRepo(
+      _db,
+    ).cancelPendingForMessageMutationInTransaction(
+      sessionId: sessionId,
+      messageIds: existingMessages
+          .map((message) => message.id)
+          .where((id) => id.isNotEmpty)
+          .toSet(),
+    );
     await (_db.update(
       _db.chatSessions,
     )..where((table) => table.sessionId.equals(sessionId))).write(

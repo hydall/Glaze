@@ -32,6 +32,7 @@ jobs:
       - name: Install Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.44.9'
           channel: 'stable'
           cache: true
 
@@ -55,11 +56,90 @@ jobs:
         # *.g.dart / *.freezed.dart are gitignored, so they must be built here.
         run: dart run build_runner build --delete-conflicting-outputs
 
+      - name: Generate localization keys
+        # lib/generated/locale_keys.g.dart comes from easy_localization's own
+        # generator, not build_runner, and is gitignored like the rest of the
+        # generated code. Without this step the localization contract test has
+        # no file to check the translation keys against.
+        #
+        # `-s en.json` is not optional. In `keys` format the generator reads
+        # `files.first` from a bare `Directory.list()` (easy_localization
+        # 3.0.8, bin/generate.dart), which is filesystem order — with the
+        # glossary files sitting next to the locales in that folder, the run
+        # picked one of them often enough to fail the contract test at random
+        # on unrelated PRs. Naming the source file makes the step deterministic.
+        run: >-
+          dart run easy_localization:generate
+          -S assets/translations -s en.json -f keys -o locale_keys.g.dart
+
       - name: Analyze
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
       - name: Test
-        run: flutter test --reporter expanded
+        run: flutter test --exclude-tags db-migration --reporter expanded
+
+  database-migrations:
+    name: Database migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.9'
+          channel: 'stable'
+          cache: true
+
+      - name: Cache pub
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+          restore-keys: pub-${{ runner.os }}-
+
+      - name: Create placeholder .env
+        run: touch .env
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Generate code
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Test
+        run: >-
+          flutter test test/db_migration_test.dart
+          --tags db-migration --reporter expanded
+
+  webview-render:
+    name: WebView render tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: test/webview_js/package-lock.json
+
+      - name: Install dependencies
+        working-directory: test/webview_js
+        run: npm ci
+
+      - name: Install Chromium
+        working-directory: test/webview_js
+        run: npx playwright install --with-deps chromium
+
+      # Renders the card corpus in a real browser and asserts on the DOM, the
+      # resolved CSS and what a click does — the checks the Dart asset tests
+      # cannot make, because they only read the sources as strings.
+      - name: Test
+        working-directory: test/webview_js
+        run: npm test
 
   bug-triage:
     name: Bug-triage agent (unit tests)

@@ -1,12 +1,19 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:glaze_flutter/core/llm/transport/llm_protocol.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 
 void main() {
   test('Responses API defaults off and round-trips when enabled', () {
     expect(ApiConfig.fromJson(const {'id': 'api'}).useResponsesApi, isFalse);
-    final config = ApiConfig(id: 'api', useResponsesApi: true);
+    final config = ApiConfig(
+      id: 'api',
+      protocol: LlmProtocol.openaiResponses,
+      useResponsesApi: true,
+    );
 
-    expect(ApiConfig.fromJson(config.toJson()).useResponsesApi, isTrue);
+    final restored = ApiConfig.fromJson(config.toJson());
+    expect(restored.useResponsesApi, isTrue);
+    expect(restored.protocol, LlmProtocol.openaiResponses);
   });
 
   test('reasoning settings are backward-compatible', () {
@@ -14,9 +21,9 @@ void main() {
 
     expect(config.reasoningHistoryCount, 0);
     expect(config.showNativeReasoning, isTrue);
-    expect(config.omitTopK, isFalse);
-    expect(config.omitFrequencyPenalty, isFalse);
-    expect(config.omitPresencePenalty, isFalse);
+    expect(config.omitTopK, isTrue);
+    expect(config.omitFrequencyPenalty, isTrue);
+    expect(config.omitPresencePenalty, isTrue);
   });
 
   test('legacy omitReasoning controls the initial visibility default', () {

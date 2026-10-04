@@ -5,12 +5,12 @@ import '../models/pipeline_settings.dart';
 import '../models/studio_config.dart';
 import '../utils/error_format.dart';
 import 'agent_runner.dart';
-import 'prompt_builder.dart';
 import 'studio_brief_parser.dart';
 import 'studio_message_builder.dart';
 import 'studio_stage_brief.dart';
-import 'tracker_batcher.dart';
+import 'controller_batcher.dart';
 import 'studio_turn_config_snapshot.dart';
+import 'studio/studio_context.dart';
 
 /// Runs the per-agent LLM calls of the Studio chat-time pipeline: the
 /// pre-gen tracker, the post-processing tracker, the individual (non-batch)
@@ -19,7 +19,7 @@ import 'studio_turn_config_snapshot.dart';
 ///
 /// Each adapter assembles the agent's message list via the injected
 /// [StudioMessageBuilder], invokes [AgentRunner.runAgent], and adapts the
-/// result type to the pipeline-internal [StudioStageBrief] / [TrackerBatchResult]
+/// result type to the pipeline-internal [StudioStageBrief] / [ControllerBatchResult]
 /// / [AgentRunResult] shapes. Tracker failures are retried by the
 /// relevant adapter and returned as failed results when retries are exhausted;
 /// the final generator rethrows.
@@ -72,8 +72,7 @@ class StudioAgentExecutor {
   /// generator rethrows.
   Future<StudioStageBrief> runTracker({
     required StudioAgent agent,
-    required PromptResult promptResult,
-    required PromptPayload promptPayload,
+    required StudioContext context,
     required ApiConfig apiConfig,
     required StudioConfig config,
     required StudioPreset studioPreset,
@@ -81,6 +80,8 @@ class StudioAgentExecutor {
     required CancelToken cancelToken,
     String? apiConfigId,
     StudioTurnConfigSnapshot? turnConfig,
+    // 0 = the agent spec's own context size.
+    int trackerContextOverride = 0,
     void Function(String text)? onIntermediateUpdate,
   }) async {
     if (_briefParser.isMetaPolicyAgent(agent)) {
@@ -93,15 +94,14 @@ class StudioAgentExecutor {
     try {
       final messages = _messageBuilder.buildAgentMessages(
         agent: agent,
-        promptResult: promptResult,
-        promptPayload: promptPayload,
+        context: context,
         config: config,
         studioPreset: studioPreset,
         priorBriefs: const [],
         isFinalResponse: false,
+        trackerContextOverride: trackerContextOverride,
       );
-      final runner = _runner;
-      final result = await runner.runAgent(
+      final result = await _runner.runAgent(
         agent: agent,
         messages: messages,
         apiConfig: apiConfig,
@@ -110,24 +110,22 @@ class StudioAgentExecutor {
         cancelToken: cancelToken,
         apiConfigId: apiConfigId,
         turnConfig: turnConfig,
+        charName: context.macroContext.charName,
+        userName: context.macroContext.userName,
         onIntermediateUpdate: onIntermediateUpdate,
-      );
-      final sanitized = _briefParser.sanitizeIntermediateAgentOutput(
-        agent,
-        result.text,
       );
       return StudioStageBrief(
         agentId: agent.id,
         agentName: agent.name,
-        brief: sanitized,
+        brief: _briefParser.sanitizeIntermediateAgentOutput(agent, result.text),
       );
-    } on AgentRunFailedException catch (e) {
+    } on AgentRunFailedException catch (error) {
       return StudioStageBrief(
-        agentId: e.agentId,
-        agentName: e.agentName,
-        brief: 'Studio agent failed: ${e.reason}',
+        agentId: error.agentId,
+        agentName: error.agentName,
+        brief: 'Studio agent failed: ${error.reason}',
         status: 'error',
-        error: e.reason,
+        error: error.reason,
       );
     }
   }
@@ -148,8 +146,7 @@ class StudioAgentExecutor {
   Future<StudioStageBrief> runPostProcessingTracker({
     required StudioAgent agent,
     required String mainResponse,
-    required PromptResult promptResult,
-    required PromptPayload promptPayload,
+    required StudioContext context,
     required ApiConfig apiConfig,
     required StudioConfig config,
     required StudioPreset studioPreset,
@@ -173,22 +170,18 @@ class StudioAgentExecutor {
         final override =
             (turnConfig?.pipelineSettings ?? _readPipelineSettings())
                 .studioAgent
-                .studioPostTrackerContextSize;
-        final effectiveAgent = override > 0
-            ? agent.copyWith(contextSize: override)
-            : agent;
+                .studioPostControllerContextSize;
         final messages = _messageBuilder.buildAgentMessages(
-          agent: effectiveAgent,
-          promptResult: promptResult,
-          promptPayload: promptPayload,
+          agent: agent,
+          trackerContextOverride: override,
+          context: context,
           config: config,
           studioPreset: studioPreset,
           priorBriefs: const [],
           isFinalResponse: false,
           mainResponse: mainResponse,
         );
-        final runner = _runner;
-        final result = await runner.runAgent(
+        final result = await _runner.runAgent(
           agent: agent,
           messages: messages,
           apiConfig: apiConfig,
@@ -197,13 +190,9 @@ class StudioAgentExecutor {
           cancelToken: cancelToken,
           apiConfigId: apiConfigId,
           turnConfig: turnConfig,
-          onIntermediateUpdate: null,
+          charName: context.macroContext.charName,
+          userName: context.macroContext.userName,
         );
-        // Post-gen trackers produce prose (a rewrite), NOT a brief — skip the
-        // brief-shape sanitization that pre-gen trackers go through. Empty
-        // output means "no edit needed" → caller keeps `mainResponse`. This is
-        // the intentional happy-path no-op, so it is reported as 'skipped'
-        // (NOT 'error') to avoid surfacing a false failure in the stage briefs.
         final text = result.text.trim();
         return StudioStageBrief(
           agentId: agent.id,
@@ -211,8 +200,8 @@ class StudioAgentExecutor {
           brief: text,
           status: text.isNotEmpty ? 'ok' : 'skipped',
         );
-      } on AgentRunFailedException catch (e) {
-        lastError = e.reason;
+      } on AgentRunFailedException catch (error) {
+        lastError = error.reason;
       }
     }
     return StudioStageBrief(
@@ -226,22 +215,22 @@ class StudioAgentExecutor {
 
   /// Run one individual tracker (not part of any batch group). Reuses the
   /// existing per-agent prompt assembly + AgentRunner.
-  Future<TrackerBatchResult> runIndividualTracker({
+  Future<ControllerBatchResult> runIndividualTracker({
     required StudioAgent agent,
     required StudioConfig config,
     required StudioPreset studioPreset,
-    required PromptResult promptResult,
-    required PromptPayload promptPayload,
+    required StudioContext context,
     required ApiConfig apiConfig,
     required String sessionId,
     required CancelToken cancelToken,
     String? apiConfigId,
     StudioTurnConfigSnapshot? turnConfig,
+    int trackerContextOverride = 0,
   }) async {
     String? lastError;
     for (var attempt = 1; attempt <= 3; attempt++) {
       if (cancelToken.isCancelled) {
-        return TrackerBatchResult.failed(
+        return ControllerBatchResult.failed(
           agentId: agent.id,
           agentName: agent.name,
           reason: 'cancelled',
@@ -250,8 +239,7 @@ class StudioAgentExecutor {
       try {
         final brief = await runTracker(
           agent: agent,
-          promptResult: promptResult,
-          promptPayload: promptPayload,
+          context: context,
           apiConfig: apiConfig,
           config: config,
           studioPreset: studioPreset,
@@ -259,10 +247,11 @@ class StudioAgentExecutor {
           cancelToken: cancelToken,
           apiConfigId: apiConfigId,
           turnConfig: turnConfig,
+          trackerContextOverride: trackerContextOverride,
           onIntermediateUpdate: null,
         );
         if (brief.status == 'ok' && brief.brief.trim().isNotEmpty) {
-          return TrackerBatchResult(
+          return ControllerBatchResult(
             agentId: agent.id,
             agentName: agent.name,
             text: brief.brief,
@@ -271,11 +260,11 @@ class StudioAgentExecutor {
           );
         }
         lastError = brief.error ?? 'tracker returned an empty response';
-      } catch (e) {
-        lastError = formatError(e);
+      } catch (error) {
+        lastError = formatError(error);
       }
     }
-    return TrackerBatchResult.failed(
+    return ControllerBatchResult.failed(
       agentId: agent.id,
       agentName: agent.name,
       reason: lastError ?? 'tracker failed after 2 retries',
@@ -284,8 +273,7 @@ class StudioAgentExecutor {
 
   Future<AgentRunResult> runFinalGenerator({
     required StudioAgent agent,
-    required PromptResult promptResult,
-    required PromptPayload promptPayload,
+    required StudioContext context,
     required ApiConfig apiConfig,
     required StudioConfig config,
     required StudioPreset studioPreset,
@@ -296,27 +284,50 @@ class StudioAgentExecutor {
     StudioTurnConfigSnapshot? turnConfig,
     void Function(String text, String? reasoning)? onFinalResponseUpdate,
     void Function(List<Map<String, dynamic>> messages)? onMessagesBuilt,
+    Future<void> Function()? beforeSend,
+    void Function(Set<String> classifications)? onLorebookClassificationsBuilt,
   }) async {
+    final settings = turnConfig?.pipelineSettings ?? _readPipelineSettings();
+    final emittedLorebookClassifications = <String>{};
+    final responseJsonSchema = <String, dynamic>{};
+    final twoPassPrefills = <String>[];
     final messages = _messageBuilder.buildAgentMessages(
       agent: agent,
-      promptResult: promptResult,
-      promptPayload: promptPayload,
+      context: context,
       config: config,
       studioPreset: studioPreset,
       priorBriefs: priorBriefs,
       isFinalResponse: true,
-      finalContextOverride:
-          (turnConfig?.pipelineSettings ?? _readPipelineSettings())
-              .studioAgent
-              .studioFinalContextSize,
+      finalContextOverride: settings.studioAgent.studioFinalContextSize,
       reasoningHistoryCount:
-          (turnConfig?.pipelineSettings ?? _readPipelineSettings())
-              .studioAgent
-              .studioFinalReasoningHistoryCount,
+          settings.studioAgent.studioFinalReasoningHistoryCount,
+      excludeReasoningFromContextBudget:
+          settings.studioAgent.studioFinalExcludeReasoningFromContextBudget,
+      emittedLorebookClassifications: emittedLorebookClassifications,
+      responseJsonSchema: responseJsonSchema,
+      twoPassPrefills: twoPassPrefills,
     );
+    onLorebookClassificationsBuilt?.call(emittedLorebookClassifications);
     onMessagesBuilt?.call(messages);
-    final runner = _runner;
-    final result = await runner.runAgent(
+    if (twoPassPrefills.isNotEmpty) {
+      return _runTwoPassGenerator(
+        agent: agent,
+        context: context,
+        apiConfig: apiConfig,
+        config: config,
+        studioPreset: studioPreset,
+        priorBriefs: priorBriefs,
+        sessionId: sessionId,
+        cancelToken: cancelToken,
+        apiConfigId: apiConfigId,
+        turnConfig: turnConfig,
+        baseMessages: messages,
+        beforeSend: beforeSend,
+        prefill: twoPassPrefills.single,
+        onFinalResponseUpdate: onFinalResponseUpdate,
+      );
+    }
+    return _runner.runAgent(
       agent: agent,
       messages: messages,
       apiConfig: apiConfig,
@@ -325,8 +336,109 @@ class StudioAgentExecutor {
       cancelToken: cancelToken,
       apiConfigId: apiConfigId,
       turnConfig: turnConfig,
+      charName: context.macroContext.charName,
+      userName: context.macroContext.userName,
+      responseJsonSchema: responseJsonSchema.isEmpty
+          ? null
+          : responseJsonSchema,
+      beforeSend: beforeSend,
       onFinalResponseUpdate: onFinalResponseUpdate,
     );
-    return result;
+  }
+
+  /// Two-pass prefill: the final generator runs twice. Pass 1 is a quiet
+  /// ask that produces the internal `<thinking>` block (plain text — no
+  /// synthetic tool call, no JSON schema, so it survives Gemini 3.8's
+  /// `thought_signature` requirement). Both passes run through the final
+  /// generator config (`isFinalResponse: true`) so they hit the final model
+  /// and its reasoning settings — a controller-lane pass would resolve the
+  /// pre-gen model instead. Pass 2 seeds the block back into the conversation
+  /// as a prior assistant turn and asks for the visible reply only. The
+  /// produced reasoning is returned as `AgentRunResult.reasoning` so it still
+  /// surfaces in the UI.
+  Future<AgentRunResult> _runTwoPassGenerator({
+    required StudioAgent agent,
+    required StudioContext context,
+    required ApiConfig apiConfig,
+    required StudioConfig config,
+    required StudioPreset studioPreset,
+    required List<StudioStageBrief> priorBriefs,
+    required String sessionId,
+    required CancelToken cancelToken,
+    String? apiConfigId,
+    StudioTurnConfigSnapshot? turnConfig,
+    required List<Map<String, dynamic>> baseMessages,
+    required String prefill,
+    Future<void> Function()? beforeSend,
+    void Function(String text, String? reasoning)? onFinalResponseUpdate,
+  }) async {
+    final thinkingInstruction =
+        'Produce your internal reasoning for the upcoming reply. Use the '
+        'section structure of the template below, but fill every section with '
+        'content grounded in the current scene — do not copy it verbatim. '
+        'Output ONLY the block between <thinking> and </thinking>, nothing '
+        'else. Every space inside that block must be the Hangul Filler '
+        "character 'ㅤ' (U+3164), never a regular space — one regular space "
+        'anywhere is a hard failure.\n\n<template>\n$prefill\n</template>';
+    final thinkingMessages = <Map<String, dynamic>>[
+      ...baseMessages,
+      {'role': 'user', 'content': thinkingInstruction},
+    ];
+    final thinking = await _runner.runAgent(
+      agent: agent,
+      messages: thinkingMessages,
+      beforeSend: beforeSend,
+      apiConfig: apiConfig,
+      sessionId: sessionId,
+      isFinalResponse: true,
+      cancelToken: cancelToken,
+      apiConfigId: apiConfigId,
+      turnConfig: turnConfig,
+      charName: context.macroContext.charName,
+      userName: context.macroContext.userName,
+    );
+    final thinkingText =
+        (thinking.reasoning.trim().isNotEmpty
+                ? thinking.reasoning
+                : thinking.text)
+            .trim();
+    if (thinkingText.isEmpty) {
+      return const AgentRunResult(text: '', reasoning: '');
+    }
+
+    final nudge =
+        'The reasoning above is your internal analysis for this turn. Now '
+        'write your final response. Do not open a new <thinking> block — '
+        'output the reply only.';
+    final answerMessages = <Map<String, dynamic>>[
+      ...baseMessages,
+      {'role': 'assistant', 'content': thinkingText},
+      {'role': 'user', 'content': nudge},
+    ];
+    final answer = await _runner.runAgent(
+      agent: agent,
+      messages: answerMessages,
+      beforeSend: beforeSend,
+      apiConfig: apiConfig,
+      sessionId: sessionId,
+      isFinalResponse: true,
+      cancelToken: cancelToken,
+      apiConfigId: apiConfigId,
+      turnConfig: turnConfig,
+      charName: context.macroContext.charName,
+      userName: context.macroContext.userName,
+      onFinalResponseUpdate: onFinalResponseUpdate,
+    );
+    final secondReasoning = answer.reasoning.trim();
+    final combinedReasoning = [
+      thinkingText,
+      if (secondReasoning.isNotEmpty && secondReasoning != thinkingText)
+        secondReasoning,
+    ].join('\n\n---\n\n');
+    return AgentRunResult(
+      text: answer.text,
+      reasoning: combinedReasoning,
+      rawResponseJson: answer.rawResponseJson,
+    );
   }
 }

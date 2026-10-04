@@ -36,6 +36,7 @@ void main() {
     cacheControlTtl: '1h',
     cacheBreakpointMode: 'stable_prefix',
     sessionIdMode: 'always',
+    useSystemInstruction: false,
     extraRequestParameters: extraParameters,
   );
 
@@ -135,6 +136,11 @@ void main() {
         expected: config.sessionIdMode,
       ),
       (
+        name: 'useSystemInstruction',
+        actual: request.useSystemInstruction,
+        expected: config.useSystemInstruction,
+      ),
+      (
         name: 'extraRequestParameters',
         actual: request.extraRequestParameters,
         expected: config.extraRequestParameters,
@@ -169,6 +175,8 @@ void main() {
       previousMessages: previousMessages,
       tools: tools,
       toolChoice: 'required',
+      charName: 'Character',
+      userName: 'User Name',
     );
 
     expect(request.model, 'override-model');
@@ -178,5 +186,14 @@ void main() {
     expect(request.previousMessages, same(previousMessages));
     expect(request.tools, same(tools));
     expect(request.toolChoice, 'required');
+    expect(request.charName, 'Character');
+    expect(request.userName, 'User Name');
+
+    final rewritten = request.withMessages(const [
+      {'role': 'user', 'content': 'Rewritten'},
+    ]);
+    expect(rewritten.charName, 'Character');
+    expect(rewritten.userName, 'User Name');
+    expect(rewritten.promptPostProcessing, 'none');
   });
 }

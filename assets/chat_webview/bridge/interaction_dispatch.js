@@ -1,5 +1,7 @@
 ﻿/* Extracted from ../bridge.legacy.js. Keep public behavior stable. */
 
+import { TARGET_ATTRIBUTE } from '../renderer/target_toggle.js';
+
 export class InteractionDispatch {
   constructor(bridge) {
     this.bridge = bridge;
@@ -42,9 +44,18 @@ export class InteractionDispatch {
       return;
     }
 
-    const link = e.target.closest('a');
+    // composedPath() again: a link written by the message (a markdown link, or
+    // the anchor an ST-style card toggles its panels with) lives in the
+    // message shadow root, where e.target is retargeted to the host and
+    // e.target.closest('a') never sees it.
+    const link = this._closestLinkInPath(e);
     if (link) {
       e.preventDefault();
+      const href = link.getAttribute('href') || '';
+      if (href.startsWith('#')) {
+        this._toggleFragmentTarget(link, href.slice(1));
+        return;
+      }
       bridge._sendToFlutter('onLinkClick', [link.href]);
       return;
     }
@@ -127,6 +138,40 @@ export class InteractionDispatch {
         : null;
   }
 
+  // Returns the first <a href> along the event's composed path (pierces Shadow
+  // DOM boundaries), or null.
+  _closestLinkInPath(e) {
+    const path = (e.composedPath && e.composedPath()) || [];
+    for (const node of path) {
+      if (node && node.nodeType === 1 && node.localName === 'a' &&
+          node.hasAttribute('href')) {
+        return node;
+      }
+    }
+    return e.target && e.target.closest ? e.target.closest('a[href]') : null;
+  }
+
+  // Stands in for fragment navigation inside the root the link lives in (a
+  // message shadow root, normally). The browser cannot do it there — a URL
+  // fragment only resolves against the document tree — so the element the link
+  // points at is marked instead, and the card's own `:target` rules, re-keyed
+  // on that attribute at render time (renderer/target_toggle.js), light up.
+  // Document semantics are kept: at most one target per root, and an empty
+  // fragment (the `href="#"` a card closes its panel with) clears it.
+  _toggleFragmentTarget(link, rawId) {
+    const root = link.getRootNode ? link.getRootNode() : document;
+    if (!root || !root.querySelectorAll) return;
+    for (const marked of root.querySelectorAll(`[${TARGET_ATTRIBUTE}]`)) {
+      marked.removeAttribute(TARGET_ATTRIBUTE);
+    }
+    let id = rawId;
+    try { id = decodeURIComponent(rawId); } catch (_) { /* keep it raw */ }
+    if (!id || id === 'top') return;
+    let target = null;
+    try { target = root.querySelector(`#${CSS.escape(id)}`); } catch (_) { target = null; }
+    if (target) target.setAttribute(TARGET_ATTRIBUTE, '');
+  }
+
   // Returns the first element along the event's composed path (pierces
   // Shadow DOM) that carries the given CSS class, or null.
   _findInPath(e, className) {
@@ -139,13 +184,86 @@ export class InteractionDispatch {
     return null;
   }
 
+  /* Reads the variation state a switcher arrow needs off the message section.
+   * Every arrow consults this before animating: the slide/fade in
+   * `animateVariantSwap` is driven by Flutter pushing an `updateMessage` back,
+   * so firing it for a request Dart will refuse (edge of the list, or a
+   * generation in flight) leaves the bubble faded out until the fallback timer
+   * expires. `busy` covers the generation window, where every swipe/agent-swipe
+   * handler in ChatSwipeController bails out. */
+  _swipeState(messageId) {
+    const section = document.querySelector(`[data-message-id="${messageId}"]`);
+    const num = (value, fallback) => {
+      const parsed = parseInt(value, 10);
+      return Number.isNaN(parsed) ? fallback : parsed;
+    };
+    return {
+      section,
+      swipeId: section ? num(section.dataset.swipeId, 0) : 0,
+      swipeTotal: section ? num(section.dataset.swipeTotal, 1) : 1,
+      agentSwipeId: section ? num(section.dataset.agentSwipeId, 0) : 0,
+      agentSwipeTotal: section ? num(section.dataset.agentSwipeTotal, 1) : 1,
+      greetingId: section ? num(section.dataset.greetingId, 0) : 0,
+      greetingTotal: section ? num(section.dataset.greetingTotal, 1) : 1,
+      isLast: section ? section.dataset.isLast === 'true' : false,
+      busy: !!(this.bridge.isGenerating || this.bridge.isPostGenRunning || this.bridge.isGeneratingImage),
+    };
+  }
+
+  // `imgIndex` is the position of the block inside its message, stamped by the
+  // formatter. -1 means "not an image gen block" (markdown images) and tells
+  // Flutter to fall back to the whole-message behaviour.
   _extractImgInstruction(el, path) {
     const sec = path.find(e => e.dataset?.messageId);
     const messageId = sec ? sec.dataset.messageId : '';
     let instr = '';
     try { instr = decodeURIComponent(el.dataset.instruction || ''); }
     catch (_) { instr = el.dataset.instruction || ''; }
-    return { instr, messageId };
+    const raw = parseInt(el.dataset.imgIndex, 10);
+    const imgIndex = Number.isInteger(raw) && raw >= 0 ? raw : -1;
+    return { instr, messageId, imgIndex };
+  }
+
+  // Pages one image block through the images it carries. The swap happens
+  // here — the pictures are already in the page — and Flutter is told only so
+  // the choice survives a reload. Like a message swipe, the ends are hard: the
+  // first image does not wrap around to the last.
+  _stepImageVariant(e, el, direction) {
+    const wrapper = e.composedPath().find(
+      (node) => node.classList?.contains('imggen-result-wrapper'),
+    );
+    if (!wrapper) return;
+    const variants = (wrapper.dataset.variants || '').split(';;').filter(Boolean);
+    if (variants.length < 2) return;
+
+    const current = parseInt(wrapper.dataset.variantIndex, 10);
+    const from = Number.isInteger(current) ? current : 0;
+    const next = from + direction;
+    if (next < 0 || next >= variants.length) return;
+
+    const img = wrapper.querySelector('img.imggen-result');
+    const src = variants[next];
+    if (img) {
+      img.src = src;
+      img.dataset.src = src;
+      // A retry counter from the previous image must not carry over.
+      delete img.dataset.retryAttempt;
+    }
+    const options = wrapper.querySelector('.imggen-options-btn');
+    if (options) options.dataset.src = src;
+    const count = wrapper.querySelector('.imggen-variant-count');
+    if (count) count.textContent = `${next + 1}/${variants.length}`;
+    wrapper.dataset.variantIndex = String(next);
+
+    const section = e.composedPath().find((node) => node.dataset?.messageId);
+    const messageId = section ? section.dataset.messageId : '';
+    const rawIndex = parseInt(el.dataset.imgIndex, 10);
+    if (!messageId || !Number.isInteger(rawIndex) || rawIndex < 0) return;
+    this.bridge._sendToFlutter('onImgVariant', [JSON.stringify({
+      messageId,
+      imgIndex: rawIndex,
+      variantIndex: next,
+    })]);
   }
 
   get _actionMap() {
@@ -166,6 +284,12 @@ export class InteractionDispatch {
       },
       'swipe-left': (e, el) => {
         const id = el.dataset.messageId;
+        // First variation → hard edge, no wrap to the last one and no
+        // animation. Dart answers such a request with a no-op, so animating
+        // would fade the bubble out and hold it blank until the 300 ms
+        // fallback timer put it back — the "stuck message" symptom.
+        const { swipeId, busy } = this._swipeState(id);
+        if (busy || swipeId <= 0) return;
         bridge._swipeHandler.animateVariantSwap(id, 'prev', () =>
           bridge._sendToFlutter('onSwipe', [JSON.stringify({ id, direction: 'left' })])
         );
@@ -176,10 +300,8 @@ export class InteractionDispatch {
         // next arrow is pressed while already on the last variation of the last
         // message, kick off a regeneration into a fresh swipe instead of a no-op
         // — unless swipe-regeneration is disabled in settings.
-        const section = document.querySelector(`[data-message-id="${id}"]`);
-        const swipeId = section ? parseInt(section.dataset.swipeId || '0', 10) : 0;
-        const swipeTotal = section ? parseInt(section.dataset.swipeTotal || '1', 10) : 1;
-        const isLast = section ? section.dataset.isLast === 'true' : false;
+        const { swipeId, swipeTotal, isLast, busy } = this._swipeState(id);
+        if (busy) return;
         if (swipeId >= swipeTotal - 1) {
           if (isLast && !bridge.disableSwipeRegeneration) {
             bridge._sendToFlutter('onRegenerate', [id, 'new_variant']);
@@ -192,24 +314,32 @@ export class InteractionDispatch {
       },
       'agent-swipe-left': (e, el) => {
         const id = el.dataset.messageId;
+        const { agentSwipeId, busy } = this._swipeState(id);
+        if (busy || agentSwipeId <= 0) return;
         bridge._swipeHandler.animateVariantSwap(id, 'prev', () =>
           bridge._sendToFlutter('onAgentSwipe', [JSON.stringify({ id, direction: 'left' })])
         );
       },
       'agent-swipe-right': (e, el) => {
         const id = el.dataset.messageId;
+        const { agentSwipeId, agentSwipeTotal, busy } = this._swipeState(id);
+        if (busy || agentSwipeId >= agentSwipeTotal - 1) return;
         bridge._swipeHandler.animateVariantSwap(id, 'next', () =>
           bridge._sendToFlutter('onAgentSwipe', [JSON.stringify({ id, direction: 'right' })])
         );
       },
       'greeting-prev': (e, el) => {
         const id = el.dataset.messageId;
+        const { greetingId, busy } = this._swipeState(id);
+        if (busy || greetingId <= 0) return;
         bridge._swipeHandler.animateVariantSwap(id, 'prev', () =>
           bridge._sendToFlutter('onChangeGreeting', [id, -1])
         );
       },
       'greeting-next': (e, el) => {
         const id = el.dataset.messageId;
+        const { greetingId, greetingTotal, busy } = this._swipeState(id);
+        if (busy || greetingId >= greetingTotal - 1) return;
         bridge._swipeHandler.animateVariantSwap(id, 'next', () =>
           bridge._sendToFlutter('onChangeGreeting', [id, 1])
         );
@@ -231,27 +361,31 @@ export class InteractionDispatch {
         }
       },
       'img-retry': (e, el) => {
-        const { instr, messageId } = this._extractImgInstruction(el, e.composedPath());
-        bridge._sendToFlutter('onImgRetry', [instr, messageId]);
+        const { instr, messageId, imgIndex } = this._extractImgInstruction(el, e.composedPath());
+        bridge._sendToFlutter('onImgRetry', [instr, messageId, imgIndex]);
+      },
+      'img-enable-retry': (e, el) => {
+        const { instr, messageId, imgIndex } = this._extractImgInstruction(el, e.composedPath());
+        bridge._sendToFlutter('onImgEnableRetry', [instr, messageId, imgIndex]);
       },
       'img-find': (e, el) => {
-        const { instr, messageId } = this._extractImgInstruction(el, e.composedPath());
-        bridge._sendToFlutter('onImgFind', [instr, messageId]);
+        const { instr, messageId, imgIndex } = this._extractImgInstruction(el, e.composedPath());
+        bridge._sendToFlutter('onImgFind', [instr, messageId, imgIndex]);
       },
       'img-regen': (e, el) => {
-        const { instr, messageId } = this._extractImgInstruction(el, e.composedPath());
-        bridge._sendToFlutter('onImgRegen', [instr, messageId]);
+        const { instr, messageId, imgIndex } = this._extractImgInstruction(el, e.composedPath());
+        bridge._sendToFlutter('onImgRegen', [instr, messageId, imgIndex]);
       },
       'img-stop': (e, el) => bridge._sendToFlutter('onImgCancel', []),
+      'img-variant-prev': (e, el) => this._stepImageVariant(e, el, -1),
+      'img-variant-next': (e, el) => this._stepImageVariant(e, el, 1),
       'img-options': (e, el) => {
-        const { messageId } = this._extractImgInstruction(el, e.composedPath());
-        let instruction = '';
-        try { instruction = decodeURIComponent(el.dataset.instruction || ''); }
-        catch (_) { instruction = el.dataset.instruction || ''; }
+        const { instr, messageId, imgIndex } = this._extractImgInstruction(el, e.composedPath());
         bridge._sendToFlutter('onImgOptions', [JSON.stringify({
           src: el.dataset.src || '',
-          instruction,
+          instruction: instr,
           messageId,
+          imgIndex,
         })]);
       },
       'image-click': (e, el) => {

@@ -99,5 +99,66 @@ void main() {
       ]);
       expect(sep.lorebookText, isNot(contains('Northern Keep')));
     });
+
+    // A public *script* has no readable entries until an LLM converts it, which
+    // can happen after the capture — so the same subtraction has to work on
+    // already-isolated text.
+    test('withoutPublicEntries cuts entries out of isolated text', () {
+      final sep = separate(payload, extractCard(payload));
+      expect(sep.lorebookText, contains('Northern Keep'));
+
+      final scrubbed = withoutPublicEntries(sep.lorebookText, [
+        'The Northern Keep is an ancient fortress carved into the cliffs. '
+            'It has stood for a thousand winters.',
+      ]);
+
+      expect(scrubbed, isNot(contains('Northern Keep')));
+      expect(scrubbed, contains('Frostfang Blade'));
+      expect(scrubbed, isNot(contains('\n\n\n')));
+    });
+
+    test('withoutPublicEntries leaves the text alone with nothing to cut', () {
+      final sep = separate(payload, extractCard(payload));
+      expect(withoutPublicEntries(sep.lorebookText, const []), sep.lorebookText);
+    });
+  });
+
+  group('restoreMacros', () {
+    test('swaps the baked character name back to {{char}}', () {
+      final out = restoreMacros(
+        'Aria draws her sword. Aria is loyal.',
+        charNames: ['Aria'],
+      );
+      expect(out, '{{char}} draws her sword. {{char}} is loyal.');
+    });
+
+    test('swaps the baked persona name back to {{user}}', () {
+      final out = restoreMacros(
+        'Aria bows to Cole.',
+        charNames: ['Aria'],
+        userName: 'Cole',
+      );
+      expect(out, '{{char}} bows to {{user}}.');
+    });
+
+    test('a longer name wins over the shorter one it contains', () {
+      final out = restoreMacros(
+        'Aria Blackwood signs the letter.',
+        charNames: ['Aria', 'Aria Blackwood'],
+      );
+      expect(out, '{{char}} signs the letter.');
+    });
+
+    test('very short names are left alone', () {
+      // "Al" would match inside "Always", "also", "already"…
+      final out = restoreMacros('Al always arrives early.', charNames: ['Al']);
+      expect(out, 'Al always arrives early.');
+    });
+
+    test('no names to swap leaves the text untouched', () {
+      const text = 'Nothing to substitute here.';
+      expect(restoreMacros(text), text);
+      expect(restoreMacros(text, charNames: ['', '  ']), text);
+    });
   });
 }

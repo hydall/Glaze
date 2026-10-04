@@ -12,8 +12,9 @@ class SummaryRepo extends DatabaseAccessor<AppDatabase>
   SummaryRepo(super.db);
 
   Future<ChatSummary?> get(String sessionId) {
-    return (select(chatSummaries)..where((t) => t.sessionId.equals(sessionId)))
-        .getSingleOrNull();
+    return (select(
+      chatSummaries,
+    )..where((t) => t.sessionId.equals(sessionId))).getSingleOrNull();
   }
 
   Future<List<String>> getAllSessionIds() async {
@@ -43,6 +44,47 @@ class SummaryRepo extends DatabaseAccessor<AppDatabase>
     );
   }
 
+  Future<void> putSynced({
+    required String sessionId,
+    required String content,
+    required int messageCount,
+    required bool enabled,
+    required String? prompt,
+    required int updatedAt,
+  }) async {
+    await into(chatSummaries).insertOnConflictUpdate(
+      ChatSummariesCompanion.insert(
+        sessionId: sessionId,
+        content: content,
+        enabled: Value(enabled),
+        messageCount: Value(messageCount),
+        prompt: Value(prompt),
+        updatedAt: Value(updatedAt),
+      ),
+    );
+  }
+
+  /// Writes only the summarization template, leaving the content and the
+  /// message count alone. A settings screen that edits the prompt must not
+  /// stamp a new message count — that silently restarts the auto-summary
+  /// countdown.
+  Future<void> setPrompt({
+    required String sessionId,
+    required String? prompt,
+  }) async {
+    final existing = await get(sessionId);
+    await into(chatSummaries).insertOnConflictUpdate(
+      ChatSummariesCompanion.insert(
+        sessionId: sessionId,
+        content: existing?.content ?? '',
+        enabled: Value(existing?.enabled ?? true),
+        messageCount: Value(existing?.messageCount ?? 0),
+        prompt: Value(prompt),
+        updatedAt: Value(currentTimestampSeconds()),
+      ),
+    );
+  }
+
   Future<void> setEnabled({
     required String sessionId,
     required bool enabled,
@@ -61,9 +103,9 @@ class SummaryRepo extends DatabaseAccessor<AppDatabase>
   }
 
   Future<void> deleteBySessionId(String sessionId) {
-    return (delete(chatSummaries)..where((t) => t.sessionId.equals(sessionId)))
-        .go()
-        .then((_) {});
+    return (delete(
+      chatSummaries,
+    )..where((t) => t.sessionId.equals(sessionId))).go().then((_) {});
   }
 
   /// Carries user settings, but resets generated content because this model

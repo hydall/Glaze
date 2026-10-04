@@ -2,14 +2,38 @@
 
 import { GenTimer } from './gen_timer.js';
 import { ImgGenTimer } from './imggen_timer.js';
+import { refreshImgGenPlaceholderState } from '../renderer/imggen_placeholder.js';
 import { MessageUpdateBatcher } from './message_update_batcher.js';
 import { SelectionManager } from './selection_manager.js';
 import { EditController } from './edit_controller.js';
 import { SwipeGestureHandler } from './swipe_gesture_handler.js';
+import { TrackpadScroll } from './trackpad_scroll.js';
 import { InteractionDispatch } from './interaction_dispatch.js';
 import { PanelHost } from './panel_host.js';
 import { sanitizeExtBlockHtml } from './html_sanitizer.js';
+import { parseImageResultElement, parseImagePendingPayload } from '../formatter/formatter.js';
+
+/* Breathing room the caret keeps from the chrome it is being revealed past.
+ * Landing the caret exactly on the input bar's edge reads as though it is
+ * still half under it. */
+const CARET_REVEAL_GUTTER_PX = 12;
+/* How far the list must be from the first message before the scroll-to-top
+ * button is worth showing. Mirrors the 100px the scroll-to-bottom button uses
+ * (see emitScrollToBottomVisibility). */
+const SCROLL_TO_TOP_THRESHOLD_PX = 100;
+/* How recently the reader must have touched the list for an upward scroll to
+ * count as theirs. Spacer rewrites and late image heights move scrollTop on
+ * their own; without this the correction after a chat's opening jump read as
+ * the reader scrolling up and put the button on screen unprompted. */
+const USER_SCROLL_INPUT_WINDOW_MS = 1000;
 import { ICON } from '../renderer/icon_library.js';
+import { applyTypingPhase } from '../renderer/typing_phase.js';
+import { retryFailedLocalImages } from '../renderer/local_image_retry.js';
+
+/* Id of the virtual typing placeholder. It is not a persisted message: Flutter
+ * owns one constant id for it and the page keeps it pinned to the tail, so a
+ * persisted message that lands while it is up never slots in underneath. */
+const STREAMING_ID = '__streaming__';
 
 export class Bridge {
   constructor(renderer, virtualList) {
@@ -20,22 +44,49 @@ export class Bridge {
     this.isGenerating = false;
     this.isGeneratingImage = false;
     this.isPostGenRunning = false;
+    // A send is painted but its generation has not been published yet. The
+    // typing bubble is already on screen for it, so the elapsed clock under
+    // the bubble runs on this too — see _syncGenerationTimer().
+    this.isSendPending = false;
+    // Label under the typing pencil, naming the phase the generation is
+    // actually in. Empty = the renderer's default. See setGenerationPhase().
+    this.generationPhaseText = '';
+    // Placeholder element lifted out by clearAll, waiting for the setMessages
+    // that follows it. See _keepingPlaceholderLast().
+    this._parkedPlaceholder = null;
+    // Whether Flutter still believes a typing placeholder is on screen. The
+    // page may carry that node across a re-render of the same list, but it
+    // must never bring one back on its own: `updateMessage` is rAF-batched, so
+    // a delta issued before the placeholder was taken away can execute after
+    // it, and the re-create branch in _executeUpdateMessage would then put the
+    // finished reply back on screen as a second copy of itself.
+    this._placeholderActive = false;
     // Scroll-hide header state. Lifted out of the _setupScrollListener closure
-    // so setGenerating() can re-show the header when a generation ends (see
-    // setGenerating): the header is frozen for the whole streaming window and
-    // must never be left stuck hidden afterwards.
+    // so the rest of the controller can reach it: _ensureHeaderReachable()
+    // un-hides the header when the list shrinks out of scroll range, and
+    // showHeader() clears it when a chat opens.
     this._headerHidden = false;
     // Last scroll offset the header tracker decided on, and the deadline until
     // which it only re-baselines instead of deciding. Both are instance fields
     // so showHeader() can reset them — see showHeader() for why that matters.
     this._headerLastTop = 0;
     this._headerRebaselineUntil = 0;
+    // Scroll-to-top button. `_scrolledUpFromTop` latches once the reader
+    // scrolls up away from the first message; a downward scroll does not take
+    // the button away, only returning to the top does. `_lastScrollToTopShown`
+    // caches the emitted state so a chat open can realign it (see showHeader()).
+    this._scrolledUpFromTop = false;
+    this._lastScrollToTopShown = null;
+    // Last wheel / touch / key event on the list, used to tell a reader's
+    // upward scroll from a layout correction (see USER_SCROLL_INPUT_WINDOW_MS).
+    this._lastUserScrollInputAt = 0;
     this._genTimer = new GenTimer(renderer);
     this._imgGenTimer = new ImgGenTimer();
     this._updateBatcher = new MessageUpdateBatcher();
     this._selectionManager = new SelectionManager(
       (name, args) => this._sendToFlutter(name, args),
       () => this._orderedMessageIds(),
+      () => this._allMessageSections(),
     );
     this._editController = new EditController((name, args) => this._sendToFlutter(name, args));
     this._interaction = new InteractionDispatch(this);
@@ -45,6 +96,15 @@ export class Bridge {
     this._personaAvatarUrl = null;
     this.batterySaver = false;
     this.disableSwipeRegeneration = false;
+    // One "a message tried to run JS" report per WebView load — see
+    // notifyMessageScriptBlocked().
+    this._messageScriptBlockedNotified = false;
+    // Live elapsed clock for running ext-blocks (see _ensureExtBlockTicker).
+    this._extBlockTicker = null;
+    // Localized "Generating image…" label for the block image placeholder.
+    // Flutter passes it with each showExtBlocksPanel; the default keeps a panel
+    // rendered before the first push readable.
+    this._extBlockImageGenLabel = 'Generating image…';
     renderer.selectionManager = this._selectionManager;
     this._swipeHandler = new SwipeGestureHandler(
       (name, args) => this._sendToFlutter(name, args),
@@ -52,6 +112,9 @@ export class Bridge {
       () => this.isGenerating,
       () => this.disableSwipeRegeneration,
     );
+    // Windows-only fallback path: the embedder never delivers touchpad pans to
+    // WebView2 as wheel events, so Flutter replays them through here.
+    this._trackpadScroll = new TrackpadScroll(() => this.virtualList.container);
     // Bottom-inset reconciliation state — see setBottomPadding().
     // `_bottomInsetPx` is the inset Flutter measured from the bottom edge of the
     // full-size WebView box (input bar + keyboard/drawer + safe area);
@@ -69,6 +132,7 @@ export class Bridge {
     this._bottomInsetApplied = false;
     this._setupScrollListener();
     this._setupViewportShrinkListener();
+    this._setupDocumentScrollLock();
     this._setupInteractionListener();
     this._setupGlazeRequestRelay();
     this._setupImageClickForward();
@@ -91,11 +155,17 @@ export class Bridge {
       const isUser = section.classList.contains('user');
       const stored = section.dataset.personaName || '';
       const storedPersonaName = stored === 'You' ? '' : stored;
+      // A message pinned to the persona it was sent as keeps that persona's
+      // name and avatar — the letter included, when the persona was deleted.
+      // Only unpinned messages follow the active identity.
+      const pinned = section.dataset.avatarPinned === '1';
       // Per-message stored persona wins; otherwise use the active identity.
       const newName = isUser
-        ? (storedPersonaName || this._personaName || 'You')
+        ? ((pinned ? stored : storedPersonaName) || this._personaName || 'You')
         : (this._charName || stored || 'Character');
-      const newAvatarUrl = isUser ? this._personaAvatarUrl : this._charAvatarUrl;
+      const newAvatarUrl = pinned
+        ? (section.dataset.avatarUrl || null)
+        : (isUser ? this._personaAvatarUrl : this._charAvatarUrl);
 
       const label = section.querySelector('.msg-name-label');
       if (label) label.textContent = newName;
@@ -118,6 +188,32 @@ export class Bridge {
         if (existingImg) existingImg.remove();
         avatar.textContent = (newName.charAt(0) || '?').toUpperCase();
       }
+      // The avatar may have been created here rather than in the section
+      // build, so it is wired for a retry the same way.
+      retryFailedLocalImages(avatar);
+    });
+  }
+
+  /* Names the phase of the running generation in the typing bubble. Called
+   * from Flutter on every transition (prompt assembly -> retrieval -> waiting
+   * on the model -> streaming -> post-gen), and with an empty string when the
+   * run ends so the next bubble starts from the default label instead of the
+   * last phase of the previous turn. */
+  setGenerationPhase(text) {
+    const next = typeof text === 'string' ? text : '';
+    if (next === this.generationPhaseText) return;
+    this.generationPhaseText = next;
+    this._applyGenerationPhase();
+  }
+
+  /* A typing bubble is only ever on screen for the live generation, so every
+   * `.typing-text` currently rendered belongs to this phase. */
+  _applyGenerationPhase() {
+    const reduceMotion = window.matchMedia
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const animate = !this.batterySaver && !reduceMotion;
+    document.querySelectorAll('.typing-container .typing-text').forEach((el) => {
+      applyTypingPhase(el, this.generationPhaseText, animate);
     });
   }
 
@@ -125,27 +221,43 @@ export class Bridge {
     const wasGenerating = this.isGenerating;
     this.isGenerating = !!value;
     this._syncGenerationTimer();
-    // updateHeader() early-returns for the whole streaming window, so the
-    // scroll-hide header is frozen at whatever state it had when generation
-    // started. If it was hidden — and especially if the chat then shrank (a
-    // cancelled generation trims its empty placeholder) so it no longer
-    // scrolls and the bounds check also early-returns — the header could never
-    // re-appear. Re-show it once when generation ends so it is never stuck
-    // hidden after a (possibly cancelled) generation. Emitting keeps JS the
-    // single source of truth for the Flutter header state.
-    if (wasGenerating && !this.isGenerating && this._headerHidden) {
-      this._headerHidden = false;
-      this._sendToFlutter('onHeaderScroll', [false]);
-    }
+    // A cancelled generation trims its empty placeholder, so the list can
+    // shrink right here — possibly below the scroll range a hidden header
+    // needs to be scrolled back into view. See _ensureHeaderReachable().
+    if (wasGenerating && !this.isGenerating) this._ensureHeaderReachable();
+  }
+
+  /* The send window that precedes a generation: the user's message is painted
+   * and the durable append is still in flight. Nothing else in the page reads
+   * it — it only keeps the elapsed clock honest, so the bubble does not sit
+   * there without one for as long as that write takes. */
+  setSendPending(value) {
+    this.isSendPending = !!value;
+    this._syncGenerationTimer();
   }
 
   setPostGenRunning(value) {
     this.isPostGenRunning = !!value;
   }
 
+  // The image stage is the only thing that generates from an `[IMG:GEN…]` tag,
+  // so this flag is what tells a pending block apart from a running one
+  // (INV-IG1). The transition carries no re-render of its own — the reply's
+  // last chunk is already painted — so the placeholders are restamped here,
+  // and the ticker is woken for the clocks that just started.
+  setImageGenerating(value) {
+    this.isGeneratingImage = !!value;
+    refreshImgGenPlaceholderState();
+    this._imgGenTimer.ensureRunning();
+  }
+
   _syncGenerationTimer() {
-    if (this.isGenerating) {
-      this._genTimer.start();
+    // Post-generation work is deliberately absent here: the reply is written
+    // by then and its badge is final. The send window is not — the bubble it
+    // puts up is the same bubble the reply streams into, so the clock spans
+    // both and `ensureRunning` keeps the hand-off from restarting it.
+    if (this.isGenerating || this.isSendPending) {
+      this._genTimer.ensureRunning();
     } else {
       this._genTimer.stop();
     }
@@ -228,6 +340,44 @@ export class Bridge {
 
   /* ---------- Scroll / load-more ---------- */
 
+  // Windows touchpad pan replayed by Flutter as a wheel at the cursor. See
+  // ./trackpad_scroll.js for why the embedder can't deliver it itself.
+  trackpadScroll(dx, dy, x, y) {
+    this._trackpadScroll.scrollBy(dx, dy, x, y);
+  }
+
+  // True while the list is being scrolled by us rather than by the user. The
+  // virtual list raises the flag around its own scrolls (streaming
+  // auto-follow, scroll-to-bottom / -message, anchor restore) and the bridge
+  // raises it around the bottom-inset re-pin glide (see
+  // _reconcileBottomInset), which also drives `_repinAnimating`.
+  _isProgrammaticScroll() {
+    return !!(this._repinAnimating || this.virtualList?.isProgrammaticScrolling);
+  }
+
+  // Re-shows the header when scrolling can no longer bring it back.
+  //
+  // The tracker only un-hides on an upward scroll, so a hidden header stays
+  // recoverable only while the list has scroll range left. Losing it strands
+  // the header off screen with no gesture that could restore it — which is
+  // what a cancelled generation does when it trims its empty placeholder and
+  // the remaining chat is shorter than the viewport.
+  //
+  // Deliberately conditional: while the list still scrolls, the header belongs
+  // to the user, so this must not undo a hide they asked for by scrolling down
+  // mid-stream. Emitting keeps JS the single source of truth for the Flutter
+  // header state.
+  _ensureHeaderReachable() {
+    if (!this._headerHidden) return;
+    const container = this.virtualList?.container;
+    if (!container) return;
+    // Mirrors the `st > 50` hide threshold: with less range than that left
+    // there is no upward scroll available to bring the header back.
+    if (container.scrollHeight - container.clientHeight > 50) return;
+    this._headerHidden = false;
+    this._sendToFlutter('onHeaderScroll', [false]);
+  }
+
   // Re-shows the header and re-baselines the hide-on-scroll tracker. Flutter
   // calls this whenever a chat is opened or a session is switched.
   //
@@ -250,6 +400,23 @@ export class Bridge {
     // the window setMessages() already uses to suppress load-more.
     this._headerRebaselineUntil = Date.now() + 1000;
     this._sendToFlutter('onHeaderScroll', [false]);
+    // Same carried-over-state problem for the scroll-to-top button: the latch
+    // belongs to the chat being left, so clear it for the fresh one. The
+    // reconciler below is flushed too, so Flutter does not keep a button the
+    // new chat has nothing to scroll. The input timestamp goes with it, so a
+    // gesture from the previous chat cannot arm the button here.
+    this._scrolledUpFromTop = false;
+    this._lastUserScrollInputAt = 0;
+    this._emitScrollToTopVisibility(false);
+  }
+
+  // Emits the scroll-to-top button state, deduped. An instance method (not a
+  // closure in _setupScrollListener) so showHeader() and scrollToTop() can
+  // realign the cached value instead of racing a stale one.
+  _emitScrollToTopVisibility(show) {
+    if (this._lastScrollToTopShown === show) return;
+    this._lastScrollToTopShown = show;
+    this._sendToFlutter('onScrollToTopVisibility', [show]);
   }
 
   _setupScrollListener() {
@@ -258,10 +425,32 @@ export class Bridge {
     let lastShowScrollToBottom = null;
     // Header hide-on-scroll (ported from Glaze/src/core/services/ui.js initHeaderScroll).
     // `_headerHidden` / `_headerLastTop` are instance fields (see constructor)
-    // so setGenerating() can re-show the header when a generation ends and
-    // showHeader() can re-baseline the tracker when a chat opens.
+    // so _ensureHeaderReachable() can re-show the header when the list shrinks
+    // and showHeader() can re-baseline the tracker when a chat opens.
     let ticking = false;
     const container = this.virtualList.container;
+
+    // Reconcile the scroll-to-top button from the current offset. The latch
+    // (`_scrolledUpFromTop`) only turns on from an upward move; this clears it
+    // again at the top and emits, so every path out of updateHeader — including
+    // the early returns — leaves the button consistent with where the list is.
+    const syncScrollToTop = () => {
+      if (container.scrollTop <= SCROLL_TO_TOP_THRESHOLD_PX) {
+        this._scrolledUpFromTop = false;
+      }
+      this._emitScrollToTopVisibility(
+        this._scrolledUpFromTop &&
+          container.scrollTop > SCROLL_TO_TOP_THRESHOLD_PX,
+      );
+    };
+
+    // An upward move only arms the button when the reader made it: one of
+    // these input events has to be behind it. `_headerLastTop` is the offset
+    // the move is compared against, so read it before it is advanced.
+    const isUserScrollUp = (st) =>
+      st > SCROLL_TO_TOP_THRESHOLD_PX &&
+      st < this._headerLastTop - 3 &&
+      Date.now() - this._lastUserScrollInputAt < USER_SCROLL_INPUT_WINDOW_MS;
 
     const emitScrollToBottomVisibility = () => {
       const distanceFromBottom =
@@ -278,28 +467,80 @@ export class Bridge {
       this._sendToFlutter('onScrollToBottomVisibility', [show]);
     };
 
+    // Content that grows or shrinks *above* the reader moves `scrollTop` with
+    // it — a page of older messages prepended, rows mounting above the viewport
+    // at their real heights, the browser's own scroll anchoring — while the
+    // text on screen does not move at all. Read as scrolling, each of those hid
+    // the header and the next upward flick brought it back: the header bouncing
+    // on every load-more. So the baseline is carried along with the row at the
+    // top of the screen, and only what moves that row on screen counts.
+    let headerRef = null;
+    let headerRefTop = 0;
+    const followHeaderRef = (st) => {
+      if (headerRef && headerRef.isConnected) {
+        this._headerLastTop += headerRef.offsetTop - headerRefTop;
+      }
+      headerRef = null;
+      const vl = this.virtualList;
+      // offsetTop is measured from the body, scrollTop from the container.
+      const base = container.offsetTop;
+      for (let i = vl.renderStart; i < vl.renderEnd; i++) {
+        const el = vl.items[i]?.el;
+        if (el && el.isConnected && el.offsetTop - base + el.offsetHeight > st) {
+          headerRef = el;
+          headerRefTop = el.offsetTop;
+          break;
+        }
+      }
+    };
+
     const updateHeader = () => {
       ticking = false;
       const st = container.scrollTop;
+      followHeaderRef(st);
       // Right after showHeader() the list is still being filled and scrolled to
       // the bottom programmatically. Follow the offset without deciding, so the
       // jump is never mistaken for the user scrolling down.
       if (Date.now() < this._headerRebaselineUntil) {
         this._headerLastTop = st <= 0 ? 0 : st;
+        syncScrollToTop();
         return;
       }
-      // Streaming auto-follow must not hide the header, but an explicit upward
-      // scroll should still restore an already-hidden header.
-      if (this.isGenerating) {
-        if (st < this._headerLastTop - 3 && this._headerHidden) {
-          this._headerHidden = false;
-          this._sendToFlutter('onHeaderScroll', [false]);
+      // Scrolls we caused ourselves are not user intent: the streaming
+      // auto-follow, the keyboard / input-bar re-pin glide, scroll-to-message
+      // and the anchor restore all move scrollTop on their own. Follow the
+      // offset without deciding, so none of them hides the header.
+      //
+      // This replaced a blanket freeze on the generation flag, which suspended
+      // hide-on-scroll for the whole streaming window: during a long reply the
+      // header simply stopped responding to scrolling. Only the auto-follow
+      // needs suppressing, and it already announces itself through the virtual
+      // list's own programmatic-scroll flag.
+      //
+      // An upward move still restores an already-hidden header. The auto-follow
+      // only ever pins downward, so an upward one inside this window is the
+      // user's — and it is how they detach from the follow in the first place
+      // (the flag stays set for ~80ms after the last pin, see smartScroll()).
+      if (this._isProgrammaticScroll()) {
+        if (st < this._headerLastTop - 3) {
+          if (this._headerHidden) {
+            this._headerHidden = false;
+            this._sendToFlutter('onHeaderScroll', [false]);
+          }
+          // The auto-follow only ever pins downward, so an upward move inside
+          // its window is the reader's — and it is how they detach from the
+          // follow in the first place.
+          if (isUserScrollUp(st)) this._scrolledUpFromTop = true;
         }
         this._headerLastTop = st <= 0 ? 0 : st;
+        syncScrollToTop();
         return;
       }
+      // A shrink can clamp scrollTop without leaving room to scroll back up.
+      this._ensureHeaderReachable();
       if (st < 0 || st + container.clientHeight > container.scrollHeight) {
         this._headerLastTop = st <= 0 ? 0 : st;
+        syncScrollToTop();
         return;
       }
       if (st > this._headerLastTop + 3 && st > 50) {
@@ -312,7 +553,11 @@ export class Bridge {
           this._headerHidden = false;
           this._sendToFlutter('onHeaderScroll', [false]);
         }
+        // An upward move away from the top is what arms the scroll-to-top
+        // button; a downward one never takes it away, only reaching the top.
+        if (isUserScrollUp(st)) this._scrolledUpFromTop = true;
       }
+      syncScrollToTop();
       this._headerLastTop = st <= 0 ? 0 : st;
     };
 
@@ -336,7 +581,20 @@ export class Bridge {
       emitScrollToBottomVisibility();
     }, { passive: true });
 
+    // A reader's scroll always has one of these in front of it (the Windows
+    // touchpad is replayed as a synthetic wheel — see TrackpadScroll), so the
+    // timestamp is the tell between a real upward scroll and a layout
+    // correction. Passive: none of them preventDefault.
+    for (const type of ['wheel', 'touchstart', 'touchmove', 'keydown']) {
+      container.addEventListener(
+        type,
+        () => { this._lastUserScrollInputAt = Date.now(); },
+        { passive: true },
+      );
+    }
+
     requestAnimationFrame(emitScrollToBottomVisibility);
+    requestAnimationFrame(() => this._emitScrollToTopVisibility(false));
   }
 
   /* ---------- Viewport shrink (soft keyboard) ---------- */
@@ -363,18 +621,70 @@ export class Bridge {
     }
   }
 
+  /* ---------- Document scroll lock ---------- */
+  // #chat-container is the only scroller in this page. If the document itself
+  // still scrolls — the browser revealing a focused caret or a dragged text
+  // selection on an engine that ignores the CSS lock, or the embedder panning
+  // its viewport — the whole page slides, and with it every `position: fixed`
+  // layer, including the Flutter-glass overlay-blur strips Flutter mirrors into
+  // the page. The strips then sit away from the Flutter chrome and trail it
+  // through keyboard/drawer animations.
+  //
+  // The page is locked in CSS (html/body fixed, overflow hidden); this is the
+  // belt to that suspenders. A document scroll is undone and the same movement
+  // is handed to the container, so the caret/selection reveal still scrolls the
+  // chat instead of the WebView.
+  _setupDocumentScrollLock() {
+    const pin = () => {
+      const doc = document.scrollingElement;
+      if (!doc) return;
+      const top = doc.scrollTop;
+      const left = doc.scrollLeft;
+      if (top === 0 && left === 0) return;
+      doc.scrollTop = 0;
+      doc.scrollLeft = 0;
+      const container = this.virtualList && this.virtualList.container;
+      if (container && top) container.scrollTop += top;
+    };
+    window.addEventListener('scroll', pin, { passive: true });
+    document.addEventListener('scroll', pin, { passive: true });
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('scroll', pin, { passive: true });
+    }
+  }
+
   // How many px of Flutter's bottom inset the WebView viewport already ate by
   // shrinking. 0 when the viewport stays full-screen and the keyboard simply
   // overlays it (then the whole inset must become real padding).
   _viewportShrinkPx() {
     const full = this._viewportFullH || 0;
     if (full <= 0) return 0;
-    const shrink = full - this.virtualList.container.clientHeight;
+    const shrink = full - this._visibleViewportH();
     // CSS px and Flutter logical px agree (initial-scale=1), but rounding on
     // either side can leave a pixel or two of slack — ignore that as noise so a
     // non-shrinking embedder never loses real padding to it.
     if (shrink < 8) return 0;
     return Math.min(shrink, this._bottomInsetPx);
+  }
+
+  // The height of the scrollport, in CSS px.
+  //
+  // Deliberately the container's own layout height and not the visual
+  // viewport, even though an overlaying keyboard shrinks the latter and not
+  // the former. What the padding above buys is SCROLL RANGE: room to push the
+  // end of the list out from under the chrome. Only a scrollport that actually
+  // got shorter needs less of it, and an overlaying keyboard does not shorten
+  // this one — it covers it.
+  //
+  // Measuring the visual viewport here subtracted the keyboard's height from
+  // the padding while the scroll range it was standing in for never appeared,
+  // so the bottom of the list became unreachable: at maximum scroll the last
+  // lines sat behind the keyboard with nothing left to scroll. Where the
+  // embedder really does resize the WebView, the container's own height falls
+  // with it and the shrink is still seen, which is the case this subtraction
+  // exists for.
+  _visibleViewportH() {
+    return this.virtualList.container.clientHeight;
   }
 
   /* ---------- Interaction dispatch ---------- */
@@ -387,11 +697,6 @@ export class Bridge {
   }
 
   _extractText(section) {
-    const host = section.querySelector('.msg-body .message-content');
-    if (host && host.shadowRoot) {
-      const root = host.shadowRoot.querySelector('.glaze-message');
-      if (root) return root.innerText || '';
-    }
     return section.dataset.rawText || '';
   }
 
@@ -416,9 +721,79 @@ export class Bridge {
     loading.style.display = 'flex';
   }
 
+  /* ---------- Typing placeholder pinning ---------- */
+
+  /* Lifts the placeholder out of the list and hands back its element, or null
+   * when it is not the tail. The node survives detached, so putting it back
+   * keeps whatever has already streamed into it. */
+  _detachStreamingPlaceholder() {
+    const items = this.virtualList.items;
+    const last = items[items.length - 1];
+    if (!last || last.id !== STREAMING_ID) return null;
+    const el = last.el;
+    this.virtualList.remove(STREAMING_ID);
+    return el;
+  }
+
+  _reattachStreamingPlaceholder(el) {
+    if (!el) return;
+    this.virtualList.append(STREAMING_ID, el);
+  }
+
+  /* Retires the typing bubble for good, without an exit animation, so a
+   * `setMessages` issued right after this call has nothing left to carry
+   * across. Flutter makes the call when it opens a chat with no run in
+   * flight: the page is a keep-alive singleton, so a run that ended while
+   * the chat was closed left its bubble here with no falling edge to take it
+   * away, and the carry below would read that leftover as proof a reply is
+   * still on its way.
+   *
+   * Level-triggered on the page's own belief: `removeMessage` clears
+   * `_placeholderActive` the moment Flutter stops believing in the bubble, so
+   * a node still on screen under that flag is playing its exit animation and
+   * is left alone to finish it. */
+  retireTypingPlaceholder() {
+    if (!this._placeholderActive && !this._parkedPlaceholder) return;
+    this.flush();
+    this._placeholderActive = false;
+    this._parkedPlaceholder = null;
+    this.virtualList.remove(STREAMING_ID);
+    this._pruneOrphanSeparators();
+    this._ensureHeaderReachable();
+  }
+
+  /* Runs [fn] with the placeholder lifted out, then puts it back at the tail.
+   * Every batch append goes through here: `virtualList.append` lands after
+   * whatever is currently last, so a persisted message arriving mid-generation
+   * would otherwise render *below* the bubble that is still typing. */
+  _keepingPlaceholderLast(fn) {
+    const el = this._detachStreamingPlaceholder();
+    try {
+      fn();
+    } finally {
+      this._reattachStreamingPlaceholder(el);
+    }
+  }
+
   /* ---------- Message list API ---------- */
   setMessages(messagesJson, preserveScroll = false) {
     this.flush();
+    // A full re-render drops the placeholder while Flutter still believes it
+    // is on screen — every following delta would then update a node that no
+    // longer exists and the reply would stream into nothing. Carry it across.
+    // `clearAll` runs as its own call right before this one on the re-render
+    // path, so it parks the element here for us to pick up.
+    const carriedPlaceholder =
+      this._detachStreamingPlaceholder() || this._parkedPlaceholder || null;
+    this._parkedPlaceholder = null;
+    // Carrying one across says it is still live. Not carrying one says
+    // nothing: the node may simply have been lost, which is the case the
+    // re-create branch in _executeUpdateMessage exists for. Only removeMessage,
+    // retireTypingPlaceholder and a chat-replacing clearAll retire the
+    // placeholder — and the first inference only holds because Flutter retires
+    // a leftover before the setMessages that reopens a chat, so what is
+    // carried here is always a bubble some run is still streaming into.
+    if (carriedPlaceholder) this._placeholderActive = true;
     this._suppressLoadMore = true;
     // When re-rendering in place (e.g. a preset switch changes display regexes),
     // remember the current reading position so the batch replace below doesn't
@@ -445,33 +820,44 @@ export class Bridge {
     }
 
     this.virtualList.setMessagesBatch(ids, elements);
+    this._reattachStreamingPlaceholder(carriedPlaceholder);
     if (anchor) this.virtualList.restoreAnchor(anchor);
     this._hideLoadingScreen();
     this._imgGenTimer.ensureRunning();
     setTimeout(() => { this._suppressLoadMore = false; }, 1000);
   }
 
-  appendMessage(messageJson) {
-    this.flush();
-    const msg = JSON.parse(messageJson);
+  _renderAndAppend(msg) {
     const rendered = this.renderer.renderMessage(msg);
     for (const el of rendered) {
       const id = el.dataset.messageId || `__date_${el.dataset.dateSeparator || Date.now()}`;
       this.virtualList.append(id, el);
     }
-    this.virtualList.scrollToBottom();
+  }
+
+  appendMessage(messageJson) {
+    this.flush();
+    const msg = JSON.parse(messageJson);
+    // The placeholder is itself appended through here — pinning it behind
+    // itself would evict and re-add the node for nothing.
+    if (msg.id === STREAMING_ID) {
+      this._placeholderActive = true;
+      this._renderAndAppend(msg);
+    } else {
+      this._keepingPlaceholderLast(() => this._renderAndAppend(msg));
+    }
+    // No scroll of its own: `virtualList.append` already follows the end when
+    // the reader is parked there (or when a send armed the pending follow), and
+    // a second call here re-pinned the list a frame later — the extra step a
+    // send showed.
     this._imgGenTimer.ensureRunning();
   }
 
   appendMessages(messagesJson) {
     this.flush();
     const messages = JSON.parse(messagesJson);
-    messages.forEach(msg => {
-      const rendered = this.renderer.renderMessage(msg);
-      for (const el of rendered) {
-        const id = el.dataset.messageId || `__date_${el.dataset.dateSeparator || Date.now()}`;
-        this.virtualList.append(id, el);
-      }
+    this._keepingPlaceholderLast(() => {
+      messages.forEach(msg => this._renderAndAppend(msg));
     });
     this._imgGenTimer.ensureRunning();
   }
@@ -480,7 +866,9 @@ export class Bridge {
     this.flush();
     this._suppressLoadMore = true;
     const messages = JSON.parse(messagesJson);
-    const scrollBefore = this.virtualList.container.scrollHeight;
+    const container = this.virtualList.container;
+    const topBefore = container.scrollTop;
+    const scrollBefore = container.scrollHeight;
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i];
       const rendered = this.renderer.renderMessage(msg);
@@ -490,8 +878,21 @@ export class Bridge {
         this.virtualList.prepend(id, el);
       }
     }
-    const scrollAfter = this.virtualList.container.scrollHeight;
-    this.virtualList.container.scrollTop += scrollAfter - scrollBefore;
+    const scrollAfter = container.scrollHeight;
+    // Absolute, not `+=`: where the browser anchors natively (Chromium) the
+    // layout the read above just forced has already moved `scrollTop` by the
+    // growth, and adding it again threw the reader a whole page down — onto
+    // messages they had already read. Where it does not (WebKit, or at the
+    // very top, where Chromium never anchors) this is the whole correction.
+    container.scrollTop = topBefore + (scrollAfter - scrollBefore);
+    // The page went in above the reader as spacer only: `prepend` keeps the
+    // window on the rows already on screen, and the observer will not grow it
+    // until one of them changes visibility — with long replies, not before the
+    // reader has scrolled into the spacer and seen an empty chat. Mount the
+    // buffer above them now, while the reader's row is still in view, so their
+    // real heights replace the estimates against that row instead of against a
+    // position the blank-viewport recovery guessed from the estimates.
+    this.virtualList.updateWindow();
     this._hideLoadingScreen();
     setTimeout(() => { this._suppressLoadMore = false; }, 500);
   }
@@ -501,9 +902,63 @@ export class Bridge {
     this._updateBatcher.enqueue(msg.id, () => this._executeUpdateMessage(msg));
   }
 
+  // Moves the CONTEXT LIMIT rule to the oldest message the next prompt still
+  // carries; '' retires it. Patches only the two rows involved instead of
+  // re-rendering the chat, and reaches them through `itemMap`, which retains
+  // every row element — so the rule is right whether or not the boundary is
+  // currently mounted. The renderer keeps the id as well, which is what makes a
+  // later full re-render draw the rule again without another call from Flutter.
+  setContextWindowStart(messageId) {
+    const next = messageId || null;
+    const previous = this.renderer.contextStartId || null;
+    this.renderer.setContextWindowStart(next);
+    if (previous === next) return;
+    if (previous) {
+      const el = this.virtualList.itemMap?.get(previous)?.el;
+      if (el) {
+        el.querySelector(':scope > .context-limit-marker')?.remove();
+        delete el.dataset.contextStart;
+      }
+    }
+    if (next) {
+      const el = this.virtualList.itemMap?.get(next)?.el;
+      if (el && !el.querySelector(':scope > .context-limit-marker')) {
+        el.dataset.contextStart = '1';
+        el.insertBefore(this.renderer.createContextLimitMarker(), el.firstChild);
+      }
+    }
+  }
+
+  // Patch only memory badges when the async memory providers settle. This
+  // deliberately avoids rebuilding message bodies/panels and works for both
+  // mounted and virtualized rows because itemMap retains every row element.
+  patchMemoryStatuses(statusesJson) {
+    const statuses = JSON.parse(statusesJson);
+    for (const [id, status] of Object.entries(statuses)) {
+      const item = this.virtualList.itemMap?.get(id);
+      const section = item?.el;
+      if (!section) continue;
+      const current = section.querySelector('.msg-memory-badge')?.textContent;
+      // REBUILD/STALE come from message-local coverage and outrank book state.
+      if (current === 'REBUILD' || current === 'STALE') continue;
+      this.renderer.updateMessageMeta(section, { id, memoryStatus: status });
+    }
+  }
+
   _executeUpdateMessage(msg) {
     const section = document.querySelector(`[data-message-id="${msg.id}"]`);
-    if (!section) return;
+    if (!section) {
+      // Last line of defence for the virtual placeholder: while Flutter still
+      // believes one is on screen, a node the list lost has to be re-created
+      // or the reply streams into nothing. Once the placeholder has been taken
+      // away — or a full re-render landed without it — a late delta must not
+      // bring it back: that is the finished reply, shown a second time under
+      // itself, and it outlives the run that produced it.
+      if (msg.id === STREAMING_ID && this._placeholderActive) {
+        this._renderAndAppend(msg);
+      }
+      return;
+    }
 
     const animate = !!msg.swipeDirection;
     if (msg.swipeDirection) section.dataset.swipeDirection = msg.swipeDirection;
@@ -512,6 +967,12 @@ export class Bridge {
     else if (msg.reasoning === null || msg.reasoning === '') delete section.dataset.reasoning;
 
     if (msg.text != null) section.dataset.rawText = msg.text;
+
+    // Kept in step with rawText: an update that carries text but no sourceText
+    // means the stored text and the rendered one are identical again, so a
+    // stale source from an earlier update must not survive into the editor.
+    if (msg.sourceText != null) section.dataset.sourceText = msg.sourceText;
+    else if (msg.text != null) delete section.dataset.sourceText;
 
     if (msg.isError !== undefined) section.classList.toggle('error', !!msg.isError);
 
@@ -539,6 +1000,7 @@ export class Bridge {
     if (msg.agentSwipeIndex !== undefined) section.dataset.agentSwipeId = String(msg.agentSwipeIndex);
     if (msg.agentSwipeTotal !== undefined) section.dataset.agentSwipeTotal = String(msg.agentSwipeTotal);
     if (msg.greetingTotal !== undefined) section.dataset.greetingTotal = String(msg.greetingTotal);
+    if (msg.greetingIndex !== undefined) section.dataset.greetingId = String(msg.greetingIndex);
 
     // Restore data-is-last on char sections after generation ends.
     // setLastMessage(null) clears this flag at generation start; without
@@ -579,7 +1041,7 @@ export class Bridge {
     const agentSwipeIndex = msg.agentSwipeIndex !== undefined ? msg.agentSwipeIndex : parseInt(section.dataset.agentSwipeId || '0', 10);
     const agentSwipeTotal = msg.agentSwipeTotal !== undefined ? msg.agentSwipeTotal : parseInt(section.dataset.agentSwipeTotal || '0', 10);
     const agentSwipeFinalCount = msg.agentSwipeFinalCount !== undefined ? msg.agentSwipeFinalCount : 0;
-    const greetingIndex = msg.greetingIndex !== undefined ? msg.greetingIndex : 0;
+    const greetingIndex = msg.greetingIndex !== undefined ? msg.greetingIndex : parseInt(section.dataset.greetingId || '0', 10);
     const greetingTotal = msg.greetingTotal !== undefined ? msg.greetingTotal : parseInt(section.dataset.greetingTotal || '0', 10);
     const messageIndex = parseInt(section.dataset.messageIndex || '-1', 10);
     const hasSwipes = isChar && swipeTotal > 1;
@@ -681,6 +1143,10 @@ export class Bridge {
 
   removeMessage(messageId) {
     this.flush();
+    // The node lingers for its exit animation, but Flutter has stopped
+    // believing in it right here — anything that arrives for it from now on is
+    // a leftover of the run that just ended.
+    if (messageId === STREAMING_ID) this._placeholderActive = false;
     if (this._panelHost) {
       for (const [panelId, panel] of [...this._panelHost._panels.entries()]) {
         if (panel.messageId === messageId) this._panelHost.close(panelId);
@@ -698,10 +1164,16 @@ export class Bridge {
           this.virtualList.remove(messageId);
         }
         this._pruneOrphanSeparators();
+        // The list just got shorter; a hidden header may have lost the scroll
+        // range that lets the user bring it back. This lands ~340ms after the
+        // exit animation started, which is why setGenerating()'s own check
+        // (the placeholder is still on screen there) is not enough.
+        this._ensureHeaderReachable();
       });
     } else {
       this.virtualList.remove(messageId);
       this._pruneOrphanSeparators();
+      this._ensureHeaderReachable();
     }
   }
 
@@ -736,18 +1208,38 @@ export class Bridge {
     for (const id of orphanIds) this.virtualList.remove(id);
   }
 
-  clearAll() {
+  /* [keepPlaceholder] is false when the chat itself is being replaced. The
+   * typing bubble belongs to the chat being left: carrying it into the next
+   * one shows a reply on its way in a session where nothing is running, and it
+   * then rides along on every following re-render. */
+  clearAll(keepPlaceholder = true) {
     this.flush();
     this._showLoadingScreen();
     this._panelHost?.closeAll();
+    // Park the placeholder rather than dropping it: every clearAll on the
+    // message-sync path is immediately followed by setMessages, which puts it
+    // back at the tail. Without this the reply streams into a removed node.
+    const parked = this._detachStreamingPlaceholder();
+    this._parkedPlaceholder = keepPlaceholder ? parked : null;
+    if (!keepPlaceholder) this._placeholderActive = false;
     this.virtualList.clear();
   }
 
   scrollToBottom(behavior = 'auto') {
-    this.virtualList.scrollToBottom(behavior);
+    const settled = this.virtualList.scrollToBottom(behavior);
     requestAnimationFrame(() => {
       this._sendToFlutter('onScrollToBottomVisibility', [false]);
     });
+    return settled;
+  }
+
+  // Jump back to the first message. The button's latch is cleared before the
+  // jump so the (programmatic) scroll does not re-arm it; the header tracker
+  // re-shows a hidden header on the upward move the jump produces.
+  scrollToTop() {
+    this._scrolledUpFromTop = false;
+    this._emitScrollToTopVisibility(false);
+    this.virtualList.scrollToTop();
   }
 
   // Arm a one-shot "stick to bottom on the next append" so that sending a
@@ -758,7 +1250,7 @@ export class Bridge {
   }
   scrollToMessage(messageId, highlight = false) { this.virtualList.scrollToMessage(messageId, highlight); }
 
-  setSearch(query, activeIndex) { this.renderer.setSearch(query, activeIndex); }
+  setSearch(query, activeIndex, scroll = true) { this.renderer.setSearch(query, activeIndex, scroll); }
 
   setChatFont(fontFamily, fontDataUrl, fontSize, letterSpacing) {
     const root = document.documentElement;
@@ -890,7 +1382,7 @@ export class Bridge {
       this._bottomInsetApplied = true;
       cancelAnimationFrame(this._repinRaf);
       this._repinAnimating = false;
-      container.style.paddingBottom = target + 'px';
+      this._applyBottomPadding(container, target);
       container.scrollTop = targetScrollTop;
       this._finishRepin(container);
       return;
@@ -906,7 +1398,7 @@ export class Bridge {
     // the padding it reveals sits under the keyboard / input bar where it cannot
     // be seen mid-transition.
     if (target > prevPadding) {
-      container.style.paddingBottom = target + 'px';
+      this._applyBottomPadding(container, target);
     } else if (paddingChanged) {
       this._scheduleShrink(container);
     }
@@ -937,7 +1429,7 @@ export class Bridge {
       const target = this._targetBottomPadding();
       const applied = parseFloat(container.style.paddingBottom) || 0;
       if (target >= applied - 0.1) return;
-      container.style.paddingBottom = target + 'px';
+      this._applyBottomPadding(container, target);
     }, 260);
   }
 
@@ -945,6 +1437,28 @@ export class Bridge {
   // absorb by shrinking. See _setupViewportShrinkListener.
   _targetBottomPadding() {
     return Math.max(0, this._bottomInsetPx - this._viewportShrinkPx());
+  }
+
+  /* Writes the bottom inset as BOTH kinds of padding.
+   *
+   * `padding-bottom` reserves the space at the end of the list, which is what
+   * keeps the newest message off the input bar. It does nothing for anything
+   * reached mid-list, though, and the browser's own "scroll this into view" is
+   * the main such caller: the chat WebView is full-screen and never resizes
+   * when the keyboard opens (the scaffold runs with
+   * `resizeToAvoidBottomInset: false`), so as far as the page is concerned the
+   * scrollport runs to the bottom of the screen and a caret sitting behind the
+   * input bar is perfectly visible — the browser leaves it there. That is what
+   * put the caret of an edited message under the composer: the reveal had
+   * nothing to reveal.
+   *
+   * `scroll-padding-bottom` is the property for exactly this — the part of the
+   * scrollport something else is covering — and the browser's caret reveal
+   * honours it. The extra gutter keeps the caret off the chrome's edge instead
+   * of flush against it. */
+  _applyBottomPadding(container, target) {
+    container.style.paddingBottom = target + 'px';
+    container.style.scrollPaddingBottom = target + CARET_REVEAL_GUTTER_PX + 'px';
   }
 
   // The offset that parks the newest message on the input bar, once everything
@@ -1002,7 +1516,7 @@ export class Bridge {
     const target = this._targetBottomPadding();
     const applied = parseFloat(container.style.paddingBottom) || 0;
     if (target > applied) {
-      container.style.paddingBottom = target + 'px';
+      this._applyBottomPadding(container, target);
     } else if (target < applied - 0.1) {
       this._scheduleShrink(container);
     }
@@ -1022,6 +1536,10 @@ export class Bridge {
   setTopPadding(px) {
     const container = document.getElementById('chat-container') || document.body;
     container.style.paddingTop = px + 'px';
+    // The floating header covers the same number of pixels at the top, and a
+    // reveal that parks its target under it is just as invisible — see
+    // _applyBottomPadding.
+    container.style.scrollPaddingTop = px + CARET_REVEAL_GUTTER_PX + 'px';
   }
 
   /* ---------- Overlay blur regions (Flutter glass over the WebView) ----------
@@ -1106,44 +1624,44 @@ export class Bridge {
   }
 
   setAllowMessageScripts(enabled) {
+    const previous = this.renderer.allowMessageScripts;
     this.renderer.allowMessageScripts = enabled === true;
+    // Apply the new policy to what is already on screen: enabling runs the
+    // scripts of the messages the user is looking at, disabling re-inserts
+    // their sanitized form.
+    if (this.renderer.allowMessageScripts !== previous) {
+      this.renderer.rerenderMessageBodies();
+    }
+  }
+
+  /**
+   * Called by the renderer when a message carried a `<script>` while message
+   * script execution is off. Reported to Flutter once per WebView load — the
+   * app then offers to enable execution, and its answer is persisted there.
+   */
+  notifyMessageScriptBlocked() {
+    if (this._messageScriptBlockedNotified) return;
+    this._messageScriptBlockedNotified = true;
+    this._sendToFlutter('onMessageScriptBlocked', []);
   }
 
   /* ---------- Inline edit (toggle into .msg-body) ---------- */
+  /* Entering edit mode does not move the chat. The controller restores the
+   * scroll position it took before swapping the body for the textarea, and
+   * nothing else here touches it: a message tapped for editing is a message the
+   * reader is already looking at, and the jump this used to make — a smooth
+   * scroll putting the message's top under the header — took the rest of the
+   * chat with it and dragged the header and the context card through their own
+   * scroll reactions on the way.
+   *
+   * The caret is still kept in view, but by the browser rather than by us: it
+   * reveals the caret on focus and as the text grows, and `scroll-padding`
+   * on the container is what keeps that reveal clear of the chrome (see
+   * _applyBottomPadding). That only ever scrolls as far as the caret needs. */
   startEdit(messageId) {
     this._editController.startEdit(messageId, (pos) => {
       if (pos !== undefined) this.virtualList.container.scrollTop = pos;
       return this.virtualList.container.scrollTop;
-    });
-    // After the textarea/footer have been swapped in (and the prior scroll
-    // position restored by the controller), smoothly bring the top of the
-    // edited message into view so the user starts editing from its beginning.
-    this._scrollMessageToTop(messageId);
-  }
-
-  // Smoothly scroll so the top of [messageId] lands just below the translucent
-  // header. The container carries a dynamic `padding-top` (header inset, see
-  // setTopPadding), so we subtract it to avoid the message hiding behind it.
-  _scrollMessageToTop(messageId) {
-    const container = this.virtualList?.container;
-    if (!container) return;
-    requestAnimationFrame(() => {
-      const section = document.querySelector(`[data-message-id="${messageId}"]`);
-      if (!section || !container.isConnected) return;
-      const cRect = container.getBoundingClientRect();
-      const sRect = section.getBoundingClientRect();
-      const padTop = parseFloat(getComputedStyle(container).paddingTop) || 0;
-      const target = container.scrollTop + (sRect.top - cRect.top) - padTop - 8;
-      this.virtualList.isProgrammaticScrolling = true;
-      container.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
-      setTimeout(() => {
-        this.virtualList.isProgrammaticScrolling = false;
-        // Re-sync the render window to the resting scroll position (scroll
-        // events fired during the animation were gated out above).
-        if (typeof this.virtualList.updateWindow === 'function') {
-          this.virtualList.updateWindow();
-        }
-      }, 500);
     });
   }
 
@@ -1151,7 +1669,7 @@ export class Bridge {
     this._editController.stopEdit(messageId);
   }
 
-  setBackgroundImage(url, blur, opacity) {
+  setBackgroundImage(url, blur) {
     // Duplicate the app background inside the WebView so its own
     // backdrop-filter blur regions have real pixels to sample — CSS
     // backdrop-filter can't see the natively-composited Flutter layer
@@ -1179,8 +1697,10 @@ export class Bridge {
       document.body.insertBefore(bg, document.body.firstChild);
     }
     bg.style.display = 'block';
-    const op = opacity == null ? 1 : Math.max(0, Math.min(1, Number(opacity)));
-    bg.style.opacity = op;
+    // The layer stays fully opaque: darkening is the `--bg-dim` overlay in
+    // #bg-layer::after. Fading the layer itself would let the transparent
+    // WebView show the Flutter background painted behind it.
+    bg.style.opacity = '';
 
     const b = Math.max(0, Number(blur) || 0);
     if (b <= 0) {
@@ -1367,6 +1887,23 @@ export class Bridge {
 
   setSelectionMode(enabled) { this._selectionManager.setSelectionMode(enabled); }
 
+  // Toolbar "select everything above / below the last tapped message" buttons.
+  selectMessagesAbove() { this._selectionManager.selectAbove(); }
+
+  selectMessagesBelow() { this._selectionManager.selectBelow(); }
+
+  /* Every message element the chat holds, mounted or not. `items` keeps the
+   * (possibly detached) element of each message, and the list re-mounts that
+   * same element instead of re-rendering it — so anything that has to reach the
+   * whole chat has to come through here rather than through the document. */
+  _allMessageSections() {
+    const list = this.virtualList;
+    if (Array.isArray(list?.items)) {
+      return list.items.map(item => item.el).filter(Boolean);
+    }
+    return Array.from(document.querySelectorAll('.message-section'));
+  }
+
   // Ordered list of real message ids (top → bottom), excluding date separators.
   // Range selection needs the full order even for messages currently outside
   // the virtual-scroll render window, so it reads from the complete backing
@@ -1443,6 +1980,8 @@ export class Bridge {
     const { messageId, blocks, canRunAll } = data;
     if (!messageId) return;
 
+    if (data.imageGenLabel) this._extBlockImageGenLabel = data.imageGenLabel;
+
     const section = document.querySelector(`[data-message-id="${messageId}"]`);
     if (!section) return;
 
@@ -1459,6 +1998,13 @@ export class Bridge {
       content.appendChild(panel);
     }
 
+    // A full re-render drops the DOM, so carry running blocks' elapsed-clock
+    // start times across so their timer doesn't reset to 0 on every refresh.
+    const prevStarts = new Map();
+    panel.querySelectorAll('.ext-block-item[data-start]').forEach((el) => {
+      prevStarts.set(el.dataset.blockId, el.dataset.start);
+    });
+
     panel.innerHTML = '';
 
     if (canRunAll) {
@@ -1466,10 +2012,11 @@ export class Bridge {
       toolbar.className = 'ext-blocks-toolbar';
       const runAllBtn = document.createElement('button');
       runAllBtn.type = 'button';
-      runAllBtn.className = 'ext-block-btn ext-blocks-run-all';
+      runAllBtn.className = 'ext-blocks-run-all';
       runAllBtn.dataset.action = 'ext-blocks-run-all';
       runAllBtn.dataset.messageId = messageId;
-      runAllBtn.textContent = '▶ Запустить блоки';
+      runAllBtn.title = 'Запустить блоки';
+      runAllBtn.innerHTML = `${ICON.play}<span>Запустить блоки</span>`;
       toolbar.appendChild(runAllBtn);
       panel.appendChild(toolbar);
     }
@@ -1484,7 +2031,7 @@ export class Bridge {
 
       const caret = document.createElement('span');
       caret.className = 'ext-block-caret';
-      caret.textContent = '▸';
+      caret.innerHTML = ICON.chevronDown;
       header.appendChild(caret);
 
       const name = document.createElement('span');
@@ -1492,84 +2039,67 @@ export class Bridge {
       name.textContent = block.blockName || block.blockId || '—';
       header.appendChild(name);
 
-      const statusEl = document.createElement('span');
-      statusEl.className = 'ext-block-status';
-      statusEl.textContent = this._extBlockStatusLabel(block.status);
-      header.appendChild(statusEl);
+      // Header marker: a live clock while running, a muted pill for the
+      // pre-run / stopped states, and nothing for done. An error block takes
+      // over the body instead of a header marker.
+      if (block.status === 'running') {
+        if (prevStarts.has(block.blockId)) item.dataset.start = prevStarts.get(block.blockId);
+        header.appendChild(this._extBlockTimerEl(item));
+      } else if (block.status === 'pending' || block.status === 'stopped') {
+        const statusEl = document.createElement('span');
+        statusEl.className = 'ext-block-status';
+        statusEl.textContent = this._extBlockStatusLabel(block.status);
+        header.appendChild(statusEl);
+      }
 
-      // Buttons — no per-btnGroup listener so the click bubbles up to the
-      // document-level delegation in `_interaction.handleClick` (which
-      // dispatches via `_actionMap`). The header's own click listener has
-      // a `closest('.ext-block-btn')` guard so it won't toggle collapse.
+      // Icon buttons — no per-btnGroup listener, so the click bubbles up to
+      // the document-level delegation in `_interaction.handleClick` (which
+      // dispatches via `_actionMap`). The header's own click listener has a
+      // `closest('.ext-block-btn')` guard so it won't toggle collapse.
       const btnGroup = document.createElement('span');
       btnGroup.className = 'ext-block-actions';
 
+      const makeButton = (action, icon, title, danger = false) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'ext-block-btn' + (danger ? ' ext-block-btn-danger' : '');
+        btn.dataset.action = action;
+        btn.dataset.blockId = block.blockId;
+        btn.dataset.messageId = messageId;
+        btn.title = title;
+        btn.innerHTML = icon;
+        return btn;
+      };
+
       // Pending entries are preset placeholders and have no persisted row yet.
       if (block.id) {
-        const editBtn = document.createElement('button');
-        editBtn.type = 'button';
-        editBtn.className = 'ext-block-btn ext-block-btn-icon';
-        editBtn.dataset.action = 'ext-block-edit';
-        editBtn.dataset.blockId = block.blockId;
-        editBtn.dataset.messageId = messageId;
-        editBtn.title = 'Редактировать';
-        editBtn.textContent = '✎';
-        btnGroup.appendChild(editBtn);
-
-        const deleteBtn = document.createElement('button');
-        deleteBtn.type = 'button';
-        deleteBtn.className = 'ext-block-btn ext-block-btn-icon ext-block-btn-danger';
-        deleteBtn.dataset.action = 'ext-block-delete';
-        deleteBtn.dataset.blockId = block.blockId;
-        deleteBtn.dataset.messageId = messageId;
-        deleteBtn.title = 'Удалить';
-        deleteBtn.textContent = '✕';
-        btnGroup.appendChild(deleteBtn);
+        btnGroup.appendChild(makeButton('ext-block-edit', ICON.edit, 'Редактировать'));
+        btnGroup.appendChild(makeButton('ext-block-delete', ICON.trash, 'Удалить', true));
       }
 
       if (block.status === 'running') {
-        const stopBtn = document.createElement('button');
-        stopBtn.type = 'button';
-        stopBtn.className = 'ext-block-btn';
-        stopBtn.dataset.action = 'ext-block-stop';
-        stopBtn.dataset.blockId = block.blockId;
-        stopBtn.dataset.messageId = messageId;
-        stopBtn.textContent = '■ Стоп';
-        btnGroup.appendChild(stopBtn);
+        btnGroup.appendChild(makeButton('ext-block-stop', ICON.stop, 'Стоп'));
       } else if (block.status === 'pending') {
-        const startBtn = document.createElement('button');
-        startBtn.type = 'button';
-        startBtn.className = 'ext-block-btn';
-        startBtn.dataset.action = 'ext-block-regen';
-        startBtn.dataset.blockId = block.blockId;
-        startBtn.dataset.messageId = messageId;
-        startBtn.textContent = '▶ Запустить';
-        btnGroup.appendChild(startBtn);
+        btnGroup.appendChild(makeButton('ext-block-regen', ICON.play, 'Запустить'));
       } else {
-        const canRegenImage = block.type === 'imageGen' && block.content && (
+        // Type-agnostic on purpose: a block can be redrawn because its
+        // content holds an image, not because it was made by an image block.
+        const canRegenImage = block.content && (
           /\[IMG:RESULT:/.test(block.content) ||
           /\[IMG:GEN:/.test(block.content) ||
           /data-iig-instruction/i.test(block.content)
         );
         if (canRegenImage) {
-          const imgRegenBtn = document.createElement('button');
-          imgRegenBtn.type = 'button';
-          imgRegenBtn.className = 'ext-block-btn';
-          imgRegenBtn.dataset.action = 'ext-block-regen-image';
-          imgRegenBtn.dataset.blockId = block.blockId;
-          imgRegenBtn.dataset.messageId = messageId;
-          imgRegenBtn.textContent = '↺ Картинка';
-          btnGroup.appendChild(imgRegenBtn);
+          btnGroup.appendChild(makeButton('ext-block-regen-image', ICON.image, 'Перегенерировать картинку'));
         }
-        const regenBtn = document.createElement('button');
-        regenBtn.type = 'button';
-        regenBtn.className = 'ext-block-btn';
-        regenBtn.dataset.action = 'ext-block-regen';
-        regenBtn.dataset.blockId = block.blockId;
-        regenBtn.dataset.messageId = messageId;
-        regenBtn.textContent = '↺ Перегенерировать';
-        btnGroup.appendChild(regenBtn);
+        btnGroup.appendChild(makeButton('ext-block-regen', ICON.regen, 'Перегенерировать'));
       }
+
+      // Trailing buttons are pinned right; the spacer absorbs the space so the
+      // name and its timer hug the left edge.
+      const spacer = document.createElement('span');
+      spacer.className = 'ext-block-spacer';
+      header.appendChild(spacer);
 
       header.appendChild(btnGroup);
       header.addEventListener('click', (e) => {
@@ -1578,14 +2108,22 @@ export class Bridge {
       });
       item.appendChild(header);
 
-      // Content body (collapsible).
+      // Collapsible body — animated like reasoning, not display:none.
+      const collapse = document.createElement('div');
+      collapse.className = 'ext-block-collapse';
       const body = document.createElement('div');
       body.className = 'ext-block-body';
-      this._fillExtBlockBody(body, block);
-      item.appendChild(body);
+      const inner = document.createElement('div');
+      inner.className = 'ext-block-inner';
+      this._fillExtBlockBody(inner, block);
+      body.appendChild(inner);
+      collapse.appendChild(body);
+      item.appendChild(collapse);
 
       panel.appendChild(item);
     }
+
+    this._ensureExtBlockTicker();
   }
 
   /**
@@ -1607,13 +2145,29 @@ export class Bridge {
     if (!item) return false;
 
     item.className = `ext-block-item ${status || 'running'}`;
-    const statusEl = item.querySelector('.ext-block-status');
-    if (statusEl) statusEl.textContent = this._extBlockStatusLabel(status);
 
-    const body = item.querySelector('.ext-block-body');
-    if (!body) return false;
-    body.innerHTML = '';
-    this._fillExtBlockBody(body, { content, status });
+    // Keep the header clock in step: while running it keeps counting (the full
+    // render already placed it), otherwise a leftover clock is torn down. A
+    // terminal state always arrives via showExtBlocksPanel, so this is only a
+    // defensive cleanup.
+    if ((status || 'running') === 'running') {
+      item.querySelector('.ext-block-status')?.remove();
+      if (!item.querySelector('.ext-block-timer')) {
+        const header = item.querySelector('.ext-block-header');
+        const spacer = item.querySelector('.ext-block-spacer');
+        if (header && spacer) header.insertBefore(this._extBlockTimerEl(item), spacer);
+        else if (header) header.appendChild(this._extBlockTimerEl(item));
+      }
+      this._ensureExtBlockTicker();
+    } else {
+      delete item.dataset.start;
+      item.querySelector('.ext-block-timer')?.remove();
+    }
+
+    const inner = item.querySelector('.ext-block-inner');
+    if (!inner) return false;
+    inner.innerHTML = '';
+    this._fillExtBlockBody(inner, { content, status });
     item.classList.remove('collapsed');
     return true;
   }
@@ -1622,6 +2176,13 @@ export class Bridge {
     return String(value || '')
       .replace(/&/g, '&amp;')
       .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  _escapeHtml(value) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
   }
@@ -1648,7 +2209,72 @@ export class Bridge {
     return `<span class="ext-block-image-wrapper img-result-wrapper"><img src="${src}" class="ext-block-image" loading="eager" decoding="sync" data-action="image-click" data-src="${src}"><button class="img-download-btn" data-action="img-download" data-src="${src}" title="Save image">⤓</button></span>`;
   }
 
+  /**
+   * Rewrites the stored `<img data-iig-…>` form of a finished image block into
+   * the `[IMG:RESULT:…]` token this panel already renders — with the download
+   * button and the viewer action the bare element would not carry. Purely a
+   * render-time normalization; the block's stored content is untouched.
+   */
+  _extBlockLegacyImageTokens(content) {
+    const text = String(content == null ? '' : content);
+    if (text.indexOf('data-iig-instruction') === -1) return text;
+    return text.replace(
+      /<img\s[^>]*?data-iig-instruction\s*=\s*(?:"[^"]*"|'[^']*')[^>]*>/gi,
+      (tag) => {
+        const parsed = parseImageResultElement(tag);
+        if (!parsed) return tag;
+        const src = parsed.paths[parsed.activeIndex] || parsed.paths[0] || '';
+        return src ? `[IMG:RESULT:${src}]` : tag;
+      },
+    );
+  }
+
+  /* The shimmer placeholder a pending `[IMG:GEN:…]` block renders as — the
+   * same visual language as a message's inline image placeholder. */
+  _extBlockImageGenMarkup(instruction) {
+    const prompt = this._extBlockImageGenPrompt(instruction);
+    const promptEl = prompt
+      ? `<div class="ext-block-imagegen-prompt">${this._escapeHtml(prompt)}</div>`
+      : '';
+    return `<div class="ext-block-imagegen"><div class="ext-block-imagegen-surface"></div><div class="ext-block-imagegen-head">${this._escapeHtml(this._extBlockImageGenLabel)}</div>${promptEl}</div>`;
+  }
+
+  /* The human-readable prompt out of a `[IMG:GEN:…]` instruction payload
+   * (JSON `prompt`/`caption`, or the raw text), matching the message formatter. */
+  _extBlockImageGenPrompt(instruction) {
+    const raw = parseImagePendingPayload(instruction).instruction.trim();
+    if (!raw) return '';
+    try {
+      const json = JSON.parse(raw);
+      if (json && typeof json === 'object') {
+        return (json.prompt || json.caption || '').replace(/^SCENE_PROMPT:\s*/, '');
+      }
+    } catch (_) { /* fall through to raw text */ }
+    return raw;
+  }
+
+  /* The card a failed `[IMG:ERROR:…]` renders as.
+   *
+   * These only reach a block now that its content goes through the same image
+   * pipeline a message does: a picture that fails leaves a retryable card in
+   * place of its tag instead of taking the whole block down with it. The
+   * block's own "regenerate image" control redraws every failed picture at
+   * once, so the card states what went wrong rather than carrying a button of
+   * its own. */
+  _extBlockImageErrorMarkup(payload) {
+    let message = 'Unknown error';
+    try {
+      const parsed = JSON.parse(payload);
+      if (parsed && parsed.error) message = parsed.error;
+    } catch (_) { /* keep the default */ }
+    return `<div class="ext-block-image-error"><span class="ext-block-image-error-icon">⚠</span><span class="ext-block-image-error-msg">${this._escapeHtml(message)}</span></div>`;
+  }
+
   _fillExtBlockBody(body, block) {
+    if (block.status === 'error') {
+      this._renderExtBlockError(body, block);
+      return;
+    }
     const hasContent = block.content && block.content.trim().length > 0;
     if (!hasContent && block.status !== 'pending') {
       const empty = document.createElement('div');
@@ -1659,30 +2285,43 @@ export class Bridge {
     }
     if (!hasContent) return;
 
+    const content = this._extBlockLegacyImageTokens(block.content);
     const imgResultRegex = /\[IMG:RESULT:([^\]]+)\]/;
-    const hasImgResult = imgResultRegex.test(block.content);
-    const hasHtmlMarkup = /<[a-z][\s\S]*>/i.test(block.content);
+    const imgGenRegex = /\[IMG:GEN(?::([\s\S]*?))?\]/;
+    const imgErrorRegex = /\[IMG:ERROR:([\s\S]*?)\]/;
+    const hasImgResult = imgResultRegex.test(content);
+    const hasImgGen = imgGenRegex.test(content);
+    const hasImgError = imgErrorRegex.test(content);
+    const hasHtmlMarkup = /<[a-z][\s\S]*>/i.test(content);
 
-    if (hasImgResult && hasHtmlMarkup) {
-      let html = block.content.replace(
-        /\[IMG:RESULT:([^\]]+)\]/g,
-        (match, payload) => this._renderExtBlockImageHtml(payload),
-      );
-      const htmlEl = document.createElement('div');
-      htmlEl.className = 'ext-block-content';
-      htmlEl.innerHTML = sanitizeExtBlockHtml(html);
-      body.appendChild(htmlEl);
-    } else if (hasImgResult) {
-      const imgMatch = block.content.match(imgResultRegex);
+    // One bare picture and nothing else keeps its unwrapped form.
+    if (hasImgResult && !hasImgGen && !hasImgError && !hasHtmlMarkup) {
+      const imgMatch = content.match(imgResultRegex);
       const wrapper = document.createElement('span');
       wrapper.innerHTML = sanitizeExtBlockHtml(this._renderExtBlockImageHtml(imgMatch[1]));
       body.appendChild(wrapper.firstElementChild);
-    } else {
-      const html = document.createElement('div');
-      html.className = 'ext-block-content';
-      html.innerHTML = sanitizeExtBlockHtml(block.content);
-      body.appendChild(html);
+      retryFailedLocalImages(body);
+      return;
     }
+
+    // Every image token is rewritten in one pass rather than one kind per
+    // branch: a block's content goes through the same pipeline a message's
+    // does, so it can hold a finished picture, one still generating and one
+    // that failed, all at the same time.
+    const html = content
+      .replace(/<p class="ext-block-image-pending">[\s\S]*?<\/p>/g, '')
+      .replace(/\[IMG:ERROR:([\s\S]*?)\]/g, (match, payload) =>
+        this._extBlockImageErrorMarkup(payload))
+      .replace(/\[IMG:GEN(?::([\s\S]*?))?\]/g, (match, instruction) =>
+        this._extBlockImageGenMarkup(instruction || ''))
+      .replace(/\[IMG:RESULT:([^\]]+)\]/g, (match, payload) =>
+        this._renderExtBlockImageHtml(payload));
+
+    const htmlEl = document.createElement('div');
+    htmlEl.className = 'ext-block-content';
+    htmlEl.innerHTML = sanitizeExtBlockHtml(html);
+    body.appendChild(htmlEl);
+    retryFailedLocalImages(body);
   }
 
   /**
@@ -1708,6 +2347,71 @@ export class Bridge {
       case 'done': return 'готово';
       default: return status || '—';
     }
+  }
+
+  /* Builds the running block's header clock: a clock glyph + a rolling seconds
+   * label. [item.dataset.start] is stamped with the current time when absent,
+   * so a re-run starts from 0 and a re-render reuses the preserved start. */
+  _extBlockTimerEl(item) {
+    if (!item.dataset.start) item.dataset.start = String(Date.now());
+    const timer = document.createElement('span');
+    timer.className = 'ext-block-timer';
+    const clock = document.createElement('span');
+    clock.innerHTML = ICON.clock;
+    clock.firstChild.style.cssText = 'width:12px;height:12px;fill:currentColor;';
+    timer.appendChild(clock.firstChild);
+    const time = document.createElement('span');
+    time.className = 'ext-block-time';
+    const sec = (Date.now() - Number(item.dataset.start)) / 1000;
+    time.textContent = (this.batterySaver ? sec.toFixed(0) : sec.toFixed(1)) + 's';
+    timer.appendChild(time);
+    return timer;
+  }
+
+  /* One shared interval repaints every running block's elapsed label; it stops
+   * itself when no running block is left on screen. */
+  _ensureExtBlockTicker() {
+    if (this._extBlockTicker) return;
+    const tick = () => {
+      const els = document.querySelectorAll('.ext-block-item.running .ext-block-time');
+      if (els.length === 0) { this._stopExtBlockTicker(); return; }
+      const now = Date.now();
+      const battery = this.batterySaver;
+      for (const el of els) {
+        const item = el.closest('.ext-block-item');
+        const start = Number(item?.dataset.start || now);
+        const sec = (now - start) / 1000;
+        el.textContent = (battery ? sec.toFixed(0) : sec.toFixed(1)) + 's';
+      }
+    };
+    if (!document.querySelector('.ext-block-item.running .ext-block-time')) return;
+    tick();
+    this._extBlockTicker = setInterval(tick, this.batterySaver ? 1000 : 100);
+  }
+
+  _stopExtBlockTicker() {
+    if (this._extBlockTicker) {
+      clearInterval(this._extBlockTicker);
+      this._extBlockTicker = null;
+    }
+  }
+
+  /* A failed block shows the message-style error window in place of its own
+   * content. */
+  _renderExtBlockError(inner, block) {
+    const win = document.createElement('div');
+    win.className = 'error-window';
+    const hdr = document.createElement('div');
+    hdr.className = 'error-header';
+    const label = document.createElement('span');
+    label.textContent = 'ERROR';
+    hdr.appendChild(label);
+    win.appendChild(hdr);
+    const content = document.createElement('div');
+    content.className = 'error-content';
+    content.innerHTML = sanitizeExtBlockHtml(block.content || '');
+    win.appendChild(content);
+    inner.appendChild(win);
   }
 
   /**

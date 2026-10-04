@@ -198,6 +198,16 @@ Win32Window::MessageHandler(HWND hwnd,
       return 0;
     }
     case WM_SIZE: {
+      // Maximizing or minimizing can swallow the WM_*BUTTONUP that would have
+      // ended a drag started inside the Flutter view, leaving the view holding
+      // the Win32 mouse capture (the engine takes it on every button down).
+      // A held capture routes *every* mouse event on the desktop into this
+      // process, so the desktop, the taskbar and other apps stop reacting to
+      // clicks until the window is restored or minimized.
+      if (wparam == SIZE_MAXIMIZED || wparam == SIZE_MINIMIZED) {
+        ReleaseChildContentCapture();
+      }
+
       RECT rect = GetClientArea();
       if (child_content_ != nullptr) {
         // Size and position the child window.
@@ -208,6 +218,16 @@ Win32Window::MessageHandler(HWND hwnd,
     }
 
     case WM_ACTIVATE:
+      // WM_ACTIVATE also fires with WA_INACTIVE when the user clicks the
+      // desktop, the taskbar or another window. Taking focus there pulls
+      // activation straight back into this window, so clicks outside the app
+      // look like they do nothing - most visibly when the window is maximized
+      // and covers the whole screen. Only grab focus while activating, and let
+      // DefWindowProc run the default deactivation.
+      if (LOWORD(wparam) == WA_INACTIVE) {
+        ReleaseChildContentCapture();
+        break;
+      }
       if (child_content_ != nullptr) {
         SetFocus(child_content_);
       }
@@ -230,6 +250,15 @@ void Win32Window::Destroy() {
   }
   if (g_active_window_count == 0) {
     WindowClassRegistrar::GetInstance()->UnregisterWindowClass();
+  }
+}
+
+void Win32Window::ReleaseChildContentCapture() {
+  // Only drop a capture held by the hosted Flutter view. The frame's own
+  // capture during an interactive move/resize belongs to DefWindowProc's modal
+  // loop and must be left alone.
+  if (child_content_ != nullptr && GetCapture() == child_content_) {
+    ReleaseCapture();
   }
 }
 

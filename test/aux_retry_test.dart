@@ -26,7 +26,11 @@ void main() {
         ),
       );
       var calls = 0;
+      final starts = <(int, int)>[];
       final outcome = await runner.run(
+        onAttemptStart: (attempt, maxAttempts) {
+          starts.add((attempt, maxAttempts));
+        },
         attempt: (_) async {
           calls++;
           if (calls < 3) {
@@ -50,6 +54,68 @@ void main() {
       expect(outcome.attempts[1].status, 'http_5xx');
       expect(outcome.attempts[2].status, 'ok');
       expect(calls, 3);
+      expect(starts, [(1, 3), (2, 3), (3, 3)]);
+    });
+
+    test('a gateway timeout is retried like any other 5xx', () async {
+      // 504 is what a provider's gateway answers when its own upstream took
+      // too long. It is transient by definition, so it must not be the end of
+      // the call — memory drafting used to die on the first one.
+      final runner = const AuxRetryRunner(
+        policy: AuxRetryPolicy(
+          maxAttempts: 3,
+          backoffDelays: [Duration.zero, Duration.zero, Duration.zero],
+        ),
+      );
+      var calls = 0;
+      final outcome = await runner.run(
+        attempt: (_) async {
+          calls++;
+          if (calls < 2) {
+            throw DioException(
+              requestOptions: RequestOptions(path: ''),
+              response: Response(
+                requestOptions: RequestOptions(path: ''),
+                statusCode: 504,
+              ),
+              type: DioExceptionType.badResponse,
+            );
+          }
+          return 'recovered';
+        },
+      );
+
+      expect(outcome.isOk, isTrue);
+      expect(outcome.attempts.first.statusCode, 504);
+      expect(outcome.attempts.first.status, 'http_5xx');
+      expect(calls, 2);
+    });
+
+    test('attempt progress failure does not break the request', () async {
+      final outcome = await const AuxRetryRunner().run(
+        onAttemptStart: (_, _) => throw StateError('detached UI'),
+        attempt: (_) async => 'ok',
+      );
+
+      expect(outcome.isOk, isTrue);
+      expect(outcome.text, 'ok');
+    });
+
+    test('attempt diagnostics do not delay the outcome', () async {
+      final diagnosticStarted = Completer<void>();
+      final diagnosticRelease = Completer<void>();
+
+      final outcome = await const AuxRetryRunner().run(
+        onAttemptComplete: (_, _) async {
+          diagnosticStarted.complete();
+          await diagnosticRelease.future;
+        },
+        attempt: (_) async => 'ok',
+      );
+
+      expect(outcome.isOk, isTrue);
+      expect(diagnosticStarted.isCompleted, isTrue);
+      diagnosticRelease.complete();
     });
 
     test('fails fast on 4xx (no retry)', () async {
@@ -97,6 +163,38 @@ void main() {
       expect(outcome.attempts.first.status, 'timeout');
       expect(outcome.attempts.last.status, 'ok');
     });
+
+    for (final type in const [
+      DioExceptionType.connectionError,
+      DioExceptionType.connectionTimeout,
+      DioExceptionType.sendTimeout,
+      DioExceptionType.receiveTimeout,
+    ]) {
+      test('retries transient Dio $type', () async {
+        var calls = 0;
+        final outcome =
+            await const AuxRetryRunner(
+              policy: AuxRetryPolicy(
+                maxAttempts: 2,
+                backoffDelays: [Duration.zero],
+              ),
+            ).run(
+              attempt: (_) async {
+                calls++;
+                if (calls == 1) {
+                  throw DioException(
+                    requestOptions: RequestOptions(path: ''),
+                    type: type,
+                  );
+                }
+                return 'recovered';
+              },
+            );
+
+        expect(outcome.text, 'recovered');
+        expect(calls, 2);
+      });
+    }
 
     test(
       'does NOT retry on TimeoutException when retryOnTimeout=false',

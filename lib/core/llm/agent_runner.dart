@@ -12,6 +12,7 @@ import 'agent_stream_runner.dart';
 import 'studio/agent_config_resolver.dart';
 import 'studio_turn_config_snapshot.dart';
 import 'transport/transport_factory.dart';
+import 'studio_controller_ontology.dart';
 
 /// Thin LLM orchestrator extracted from `MemoryStudioService` (Phase 5.1,
 /// port of Marinara `agent-executor.ts` single-agent execution path).
@@ -54,8 +55,8 @@ class AgentRunner {
   /// and the caller-supplied config is used directly. This avoids double
   /// resolution when the caller (e.g. `StudioBatchCoordinator`) has already
   /// resolved the config at grouping time. When provided, global tracker
-  /// maxTokens/temperature overrides are also skipped — the agent's own
-  /// values (which for batch carry the batch budget) are used instead.
+  /// maxTokens/temperature overrides are also skipped — a batched call passes
+  /// its budget explicitly via [batchMaxTokens] / [batchTemperature].
   Future<AgentRunResult> runAgent({
     required StudioAgent agent,
     required List<Map<String, dynamic>> messages,
@@ -66,8 +67,17 @@ class AgentRunner {
     ResolvedAgentConfig? preResolvedConfig,
     String? apiConfigId,
     StudioTurnConfigSnapshot? turnConfig,
+    String? charName,
+    String? userName,
+    // Explicit budget for a batched run: the group's summed token budget and
+    // minimum temperature. Non-null wins over both the global override and the
+    // agent spec's own values — an agent carries none of its own (§4).
+    int? batchMaxTokens,
+    double? batchTemperature,
+    Map<String, dynamic>? responseJsonSchema,
     void Function(String text, String? reasoning)? onFinalResponseUpdate,
     void Function(String text)? onIntermediateUpdate,
+    Future<void> Function()? beforeSend,
   }) async {
     final token = cancelToken ?? CancelToken();
     if (token.isCancelled) {
@@ -89,8 +99,14 @@ class AgentRunner {
         preResolvedConfig: preResolvedConfig,
         apiConfigId: apiConfigId,
         turnConfig: turnConfig,
+        charName: charName,
+        userName: userName,
+        batchMaxTokens: batchMaxTokens,
+        batchTemperature: batchTemperature,
+        responseJsonSchema: responseJsonSchema,
         onFinalResponseUpdate: onFinalResponseUpdate,
         onIntermediateUpdate: onIntermediateUpdate,
+        beforeSend: beforeSend,
       );
     } catch (e) {
       if (token.isCancelled || (e is DioException && CancelToken.isCancel(e))) {
@@ -122,8 +138,14 @@ class AgentRunner {
     ResolvedAgentConfig? preResolvedConfig,
     String? apiConfigId,
     StudioTurnConfigSnapshot? turnConfig,
+    String? charName,
+    String? userName,
+    int? batchMaxTokens,
+    double? batchTemperature,
+    Map<String, dynamic>? responseJsonSchema,
     void Function(String text, String? reasoning)? onFinalResponseUpdate,
     void Function(String text)? onIntermediateUpdate,
+    Future<void> Function()? beforeSend,
   }) async {
     final resolved =
         preResolvedConfig ??
@@ -144,51 +166,24 @@ class AgentRunner {
     // all group agents' maxTokens, min temperature). Global overrides are
     // for individual tracker requests; applying them to a batch would
     // overwrite the computed batch budget with a per-agent cap.
-    final maxTokensOverride = preResolvedConfig != null && !isFinalResponse
-        ? null
-        : effectiveMaxTokens(agent, isFinalResponse, turnConfig);
-    final temperatureOverride = preResolvedConfig != null && !isFinalResponse
-        ? null
-        : effectiveTemperature(agent, isFinalResponse, turnConfig);
-    final pipeline = turnConfig?.pipelineSettings ?? _readPipelineSettings();
-    final effectiveResolved = isFinalResponse
-        ? resolved.copyWithReasoning(
-            useResponsesApi: pipeline.studioAgent.studioFinalUseResponsesApi,
-            requestReasoning: pipeline.studioAgent.studioFinalDisableReasoning
-                ? false
-                : pipeline.studioAgent.studioFinalRequestReasoning,
-            omitReasoning: pipeline.studioAgent.studioFinalDisableReasoning
-                ? true
-                : pipeline.studioAgent.studioFinalOmitReasoning,
-            omitReasoningEffort:
-                pipeline.studioAgent.studioFinalOmitReasoningEffort,
-            reasoningEffort: pipeline.studioAgent.studioFinalReasoningEffort,
-          )
-        : agent.phase == 'post_processing'
-        ? resolved.copyWithReasoning(
-            useResponsesApi: pipeline.cleaner.postCleanerUseResponsesApi,
-            requestReasoning: pipeline.cleaner.postCleanerDisableReasoning
-                ? false
-                : pipeline.cleaner.postCleanerRequestReasoning,
-            omitReasoning: pipeline.cleaner.postCleanerDisableReasoning
-                ? true
-                : pipeline.cleaner.postCleanerOmitReasoning,
-            omitReasoningEffort:
-                pipeline.cleaner.postCleanerOmitReasoningEffort,
-            reasoningEffort: pipeline.cleaner.postCleanerReasoningEffort,
-          )
-        : resolved.copyWithReasoning(
-            useResponsesApi: pipeline.studioAgent.studioTrackerUseResponsesApi,
-            requestReasoning: pipeline.studioAgent.studioTrackerDisableReasoning
-                ? false
-                : pipeline.studioAgent.studioTrackerRequestReasoning,
-            omitReasoning: pipeline.studioAgent.studioTrackerDisableReasoning
-                ? true
-                : pipeline.studioAgent.studioTrackerOmitReasoning,
-            omitReasoningEffort:
-                pipeline.studioAgent.studioTrackerOmitReasoningEffort,
-            reasoningEffort: pipeline.studioAgent.studioTrackerReasoningEffort,
-          );
+    final maxTokensOverride =
+        batchMaxTokens ??
+        (preResolvedConfig != null && !isFinalResponse
+            ? null
+            : effectiveMaxTokens(agent, isFinalResponse, turnConfig));
+    final temperatureOverride =
+        batchTemperature ??
+        (preResolvedConfig != null && !isFinalResponse
+            ? null
+            : effectiveTemperature(agent, isFinalResponse, turnConfig));
+    final effectiveResolved = effectiveRequestConfig(
+      agent,
+      resolved,
+      isFinalResponse,
+      turnConfig,
+    );
+    await beforeSend?.call();
+    if (cancelToken.isCancelled) throw cancelToken.cancelError!;
     return _streamRunner.run(
       agent: agent,
       messages: messages,
@@ -199,17 +194,20 @@ class AgentRunner {
       timeoutMs: timeoutMs,
       maxTokensOverride: maxTokensOverride,
       temperatureOverride: temperatureOverride,
-      tagStart: apiConfig.reasoningTagStart,
-      tagEnd: apiConfig.reasoningTagEnd,
+      tagStart: effectiveResolved.reasoningTagStart,
+      tagEnd: effectiveResolved.reasoningTagEnd,
       headerModel: isFinalResponse ? 'reasoning_model'.tr() : null,
       headerInline: isFinalResponse ? 'reasoning_inline'.tr() : null,
+      charName: charName,
+      userName: userName,
+      responseJsonSchema: responseJsonSchema,
       onFinalResponseUpdate: onFinalResponseUpdate,
       onIntermediateUpdate: onIntermediateUpdate,
     );
   }
 
   /// Resolve which API config an agent uses. Delegates to
-  /// [AgentConfigResolver]. Kept as a facade so callers (TrackerBatcher,
+  /// [AgentConfigResolver]. Kept as a facade so callers (ControllerBatcher,
   /// tests) can call `runner.resolveAgentConfig(...)` without importing the
   /// resolver directly.
   Future<ResolvedAgentConfig> resolveAgentConfig(
@@ -230,6 +228,95 @@ class AgentRunner {
     );
   }
 
+  /// Applies the per-lane reasoning overrides used immediately before a Studio
+  /// request is built. Kept pure so diagnostics can preview the same request.
+  ResolvedAgentConfig effectiveRequestConfig(
+    StudioAgent agent,
+    ResolvedAgentConfig resolved,
+    bool isFinalResponse, [
+    StudioTurnConfigSnapshot? turnConfig,
+  ]) {
+    final pipeline = turnConfig?.pipelineSettings ?? _readPipelineSettings();
+    final studio = pipeline.studioAgent;
+    final cleaner = pipeline.cleaner;
+    if (isFinalResponse) {
+      return resolved.copyWithReasoning(
+        useResponsesApi: studio.studioFinalUseResponsesApiOverride
+            ? studio.studioFinalUseResponsesApi
+            : null,
+        requestReasoning: studio.studioFinalDisableReasoning
+            ? false
+            : studio.studioFinalRequestReasoningOverride
+            ? studio.studioFinalRequestReasoning
+            : null,
+        showNativeReasoning: studio.studioFinalShowNativeReasoningOverride
+            ? studio.studioFinalShowNativeReasoning
+            : null,
+        omitReasoning: studio.studioFinalDisableReasoning
+            ? true
+            : studio.studioFinalRequestReasoningOverride
+            ? studio.studioFinalOmitReasoning
+            : null,
+        omitReasoningEffort: studio.studioFinalReasoningEffortOverride
+            ? studio.studioFinalOmitReasoningEffort
+            : null,
+        reasoningEffort: studio.studioFinalReasoningEffortOverride
+            ? studio.studioFinalReasoningEffort
+            : null,
+      );
+    }
+    if (agent.phase == 'post_processing') {
+      return resolved.copyWithReasoning(
+        useResponsesApi: cleaner.postCleanerUseResponsesApiOverride
+            ? cleaner.postCleanerUseResponsesApi
+            : null,
+        requestReasoning: cleaner.postCleanerDisableReasoning
+            ? false
+            : cleaner.postCleanerRequestReasoningOverride
+            ? cleaner.postCleanerRequestReasoning
+            : null,
+        showNativeReasoning: cleaner.postCleanerShowNativeReasoningOverride
+            ? cleaner.postCleanerShowNativeReasoning
+            : null,
+        omitReasoning: cleaner.postCleanerDisableReasoning
+            ? true
+            : cleaner.postCleanerRequestReasoningOverride
+            ? cleaner.postCleanerOmitReasoning
+            : null,
+        omitReasoningEffort: cleaner.postCleanerReasoningEffortOverride
+            ? cleaner.postCleanerOmitReasoningEffort
+            : null,
+        reasoningEffort: cleaner.postCleanerReasoningEffortOverride
+            ? cleaner.postCleanerReasoningEffort
+            : null,
+      );
+    }
+    return resolved.copyWithReasoning(
+      useResponsesApi: studio.studioControllerUseResponsesApiOverride
+          ? studio.studioControllerUseResponsesApi
+          : null,
+      requestReasoning: studio.studioControllerDisableReasoning
+          ? false
+          : studio.studioControllerRequestReasoningOverride
+          ? studio.studioControllerRequestReasoning
+          : null,
+      showNativeReasoning: studio.studioControllerShowNativeReasoningOverride
+          ? studio.studioControllerShowNativeReasoning
+          : null,
+      omitReasoning: studio.studioControllerDisableReasoning
+          ? true
+          : studio.studioControllerRequestReasoningOverride
+          ? studio.studioControllerOmitReasoning
+          : null,
+      omitReasoningEffort: studio.studioControllerReasoningEffortOverride
+          ? studio.studioControllerOmitReasoningEffort
+          : null,
+      reasoningEffort: studio.studioControllerReasoningEffortOverride
+          ? studio.studioControllerReasoningEffort
+          : null,
+    );
+  }
+
   /// Per-agent idle timeout. The idle timer fires only if the model emits
   /// NO chunks (text or reasoning) within the window — once any chunk
   /// arrives the timer is cancelled entirely (see AgentStreamRunner). So
@@ -237,7 +324,7 @@ class AgentRunner {
   /// timeout.
   ///
   /// Resolution order:
-  /// 1. [StudioAgent.timeoutMs] (>4000ms, minimum 1000ms) —
+  /// 1. The agent spec's `timeoutMs` (>4000ms, minimum 1000ms) —
   ///    per-agent override set at Studio build time.
   /// 2. [PipelineSettings.studioAgent.studioTimeoutMs] (>0, minimum 1000ms)
   ///    — global user setting from the Post-Building menu.
@@ -253,12 +340,14 @@ class AgentRunner {
         ? pipeline.studioAgent.studioFinalTimeoutMs
         : agent.phase == 'post_processing'
         ? pipeline.cleaner.postCleanerTimeoutMs
-        : pipeline.studioAgent.studioTrackerTimeoutMs;
+        : pipeline.studioAgent.studioControllerTimeoutMs;
     if (slot > 0) {
       return slot < 1000 ? 1000 : slot;
     }
-    if (agent.timeoutMs > 4000) {
-      return agent.timeoutMs < 1000 ? 1000 : agent.timeoutMs;
+    final specTimeout =
+        StudioControllerOntology.specForAgent(agent)?.timeoutMs ?? 4000;
+    if (specTimeout > 4000) {
+      return specTimeout < 1000 ? 1000 : specTimeout;
     }
     final global = pipeline.studioAgent.studioTimeoutMs;
     if (global > 0) {
@@ -268,9 +357,10 @@ class AgentRunner {
   }
 
   /// Max tokens override. Two tiers:
-  /// - Final generator: [PipelineSettings.studioAgent.studioFinalMaxTokens] (>0)
-  ///   overrides the per-agent default (8000).
-  /// - Trackers: [PipelineSettings.studioAgent.studioTrackerMaxTokens] (>0) overrides the
+  /// - Final generator: `studioFinalMaxTokensOverride` decides whether
+  ///   `studioFinalMaxTokens` replaces the per-agent default. Zero is valid and
+  ///   causes OpenAI-compatible transports to omit the token-limit field.
+  /// - Trackers: [PipelineSettings.studioAgent.studioControllerMaxTokens] (>0) overrides the
   ///   per-agent default (1600). Lets the user tighten/loosen the compact JSON
   ///   brief budget for all 7 pre-gen agents at once from the Studio menu.
   /// Returns null when the relevant global override is 0 and the caller should
@@ -282,16 +372,17 @@ class AgentRunner {
   ]) {
     final pipeline = turnConfig?.pipelineSettings ?? _readPipelineSettings();
     if (isFinalResponse) {
-      final global = pipeline.studioAgent.studioFinalMaxTokens;
-      if (global > 0) return global;
-      return null;
+      final studio = pipeline.studioAgent;
+      return studio.studioFinalMaxTokensOverride
+          ? studio.studioFinalMaxTokens
+          : null;
     }
     if (agent.phase == 'post_processing') {
       final cleanerGlobal = pipeline.cleaner.postCleanerMaxTokens;
       if (cleanerGlobal > 0) return cleanerGlobal;
       return null;
     }
-    final trackerGlobal = pipeline.studioAgent.studioTrackerMaxTokens;
+    final trackerGlobal = pipeline.studioAgent.studioControllerMaxTokens;
     if (trackerGlobal > 0) return trackerGlobal;
     return null;
   }
@@ -299,9 +390,11 @@ class AgentRunner {
   /// Temperature override. Two tiers:
   /// - Final generator: [PipelineSettings.studioAgent.studioFinalTemperature] (>= 0)
   ///   overrides the per-agent default (0.8).
-  /// - Trackers: [PipelineSettings.studioAgent.studioTrackerTemperature] (>= 0) overrides
+  /// - Trackers: [PipelineSettings.studioAgent.studioControllerTemperature] (>= 0) overrides
   ///   the per-agent default (0.3). Lets the user tune the creativity of all
   ///   7 pre-gen agents at once from the Studio menu.
+  /// - Post-processing: [PipelineSettings.cleaner.postCleanerTemperature]
+  ///   (>= 0), same sentinel.
   /// Returns null when the relevant global override is negative and the
   /// caller should use the agent's own value.
   double? effectiveTemperature(
@@ -316,9 +409,11 @@ class AgentRunner {
       return null;
     }
     if (agent.phase == 'post_processing') {
-      return pipeline.cleaner.postCleanerTemperature;
+      final cleanerGlobal = pipeline.cleaner.postCleanerTemperature;
+      if (cleanerGlobal >= 0) return cleanerGlobal;
+      return null;
     }
-    final trackerGlobal = pipeline.studioAgent.studioTrackerTemperature;
+    final trackerGlobal = pipeline.studioAgent.studioControllerTemperature;
     if (trackerGlobal >= 0) return trackerGlobal;
     return null;
   }
@@ -375,7 +470,11 @@ class ResolvedAgentConfig {
   final double presencePenalty;
   final bool omitTemperature;
   final bool omitTopP;
+  final bool omitTopK;
+  final bool omitFrequencyPenalty;
+  final bool omitPresencePenalty;
   final bool requestReasoning;
+  final bool showNativeReasoning;
   final bool useResponsesApi;
   final String? reasoningEffort;
   final bool omitReasoning;
@@ -384,8 +483,11 @@ class ResolvedAgentConfig {
   final String cacheControlTtl;
   final String cacheBreakpointMode;
   final String sessionIdMode;
+  final String promptPostProcessing;
   final int contextSize;
   final List<ExtraRequestParameter> extraRequestParameters;
+  final String? reasoningTagStart;
+  final String? reasoningTagEnd;
 
   const ResolvedAgentConfig({
     required this.endpoint,
@@ -398,7 +500,11 @@ class ResolvedAgentConfig {
     this.presencePenalty = 0.0,
     this.omitTemperature = false,
     this.omitTopP = false,
+    this.omitTopK = false,
+    this.omitFrequencyPenalty = false,
+    this.omitPresencePenalty = false,
     this.requestReasoning = false,
+    this.showNativeReasoning = true,
     this.useResponsesApi = false,
     this.reasoningEffort,
     this.omitReasoning = false,
@@ -407,8 +513,11 @@ class ResolvedAgentConfig {
     this.cacheControlTtl = 'off',
     this.cacheBreakpointMode = 'depth',
     this.sessionIdMode = 'openrouter',
+    this.promptPostProcessing = 'none',
     this.contextSize = 32000,
     this.extraRequestParameters = const [],
+    this.reasoningTagStart,
+    this.reasoningTagEnd,
   });
 
   factory ResolvedAgentConfig.fromApiConfig(
@@ -426,7 +535,11 @@ class ResolvedAgentConfig {
       presencePenalty: config.presencePenalty,
       omitTemperature: config.omitTemperature,
       omitTopP: config.omitTopP,
+      omitTopK: config.omitTopK,
+      omitFrequencyPenalty: config.omitFrequencyPenalty,
+      omitPresencePenalty: config.omitPresencePenalty,
       requestReasoning: config.requestReasoning,
+      showNativeReasoning: config.showNativeReasoning,
       useResponsesApi: config.useResponsesApi,
       reasoningEffort: config.reasoningEffort,
       omitReasoning: config.omitReasoning,
@@ -435,8 +548,11 @@ class ResolvedAgentConfig {
       cacheControlTtl: config.cacheControlTtl,
       cacheBreakpointMode: config.cacheBreakpointMode,
       sessionIdMode: config.sessionIdMode,
+      promptPostProcessing: config.promptPostProcessing,
       contextSize: config.contextSize,
       extraRequestParameters: config.extraRequestParameters,
+      reasoningTagStart: config.reasoningTagStart,
+      reasoningTagEnd: config.reasoningTagEnd,
     );
   }
 
@@ -445,6 +561,7 @@ class ResolvedAgentConfig {
   ResolvedAgentConfig copyWithReasoning({
     bool? useResponsesApi,
     bool? requestReasoning,
+    bool? showNativeReasoning,
     bool? omitReasoning,
     bool? omitReasoningEffort,
     String? reasoningEffort,
@@ -460,7 +577,11 @@ class ResolvedAgentConfig {
       presencePenalty: presencePenalty,
       omitTemperature: omitTemperature,
       omitTopP: omitTopP,
+      omitTopK: omitTopK,
+      omitFrequencyPenalty: omitFrequencyPenalty,
+      omitPresencePenalty: omitPresencePenalty,
       requestReasoning: requestReasoning ?? this.requestReasoning,
+      showNativeReasoning: showNativeReasoning ?? this.showNativeReasoning,
       useResponsesApi: useResponsesApi ?? this.useResponsesApi,
       reasoningEffort: reasoningEffort ?? this.reasoningEffort,
       omitReasoning: omitReasoning ?? this.omitReasoning,
@@ -469,8 +590,11 @@ class ResolvedAgentConfig {
       cacheControlTtl: cacheControlTtl,
       cacheBreakpointMode: cacheBreakpointMode,
       sessionIdMode: sessionIdMode,
+      promptPostProcessing: promptPostProcessing,
       contextSize: contextSize,
       extraRequestParameters: extraRequestParameters,
+      reasoningTagStart: reasoningTagStart,
+      reasoningTagEnd: reasoningTagEnd,
     );
   }
 
@@ -481,6 +605,9 @@ class ResolvedAgentConfig {
     double? presencePenalty,
     bool? omitTemperature,
     bool? omitTopP,
+    bool? omitTopK,
+    bool? omitFrequencyPenalty,
+    bool? omitPresencePenalty,
     List<ExtraRequestParameter>? extraRequestParameters,
   }) {
     return ResolvedAgentConfig(
@@ -494,7 +621,13 @@ class ResolvedAgentConfig {
       presencePenalty: presencePenalty ?? this.presencePenalty,
       omitTemperature: omitTemperature ?? this.omitTemperature,
       omitTopP: omitTopP ?? this.omitTopP,
+      // Studio has no per-slot switches for these three, so they keep whatever
+      // the underlying ApiConfig said instead of being dropped.
+      omitTopK: omitTopK ?? this.omitTopK,
+      omitFrequencyPenalty: omitFrequencyPenalty ?? this.omitFrequencyPenalty,
+      omitPresencePenalty: omitPresencePenalty ?? this.omitPresencePenalty,
       requestReasoning: requestReasoning,
+      showNativeReasoning: showNativeReasoning,
       useResponsesApi: useResponsesApi,
       reasoningEffort: reasoningEffort,
       omitReasoning: omitReasoning,
@@ -503,9 +636,51 @@ class ResolvedAgentConfig {
       cacheControlTtl: cacheControlTtl,
       cacheBreakpointMode: cacheBreakpointMode,
       sessionIdMode: sessionIdMode,
+      promptPostProcessing: promptPostProcessing,
       contextSize: contextSize,
       extraRequestParameters:
           extraRequestParameters ?? this.extraRequestParameters,
+      reasoningTagStart: reasoningTagStart,
+      reasoningTagEnd: reasoningTagEnd,
+    );
+  }
+
+  /// Override only the reasoning tag pair. Used by [AgentConfigResolver]
+  /// when a Studio preset's `runtime.reasoningTagStart/End` are set and
+  /// should take priority over the API config's values.
+  ResolvedAgentConfig copyWithReasoningTags({
+    String? reasoningTagStart,
+    String? reasoningTagEnd,
+  }) {
+    return ResolvedAgentConfig(
+      endpoint: endpoint,
+      apiKey: apiKey,
+      model: model,
+      protocol: protocol,
+      topP: topP,
+      topK: topK,
+      frequencyPenalty: frequencyPenalty,
+      presencePenalty: presencePenalty,
+      omitTemperature: omitTemperature,
+      omitTopP: omitTopP,
+      omitTopK: omitTopK,
+      omitFrequencyPenalty: omitFrequencyPenalty,
+      omitPresencePenalty: omitPresencePenalty,
+      requestReasoning: requestReasoning,
+      showNativeReasoning: showNativeReasoning,
+      useResponsesApi: useResponsesApi,
+      reasoningEffort: reasoningEffort,
+      omitReasoning: omitReasoning,
+      omitReasoningEffort: omitReasoningEffort,
+      stream: stream,
+      cacheControlTtl: cacheControlTtl,
+      cacheBreakpointMode: cacheBreakpointMode,
+      sessionIdMode: sessionIdMode,
+      promptPostProcessing: promptPostProcessing,
+      contextSize: contextSize,
+      extraRequestParameters: extraRequestParameters,
+      reasoningTagStart: reasoningTagStart ?? this.reasoningTagStart,
+      reasoningTagEnd: reasoningTagEnd ?? this.reasoningTagEnd,
     );
   }
 }

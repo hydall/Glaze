@@ -45,10 +45,13 @@ const _exclusiveStudioHeaders = <String>{
   'narrative styles',
   'story difficulty',
   'response length controls',
+  'text formatting',
   'cot selections',
 };
 
-const _narrativeStyleAddonTitles = <String>{
+final _studioBriefMacro = RegExp(r'\{\{studio_(\w+)_briefs?\}\}');
+
+const _independentNarrativeStyleTitles = <String>{
   'bratty ass narrative',
   'doujinshi narrative',
   'emotional deflections',
@@ -56,6 +59,20 @@ const _narrativeStyleAddonTitles = <String>{
 
 bool isStudioPresetGroupHeader(StudioPresetBlock block) =>
     block.title.trimLeft().startsWith('━');
+
+/// A structural group boundary — detected by the transient `kind` synthesized in
+/// [normalizeStudioGroupBoundaries] or by the persisted `groupBoundary` field
+/// after the §5 migration cleared `kind`.
+bool isStudioGroupOpen(StudioPresetBlock block) =>
+    block.groupBoundary == 'open' || block.id.endsWith('_group_open');
+
+bool isStudioGroupClose(StudioPresetBlock block) =>
+    block.groupBoundary == 'close' ||
+    block.id.endsWith('_group_close') ||
+    block.id.endsWith('_prefix_close');
+
+bool isStudioGroupBoundary(StudioPresetBlock block) =>
+    isStudioGroupOpen(block) || isStudioGroupClose(block);
 
 final _leadingGroupTags = RegExp(
   r'^\s*(?:(</[A-Za-z][\w-]*>)\s*)?(?:(<[A-Za-z][\w-]*>)\s*)?',
@@ -67,9 +84,7 @@ final _standaloneClosingTag = RegExp(r'^\s*</[A-Za-z][\w-]*>\s*$');
 List<StudioPresetBlock> normalizeStudioGroupBoundaries(
   List<StudioPresetBlock> blocks,
 ) {
-  if (blocks.any(
-    (block) => block.kind == 'group_open' || block.kind == 'group_close',
-  )) {
+  if (blocks.any(isStudioGroupBoundary)) {
     return blocks;
   }
 
@@ -97,7 +112,6 @@ List<StudioPresetBlock> normalizeStudioGroupBoundaries(
         StudioPresetBlock(
           id: '${block.id}_prefix_close',
           title: 'Previous section closing tag',
-          kind: 'group_close',
           role: 'system',
           content: previousClose,
           section: block.section,
@@ -108,7 +122,6 @@ List<StudioPresetBlock> normalizeStudioGroupBoundaries(
         StudioPresetBlock(
           id: '${previousHeaderId}_group_close',
           title: 'Closing tag',
-          kind: 'group_close',
           role: 'system',
           content: pendingClose ?? previousClose,
           section: previousHeaderSection ?? block.section,
@@ -120,7 +133,6 @@ List<StudioPresetBlock> normalizeStudioGroupBoundaries(
         StudioPresetBlock(
           id: '${block.id}_group_open',
           title: 'Opening tag',
-          kind: 'group_open',
           role: 'system',
           content: ownOpen,
           section: block.section,
@@ -141,7 +153,6 @@ List<StudioPresetBlock> normalizeStudioGroupBoundaries(
       output[output.length - 1] = existingClose.copyWith(
         id: '${previousHeaderId}_group_close',
         title: 'Closing tag',
-        kind: 'group_close',
         role: 'system',
         content: pendingClose,
       );
@@ -150,7 +161,6 @@ List<StudioPresetBlock> normalizeStudioGroupBoundaries(
         StudioPresetBlock(
           id: '${previousHeaderId}_group_close',
           title: 'Closing tag',
-          kind: 'group_close',
           role: 'system',
           content: pendingClose,
           section: output.last.section,
@@ -166,15 +176,15 @@ List<StudioPresetBlock> normalizeStudioGroupBoundaries(
 }
 
 /// Groups the flat runtime block list for presentation only. Authored Loom
-/// header blocks define group boundaries, so no extra DB metadata is needed.
+/// header blocks and explicit closing boundaries define group spans, so no
+/// extra DB metadata is needed.
 List<StudioPresetBlockGroup> groupStudioPresetBlocks(
   List<StudioPresetBlock> blocks,
 ) {
   final sorted = [...blocks]..sort((a, b) => a.order.compareTo(b.order));
   final boundaries = {
     for (final block in sorted)
-      if (block.kind == 'group_open' || block.kind == 'group_close')
-        block.id: block,
+      if (isStudioGroupBoundary(block)) block.id: block,
   };
   final result = <StudioPresetBlockGroup>[];
   StudioPresetBlock? header;
@@ -183,41 +193,31 @@ List<StudioPresetBlockGroup> groupStudioPresetBlocks(
   void flush() {
     final current = header;
     if (current == null) return;
-    final isNarrativeStyles =
-        _normalizedHeaderTitle(current.title) == 'narrative styles';
-    final groupedChildren = isNarrativeStyles
-        ? children
-              .where(
-                (block) => !_narrativeStyleAddonTitles.contains(
-                  block.title.trim().toLowerCase(),
-                ),
-              )
-              .toList(growable: false)
-        : children;
     result.add(
       StudioPresetBlockGroup.section(
         header: current,
         openingBoundary: boundaries['${current.id}_group_open'],
         closingBoundary: boundaries['${current.id}_group_close'],
-        children: List.unmodifiable(groupedChildren),
+        children: List.unmodifiable(children),
         exclusive: _isExclusiveHeader(current.title),
       ),
     );
-    if (isNarrativeStyles) {
-      for (final child in children) {
-        if (_narrativeStyleAddonTitles.contains(
-          child.title.trim().toLowerCase(),
-        )) {
-          result.add(StudioPresetBlockGroup.standalone(child));
-        }
-      }
-    }
     header = null;
     children = <StudioPresetBlock>[];
   }
 
   for (final block in sorted) {
-    if (block.kind == 'group_open' || block.kind == 'group_close') continue;
+    if (isStudioGroupClose(block)) {
+      flush();
+      continue;
+    }
+    if (isStudioGroupOpen(block)) continue;
+    // Stored block order can interleave stages after older routing repairs.
+    // A visual group belongs to exactly one injection point; never let an
+    // exclusive `final` group swallow adjacent cleaner/ledger blocks.
+    if (header != null && block.injectionPoint != header!.injectionPoint) {
+      flush();
+    }
     final startsTenseSubgroup =
         header != null &&
         _isPointOfViewHeader(header!.title) &&
@@ -228,6 +228,7 @@ List<StudioPresetBlockGroup> groupStudioPresetBlocks(
         id: '${block.id}_group',
         title: 'Tense',
         section: block.section,
+        injectionPoint: block.injectionPoint,
         order: block.order,
       );
     }
@@ -244,6 +245,102 @@ List<StudioPresetBlockGroup> groupStudioPresetBlocks(
   return result;
 }
 
+/// Enables or disables a visual group while preserving all child selections.
+List<StudioPresetBlock> toggleStudioPresetBlockGroup(
+  List<StudioPresetBlock> blocks,
+  StudioPresetBlockGroup group,
+  bool enabled,
+) {
+  final headerId = group.header?.id;
+  if (headerId == null) return blocks;
+  return blocks
+      .map(
+        (block) =>
+            block.id == headerId ? block.copyWith(enabled: enabled) : block,
+      )
+      .toList(growable: false);
+}
+
+bool isIndependentStudioGroupChild(
+  StudioPresetBlockGroup group,
+  StudioPresetBlock block,
+) {
+  return _normalizedHeaderTitle(group.header?.title ?? '') ==
+          'narrative styles' &&
+      _independentNarrativeStyleTitles.contains(
+        block.title.trim().toLowerCase(),
+      );
+}
+
+/// Applies folder enablement and folds structural boundary rows into the
+/// authored blocks they wrap.
+List<StudioPresetBlock> resolveEnabledStudioPresetBlocks(
+  List<StudioPresetBlock> blocks,
+) {
+  final sorted = [...blocks]..sort((a, b) => a.order.compareTo(b.order));
+  final output = <StudioPresetBlock>[];
+  String? pendingOpen;
+  int? groupStart;
+  var groupEnabled = true;
+
+  for (final block in sorted) {
+    if (isStudioGroupOpen(block)) {
+      pendingOpen = block.content.trim();
+      continue;
+    }
+    if (isStudioGroupClose(block)) {
+      final start = groupStart;
+      if (groupEnabled && start != null) {
+        for (var index = output.length - 1; index >= start; index--) {
+          if (!output[index].enabled) continue;
+          output[index] = output[index].copyWith(
+            content: _joinStudioBoundary(output[index].content, block.content),
+          );
+          break;
+        }
+      } else if (start == null && output.isNotEmpty) {
+        output[output.length - 1] = output.last.copyWith(
+          content: _joinStudioBoundary(output.last.content, block.content),
+        );
+      }
+      pendingOpen = null;
+      groupStart = null;
+      groupEnabled = true;
+      continue;
+    }
+
+    if (isStudioPresetGroupHeader(block)) {
+      groupEnabled = block.enabled;
+      groupStart = output.length;
+      if (groupEnabled) {
+        final opening = pendingOpen;
+        output.add(
+          opening == null || opening.isEmpty
+              ? block
+              : block.copyWith(
+                  content: _joinStudioBoundary(opening, block.content),
+                ),
+        );
+      }
+      pendingOpen = null;
+      continue;
+    }
+
+    if (groupStart != null && !groupEnabled) continue;
+    if (block.enabled) output.add(block);
+  }
+
+  return output;
+}
+
+String _joinStudioBoundary(String first, String second) {
+  final left = first.trim();
+  final right = second.trim();
+  if (left.isEmpty) return right;
+  if (right.isEmpty) return left;
+  return '$left\n$right';
+}
+
 /// Enables [selectedId] and disables every sibling in an exclusive group.
 List<StudioPresetBlock> selectExclusiveStudioBlock(
   List<StudioPresetBlock> blocks,
@@ -251,10 +348,17 @@ List<StudioPresetBlock> selectExclusiveStudioBlock(
   String selectedId,
 ) {
   if (!group.exclusive) return blocks;
-  final ids = group.children.map((block) => block.id).toSet();
+  final ids = group.children
+      .where((block) => !isIndependentStudioGroupChild(group, block))
+      .map((block) => block.id)
+      .toSet();
   if (!ids.contains(selectedId)) return blocks;
   if (group.children.any(
-    (block) => block.locked && block.enabled && block.id != selectedId,
+    (block) =>
+        ids.contains(block.id) &&
+        block.locked &&
+        block.enabled &&
+        block.id != selectedId,
   )) {
     return blocks;
   }
@@ -265,6 +369,65 @@ List<StudioPresetBlock> selectExclusiveStudioBlock(
             : block,
       )
       .toList(growable: false);
+}
+
+/// Finds the macro block for a controller spec by looking for the
+/// `{{studio_<specId>_brief}}` macro in block content.
+StudioPresetBlock? findControllerMacroBlock(
+  List<StudioPresetBlock> blocks,
+  String specId,
+) {
+  final macro = '{{studio_${specId}_brief}}';
+  final macroPlural = '{{studio_${specId}_briefs}}';
+  for (final block in blocks) {
+    if (block.content.contains(macro) || block.content.contains(macroPlural)) {
+      return block;
+    }
+  }
+  return null;
+}
+
+/// Finds the [StudioPresetBlockGroup] that contains [blockId], or `null` if
+/// the block is standalone or not found.
+StudioPresetBlockGroup? findGroupForBlock(
+  List<StudioPresetBlock> blocks,
+  String blockId,
+) {
+  for (final group in groupStudioPresetBlocks(blocks)) {
+    if (group.standalone?.id == blockId) return group;
+    if (group.children.any((block) => block.id == blockId)) return group;
+  }
+  return null;
+}
+
+/// Returns the id of the currently enabled child in [group], or `null` if
+/// none is enabled. Excludes independent children.
+String? enabledChildInGroup(StudioPresetBlockGroup group) {
+  for (final block in group.children) {
+    if (isIndependentStudioGroupChild(group, block)) continue;
+    if (block.enabled) return block.id;
+  }
+  return null;
+}
+
+/// The controller specId whose macro block this block carries, or `null`.
+/// A macro block contains `{{studio_<specId>_brief}}` or
+/// `{{studio_<specId>_briefs}}` in its content.
+String? controllerSpecIdForMacroBlock(StudioPresetBlock block) {
+  final m = _studioBriefMacro.firstMatch(block.content);
+  return m?.group(1);
+}
+
+/// The controller specId for which [blockId] is listed as an alternative,
+/// or `null`. Checks [StudioPreset.controllerAlternativeBlockIds].
+String? controllerSpecIdForAlternativeBlock(
+  StudioPreset preset,
+  String blockId,
+) {
+  for (final entry in preset.controllerAlternativeBlockIds.entries) {
+    if (entry.value.contains(blockId)) return entry.key;
+  }
+  return null;
 }
 
 /// Replaces a block and preserves the one-enabled invariant of its visual
@@ -284,6 +447,7 @@ List<StudioPresetBlock> updateStudioPresetBlockRespectingGroups(
   if (!updated.enabled) return result;
   for (final group in groupStudioPresetBlocks(result)) {
     if (group.exclusive &&
+        !isIndependentStudioGroupChild(group, updated) &&
         group.children.any((block) => block.id == updated.id)) {
       result = selectExclusiveStudioBlock(result, group, updated.id);
       break;

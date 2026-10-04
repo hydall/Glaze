@@ -190,7 +190,7 @@ class MemorySelector {
       if (!legacyMode &&
           input.sourceWindowExclusion &&
           entry.messageIds.isNotEmpty &&
-          entry.messageIds.any(visibleSet.contains)) {
+          entry.messageIds.every(visibleSet.contains)) {
         scored.add(
           MemoryCandidateScore(
             entry: entry,

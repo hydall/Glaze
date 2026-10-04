@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:glaze_flutter/core/llm/prompt_builder.dart';
+import 'package:glaze_flutter/core/llm/studio/studio_stream_interceptor.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
@@ -26,13 +27,17 @@ PromptPayload _payloadWith({
 
 void main() {
   group('effectiveRecalledMessagesContent', () {
-    test('returns raw recalledMessagesContent when no chunks exist', () {
+    test('frames legacy recalledMessagesContent when no chunks exist', () {
       final payload = _payloadWith(
         recalledMessagesContent: '<recalled>old style</recalled>',
       );
       expect(
         effectiveRecalledMessagesContent(payload),
-        '<recalled>old style</recalled>',
+        contains('<recalled>old style</recalled>'),
+      );
+      expect(
+        effectiveRecalledMessagesContent(payload),
+        contains('Historical evidence, not current state'),
       );
     });
 
@@ -118,19 +123,28 @@ void main() {
   });
 
   group('studioFinalVisibleMessageIds', () {
-    test('returns empty set when finalContextSize is 0', () {
+    test('tracker window uses tracker limiter semantics for zero size', () {
+      final ids = StudioStreamInterceptor.computeStudioVisibleMessageIds(const [
+        ChatMessage(id: 'one', role: 'user', content: 'one'),
+        ChatMessage(id: 'two', role: 'assistant', content: 'two'),
+      ], 0);
+
+      expect(ids, {'two'});
+    });
+
+    test('zero finalContextSize means no count cap', () {
       final ids = StreamGenerationService.computeStudioFinalVisibleMessageIds([
         _msg('m1'),
         _msg('m2'),
       ], 0);
-      expect(ids, isEmpty);
+      expect(ids, {'m1', 'm2'});
     });
 
-    test('returns empty set when finalContextSize is negative', () {
+    test('negative finalContextSize means no count cap', () {
       final ids = StreamGenerationService.computeStudioFinalVisibleMessageIds([
         _msg('m1'),
       ], -5);
-      expect(ids, isEmpty);
+      expect(ids, {'m1'});
     });
 
     test('returns all non-hidden ids when contextSize >= history length', () {
@@ -142,7 +156,7 @@ void main() {
       expect(ids, {'m1', 'm2', 'm3'});
     });
 
-    test('returns last N non-hidden message ids', () {
+    test('uses the persisted stable-window boundary', () {
       final history = [
         _msg('m1'),
         _msg('m2'),
@@ -153,11 +167,12 @@ void main() {
       final ids = StreamGenerationService.computeStudioFinalVisibleMessageIds(
         history,
         3,
+        historyWindowStartMessageId: 'm3',
       );
       expect(ids, {'m3', 'm4', 'm5'});
     });
 
-    test('skips hidden messages and counts only non-hidden', () {
+    test('skips hidden messages before applying the boundary', () {
       final history = [
         _msg('m1'),
         _msg('h1', isHidden: true),
@@ -168,6 +183,7 @@ void main() {
       final ids = StreamGenerationService.computeStudioFinalVisibleMessageIds(
         history,
         2,
+        historyWindowStartMessageId: 'm2',
       );
       expect(ids, {'m2', 'm3'});
     });
@@ -186,6 +202,26 @@ void main() {
         _msg('only'),
       ], 1);
       expect(ids, {'only'});
+    });
+
+    test('does not rotate an uninitialized window before commit', () {
+      final huge = List.filled(250000, 'x').join();
+      final ids = StreamGenerationService.computeStudioFinalVisibleMessageIds(
+        [
+          _msg('old'),
+          ChatMessage(
+            id: 'reasoning-heavy',
+            role: 'assistant',
+            content: 'short',
+            reasoning: huge,
+          ),
+          _msg('latest'),
+        ],
+        10,
+        reasoningHistoryCount: 1,
+      );
+
+      expect(ids, {'old', 'reasoning-heavy', 'latest'});
     });
   });
 }

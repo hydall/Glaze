@@ -10,6 +10,7 @@ import '../utils/time_helpers.dart';
 import 'preset_defaults.dart';
 
 import '../models/api_config.dart';
+import '../llm/transport/llm_protocol.dart';
 import '../models/character.dart';
 import '../models/chat_message.dart';
 import '../models/persona.dart';
@@ -135,7 +136,8 @@ class MigrationService {
           name: (json['name'] as String?) ?? 'User',
           prompt: json['prompt'] as String?,
           avatarPath: avatarPath,
-          createdAt: _toInt(json['createdAt'] ?? json['created_at']) ??
+          createdAt:
+              _toInt(json['createdAt'] ?? json['created_at']) ??
               currentTimestampSeconds(),
         );
         await _personaRepo.put(persona);
@@ -146,7 +148,10 @@ class MigrationService {
     }
   }
 
-  Future<void> _importChats(Map<String, dynamic> kv, MigrationResult result) async {
+  Future<void> _importChats(
+    Map<String, dynamic> kv,
+    MigrationResult result,
+  ) async {
     final validCharIds = (await _charRepo.getAll()).map((c) => c.id).toSet();
     for (final entry in kv.entries) {
       if (!entry.key.startsWith('gz_chat_')) continue;
@@ -187,7 +192,10 @@ class MigrationService {
     }
   }
 
-  Future<void> _importApiConfigs(Map<String, dynamic> kv, MigrationResult result) async {
+  Future<void> _importApiConfigs(
+    Map<String, dynamic> kv,
+    MigrationResult result,
+  ) async {
     final data = kv['gz_api_connection_presets'];
     if (data is! List) return;
 
@@ -197,17 +205,27 @@ class MigrationService {
         final config = ApiConfig(
           id: json['id'] as String? ?? _generateId(),
           name: (json['name'] as String?) ?? '',
-          providerId: json['providerId'] as String? ?? 'openai_compatible',
+          providerId: 'custom_chat_completion',
+          protocol: LlmProtocol.customChatCompletion,
           endpoint: json['endpoint'] as String? ?? '',
           apiKey: json['key'] as String? ?? '',
           model: json['model'] as String? ?? '',
-          maxTokens: _toInt(json['max_tokens']) ?? 8000,
+          maxTokens: _toInt(json['max_tokens']) ?? 1500,
           contextSize: _toInt(json['context']) ?? 32000,
-          temperature: _toDouble(json['temp']) ?? 0.7,
-          topP: _toDouble(json['topp']) ?? 0.9,
+          temperature: _toDouble(json['temp']) ?? 1.0,
+          topP: _toDouble(json['topp']) ?? 1.0,
           topK: _toInt(json['top_k']) ?? 0,
           frequencyPenalty: _toDouble(json['frequency_penalty']) ?? 0.0,
           presencePenalty: _toDouble(json['presence_penalty']) ?? 0.0,
+          // An imported preset keeps its sampling: the legacy connection sent
+          // these values, so the omit switches start off unless the source
+          // carried one explicitly.
+          omitTemperature: json['omit_temperature'] as bool? ?? false,
+          omitTopP: json['omit_top_p'] as bool? ?? false,
+          omitTopK: json['omit_top_k'] as bool? ?? false,
+          omitFrequencyPenalty:
+              json['omit_frequency_penalty'] as bool? ?? false,
+          omitPresencePenalty: json['omit_presence_penalty'] as bool? ?? false,
           stream: json['stream'] as bool? ?? true,
         );
         await _apiRepo.put(config);
@@ -218,7 +236,10 @@ class MigrationService {
     }
   }
 
-  Future<void> _importPresets(Map<String, dynamic> ls, MigrationResult result) async {
+  Future<void> _importPresets(
+    Map<String, dynamic> ls,
+    MigrationResult result,
+  ) async {
     final raw = ls['silly_cradle_presets'];
     if (raw == null) return;
 
@@ -369,25 +390,36 @@ class MigrationService {
         if (r is! Map<String, dynamic>) continue;
         final normalized = Map<String, dynamic>.from(r);
         if (!normalized.containsKey('id')) normalized['id'] = _generateId();
-        if (!normalized.containsKey('name')) normalized['name'] = r['scriptName'] ?? '';
-        if (!normalized.containsKey('regex')) normalized['regex'] = r['findRegex'] ?? '';
-        if (!normalized.containsKey('replacement')) normalized['replacement'] = r['replaceString'] ?? '';
-        if (!normalized.containsKey('trimOut')) normalized['trimOut'] = _joinTrimStrings(r['trimStrings']);
+        if (!normalized.containsKey('name')) {
+          normalized['name'] = r['scriptName'] ?? '';
+        }
+        if (!normalized.containsKey('regex')) {
+          normalized['regex'] = r['findRegex'] ?? '';
+        }
+        if (!normalized.containsKey('replacement')) {
+          normalized['replacement'] = r['replaceString'] ?? '';
+        }
+        if (!normalized.containsKey('trimOut')) {
+          normalized['trimOut'] = _joinTrimStrings(r['trimStrings']);
+        }
         if (r['isEnabled'] is bool) {
           normalized['disabled'] = !(r['isEnabled'] as bool);
         }
         // ST compatibility flags (accept both camelCase and snake_case variants)
         if (!normalized.containsKey('markdownOnly')) {
-          normalized['markdownOnly'] = r['markdownOnly'] ?? r['markdown_only'] ?? false;
+          normalized['markdownOnly'] =
+              r['markdownOnly'] ?? r['markdown_only'] ?? false;
         }
         if (!normalized.containsKey('promptOnly')) {
-          normalized['promptOnly'] = r['promptOnly'] ?? r['prompt_only'] ?? false;
+          normalized['promptOnly'] =
+              r['promptOnly'] ?? r['prompt_only'] ?? false;
         }
         if (!normalized.containsKey('runOnEdit')) {
           normalized['runOnEdit'] = r['runOnEdit'] ?? false;
         }
         if (!normalized.containsKey('substituteRegex')) {
-          normalized['substituteRegex'] = r['substituteRegex'] ?? r['substitute_regex'] ?? 0;
+          normalized['substituteRegex'] =
+              r['substituteRegex'] ?? r['substitute_regex'] ?? 0;
         }
         if (!normalized.containsKey('minDepth') && r.containsKey('minDepth')) {
           normalized['minDepth'] = r['minDepth'];
@@ -399,30 +431,29 @@ class MigrationService {
       }
     }
 
-    return finalizeImportedPreset(Preset(
-      id: json['id'] as String? ?? _generateId(),
-      name: json['name'] as String? ?? 'Imported',
-      author: json['author'] as String?,
-      blocks: blocks,
-      regexes: regexes,
-      reasoningEnabled: json['reasoningEnabled'] as bool? ?? false,
-      reasoningStart: json['reasoningStart'] as String?,
-      reasoningEnd: json['reasoningEnd'] as String?,
-      guidedGenerationPrompt: json['guidedGenerationPrompt'] as String?,
-      guidedImpersonationPrompt: json['guidedImpersonationPrompt'] as String?,
-      impersonationPrompt:
-          json['impersonationPrompt'] as String? ??
-          json['impersonation_prompt'] as String?,
-      summaryPrompt: json['summaryPrompt'] as String?,
-      mergePrompts: json['mergePrompts'] as bool? ?? false,
-      mergeRole: json['mergeRole'] as String? ?? 'system',
-      createdAt: _toInt(json['createdAt']) ?? 0,
-    ));
+    return finalizeImportedPreset(
+      Preset(
+        id: json['id'] as String? ?? _generateId(),
+        name: json['name'] as String? ?? 'Imported',
+        author: json['author'] as String?,
+        blocks: blocks,
+        regexes: regexes,
+        reasoningEnabled: json['reasoningEnabled'] as bool? ?? false,
+        reasoningStart: json['reasoningStart'] as String?,
+        reasoningEnd: json['reasoningEnd'] as String?,
+        guidedGenerationPrompt: json['guidedGenerationPrompt'] as String?,
+        guidedImpersonationPrompt: json['guidedImpersonationPrompt'] as String?,
+        impersonationPrompt:
+            json['impersonationPrompt'] as String? ??
+            json['impersonation_prompt'] as String?,
+        summaryPrompt: json['summaryPrompt'] as String?,
+        createdAt: _toInt(json['createdAt']) ?? 0,
+      ),
+    );
   }
 
   String _generateId() {
-    return generateId() +
-        Random().nextInt(9999).toRadixString(36);
+    return generateId() + Random().nextInt(9999).toRadixString(36);
   }
 
   int? _toInt(dynamic value) {
@@ -433,8 +464,12 @@ class MigrationService {
   }
 
   int _importTimestamp(Map<String, dynamic> json) {
-    final raw = _toInt(json['updatedAt'] ?? json['updated_at'] ??
-        json['creation_date'] ?? json['created_at']);
+    final raw = _toInt(
+      json['updatedAt'] ??
+          json['updated_at'] ??
+          json['creation_date'] ??
+          json['created_at'],
+    );
     if (raw == null) return currentTimestampSeconds();
     if (raw > 1e12) return raw ~/ 1000;
     return raw;

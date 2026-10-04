@@ -11,7 +11,7 @@ import '../bridge/chat_bridge_controller.dart';
 /// contract is preserved exactly:
 ///   * No-op when a session switch is in progress (defer to caller).
 ///   * First load (old empty) → `setMessages`.
-///   * Cleared (new empty) → `clearAll`.
+///   * Cleared (new empty) → `clearAll` + an empty `setMessages`.
 ///   * Head prepend → `prependMessages` for the prefix.
 ///   * Tail append → `appendMessages`.
 ///   * Any pure removal — head truncation, tail truncation, mid-chat
@@ -30,8 +30,13 @@ class ChatMessageSync {
   /// the diff.
   /// [visibleStartIndex] is forwarded to `setMessages` / `prependMessages`
   /// for the scrollback window.
-  /// [isGenerating] controls whether `setLastMessage` is called after
-  /// a tail append (only when generation has settled).
+  /// [busy] suppresses `setLastMessage`, whose only job is to stamp the
+  /// Regenerate button under a trailing user message. That button belongs to
+  /// an idle chat: a reply already on its way is not idle. It covers the
+  /// streaming window (`isGenerating`) *and* the send window before it
+  /// (`ChatState.isSendPending`) — the optimistic user bubble is a tail
+  /// append, so gating on `isGenerating` alone flashed a Regenerate button
+  /// under the message for as long as the durable append took.
   /// [sessionSwitching] short-circuits the diff entirely so a session
   /// switch can complete its full reset.
   Future<void> sync({
@@ -39,8 +44,9 @@ class ChatMessageSync {
     required List<ChatMessage> oldMsgs,
     required List<ChatMessage> newMsgs,
     required int visibleStartIndex,
-    required bool isGenerating,
+    required bool busy,
     required bool sessionSwitching,
+    void Function()? onDomReset,
   }) async {
     if (sessionSwitching) return;
     if (bridge == null) return;
@@ -50,8 +56,9 @@ class ChatMessageSync {
     final newLen = newIds.length;
 
     if (oldIds.isEmpty) {
+      onDomReset?.call();
       await bridge.setMessages(newMsgs, visibleStartIndex: visibleStartIndex);
-      if (!isGenerating) {
+      if (!busy) {
         await bridge.setLastMessage(
           lastUserMessageId(newMsgs) ?? newMsgs.lastOrNull?.id,
         );
@@ -60,7 +67,13 @@ class ChatMessageSync {
     }
 
     if (newIds.isEmpty) {
+      onDomReset?.call();
       await bridge.clearAll();
+      // `clearAll` raises the page's loading screen for the `setMessages` that
+      // follows it on every other reset path. Deleting the last message has no
+      // such call, so the spinner sat over the emptied chat — a chat that
+      // renders nothing until it is re-entered — until this one arrived.
+      await bridge.setMessages(const [], visibleStartIndex: visibleStartIndex);
       return;
     }
 
@@ -80,7 +93,7 @@ class ChatMessageSync {
           appends,
           startIndex: visibleStartIndex + oldIds.length,
         );
-        if (appends.isNotEmpty && !isGenerating) {
+        if (appends.isNotEmpty && !busy) {
           await bridge.setLastMessage(
             lastUserMessageId(appends) ?? newMsgs.lastOrNull?.id,
           );
@@ -102,16 +115,17 @@ class ChatMessageSync {
         for (final id in removed) {
           await bridge.removeMessage(id);
         }
-        if (!isGenerating) {
+        if (!busy) {
           await bridge.setLastMessage(
             lastUserMessageId(newMsgs) ?? newMsgs.lastOrNull?.id,
           );
         }
         return;
       }
+      onDomReset?.call();
       await bridge.clearAll();
       await bridge.setMessages(newMsgs, visibleStartIndex: visibleStartIndex);
-      if (!isGenerating) {
+      if (!busy) {
         await bridge.setLastMessage(
           lastUserMessageId(newMsgs) ?? newMsgs.lastOrNull?.id,
         );
@@ -124,9 +138,10 @@ class ChatMessageSync {
     for (int i = 0; i < minLen; i++) {
       if (i >= newIds.length) break;
       if (newIds[i] != oldIds[i]) {
+        onDomReset?.call();
         await bridge.clearAll();
         await bridge.setMessages(newMsgs, visibleStartIndex: visibleStartIndex);
-        if (!isGenerating) {
+        if (!busy) {
           await bridge.setLastMessage(
             lastUserMessageId(newMsgs) ?? newMsgs.lastOrNull?.id,
           );
@@ -159,6 +174,9 @@ class ChatMessageSync {
       // reload from DB.
       final genTimeChanged = o.genTime != n.genTime;
       final tokensChanged = o.tokens != n.tokens;
+      // The ledger stamps the game clock onto the message after the turn,
+      // post-bubble-render — the same badge-style update path as genTime.
+      final timeChanged = o.time != n.time;
 
       final needsUpdate =
           contentChanged ||
@@ -174,7 +192,8 @@ class ChatMessageSync {
           greetingChanged ||
           studioOutputsChanged ||
           genTimeChanged ||
-          tokensChanged;
+          tokensChanged ||
+          timeChanged;
 
       if (needsUpdate) {
         await bridge.updateMessage(n);
@@ -186,7 +205,7 @@ class ChatMessageSync {
     // because the WebView footer/regen controls are not re-rendered by
     // `updateMessage`. The previous dispatcher call relied on a
     // changing isGenerating flag, which does not move on edit.
-    if (anyUpdated && !isGenerating) {
+    if (anyUpdated && !busy) {
       await bridge.setLastMessage(
         lastUserMessageId(newMsgs) ?? newMsgs.lastOrNull?.id,
       );

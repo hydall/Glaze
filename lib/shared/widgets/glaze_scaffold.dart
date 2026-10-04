@@ -4,17 +4,46 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 
+import '../shell/desktop/desktop_floating_provider.dart';
 import '../shell/shell_header_provider.dart';
+import '../shell/title_bar_header.dart';
 import '../theme/app_colors.dart';
 import 'glass_surface.dart';
 import 'glaze_background.dart';
+
+/// Hide-on-scroll animation of the floating header. Exposed so overlays that
+/// belong TO the header but cannot live inside it (the chat's triggered-entries
+/// panel, which is measured by the chat body to inset the message list) can run
+/// the exact same curve and travel the exact same distance — header and panel
+/// then slide away and come back as one unit instead of drifting apart.
+const Duration kGlazeHeaderHideDuration = Duration(milliseconds: 300);
+const Curve kGlazeHeaderHideCurve = Curves.easeOutCubic;
+
+/// How far the header slides up when hidden, as a fraction of its own height.
+const double kGlazeHeaderHideSlideFactor = 1.5;
+
+/// Fractional [AnimatedSlide] offset for an overlay that hides *with* the
+/// header: the y-offset an overlay of [overlayHeight] needs so it travels the
+/// same number of PIXELS as a header of [headerHeight].
+///
+/// [AnimatedSlide] measures its offset in fractions of the child's own size, so
+/// reusing [kGlazeHeaderHideSlideFactor] directly would make a tall overlay
+/// shoot off proportionally faster than the header and the two would visibly
+/// come apart mid-animation. Falls back to the header's own factor until the
+/// overlay has been measured ([overlayHeight] still 0).
+double glazeHeaderHideSlideFor({
+  required double headerHeight,
+  required double overlayHeight,
+}) => overlayHeight <= 0
+    ? kGlazeHeaderHideSlideFactor
+    : (headerHeight * kGlazeHeaderHideSlideFactor) / overlayHeight;
 
 /// Scaffold with a floating glassmorphic header — use for screens OUTSIDE
 /// the shell (character editor, chat screen, etc.) that need a back button.
 ///
 /// Screens inside the shell (history, character list, menu) build their own
 /// header inline in their body since they share the shell's bottom nav.
-class GlazeScaffold extends StatelessWidget {
+class GlazeScaffold extends StatefulWidget {
   final String? title;
   final Widget? titleWidget;
   final Widget body;
@@ -26,10 +55,24 @@ class GlazeScaffold extends StatelessWidget {
   final bool hideHeader;
   final bool showBackground;
 
-  /// Set for the chat screen, whose body is a full-screen `InAppWebView`. The
-  /// floating header then drops its Flutter blur and lets an in-WebView CSS
-  /// strip reproduce it (see [GlassSurface.blurViaWebView]).
+  /// Set by the chat screen, whose body is a full-screen `InAppWebView`, on
+  /// the platforms where Flutter cannot blur that WebView itself. The floating
+  /// header then drops its Flutter blur and lets an in-WebView CSS strip
+  /// reproduce it (see [GlassSurface.blurViaWebView]).
   final bool headerBlurViaWebView;
+
+  /// Shares the header's backdrop capture with the other glass chrome painted
+  /// over the same body — the chat's input pill and the circle buttons beside
+  /// it (see [GlassSurface.backdropKey]). They sit at opposite edges and never
+  /// overlap, so one blur pass serves all of them instead of one each.
+  final BackdropKey? headerBackdropKey;
+
+  /// Draws the header edge to edge with square corners, the way the desktop
+  /// shell paints a tab's header, instead of as an inset floating pill.
+  ///
+  /// Chat sets it on desktop so its header matches the Characters tab beside
+  /// it; the pill treatment stays everywhere else.
+  final bool flushHeader;
 
   /// When true, this scaffold does not draw its own floating header. Instead it
   /// publishes its title/actions/back into the shell's persistent header (see
@@ -57,11 +100,43 @@ class GlazeScaffold extends StatelessWidget {
     this.useShellHeader = false,
     this.headerBranchIndex,
     this.headerBlurViaWebView = false,
+    this.headerBackdropKey,
+    this.flushHeader = false,
   });
 
   @override
+  State<GlazeScaffold> createState() => _GlazeScaffoldState();
+}
+
+class _GlazeScaffoldState extends State<GlazeScaffold> {
+  /// Keeps the scaffold — and the body under it — the same element while the
+  /// wrappers above it come and go. [GlazeBackground] is added and dropped here
+  /// with [GlazeScaffold.showBackground], and its own layers (`CardBackdrop`,
+  /// the image) with the theme and battery saver; without the key each of
+  /// those changes unmounted the whole body and built it again.
+  ///
+  /// For the chat that rebuild was fatal, not just wasteful. A fresh
+  /// `InAppWebView` takes over the shared keep-alive WebView while the old one
+  /// is still mounted, and disposing the old one then pulls the WebView out of
+  /// the new one's container: the page is left detached and hidden, so it never
+  /// paints again and the chat goes blank.
+  final GlobalKey _contentKey = GlobalKey();
+
+  @override
   Widget build(BuildContext context) {
-    final backHandler = onBack ?? () => Navigator.of(context).maybePop();
+    // Inside a desktop window the window's title bar is the header: nothing is
+    // drawn or kept clear for one here, the title and actions are published to
+    // that bar, and going back steps the window back. The window's glass is
+    // the background, too, as it is behind Settings — every window reads the
+    // same, whatever [showBackground] asks for on a phone.
+    final inWindow = DetachedShellHost.drawsChrome(context);
+    final fallbackBack =
+        widget.onBack ?? () => Navigator.of(context).maybePop();
+    void backHandler() {
+      if (inWindow && popDesktopWindow(context)) return;
+      fallbackBack();
+    }
+
     final isIosLikeTargetPlatform =
         !kIsWeb &&
         (defaultTargetPlatform == TargetPlatform.iOS ||
@@ -74,32 +149,49 @@ class GlazeScaffold extends StatelessWidget {
     // page, emptying the root navigator and closing the app. GoRouter's match
     // list is updated synchronously on `go` (a top-level route reports false),
     // while genuinely pushed routes still report true so the iOS swipe-back
-    // keeps working there.
-    final navigatorCanPop = GoRouter.of(context).canPop();
+    // keeps working there. A screen pumped without a router (a focused widget
+    // test) has no stack to consult, so it reads as unpoppable.
+    final navigatorCanPop = GoRouter.maybeOf(context)?.canPop() ?? false;
+
+    // In the desktop middle column under the app's own title bar, that bar
+    // draws this header (see [TitleBarHeaderScope]): the row keeps its space
+    // here, empty, and the title, back button and actions are published.
+    final inTitleBar =
+        !widget.useShellHeader && TitleBarHeaderScope.of(context);
 
     final header = SafeArea(
       bottom: false,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-        child: GlazeAppBar(
-          title: title,
-          titleWidget: titleWidget,
-          actions: actions,
-          showBack: showBack,
-          onBack: backHandler,
-          blurViaWebView: headerBlurViaWebView,
-        ),
+        padding: widget.flushHeader
+            ? EdgeInsets.zero
+            : const EdgeInsets.fromLTRB(16, 10, 16, 0),
+        child: inTitleBar
+            ? const SizedBox(height: kTitleBarHiddenHeaderHeight)
+            : GlazeAppBar(
+                title: widget.title,
+                titleWidget: widget.titleWidget,
+                actions: widget.actions,
+                showBack: widget.showBack,
+                onBack: backHandler,
+                blurViaWebView: widget.headerBlurViaWebView,
+                backdropKey: widget.headerBackdropKey,
+                borderRadius: widget.flushHeader
+                    ? BorderRadius.zero
+                    : const BorderRadius.all(Radius.circular(20)),
+              ),
       ),
     );
 
     final animatedHeader = AnimatedSlide(
-      offset: hideHeader ? const Offset(0, -1.5) : Offset.zero,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOutCubic,
+      offset: widget.hideHeader
+          ? const Offset(0, -kGlazeHeaderHideSlideFactor)
+          : Offset.zero,
+      duration: kGlazeHeaderHideDuration,
+      curve: kGlazeHeaderHideCurve,
       child: AnimatedOpacity(
-        opacity: hideHeader ? 0.0 : 1.0,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOutCubic,
+        opacity: widget.hideHeader ? 0.0 : 1.0,
+        duration: kGlazeHeaderHideDuration,
+        curve: kGlazeHeaderHideCurve,
         child: header,
       ),
     );
@@ -107,7 +199,9 @@ class GlazeScaffold extends StatelessWidget {
     // When delegating to the shell's persistent header, reserve the same space
     // the local header would occupy but draw nothing — the shell paints the
     // header on top.
-    final headerSlot = useShellHeader
+    final headerSlot = inWindow
+        ? const SizedBox.shrink()
+        : widget.useShellHeader
         ? const SafeArea(
             bottom: false,
             child: Padding(
@@ -118,18 +212,19 @@ class GlazeScaffold extends StatelessWidget {
         : animatedHeader;
 
     final scaffold = PopScope(
-      canPop: isIosLikeTargetPlatform ? navigatorCanPop : !showBack,
+      key: _contentKey,
+      canPop: isIosLikeTargetPlatform ? navigatorCanPop : !widget.showBack,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
         backHandler();
       },
       child: Scaffold(
         backgroundColor: Colors.transparent,
-        resizeToAvoidBottomInset: resizeToAvoidBottomInset,
-        body: extendBodyBehindHeader
+        resizeToAvoidBottomInset: widget.resizeToAvoidBottomInset,
+        body: widget.extendBodyBehindHeader
             ? Stack(
                 children: [
-                  Positioned.fill(child: body),
+                  Positioned.fill(child: widget.body),
                   Positioned(top: 0, left: 0, right: 0, child: headerSlot),
                 ],
               )
@@ -140,7 +235,7 @@ class GlazeScaffold extends StatelessWidget {
                     child: MediaQuery.removePadding(
                       context: context,
                       removeTop: true,
-                      child: body,
+                      child: widget.body,
                     ),
                   ),
                 ],
@@ -148,21 +243,23 @@ class GlazeScaffold extends StatelessWidget {
       ),
     );
 
-    final withBackground = showBackground
-        ? GlazeBackground(
-            child: scaffold,
-          )
+    final withBackground = widget.showBackground && !inWindow
+        ? GlazeBackground(child: scaffold)
         : scaffold;
 
-    if (!useShellHeader) return withBackground;
+    if (!widget.useShellHeader && !inTitleBar && !inWindow) {
+      return withBackground;
+    }
 
     return _ShellHeaderPublisher(
-      branchIndex: headerBranchIndex ?? 0,
+      branchIndex: inTitleBar
+          ? titleBarHeaderBranchFor(context)
+          : widget.headerBranchIndex ?? 0,
       config: ShellHeaderConfig(
-        title: title,
-        titleWidget: titleWidget,
-        actions: actions,
-        showBack: showBack,
+        title: widget.title,
+        titleWidget: widget.titleWidget,
+        actions: widget.actions,
+        showBack: widget.showBack,
         onBack: backHandler,
       ),
       child: withBackground,
@@ -195,7 +292,11 @@ class _ShellHeaderPublisherState extends ConsumerState<_ShellHeaderPublisher> {
 
   void _publish() {
     if (!mounted) return;
-    _registry?.publish(this, widget.branchIndex, widget.config);
+    _registry?.publish(
+      this,
+      shellHeaderBranchFor(context, widget.branchIndex),
+      widget.config,
+    );
   }
 
   @override
@@ -233,11 +334,25 @@ class GlazeAppBar extends ConsumerWidget {
   final Widget? leading;
   final BorderRadius borderRadius;
 
-  /// When the header floats over the chat WebView its blur is reproduced by a
-  /// CSS strip inside the WebView (see [GlassSurface.blurViaWebView]); the
-  /// Flutter BackdropFilter is then dropped. Only the chat header sets this —
-  /// standalone shell-tab headers keep their own blur.
+  /// When the header floats over a chat WebView that Flutter cannot sample,
+  /// its blur is reproduced by a CSS strip inside the WebView (see
+  /// [GlassSurface.blurViaWebView]) and the Flutter BackdropFilter is dropped.
+  /// Only the chat header sets this — standalone shell-tab headers keep their
+  /// own blur.
   final bool blurViaWebView;
+
+  /// Passed straight to [GlassSurface.backdropKey]: the header joins the
+  /// backdrop group of the chrome it is painted alongside, so the engine blurs
+  /// the backdrop once for all of them.
+  final BackdropKey? backdropKey;
+
+  /// Outline of the bar; all four sides when null.
+  final BoxBorder? border;
+
+  /// False drops the leading slot — back button, [leading] or logo — and the
+  /// title starts at the edge gutter. For a header whose back button is drawn
+  /// beside it: a desktop sidebar panel's, at the top of the strip.
+  final bool showLeading;
 
   const GlazeAppBar({
     super.key,
@@ -249,6 +364,9 @@ class GlazeAppBar extends ConsumerWidget {
     this.leading,
     this.borderRadius = const BorderRadius.all(Radius.circular(20)),
     this.blurViaWebView = false,
+    this.backdropKey,
+    this.border,
+    this.showLeading = true,
   });
 
   @override
@@ -256,16 +374,19 @@ class GlazeAppBar extends ConsumerWidget {
     return GlassSurface(
       enableRipple: true,
       blurViaWebView: blurViaWebView,
+      backdropKey: backdropKey,
       borderRadius: borderRadius,
-      border: Border.all(color: context.cs.outlineVariant),
+      border: border ?? Border.all(color: context.cs.outlineVariant),
       child: SizedBox(
         height: 56,
         child: Row(
           children: [
             // Left: back button OR logo
             SizedBox(
-              width: 52,
-              child: showBack
+              width: showLeading ? 52 : 16,
+              child: !showLeading
+                  ? null
+                  : showBack
                   ? IconButton(
                       icon: const Icon(
                         Icons.arrow_back_ios_new_rounded,
@@ -301,10 +422,7 @@ class GlazeAppBar extends ConsumerWidget {
             if (actions != null)
               Padding(
                 padding: const EdgeInsets.only(right: 4),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: actions!,
-                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: actions!),
               )
             else
               const SizedBox(width: 12),

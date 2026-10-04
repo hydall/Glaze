@@ -24,6 +24,44 @@ void main() {
     );
   }
 
+  testWidgets('the sheet is solid, not glass', (tester) async {
+    await tester.pumpWidget(
+      testApp(() {}),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        child: MaterialApp(
+          theme: ThemeData.dark(),
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => ElevatedButton(
+                onPressed: () => GlazeBottomSheet.show<void>(
+                  context,
+                  title: 'Sheet',
+                  items: [
+                    BottomSheetItem(label: 'one', onTap: () {}),
+                    BottomSheetItem(label: 'two', onTap: () {}),
+                  ],
+                ),
+                child: const Text('Open'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('one'), findsOneWidget);
+    // The shell composites its tint against the surface colour instead of
+    // blurring the dimmed screen behind it, and everything it contains
+    // inherits that, so nothing in the sheet paints a backdrop pass. The
+    // header strip keeps its own blur — that one is over the sheet's own
+    // scrolling content, not over what is behind the sheet.
+    expect(find.byType(BackdropFilter), findsNothing);
+  });
+
   testWidgets('lazy items only build rows in the viewport', (tester) async {
     var buildCount = 0;
 
@@ -88,6 +126,104 @@ void main() {
 
     expect(tapped, isTrue);
     expect(result, 'item-2');
+  });
+
+  /// Three rows with distinct labels, opened as a searchable sheet.
+  Future<void> pumpSearchSheet(
+    WidgetTester tester, {
+    required bool batterySaver,
+  }) async {
+    // Pinned as a mode, not just the resolved bool: under the `system` default
+    // the notifier asks the platform and overwrites whatever was seeded here.
+    SharedPreferences.setMockInitialValues({
+      'batterySaver': batterySaver,
+      'batterySaverMode': batterySaver ? 'on' : 'off',
+    });
+    late BuildContext sheetContext;
+    final items = [
+      BottomSheetItem(label: 'gpt-4o-mini', onTap: () {}),
+      BottomSheetItem(label: 'claude-opus', onTap: () {}),
+      BottomSheetItem(label: 'gemini-pro', onTap: () {}),
+    ];
+
+    await tester.pumpWidget(
+      testApp(
+        () => GlazeBottomSheet.show<void>(
+          sheetContext,
+          items: items,
+          searchable: true,
+          searchHint: 'Search models',
+        ),
+      ),
+    );
+    sheetContext = tester.element(find.text('Open'));
+
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('search field filters the rows down to the matches', (
+    tester,
+  ) async {
+    await pumpSearchSheet(tester, batterySaver: false);
+
+    expect(find.text('Search models'), findsOneWidget);
+    expect(find.text('claude-opus'), findsOneWidget);
+
+    // Tokens match independently, so "gpt 4o" still finds "gpt-4o-mini".
+    await tester.enterText(find.byType(TextField), 'gpt 4o');
+    await tester.pumpAndSettle();
+
+    expect(find.text('gpt-4o-mini'), findsOneWidget);
+    expect(find.text('claude-opus'), findsNothing);
+    expect(find.text('gemini-pro'), findsNothing);
+  });
+
+  testWidgets('filtered-out rows animate away instead of popping', (
+    tester,
+  ) async {
+    await pumpSearchSheet(tester, batterySaver: false);
+
+    await tester.enterText(find.byType(TextField), 'gpt');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 60));
+
+    // Mid-flight: the row is collapsing, so it is still mounted.
+    expect(find.text('claude-opus'), findsOneWidget);
+
+    await tester.pumpAndSettle();
+    expect(find.text('claude-opus'), findsNothing);
+  });
+
+  testWidgets('battery saver drops the filter animation', (tester) async {
+    await pumpSearchSheet(tester, batterySaver: true);
+
+    await tester.enterText(find.byType(TextField), 'gpt');
+    await tester.pump();
+
+    // No transition to wait out — the row is gone on the very next frame.
+    expect(find.text('claude-opus'), findsNothing);
+    expect(find.text('gpt-4o-mini'), findsOneWidget);
+  });
+
+  testWidgets('search shows an empty state when nothing matches', (
+    tester,
+  ) async {
+    await pumpSearchSheet(tester, batterySaver: false);
+
+    await tester.enterText(find.byType(TextField), 'nothing-matches-this');
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(Icons.search_off_rounded), findsOneWidget);
+    expect(find.text('gpt-4o-mini'), findsNothing);
+
+    // Clearing restores every row.
+    await tester.tap(find.byIcon(Icons.close_rounded));
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(Icons.search_off_rounded), findsNothing);
+    expect(find.text('gpt-4o-mini'), findsOneWidget);
+    expect(find.text('claude-opus'), findsOneWidget);
   });
 
   testWidgets('materialized items still build every row', (tester) async {

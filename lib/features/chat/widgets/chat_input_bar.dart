@@ -1,21 +1,35 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:easy_localization/easy_localization.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/models/chat_message.dart' show maxMessageAttachments;
+import '../../../core/platform/clipboard_images.dart';
+import '../../../core/platform/haptics.dart';
+import '../../../core/utils/text_insert.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/theme/theme_preset.dart';
 import '../../../shared/theme/theme_provider.dart';
 import '../../../shared/widgets/fullscreen_editor.dart';
 import '../../../shared/widgets/glass_surface.dart';
+import '../../../shared/widgets/glaze_toast.dart';
 import '../chat_provider.dart'
-    show ImpersonationState, impersonationStateProvider;
+    show ImpersonationState, chatProvider, impersonationStateProvider;
+import '../composer_empty_action_provider.dart';
+import '../composer_pins_provider.dart';
+import '../hidden_composer_actions_provider.dart';
+import '../quick_replies_provider.dart';
+import '../services/drawer_item_launcher.dart';
+import '../state/chat_drawer_editing_provider.dart';
+import 'action_glyph.dart';
 import 'chat_blur_region_tracker.dart';
+import 'magic_drawer_catalog.dart';
+import 'magic_drawer_widgets.dart';
 
 Border _uiBorder(BuildContext context, ThemePreset preset) {
   final base = preset.borderParsed ?? context.cs.onSurface;
@@ -26,14 +40,17 @@ Border _uiBorder(BuildContext context, ThemePreset preset) {
 }
 
 class ChatInputBar extends ConsumerStatefulWidget {
-  final ValueChanged<String> onSend;
+  /// Returns true only when the host accepted ownership of the send. The
+  /// composer is cleared only in that case.
+  final Future<bool> Function(String text) onSend;
 
   /// Guard invoked right before a send is dispatched. When it returns false the
   /// send is aborted and the composed text/image are kept intact so the host
   /// can show a prerequisite modal (e.g. "no provider selected") without losing
   /// what the user typed. When null, sending is always allowed.
   final bool Function()? canSend;
-  final void Function(String text, String? guidance)? onSendWithGuidance;
+  final Future<bool> Function(String text, String? guidance)?
+  onSendWithGuidance;
   final bool isGenerating;
   final bool isGeneratingImage;
 
@@ -43,10 +60,17 @@ class ChatInputBar extends ConsumerStatefulWidget {
   final bool isPostGenRunning;
   final VoidCallback? onStop;
   final VoidCallback? onMagicDrawer;
-  final void Function(String text, String? guidanceText, String imageDataUrl)?
-  onSendWithImage;
+
+  /// Sends the composed text together with its attachments. [imageDataUrls]
+  /// holds one `data:` URL per attached image, in the order they were
+  /// attached, and never more than [maxMessageAttachments].
+  final Future<bool> Function(
+    String text,
+    String? guidanceText,
+    List<String> imageDataUrls,
+  )?
+  onSendWithImages;
   final VoidCallback? onFullScreen;
-  final VoidCallback? onQuickReplies;
 
   /// Triggered by the account-circle button when the composer is empty.
   /// [guidance] carries the active guidance instruction when guidance mode is
@@ -56,12 +80,9 @@ class ChatInputBar extends ConsumerStatefulWidget {
   final bool enterToSend;
   final bool batterySaver;
 
-  /// When true, the magic-drawer button shows the active state. The host
-  /// also uses this to interpret onMagicDrawer as a toggle.
+  /// When true, the drawer button shows the active state. The host also uses
+  /// this to interpret onMagicDrawer as a toggle.
   final bool isDrawerOpen;
-
-  /// When true, the quick-replies (Continue) button shows the active state.
-  final bool isQuickRepliesOpen;
 
   /// Optional focus node from the host so it can mediate keyboard ↔ drawer
   /// transitions (Telegram-style: keyboard and drawer replace each other).
@@ -82,12 +103,40 @@ class ChatInputBar extends ConsumerStatefulWidget {
   final VoidCallback? onCancelSelection;
   final VoidCallback? onHideSelected;
   final VoidCallback? onDeleteSelected;
+
+  /// Whether the current selection passes the delete rule. When false the
+  /// delete button is not rendered at all, so a middle message cannot be
+  /// removed while middle deletion is disabled.
+  final bool canDeleteSelected;
+
+  /// Selects everything above / below the last tapped message. Tapping again
+  /// with that run already selected clears it.
+  final VoidCallback? onSelectAbove;
+  final VoidCallback? onSelectBelow;
   final bool allSelectedHidden;
   final bool isEditingMessage;
 
   /// Chat/character id used to observe impersonation streaming state. When null
   /// the composer behaves as a plain input (e.g. theme preview, tests).
   final String? charId;
+
+  /// Runs before a pinned quick reply starts a generation; false aborts it.
+  /// The drawer's Actions tab is handed the same guard, so a reply behaves the
+  /// same whether it is tapped in the grid or up here.
+  final Future<bool> Function()? beforeGeneration;
+
+  /// The composer floats over the chat WebView, whose pixels a Flutter
+  /// `BackdropFilter` cannot always sample. Where it cannot, the pill and the
+  /// circle buttons drop their own blur and have it mirrored into the WebView
+  /// as CSS strips instead (see [chatWebViewBlurIsFlutterSide] and
+  /// [BlurRegionTracker]).
+  final bool blurViaWebView;
+
+  /// Shares one backdrop capture with the rest of the chrome painted over the
+  /// same body — in practice the header pill at the other edge. Only the
+  /// surfaces that float directly over the body take it; anything nested
+  /// inside one of them keeps its own blur.
+  final BackdropKey? backdropKey;
 
   const ChatInputBar({
     super.key,
@@ -99,15 +148,13 @@ class ChatInputBar extends ConsumerStatefulWidget {
     this.isPostGenRunning = false,
     this.onStop,
     this.onMagicDrawer,
-    this.onSendWithImage,
+    this.onSendWithImages,
     this.onFullScreen,
-    this.onQuickReplies,
     this.onImpersonate,
     this.virtualKeyboardSend = false,
     this.enterToSend = true,
     this.batterySaver = false,
     this.isDrawerOpen = false,
-    this.isQuickRepliesOpen = false,
     this.focusNode,
     this.initialDraft = '',
     this.onDraftChanged,
@@ -122,9 +169,15 @@ class ChatInputBar extends ConsumerStatefulWidget {
     this.onCancelSelection,
     this.onHideSelected,
     this.onDeleteSelected,
+    this.canDeleteSelected = false,
+    this.onSelectAbove,
+    this.onSelectBelow,
     this.allSelectedHidden = false,
     this.isEditingMessage = false,
     this.charId,
+    this.beforeGeneration,
+    this.blurViaWebView = true,
+    this.backdropKey,
   });
 
   @override
@@ -139,14 +192,22 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
   bool _guidanceMode = false;
   Timer? _debounce;
   final _internalFocusNode = FocusNode();
-  Uint8List? _attachedImageBytes;
-  String? _attachedImageDataUrl;
+
+  /// Images queued for the next message, in the order they were attached.
+  /// Capped at [maxMessageAttachments] — the chat bubble lays exactly that
+  /// many out as a grid.
+  final List<ClipboardImage> _attachments = [];
   double _verticalDragDistance = 0;
 
   /// True while an impersonation stream is filling the composer. The input is
   /// locked and draft persistence is paused so the streamed text is not saved
   /// as the user's draft.
   bool _isImpersonating = false;
+  bool _isDispatchingSend = false;
+
+  /// Held rather than looked up on demand: `dispose` has to hand the bridge
+  /// back, and `ref` is off limits once the element is being unmounted.
+  late final ComposerActionBridge _actionBridge;
 
   @override
   void initState() {
@@ -154,6 +215,38 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     _controller = TextEditingController(text: widget.initialDraft);
     _controller.addListener(_onTextChanged);
     _updateFocusNodeHandler();
+    // Attach / fullscreen / guidance act on the controllers this State owns, so
+    // the drawer cannot run them itself once one of their cards is sitting in
+    // its Actions grid. Hand it a way in.
+    _actionBridge = ref.read(composerActionBridgeProvider)
+      ..register(_runComposerAction);
+  }
+
+  /// Runs a composer-owned action asked for from the drawer's Actions tab.
+  void _runComposerAction(ComposerAction action) {
+    if (!mounted) return;
+    switch (action) {
+      case ComposerAction.drawer:
+        widget.onMagicDrawer?.call();
+      case ComposerAction.attach:
+        unawaited(_pickImages());
+      case ComposerAction.fullscreen:
+        unawaited(_openFullscreenEditor());
+      case ComposerAction.guidance:
+        _toggleGuidance();
+      case ComposerAction.asterisk:
+      case ComposerAction.quote:
+        final token = action.insertToken;
+        if (token != null) _insertSurround(token);
+    }
+  }
+
+  /// Wraps the caret / selection in a pair of [token] and brings the keyboard
+  /// back, so the drawer's insert cards type where the user was already
+  /// looking rather than leaving a caret they have to go find.
+  void _insertSurround(String token) {
+    insertSurroundingText(_controller, token);
+    _effectiveFocusNode.requestFocus();
   }
 
   void _onTextChanged() {
@@ -167,33 +260,111 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     setState(() {});
   }
 
-  Future<void> _pickImage() async {
+  /// Free attachment slots left on the next message.
+  int get _remainingAttachmentSlots =>
+      maxMessageAttachments - _attachments.length;
+
+  Future<void> _pickImages() async {
+    if (_atAttachmentLimit()) return;
     final result = await FilePicker.pickFiles(
       type: FileType.image,
-      allowMultiple: false,
+      allowMultiple: true,
       withData: true,
     );
-    if (result == null || result.files.isEmpty) return;
-    final file = result.files.first;
-    var bytes = file.bytes;
-    if (bytes == null && file.path != null) {
-      bytes = await File(file.path!).readAsBytes();
+    if (result == null || result.files.isEmpty || !mounted) return;
+    final slots = _remainingAttachmentSlots;
+    final picked = <ClipboardImage>[];
+    // Take only what still fits, so reading files the limit would drop is
+    // never paid for.
+    for (final file in result.files.take(slots)) {
+      var bytes = file.bytes;
+      if (bytes == null && file.path != null) {
+        try {
+          bytes = await File(file.path!).readAsBytes();
+        } catch (error) {
+          debugPrint('[ChatInputBar] attachment read failed: $error');
+        }
+      }
+      if (bytes == null || bytes.isEmpty) continue;
+      picked.add(ClipboardImage.fromBytes(bytes, sourcePath: file.path));
     }
-    if (bytes == null || !mounted) return;
-    final ext = (file.extension ?? 'png').toLowerCase();
-    final mime = (ext == 'jpg' || ext == 'jpeg') ? 'image/jpeg' : 'image/png';
-    final dataUrl = 'data:$mime;base64,${base64Encode(bytes)}';
-    setState(() {
-      _attachedImageBytes = bytes;
-      _attachedImageDataUrl = dataUrl;
-    });
+    if (!mounted) return;
+    _addAttachments(picked, droppedByLimit: result.files.length > slots);
   }
 
-  void _clearImage() {
-    setState(() {
-      _attachedImageBytes = null;
-      _attachedImageDataUrl = null;
-    });
+  /// Attaches whatever images are on the clipboard. Answers false when there
+  /// were none, which is how a paste decides to fall through to the ordinary
+  /// text paste.
+  Future<bool> _pasteImagesFromClipboard() async {
+    final images = await ClipboardImages.read(limit: maxMessageAttachments);
+    if (!mounted || images.isEmpty) return false;
+    _addAttachments(images, droppedByLimit: false);
+    return true;
+  }
+
+  /// A picture handed over by the on-screen keyboard — the clipboard chip and
+  /// the sticker/GIF pickers in Gboard and the rest.
+  ///
+  /// Those never reach the clipboard at all: the keyboard commits the content
+  /// straight into the field over the input connection, so neither a paste
+  /// shortcut nor the selection toolbar can see it. The engine hands the bytes
+  /// over here instead.
+  void _handleInsertedContent(KeyboardInsertedContent content) {
+    if (!mounted || widget.isEditingMessage) return;
+    final bytes = content.data;
+    if (bytes == null || bytes.isEmpty) {
+      // The engine could not read the content:// URI it was given. Nothing in
+      // Dart can open one either, so there is no fallback to try.
+      debugPrint(
+        '[ChatInputBar] keyboard content had no bytes: ${content.uri}',
+      );
+      return;
+    }
+    _addAttachments([
+      ClipboardImage.fromBytes(bytes, declaredMimeType: content.mimeType),
+    ], droppedByLimit: false);
+  }
+
+  /// Appends [images] up to the limit. [droppedByLimit] reports that the
+  /// caller already had more on offer than it handed over, so the toast is
+  /// shown for a full selection as well as for an overflowing one.
+  void _addAttachments(
+    List<ClipboardImage> images, {
+    required bool droppedByLimit,
+  }) {
+    if (images.isEmpty) {
+      if (droppedByLimit) _warnAttachmentLimit();
+      return;
+    }
+    final accepted = images.take(_remainingAttachmentSlots).toList();
+    if (accepted.isNotEmpty) {
+      setState(() => _attachments.addAll(accepted));
+    }
+    if (droppedByLimit || accepted.length < images.length) {
+      _warnAttachmentLimit();
+    }
+  }
+
+  /// True — with the toast already shown — when there is no room left.
+  bool _atAttachmentLimit() {
+    if (_remainingAttachmentSlots > 0) return false;
+    _warnAttachmentLimit();
+    return true;
+  }
+
+  void _warnAttachmentLimit() {
+    if (!mounted) return;
+    GlazeToast.show(
+      context,
+      'chat_attachment_limit'.tr(
+        namedArgs: {'count': '$maxMessageAttachments'},
+      ),
+    );
+  }
+
+  void _removeAttachment(int index) {
+    if (index < 0 || index >= _attachments.length) return;
+    setState(() => _attachments.removeAt(index));
   }
 
   @override
@@ -202,34 +373,138 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     if (old.enterToSend != widget.enterToSend ||
         old.isEditingMessage != widget.isEditingMessage ||
         old.focusNode != widget.focusNode) {
+      // A swapped-in host node leaves the old one holding a handler that
+      // closes over this State.
+      if (old.focusNode != widget.focusNode) old.focusNode?.onKeyEvent = null;
       _updateFocusNodeHandler();
     }
   }
 
   void _updateFocusNodeHandler() {
-    final fn = widget.focusNode;
     final effective = _effectiveFocusNode;
     effective.canRequestFocus = !widget.isEditingMessage;
     if (widget.isEditingMessage && effective.hasFocus) {
       effective.unfocus();
     }
-    if (fn == null || !widget.enterToSend) return;
-    fn.onKeyEvent = (node, event) {
-      if (widget.isEditingMessage) {
-        return KeyEventResult.ignored;
+    effective.onKeyEvent = _handleComposerKey;
+  }
+
+  /// Hardware-keyboard handling for the composer: Enter sends (host node only,
+  /// and only when the host asked for it), and Ctrl/Cmd+V pastes an image off
+  /// the clipboard when there is one.
+  KeyEventResult _handleComposerKey(FocusNode node, KeyEvent event) {
+    if (widget.isEditingMessage) return KeyEventResult.ignored;
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (_isPasteShortcut(event)) {
+      // The clipboard can only be read asynchronously, so the paste is taken
+      // over wholesale: an image is attached, and anything else is inserted
+      // as text by hand. Letting the field paste natively as well would put
+      // the source URL of a copied picture into the box next to it.
+      unawaited(_handlePaste());
+      return KeyEventResult.handled;
+    }
+    if (widget.focusNode != null &&
+        widget.enterToSend &&
+        event.logicalKey == LogicalKeyboardKey.enter &&
+        !HardwareKeyboard.instance.isShiftPressed) {
+      _handleSend();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  static bool _isPasteShortcut(KeyEvent event) {
+    if (event.logicalKey != LogicalKeyboardKey.keyV) return false;
+    final keyboard = HardwareKeyboard.instance;
+    return defaultTargetPlatform == TargetPlatform.macOS
+        ? keyboard.isMetaPressed
+        : keyboard.isControlPressed;
+  }
+
+  /// The field's own selection toolbar, with **Paste** rewired to
+  /// [_handlePaste].
+  ///
+  /// This is the way in on touch: the system offers paste from the long-press
+  /// toolbar and from the keyboard's clipboard strip, and the stock handler
+  /// only ever inserts text. The item is added when Flutter left it out, which
+  /// it does whenever the clipboard holds no *text* — exactly the case an
+  /// image paste has to survive.
+  Widget _buildContextMenu(
+    BuildContext context,
+    EditableTextState editableTextState,
+  ) {
+    void paste() {
+      editableTextState.hideToolbar();
+      unawaited(_handlePaste());
+    }
+
+    final items = <ContextMenuButtonItem>[];
+    var rewired = false;
+    for (final item in editableTextState.contextMenuButtonItems) {
+      if (item.type == ContextMenuButtonType.paste) {
+        rewired = true;
+        items.add(
+          ContextMenuButtonItem(
+            type: ContextMenuButtonType.paste,
+            onPressed: paste,
+          ),
+        );
+      } else {
+        items.add(item);
       }
-      if (event is KeyDownEvent &&
-          event.logicalKey == LogicalKeyboardKey.enter &&
-          !HardwareKeyboard.instance.isShiftPressed) {
-        _handleSend();
-        return KeyEventResult.handled;
-      }
-      return KeyEventResult.ignored;
-    };
+    }
+    if (!rewired && !widget.isEditingMessage) {
+      items.add(
+        ContextMenuButtonItem(
+          type: ContextMenuButtonType.paste,
+          onPressed: paste,
+        ),
+      );
+    }
+    return AdaptiveTextSelectionToolbar.buttonItems(
+      anchors: editableTextState.contextMenuAnchors,
+      buttonItems: items,
+    );
+  }
+
+  Future<void> _handlePaste() async {
+    if (await _pasteImagesFromClipboard()) return;
+    if (!mounted) return;
+    await _pasteClipboardText();
+  }
+
+  /// The text half of the intercepted paste: inserts the clipboard's text at
+  /// the caret, replacing the selection, exactly as the field would have.
+  Future<void> _pasteClipboardText() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final pasted = data?.text;
+    if (pasted == null || pasted.isEmpty || !mounted) return;
+    final value = _controller.value;
+    final selection = value.selection;
+    if (!selection.isValid) {
+      _controller.value = TextEditingValue(
+        text: value.text + pasted,
+        selection: TextSelection.collapsed(
+          offset: value.text.length + pasted.length,
+        ),
+      );
+      return;
+    }
+    _controller.value = TextEditingValue(
+      text: value.text.replaceRange(selection.start, selection.end, pasted),
+      selection: TextSelection.collapsed(
+        offset: selection.start + pasted.length,
+      ),
+      composing: TextRange.empty,
+    );
   }
 
   @override
   void dispose() {
+    // Identity-checked inside, so a session switch — which re-keys this widget
+    // and can mount the replacement before this runs — cannot leave the drawer
+    // holding a handler into a disposed State.
+    _actionBridge.unregister(_runComposerAction);
     _debounce?.cancel();
     _controller.dispose();
     _guidanceController.dispose();
@@ -296,33 +571,80 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     });
   }
 
-  void _handleSend() {
-    if (widget.isEditingMessage) return;
+  Future<void> _handleSend() async {
+    if (widget.isEditingMessage || _isDispatchingSend) return;
     final text = _controller.text;
-    final hasImage = _attachedImageDataUrl != null;
-    if (text.trim().isEmpty && !hasImage) return;
+    if (text.trim().isEmpty && _attachments.isEmpty) return;
     // Prerequisites (e.g. a selected provider) failed: keep the composed text
-    // and image so nothing is lost while the host shows its modal.
+    // and attachments so nothing is lost while the host shows its modal.
     if (widget.canSend != null && !widget.canSend!()) return;
-    final imageDataUrl = _attachedImageDataUrl;
-    if (imageDataUrl != null) {
-      final guidance =
-          _guidanceMode && _guidanceController.text.trim().isNotEmpty
-          ? _guidanceController.text.trim()
-          : null;
-      widget.onSendWithImage?.call(text, guidance, imageDataUrl);
-    } else if (_guidanceMode && _guidanceController.text.trim().isNotEmpty) {
-      widget.onSendWithGuidance?.call(text, _guidanceController.text.trim());
-    } else {
-      if (text.trim().isEmpty) return;
-      widget.onSend(text);
+    final attachments = List<ClipboardImage>.unmodifiable(_attachments);
+    final guidance = _guidanceMode && _guidanceController.text.trim().isNotEmpty
+        ? _guidanceController.text.trim()
+        : null;
+    _isDispatchingSend = true;
+    // Empty the composer on the tap, not on durable acceptance. Behind a send
+    // is a whole re-encode of the message list, and on a long chat that is
+    // seconds of the message sitting in the box next to its own bubble,
+    // reading as a send that never registered. The payload is captured above,
+    // so the rare rejection puts it straight back.
+    _clearComposedPayload();
+    // The stored draft is spent the moment its text becomes a message, so
+    // clear it on the tap instead of leaving it to the debounce the clear
+    // above just re-armed. That timer is 500ms in which nothing has cleared
+    // the row yet and `dispose` cancels it outright — leave the chat right
+    // after sending and it never fires. It is also the only writer that can
+    // clear a row which is *already* holding a sent message's text, so
+    // pushing the empty draft through here is what cleans one up.
+    _debounce?.cancel();
+    widget.onDraftChanged?.call('');
+    bool accepted;
+    try {
+      if (attachments.isNotEmpty) {
+        accepted =
+            await widget.onSendWithImages?.call(text, guidance, [
+              for (final attachment in attachments) attachment.dataUrl,
+            ]) ??
+            false;
+      } else if (guidance != null) {
+        accepted =
+            await widget.onSendWithGuidance?.call(text, guidance) ?? false;
+      } else {
+        accepted = await widget.onSend(text);
+      }
+    } finally {
+      _isDispatchingSend = false;
     }
+    if (!mounted || accepted) return;
+    _restoreComposedPayload(
+      text: text,
+      guidance: guidance,
+      attachments: attachments,
+    );
+  }
+
+  void _clearComposedPayload() {
     _controller.clear();
     _guidanceController.clear();
-    setState(() {
-      _attachedImageBytes = null;
-      _attachedImageDataUrl = null;
-    });
+    setState(_attachments.clear);
+  }
+
+  /// Puts a rejected send's payload back in the composer — unless the user has
+  /// already started composing something newer, which outranks it.
+  void _restoreComposedPayload({
+    required String text,
+    required String? guidance,
+    required List<ClipboardImage> attachments,
+  }) {
+    if (_controller.text.isNotEmpty || _attachments.isNotEmpty) return;
+    _controller.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
+    if (guidance != null && _guidanceController.text.isEmpty) {
+      _guidanceController.text = guidance;
+    }
+    setState(() => _attachments.addAll(attachments));
   }
 
   Future<void> _openFullscreenEditor() async {
@@ -340,12 +662,514 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
       hintText: _guidanceMode
           ? 'chat_long_message_hint'.tr()
           : 'chat_placeholder'.tr(),
+      showFormatBar: true,
       onChanged: (value) {
         if (!mounted) return;
         _controller.text = value;
         setState(() {});
       },
     );
+  }
+
+  /// The configurable button row under the composer.
+  ///
+  /// What sits here comes from [composerPinsProvider], and it is no longer only
+  /// composer actions: a quick reply or a Tools card can be pinned up here too,
+  /// and whatever is pinned is filtered out of the drawer tab it came from. A
+  /// pin whose target is gone (a deleted quick reply, a card this build
+  /// dropped, the drawer button on desktop) resolves to nothing and is skipped
+  /// — a dead button is worse than a missing one.
+  ///
+  /// The row is edited from the drawer's pencil rather than from a settings
+  /// sheet of its own: while [chatDrawerEditingProvider] is on and the drawer is
+  /// open, each button can be dragged along the row and carries a down-arrow
+  /// that drops it back into its tab. The other direction has no badge — a card
+  /// dragged out of a drawer grid and dropped here is what puts it up.
+  Widget _buildActionRow(bool editing) {
+    final pins = ref.watch(composerPinsProvider).value ?? kDefaultComposerPins;
+
+    final buttons = <Widget>[];
+    for (var index = 0; index < pins.length; index++) {
+      final button = _buildPinnedButton(pins[index], editing);
+      if (button == null) continue;
+      if (buttons.isNotEmpty) buttons.add(const SizedBox(width: 8));
+      buttons.add(button);
+    }
+    if (buttons.isEmpty) return const SizedBox.shrink();
+
+    final strip = SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      // Dragging a button along the row and scrolling the row are the same
+      // gesture, so edit mode takes the scroll away. A row long enough to
+      // overflow is a row worth thinning out with the down-arrows anyway.
+      physics: editing
+          ? const NeverScrollableScrollPhysics()
+          : const ClampingScrollPhysics(),
+      // Room for the badges edit mode hangs off each button's corner, reserved
+      // in both states so turning edit mode on does not nudge the row.
+      padding: const EdgeInsets.only(top: 6, right: 6),
+      child: Row(mainAxisSize: MainAxisSize.min, children: buttons),
+    );
+    if (!editing) return strip;
+
+    // Catches a card dropped on the row rather than on one of its buttons —
+    // the gap past the last one, or anywhere at all when the row is down to the
+    // drawer button. The per-button targets sit deeper in the tree and win when
+    // the drop lands on one, so this only ever handles the leftovers.
+    return DragTarget<ComposerPin>(
+      onWillAcceptWithDetails: (details) => !pins.contains(details.data),
+      onAcceptWithDetails: (details) => _pin(details.data, pins.length),
+      builder: (context, _, _) => strip,
+    );
+  }
+
+  /// Null when [pin] has nothing to do in the current layout.
+  Widget? _buildPinnedButton(ComposerPin pin, bool editing) {
+    final resolved = _resolvePin(pin);
+    if (resolved == null) return null;
+
+    final button = _CircleBtn(
+      icon: resolved.icon,
+      glyph: resolved.glyph,
+      // Edit mode is for arranging the row, not for firing it: a tap that both
+      // reorders and sends would be a trap.
+      onTap: editing ? null : resolved.onTap,
+      color: resolved.color,
+      batterySaver: widget.batterySaver,
+      blurRegionId: 'btn-pin-${pin.encode()}',
+      blurViaWebView: widget.blurViaWebView,
+      backdropKey: widget.backdropKey,
+    );
+    if (!editing) return button;
+
+    final content = Stack(
+      clipBehavior: Clip.none,
+      children: [
+        button,
+        // Mirrors the up-arrow the drawer's cards carry, in the same accent:
+        // one gesture, one colour, opposite directions.
+        if (!pin.isPermanent)
+          Positioned(
+            top: -6,
+            right: -6,
+            child: MagicCardBadge(
+              icon: Icons.arrow_downward,
+              color: context.cs.primary,
+              tooltip: 'composer_pin_remove'.tr(),
+              size: 18,
+              onTap: () => _unpin(pin),
+            ),
+          ),
+      ],
+    );
+
+    // Carries the pin itself rather than its index, for two reasons: the drop
+    // resolves against the list as it is *then*, and the payload type is one
+    // the drawer's grids cannot produce. Both grids are on screen right now,
+    // and a shared payload type would have let a card dragged out of one land
+    // in this row as a reorder of whatever happened to share its index.
+    return DragTarget<ComposerPin>(
+      onWillAcceptWithDetails: (details) => details.data != pin,
+      onAcceptWithDetails: (details) {
+        final current =
+            ref.read(composerPinsProvider).value ?? const <ComposerPin>[];
+        final to = current.indexOf(pin);
+        if (to < 0) return;
+        final from = current.indexOf(details.data);
+        // Below zero means the payload came from a drawer grid rather than
+        // from this row, so it is an arrival, not a move.
+        if (from < 0) {
+          _pin(details.data, to);
+        } else {
+          ref.read(composerPinsProvider.notifier).reorder(from, to);
+        }
+      },
+      builder: (context, _, _) => Draggable<ComposerPin>(
+        // A plain [Draggable], not the grid's long-press one: edit mode has
+        // already claimed the row, so a button has nothing else a press could
+        // mean and moving one should cost a single finger movement.
+        data: pin,
+        axis: Axis.horizontal,
+        feedback: Material(
+          color: Colors.transparent,
+          child: Opacity(
+            opacity: 0.92,
+            // No blur region on the copy under the finger: it lives in the root
+            // overlay, outside the chat's tracker scope, and mirroring a moving
+            // rect into the WebView would only chase it.
+            child: _CircleBtn(
+              icon: resolved.icon,
+              glyph: resolved.glyph,
+              color: resolved.color,
+              batterySaver: widget.batterySaver,
+            ),
+          ),
+        ),
+        childWhenDragging: Opacity(opacity: 0.25, child: content),
+        child: content,
+      ),
+    );
+  }
+
+  /// The send button — and, while the composer is empty, the one slot in the
+  /// composer the drawer's pencil can retarget.
+  ///
+  /// With text in the box the button sends, mid-generation it stops, and edit
+  /// mode leaves both of those alone: neither is a preference. Empty, it has
+  /// always guessed — it impersonated the user — so that state is the one the
+  /// user gets to assign. Whatever [composerEmptyActionProvider] holds lends
+  /// the button its glyph and its tap; an Actions card dropped on it in edit
+  /// mode is what puts it there, and the undo badge hands the impersonation
+  /// back. Tools are turned away at the drop — see
+  /// [ComposerEmptyActionNotifier.isAssignable].
+  ///
+  /// Only the empty state goes dead in edit mode, for the reason the row's
+  /// buttons all do: a tap that both retargets and fires would be a trap.
+  /// Sending and stopping stay live, since neither is what the drop is aimed
+  /// at.
+  Widget _buildSendButton({
+    required bool isGenerating,
+    required bool hasContent,
+    required bool editing,
+  }) {
+    final emptyPin = ref.watch(composerEmptyActionProvider).value;
+    // Null once the thing it points at is gone — a quick reply since deleted,
+    // the drawer button on desktop. The button falls back to impersonation
+    // rather than wearing a glyph that does nothing.
+    final emptyAction = emptyPin == null ? null : _resolvePin(emptyPin);
+    // The insert actions' text token only belongs on the empty branch: once
+    // there is something to send the button is the send (or stop) glyph again.
+    final idle = !isGenerating && !hasContent;
+
+    final button = _SendBtn(
+      icon: isGenerating
+          ? Icons.stop_rounded
+          : hasContent
+          ? (_guidanceMode && _controller.text.trim().isEmpty
+                ? Icons.check_rounded
+                : Icons.send_rounded)
+          : (emptyAction?.icon ?? Icons.account_circle_rounded),
+      glyph: idle ? emptyAction?.glyph : null,
+      batterySaver: widget.batterySaver,
+      onTap: editing && !isGenerating && !hasContent
+          ? null
+          : () {
+              if (isGenerating) {
+                widget.onStop?.call();
+              } else if (widget.isEditingMessage) {
+                return;
+              } else if (hasContent) {
+                _handleSend();
+              } else if (emptyAction?.onTap != null) {
+                emptyAction!.onTap!();
+              } else {
+                final guidance =
+                    _guidanceMode && _guidanceController.text.trim().isNotEmpty
+                    ? _guidanceController.text.trim()
+                    : null;
+                // The instruction is spent: it now belongs to the message
+                // impersonation is about to write, and the chat stamps it on
+                // that message when it is sent. Leaving it in the field would
+                // send it a second time, as a guided generation.
+                _closeGuidanceSilently();
+                widget.onImpersonate?.call(guidance);
+              }
+            },
+    );
+    if (!editing) return button;
+
+    final content = Stack(
+      clipBehavior: Clip.none,
+      children: [
+        button,
+        // Reset, not the row's demote arrow: an assignment here never took the
+        // card out of its tab, so there is nothing to send back — only a
+        // default to restore.
+        if (emptyPin != null)
+          Positioned(
+            top: -6,
+            right: -6,
+            child: MagicCardBadge(
+              icon: Icons.undo,
+              color: context.cs.primary,
+              tooltip: 'composer_empty_action_reset'.tr(),
+              size: 18,
+              onTap: _resetEmptyAction,
+            ),
+          ),
+      ],
+    );
+
+    return Tooltip(
+      // The slot is invisible the moment anything is typed, so the hint is the
+      // only thing that says a drop lands here at all.
+      message: 'composer_empty_action_hint'.tr(),
+      preferBelow: false,
+      child: DragTarget<ComposerPin>(
+        // Actions only, so a Tools card dragged across the button is refused
+        // rather than silently swallowed: the drag keeps looking for the row
+        // below, which is where a tool belongs.
+        onWillAcceptWithDetails: (details) =>
+            details.data != emptyPin &&
+            ComposerEmptyActionNotifier.isAssignable(details.data),
+        onAcceptWithDetails: (details) => _assignEmptyAction(details.data),
+        // Scale rather than a ring: a border would grow the 40px circle and
+        // shove the row it shares a baseline with.
+        builder: (context, candidate, _) => AnimatedScale(
+          duration: const Duration(milliseconds: 120),
+          scale: candidate.isEmpty ? 1.0 : 1.15,
+          child: content,
+        ),
+      ),
+    );
+  }
+
+  /// Points the empty composer's button at [pin]. The pin keeps its place in
+  /// the drawer or the row — see [composerEmptyActionProvider].
+  void _assignEmptyAction(ComposerPin pin) {
+    Haptics.mediumImpact();
+    unawaited(ref.read(composerEmptyActionProvider.notifier).assign(pin));
+  }
+
+  void _resetEmptyAction() {
+    Haptics.mediumImpact();
+    unawaited(ref.read(composerEmptyActionProvider.notifier).reset());
+  }
+
+  void _unpin(ComposerPin pin) {
+    Haptics.mediumImpact();
+    unawaited(ref.read(composerPinsProvider.notifier).unpin(pin));
+  }
+
+  /// Lands a card dragged out of a drawer grid at [index] in the row.
+  void _pin(ComposerPin pin, int index) {
+    Haptics.mediumImpact();
+    unawaited(ref.read(composerPinsProvider.notifier).pinAt(pin, index));
+  }
+
+  /// Icon, tint and callback for one pinned button, or null when the thing it
+  /// points at is unavailable here.
+  _ResolvedPin? _resolvePin(ComposerPin pin) {
+    switch (pin.kind) {
+      case ComposerPinKind.action:
+        return _resolveAction(pin.asAction);
+      case ComposerPinKind.reply:
+        final reply = (ref.watch(quickRepliesProvider).value ?? const [])
+            .where((r) => r.id == pin.refId)
+            .firstOrNull;
+        if (reply == null) return null;
+        return _ResolvedPin(
+          icon: reply.icon,
+          onTap: () => _sendQuickReply(reply),
+        );
+      case ComposerPinKind.tool:
+        final charId = widget.charId;
+        final def = magicDrawerItemById(pin.refId);
+        // Tools open sheets against a chat; without a charId (theme preview,
+        // tests) there is none to open them against.
+        if (charId == null || def == null) return null;
+        return _ResolvedPin(
+          icon: def.icon,
+          onTap: () => DrawerItemLauncher(
+            ref: ref,
+            charId: charId,
+          ).open(context, def.id),
+        );
+    }
+  }
+
+  _ResolvedPin? _resolveAction(ComposerAction? action) {
+    switch (action) {
+      case null:
+        return null;
+      case ComposerAction.drawer:
+        // Null on desktop, where the drawer lives in the right sidebar
+        // instead — drop the button rather than leave a dead one behind.
+        if (widget.onMagicDrawer == null) return null;
+        return _ResolvedPin(
+          icon: action.icon,
+          onTap: widget.onMagicDrawer,
+          color: widget.isDrawerOpen ? Colors.amber : null,
+        );
+      case ComposerAction.attach:
+        return _ResolvedPin(icon: action.icon, onTap: _pickImages);
+      case ComposerAction.fullscreen:
+        return _ResolvedPin(icon: action.icon, onTap: _openFullscreenEditor);
+      case ComposerAction.guidance:
+        return _ResolvedPin(
+          icon: action.icon,
+          onTap: _toggleGuidance,
+          color: _guidanceMode ? Colors.orange : null,
+        );
+      case ComposerAction.asterisk:
+      case ComposerAction.quote:
+        final token = action.insertToken;
+        // A hidden action loses its pinned button too: hiding is "put this
+        // away", and a copy left under the composer would not be away.
+        if (token == null ||
+            (ref.watch(hiddenComposerActionsProvider).value ?? const <String>{})
+                .contains(action.id)) {
+          return null;
+        }
+        return _ResolvedPin(
+          icon: action.icon,
+          glyph: action.glyph,
+          onTap: () => _insertSurround(token),
+        );
+    }
+  }
+
+  /// The guidance instruction, as the top half of the input pill: a small
+  /// caption naming which mode is armed, the instruction itself, and a hairline
+  /// separating it from the message field underneath.
+  Widget _buildGuidanceField(double scale, double letterSpacing) {
+    final accent = Colors.orange;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: 0.06),
+        border: Border(
+          bottom: BorderSide(color: accent.withValues(alpha: 0.25)),
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 8, 8, 0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    _guidanceImpersonates
+                        ? 'guided_impersonation'.tr()
+                        : 'guided_generation'.tr(),
+                    style: TextStyle(
+                      fontSize: 10 * scale,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.8,
+                      color: accent.withValues(alpha: 0.8),
+                    ),
+                  ),
+                ),
+                // Guidance was only dismissable from whichever button had
+                // opened it — a composer action that may be pinned anywhere,
+                // or the drawer.
+                GestureDetector(
+                  onTap: widget.isEditingMessage ? null : _toggleGuidance,
+                  behavior: HitTestBehavior.opaque,
+                  child: Padding(
+                    padding: const EdgeInsets.all(6),
+                    child: Icon(
+                      Icons.close_rounded,
+                      size: 16,
+                      color: accent.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          TextField(
+            controller: _guidanceController,
+            readOnly: widget.isEditingMessage,
+            canRequestFocus: !widget.isEditingMessage,
+            enableInteractiveSelection: !widget.isEditingMessage,
+            showCursor: !widget.isEditingMessage,
+            maxLines: 3,
+            minLines: 1,
+            textCapitalization: TextCapitalization.sentences,
+            keyboardType: TextInputType.multiline,
+            textInputAction: TextInputAction.newline,
+            style: TextStyle(
+              fontSize: 14 * scale,
+              color: accent,
+              letterSpacing: letterSpacing,
+            ),
+            decoration: InputDecoration(
+              hintText: _guidanceImpersonates
+                  ? 'impersonate_guidance_placeholder'.tr()
+                  : 'guidance_placeholder'.tr(),
+              hintStyle: TextStyle(
+                color: accent.withValues(alpha: 0.5),
+                fontSize: 14 * scale,
+                letterSpacing: letterSpacing,
+              ),
+              prefixIcon: Icon(
+                Icons.tips_and_updates_outlined,
+                color: accent.withValues(alpha: 0.7),
+                size: 20,
+              ),
+              prefixIconConstraints: const BoxConstraints(
+                minWidth: 42,
+                minHeight: 32,
+              ),
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              contentPadding: const EdgeInsets.fromLTRB(0, 6, 18, 10),
+              filled: false,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _toggleGuidance() {
+    setState(() {
+      _guidanceMode = !_guidanceMode;
+      if (!_guidanceMode) _guidanceController.clear();
+    });
+  }
+
+  /// Closes the guidance half without the toggle's semantics — used once the
+  /// instruction has been handed to a generation that owns it now.
+  void _closeGuidanceSilently() {
+    if (!_guidanceMode) return;
+    setState(() {
+      _guidanceMode = false;
+      _guidanceController.clear();
+    });
+  }
+
+  /// Whether the instruction will guide an impersonation rather than a reply.
+  ///
+  /// The Vue composer had two separate guidance modes, each with its own
+  /// header and placeholder. Glaze folds them into one field and decides by
+  /// whether a message is waiting to be sent — the send button has always
+  /// worked this way, switching between the send glyph and a checkmark. The
+  /// panel just never said which one it was, so the reader could not tell
+  /// what pressing it would do.
+  bool get _guidanceImpersonates => _controller.text.trim().isEmpty;
+
+  /// Sends a quick reply pinned to the row, on the same terms the drawer's
+  /// Actions tab sends it: the host's pre-generation guard first, then either
+  /// the built-in continue or the reply's text.
+  Future<void> _sendQuickReply(QuickReply reply) async {
+    final charId = widget.charId;
+    if (charId == null) return;
+    if (await widget.beforeGeneration?.call() == false) return;
+    if (!mounted) return;
+    final notifier = ref.read(chatProvider(charId).notifier);
+    if (reply.isContinueAction) {
+      await notifier.continueMessage();
+    } else if (reply.text.trim().isNotEmpty) {
+      await notifier.sendMessage(reply.text);
+    }
+  }
+
+  /// Wraps a surface that floats directly over the chat WebView. Where the
+  /// blur is mirrored into the page, the surface's rect has to be tracked for
+  /// the bridge; where Flutter blurs the WebView itself there is nothing to
+  /// mirror, and the tracker is left out entirely.
+  Widget _floatingChrome({
+    required String id,
+    required double radius,
+    required Widget child,
+  }) {
+    if (!widget.blurViaWebView) return child;
+    return BlurRegionTracker(id: id, radius: radius, child: child);
   }
 
   @override
@@ -363,12 +1187,13 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     _listenImpersonation();
 
     if (widget.showSearchControls) {
-      final searchContent = BlurRegionTracker(
+      final searchContent = _floatingChrome(
         id: 'input-pill',
         radius: 28,
         child: GlassSurface(
           enableRipple: true,
-          blurViaWebView: true,
+          blurViaWebView: widget.blurViaWebView,
+          backdropKey: widget.backdropKey,
           borderRadius: BorderRadius.circular(28),
           tint: context.cs.surface,
           border: uiBorder,
@@ -430,12 +1255,13 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     }
 
     if (widget.isSelectionMode) {
-      final selectionContent = BlurRegionTracker(
+      final selectionContent = _floatingChrome(
         id: 'input-pill',
         radius: 28,
         child: GlassSurface(
           enableRipple: true,
-          blurViaWebView: true,
+          blurViaWebView: widget.blurViaWebView,
+          backdropKey: widget.backdropKey,
           borderRadius: BorderRadius.circular(28),
           tint: context.cs.surface,
           border: uiBorder,
@@ -449,7 +1275,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
                   onTap: widget.onCancelSelection,
                   batterySaver: widget.batterySaver,
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     '${widget.selectedCount} ${'selected_count'.tr()}',
@@ -464,6 +1290,20 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
                   ),
                 ),
                 _CircleBtn(
+                  icon: Icons.keyboard_double_arrow_up,
+                  onTap: widget.onSelectAbove,
+                  color: textColor,
+                  batterySaver: widget.batterySaver,
+                ),
+                const SizedBox(width: 6),
+                _CircleBtn(
+                  icon: Icons.keyboard_double_arrow_down,
+                  onTap: widget.onSelectBelow,
+                  color: textColor,
+                  batterySaver: widget.batterySaver,
+                ),
+                const SizedBox(width: 6),
+                _CircleBtn(
                   icon: widget.allSelectedHidden
                       ? Icons.visibility
                       : Icons.visibility_off,
@@ -475,17 +1315,17 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
                       : secondaryColor.withValues(alpha: 0.5),
                   batterySaver: widget.batterySaver,
                 ),
-                const SizedBox(width: 8),
-                _CircleBtn(
-                  icon: Icons.delete,
-                  onTap: widget.selectedCount > 0
-                      ? widget.onDeleteSelected
-                      : null,
-                  color: widget.selectedCount > 0
-                      ? Colors.redAccent
-                      : secondaryColor.withValues(alpha: 0.5),
-                  batterySaver: widget.batterySaver,
-                ),
+                if (widget.canDeleteSelected) ...[
+                  const SizedBox(width: 6),
+                  _CircleBtn(
+                    icon: Icons.delete,
+                    onTap: widget.selectedCount > 0
+                        ? widget.onDeleteSelected
+                        : null,
+                    color: Colors.redAccent,
+                    batterySaver: widget.batterySaver,
+                  ),
+                ],
                 const SizedBox(width: 8),
               ],
             ),
@@ -509,11 +1349,15 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     final hasContent =
         _controller.text.trim().isNotEmpty ||
         (_guidanceMode && _guidanceController.text.trim().isNotEmpty) ||
-        _attachedImageDataUrl != null;
+        _attachments.isNotEmpty;
     final isGenerating =
         widget.isGenerating ||
         widget.isGeneratingImage ||
         widget.isPostGenRunning;
+    // Gated on the drawer being open as well as on edit mode: with the drawer
+    // shut there is nowhere for a demoted button to land, nothing on screen to
+    // drag into the send button, and no pencil to explain the badges.
+    final editing = widget.isDrawerOpen && ref.watch(chatDrawerEditingProvider);
 
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
@@ -527,76 +1371,25 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (_attachedImageBytes != null) ...[
-              _AttachedImagePreview(
-                imageBytes: _attachedImageBytes!,
-                onClear: _clearImage,
+            if (_attachments.isNotEmpty) ...[
+              _AttachedImagesPreview(
+                attachments: _attachments,
+                onRemove: _removeAttachment,
                 border: uiBorder,
               ),
               const SizedBox(height: 8),
-            ],
-            if (_guidanceMode) ...[
-              Container(
-                constraints: const BoxConstraints(minHeight: 44),
-                decoration: BoxDecoration(
-                  color: Colors.orange.withValues(alpha: 0.08),
-                  border: Border.all(
-                    color: Colors.orange.withValues(alpha: 0.3),
-                    width: preset.borderWidth.clamp(1.0, double.infinity),
-                  ),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: TextField(
-                  controller: _guidanceController,
-                  readOnly: widget.isEditingMessage,
-                  canRequestFocus: !widget.isEditingMessage,
-                  enableInteractiveSelection: !widget.isEditingMessage,
-                  showCursor: !widget.isEditingMessage,
-                  maxLines: 3,
-                  minLines: 1,
-                  textCapitalization: TextCapitalization.sentences,
-                  keyboardType: TextInputType.multiline,
-                  textInputAction: TextInputAction.newline,
-                  style: TextStyle(
-                    fontSize: 14 * scale,
-                    color: Colors.orange,
-                    letterSpacing: letterSpacing,
-                  ),
-                  decoration: InputDecoration(
-                    hintText: 'guidance_placeholder'.tr(),
-                    hintStyle: TextStyle(
-                      color: Colors.orange.withValues(alpha: 0.5),
-                      fontSize: 14 * scale,
-                      letterSpacing: letterSpacing,
-                    ),
-                    prefixIcon: Icon(
-                      Icons.tips_and_updates_outlined,
-                      color: Colors.orange.withValues(alpha: 0.7),
-                      size: 20,
-                    ),
-                    border: InputBorder.none,
-                    enabledBorder: InputBorder.none,
-                    focusedBorder: InputBorder.none,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
-                    ),
-                    filled: false,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 6),
             ],
             Material(
               color: Colors.transparent,
               elevation: 0,
               borderRadius: BorderRadius.circular(28),
-              child: BlurRegionTracker(
+              child: _floatingChrome(
                 id: 'input-pill',
                 radius: 28,
                 child: GlassSurface(
                   enableRipple: true,
-                  blurViaWebView: true,
+                  blurViaWebView: widget.blurViaWebView,
+                  backdropKey: widget.backdropKey,
                   borderRadius: BorderRadius.circular(28),
                   tint: context.cs.surface,
                   border: _guidanceMode
@@ -605,126 +1398,81 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
                           width: preset.borderWidth.clamp(1.0, double.infinity),
                         )
                       : uiBorder,
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(minHeight: 56),
-                    child: TextField(
-                      controller: _controller,
-                      focusNode: _effectiveFocusNode,
-                      readOnly: widget.isEditingMessage || _isImpersonating,
-                      canRequestFocus: !widget.isEditingMessage,
-                      enableInteractiveSelection: !widget.isEditingMessage,
-                      showCursor: !widget.isEditingMessage,
-                      maxLines: 5,
-                      minLines: 1,
-                      textCapitalization: TextCapitalization.sentences,
-                      textInputAction: widget.virtualKeyboardSend
-                          ? TextInputAction.send
-                          : TextInputAction.newline,
-                      onSubmitted: widget.virtualKeyboardSend
-                          ? (_) => _handleSend()
-                          : null,
-                      style: TextStyle(
-                        fontSize: 16 * scale,
-                        color: textColor,
-                        letterSpacing: letterSpacing,
-                      ),
-                      decoration: InputDecoration(
-                        hintText: _guidanceMode
-                            ? 'chat_guidance_message_hint'.tr()
-                            : 'chat_placeholder'.tr(),
-                        hintStyle: TextStyle(
-                          color: secondaryColor,
-                          fontSize: 16 * scale,
-                          letterSpacing: letterSpacing,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // The instruction is the pill's top half, over a hairline
+                      // and the message field — one block, the way the Vue
+                      // composer had it, rather than a card floating above it.
+                      if (_guidanceMode)
+                        _buildGuidanceField(scale, letterSpacing),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(minHeight: 56),
+                        child: TextField(
+                          controller: _controller,
+                          focusNode: _effectiveFocusNode,
+                          contextMenuBuilder: _buildContextMenu,
+                          contentInsertionConfiguration:
+                              ContentInsertionConfiguration(
+                                onContentInserted: _handleInsertedContent,
+                              ),
+                          readOnly: widget.isEditingMessage || _isImpersonating,
+                          canRequestFocus: !widget.isEditingMessage,
+                          enableInteractiveSelection: !widget.isEditingMessage,
+                          showCursor: !widget.isEditingMessage,
+                          maxLines: 5,
+                          minLines: 1,
+                          textCapitalization: TextCapitalization.sentences,
+                          textInputAction: widget.virtualKeyboardSend
+                              ? TextInputAction.send
+                              : TextInputAction.newline,
+                          onSubmitted: widget.virtualKeyboardSend
+                              ? (_) => _handleSend()
+                              : null,
+                          style: TextStyle(
+                            fontSize: 16 * scale,
+                            color: textColor,
+                            letterSpacing: letterSpacing,
+                          ),
+                          decoration: InputDecoration(
+                            hintText: _guidanceMode
+                                ? 'chat_guidance_message_hint'.tr()
+                                : 'chat_placeholder'.tr(),
+                            hintStyle: TextStyle(
+                              color: secondaryColor,
+                              fontSize: 16 * scale,
+                              letterSpacing: letterSpacing,
+                            ),
+                            border: InputBorder.none,
+                            enabledBorder: InputBorder.none,
+                            focusedBorder: InputBorder.none,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 18,
+                              vertical: 16,
+                            ),
+                            filled: false,
+                          ),
                         ),
-                        border: InputBorder.none,
-                        enabledBorder: InputBorder.none,
-                        focusedBorder: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 18,
-                          vertical: 16,
-                        ),
-                        filled: false,
                       ),
-                    ),
+                    ],
                   ),
                 ),
               ),
             ),
-            const SizedBox(height: 10),
+            // 4, not the 10 this gap used to be: the row reserves 6px of its
+            // own for the badges edit mode hangs above the buttons.
+            const SizedBox(height: 4),
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _CircleBtn(
-                      icon: Icons.auto_awesome,
-                      onTap: widget.onMagicDrawer,
-                      color: widget.isDrawerOpen ? Colors.amber : null,
-                      batterySaver: widget.batterySaver,
-                      blurRegionId: 'btn-magic',
-                    ),
-                    const SizedBox(width: 8),
-                    _CircleBtn(
-                      icon: Icons.attach_file,
-                      onTap: _pickImage,
-                      batterySaver: widget.batterySaver,
-                      blurRegionId: 'btn-attach',
-                    ),
-                    const SizedBox(width: 8),
-                    _CircleBtn(
-                      icon: Icons.fullscreen,
-                      onTap: _openFullscreenEditor,
-                      batterySaver: widget.batterySaver,
-                      blurRegionId: 'btn-fullscreen',
-                    ),
-                    const SizedBox(width: 8),
-                    _CircleBtn(
-                      icon: Icons.north_east,
-                      onTap: () => setState(() {
-                        _guidanceMode = !_guidanceMode;
-                        if (!_guidanceMode) _guidanceController.clear();
-                      }),
-                      color: _guidanceMode ? Colors.orange : null,
-                      batterySaver: widget.batterySaver,
-                      blurRegionId: 'btn-guidance',
-                    ),
-                    const SizedBox(width: 8),
-                    _CircleBtn(
-                      icon: Icons.keyboard_double_arrow_right,
-                      onTap: widget.onQuickReplies,
-                      color: widget.isQuickRepliesOpen ? Colors.amber : null,
-                      batterySaver: widget.batterySaver,
-                      blurRegionId: 'btn-quick-replies',
-                    ),
-                  ],
-                ),
-                _SendBtn(
-                  icon: isGenerating
-                      ? Icons.stop_rounded
-                      : hasContent
-                      ? (_guidanceMode && _controller.text.trim().isEmpty
-                            ? Icons.check_rounded
-                            : Icons.send_rounded)
-                      : Icons.account_circle_rounded,
-                  batterySaver: widget.batterySaver,
-                  onTap: () {
-                    if (isGenerating) {
-                      widget.onStop?.call();
-                    } else if (widget.isEditingMessage) {
-                      return;
-                    } else if (hasContent) {
-                      _handleSend();
-                    } else {
-                      final guidance =
-                          _guidanceMode &&
-                              _guidanceController.text.trim().isNotEmpty
-                          ? _guidanceController.text.trim()
-                          : null;
-                      widget.onImpersonate?.call(guidance);
-                    }
-                  },
+                // Expanded, so a row long enough to overflow scrolls instead of
+                // shoving the send button off the screen.
+                Expanded(child: _buildActionRow(editing)),
+                const SizedBox(width: 8),
+                _buildSendButton(
+                  isGenerating: isGenerating,
+                  hasContent: hasContent,
+                  editing: editing,
                 ),
               ],
             ),
@@ -735,52 +1483,114 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
   }
 }
 
-class _AttachedImagePreview extends StatelessWidget {
-  final Uint8List imageBytes;
-  final VoidCallback onClear;
+/// What a [ComposerPin] turns into once the composer has looked it up: the
+/// glyph to draw, the tint to draw it in, and what a tap does. Keeps the row
+/// builder free of the three-way switch that produces it.
+class _ResolvedPin {
+  final IconData icon;
+
+  /// Short text token to draw instead of [icon] — the insert actions' `**`.
+  final String? glyph;
+  final VoidCallback? onTap;
+
+  /// Active-state tint (the drawer button while the drawer is open, guidance
+  /// while the field is up); null leaves the button in the accent colour.
+  final Color? color;
+
+  const _ResolvedPin({required this.icon, this.glyph, this.onTap, this.color});
+}
+
+/// The strip of queued attachments above the input. A single image keeps the
+/// roomy preview it always had; several become square thumbnails, wrapping
+/// onto a second row on a narrow phone.
+class _AttachedImagesPreview extends StatelessWidget {
+  final List<ClipboardImage> attachments;
+  final ValueChanged<int> onRemove;
   final BoxBorder? border;
 
-  const _AttachedImagePreview({
-    required this.imageBytes,
-    required this.onClear,
+  const _AttachedImagesPreview({
+    required this.attachments,
+    required this.onRemove,
     this.border,
   });
 
   @override
   Widget build(BuildContext context) {
+    final single = attachments.length == 1;
     return Align(
       alignment: Alignment.centerLeft,
-      child: Container(
-        constraints: const BoxConstraints(maxWidth: 150, maxHeight: 150),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          border:
-              border ?? Border.all(color: Colors.white.withValues(alpha: 0.08)),
-        ),
-        child: Stack(
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.memory(imageBytes, fit: BoxFit.contain),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (var i = 0; i < attachments.length; i++)
+            _AttachedImageThumb(
+              key: ObjectKey(attachments[i]),
+              imageBytes: attachments[i].bytes,
+              onRemove: () => onRemove(i),
+              border: border,
+              size: single ? 150 : 84,
+              fit: single ? BoxFit.contain : BoxFit.cover,
             ),
-            Positioned(
-              top: 4,
-              right: 4,
-              child: GestureDetector(
-                onTap: onClear,
-                child: Container(
-                  width: 22,
-                  height: 22,
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.6),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.close, color: Colors.white, size: 14),
+        ],
+      ),
+    );
+  }
+}
+
+class _AttachedImageThumb extends StatelessWidget {
+  final Uint8List imageBytes;
+  final VoidCallback onRemove;
+  final BoxBorder? border;
+  final double size;
+  final BoxFit fit;
+
+  const _AttachedImageThumb({
+    super.key,
+    required this.imageBytes,
+    required this.onRemove,
+    required this.size,
+    required this.fit,
+    this.border,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: BoxConstraints(maxWidth: size, maxHeight: size),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        border:
+            border ?? Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Stack(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: fit == BoxFit.cover
+                ? SizedBox.square(
+                    dimension: size,
+                    child: Image.memory(imageBytes, fit: fit),
+                  )
+                : Image.memory(imageBytes, fit: fit),
+          ),
+          Positioned(
+            top: 4,
+            right: 4,
+            child: GestureDetector(
+              onTap: onRemove,
+              child: Container(
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.6),
+                  shape: BoxShape.circle,
                 ),
+                child: const Icon(Icons.close, color: Colors.white, size: 14),
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -788,22 +1598,39 @@ class _AttachedImagePreview extends StatelessWidget {
 
 class _CircleBtn extends ConsumerStatefulWidget {
   final IconData icon;
+
+  /// Short text token drawn in place of [icon] for the insert actions.
+  final String? glyph;
   final VoidCallback? onTap;
   final Color? color;
   final bool batterySaver;
 
-  /// When set, the button's rect is mirrored into the chat WebView as a
-  /// backdrop-blur region (see [BlurRegionTracker]). Only buttons that sit
-  /// directly over the WebView (the bottom row) need one; buttons nested
-  /// inside an already-tracked pill must leave it null.
+  /// Set on the buttons that float directly over the chat WebView (the bottom
+  /// row); buttons nested inside an already-blurred pill leave it null. Where
+  /// the blur is mirrored into the page, it is also the id of this button's
+  /// region (see [BlurRegionTracker]).
   final String? blurRegionId;
+
+  /// True while the chrome's blur is mirrored into the WebView instead of
+  /// being drawn here — then a floating button drops its own blur pass and
+  /// registers its rect instead.
+  final bool blurViaWebView;
+
+  /// Backdrop capture shared with the rest of the floating chrome. Only for
+  /// buttons that float over the body ([blurRegionId] set): one nested inside
+  /// a pill is painted over that pill's own blur and cannot share a capture
+  /// taken before it.
+  final BackdropKey? backdropKey;
 
   const _CircleBtn({
     required this.icon,
+    this.glyph,
     this.onTap,
     this.color,
     this.batterySaver = false,
     this.blurRegionId,
+    this.blurViaWebView = true,
+    this.backdropKey,
   });
 
   @override
@@ -838,6 +1665,7 @@ class _CircleBtnState extends ConsumerState<_CircleBtn>
   @override
   Widget build(BuildContext context) {
     final preset = ref.watch(themeProvider.select((s) => s.activePreset));
+    final floating = widget.blurRegionId != null;
     final btn = GestureDetector(
       onTap: widget.onTap,
       onTapDown: (widget.onTap != null && !widget.batterySaver)
@@ -856,15 +1684,17 @@ class _CircleBtnState extends ConsumerState<_CircleBtn>
           height: 40,
           child: GlassSurface(
             // Only the top-level circle buttons carry a blurRegionId (they
-            // float over the WebView and are mirrored to a CSS strip); the
-            // ones nested inside the input pill keep their Flutter blur.
-            blurViaWebView: widget.blurRegionId != null,
+            // float over the WebView); the ones nested inside the input pill
+            // always keep their own Flutter blur.
+            blurViaWebView: floating && widget.blurViaWebView,
+            backdropKey: floating ? widget.backdropKey : null,
             borderRadius: BorderRadius.circular(20),
             tint: context.cs.surface,
             border: _uiBorder(context, preset),
             child: Center(
-              child: Icon(
-                widget.icon,
+              child: ActionGlyph(
+                icon: widget.icon,
+                glyph: widget.glyph,
                 color: widget.color ?? context.cs.primary,
                 size: 20,
               ),
@@ -874,17 +1704,26 @@ class _CircleBtnState extends ConsumerState<_CircleBtn>
       ),
     );
     final regionId = widget.blurRegionId;
-    if (regionId == null) return btn;
+    if (regionId == null || !widget.blurViaWebView) return btn;
     return BlurRegionTracker(id: regionId, radius: 20, child: btn);
   }
 }
 
 class _SendBtn extends StatefulWidget {
   final IconData icon;
+
+  /// Short text token drawn in place of [icon] when the empty composer's slot
+  /// is assigned to an insert action.
+  final String? glyph;
   final VoidCallback? onTap;
   final bool batterySaver;
 
-  const _SendBtn({required this.icon, this.onTap, this.batterySaver = false});
+  const _SendBtn({
+    required this.icon,
+    this.glyph,
+    this.onTap,
+    this.batterySaver = false,
+  });
 
   @override
   State<_SendBtn> createState() => _SendBtnState();
@@ -944,9 +1783,10 @@ class _SendBtnState extends State<_SendBtn>
                   child: child,
                 ),
               ),
-              child: Icon(
-                widget.icon,
-                key: ValueKey(widget.icon),
+              child: ActionGlyph(
+                key: ValueKey(widget.glyph ?? widget.icon),
+                icon: widget.icon,
+                glyph: widget.glyph,
                 color: Colors.black,
                 size: 20,
               ),

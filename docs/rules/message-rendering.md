@@ -1,0 +1,365 @@
+# Message Rendering Rules
+
+Rules for `assets/chat_webview/formatter/`, `assets/chat_webview/renderer/` and
+the virtualised list they render into (`assets/chat_webview/useVirtualScroll.js`)
+— everything that turns a message body into what the reader sees.
+
+Read this before changing any of them. The behaviour it describes is
+covered by `test/webview_js` (a real browser renders the card corpus); the
+shape of the modules is covered by `test/webview_assets_test.dart`.
+
+---
+
+## Every rendering bug becomes a corpus entry before it is fixed
+
+`test/webview_js/corpus/cards.js` holds the message bodies worth protecting,
+verbatim, each with the PR or audit it came from. The workflow is:
+
+1. add the card that renders wrong, exactly as the author or model wrote it;
+2. add the assertion that fails;
+3. fix the renderer.
+
+A fix without an entry is a fix the next refactor is free to undo — which is
+how the same three bugs came back six times in ten days. If a case cannot be
+served yet, commit it as `test.fail()` naming what would make it pass, rather
+than leaving it out.
+
+---
+
+## The render is two phases, and the parser owns structure
+
+```
+protect  →  parse (phase A)  →  format text nodes (phase B)  →  restore
+```
+
+* **Phase A** (`html_scan.js`, `parseHtml`) hands the message to the browser's
+  HTML parser. What is an element, how elements nest, and where an unclosed tag
+  ends are the parser's answers. This is what makes a card render as a card
+  from its first streamed chunk instead of flickering as raw tags.
+* **Phase B** (`dom_format.js`, `block_syntax.js`, `inline_syntax.js`) applies
+  markdown to **text nodes only**, with elements masked out of the string the
+  passes see.
+
+**Never add a markdown pass that runs over a string containing live HTML.**
+That is what the old formatter did, and every one of its 25 numbered steps was
+one more chance to eat somebody's markup.
+
+---
+
+## What is markup is decided by the vocabulary, not by counting
+
+`escapeProseTags()` escapes a tag into visible text only when its name is not
+an HTML/SVG/MathML element **and** the message's own CSS does not style it
+**and** it has no matching closing tag. `<вздох>` in prose stays a word;
+`<loomledger>` in a card stays a container.
+
+Do not reintroduce either of the heuristics this replaced:
+
+* an "orphan" rule keyed on how many times a tag name occurs in the message;
+* a hand-kept list of which tags are block-level.
+
+Both were lists that every slightly-different card fell off the end of.
+
+---
+
+## `<p>` is added at the top level of a message and nowhere else
+
+Inside markup the author wrote, nothing is wrapped. A paragraph of ours around
+someone's card reparents their elements, and `#toggle:checked ~ .overlay` —
+the selector every CSS-only card is built on — stops matching the moment its
+two halves stop being siblings.
+
+At the top level a run of text is still not wrapped when it touches a block
+element the author wrote with no blank line between them
+(`touchesBlockSibling` in `dom_format.js`): `<input><label>…</label><div>` is
+one card, not a paragraph followed by a card.
+
+---
+
+## A protected region is atomic
+
+`protect.js` takes out, before the parse:
+
+| Region | Why |
+|---|---|
+| fenced and inline code | prose *about* a tag is not a tag |
+| image tags (`[IMG:…]`, `<img data-iig-…>`) | they render as app UI, and their order is `data-img-index` (INV-IG6) |
+| markdown images | the wrapper, the picture and the options button are one positioned card |
+| `<think>` blocks | the model's own panel, rendered recursively |
+| style markers (`==hc:…==`, `**…**`) | a marker may span a tag, and a parsed marker is two text nodes with an element between them |
+
+A region comes back as one unit after phase B. Do not emit its markup into the
+text mid-pipeline: whatever pass runs next will take it apart.
+
+---
+
+## Markers are inline, always — and they come from a run, not from the message
+
+`renderStyledSegment()` renders a marker's content through
+`formatInlineMasked()`, which cannot produce a block element. A `<p>` inside a
+marker's `<span>` is markup the browser throws straight back out — the marker
+then shows as empty text. See `docs/markdown-markers.md` for the marker list
+itself.
+
+Markers are taken in `formatRun` (`dom_format.js`), from the string that pass
+has already built: one container's text nodes escaped, its inline elements
+replaced by `E_n` placeholders. That string holds no markup at all, which is
+what makes the scan safe. Three properties follow from *where* it runs, not
+from anything the scan checks:
+
+* a marker cannot reach across a block element, because a block element ends
+  the run;
+* a marker cannot open inside an element and close outside it, because those
+  are two different runs;
+* a marker cannot reach inside `<pre>`, `<script>` or `<style>`, because those
+  are `OPAQUE` and never get a run.
+
+It still runs before `applyBlockSyntax`, not per line: `==hc:#fff==` matches
+with `s` and may wrap several lines, and the block pass formats a line at a
+time.
+
+**This is the pass that used to be the exception.** It ran before the parse, on
+the raw message, with tags masked — and every property above was something it
+had to guess. A `*` a model wrote before a regex-built card and the `*` the
+script's capture pulled into the card matched as one emphasis run over the
+whole card, taking its `<style>` with it; the same scan reached inside a `<pre>`
+the block pass never formats, so the run it held was never restored and the
+leak sweep deleted it. Do not move it back in front of the parse: there is now
+no markdown pass anywhere that reads a string containing live HTML.
+
+---
+
+## The render window is never allowed to leave the viewport
+
+The list is virtualised (`useVirtualScroll.js`): only a window of rows is
+mounted, and an `IntersectionObserver` grows that window as rows come into
+view. The observer is a *local* mechanism — it can only report on rows that
+are already mounted and within its `1000px` margin. So the one state it cannot
+recover from is the window drifting entirely off the viewport: nothing is near
+enough to report, `visibleIndices` empties, and there is no visible index left
+to grow the window from. The chat renders nothing, and no amount of scrolling
+brings it back — only a fresh `setMessages`, which is why the symptom was
+"open another chat and come back".
+
+Three things move the rows out from under a scroll position that does not move
+with them: a delete or an append rewrites the spacers, a late height correction
+(images, fonts, badges) rewrites them again from the `ResizeObserver`, and a
+fast scroll can outrun the observer entirely.
+
+So every one of those paths ends at `_recoverIfViewportIsBlank()`, and the
+recovery it runs (`_recenterOnScrollPosition`) is derived from the scroll
+position and the height cache alone — it needs neither an observer entry nor a
+mounted row. It moves the window and never `scrollTop`, so a `scrollToBottom`
+or a streaming `smartScroll` already in flight still lands where it meant to.
+
+Two rules follow, and `specs/virtual_window.spec.js` holds them:
+
+* **no early return may leave the list with nothing rendered.** `updateWindow`
+  returning on an empty `visibleIndices` is exactly the bug above.
+* **anything that renumbers `items` renumbers the observer's index sets too.**
+  The observer reports an index, not an id. `remove` and `prepend` shift
+  `visibleIndices` / `realVisibleIndices` the same way they shift the height
+  cache; a set left on the old numbering points the next `updateWindow` at
+  somebody else's row, and past the end of the list once enough rows go.
+
+---
+
+## A jump lands by measuring the target, never by summing the cache
+
+Everything the height cache holds for a row that has never been mounted is a
+guess — `estimateHeight`, or the coarse bands in `_estimateHeight`. So a jump
+(`scrollToIndex`) mounts a window around the target first, then reads the row's
+real rect and scrolls by the *delta* to centre it. A delta stays correct however
+far the spacers have drifted from what the cache thought they were; an absolute
+offset summed out of the cache is wrong by whatever the guesses were wrong by,
+which in a chat of long messages is screens, not pixels.
+
+Landing once is not enough either. Two things move the rows out from under a
+landing with no scroll event to follow: the observers replacing estimates with
+measurements (which rewrites the top spacer under a scroll position that does
+not move with it) and late reflow from images, fonts and badges. So a jump is a
+**settle**, not a scroll — `_settleOn` re-measures and re-corrects across the
+same window the rest of the list uses for late height changes, and only then
+hands the list back to `updateWindow`.
+
+Three rules follow, and `specs/search_navigation.spec.js` holds them:
+
+* **one thing writes `scrollTop` per landing.** A caller that needs to aim at
+  something *inside* the row — the active search hit, which lives in the row's
+  shadow root — hands that node to the jump as `fineTarget` and lets every
+  correction pass aim at it. A second scroll of its own afterwards (what
+  `scrollIntoView` on the highlight used to be) races the corrections, and the
+  hit ends up anywhere but in view.
+* **the reader outranks a settle.** A wheel notch or a touch retires it, as does
+  any other scroll entry point (`scrollToBottom`, `scrollToTop`, `refresh`,
+  `restoreAnchor`), so two of them are never in flight at once.
+* **`_recoverIfViewportIsBlank` stands down while a settle runs.** It is the
+  weaker recovery of the two: it maps a scroll position through a cache that has
+  not caught up yet, which unmounts the row being landed on. The settle re-mounts
+  its target on every pass and runs the blank check itself the moment it
+  finishes, so the invariant above still holds.
+
+---
+
+## A late height correction holds the reader's place
+
+A reply is not measured once. It reaches the page mid-stream, then reflows long
+after: the body finalises, a reasoning box collapses, an image block appears,
+an `<img>` finishes loading. Each correction rewrites the rows below the one
+that changed, under a `scrollTop` that does not move with them — so in a chat of
+long messages the text under the reader slides down the screen, a screenful at a
+time, while the scrollbar stays put. That is the "chat jumped" a post leaves
+behind when it finishes and again when its picture lands.
+
+The `ResizeObserver` pass therefore offsets `scrollTop` by the growth of every
+re-measured row that sits **before the topmost row crossing the viewport top**
+(the reader's anchor). Two things about *how* that anchor is found matter:
+
+* **it is read from the height cache before the loop writes to it, not from the
+  live DOM after.** The row that grew can itself become the first to cross the
+  viewport — its bottom was above the top edge and now is not — which would hide
+  that it sits above the reader and drop the correction entirely.
+* **a row replaced, not resized, carries no growth to offset.** `update()`
+  writes a `0` sentinel to force a fresh measurement; that transition is skipped.
+
+The offset is skipped while the list is bottom-pinned (the follow owns the
+scroll) and for an editing row (the browser reveals the caret). It writes
+`_lastScrollTop` with the new offset, so the scroll event it queues is not read
+as the reader scrolling. `specs/reading_position.spec.js` holds this.
+
+**A row's first measurement after it mounts is not a reflow.** Where the engine
+anchors natively (`CSS.supports('overflow-anchor', 'auto')` — Chromium, so the
+Android WebView and WebView2), the browser already moves `scrollTop` when rows
+mount above the viewport at real heights the spacer only estimated. An offset
+of our own on top of that moved the reader twice; during a touch fling on
+Android it stopped the fling dead and threw the reader back onto messages they
+had already passed. So `renderDOM` marks what it mounts
+(`_awaitingFirstMeasure`), and that first entry is left to the browser. Only a
+row that changes height *while mounted* is offset there — the case native
+anchoring does not hold. WebKit has no native anchoring, so it offsets every
+change; the specs run both ways.
+
+---
+
+## A page of older messages goes in above the reader without moving them
+
+`prependMessages` puts the rows in above the viewport as spacer, at estimated
+heights. Two things follow:
+
+* **the restore is absolute.** It sets `scrollTop` to where it was plus the
+  growth, never `+=`: native anchoring may already have moved it by the time
+  the layout read returns, and adding the growth again threw the reader a whole
+  page down.
+* **the window grows over the new rows straight away** (`updateWindow()` after
+  the restore). `prepend` keeps the window on the rows already on screen, and
+  the observer does not grow it until one of them changes visibility — with
+  long replies, not before the reader has scrolled into the spacer, seen an
+  empty chat and had the blank-viewport recovery rebuild the window from the
+  estimates.
+
+The header tracker reads this growth too: content added above the reader moves
+`scrollTop` without moving the reader, so its baseline follows the row at the
+top of the screen rather than the raw offset. Otherwise every load-more hid the
+header and the next upward flick showed it again.
+`specs/load_older_scroll.spec.js` holds all three.
+
+---
+
+## State that has to reach the whole chat is written to `items`, not the document
+
+`document.querySelectorAll('.message-section')` is the twenty-odd rows the list
+has mounted, not the chat. And the list re-mounts the element it built once
+rather than re-rendering it, so a row that was outside the window when the
+write happened never gets a second chance at it.
+
+Anything whose truth spans the whole chat therefore goes through
+`virtualList.items` — `Bridge._allMessageSections()` for elements,
+`Bridge._orderedMessageIds()` for ids. Selection is the case that taught this:
+"select everything above" already walked the item order, so the toolbar counted
+messages the reader then scrolled back to and found unselected, in a chat that
+did not look like it was in selection mode at all
+(`specs/selection_window.spec.js`).
+
+Class writes that only ever concern one section — `applyClassesToSection` at
+render time, the editing section, the flash highlight — stay where they are.
+
+---
+
+## Walking the search hits moves a class, not the chat
+
+`setSearch` re-formats and rewrites the shadow body of **every message in the
+chat**. That is the right thing when the query changes; it is the wrong thing
+for the prev/next arrows, which change one thing only — which highlight is
+active. Doing the full pass per press costs hundreds of milliseconds on a long
+chat, and the presses arrive faster than the passes finish, which is what made
+the arrows look dead.
+
+So an active-index-only change takes `_moveActiveMatch`: re-collect the
+highlight nodes in the numbering the last pass gave them (message order,
+reasoning before body), move the `active-search-match` class, reveal. The count
+check is what keeps it honest — when the highlights in the page are not the set
+the last pass numbered, the full pass runs instead of a class landing on the
+wrong word.
+
+---
+
+## A variation moves as one piece, and the footer does not move at all
+
+The reply body is not the variation. `.msg-content-stack` holds the reasoning
+box, the in-game clock, `.msg-transition-wrapper > .msg-body` and the footer as
+**siblings**, so a transform on `.msg-body` alone slides the reply out from
+under everything stacked above it — the message tears in half mid-swipe, and a
+finger that started on the reasoning box drags a bubble it is not touching.
+
+`SWIPE_TARGET_SELECTORS` in `bridge/swipe_gesture_handler.js` is the list of
+what moves: `.msg-reasoning`, `.msg-game-time`, `.msg-body`. Both paths use it —
+the touch gesture (`onStart` resolves it once and `onMove`/`onEnd` style the
+whole set) and `animateVariantSwap`, which the prev/next arrows and the guided
+swipe call. Adding another element to the stack means adding it here too.
+
+Two consequences worth keeping:
+
+* **The footer stays put.** Its switcher and actions button have to remain
+  under the thumb while the content moves, so it is deliberately not a target.
+* **Each target locks its own height.** Variations differ in length, and one
+  may have reasoning where the next has none, so the swap measures and animates
+  per element; the sum is what keeps the page from jumping. The run guard
+  (`section._variantSwap`) lives on the **section**, not on the body, because
+  the set of moving elements changes between variations — the body is not a
+  stable place to find the run that has to be aborted.
+
+Covered by `specs/variant_swap_targets.spec.js`.
+
+---
+
+## A user message wears the persona it was sent as, not the active one
+
+Every user message stores the persona it was sent under — `personaId` and
+`personaName` (`ChatNotifier._sendMessage`). By the time the map reaches the
+page that id is already resolved against the live roster
+(`ChatBridgeController.setPersonaRoster`):
+
+* the persona still exists → the map carries its `avatarUrl` and its *current*
+  name, so renaming a persona renames the messages it sent;
+* it was deleted, or has no picture → `avatarFallback: true`, and the message
+  keeps the name stored on it while the avatar drops to the initial letter.
+
+Either way the renderer stamps `data-avatar-pinned` on the section, and
+`setIdentity` — which repaints every avatar in the DOM — skips the pinned ones.
+Without that skip, switching persona re-faces the whole history, and a message
+from a deleted persona borrows the picture of whoever is active now.
+`specs/message_persona.spec.js` holds this.
+
+A message written before personas were stamped carries neither field: it is
+unpinned and keeps following the active identity, which is all there is to go
+on for it.
+
+---
+
+## The message body renders into a shadow root
+
+`.message-content` gets an open shadow root (`message_renderer.js`), which is
+what keeps a card's CSS out of the app chrome. What a card may rely on inside
+that root is a fixed list, not a guess: `renderer/message_document.js` and
+`docs/INVARIANTS.md` § 11 (INV-MR1…INV-MR8). Add to that contract rather than
+shimming one more case where it happens to be needed.

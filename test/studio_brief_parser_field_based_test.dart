@@ -7,8 +7,8 @@ void main() {
   final logs = <String>[];
   final narrativeAgent = const StudioAgent(
     id: 'narrative',
+    controllerId: 'narrative',
     name: 'Narrative / Pacing / Style Controller',
-    sourceBlockNames: 'narrative_task',
   );
 
   setUp(() {
@@ -29,7 +29,10 @@ target_paragraphs: 6-10
 stop_point: After Claire asks what Danvi wants
 avoid_repeating: bar atmosphere paragraphs, neon descriptions
 ''';
-      final result = parser.sanitizeIntermediateAgentOutput(narrativeAgent, raw);
+      final result = parser.sanitizeIntermediateAgentOutput(
+        narrativeAgent,
+        raw,
+      );
 
       expect(result, contains('Focus:'));
       expect(result, contains('beat_type: social'));
@@ -47,7 +50,10 @@ avoid_repeating: bar atmosphere paragraphs, neon descriptions
 
     test('returns null for single field (not enough signal)', () {
       const raw = 'beat_type: social\n';
-      final result = parser.sanitizeIntermediateAgentOutput(narrativeAgent, raw);
+      final result = parser.sanitizeIntermediateAgentOutput(
+        narrativeAgent,
+        raw,
+      );
 
       // Single field → recognized < 2 → falls through to fallback.
       expect(logs, isNotEmpty);
@@ -60,7 +66,10 @@ beat_type: combat
 custom_field: some value
 another_field: another value
 ''';
-      final result = parser.sanitizeIntermediateAgentOutput(narrativeAgent, raw);
+      final result = parser.sanitizeIntermediateAgentOutput(
+        narrativeAgent,
+        raw,
+      );
 
       expect(result, contains('Focus:'));
       expect(result, contains('beat_type: combat'));
@@ -82,7 +91,10 @@ Constraints:
 Avoid:
 - Neon descriptions
 ''';
-      final result = parser.sanitizeIntermediateAgentOutput(narrativeAgent, raw);
+      final result = parser.sanitizeIntermediateAgentOutput(
+        narrativeAgent,
+        raw,
+      );
 
       expect(result, contains('Focus:'));
       expect(result, contains('Beat: social'));
@@ -99,7 +111,10 @@ Avoid:
 beat_type: social
 *Она ставит стакан на столешницу с глухим стуком.*
 ''';
-      final result = parser.sanitizeIntermediateAgentOutput(narrativeAgent, raw);
+      final result = parser.sanitizeIntermediateAgentOutput(
+        narrativeAgent,
+        raw,
+      );
 
       expect(logs, isNotEmpty);
       expect(result, contains('Apply the default'));

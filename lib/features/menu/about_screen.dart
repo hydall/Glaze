@@ -10,8 +10,11 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/constants/app_version.dart';
 import '../../core/services/update_check_coordinator.dart';
 import '../../core/state/dev_mode_provider.dart';
+import '../../shared/shell/desktop/desktop_floating_provider.dart';
+import '../../shared/shell/shell_header_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glaze_scaffold.dart';
+import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/menu_group.dart';
 import '../settings/app_settings_provider.dart';
@@ -29,7 +32,11 @@ class AboutScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final lang = ref.watch(appSettingsProvider).value?.language ?? 'en';
-    final topPad = MediaQuery.of(context).padding.top + 74.0;
+    // Inside the desktop floating window the frame supplies the title bar, so
+    // the space reserved for a header would be a gap.
+    final topPad = DetachedShellHost.of(context)
+        ? 0.0
+        : MediaQuery.of(context).padding.top + 74.0;
 
     return GlazeScaffold(
       title: 'menu_about'.tr(),
@@ -270,10 +277,7 @@ class _UpdatesSectionState extends State<_UpdatesSection> {
                       ? SizedBox(
                           width: 18,
                           height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: cs.primary,
-                          ),
+                          child: GlazeSpinner(color: cs.primary),
                         )
                       : Icon(
                           Icons.refresh_rounded,
@@ -332,7 +336,7 @@ class _AuthorsSection extends StatelessWidget {
           name: 'hydall',
           role: 'about_role_hydall'.tr(),
           initial: 'H',
-          accentColor: const Color(0xFF7996CE),
+          accentColor: const Color(0xFFC42A4A),
           imageAsset: 'assets/hydall.jpg',
         ),
         _AuthorTile(
@@ -343,7 +347,7 @@ class _AuthorsSection extends StatelessWidget {
           imageAsset: 'assets/danvitv.png',
         ),
         _TestersTile(
-          onTap: () => context.push('/menu/about/hall-of-fame'),
+          onTap: () => goOrFloat(context, 'hall-of-fame', push: true),
         ),
       ],
     );

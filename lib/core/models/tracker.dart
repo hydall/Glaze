@@ -11,6 +11,8 @@ abstract class Tracker with _$Tracker {
     @Default('') String value,
     @Default('chat') String scope,
     @Default('') String provenance,
+    @Default(0) int basisRevisionNumber,
+    @Default('') String basisRevisionHash,
     @Default(0) int updatedAt,
   }) = _Tracker;
 

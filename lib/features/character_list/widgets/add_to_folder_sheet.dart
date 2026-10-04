@@ -6,7 +6,7 @@ import '../../../core/state/character_folder_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/sheet_view.dart';
-import 'folder_name_dialog.dart';
+import '../../../shared/widgets/folder_name_dialog.dart';
 
 /// Multi-select sheet to toggle a character's folder memberships. A character
 /// may be in many folders; tapping a row toggles that membership immediately

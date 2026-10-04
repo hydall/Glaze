@@ -64,6 +64,7 @@ String? buildArcContent(
 
   final completed = <String>[];
   final active = <String>[];
+  final paused = <String>[];
 
   for (final arcId in arcFields.keys) {
     final f = arcFields[arcId]!;
@@ -72,10 +73,8 @@ String? buildArcContent(
     final summary = f['summary'] ?? '';
     final title = f['title'] ?? arcId;
 
-    if (status == 'completed' ||
-        status == 'failed' ||
-        status == 'abandoned' ||
-        status == 'superseded') {
+    final lifecycle = mapLegacyArcLifecycle(status);
+    if (lifecycle == ArcLifecycleCompatibility.terminal) {
       // Include completed arcs with do_not_reopen OR if their title/summary
       // is mentioned in the latest user message.
       final mentioned =
@@ -91,14 +90,16 @@ String? buildArcContent(
       if (doNotReopen || mentioned) {
         completed.add(arcId);
       }
+    } else if (lifecycle == ArcLifecycleCompatibility.paused) {
+      paused.add(arcId);
     } else {
-      // active/seeded/paused — include if entities/title mentioned or
-      // no filter needed (all active arcs are relevant for near-term)
+      // Unknown values intentionally retain legacy non-terminal behavior. In
+      // particular, "resolved" is not reinterpreted without migration.
       active.add(arcId);
     }
   }
 
-  if (completed.isEmpty && active.isEmpty) return null;
+  if (completed.isEmpty && active.isEmpty && paused.isEmpty) return null;
 
   final buf = StringBuffer();
   buf.writeln('<arc_state>');
@@ -138,6 +139,33 @@ String? buildArcContent(
     }
   }
 
+  if (paused.isNotEmpty) {
+    buf.writeln('\nPaused (continuity only; not an immediate scene task):');
+    for (final id in paused..sort()) {
+      final f = arcFields[id]!;
+      final title = f['title'] ?? id;
+      final summary = f['summary'] ?? '';
+      buf.write('- $title');
+      if (summary.isNotEmpty) buf.write(': $summary');
+      buf.writeln();
+    }
+  }
+
   buf.write('</arc_state>');
   return buf.toString().trim();
 }
+
+enum ArcLifecycleCompatibility { active, paused, terminal }
+
+/// Explicit compatibility map for persisted arc values. Only statuses already
+/// terminal in the legacy formatter are terminal. New vocabulary (including
+/// `resolved`) must be migrated before it can gain tombstone semantics.
+ArcLifecycleCompatibility mapLegacyArcLifecycle(String status) =>
+    switch (status.trim().toLowerCase()) {
+      'completed' ||
+      'failed' ||
+      'abandoned' ||
+      'superseded' => ArcLifecycleCompatibility.terminal,
+      'paused' => ArcLifecycleCompatibility.paused,
+      _ => ArcLifecycleCompatibility.active,
+    };

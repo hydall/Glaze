@@ -49,9 +49,13 @@ lib/
 │   ├── constants/
 │   │   └── image_gen_patterns.dart     # IMG-tag regex constants
 │   ├── db/
-│   │   ├── app_db.dart                 # AppDatabase singleton (26 tables, schema v81)
-│   │   ├── tables.dart                 # Drift table class definitions
-│   │   └── repositories/              # One repo per table (CRUD only)
+│   │   ├── app_db.dart                 # AppDatabase composition root (56 tables, schema v130)
+│   │   ├── migrations/                 # Integrity, Studio legacy, and version-range upgrades
+│   │   ├── studio_preset_seed.dart     # Historical/default Studio preset seed data
+│   │   ├── tables.dart                 # Barrel for seven domain table parts
+│   │   ├── tables/                     # Character/chat, memory, ledger, canon/rewrite,
+│   │   │                               # Studio/presets, lorebooks, and extensions
+│   │   └── repositories/              # Persistence APIs and transactional aggregates
 │   │       ├── api_config_repo.dart
 │   │       ├── character_repo.dart
 │   │       ├── character_folder_repo.dart
@@ -104,7 +108,7 @@ lib/
 │   │   ├── memory_embedding_service.dart   # Indexes memory entries into embedding store
 │   │   ├── memory_injection_service.dart   # Scores + selects memory entries for injection
 │   │   ├── memory_budget.dart         # INV-PS4 token cap for memory injection
-│   │   ├── glaze_matcher.dart         # Pure regex keyword matching (3 whole-word modes)
+│   │   ├── glaze_matcher.dart         # Pure regex keyword matching (3 whole-word modes, ST `/pattern/flags` keys)
 │   │   ├── regex_service.dart         # Applies PresetRegex scripts to a string
 │   │   ├── preset_macro_attribution.dart # Preset macro source attribution (debug)
 │   │   ├── sse_client.dart           # SSE + non-streaming completions via Dio
@@ -112,6 +116,7 @@ lib/
 │   │   ├── response_normalizer.dart  # Extracts content from non-streaming response body
 │   │   ├── summary_service.dart      # Reads/writes summaries, triggers LLM regeneration
 │   │   ├── tokenizer.dart            # estimateTokens() with LRU cache, base64 stripping
+│   │   ├── request_tokens.dart       # countRequestTokens(): one rule for the inspector's next and captured requests
 │   │   ├── macro_engine.dart         # SillyTavern-compatible macro replacement engine
 │   │   ├── memory_formatting.dart    # Shared formatMemoryItems / formatMemoryRange helpers
 │   │   ├── vector_math.dart          # cosineSimilarity, findTopK, findTopKMulti, BLOB helpers
@@ -134,8 +139,8 @@ lib/
 │   │   │   ├── audit_prompt_builder.dart    # Audit prompt builder + JSON parser
 │   │   │   └── cleaner_text_guard.dart      # Text rewrite protection guards
 │   │   ├── studio/                   # Studio pipeline specialists (extracted Phases 5, 7-9)
-│   │   │   ├── studio_tracker_phase_runner.dart # Pre-gen tracker phase runner
-│   │   │   ├── studio_tracker_result_mapper.dart # Tracker result → brief mapper
+│   │   │   ├── controller_phase_runner.dart # Pre-gen controller phase owner
+│   │   │   ├── controller_result_mapper.dart # Controller result → brief mapper
 │   │   │   ├── studio_history_limiter.dart  # History truncation for agents
 │   │   │   ├── studio_brief_macro_renderer.dart # Studio brief macro rendering
 │   │   │   ├── studio_runtime_block_expander.dart # Runtime block content expansion
@@ -146,10 +151,16 @@ lib/
 │   │   │   ├── memory_catalog_matcher.dart  # Catalog/keyword matching
 │   │   │   ├── memory_chunker.dart          # Text chunking + sentence splitting
 │   │   │   └── excerpt_scorer.dart          # Excerpt scoring helpers
-│   │   ├── ledger/                   # Studio Ledger specialists (extracted Phase 7)
-│   │   │   ├── ledger_op_applier.dart       # Ledger op application
-│   │   │   ├── visible_ledger_store.dart    # Visible ledger storage
-│   │   │   └── ledger_provenance.dart       # Ledger provenance builder
+│   │   ├── ledger/                   # Studio Ledger execution and commit specialists
+│   │   │   ├── ledger_canon_authority.dart  # Canon/currentness authority
+│   │   │   ├── ledger_in_flight_registry.dart # Shared in-flight operation registry
+│   │   │   ├── ledger_output_recovery.dart  # Parse/recovery policy
+│   │   │   ├── ledger_prompt_factory.dart   # Turn prompt construction
+│   │   │   ├── ledger_run_diagnostics.dart  # Attempt and outcome diagnostics
+│   │   │   ├── ledger_turn_runner.dart / ledger_turn_committer.dart
+│   │   │   ├── ledger_reconciliation_runner.dart / ledger_reconciliation_committer.dart
+│   │   │   ├── ledger_replacement_basis_resolver.dart
+│   │   │   └── ledger_op_applier.dart / ledger_provenance.dart / ledger_run_result.dart
 │   │   └── shared/                   # Shared utilities across services
 │   │       └── message_range_formatter.dart # Unified message range formatting
 │   ├── llm/converters/               # Protocol-specific message converters (pure)
@@ -157,27 +168,38 @@ lib/
 │   │   ├── gemini_messages.dart      # Google Gemini shape
 │   │   ├── openrouter_messages.dart  # OpenRouter (Anthropic/OpenAI passthrough)
 │   │   ├── message_merger.dart       # Consecutive same-role message merging
+│   │   ├── prompt_post_processing.dart # SillyTavern prompt post-processing modes (merge/semi/strict/single)
 │   │   ├── attachment_encoder.dart   # Image/file → provider attachment payload
 │   │   ├── cache_breakpoint_marker.dart # Anthropic/OpenRouter cache_control placement
-│   │   └── thinking_budget.dart      # Extended-thinking budget mapping per protocol
+│   │   ├── thinking_budget.dart      # Extended-thinking budget mapping per protocol
+│   │   └── reasoning_effort.dart     # Effort step → per-protocol wire value
 │   ├── llm/transport/                # LLM HTTP/SSE transports (one per protocol)
 │   │   ├── chat_transport.dart       # Abstract ChatTransport interface
 │   │   ├── chat_transport_request.dart # Shared request value object
-│   │   ├── llm_protocol.dart         # Protocol enum (openai/anthropic/gemini/openrouter)
-│   │   ├── transport_factory.dart    # ApiConfig.protocol → ChatTransport (wraps in LoggingChatTransport)
+│   │   ├── llm_protocol.dart         # Protocol enum (openai/openai_responses/anthropic/gemini/openrouter)
+│   │   ├── transport_factory.dart    # ApiConfig.protocol → ChatTransport (wraps in PostProcessingChatTransport + LoggingChatTransport)
 │   │   ├── llm_request_dump.dart     # Diagnostics: dump every outgoing LLM request to JSONL (off by default)
+│   │   ├── post_processing_chat_transport.dart # Applies ApiConfig.promptPostProcessing before the protocol converter
+│   │   ├── endpoint_normalizer.dart  # User-typed endpoint → real request URL (scheme/typo/version repair)
+│   │   ├── known_api_hosts.dart      # Canonical base path per provider host (openrouter → /api/v1, perplexity → root)
+│   │   ├── endpoint_resolution_cache.dart # Remembers which candidate URL answered
+│   │   ├── endpoint_preview.dart     # "this endpoint will call …" caption for the settings field
 │   │   ├── openai_chat_transport.dart
+│   │   ├── openai_responses_transport.dart # OpenAI Responses API (`/responses`)
 │   │   ├── anthropic_chat_transport.dart
 │   │   ├── gemini_chat_transport.dart
 │   │   └── openrouter_chat_transport.dart
 │   ├── navigation/
 │   │   └── router.dart               # GoRouter routes + shell (used by app.dart)
 │   ├── platform/                     # Platform-specific integrations
+│   │   ├── clipboard_images.dart     # Clipboard → image data URLs (bitmap + copied files)
 │   │   ├── haptics.dart              # Haptic feedback helpers
 │   │   ├── system_settings.dart      # OS settings (wallpaper, dark mode)
 │   │   └── wallpaper.dart            # Device wallpaper fetch
 │   ├── services/                     # Business logic services (no UI, no Riverpod ref)
 │   │   ├── character_importer.dart   # Parses PNG/JSON/YAML V1/V2 character cards
+│   │   ├── character_bulk_import_service.dart # Mass import: one card at a time (read → parse → persist → release), yields between cards
+│   │   ├── character_import_write_buffer.dart # Buffers imported rows into chunked transactions (one list refresh per chunk)
 │   │   ├── character_exporter.dart   # Exports character to PNG (tEXt chunk) or JSON
 │   │   ├── character_book_converter.dart # character_book JSON ↔ Lorebook model
 │   │   ├── image_storage_service.dart    # Avatars + thumbnails on disk
@@ -209,13 +231,23 @@ lib/
 │   │   │   ├── type_converters.dart          # ST→Glaze type conversions
 │   │   │   └── service_prefs_writer.dart     # Writes imported prefs to SharedPreferences
 │   │   ├── migration_service.dart    # Migrates legacy Glaze-JS data to Drift DB
+│   │   ├── card_rewriter/             # Manual rewrite + Automated Card Evolution
+│   │   │   ├── automated_card_evolution_service.dart # Compatibility facade
+│   │   │   ├── card_evolution_collector_coordinator.dart
+│   │   │   ├── card_evolution_writer_coordinator.dart
+│   │   │   ├── observation_response_parser.dart
+│   │   │   ├── card_evolution_diagnostics.dart
+│   │   │   ├── durable_writer_call_runner.dart
+│   │   │   └── writer_context_consolidator.dart
 │   │   ├── preset_defaults.dart      # Ensures mandatory blocks exist in imported presets
 │   │   ├── preset_seeder.dart        # Seeds built-in "Glaze Default" preset on first launch
 │   │   ├── png_text_extractor.dart   # Reads tEXt chunks from PNG byte stream
 │   │   ├── chat_import_export.dart   # Import/export individual chat sessions as JSONL
 │   │   ├── file_export_service.dart  # Platform-aware file export (file_selector / share)
 │   │   ├── deep_link_service.dart    # Listens for OAuth deep-link URIs
-│   │   ├── generation_notification_service.dart # Android foreground/background notifications
+│   │   ├── generation_notification_service.dart # When to notify: lifecycle, active chat, foreground leases
+│   │   ├── notifications/
+│   │   │   └── message_notification_presenter.dart # How to notify: plugin init + one notification, per platform
 │   │   ├── memory_prompt_presets.dart           # Built-in memory prompt templates
 │   │   └── onboarding_service.dart   # Completion check + showOnboarding (UI in features/onboarding/)
 │   ├── import/
@@ -249,6 +281,9 @@ lib/
 ├── features/
 │   ├── chat/
 │   │   ├── chat_provider.dart        # ChatNotifier: state owner; delegates to controllers + pipeline
+│   │   ├── composer_pins_provider.dart # What sits in the row under the composer (actions/replies/tools)
+│   │   ├── composer_empty_action_provider.dart # What the send button runs while the composer is empty (default: impersonate)
+│   │   ├── quick_replies_provider.dart # The Actions tab's user-written replies
 │   │   ├── chat_state.dart           # ChatState + StreamingState value objects
 │   │   ├── editing_message_provider.dart # Tracks which message is being edited
 │   │   ├── chat_screen.dart          # UI: WebView + ChatInputBar + header
@@ -274,10 +309,11 @@ lib/
 │   │   │   ├── stream_generation_service.dart # SSE + prompt build + stream accumulate + save
 │   │   │   ├── image_gen_processor.dart
 │   │   │   ├── magic_drawer_layout_service.dart
-│   │   │   └── magic_drawer_stats_service.dart
+│   │   │   ├── magic_drawer_stats_service.dart
+│   │   │   └── drawer_item_launcher.dart # Opens a Tools card's sheet by id (drawer + pinned row)
 │   │   ├── bridge/                       # WebView ↔ Flutter bridge
 │   │   │   ├── chat_bridge_controller.dart  # Host: shared state + iterates bridgeHandlers
-│   │   │   ├── bridge_handlers.dart         # Single source of truth: 27 JS handler names
+│   │   │   ├── bridge_handlers.dart         # Single source of truth: 40 JS handler names
 │   │   │   ├── bridge_message_commands.dart # set/append/update/remove messages, scroll
 │   │   │   ├── bridge_theme_commands.dart   # applyTheme, fonts, background, performance
 │   │   │   ├── bridge_identity_commands.dart # setIdentity, applyLayout, regex context
@@ -290,8 +326,8 @@ lib/
 │   │   │   └── message_dto.dart
 │   │   ├── state/
 │   │   │   ├── chat_body_selectors.dart # batteryAware dual-read helper
-│   │   │   ├── cached_token_breakdown.dart
-│   │   │   └── token_breakdown_cache.dart
+│   │   │   ├── chat_drawer_editing_provider.dart # Drawer edit mode; also drives the composer row
+│   │   │   └── cached_token_breakdown.dart
 │   │   ├── utils/
 │   │   │   └── message_preview.dart   # Notification preview text helper
 │   │   └── widgets/                      # Chat UI widgets (sheets, header, webview, etc.)
@@ -324,6 +360,20 @@ lib/
 │   ├── personas/                     # Persona UI screens + provider
 │   ├── backup/                       # Backup UI screen + provider
 │   ├── catalog/                      # Character discovery: UI + provider + API services
+│   │   ├── services/datacat/         # DataCat Client API (v1): discovery, cards, creators, community, account
+│   │   │                             # Contract vendored at docs/external/DATACAT_CLIENT_API{.md,.openapi.json}
+│   │   │   ├── datacat_client.dart   # Base URL, client id, installation id, headers, request wrappers
+│   │   │   ├── datacat_errors.dart   # Structured API failures (code, message, verification instructions)
+│   │   │   ├── datacat_models.dart   # Paging, capabilities, creator profile, kudos, device flow
+│   │   │   ├── datacat_sort.dart     # Sort field + time window, and the pre-API sort-key migration
+│   │   │   ├── datacat_discovery.dart # /capabilities, /characters, /fresh, /tags
+│   │   │   ├── datacat_cards.dart    # Leased Character Card V2 + image transfers
+│   │   │   ├── datacat_verification.dart # Hosted human verification, transfer-lease store
+│   │   │   ├── datacat_creators.dart # Creator bootstrap + paged characters
+│   │   │   ├── datacat_community.dart # Kudos and comments (read anonymous, write as linked user)
+│   │   │   └── datacat_account.dart  # Device-link flow, account status, revoke
+│   │   ├── services/datacat_provider.dart # URL extraction only — the Client API has no indexing endpoint
+│   │   └── widgets/datacat/          # Verification sheet, account link sheet, creator screen, community section
 │   ├── character_list/               # Character list/detail/editor screens + widgets
 │   ├── character_gallery/            # Gallery screen + provider
 │   ├── regex/                        # Global regex list screen
@@ -360,13 +410,14 @@ lib/
 │   │   ├── shell_screen.dart         # Bottom nav shell (GoRouter StatefulNavigationShell)
 │   │   ├── nav_height_provider.dart  # navHeightProvider: nav bar height for layout
 │   │   ├── shell_header_provider.dart
-│   │   └── desktop/                  # Desktop (≥768px) three-column layout
+│   │   └── desktop/                  # Desktop three-column layout (≥768px wide, landscape on tablets)
 │   │       ├── desktop_shell.dart    # Shell wrapper; left/center/right columns
 │   │       ├── desktop_layout_provider.dart
 │   │       ├── desktop_left_sidebar.dart  # Chat list + nav (replaces bottom nav)
 │   │       ├── desktop_right_sidebar.dart # Tools / MagicDrawer
-│   │       ├── desktop_window_view.dart
-│   │       ├── desktop_floating_provider.dart
+│   │       ├── desktop_window_view.dart     # Floating windows (non-modal) + switcher dock
+│   │       ├── desktop_floating_provider.dart # Window manager: per-window stack, z-order, geometry
+│   │       ├── desktop_window_geometry.dart   # Move/resize math + drag/resize widgets
 │   │       └── desktop_glossary_popup.dart
 │   ├── theme/                        # ThemePreset, storage, provider, fonts, app_colors, app_theme
 │   ├── utils/
@@ -382,10 +433,10 @@ GoRouter lives in `router.dart`, not `app.dart`. Shell tabs and overlay routes:
 
 | Route | Screen |
 |-------|--------|
-| `/` | `ChatHistoryScreen` (mobile); redirects to `/characters` on desktop (width ≥ 768, non-mobile force) |
+| `/` | `ChatHistoryScreen` (mobile); redirects to `/characters` on desktop (window ≥ 768 wide and, on a tablet, landscape; non-mobile force) |
 | `/characters` | `CharacterListScreen` |
 | `/tools` (+ nested `api`, `personas`, `presets`, `regex`, `lorebooks`, `lorebooks/settings`, `embeddings`) | `ToolsScreen` |
-| `/menu` (+ `settings`, `themes`, `about`, `glossary`) | `MenuScreen` |
+| `/menu` (+ `settings`, `themes`, `about`, `glossary`) | `MenuScreen` — the header search filters the tab's nested settings; `settings` is one flat screen of themed groups with its own header search, and takes `?highlight=<row id>` so a hit deep-links to the row (`features/menu/search/`) |
 | `/chat/:charId` | `ChatScreen` (query params: `?session=`, `?new=1`, `?msg=`) |
 | `/character/create`, `/character/:charId`, `…/edit`, `…/gallery` | Character CRUD overlays |
 | `/sync` | `SyncSheet` |
@@ -441,10 +492,14 @@ runs independently when image tags exist; neither task updates Studio Ledger.
 5. Inline image-tag processing after the cleaner/Ledger task, using the
    reloaded canonical message
 
-**Continue exception:** `ChatNotifier.continueMessage()` calls
-`ChatGenerationService.generate()` directly and merges text onto the last assistant
-message. It does **not** use `GenerationPipeline` — no image-tag processing, extensions
-post-gen, or pipeline sync notification. See `docs/INVARIANTS.md` INV-CM2.
+**Continue:** `ChatNotifier.continueMessage()` runs this same pipeline with
+`continueTargetId` set. The prompt gains one system turn — *"Expand your latest
+message, continue."* — directly after the reply being extended, so the request
+never leans on provider prefill. Once the stream ends, `_resolveContinuation()`
+merges the generated block into that message, commits it as a single guarded
+message write, and runs the ordinary post-gen tail against it. A failed
+continuation writes nothing to the message and surfaces as the `Continue Failed`
+toast. See `docs/INVARIANTS.md` INV-CM1–INV-CM6.
 
 **Talkativeness:** `sendMessage()` may skip generation when
 `character.extensions['talkativeness']` rolls above the configured threshold.
@@ -461,14 +516,84 @@ to a detached, immutable `List<RuntimePromptBlock>` before entering core prompt
 code. The two core orchestrators still receive `Ref` for core providers; this is
 a dependency-direction boundary, not a claim that prompt collection is pure.
 
+### Prompt post-processing
+
+**Files:** `core/llm/converters/prompt_post_processing.dart`,
+`core/llm/transport/post_processing_chat_transport.dart`
+
+`ApiConfig.promptPostProcessing` reshapes the finished, OpenAI-shaped message
+array *after* the prompt is built and *before* the protocol converter runs. It
+is a port of SillyTavern's `postProcessPrompt` / `mergeMessages`, and it uses
+ST's own mode identifiers so prompts stay portable:
+
+| Mode | Effect |
+|------|--------|
+| `none` (default) | Nothing — messages go out as built |
+| `merge` | Squashes consecutive same-role messages |
+| `semi` | `merge` + every system message after the first becomes `user` |
+| `strict` | `semi` + a filler user turn so the prompt opens on `user` |
+| `single` | Collapses the whole conversation into one `user` message |
+| `merge_tools` / `semi_tools` / `strict_tools` | Same, keeping tool calls and tool results instead of stripping them |
+
+It lives on the API connection, not the prompt preset: whether an endpoint
+accepts several system blocks or non-alternating roles is a property of the
+endpoint. It replaces the preset-level `mergePrompts` flag, which squashed
+adjacent non-assistant *blocks* at build time. DB migration v118 only adds the
+column with `none`; it deliberately does not infer a connection setting from
+any active preset.
+
+**Offered for `custom_chat_completion` only.** Every first-party protocol
+already normalizes what its wire format demands inside its own converter — the
+Anthropic and Gemini ones lift the leading system run into the native system
+field, demote mid-prompt system turns to `user`, and squash same-role
+neighbours (equivalent to `semi`). A custom endpoint is the one case Glaze
+cannot know the shape of. `ApiConfigDraft.normalizeValues` clears the mode for
+every other protocol so a hidden control can never reshape a prompt.
+
+The picker shows one row per **family** (`none` / `merge` / `semi` / `strict` /
+`single`) and stores `PromptPostProcessing.withTools(...)`, so a prompt that
+starts carrying tool traffic keeps it rather than silently losing every call.
+Glaze sends no tool definitions today — the agentic-memory service, the only
+consumer, is disabled — which is why both halves of a pair are currently
+indistinguishable. The no-tools halves stay implemented and reachable for
+values imported from ST; `PromptPostProcessing.baseOf(...)` maps either half
+back to its family for labels and the picker's checkmark.
+
+`pickChatTransport` wraps every transport in `PostProcessingChatTransport`, so
+the pass runs exactly once, for every caller, before any provider-specific
+rewrite. `previousMessages` gets the same pass so cache-breakpoint hashes still
+match. Every mode is idempotent, and the rewritten request carries
+`promptPostProcessing: 'none'` so it can never be applied twice. The prompt
+preview builds bodies without a transport, so it calls
+`PostProcessingChatTransport.applyTo` itself.
+
+`single` would otherwise erase who spoke each chat turn when all roles become
+one `user` message. Chat-aware callers therefore attach effective `charName`
+and `userName` as request-only metadata. The post-processing decorator prefixes
+assistant and user text with those labels for both `messages` and
+`previousMessages`; the names are not stored in `ApiConfig`, serialized as a
+wire field, or added globally as `message.name`.
+
+The Prompt Inspector shows the same reshaped conversation in its **formatted**
+view, not just in the raw JSON:
+`features/chat/services/prompt_preview_post_processor.dart` replays the pass
+over the built `PromptMessage` list and returns one `PreviewMessage` per
+outgoing message, each carrying the blocks that were folded into it (so a
+merged card can show the union of their section flags, their joined block
+names, every attachment, and a badge with the block count). It never
+re-implements the rules: it runs the real `postProcessPrompt` over placeholder
+content — one unique token per built message — and reads the tokens back out of
+the result to recover which blocks landed where.
+
 ### Request Types
 
 | Type | State owner | Streaming | Abort |
 |------|-------------|-----------|-------|
 | Chat | `ChatState.isGenerating` per `charId` | Yes (SSE) | `AbortHandler`: `CancelToken` + `_activeGenId` |
 | Image gen | `ChatState.isGeneratingImage` + `_imgGenCancelToken` | No (one-shot) | `_imgGenCancelToken` in `ChatNotifier` |
-| Summary | Widget-local in `summary_sheet.dart` | No | Widget-scoped `CancelToken` |
-| Memory draft | `MemoryDraftGenerationController` (delegated by `MemoryBookController`) | No | Per-draft `CancelToken`; mutex via `memory_active_drafts_provider` |
+| Summary (manual) | Widget-local in `summary_tab.dart` | No | Not abortable (INV-S2). Runs on the Memory slot (`memoryBookApi`), like memory drafts |
+| Summary (auto) | `AutoSummaryStage`, from `PostGenCoordinator` | No | Not abortable (INV-S2) |
+| Memory draft | `memoryDraftJobsProvider` (app-scoped; the memory sheet only starts and reads it) | No | Per-draft `CancelToken`; memory-workflow leases via `memory_active_drafts_provider`; 5xx/timeouts retried by `AuxLlmClient` |
 
 ### Reasoning / Thinking
 
@@ -503,10 +628,27 @@ part of the Studio cycle and are distinct from the later POST-cleaner.
 
 Studio has two separate persisted layers:
 
-- `studio_config_rows` stores reusable agent profiles, model slots, scheduling,
-  and session-to-profile binding through `profileId`;
+- `studio_config_rows` stores per-session Studio activation (`enabled` flag);
 - `studio_preset_rows` stores user-owned prompt presets as JSON block lists,
-  per-controller toggles, and an explicit `executionMode`.
+  per-controller toggles, an explicit `executionMode`, and nested
+  `StudioRuntimeSettings` (broadcast blocks, Ledger prompt-injection mode,
+  reasoning tags, and this preset's own Post Clean / Ledger / Card Rewriter
+  settings).
+
+The three post-processing lanes are configured **per preset**:
+`StudioRuntimeSettings.cleaner` / `.ledger` / `.cardRewriter` each hold that
+preset's copy of the settings object otherwise found in the global
+`PipelineSettings`. Null means the lane is unconfigured on this preset and the
+global value applies, which is what an install carries until someone edits a
+lane. `applyStudioPresetOverrides` (`core/models/studio_pipeline_overrides.dart`)
+is the single fold; `StudioTurnConfigSnapshot` applies it to the whole turn and
+`cardRewriterSettingsProvider` to the Card Rewriter lane, so no consumer reads
+either source directly. The pre-generation controller and final-writer model
+overrides, and MemoryBook generation, stay global.
+
+The active Studio preset is a global selection (`activeStudioPresetId` in
+SharedPreferences, synced via `local_storage`). Session rows carry only the
+on/off toggle — they do not bind to a specific preset.
 
 Studio prompt presets are imported, copied, edited, and exported by the user.
 The application does not expose a public default-seed reset and does not ship
@@ -523,40 +665,29 @@ The same snapshot is passed through prompt construction, tracker/final-agent
 execution, POST-cleaner, and Ledger. Changes made while a turn is running apply
 to later turns only. A separate manual action may resolve a fresh snapshot.
 
-#### Execution topologies
+#### Agent topology
 
-`StudioExecutionMode` is persisted with every preset and enforced twice:
-`prepareStudioPresetForMode` shapes the editable block/controller structure,
-then `StudioActivationGate.applyExecutionMode` gates stale agents at runtime.
-This prevents agents left in an older `studio_config_rows` profile from reviving
-after a mode switch.
+Studio no longer has Direct, Assisted, or Legacy execution modes. The active
+preset's agent toggles are the sole topology control. `StudioActivationGate`
+splits enabled agents into pre-generation controllers, the required Main
+Writer, and post-processing agents; declared dependencies are applied before a
+turn starts. Main Writer is locked on, while Meta-Weaver / OOC Policy is off by
+default.
 
-| Mode | Pre-generation controllers | Final generator | Beauty ownership |
-|------|----------------------------|-----------------|------------------|
-| `direct` | none | `final` | POST-cleaner derives and applies Beauty |
-| `assisted` | `continuity`, `narrative`, `beauty` | `final` | pregen Beauty brief is passed to POST-cleaner |
-| `legacy` | all enabled controllers | `final` | pregen Beauty brief is passed to POST-cleaner |
-
-Assisted keeps only its three controller task blocks plus the shared pregen
-context blocks. Legacy preserves the full controller/task layout. Their FINAL
-prompt blocks expose only briefs intended for prose generation. In particular,
-`StudioBriefMacroRenderer` always resolves `{{studio_beauty_brief}}` to an empty
-string: Beauty is never injected into FINAL.
-
-At generation time `MemoryStudioService.runTrackerCycle` runs:
+At generation time `MemoryStudioService` delegates the shared pre-generation
+controller phase to `ControllerPhaseRunner`, which runs:
 
 1. **Cache probe** (`_probeCache`): each due tracker is checked against
    `_briefCache` keyed by refresh policy (`turn` / `scene` / `static`).
    Cache hits are excluded from the LLM round-trip.
-2. **Batching** (`TrackerBatcher.groupAgents`): trackers with the same
-   `(provider, model)` and `!runIndividually` are packed into one LLM request
+2. **Batching** (`ControllerBatcher.groupAgents`): trackers with the same
+   `(provider, model, phase)` are packed into one LLM request
    via `<agents><agent_task>` XML with a single system prompt that orders shared
    context first (`<role>` + `<lore>` = static + dynamic + trimmed history) and
    per-agent instructions last (`<agents>`) — a prompt-cache-friendly layout
-   (Phase 6.1). Heavy trackers (`expression` / `illustrator` / `lorebook` name
-   match, or explicit `StudioAgent.runIndividually`) are pulled out of the batch
-   and run as their own request.
-3. **Run phase** (`TrackerBatcher.runPhase`, concurrency limit 4): batch groups
+   (Phase 6.1). Heavy trackers whose names match `expression`, `illustrator`, or
+   `lorebook` are pulled out of the batch and run as their own request.
+3. **Run phase** (`ControllerBatcher.runPhase`, concurrency limit 4): batch groups
    + individual agents fire in parallel, subject to the concurrency cap. Each
    batch is one LLM call → `parseBatchResponse` (`<result agent="id">` with
    missing-close-tag tolerance + `<result_ID>` legacy fallback).
@@ -564,22 +695,37 @@ At generation time `MemoryStudioService.runTrackerCycle` runs:
    re-request the whole batch twice. If it still cannot be parsed, Studio
    returns a hard error asking the user to restart generation.
 5. **Final generator** (`_runFinalGenerator`): runs after all pre-generation
-   trackers settle, using `maxFinalHistoryMessages` (default 30) for the
-   trimmed history; trackers receive their own `contextSize` (default 5,
-   hard-cap 200) via `_limitTrackerHistory` + `truncateAgentText`
+    trackers settle, using a stable history window with
+    `maxFinalHistoryMessages` (default 50) and a 70K-token high-water mark;
+    trackers receive their own `contextSize` (default 5, hard-cap 200) via
+    `StudioHistoryLimiter.limitTrackerHistory`
    (head 40% + tail 60%) + `stripHtmlTags`.
-6. **Studio post-processing agents:** due agents run in `order`, respecting
-   `runInterval` and activation keywords. Each receives the current
-   `mainResponse`; a non-empty result replaces it before the cycle returns.
+6. **Studio post-processing agents:** agents run in `order` every turn. Each
+   receives the current `mainResponse`; a non-empty result replaces it before
+   the cycle returns. Historical per-agent cadence and keyword gates no longer
+   live on `StudioAgent`.
 
-`AgentRunFailedException` wraps tracker failures for retry accounting. After
-two failed retries, Studio aborts before the final generator instead of running
-with partial tracker output. The generator's own failure aborts the turn.
+`ControllerPhaseRunner` owns the tracker phase and converts exhausted failures
+into a hard Studio result. `StudioBatchCoordinator` and `StudioAgentExecutor`
+own the initial attempt plus two retries for batched and individual trackers,
+respectively. Studio aborts before the final generator instead of running with
+partial tracker output. The generator's own failure aborts the turn.
 
-Per-tracker model override (`StudioAgent.modelSource = 'custom'` picks an
-`ApiConfig` by `agent.model`; `modelOverride` applied on top) and
-`runInterval` (every-N-th-turn scheduling) are respected. Concurrency cap:
+Per-controller model and parameter resolution comes from its immutable
+`StudioControllerSpec`, the Studio slot settings, and the chat connection
+fallback; those settings no longer live on `StudioAgent`. Concurrency cap:
 `_maxConcurrentGroups = 4` (Phase 5.7.2, conservative default for desktop).
+
+Per-slot parameter overrides (Agents tab → *Parameter overrides*) are gated on
+`<field>Override` booleans in `StudioAgentSettings` / `CleanerSettings`. A flag
+that is off makes `AgentConfigResolver` pass `null` for that parameter, so
+`copyWithSampling` / `copyWithReasoning` keep whatever the slot's `ApiConfig`
+resolved to — that is what the sheet shows as the inherited value. Temperature,
+max tokens and the idle timeout carry no flag: they already encode "not
+overridden" as a sentinel (negative / `0`) and fall back to the **per-agent
+spec**, not to the API preset, which is why the sheet labels those as the agent
+default. All flags default to `true` so an upgrade keeps applying the values it
+applied before they existed.
 
 POST-processing (Phase 1.3) stays separate from the tracker pipeline: the
 POST-cleaner runs after the full reply and writes a blue `'cleaned'` agent
@@ -587,12 +733,11 @@ sub-swipe (`post_cleaner_service.dart`, `generation_pipeline.dart`),
 preserving the original `'final'` as the parent. Hold mode (Marinara) is not
 implemented. See INV-ST4.
 
-For Assisted and Legacy, `BeautyStateHandler` reads the Beauty tracker brief
-from the saved assistant message's `studioOutputs`; `CleanerStage` passes it to
-the cleaner together with the persisted `glaze_beauty_state` session variable.
-Direct has no Beauty tracker output, so the cleaner receives an empty brief and
-owns Beauty derivation itself. The POST-cleaner enable switch controls automatic
-cleaner/audit calls, not whether the independent Studio topology exists.
+Beauty is cleaner-owned rather than a separate pre-generation controller.
+`CleanerStage` can derive styling guidance during its audit and passes it to the
+cleaner together with the persisted `glaze_beauty_state` session variable. The
+POST-cleaner enable switch controls automatic cleaner/audit calls, not the
+independent Studio agent topology.
 
 #### POST-cleaner swipe lifecycle (UX phase, "swipe-first streaming")
 
@@ -624,13 +769,14 @@ On cleaner completion (`stages/cleaner_stage.dart`):
   `'final'`.
 - Abort mid-cleaner → remove the pre-created empty swipe (no partial save on
   abort by default).
-- Hard pipeline failure → best-effort remove + revert in the catch block.
+- Hard pipeline failure → preserve the latest streamed partial when non-empty;
+  otherwise best-effort remove the empty swipe and revert in the catch block.
 - Pre-create failed earlier → fall back to the legacy
   `applyCleanedText` (append) path so the user still gets a `'cleaned'` swipe.
 
 `ChatRepo.updateAgentSwipeContent` / `removeAgentSwipe` are the atomic
 (transaction-wrapped) methods for in-place swipe edits; `appendAgentSwipe`
-remains the legacy append path. `PipelineSettings.postCleanerAuditModel` exists,
+remains the legacy append path. `PipelineSettings.cleaner.postCleanerAuditModel` exists,
 but the current `CleanerStage` passes the resolved cleaner config to both the
 character/world audit and rewrite; a separate audit-model override is not yet
 wired into this runtime path.
@@ -644,24 +790,25 @@ in `message_renderer.js` and incremental `_syncMessageControls` in
 condition. Otherwise the button appears only after reopening the session and
 forcing a full render.
 
-### Preset decomposition (auto + manual)
+### Studio agents and block routing
 
-`StudioDecompositionService.decompose()` builds the `StudioAgent` list from
-the chat's effective preset: enabled blocks are macro-expanded, reasoning
-blocks dropped, then routed (LLM router with keyword fallback) to stable
-controller lanes (continuity / agency / narrative / dialogue / guard / world
-/ meta / final). The last lane (`Main Responder`, `isFinal`) is the
-generator; all earlier lanes are trackers — the exact shape
-`runTrackerCycle` consumes. `routingMode = 'verbatim'` concatenates each
-agent's assigned blocks дословно (no LLM call); `'compiled'` asks the build
-LLM to synthesize a shard. `collectBroadcastBlocks` surfaces cross-cutting
-rules (output language, prose guards) for the POST-cleaner;
-`computePresetHash` detects preset changes.
+Studio agents are defined directly in `StudioPreset.agents`, each with an
+explicit `controllerId` (continuity / agency / narrative / dialogue / guard /
+world / meta / beauty / final). The last enabled pre-generation agent is the
+generator; all earlier agents are trackers. `StudioMessageBuilder` routes
+preset blocks to agents by `targetAgentId` and expands chat-time macros
+(`{{char}}`, `{{user}}`, `{{studio_*_brief}}`). Broadcast rules for the
+POST-cleaner live in `StudioPreset.runtime.broadcastBlocks`.
 
-Manual editing: `studio_settings_sheet.dart` exposes a "Edit Preset Blocks"
-button (opens `StudioPresetEditorSheet`), and a per-slot settings dialog
-for model parameters (temperature, topP, reasoning, etc.). Edits persist
-via `studioConfigRepo.upsert`.
+Manual editing is split across two surfaces. The agentic preset editor
+(`StudioPresetEditorBody`) owns the pipeline: the blocks, the agent switches,
+and — under the Ledger whose reconciliation commits feed it — the Card Rewriter
+lane's switch and its own settings. The Agents tab of the API sheet
+(`StudioSlotsTab`) owns every stage's connection and model, plus the per-slot
+parameter dialog (temperature, topP, reasoning, timeouts). Post Clean, Ledger
+and Card Rewriter rows there read and write the active preset's
+`StudioRuntimeSettings`; the pre-generation, final and MemoryBook rows write
+global `PipelineSettings`.
 
 ### Nested swipes (agentSwipes)
 
@@ -775,7 +922,7 @@ INV-C5.
 ### Files
 - `lorebook_scanner.dart` — keyword scan: sticky/cooldown/probability/character-filter/recursion
 - `lorebook_merger.dart` — merges keyword + vector results, deduplicates by entry ID
-- `core/state/lorebook_embedding_provider.dart` — Riverpod composition for vector search and embedding
+- `core/state/lorebook_embedding_provider.dart` — Riverpod composition for vector search and embedding. `embeddingConfigProvider` reads the preset selected on the API screen's **Embeddings** tab (`activeEmbeddingConfigProvider`, over the tab's own `embeddingPresetListProvider` list), independent of the chat presets; only the preset's "Use LLM API" toggle borrows an LLM endpoint, from the preset its *Endpoint from* row names (INV-PS2c)
 - `lorebook_coverage.dart` — diagnostic full coverage report
 - `lorebook_vector_search.dart` — cosine similarity, hybrid boost (name/key/hint overlap)
 - `lorebook_embedding_service.dart` — indexes lorebook entries (hash-based dirty check)
@@ -787,10 +934,38 @@ INV-C5.
 - `lorebook_provider.dart` — CRUD + activations + settings (SharedPreferences)
 
 ### Search Type System
-- `searchType`: `'keys'` | `'vector'` | `'both'`
-- `'keys'` — keyword-only (default)
+- `searchType`: `'keyword'` | `'vector'` | `'both'`
+- `'keyword'` — keyword-only (default)
 - `'vector'` — vector-only semantic search
 - `'both'` — combined (keyword results deduplicated from vector budget)
+
+### What is embedded
+
+`lorebook_embedding_text.dart` owns both halves of this and every caller goes
+through it — the indexer, the session-overlay worker and the search-time
+fingerprint check. A second implementation of either half makes the stored hash
+disagree with the recomputed one, and the entry drops out of the vector pass
+with no error to show for it.
+
+- **Text.** The book's `embeddingTarget` picks the field: `content` (the entry
+  body, the default), `comment` (the title), `keys` (primary keys joined), or
+  `both` (title and body). A target whose field is empty on a given entry falls
+  back to the body, so one book-wide setting cannot make an untitled or keyless
+  entry unindexable. SillyTavern only ever embeds `content`
+  (`activateWorldInfo` inserts `{ text: x.content }`), so the default matches it
+  and the other targets are Glaze additions.
+- **Pools.** `lorebookVectorPoolFor` sorts each entry into the *main* pool
+  (its own `vectorSearch` flag, or every entry when the book sets
+  `vectorizeAllEntries` — SillyTavern's `enabled_for_all`), the *keyless
+  fallback* pool (no keys and no secondaryKeys, so the keyword scan can never
+  reach it), or neither. Disabled, `constant` and `excludeFromVectorization`
+  entries are in no pool, and the indexer purges any embedding an excluded
+  entry still carries.
+- **Query.** The chat text, never the keys: a focused query (current text plus
+  the recent *user* messages within `vectorScanDepth`) and a wider one (the
+  same window, both roles), each stripped of HTML tags, `(OOC: …)` and base64
+  images. Keys re-enter only as the hybrid boost on top of the cosine score —
+  entry title in the query, key overlap, retrieval-hint token overlap.
 
 ### Recursive Scan Bounds
 - Max iterations: 5 when `recursiveScan == true`, else 1
@@ -843,16 +1018,13 @@ compatibility backfill into `messageRange`.
 
 `MemoryDraftPlanner` scans stable user/assistant messages, leaves a configurable
 recent-message lag, and creates only complete fixed-size ranges. The post-turn
-`MemoryDraftStage` and manual **Scan Chat** action create empty drafts without an
-LLM call. Draft text is generated later through
-`MemoryDraftGenerationController` + `memory_draft_generator.dart`, then remains
-`pending_approval` until the user accepts it. Approval copies content, keys,
-message provenance, and range into an active `MemoryEntry`; vector indexing is
-best-effort when enabled.
-
-The `autoGenerateEnabled` setting exists in model/UI, but the current automatic
-post-turn stage does not invoke LLM draft generation. Automatic draft creation
-is not automatic memory population or approval.
+`MemoryDraftStage` and manual **Scan Chat** create drafts from complete ranges.
+When `autoGenerateEnabled` is enabled, the post-turn stage immediately fills
+newly created drafts through the configured Memory Book LLM. Generated drafts
+remain `pending_approval` until the user accepts them. Approval copies content,
+keys, message provenance, and range into an active `MemoryEntry`; vector indexing
+is best-effort when enabled. Manual **Scan Chat** keeps its explicit review and
+generation workflow.
 
 ### Retrieval and injection rule
 
@@ -914,16 +1086,76 @@ replacing `[[GLAZE_DEFERRED_MEMORY_CONTEXT]]` with the excerpt-packed macro
 content. `PromptPayload.memorySelection` must be populated (no shadowed local)
 for this path to run.
 
-**Diagnostics** (`memory_diagnostics.dart`, `memory_activity_card.dart`):
+**Diagnostics** (`memory_diagnostics.dart`, `memory_activity_section.dart`):
 per-candidate reasons include `chunk_rank_trimmed` / `chunk_budget_trimmed`;
-expanded rows show `N из M` chunks and chunk indexes. Labels like `121-135` are
-**chat message ranges** (`messageRange`), not chunk indices.
+expanded rows show `N of M` chunks and chunk indexes. Labels like `121-135` are
+**chat message ranges** (`messageRange`), not chunk indices. The section is the
+memory half of `ContextCoverageCard` (`context_coverage_card.dart`), the panel
+under the chat header that also carries lorebook coverage; the whole card is
+switched off by `AppSettings.hideContextCard`. Only the card's *collapsed*
+height insets the message list (`_contextCardCollapsedHeight` in
+`chat_screen.dart`): that inset is the WebView's `padding-top`, and rewriting it
+on every open/close moved the chat under a scroll offset that does not move, so
+the expanded body floats over the messages instead.
+
+Raw diagnostic codes (`chunk_rank_trimmed`, `worldInfoAfter`, `keyword`,
+`full_entry`…) are never rendered as such. `context_coverage/coverage_reasons.dart`
+maps them to localized sentences shown in the *expanded* record — memory rows,
+lorebook coverage tiles and past-turn manifest rows alike — so the collapsed
+line carries the entry's name and cost only and the reason has room to wrap.
+
+**Lorebook coverage** (`core/llm/lorebook_coverage.dart`,
+`state/lorebook_coverage_provider.dart`): a dry run of `scanLorebooks` for the
+diagnostics surfaces — same recursion, sticky/cooldown and per-book caps, so a
+reading matches the built prompt (`entry.probability` is the one rule it does
+not roll). One provider feeds both the context card and the Prompt Inspector's
+next-request coverage view, so a turn costs one scan and, with vectors
+configured, one embedding query. It answers for the request that has *not* been
+sent; a request that already ran answers from its own stored manifest
+(`turn_coverage_provider.dart`), inside the opened request.
+
+**Requests tab** (`widgets/requests/`, `state/request_timeline.dart`): the
+Prompt Inspector's timeline of what this chat actually sent, read from the
+always-on capture sink (`llmRequestCaptureInstallationProvider` →
+`llm_request_capture_rows`) and cut at `AppRuntime.startedAt` so a restart does
+not mix runs. Rows are folded into groups by `messageId` (one chat turn: the
+main model or the agent shards, then cleaner, ledger, ext blocks) or by
+`pipelineRunId` (a background job — card rewrite, reconciliation), and the two
+kinds share one chronological list. Retries of one call collapse into a single
+step carrying an attempt count. Opening a step shows that exact payload; the tab
+strip hides while it is open, and the step gets two tabs of its own: what was
+sent, and what came back (`PromptCaptureView.responseText`, read from the call
+events the request recorded). The next-request preview has no response tab — a
+request that has not been sent has no response of its own, and the one that used
+to sit there showed the last run's reply. The first two rows are about the *next* request —
+the live preview (`PromptPreviewScreen`), or the agent catalog
+(`StudioPromptPreviewTab`) on an agentic preset, which is why there is no
+separate Agents tab, and its coverage dry-run (`NextTurnCoverageView`).
+
+Coverage of a request that already ran is not a view of its own: it is a
+collapsed block at the top of the opened request (`RequestCoverageBlock`),
+carrying the memory selection saved on the turn's message and the lorebook
+entries from its stored manifest. Nothing there is recomputed — a re-scan would
+answer what would fire *now*, which is the next request's question.
+
+Two things make the grouping possible. The main request carries a
+`LlmCaptureContext` (`stage: 'main'`, the session, and `turnRunId`) — without it
+it was captured with no session at all and no per-chat view could show it. And
+because the reply does not exist yet when the generation stages are sent,
+`LlmRequestCaptureRepo.bindTurnMessageId` stamps the message id over them once
+the write lands, narrowly: this session, generation stages only, still unbound,
+from the turn's start. Captures are trimmed by a row ceiling *and* a byte budget
+(`maxBytesPerSession`), with `minRowsPerSession` as a floor — a megabyte-sized
+main request must not evict a turn's worth of small ones, and fifty of them must
+not sit on 50 MB.
 
 **LLM request dump** (`core/llm/transport/llm_request_dump.dart`): a debug-only
 diagnostics aid for inspecting every outgoing LLM request made while answering a
 single chat turn — studio shards, the main model, the post-cleaner audit +
 cleaner passes, and the agentic-memory writer. `transport_factory.dart` wraps
-every transport from `pickChatTransport` in a `LoggingChatTransport` decorator;
+every transport from `pickChatTransport` in a `LoggingChatTransport` decorator
+(itself wrapped in `PostProcessingChatTransport`, so the dump records the
+post-processed conversation that actually goes out);
 when enabled it appends one JSON object per line (JSONL) to a temp file
 (`glaze_llm_dump.jsonl`, overwritten on app start) before delegating to the
 inner transport. **Off by default** (`LlmRequestDump.enabled = false`): when
@@ -960,37 +1192,59 @@ because the extractor is unreliable for non-English roleplay. Their tables
 remain for forward compatibility; Studio Ledger is the sole automatic writer of
 canonical tracker state.
 
+`StudioLedgerService` is the compatibility facade over the specialists in
+`core/llm/ledger/`: canon authority, in-flight registry, output recovery,
+prompt factory, diagnostics, turn runner/committer, reconciliation
+runner/committer, replacement-basis resolver, operation applier, provenance,
+and run-result contracts. Durable writes belong to the two committers; the
+facade preserves the established entrypoints and dependency wiring.
+
+### Automated Card Evolution
+
+`AutomatedCardEvolutionService` is likewise a compatibility facade. It owns
+public entrypoints and per-session in-flight deduplication, while
+`CardEvolutionCollectorCoordinator` owns collector claims, observation state,
+evidence validation, effects, and promotion, and
+`CardEvolutionWriterCoordinator` owns writer claims, cancellation, card/repair/
+lorebook execution, and finalization. Supporting ownership is split among
+`ObservationResponseParser` (typed collector parsing),
+`CardEvolutionDiagnostics` (parser/model/selection outcomes),
+`DurableWriterCallRunner` (checkpointed prepare/replay/execute/complete), and
+`WriterContextConsolidator` (bounded history chunks and cumulative handoff).
+
 ---
 
 ## 5. Database Layer
 
-**File:** `lib/core/db/app_db.dart` + `lib/core/db/repositories/`
+`AppDatabase` is at schema **v131** and registers **56 tables**. The current
+source of truth is the `@DriftDatabase(tables: [...])` list in
+`lib/core/db/app_db.dart`; generated `app_db.g.dart` reflects that declaration.
+Do not maintain a hand-copied table-by-table inventory here.
 
-### Tables (26 total, schema v81)
+`app_db.dart` is the composition root. Its implementation is split into
+`migrations/database_integrity.dart`, `migrations/studio_legacy.dart`,
+`migrations/upgrade_v2_v50.dart`, `migrations/upgrade_v51_v100.dart`,
+`migrations/upgrade_v101_v131.dart`, and `studio_preset_seed.dart`. The versioned
+files preserve historical upgrades; current schema declarations live behind the
+`tables.dart` barrel in eight domain parts:
 
-| Table | Repo | Notes |
-|-------|------|-------|
-| `Characters` | `character_repo.dart` | watchAll(); v18 `picksHash`, v19 `createdAt`, v13 `extensionsJson`, v32 `tokenCount`, v33 `variantGroupId`/`variantName`/`variantOrder`, v34 `hidden`. `updateExtensionsJson` is the atomic read-modify-write helper for the JS `character` variable scope. |
-| `CharacterFolders` | `character_folder_repo.dart` | v31; local character folders (composite PK `{folderId, charId}`) |
-| `CharacterFolderMembers` | `character_folder_repo.dart` | v31; folder membership (composite PK + 2 indexes) |
-| `ChatSessions` | `chat_repo.dart` | JSON-backed messages plus session metadata. Mutate through narrow transactional APIs (`mutateMessage`, `mutateMessages`, `mutateSession`, draft/swipe/variable helpers); `put` is for authoritative whole-row creation/replacement. |
-| `Presets` | `preset_repo.dart` | JSON blob per preset |
-| `ApiConfigs` | `api_config_repo.dart` | v21: `cacheControlTtl`; v23: `protocol`; v24: `topK`/`frequencyPenalty`/`presencePenalty`; v25: `cacheBreakpointMode`/`sessionIdMode` |
-| `Personas` | `persona_repo.dart` | |
-| `Lorebooks` | `lorebook_repo.dart` | entries + settings as JSON |
-| `Embeddings` | `embedding_repo.dart` | `entryId`, `vectorsBlob`, `retrievalHintsJson`, `errorJson` |
-| `ChatSummaries` | `summary_repo.dart` | v30: `enabled`; one per session |
-| `MemoryBookRows` | `memory_book_repo.dart` | |
-| `MemoryCatalogRows` | `memory_catalog_repo.dart` | v29; rebuildable per-session Memory Catalog state |
-| `MemoryGraph*` | `memory_*_repo.dart` | v35; 4 tables (`memory_entity_rows`, `memory_salience_rows`, `memory_cadence_rows`, `memory_consolidation_rows`). **DISABLED** — heuristic entity extractor produces garbage on non-English text (see §"Disabled features" below). Tables remain for forward compat; no new rows written. |
-| `ExtensionPresets` | `extension_presets_repository.dart` | v20 |
-| `InfoBlocks` | `info_blocks_repository.dart` | v20; v22 adds `status` TEXT (default `'done'`) + `order` INTEGER (default 0); v27 adds `swipe_id` |
-| `StudioConfigRows` | `studio_config_repo.dart` | v36; reusable Studio profiles, v42 adds `profileId`/`profileName` for session-to-profile binding, v43 `builderPromptTemplate`, v44 `maxFinalHistoryMessages`, v46 `routingMode` |
-| `TrackerRows` | `tracker_repo.dart` | v45; lightweight key-value canonical session state (e.g. `world:location`). Composite PK `{sessionId, name}`. Studio Ledger is the sole automatic writer; snapshots provide lifecycle-safe rollback. |
-| `TrackerSnapshots` | `tracker_snapshot_repo.dart` | v50; per-agent-swipe immutable snapshots of all trackers (mirrors Marinara-Engine's `game_state_snapshots`). Composite PK `{sessionId, messageId, swipeId, agentSwipeId}`; `trackersJson`, `committed`, `createdAt`. See INV-TS1–7 in `docs/INVARIANTS.md`. |
-| `LedgerReconciliationCheckpoints` / `LedgerReconciliationCleanupJournals` | reconciliation repos | Reconciliation progress and reversible cleanup provenance. |
-| `CharacterKnowledgeFactRows` / `CharacterSessionBaselineRows` | knowledge/baseline repos | Provenance-backed character facts and immutable per-session card baseline. |
-| `StudioPresetRows` | `studio_preset_repo.dart` | User-owned Studio prompt presets and execution topology. |
+| Domain part | Ownership |
+|---|---|
+| `tables/characters_and_chat.dart` | Characters, folders, chats, and personas |
+| `tables/folders.dart` | Generic folders + membership for the non-legacy list domains (lorebooks, personas, image styles, regex) |
+| `tables/studio_and_presets.dart` | Studio activation/presets, prompt presets/folders, and API configs |
+| `tables/lorebooks.dart` | Lorebooks, session evolution overlays, immutable use manifests, and acceptance evidence |
+| `tables/memory.dart` | MemoryBook/catalog/legacy graph state, embeddings, and summaries |
+| `tables/ledger.dart` | Live/snapshot Ledger state, reconciliation lifecycle, character knowledge, and LLM diagnostics |
+| `tables/canon_and_rewrite.dart` | Character revisions, canon checkpoints, rewrite review/audit, and Card Evolution durability |
+| `tables/extensions.dart` | Extension presets and InfoBlock results |
+
+Repositories under `lib/core/db/repositories/` are the behavioral source of
+truth for reads, writes, transactions, and lifecycle cleanup. Not every table
+maps one-to-one to a repository; transactional aggregates intentionally span
+related tables. Historical milestones such as v20 ExtBlocks, v35 Memory Graph,
+v45 Ledger rows, v50 snapshots, and the v101 Studio activation rebuild remain
+relevant migration context, not descriptions of the complete current schema.
 
 ### Write Rule
 **Never** commit a mutation with `getChat -> copyWith -> put`. Use the narrowest
@@ -1060,13 +1314,48 @@ feature-local adapters to `SyncService`.
 ## 8. Image Generation
 
 ### Files
-- `image_gen_service.dart` — orchestrates: dispatches to provider adapters, saves images
-- `image_tag_markup.dart` — pure `[IMG:GEN]`/`[IMG:RESULT]`/`[IMG:ERROR]` tag text transforms (extracted from ImageGenService)
+- `image_gen_service.dart` — orchestrates: builds the prompt, collects references, saves images
+- `image_gen_dispatcher.dart` — routes a prepared request to the provider adapter of the active API type
+- `image_prompt_builder.dart` — `[STYLE: …]` block, reference descriptions, reference instruction
+- `reference_matcher.dart` — alias / word-boundary matching of the reference library against a prompt
+- `image_reference_collector.dart` — avatars + matched references + context images, clipped per model
+- `image_tag_markup.dart` — pure image-block text transforms (extracted from ImageGenService): the stored `<img data-iig-…>` element of a finished block (INV-IG9), the `[IMG:GEN]`/`[IMG:ERROR]` tags of one that has no picture yet, the `[IMG:RESULT]` of older messages, and `ImageBlockPayload`: the images one block carries, which of them is visible, and the instruction that produced them (INV-IG8)
 - `image_gen_provider.dart` — manages settings + generation state
 - `image_gen_models.dart` — Freezed data models for image generation
+- `image_gen_constants.dart` — per-provider model / ratio / resolution tables (re-exported by the models file)
+- `image_gen_capabilities.dart` — model classification: reference limits, allowed ratios and sizes, quality spelling
+- `image_gen_settings_codec.dart` — settings JSON + migration off the per-provider reference lists
+- `image_style_io.dart` — style-library JSON export / import
 - `image_gen_http.dart` — HTTP client for image generation APIs
-- Provider adapters: `routmy_image_provider.dart`, `openai_image_provider.dart`, `gemini_image_provider.dart`, `naistera_image_provider.dart`
+- Provider adapters: `routmy_image_provider.dart`, `openai_image_provider.dart` (also serves Electron Hub),
+  `gemini_image_provider.dart`, `naistera_image_provider.dart`, `openrouter_image_provider.dart`,
+  `a1111_image_provider.dart`, `novelai_image_provider.dart`, `comfyui_image_provider.dart`
 - UI: `widgets/image_gen_sheet.dart`, `widgets/image_content_renderer.dart`
+
+### Image variants
+
+Regenerating a picture appends to its block instead of replacing it: the block
+keeps every image it has produced and the message shows one of them. The chat
+formatter renders a small translucent `‹ n/N ›` switcher on the picture once a
+block holds a second image; paging swaps the `<img>` in the page (every variant
+is resolved to a servable URL up front) and reports the choice back through
+`onImgVariant`, which rewrites the active swipe in place — no message swipe is
+created for it (INV-IG7, INV-IG8).
+
+### Reference handling
+
+One reference library (`ImageGenSettings.references`) is shared by every
+provider. Per request the collector takes the character avatar, the persona
+avatar, the entries whose aliases match the prompt (or that are set to
+`always`), then the recent generated images used as context — and clips the
+result to what the active model accepts (`providerMaxReferences`). Providers
+that cannot take references at all (AUTOMATIC1111, ComfyUI, `dall-e-3`,
+Naistera `novelai` / `grok-pro`) report 0 and the reference UI is hidden. The
+direct NovelAI provider takes references as Director Tools (Character
+Reference) images, which only the V4.5 family supports.
+
+Protocol and capability tables are ported from
+[sillyimages](https://github.com/0xl0cal/sillyimages).
 
 ---
 
@@ -1106,7 +1395,7 @@ per block via `InfoBlocksRepository.updateStatus()`.
 | `BlockType` | Handler | Notes |
 |---|---|---|
 | `infoblock` | `blocks/infoblock_handler.dart` | Calls `InfoBlockService`; injects last N results into prompt context |
-| `imageGen` | `blocks/image_gen_block_handler.dart` | Reads `[img gen:…]` tag, calls `ImageGenService`, saves via `ImageStorageService`; result stored as `[IMG:RESULT:<path>]` |
+| `imageGen` | `blocks/image_gen_block_handler.dart` | Reads `[img gen:…]` tag, calls `ImageGenService`, saves via `ImageStorageService`; result stored as an `<img data-iig-…>` element whose `src` is relative to the data root (INV-IG9) |
 | `jsRunner` | `blocks/js_runner_block_handler.dart` | Runs JS through the Chat WebView via `JsBlockExecutor`; absent bridges produce a bounded unavailable error. |
 | `interactive` | `blocks/interactive_block_handler.dart` | LLM → strip code-fence → sandboxed iframe island under the assistant message. JS inside the panel has access to `window.glaze.*` |
 
@@ -1131,13 +1420,17 @@ to the canonical `(swipeId, agentSwipeId)`.
 
 ### Periodic scheduler
 
-`PeriodicTriggerScheduler` has a Riverpod provider that would watch
-`extensionPresetsProvider` + `extensionsSettingsProvider` and pause timers on
-app lifecycle transitions. The production app currently never reads/watches
-`periodicTriggerSchedulerProvider`; because providers are lazy, periodic timers
-do not start. The dormant tick path also passes `activePresetId` as `charId`.
-Treat `periodic` as unwired until the provider is bootstrapped and this context
-bug is fixed.
+`SessionLifecycleTracker` bootstraps `periodicTriggerSchedulerProvider` whenever
+a visual chat is active. `PeriodicTriggerScheduler` watches
+`extensionPresetsProvider` and `extensionsSettingsProvider`, and obtains the
+real `charId` and `sessionId` from
+`GenerationNotificationService.activeChatContext` for every tick. Execution is
+authorized only while that same active-chat context remains current.
+
+Periodic scripts require the active visual Chat WebView and its registered
+bridge. If no active chat context or bridge exists, the tick is skipped; there
+is no headless execution or headless fallback. Lifecycle pause/resume cancels
+and recreates timers without catch-up ticks (INV-JS6).
 
 ### Cancellation
 
@@ -1247,14 +1540,14 @@ when the Chat WebView is absent they return an explicit unavailable outcome.
 
 ### Dart files
 
-* `extension_post_gen_service.dart` — public orchestrator entrypoint; owns cancel token; exposes `runBlocksForMessage`, `runAfterUserBlocks`, `runJsBlock`, `rerunBlock`, `rerunImageOnly`
+* `extension_post_gen_service.dart` — public orchestrator entrypoint; owns the active cancel-token set; exposes `runBlocksForMessage`, `runAfterUserBlocks`, `runJsBlock`, `rerunBlock`, `rerunImageOnly`
 * `blocks/block_processor.dart` — order/filter/`dependsOnPrevious` orchestration
 * `blocks/single_block_runner.dart` — placeholder prep, context construction, handler dispatch, per-block error wrapping
 * `blocks/block_status_tracker.dart` — placeholder/status/error/dedupe lifecycle
 * `blocks/block_panel_updater.dart` — shared panel update/throttling plumbing
 * `blocks/image_pixel_renderer.dart` — image bytes → persisted file/result token
 * `blocks/js_block_executor.dart` — message-bound `jsRunner` execution through the Chat WebView
-* `blocks/periodic_js_block_runner.dart` — periodic JS-runner integration (not a supported bridge profile)
+* `blocks/periodic_js_block_runner.dart` — active-chat-authorized periodic JS execution through the visual bridge
 * `blocks/image_only_rerunner.dart` — manual image-only rerun validation/status update flow
 * `blocks/*_block_handler.dart` — concrete `infoblock`, `imageGen`, `jsRunner`, `interactive` handlers
 * `info_block_service.dart` — LLM call + prompt assembly for `infoblock` type
@@ -1289,9 +1582,13 @@ Active chat WebView JS is loaded as ES modules from `assets/chat_webview/index.h
 * `assets/chat_webview/glaze_sdk.js` — `window.glaze` SDK loaded before bridge bootstrap
 * `assets/chat_webview/formatter/index.js` — exports/exposes `Formatter`; implementation in `formatter/formatter.js`, marker rendering in `formatter/text_format.js`
 * `assets/chat_webview/renderer/index.js` — exports/exposes `Renderer`; message DOM in `renderer/message_renderer.js`, Shadow DOM CSS in `renderer/shadow_style.js`
+* `assets/chat_webview/renderer/css_diagnostics.js` — reads the `<style>` blocks a settled message carries and appends a short `CSS ERROR` report (unclosed brace, unterminated comment/string, rules the engine ignored). Read-only: the CSS itself is still inserted verbatim
+* `assets/chat_webview/renderer/target_toggle.js` — re-keys `:target` in a message's `<style>` on `[data-glaze-target]`, the attribute `InteractionDispatch._toggleFragmentTarget` stamps when a fragment link is tapped. A URL fragment only resolves against the document tree, so an id inside the per-message shadow root can never be the target element and an ST-style card would draw a dead button; the re-key is the one pass that rewrites message CSS, and it runs the same way with message scripts on or off
 * `assets/chat_webview/bridge/index.js` — imports `Formatter` and `Renderer`, creates `window.bridge`, registers scaled wheel handling and `onWebViewReady`
 * `assets/chat_webview/bridge/chat_bridge_controller.js` — main JS bridge facade, Flutter transport, message list API, ext-block panel, sandbox runner
 * `assets/chat_webview/bridge/panel_host.js` — sandboxed interactive iframe lifecycle and `glaze:*` relay
+* `assets/chat_webview/bridge/html_sanitizer.js` — two policies: message HTML is filtered for *code* only (`<script>`/`<iframe>`/`<object>`/`<embed>`, `on…=`, `srcdoc`, `javascript:` and non-image `data:` URLs) while its markup and CSS reach the shadow root verbatim, so a card renders the same with message scripts on and off; ExtBlock HTML keeps the strict element/attribute policy
+* `assets/chat_webview/bridge/css_sanitizer.js` — CSS policy for **ExtBlock** HTML only (message CSS never goes through it; the `:target` re-key in `renderer/target_toggle.js` is the only pass that touches it): `<style>` blocks and `style="…"` keep working, minus `url()`/`@import`/`expression()`/`position: fixed`; ExtBlock rules are scoped to `.ext-block-content` because they land in the light DOM, message rules are already scoped by the per-message shadow root
 * `assets/chat_webview/headless.html` — retained unused headless-engine asset
 
 Legacy single-file paths (`bridge.js`, `renderer.js`, `formatter.js`) are
@@ -1344,7 +1641,7 @@ Resolved (kept for history; details in git / PR notes):
 - **prompt_payload_builder split** — `prompt_inputs_collector` + `prompt_payload_assembler`.
 - **chat_provider decomposition** — controllers + `generation_pipeline` + `saved_message_writer` (~420 lines; further splits possible).
 - **lorebook_vector_search providers** — moved to `core/state/lorebook_embedding_provider.dart`.
-- **Chat ↔ memory draft mutex** — `memory_active_drafts_provider` + `MemoryBookController` (INV-M3/INV-M4).
+- **Chat ↔ memory draft isolation** — independent request ownership plus targeted persistence; `memory_active_drafts_provider` now coordinates memory workflows only (INV-M3/INV-M4).
 - **Session vars on abort/error** — only a successful guarded commit applies the
   isolate variable delta (INV-C5).
 - **Memory injection token budget** — `memory_budget.dart` + INV-PS4.
@@ -1358,7 +1655,7 @@ Resolved (kept for history; details in git / PR notes):
 - **Studio decomposition (Phases 1-11)** — data classes and specialists were
   extracted from the large Studio/chat services into `prompt/`, `cleaner/`,
   `studio/`, `memory/`, `ledger/`, and `shared/` subdirectories. `AgentRunner`,
-  `TrackerBatcher`, summary, embedding rebuild, and turn-config composition now
+  `ControllerBatcher`, summary, embedding rebuild, and turn-config composition now
   live behind state/provider boundaries. `MemoryStudioService`,
   `PromptInputsCollector`, and `PromptPayloadBuilder` still receive `Ref` for
   core provider access, while feature adapters are injected. `AuxLlmClient` has

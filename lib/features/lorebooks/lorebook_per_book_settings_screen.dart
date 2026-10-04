@@ -1,23 +1,29 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../core/llm/lorebook_embedding_text.dart';
 import '../../../core/models/lorebook.dart';
+import '../../../core/state/lorebook_embedding_provider.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_scaffold.dart';
 import '../../../shared/widgets/help_tip.dart';
+import '../../../shared/widgets/list_controls.dart';
+import 'widgets/lorebook_option_sheet.dart';
 
-class LorebookPerBookSettingsScreen extends StatefulWidget {
+class LorebookPerBookSettingsScreen extends ConsumerStatefulWidget {
   final LorebookSettings? settings;
   final LorebookGlobalSettings? globalSettings;
 
   const LorebookPerBookSettingsScreen({super.key, this.settings, this.globalSettings});
 
   @override
-  State<LorebookPerBookSettingsScreen> createState() =>
+  ConsumerState<LorebookPerBookSettingsScreen> createState() =>
       _LorebookPerBookSettingsScreenState();
 }
 
 class _LorebookPerBookSettingsScreenState
-    extends State<LorebookPerBookSettingsScreen> {
+    extends ConsumerState<LorebookPerBookSettingsScreen> {
   late LorebookSettings _settings;
   bool _hasCustom = false;
 
@@ -37,7 +43,7 @@ class _LorebookPerBookSettingsScreenState
       caseSensitive: g.caseSensitive,
       matchWholeWords: g.matchWholeWords ? 'true' : 'false',
       vectorSearchEnabled: true,
-      embeddingTarget: 'content',
+      embeddingTarget: LorebookEmbeddingTarget.content,
       vectorThreshold: g.vectorThreshold,
       vectorTopK: g.vectorTopK,
     );
@@ -45,34 +51,19 @@ class _LorebookPerBookSettingsScreenState
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: context.cs.surface,
+    return GlazeScaffold(
+      title: 'title_lorebook_settings'.tr(),
+      onBack: () => _pop(context),
+      actions: [
+        GlazeActionButton(
+          icon: Icons.undo_rounded,
+          label: 'lorebook_reset_to_global'.tr(),
+          tone: GlazeActionTone.neutral,
+          onTap: _hasCustom ? _resetToGlobal : null,
+        ),
+      ],
       body: Column(
         children: [
-          SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-              child: GlazeAppBar(
-                title: 'title_lorebook_settings'.tr(),
-                leading: BackButton(onPressed: () => _pop(context)),
-                actions: [
-                  TextButton(
-                    onPressed: _hasCustom ? _resetToGlobal : null,
-                    child: Text(
-                      'lorebook_reset_to_global'.tr(),
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: _hasCustom
-                            ? context.cs.primary
-                            : context.cs.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
           if (!_hasCustom)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -121,6 +112,7 @@ class _LorebookPerBookSettingsScreenState
                   min: 0,
                   max: 100,
                   hint: 'lorebook_global_default_hint'.tr(),
+                  description: 'lorebook_book_entry_cap_hint'.tr(),
                   onChanged: (v) => _update(
                       _settings.copyWith(maxInjectedEntries: v == 0 ? null : v)),
                 ),
@@ -143,12 +135,11 @@ class _LorebookPerBookSettingsScreenState
                 _DropdownField<String>(
                   label: 'label_match_whole_words'.tr(),
                   value: _settings.matchWholeWords ?? '',
-                  items: [
-                    DropdownMenuItem(value: '', child: Text('match_global'.tr())),
-                    DropdownMenuItem(value: 'false', child: Text('off'.tr())),
-                    DropdownMenuItem(value: 'true', child: Text('on'.tr())),
-                    DropdownMenuItem(
-                        value: 'glaze', child: Text('match_whole_words_glaze'.tr())),
+                  options: [
+                    LorebookOption('', 'match_global'.tr()),
+                    LorebookOption('false', 'off'.tr()),
+                    LorebookOption('true', 'on'.tr()),
+                    LorebookOption('glaze', 'match_whole_words_glaze'.tr()),
                   ],
                   onChanged: (v) => _update(
                       _settings.copyWith(matchWholeWords: v.isEmpty ? null : v)),
@@ -156,45 +147,75 @@ class _LorebookPerBookSettingsScreenState
                 const SizedBox(height: 24),
 
                 // ── Vector Search ─────────────────────────────────────────
-                _SectionHeader('section_vector_search'.tr()),
-                _SwitchField(
-                  label: 'label_vector_search'.tr(),
-                  value: _settings.vectorSearchEnabled,
-                  onChanged: (v) =>
-                      _update(_settings.copyWith(vectorSearchEnabled: v)),
-                ),
-                if (_settings.vectorSearchEnabled) ...[
-                  const SizedBox(height: 8),
-                  _DropdownField<String>(
-                    label: 'label_embedding_target'.tr(),
-                    value: _settings.embeddingTarget,
-                    items: [
-                      DropdownMenuItem(value: 'content', child: Text('target_content'.tr())),
-                      DropdownMenuItem(value: 'comment', child: Text('target_comment'.tr())),
-                      DropdownMenuItem(value: 'both', child: Text('search_type_both'.tr())),
-                    ],
+                // Hidden while the active API preset has semantic search off:
+                // the per-book override could not take effect anyway.
+                if (ref.watch(vectorSearchAvailableProvider)) ...[
+                  _SectionHeader('section_vector_search'.tr()),
+                  _SwitchField(
+                    label: 'label_vector_search'.tr(),
+                    value: _settings.vectorSearchEnabled,
                     onChanged: (v) =>
-                        _update(_settings.copyWith(embeddingTarget: v)),
+                        _update(_settings.copyWith(vectorSearchEnabled: v)),
                   ),
-                  const SizedBox(height: 12),
-                  _SliderField(
-                    label: 'label_similarity_threshold'.tr(),
-                    value: _settings.vectorThreshold,
-                    min: 0.0,
-                    max: 1.0,
-                    divisions: 20,
-                    displayText: _settings.vectorThreshold.toStringAsFixed(2),
-                    onChanged: (v) =>
-                        _update(_settings.copyWith(vectorThreshold: v)),
-                  ),
-                  const SizedBox(height: 12),
-                  _NumberField(
-                    label: 'label_top_k'.tr(),
-                    value: _settings.vectorTopK,
-                    min: 1,
-                    max: 50,
-                    onChanged: (v) => _update(_settings.copyWith(vectorTopK: v)),
-                  ),
+                  if (_settings.vectorSearchEnabled) ...[
+                    const SizedBox(height: 8),
+                    _SwitchField(
+                      label: 'label_vectorize_all_entries'.tr(),
+                      value: _settings.vectorizeAllEntries,
+                      onChanged: (v) =>
+                          _update(_settings.copyWith(vectorizeAllEntries: v)),
+                    ),
+                    const SizedBox(height: 8),
+                    _DropdownField<String>(
+                      label: 'label_embedding_target'.tr(),
+                      value:
+                          LorebookEmbeddingTarget.values.contains(
+                            _settings.embeddingTarget,
+                          )
+                          ? _settings.embeddingTarget
+                          : LorebookEmbeddingTarget.content,
+                      options: [
+                        LorebookOption(
+                          LorebookEmbeddingTarget.content,
+                          'target_content'.tr(),
+                        ),
+                        LorebookOption(
+                          LorebookEmbeddingTarget.comment,
+                          'target_comment'.tr(),
+                        ),
+                        LorebookOption(
+                          LorebookEmbeddingTarget.keys,
+                          'target_keys'.tr(),
+                        ),
+                        LorebookOption(
+                          LorebookEmbeddingTarget.both,
+                          'target_comment_and_content'.tr(),
+                        ),
+                      ],
+                      onChanged: (v) =>
+                          _update(_settings.copyWith(embeddingTarget: v)),
+                    ),
+                    const SizedBox(height: 12),
+                    _SliderField(
+                      label: 'label_similarity_threshold'.tr(),
+                      value: _settings.vectorThreshold,
+                      min: 0.0,
+                      max: 1.0,
+                      divisions: 20,
+                      displayText: _settings.vectorThreshold.toStringAsFixed(2),
+                      onChanged: (v) =>
+                          _update(_settings.copyWith(vectorThreshold: v)),
+                    ),
+                    const SizedBox(height: 12),
+                    _NumberField(
+                      label: 'label_top_k'.tr(),
+                      value: _settings.vectorTopK,
+                      min: 1,
+                      max: 50,
+                      onChanged: (v) =>
+                          _update(_settings.copyWith(vectorTopK: v)),
+                    ),
+                  ],
                 ],
                 const SizedBox(height: 24),
               ],
@@ -261,6 +282,10 @@ class _NumberField extends StatefulWidget {
   final int min;
   final int max;
   final String? hint;
+
+  /// Muted line under the label, for a legend too long to sit in the field's
+  /// own placeholder (which is only as wide as the 80px input).
+  final String? description;
   final ValueChanged<int> onChanged;
 
   const _NumberField({
@@ -269,6 +294,7 @@ class _NumberField extends StatefulWidget {
     this.min = 0,
     this.max = 2147483647,
     this.hint,
+    this.description,
     required this.onChanged,
   });
 
@@ -323,9 +349,25 @@ class _NumberFieldState extends State<_NumberField> {
     return Row(
       children: [
         Expanded(
-          child: Text(widget.label,
-              style:
-                  TextStyle(color: context.cs.onSurfaceVariant, fontSize: 14)),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(widget.label,
+                  style: TextStyle(
+                      color: context.cs.onSurfaceVariant, fontSize: 14)),
+              if (widget.description != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2, right: 8),
+                  child: Text(widget.description!,
+                      style: TextStyle(
+                          fontSize: 11,
+                          height: 1.25,
+                          color: context.cs.onSurfaceVariant
+                              .withValues(alpha: 0.7))),
+                ),
+            ],
+          ),
         ),
         SizedBox(
           width: 80,
@@ -361,18 +403,22 @@ class _NumberFieldState extends State<_NumberField> {
 class _DropdownField<T> extends StatelessWidget {
   final String label;
   final T value;
-  final List<DropdownMenuItem<T>> items;
+  final List<LorebookOption<T>> options;
   final ValueChanged<T> onChanged;
 
   const _DropdownField({
     required this.label,
     required this.value,
-    required this.items,
+    required this.options,
     required this.onChanged,
   });
 
   @override
   Widget build(BuildContext context) {
+    final current = options.firstWhere(
+      (o) => o.value == value,
+      orElse: () => options.first,
+    );
     return Row(
       children: [
         Expanded(
@@ -381,25 +427,20 @@ class _DropdownField<T> extends StatelessWidget {
                   TextStyle(color: context.cs.onSurfaceVariant, fontSize: 14)),
         ),
         const SizedBox(width: 8),
-        Flexible(
-          flex: 2,
-          child: DropdownButtonFormField<T>(
-            initialValue: value,
-            items: items,
-            isExpanded: true,
-            onChanged: (v) {
-              if (v != null) onChanged(v);
-            },
-            style: TextStyle(color: context.cs.onSurface, fontSize: 13),
-            dropdownColor: context.cs.surface,
-            decoration: InputDecoration(
-              isDense: true,
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              filled: true,
-              fillColor: Colors.white.withValues(alpha: 0.05),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-            ),
+        GlazeDropdownChip(
+          label: current.label,
+          onTap: () => showGlazePickerSheet(
+            context,
+            title: label,
+            items: [
+              for (final option in options)
+                GlazePickerItem(
+                  label: option.label,
+                  isActive: option.value == value,
+                  value: option.value,
+                ),
+            ],
+            onSelect: (v) => onChanged(v as T),
           ),
         ),
       ],

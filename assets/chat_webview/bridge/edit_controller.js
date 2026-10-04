@@ -30,7 +30,13 @@ export class EditController {
     const scrollPos = scrollTopFn();
     section.classList.add('editing');
 
-    const rawText = (section.dataset.rawText || '').replace(/^<think\b[^>]*>[\s\S]*?<\/think>\s*/, '');
+    // Edit the stored text, not the rendering. `rawText` holds the display
+    // form — macros expanded and display regexes applied — so saving from it
+    // would persist the rendered output over the source (a `markdownOnly`
+    // card regex would eat its own `{TRK|…}` marker). `sourceText` is sent
+    // whenever the two differ; without it they are the same string.
+    const editSource = section.dataset.sourceText ?? section.dataset.rawText ?? '';
+    const rawText = editSource.replace(/^<think\b[^>]*>[\s\S]*?<\/think>\s*/, '');
     const reasoning = section.dataset.reasoning || '';
     let editText = rawText;
     if (reasoning) editText = '<' + 'think>\n' + reasoning + '\n</' + 'think>\n' + rawText;
@@ -220,13 +226,22 @@ export class EditController {
     if (body) {
       delete body.dataset.originalHtml;   // discard stale snapshot
       if (window.bridge?.renderer) {
+        const renderer = window.bridge.renderer;
         const isUser = section.classList.contains('user');
-        window.bridge.renderer.updateMessageContent(
+        renderer.updateMessageContent(
           section,
           section.dataset.rawText || '',
           section.dataset.reasoning || null,
           isUser, false, false,
         );
+        // While the bubble was in edit mode it held a textarea instead of a
+        // content host, so a search pass that ran in the meantime skipped it
+        // and numbered the matches without it. Re-run the pass now that the
+        // saved text is back in the DOM, or the counter and the active-match
+        // highlight stay out of step with what is on screen.
+        if (renderer.searchQuery) {
+          renderer.setSearch(renderer.searchQuery, renderer.activeSearchIndex, false);
+        }
       }
     }
 

@@ -1,12 +1,17 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/db/repositories/character_repo.dart';
 import '../../../core/db/repositories/chat_repo.dart';
-import '../../../core/db/repositories/studio_config_repo.dart';
+import '../../../core/db/repositories/ledger_reconciliation_run_repo.dart';
+import '../../../core/db/repositories/ledger_reconciliation_checkpoint_repo.dart';
 import '../../../core/db/repositories/studio_preset_repo.dart';
 import '../../../core/db/repositories/tracker_repo.dart';
 import '../../../core/db/repositories/tracker_snapshot_repo.dart';
 import '../../../core/llm/aux_llm_client.dart';
+import '../../../core/llm/game_time.dart';
 import '../../../core/llm/macro_engine.dart';
 import '../../../core/llm/studio_ledger_reconciliation.dart';
 import '../../../core/llm/studio_ledger_service.dart';
@@ -14,23 +19,29 @@ import '../../../core/llm/studio_turn_config_snapshot.dart';
 import '../../../core/models/api_config.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../core/models/pipeline_settings.dart';
+import '../../../core/models/studio_config.dart';
 import '../../../core/services/generation_notification_service.dart';
-import '../../../core/services/post_gen_foreground_guard.dart';
 import '../../../core/state/active_studio_preset_provider.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/state/memory_agent_providers.dart';
+import '../../../core/utils/time_helpers.dart';
 import '../../settings/api_list_provider.dart';
+import '../chat_session_service.dart';
+import 'game_time_message_stamp.dart';
 
 final manualStudioLedgerServiceProvider = Provider<ManualStudioLedgerService>((
   ref,
 ) {
   return ManualStudioLedgerService(
     chatRepo: ref.watch(chatRepoProvider),
-    studioConfigRepo: ref.watch(studioConfigRepoProvider),
     snapshotRepo: ref.watch(trackerSnapshotRepoProvider),
     trackerRepo: ref.watch(trackerRepoProvider),
     presetRepo: ref.watch(studioPresetRepoProvider),
     characterRepo: ref.watch(characterRepoProvider),
+    reconciliationRunRepo: ref.watch(ledgerReconciliationRunRepoProvider),
+    reconciliationCheckpointRepo: ref.watch(
+      ledgerReconciliationCheckpointRepoProvider,
+    ),
     ledger: DefaultStudioLedgerExecutor(ref.watch(studioLedgerServiceProvider)),
     loadApiConfigs: () async {
       await ref.read(apiListProvider.future);
@@ -39,10 +50,8 @@ final manualStudioLedgerServiceProvider = Provider<ManualStudioLedgerService>((
     readActiveApiConfig: () => ref.read(activeApiConfigProvider),
     readPipelineSettings: () => ref.read(pipelineSettingsProvider),
     loadActivePresetId: () => ref.read(activeStudioPresetProvider.future),
-    onForegroundStarted:
-        GenerationNotificationService.instance.onPostGenStarted,
-    onForegroundFinished:
-        GenerationNotificationService.instance.onPostGenFinished,
+    acquireForegroundLease:
+        GenerationNotificationService.instance.acquirePostGenerationLease,
   );
 });
 
@@ -76,6 +85,8 @@ abstract interface class StudioLedgerExecutor {
     required String recentHistoryText,
     required ChatMessage target,
     required MacroContext macroCtx,
+    required FutureOr<bool> Function() isStillCurrent,
+    required StudioLedgerEngine engine,
   });
 
   Future<LedgerRunResult> reconcile({
@@ -84,6 +95,16 @@ abstract interface class StudioLedgerExecutor {
     required AuxApiConfig config,
     required LedgerReconciliationPlan plan,
     required MacroContext macroCtx,
+    required FutureOr<bool> Function() isStillCurrent,
+  });
+
+  Future<LedgerRunResult> replaceLatestReconciliation({
+    required String sessionId,
+    required String expectedRunId,
+    required StudioTurnConfigSnapshot turnConfig,
+    required AuxApiConfig config,
+    required MacroContext macroCtx,
+    required FutureOr<bool> Function() isStillCurrent,
   });
 }
 
@@ -101,6 +122,8 @@ class DefaultStudioLedgerExecutor implements StudioLedgerExecutor {
     required String recentHistoryText,
     required ChatMessage target,
     required MacroContext macroCtx,
+    required FutureOr<bool> Function() isStillCurrent,
+    required StudioLedgerEngine engine,
   }) {
     return _service.run(
       sessionId: sessionId,
@@ -114,7 +137,11 @@ class DefaultStudioLedgerExecutor implements StudioLedgerExecutor {
       forceEnabled: true,
       ledgerBlocks: turnConfig.preset?.blocks ?? const [],
       macroCtx: macroCtx,
+      isStillCurrent: isStillCurrent,
       commitSnapshot: true,
+      engine: engine,
+      operationIdentity:
+          'manual:${target.id}:${target.swipeId}:${target.agentSwipeId}',
     );
   }
 
@@ -125,6 +152,7 @@ class DefaultStudioLedgerExecutor implements StudioLedgerExecutor {
     required AuxApiConfig config,
     required LedgerReconciliationPlan plan,
     required MacroContext macroCtx,
+    required FutureOr<bool> Function() isStillCurrent,
   }) {
     return _service.reconcile(
       sessionId: sessionId,
@@ -133,6 +161,31 @@ class DefaultStudioLedgerExecutor implements StudioLedgerExecutor {
       plan: plan,
       ledgerBlocks: turnConfig.preset?.blocks ?? const [],
       macroCtx: macroCtx,
+      isStillCurrent: isStillCurrent,
+      operationIdentity:
+          'manual:${plan.rangeHash}:${plan.endMessage.id}:'
+          '${plan.endMessage.swipeId}:${plan.endMessage.agentSwipeId}',
+    );
+  }
+
+  @override
+  Future<LedgerRunResult> replaceLatestReconciliation({
+    required String sessionId,
+    required String expectedRunId,
+    required StudioTurnConfigSnapshot turnConfig,
+    required AuxApiConfig config,
+    required MacroContext macroCtx,
+    required FutureOr<bool> Function() isStillCurrent,
+  }) {
+    return _service.replaceLatestReconciliation(
+      sessionId: sessionId,
+      expectedRunId: expectedRunId,
+      settings: turnConfig.pipelineSettings,
+      config: config,
+      ledgerBlocks: turnConfig.preset?.blocks ?? const [],
+      macroCtx: macroCtx,
+      isStillCurrent: isStillCurrent,
+      operationIdentity: 'manual-replacement:$expectedRunId',
     );
   }
 }
@@ -140,33 +193,33 @@ class DefaultStudioLedgerExecutor implements StudioLedgerExecutor {
 class ManualStudioLedgerService {
   const ManualStudioLedgerService({
     required this.chatRepo,
-    required this.studioConfigRepo,
     required this.snapshotRepo,
     required this.trackerRepo,
     required this.presetRepo,
     required this.characterRepo,
+    required this.reconciliationRunRepo,
+    required this.reconciliationCheckpointRepo,
     required this.ledger,
     required this.loadApiConfigs,
     required this.readActiveApiConfig,
     required this.readPipelineSettings,
     required this.loadActivePresetId,
-    required this.onForegroundStarted,
-    required this.onForegroundFinished,
+    required this.acquireForegroundLease,
   });
 
   final ChatRepo chatRepo;
-  final StudioConfigRepo studioConfigRepo;
   final TrackerSnapshotRepo snapshotRepo;
   final TrackerRepo trackerRepo;
   final StudioPresetRepo presetRepo;
   final CharacterRepo characterRepo;
+  final LedgerReconciliationRunRepo reconciliationRunRepo;
+  final LedgerReconciliationCheckpointRepo reconciliationCheckpointRepo;
   final StudioLedgerExecutor ledger;
   final Future<List<ApiConfig>> Function() loadApiConfigs;
   final ApiConfig? Function() readActiveApiConfig;
   final PipelineSettings Function() readPipelineSettings;
   final Future<String> Function() loadActivePresetId;
-  final Future<void> Function() onForegroundStarted;
-  final Future<void> Function() onForegroundFinished;
+  final Future<PostGenerationForegroundLease> Function() acquireForegroundLease;
 
   Future<ManualStudioLedgerResult> rerun({
     required String sessionId,
@@ -176,16 +229,23 @@ class ManualStudioLedgerService {
     final session = await chatRepo.getById(sessionId);
     if (session == null) throw StateError('Session not found');
     final startedAt = DateTime.now().millisecondsSinceEpoch;
+    final isTargetCurrent = _targetOwnershipGuard(sessionId, target);
     final turnConfig = await turnConfigFuture;
+    _requireLedgerEnabled(turnConfig);
     final AuxApiConfig ledgerConfig;
     try {
-      ledgerConfig = turnConfig.resolveCleanerConfig(
-        errorLabel: 'ledger-rerun',
-      );
+      ledgerConfig = turnConfig.resolveLedgerConfig(errorLabel: 'ledger-rerun');
     } catch (e) {
       throw ManualStudioLedgerConfigException(e);
     }
-    final macroCtx = await _macroContext(sessionId, session.characterId);
+    final macroCtx = await _macroContext(
+      sessionId,
+      session.characterId,
+      _personaName(session.messages),
+    );
+    if (!await isTargetCurrent()) {
+      return _abortedManualResult(target, startedAt);
+    }
     final result = await _runForeground(
       () => ledger.run(
         sessionId: sessionId,
@@ -196,11 +256,24 @@ class ManualStudioLedgerService {
           session.messages,
           maxMessages: 10,
           upToMessageId: target.id,
+          excludeMessageId: target.id,
         ),
         target: target,
         macroCtx: macroCtx,
+        isStillCurrent: isTargetCurrent,
+        engine: StudioLedgerEngine.currentReconciled,
       ),
     );
+    if (!await isTargetCurrent()) {
+      return _abortedManualResult(target, startedAt);
+    }
+    if (result.status == 'ok') {
+      try {
+        await _syncGameTimeToMessage(sessionId, target);
+      } catch (error) {
+        debugPrint('[StudioLedger] rerun timestamp sync skipped: $error');
+      }
+    }
     await trackerRepo.upsertValue(
       sessionId,
       '_ledger_diag:studio_ledger',
@@ -219,51 +292,116 @@ class ManualStudioLedgerService {
     );
   }
 
-  Future<ManualStudioLedgerResult> reconcile(String sessionId) async {
+  Future<void> _syncGameTimeToMessage(
+    String sessionId,
+    ChatMessage target,
+  ) async {
+    final snapshot = await snapshotRepo.getByAnchor(
+      sessionId: sessionId,
+      messageId: target.id,
+      swipeId: target.swipeId,
+      agentSwipeId: target.agentSwipeId,
+    );
+    final stamp = snapshot == null
+        ? null
+        : GameTimeState.fromTrackers(snapshot.trackers).format();
+    final durable = await chatRepo.mutateMessagesWithBeforeWrite(
+      sessionId: sessionId,
+      updatedAt: currentTimestampSeconds(),
+      mutate: (messages) {
+        final index = messages.indexWhere((message) => message.id == target.id);
+        if (index < 0) {
+          throw StateError('Ledger rerun timestamp target changed');
+        }
+        final message = messages[index];
+        if (message.swipeId != target.swipeId ||
+            message.agentSwipeId != target.agentSwipeId ||
+            message.content != target.content) {
+          throw StateError('Ledger rerun timestamp target changed');
+        }
+        messages[index] = stampGameTimeForVariation(
+          message,
+          swipeId: target.swipeId,
+          agentSwipeId: target.agentSwipeId,
+          time: stamp,
+        );
+        return messages;
+      },
+      beforeWrite: (_, _) async {
+        final current = await snapshotRepo.getByAnchor(
+          sessionId: sessionId,
+          messageId: target.id,
+          swipeId: target.swipeId,
+          agentSwipeId: target.agentSwipeId,
+        );
+        if (current == null ||
+            GameTimeState.fromTrackers(current.trackers).format() != stamp) {
+          throw StateError('Ledger rerun timestamp snapshot changed');
+        }
+      },
+    );
+    if (durable == null) {
+      throw StateError('Ledger rerun timestamp target changed');
+    }
+    ChatSessionService.updateCache(durable);
+  }
+
+  Future<ManualStudioLedgerResult> rerunMissingForReconciliation(
+    String sessionId,
+  ) async {
     final session = await chatRepo.getById(sessionId);
     if (session == null) throw StateError('Session not found');
-    final snapshots = await snapshotRepo.getBySessionId(sessionId);
-    final committedAnchors = snapshots
-        .where((snapshot) => snapshot.committed)
-        .map(
-          (snapshot) =>
-              '${snapshot.messageId}\u001f${snapshot.swipeId}\u001f'
-              '${snapshot.agentSwipeId}',
-        )
-        .toSet();
-    final endpoint = session.messages.reversed.where((message) {
-      final anchor =
-          '${message.id}\u001f${message.swipeId}\u001f${message.agentSwipeId}';
-      return message.role == 'assistant' &&
-          !message.isError &&
-          !message.isTyping &&
-          !message.isHidden &&
-          message.content.trim().isNotEmpty &&
-          committedAnchors.contains(anchor);
-    }).firstOrNull;
-    if (endpoint == null) {
-      throw StateError('No committed Ledger snapshot to reconcile');
-    }
-    final plan = const LedgerReconciliationPlanner().planForEndpoint(
-      messages: session.messages,
-      endAssistantMessageId: endpoint.id,
-    );
+    final plan = await _reconciliationPlan(session);
     if (plan == null) {
-      throw StateError('No reviewable messages end at the committed snapshot');
+      throw StateError('No batch of five committed Ledger ranges is due');
+    }
+    final endpoint = plan.endMessage;
+    final snapshot = await snapshotRepo.getByAnchor(
+      sessionId: sessionId,
+      messageId: endpoint.id,
+      swipeId: endpoint.swipeId,
+      agentSwipeId: endpoint.agentSwipeId,
+    );
+    if (snapshot?.committed == true) {
+      throw StateError('The reconciliation endpoint is already committed');
+    }
+    return rerun(sessionId: sessionId, target: endpoint);
+  }
+
+  Future<ManualStudioLedgerResult> reconcile(String sessionId) async {
+    final turnConfigFuture = _resolveTurnConfig(sessionId);
+    final session = await chatRepo.getById(sessionId);
+    if (session == null) throw StateError('Session not found');
+    final turnConfig = await turnConfigFuture;
+    _requireLedgerEnabled(turnConfig);
+    final plan = await _reconciliationPlan(session);
+    if (plan == null) {
+      throw StateError('No batch of five committed Ledger ranges is due');
+    }
+    final endpoint = plan.endMessage;
+    final endpointSnapshot = await snapshotRepo.getByAnchor(
+      sessionId: sessionId,
+      messageId: endpoint.id,
+      swipeId: endpoint.swipeId,
+      agentSwipeId: endpoint.agentSwipeId,
+    );
+    if (endpointSnapshot?.committed != true) {
+      throw StateError('The reconciliation endpoint is not committed');
     }
 
-    final turnConfig = await _resolveTurnConfig(sessionId);
-    final ledgerConfig = turnConfig.resolveCleanerConfig(
+    final ledgerConfig = turnConfig.resolveLedgerConfig(
       errorLabel: 'ledger-reconciliation-manual',
     );
-    final macroCtx = await _macroContext(sessionId, session.characterId);
-    final startedAt = DateTime.now().millisecondsSinceEpoch;
-    await _writeReconciliationDiagnostic(
-      sessionId: sessionId,
-      trigger: endpoint,
-      plan: plan,
-      result: LedgerRunResult(status: 'running', model: ledgerConfig.model),
+    final macroCtx = await _macroContext(
+      sessionId,
+      session.characterId,
+      _personaName(session.messages),
     );
+    final startedAt = DateTime.now().millisecondsSinceEpoch;
+    final isTargetCurrent = _targetOwnershipGuard(sessionId, endpoint);
+    if (!await isTargetCurrent()) {
+      return _abortedManualResult(endpoint, startedAt);
+    }
     final result = await _runForeground(
       () => ledger.reconcile(
         sessionId: sessionId,
@@ -271,8 +409,12 @@ class ManualStudioLedgerService {
         config: ledgerConfig,
         plan: plan,
         macroCtx: macroCtx,
+        isStillCurrent: isTargetCurrent,
       ),
     );
+    if (!await isTargetCurrent()) {
+      return _abortedManualResult(endpoint, startedAt);
+    }
     await _writeReconciliationDiagnostic(
       sessionId: sessionId,
       trigger: endpoint,
@@ -286,14 +428,102 @@ class ManualStudioLedgerService {
     );
   }
 
+  Future<LedgerReconciliationPlan?> _reconciliationPlan(
+    ChatSession session,
+  ) async {
+    final trigger = session.messages.reversed.where((message) {
+      return message.role == 'assistant' &&
+          !message.isError &&
+          !message.isTyping &&
+          !message.isHidden &&
+          message.content.trim().isNotEmpty;
+    }).firstOrNull;
+    if (trigger == null) {
+      throw StateError('No assistant turn can trigger reconciliation');
+    }
+    final checkpoint = await reconciliationCheckpointRepo.get(session.id);
+    final previousHead = await reconciliationRunRepo.getHead(session.id);
+    return const LedgerReconciliationPlanner().plan(
+      messages: session.messages,
+      currentAssistantMessageId: trigger.id,
+      checkpoint: checkpoint,
+      previousEndMessageId: previousHead?.endMessageId,
+    );
+  }
+
+  Future<ManualStudioLedgerResult> regenerateLatest({
+    required String sessionId,
+    required String expectedRunId,
+  }) async {
+    final turnConfigFuture = _resolveTurnConfig(sessionId);
+    final session = await chatRepo.getById(sessionId);
+    if (session == null) throw StateError('Session not found');
+    final head = await reconciliationRunRepo.getHead(sessionId);
+    if (head == null || head.id != expectedRunId) {
+      throw StateError('The selected reconciliation is no longer latest');
+    }
+    final messages = await reconciliationRunRepo.reconstructSelectedMessages(
+      head,
+    );
+    if (messages == null || messages.isEmpty) {
+      throw StateError('The committed message range no longer matches');
+    }
+    final plan = LedgerReconciliationPlan(
+      messages: messages,
+      endMessage: messages.last,
+      rangeHash: computeLedgerReconciliationRangeHash(messages),
+    );
+    final turnConfig = await turnConfigFuture;
+    _requireLedgerEnabled(turnConfig);
+    final ledgerConfig = turnConfig.resolveLedgerConfig(
+      errorLabel: 'ledger-reconciliation-regeneration',
+    );
+    final macroCtx = await _macroContext(
+      sessionId,
+      session.characterId,
+      _personaName(session.messages),
+    );
+    final startedAt = DateTime.now().millisecondsSinceEpoch;
+    final isTargetCurrent = _targetOwnershipGuard(sessionId, plan.endMessage);
+    if (!await isTargetCurrent()) {
+      return _abortedManualResult(plan.endMessage, startedAt);
+    }
+    final result = await _runForeground(
+      () => ledger.replaceLatestReconciliation(
+        sessionId: sessionId,
+        expectedRunId: expectedRunId,
+        turnConfig: turnConfig,
+        config: ledgerConfig,
+        macroCtx: macroCtx,
+        isStillCurrent: isTargetCurrent,
+      ),
+    );
+    if (!await isTargetCurrent()) {
+      return _abortedManualResult(plan.endMessage, startedAt);
+    }
+    await _writeReconciliationDiagnostic(
+      sessionId: sessionId,
+      trigger: plan.endMessage,
+      plan: plan,
+      result: result,
+      action: 'regenerate',
+    );
+    return ManualStudioLedgerResult(
+      target: plan.endMessage,
+      result: result,
+      startedAtMs: startedAt,
+    );
+  }
+
   Future<StudioTurnConfigSnapshot> _resolveTurnConfig(String sessionId) async {
     final pipeline = readPipelineSettings();
     final activeApiConfig = readActiveApiConfig();
     final apiConfigs = List<ApiConfig>.unmodifiable(await loadApiConfigs());
-    final config = await studioConfigRepo.getBySessionId(sessionId);
     final preset = await presetRepo.getById(await loadActivePresetId());
     return StudioTurnConfigSnapshot(
-      config: config,
+      config: preset == null
+          ? null
+          : StudioConfig(sessionId: sessionId, enabled: true),
       preset: preset,
       pipelineSettings: pipeline,
       apiConfigs: apiConfigs,
@@ -301,9 +531,18 @@ class ManualStudioLedgerService {
     );
   }
 
+  void _requireLedgerEnabled(StudioTurnConfigSnapshot turnConfig) {
+    if (!turnConfig.ledgerEnabled) {
+      throw const ManualStudioLedgerConfigException(
+        'Studio Ledger is disabled in the active preset',
+      );
+    }
+  }
+
   Future<MacroContext> _macroContext(
     String sessionId,
     String characterId,
+    String userName,
   ) async {
     final character = await characterRepo.getById(characterId);
     return MacroContext(
@@ -312,29 +551,62 @@ class ManualStudioLedgerService {
       charScenario: character?.scenario,
       charPersonality: character?.personality,
       charMesExample: character?.mesExample,
-      userName: 'User',
+      userName: userName,
       macroName: character?.macroName,
       charId: characterId,
       sessionId: sessionId,
     );
   }
 
+  String _personaName(Iterable<ChatMessage> messages) {
+    for (final message in messages.toList().reversed) {
+      final name = message.personaName?.trim();
+      if (name != null && name.isNotEmpty) return name;
+    }
+    return 'User';
+  }
+
   Future<LedgerRunResult> _runForeground(
     Future<LedgerRunResult> Function() action,
-  ) {
-    return runWithPostGenForeground(
-      onStarted: onForegroundStarted,
-      action: action,
-      onFinished: onForegroundFinished,
-    );
+  ) async {
+    final lease = await acquireForegroundLease();
+    try {
+      return await action();
+    } finally {
+      await lease.release();
+    }
   }
+
+  FutureOr<bool> Function() _targetOwnershipGuard(
+    String sessionId,
+    ChatMessage target,
+  ) => () async {
+    final current = await chatRepo.getById(sessionId);
+    final message = current?.messages
+        .where((item) => item.id == target.id)
+        .firstOrNull;
+    return message != null &&
+        message.swipeId == target.swipeId &&
+        message.agentSwipeId == target.agentSwipeId &&
+        message.content == target.content;
+  };
+
+  ManualStudioLedgerResult _abortedManualResult(
+    ChatMessage target,
+    int startedAt,
+  ) => ManualStudioLedgerResult(
+    target: target,
+    result: LedgerRunResult.aborted,
+    startedAtMs: startedAt,
+  );
 
   Future<void> _writeReconciliationDiagnostic({
     required String sessionId,
     required ChatMessage trigger,
     required LedgerReconciliationPlan plan,
     required LedgerRunResult result,
-  }) {
+    String action = 'run',
+  }) async {
     final attempts = result.attempts.isEmpty
         ? 'none'
         : result.attempts
@@ -345,20 +617,24 @@ class ManualStudioLedgerService {
                     '${attempt.error == null ? '' : '/error=${attempt.error}'}',
               )
               .join(',');
-    return trackerRepo.upsertValue(
-      sessionId,
-      '_ledger_diag:studio_ledger_reconciliation',
-      'trigger=${trigger.id} \u2022 range=${plan.startMessageId}..${plan.endMessage.id} '
-          '\u2022 status=${result.status} \u2022 ops=${result.opsApplied} '
-          '\u2022 elapsedMs=${result.elapsedMs} \u2022 model=${result.model ?? 'unknown'} '
-          '\u2022 attempts=$attempts \u2022 manual=1'
-          '${result.error == null ? '' : ' \u2022 error=${result.error}'}',
-      scope: 'ledger_diagnostic',
-      provenance:
-          'message=${trigger.id}|swipe=${trigger.swipeId}|'
-          'agentSwipe=${trigger.agentSwipeId}|range=${plan.startMessageId}..'
-          '${plan.endMessage.id}|manual=1',
-    );
+    try {
+      await trackerRepo.upsertValue(
+        sessionId,
+        '_ledger_diag:studio_ledger_reconciliation',
+        'trigger=${trigger.id} \u2022 range=${plan.startMessageId}..${plan.endMessage.id} '
+            '\u2022 status=${result.status} \u2022 ops=${result.opsApplied} '
+            '\u2022 elapsedMs=${result.elapsedMs} \u2022 model=${result.model ?? 'unknown'} '
+            '\u2022 attempts=$attempts \u2022 action=$action \u2022 manual=1'
+            '${result.error == null ? '' : ' \u2022 error=${result.error}'}',
+        scope: 'ledger_diagnostic',
+        provenance:
+            'message=${trigger.id}|swipe=${trigger.swipeId}|'
+            'agentSwipe=${trigger.agentSwipeId}|range=${plan.startMessageId}..'
+            '${plan.endMessage.id}|action=$action|manual=1',
+      );
+    } catch (error) {
+      debugPrint('[StudioLedger] manual diagnostic write failed: $error');
+    }
   }
 }
 
@@ -366,18 +642,25 @@ String _recentHistoryText(
   List<ChatMessage> messages, {
   int maxMessages = 10,
   String? upToMessageId,
+  String? excludeMessageId,
 }) {
   var source = messages;
   if (upToMessageId != null) {
     final idx = messages.indexWhere((m) => m.id == upToMessageId);
     if (idx >= 0) source = messages.sublist(0, idx + 1);
   }
-  final start = source.length > maxMessages ? source.length - maxMessages : 0;
+  final eligible = source.where((message) {
+    if (message.id == excludeMessageId) return false;
+    if (message.role != 'user' && message.role != 'assistant') return false;
+    if (message.isHidden || message.isError || message.isTyping) return false;
+    return message.content.trim().isNotEmpty;
+  }).toList();
+  final start = eligible.length > maxMessages
+      ? eligible.length - maxMessages
+      : 0;
   final lines = <String>[];
-  for (final msg in source.sublist(start)) {
-    if (msg.isError || msg.isTyping) continue;
+  for (final msg in eligible.sublist(start)) {
     final content = msg.content.trim();
-    if (content.isEmpty) continue;
     final role = msg.role == 'assistant' ? 'Assistant' : 'User';
     lines.add('$role: $content');
   }

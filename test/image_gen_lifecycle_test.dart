@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/features/chat/chat_state.dart';
+import 'package:glaze_flutter/features/chat/image_recovery_service.dart';
 import 'package:glaze_flutter/features/chat/services/image_gen_processor.dart';
 
 void main() {
@@ -104,43 +105,46 @@ void main() {
   });
 
   group('Imagen green swipes', () {
-    test('regeneration appends a selected swipe and preserves old image', () {
+    test('regeneration rewrites the active swipe instead of adding one', () {
       final message = ChatMessage(
         id: 'assistant',
         role: 'assistant',
-        content: '[IMG:RESULT:/old.png|{"prompt":"scene"}]',
-        swipes: const ['[IMG:RESULT:/old.png|{"prompt":"scene"}]'],
+        content: 'She smiles. [IMG:RESULT:/old.png|{"prompt":"scene"}]',
+        isError: true,
+        swipes: const ['She smiles. [IMG:RESULT:/old.png|{"prompt":"scene"}]'],
         swipesMeta: [
           <String, dynamic>{
+            'isError': true,
             'agentSwipes': [
               const AgentSwipe(
-                content: '[IMG:RESULT:/old.png|{"prompt":"scene"}]',
+                content: 'She smiles. [IMG:RESULT:/old.png|{"prompt":"scene"}]',
               ).toJson(),
             ],
             'agentSwipeId': 0,
           },
         ],
         agentSwipes: const [
-          AgentSwipe(content: '[IMG:RESULT:/old.png|{"prompt":"scene"}]'),
+          AgentSwipe(
+            content: 'She smiles. [IMG:RESULT:/old.png|{"prompt":"scene"}]',
+          ),
         ],
       );
 
-      final result = ImageGenProcessor.appendImageRegenerationSwipe(
+      final result = ImageGenProcessor.resetImageContentInPlace(
         message,
-        '[IMG:GEN:{"prompt":"scene"}]',
+        'She smiles. [IMG:GEN:{"prompt":"scene"}]',
       );
 
-      expect(result.swipes, [
-        '[IMG:RESULT:/old.png|{"prompt":"scene"}]',
-        '[IMG:GEN:{"prompt":"scene"}]',
-      ]);
-      expect(result.swipeId, 1);
-      expect(result.swipesMeta, hasLength(2));
+      expect(result.swipes, ['She smiles. [IMG:GEN:{"prompt":"scene"}]']);
+      expect(result.swipeId, 0);
+      expect(result.content, 'She smiles. [IMG:GEN:{"prompt":"scene"}]');
       expect(result.agentSwipes.single.content, contains('[IMG:GEN:'));
+      expect(result.isError, isFalse);
+      expect(result.swipesMeta.single.containsKey('isError'), isFalse);
       expect(
         AgentSwipe.fromJson(
           Map<String, dynamic>.from(
-            (result.swipesMeta[1]['agentSwipes'] as List).single as Map,
+            (result.swipesMeta[0]['agentSwipes'] as List).single as Map,
           ),
         ).content,
         contains('[IMG:GEN:'),
@@ -177,6 +181,30 @@ void main() {
         ),
       );
       expect(stored.content, '[IMG:RESULT:/new.png]');
+    });
+  });
+
+  group('regenerating a failed block', () {
+    const text =
+        '[IMG:RESULT:/kept.png|{"prompt":"kept"}] '
+        '[IMG:ERROR:{"error":"HTTP 502","instruction":"{\\"prompt\\":\\"lost\\"}"}]';
+
+    test('resets only the failed block and keeps the finished image', () {
+      final result = ImageRecoveryService.resetImgErrorTagsToGen(text);
+
+      expect(result, contains('[IMG:RESULT:/kept.png|{"prompt":"kept"}]'));
+      expect(result, contains('[IMG:GEN:{"prompt":"lost"}]'));
+      expect(result, isNot(contains('[IMG:ERROR:')));
+    });
+
+    test('a full retry still resets every block', () {
+      final result = ImageRecoveryService.resetImgTagsToGen(text);
+
+      expect(result, isNot(contains('[IMG:RESULT:')));
+      // The finished image rides along in the pending tag, so the retry adds a
+      // variant to that block instead of replacing its only picture.
+      expect(result, contains('[IMG:GEN:@/kept.png|{"prompt":"kept"}]'));
+      expect(result, contains('[IMG:GEN:{"prompt":"lost"}]'));
     });
   });
 }

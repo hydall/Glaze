@@ -1,4 +1,5 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
+import 'memory_source_manifest.dart';
 
 part 'memory_book.freezed.dart';
 part 'memory_book.g.dart';
@@ -10,11 +11,14 @@ abstract class MemoryDraft with _$MemoryDraft {
     @Default('') String title,
     @Default('') String content,
     @Default([]) List<String> keys,
+    @Default({}) Map<String, List<int>> keyParagraphs,
+    @Default('') String ledgerRange,
     @Default([]) List<String> glazeKeys,
     @Default(false) bool vectorSearch,
     @Default([]) List<String> messageIds,
     @Default(0) int sourceSwipeId,
     @Default(0) int sourceAgentSwipeId,
+    MemorySourceManifest? sourceManifest,
     MessageRange? messageRange,
     @Default('pending_generation') String status,
     @Default('') String source,
@@ -25,7 +29,7 @@ abstract class MemoryDraft with _$MemoryDraft {
   }) = _MemoryDraft;
 
   factory MemoryDraft.fromJson(Map<String, dynamic> json) =>
-      _$MemoryDraftFromJson(json);
+      _$MemoryDraftFromJson(_migrateKeyParagraphsInPlace(json));
 }
 
 @freezed
@@ -38,17 +42,43 @@ abstract class MessageRange with _$MessageRange {
 }
 
 @freezed
+abstract class MemoryEntryRevision with _$MemoryEntryRevision {
+  const factory MemoryEntryRevision({
+    required String id,
+    required int version,
+    @Default('') String title,
+    @Default('') String content,
+    @Default([]) List<String> keys,
+    @Default({}) Map<String, List<int>> keyParagraphs,
+    @Default('') String ledgerRange,
+    @Default([]) List<String> messageIds,
+    MemorySourceManifest? sourceManifest,
+    required int createdAt,
+    @Default('system') String author,
+    @Default('initial') String reason,
+    String? reviewer,
+    int? reviewedAt,
+  }) = _MemoryEntryRevision;
+
+  factory MemoryEntryRevision.fromJson(Map<String, dynamic> json) =>
+      _$MemoryEntryRevisionFromJson(json);
+}
+
+@freezed
 abstract class MemoryEntry with _$MemoryEntry {
   const factory MemoryEntry({
     required String id,
     @Default('') String title,
     @Default([]) List<String> keys,
+    @Default({}) Map<String, List<int>> keyParagraphs,
+    @Default('') String ledgerRange,
     @Default('') String content,
     @Default('active') String status,
     @Default(false) bool vectorSearch,
     @Default([]) List<String> messageIds,
     @Default(0) int sourceSwipeId,
     @Default(0) int sourceAgentSwipeId,
+    MemorySourceManifest? sourceManifest,
     int? createdAt,
     MessageRange? messageRange,
     @Default(0) double importance,
@@ -75,6 +105,8 @@ abstract class MemoryEntry with _$MemoryEntry {
     /// `MessageRecallService` / memory vector search do not surface them
     /// (Marinara analog).
     @Default(false) bool excludeFromVectorization,
+    String? activeRevisionId,
+    @Default([]) List<MemoryEntryRevision> revisions,
   }) = _MemoryEntry;
 
   factory MemoryEntry.fromJson(Map<String, dynamic> json) =>
@@ -161,7 +193,7 @@ Map<String, dynamic> _migrateInjectionTargetInPlace(Map<String, dynamic> json) {
 /// Coerces new optional fields into safe defaults when reading older JSON
 /// payloads written before the v2 selector schema.
 Map<String, dynamic> _migrateEntryInPlace(Map<String, dynamic> json) {
-  var out = json;
+  var out = _migrateKeyParagraphsInPlace(json);
   if (out['messageRange'] != null && out['messageRange'] is! Map) {
     out = {...out, 'messageRange': null};
   }
@@ -189,7 +221,78 @@ Map<String, dynamic> _migrateEntryInPlace(Map<String, dynamic> json) {
   if (out['source'] is! String) {
     out = {...out, 'source': ''};
   }
+  if (out['sourceManifest'] != null && out['sourceManifest'] is! Map) {
+    out = {
+      ...out,
+      'sourceManifest': const {
+        'version': 0,
+        'originSessionId': '',
+        'messages': <dynamic>[],
+        'invalidated': true,
+      },
+    };
+  }
+  if (out['revisions'] != null && out['revisions'] is! List) {
+    out = {...out, 'revisions': <dynamic>[]};
+  }
+  final revisions = out['revisions'] as List?;
+  if (revisions == null || revisions.isEmpty) {
+    final entryId = out['id'];
+    if (entryId is String && entryId.isNotEmpty) {
+      final createdAt = out['createdAt'] is num
+          ? (out['createdAt'] as num).toInt()
+          : 0;
+      out = {
+        ...out,
+        'activeRevisionId': '$entryId:r1',
+        'revisions': [
+          {
+            'id': '$entryId:r1',
+            'version': 1,
+            'title': out['title'] is String ? out['title'] : '',
+            'content': out['content'] is String ? out['content'] : '',
+            'keys': out['keys'] is List ? out['keys'] : const <String>[],
+            'keyParagraphs': out['keyParagraphs'] is Map
+                ? out['keyParagraphs']
+                : const <String, dynamic>{},
+            'ledgerRange': out['ledgerRange'] is String
+                ? out['ledgerRange']
+                : '',
+            'messageIds': out['messageIds'] is List
+                ? out['messageIds']
+                : const <String>[],
+            'sourceManifest': out['sourceManifest'],
+            'createdAt': createdAt,
+            'author': 'system',
+            'reason': 'imported_legacy',
+          },
+        ],
+      };
+    }
+  }
   return out;
+}
+
+Map<String, dynamic> _migrateKeyParagraphsInPlace(Map<String, dynamic> json) {
+  final raw = json['keyParagraphs'];
+  if (raw is! Map) return {...json, 'keyParagraphs': <String, List<int>>{}};
+  final normalized = <String, List<int>>{};
+  for (final entry in raw.entries) {
+    final key = entry.key.toString().trim();
+    if (key.isEmpty || entry.value is! List) continue;
+    final indexes =
+        (entry.value as List)
+            .map(
+              (value) => value is int ? value : int.tryParse(value.toString()),
+            )
+            .whereType<int>()
+            .where((value) => value >= 0)
+            .toSet()
+            .toList()
+          ..sort();
+    if (indexes.isNotEmpty) normalized[key] = indexes;
+  }
+  return {...json, 'keyParagraphs': normalized};
 }
 
 Map<String, int>? _parseLegacyTitleRange(Object? title) {

@@ -22,7 +22,7 @@ AppDatabase _testDb() => AppDatabase.forTesting(NativeDatabase.memory());
 
 void main() {
   group('StudioApiConfigResolver', () {
-    test('resolveAgentConfig uses runApiConfigId when set', () {
+    test('resolveAgentConfig uses explicit config id when set', () {
       final active = ApiConfig(
         id: 'active',
         name: 'Active',
@@ -84,7 +84,7 @@ void main() {
       expect(resolved.model, 'custom-model');
     });
 
-    test('resolveAgentConfig with empty runApiConfigId uses active', () {
+    test('resolveAgentConfig with empty config id uses active', () {
       final active = ApiConfig(
         id: 'active',
         name: 'Active',
@@ -103,27 +103,24 @@ void main() {
     });
   });
 
-  group('StudioConfig 3-config fields', () {
+  group('StudioPreset 3-config fields', () {
     test('default values are empty strings', () {
-      final config = StudioConfig(sessionId: 'test');
+      final config = StudioPreset(id: 'test');
       expect(config.expensiveApiConfigId, '');
       expect(config.cheapApiConfigId, '');
       expect(config.cleanerApiConfigId, '');
-      expect(config.finalPresetId, '');
     });
 
     test('copyWith updates config fields', () {
-      final config = StudioConfig(sessionId: 'test');
+      final config = StudioPreset(id: 'test');
       final updated = config.copyWith(
         expensiveApiConfigId: 'exp-1',
         cheapApiConfigId: 'cheap-1',
         cleanerApiConfigId: 'clean-1',
-        finalPresetId: 'custom-preset',
       );
       expect(updated.expensiveApiConfigId, 'exp-1');
       expect(updated.cheapApiConfigId, 'cheap-1');
       expect(updated.cleanerApiConfigId, 'clean-1');
-      expect(updated.finalPresetId, 'custom-preset');
     });
 
     test('StudioAgent has no promptShard/modelSource/model/modelOverride', () {
@@ -197,6 +194,15 @@ void main() {
 
       expect(resolved.useResponsesApi, isFalse);
     });
+
+    test('auxiliary Studio slot preserves the API response budget', () {
+      final resolved = StudioSlotResolver.resolve(
+        apiConfigs: const [ApiConfig(id: 'api', maxTokens: 21000)],
+        apiConfigId: 'api',
+      );
+
+      expect(resolved.maxTokens, 21000);
+    });
   });
 
   test('Studio slot parameters override API parameters by key', () async {
@@ -225,7 +231,6 @@ void main() {
           studioFinalExtraRequestParameters: [studioParameter],
         ),
       ),
-      readRunApiConfigId: (_) async => api.id,
     );
 
     final resolved = await resolver.resolveAgentConfig(
@@ -239,6 +244,67 @@ void main() {
   });
 
   group('AgentRunner Studio final routing', () {
+    test(
+      'rejects stale context after config resolution before transport',
+      () async {
+        final runner = AgentRunner(
+          configResolver: AgentConfigResolver(
+            loadApiConfigs: () async => const [],
+            readActiveApiConfig: () => null,
+            readPipelineSettings: () => const PipelineSettings(),
+          ),
+          readPipelineSettings: () => const PipelineSettings(),
+        );
+        var checked = false;
+        await expectLater(
+          runner.runAgent(
+            agent: const StudioAgent(id: 'final', name: 'Final'),
+            messages: const [],
+            apiConfig: const ApiConfig(id: 'test', name: 'test'),
+            sessionId: 's',
+            isFinalResponse: true,
+            preResolvedConfig: const ResolvedAgentConfig(
+              endpoint: 'https://unused.invalid',
+              apiKey: '',
+              model: 'test',
+              protocol: 'openai',
+            ),
+            beforeSend: () async {
+              checked = true;
+              throw StateError('Sources changed');
+            },
+          ),
+          throwsStateError,
+        );
+        expect(checked, isTrue);
+      },
+    );
+
+    test('final max tokens supports an explicit zero override', () {
+      const settings = PipelineSettings(
+        studioAgent: StudioAgentSettings(
+          studioFinalMaxTokens: 0,
+          studioFinalMaxTokensOverride: true,
+        ),
+      );
+      final runner = AgentRunner(
+        configResolver: AgentConfigResolver(
+          loadApiConfigs: () async => const [],
+          readActiveApiConfig: () => null,
+          readPipelineSettings: () => settings,
+        ),
+        readPipelineSettings: () => settings,
+      );
+
+      expect(
+        runner.effectiveMaxTokens(
+          const StudioAgent(id: 'final', name: 'Final'),
+          true,
+        ),
+        0,
+      );
+    });
+
     test('final timeout is not capped at 120 seconds', () {
       const settings = PipelineSettings(
         studioAgent: StudioAgentSettings(studioFinalTimeoutMs: 180000),
@@ -248,7 +314,6 @@ void main() {
           loadApiConfigs: () async => const [],
           readActiveApiConfig: () => null,
           readPipelineSettings: () => settings,
-          readRunApiConfigId: (_) async => '',
         ),
         readPipelineSettings: () => settings,
       );
@@ -295,13 +360,9 @@ void main() {
         container.invalidate(apiListProvider);
         await container.read(apiListProvider.future);
         await container
-            .read(studioConfigRepoProvider)
+            .read(studioPresetRepoProvider)
             .upsert(
-              StudioConfig(
-                sessionId: 'session-1',
-                enabled: true,
-                expensiveApiConfigId: expensive.id,
-              ),
+              StudioPreset(id: 'default', expensiveApiConfigId: expensive.id),
             );
         await container
             .read(pipelineSettingsProvider.notifier)
@@ -360,13 +421,9 @@ void main() {
         container.invalidate(apiListProvider);
         await container.read(apiListProvider.future);
         await container
-            .read(studioConfigRepoProvider)
+            .read(studioPresetRepoProvider)
             .upsert(
-              StudioConfig(
-                sessionId: 'session-1',
-                enabled: true,
-                expensiveApiConfigId: expensive.id,
-              ),
+              StudioPreset(id: 'default', expensiveApiConfigId: expensive.id),
             );
         await container
             .read(pipelineSettingsProvider.notifier)

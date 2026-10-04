@@ -3,6 +3,12 @@ import 'package:freezed_annotation/freezed_annotation.dart';
 part 'chat_message.freezed.dart';
 part 'chat_message.g.dart';
 
+/// How many images one message may carry. The composer stops accepting
+/// attachments at this many, and the WebView lays them out as a grid up to
+/// exactly this count — raising it needs a matching grid case in
+/// `assets/chat_webview/renderer/image_embed.js` and `styles.css`.
+const int maxMessageAttachments = 4;
+
 class TriggeredEntry {
   final String id;
   final String name;
@@ -53,6 +59,7 @@ class AgentSwipe {
   final String? reasoning;
   final String? genTime;
   final int? tokens;
+  final String? time;
   final List<Map<String, dynamic>> studioOutputs;
   final int? parentSwipeId;
 
@@ -62,6 +69,7 @@ class AgentSwipe {
     this.reasoning,
     this.genTime,
     this.tokens,
+    this.time,
     this.studioOutputs = const [],
     this.parentSwipeId,
   });
@@ -72,6 +80,7 @@ class AgentSwipe {
     reasoning: json['reasoning'] as String?,
     genTime: json['genTime'] as String?,
     tokens: json['tokens'] as int?,
+    time: json['time'] as String?,
     studioOutputs:
         (json['studioOutputs'] as List?)
             ?.whereType<Map<dynamic, dynamic>>()
@@ -87,6 +96,7 @@ class AgentSwipe {
     'reasoning': reasoning,
     'genTime': genTime,
     'tokens': tokens,
+    'time': time,
     'studioOutputs': studioOutputs,
     'parentSwipeId': parentSwipeId,
   };
@@ -97,6 +107,7 @@ class AgentSwipe {
     String? reasoning,
     String? genTime,
     int? tokens,
+    String? time,
     List<Map<String, dynamic>>? studioOutputs,
     int? parentSwipeId,
   }) => AgentSwipe(
@@ -105,6 +116,7 @@ class AgentSwipe {
     reasoning: reasoning ?? this.reasoning,
     genTime: genTime ?? this.genTime,
     tokens: tokens ?? this.tokens,
+    time: time ?? this.time,
     studioOutputs: studioOutputs ?? this.studioOutputs,
     parentSwipeId: parentSwipeId ?? this.parentSwipeId,
   );
@@ -119,12 +131,22 @@ abstract class ChatMessage with _$ChatMessage {
     int? timestamp,
     String? personaId,
     String? personaName,
+
+    /// First attachment. Kept as its own field so sessions written before
+    /// multi-attach — and every reader that only knows this one — keep
+    /// working; attachments 2..N live in [extraImagePaths]. Read
+    /// [ChatMessageAttachments.attachments] instead of either field.
     String? imagePath,
 
+    /// Attachments after the first, in the order they were attached. Empty on
+    /// a single-image message.
+    @Default([]) List<String> extraImagePaths,
+
     /// Attachment visibility for the LLM. `false` (the default) means the
-    /// image travels with the message in the prompt; the eye toggle on the
-    /// bubble flips it so the attachment stays visible in the chat but is
-    /// dropped from the request (see [HistoryAssembler.assemble]).
+    /// images travel with the message in the prompt; the eye toggle on the
+    /// bubble flips it so they stay visible in the chat but are dropped from
+    /// the request (see [HistoryAssembler.assemble]). One flag covers every
+    /// attachment on the message.
     @Default(false) bool imageHidden,
     @Default([]) List<String> swipes,
     @Default(0) int swipeId,
@@ -134,6 +156,13 @@ abstract class ChatMessage with _$ChatMessage {
     @Default(false) bool isError,
     String? genTime,
     int? tokens,
+
+    /// Index in [content] where the newest continuation segment begins, set
+    /// when a Continue run folds its output into this message. Preview
+    /// surfaces slice from here so a notification or a chat-list row shows the
+    /// text that was just generated rather than the head the user has already
+    /// read (INV-CM7). Null on a message that was never continued.
+    int? continuationOffset,
     int? greetingIndex,
     @Default([]) List<String> contextRefs,
     @Default('none') String swipeDirection,
@@ -153,6 +182,52 @@ abstract class ChatMessage with _$ChatMessage {
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) =>
       _$ChatMessageFromJson(json);
+}
+
+/// The attachments of a message as one list, whichever field they were stored
+/// in. Everything that renders or sends attachments reads this — the split
+/// between [ChatMessage.imagePath] and [ChatMessage.extraImagePaths] exists
+/// only so old sessions keep rendering.
+extension ChatMessageAttachments on ChatMessage {
+  List<String> get attachments => [
+    if (imagePath?.isNotEmpty == true) imagePath!,
+    for (final path in extraImagePaths)
+      if (path.isNotEmpty) path,
+  ];
+
+  bool get hasAttachments => attachments.isNotEmpty;
+}
+
+/// The slice of a message's text a preview should show.
+///
+/// Continuations append to the end of the message they extend
+/// ([ChatMessage.continuationOffset] records where the newest segment starts),
+/// so every surface that truncates from the *front* — the OS notification
+/// body, the chat-list row — would otherwise keep showing the opening the user
+/// has already read. Slicing from the boundary makes those previews follow the
+/// text that was just generated (INV-CM7).
+///
+/// Lives here rather than in the chat feature because both the notification
+/// path and `ChatRepo`'s session metadata projection need it. An offset that
+/// does not address the current text is ignored, so a stale or corrupt value
+/// degrades to the whole message instead of an empty preview.
+String previewSource(String content, int? continuationOffset) {
+  final offset = continuationOffset ?? 0;
+  if (offset <= 0 || offset >= content.length) return content;
+  final tail = content.substring(offset).trim();
+  return tail.isEmpty ? content : tail;
+}
+
+/// Splits [paths] across the two storage fields of [ChatMessage].
+({String? imagePath, List<String> extraImagePaths}) splitAttachments(
+  List<String> paths,
+) {
+  final kept = paths.where((p) => p.isNotEmpty).toList(growable: false);
+  if (kept.isEmpty) return (imagePath: null, extraImagePaths: const []);
+  return (
+    imagePath: kept.first,
+    extraImagePaths: kept.skip(1).toList(growable: false),
+  );
 }
 
 @freezed
@@ -257,10 +332,23 @@ extension ChatSessionX on ChatSession {
   /// along with it, so chat-deletion is excluded from the "Deleted" statistic.
   static const deletedMessagesVarKey = '__deletedMessages';
 
+  /// Reserved [sessionVars] key holding the id of the oldest message the last
+  /// stepped history trim anchored on. Kept here rather than in a column of its
+  /// own so it rides the existing atomic session-var write path
+  /// (`ChatRepo.updateSessionVarsJson`) instead of a new read-modify-write.
+  /// Meaningless while the connection is on `sliding`, where it is cleared.
+  static const historyAnchorVarKey = '__historyAnchor';
+
   /// Cumulative count of messages deleted from this session. See
   /// [deletedMessagesVarKey].
   int get deletedMessageCount =>
       int.tryParse(sessionVars[deletedMessagesVarKey] ?? '') ?? 0;
+
+  /// Anchor the last stepped trim settled on. See [historyAnchorVarKey].
+  String? get historyAnchorId {
+    final value = sessionVars[historyAnchorVarKey];
+    return value == null || value.isEmpty ? null : value;
+  }
 
   String get historyText => messages
       .where((m) => (m.role == 'user' || m.role == 'assistant') && !m.isHidden)

@@ -7,6 +7,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:path/path.dart' as p;
 
 import '../../../core/constants/build_channel.dart';
+import '../../../core/utils/image_src.dart';
 import '../../../core/utils/platform_paths.dart';
 import 'chat_webview_settings.dart';
 
@@ -106,8 +107,26 @@ NavigationActionPolicy chatWebViewNavigationPolicy(WebUri? url) {
   return NavigationActionPolicy.CANCEL;
 }
 
+/// [source] with a chat-WebView local-file URL turned back into the path it
+/// serves, spelled relative to the Glaze data root; anything else comes back
+/// unchanged.
+///
+/// The loopback port is picked per app launch, so a `/__glaze_file__` URL is
+/// only valid for the session that produced it. One must never reach storage —
+/// a message that stored one showed a broken picture from the next start
+/// onwards — so every text the page hands back is put into its stored spelling
+/// first, and an already-stored URL is unwrapped here rather than migrated.
+String restoreChatWebViewLocalFilePath(String source) {
+  final served = glazeFilePathFromLoopbackUrl(source);
+  return relativeGlazeFilePath(served ?? source);
+}
+
 String? chatWebViewResolveLocalFileUrl(String? source) {
   if (source == null || source.isEmpty) return source;
+  // A URL from an earlier session carries the file it used to serve; resolve
+  // that file for this session instead of handing the page a dead port.
+  final stored = glazeFilePathFromLoopbackUrl(source);
+  if (stored != null) return chatWebViewResolveLocalFileUrl(stored);
   if (source.startsWith('data:') ||
       source.startsWith('http://') ||
       source.startsWith('https://')) {
@@ -163,6 +182,15 @@ Future<void> initChatWebViewEnvironment() async {
     _janitorWebViewUserAgent = await _deriveMobileJanitorWebViewUA();
     return;
   }
+  if (defaultTargetPlatform == TargetPlatform.linux) {
+    // WPE WebKit also puts a `file://` page on an opaque origin, so the
+    // chat's ES module imports fail. The Linux bundle keeps assets under
+    // `data/flutter_assets` like Windows, so serve them from disk.
+    await getAppDataDir();
+    await _startChatWebViewLocalFileServer();
+    await _startChatWebViewAssetServer();
+    return;
+  }
   if (defaultTargetPlatform != TargetPlatform.windows) return;
   if (_chatWebViewEnvironment != null) return;
 
@@ -209,7 +237,7 @@ Future<void> _startChatWebViewAssetServer() async {
 }
 
 /// Loopback server for approved Glaze media files. It intentionally uses a
-/// different origin from the iOS/Windows chat asset server.
+/// different origin from the iOS/Windows/Linux chat asset server.
 Future<void> _startChatWebViewLocalFileServer() async {
   if (_chatWebViewLocalFileServer != null) return;
 
@@ -232,50 +260,80 @@ Future<void> _startChatWebViewBundleServer() async {
 
 Future<void> _serveChatWebViewBundleAssets(HttpServer server) async {
   await for (final request in server) {
-    try {
-      final path = _safeAssetPath(request.uri.path);
-      if (path == null) {
-        request.response.statusCode = HttpStatus.forbidden;
-        await request.response.close();
-        continue;
-      }
-
-      // Asset keys always use forward slashes regardless of platform.
-      final assetKey =
-          'assets/chat_webview/${path.replaceAll(Platform.pathSeparator, '/')}';
-      ByteData data;
-      try {
-        data = await rootBundle.load(assetKey);
-      } catch (_) {
-        request.response.statusCode = HttpStatus.notFound;
-        await request.response.close();
-        continue;
-      }
-
-      request.response.headers.contentType = _contentTypeFor(path);
-      request.response.add(
-        data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
-      );
-      await request.response.close();
-    } catch (_) {
-      request.response.statusCode = HttpStatus.internalServerError;
-      await request.response.close();
-    }
+    unawaited(_handleServerRequest(request, _serveBundleAsset));
   }
+}
+
+Future<void> _serveBundleAsset(HttpRequest request) async {
+  final path = _safeAssetPath(request.uri.path);
+  if (path == null) {
+    request.response.statusCode = HttpStatus.forbidden;
+    await request.response.close();
+    return;
+  }
+
+  // Asset keys always use forward slashes regardless of platform.
+  final assetKey =
+      'assets/chat_webview/${path.replaceAll(Platform.pathSeparator, '/')}';
+  ByteData data;
+  try {
+    data = await rootBundle.load(assetKey);
+  } catch (_) {
+    request.response.statusCode = HttpStatus.notFound;
+    await request.response.close();
+    return;
+  }
+
+  request.response.headers.contentType = _contentTypeFor(path);
+  request.response.add(
+    data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
+  );
+  await request.response.close();
 }
 
 Future<void> _serveChatWebViewLocalFiles(HttpServer server) async {
   await for (final request in server) {
+    unawaited(_handleServerRequest(request, _serveLocalFile));
+  }
+}
+
+Future<void> _serveLocalFile(HttpRequest request) async {
+  if (request.uri.path != '/__glaze_file__') {
+    request.response.statusCode = HttpStatus.notFound;
+    await request.response.close();
+    return;
+  }
+  await _serveGlazeDataFile(request);
+}
+
+/// Runs one request handler in isolation.
+///
+/// Two reasons this is not inlined in the `await for` loops. Awaiting the
+/// handler there served the page one file at a time, so a single slow or
+/// half-abandoned response (the chat re-renders a message body while its image
+/// is still downloading) held back every other avatar and generated image
+/// behind it — long enough for a freshly generated image to render as a broken
+/// tag. And a failure raised after the headers were already on the wire made
+/// the recovery path throw again, which escaped the loop and tore the whole
+/// server down, so every later request failed too. Handlers now run
+/// concurrently, and a late failure is answered as far as the response still
+/// allows and then dropped.
+Future<void> _handleServerRequest(
+  HttpRequest request,
+  Future<void> Function(HttpRequest request) handler,
+) async {
+  try {
+    await handler(request);
+  } catch (_) {
     try {
-      if (request.uri.path != '/__glaze_file__') {
-        request.response.statusCode = HttpStatus.notFound;
-        await request.response.close();
-        continue;
-      }
-      await _serveGlazeDataFile(request);
-    } catch (_) {
       request.response.statusCode = HttpStatus.internalServerError;
+    } catch (_) {
+      // Headers already sent — the status can no longer be changed.
+    }
+    try {
       await request.response.close();
+    } catch (_) {
+      // Connection already gone.
     }
   }
 }
@@ -296,29 +354,28 @@ Directory _chatWebViewAssetDirectory() {
 
 Future<void> _serveChatWebViewAssets(HttpServer server, Directory root) async {
   await for (final request in server) {
-    try {
-      final path = _safeAssetPath(request.uri.path);
-      if (path == null) {
-        request.response.statusCode = HttpStatus.forbidden;
-        await request.response.close();
-        continue;
-      }
-
-      final file = File('${root.path}${Platform.pathSeparator}$path');
-      if (!file.existsSync()) {
-        request.response.statusCode = HttpStatus.notFound;
-        await request.response.close();
-        continue;
-      }
-
-      request.response.headers.contentType = _contentTypeFor(path);
-      await request.response.addStream(file.openRead());
-      await request.response.close();
-    } catch (_) {
-      request.response.statusCode = HttpStatus.internalServerError;
-      await request.response.close();
-    }
+    unawaited(_handleServerRequest(request, (r) => _serveAssetFile(r, root)));
   }
+}
+
+Future<void> _serveAssetFile(HttpRequest request, Directory root) async {
+  final path = _safeAssetPath(request.uri.path);
+  if (path == null) {
+    request.response.statusCode = HttpStatus.forbidden;
+    await request.response.close();
+    return;
+  }
+
+  final file = File('${root.path}${Platform.pathSeparator}$path');
+  if (!file.existsSync()) {
+    request.response.statusCode = HttpStatus.notFound;
+    await request.response.close();
+    return;
+  }
+
+  request.response.headers.contentType = _contentTypeFor(path);
+  await request.response.addStream(file.openRead());
+  await request.response.close();
 }
 
 Future<void> _serveGlazeDataFile(HttpRequest request) async {
@@ -359,6 +416,16 @@ String? _sourceToFilePath(String source) {
     }
   }
   if (source.startsWith('/') || RegExp(r'^[a-zA-Z]:[\\/]').hasMatch(source)) {
+    return source;
+  }
+  // Image paths are stored relative to the Glaze data root
+  // (`generated/imggen_….jpg`), which is what keeps them valid after the root
+  // moves. Only the media directories are candidates; every other relative
+  // string still fails closed here, and the joined path is checked against the
+  // data root afterwards like any absolute one.
+  final segments = p.split(source.replaceAll('\\', '/'));
+  if (segments.length > 1 &&
+      _allowedGlazeMediaDirectories.contains(segments.first)) {
     return source;
   }
   return null;
@@ -448,7 +515,7 @@ Directory _glazeDataDirectory() {
     final root = chatWebViewAndroidFileRoot;
     if (root != null && root.isNotEmpty) return Directory(root);
   }
-  if (Platform.isIOS) {
+  if (Platform.isIOS || Platform.isLinux) {
     final root = cachedAppDataDir;
     if (root != null && root.isNotEmpty) return Directory(root);
   }

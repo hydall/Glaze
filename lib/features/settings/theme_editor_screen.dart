@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/state/shared_prefs_provider.dart';
 import '../../shared/shell/nav_height_provider.dart';
+import '../../shared/shell/shell_header_provider.dart';
 import '../../shared/theme/theme_preset.dart';
 import '../../shared/theme/theme_provider.dart';
 import '../../shared/theme/app_colors.dart';
@@ -20,21 +21,23 @@ import '../../shared/widgets/swipe_tab_switcher.dart';
 import '../../shared/widgets/tab_slide_switcher.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glass_surface.dart';
+import '../../shared/widgets/list_controls.dart';
 import '../../shared/widgets/menu_group.dart';
 import 'app_settings_provider.dart';
 import 'theme_preview.dart';
 import 'widgets/chat_layout_picker.dart';
+import '../../shared/widgets/glaze_sheet.dart';
 
 // ─── Palette (mirrors Glaze JS PRESET_COLORS / PRESET_UI_COLORS) ──────────────
 
 const _presetColors = [
-  '#7996CE', '#E0555D', '#4BB34B', '#FFA000',
+  '#C42A4A', '#E0555D', '#4BB34B', '#FFA000',
   '#8858C9', '#333333', '#007AFF', '#FF2D55',
   '#FFFFFF', '#000000', '#19191A', '#B0B8C1',
 ];
 
 const _presetUiColors = [
-  '#FFFFFF', '#19191A', '#7996CE', '#E0555D',
+  '#FFFFFF', '#19191A', '#C42A4A', '#E0555D',
   '#4BB34B', '#FFA000', '#8858C9', '#333333',
 ];
 
@@ -47,7 +50,7 @@ Color _hex(String hex) {
   final clean = hex.replaceFirst('#', '');
   if (clean.length == 6) return Color(int.parse('FF$clean', radix: 16));
   if (clean.length == 8) return Color(int.parse(clean, radix: 16));
-  return const Color(0xFF7996CE);
+  return const Color(0xFFC42A4A);
 }
 
 String _toHex(Color c) {
@@ -136,6 +139,8 @@ class _ThemeEditorScreenState extends ConsumerState<ThemeEditorScreen> {
     const tabRowHeight = 66.0;
     final warningHeight = (isDefault || colorsLocked) ? 62.0 : 0.0;
     final totalTopPadding = statusBar + tabRowHeight + warningHeight;
+    // In a desktop window the back button is the title bar's.
+    final inWindow = DetachedShellHost.drawsChrome(context);
 
     return GlazeScaffold(
       extendBodyBehindHeader: true,
@@ -189,18 +194,20 @@ class _ThemeEditorScreenState extends ConsumerState<ThemeEditorScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 10, 16, 8),
+                    padding: EdgeInsets.fromLTRB(inWindow ? 16 : 4, 10, 16, 8),
                     child: Row(
                       children: [
-                        IconButton(
-                          icon: const Icon(
-                            Icons.arrow_back_ios_new_rounded,
-                            size: 20,
+                        if (!inWindow) ...[
+                          IconButton(
+                            icon: const Icon(
+                              Icons.arrow_back_ios_new_rounded,
+                              size: 20,
+                            ),
+                            color: context.cs.primary,
+                            onPressed: () => Navigator.pop(context),
                           ),
-                          color: context.cs.primary,
-                          onPressed: () => Navigator.pop(context),
-                        ),
-                        const SizedBox(width: 4),
+                          const SizedBox(width: 4),
+                        ],
                         Expanded(
                           child: GlazeTabBar(
                             tabs: [
@@ -287,7 +294,7 @@ class _GeneralTab extends StatelessWidget {
               allowNull: false,
               showPreviewOverlay: false,
               onChanged: (v) =>
-                  onUpdate((p) => p.copyWith(accentColor: v ?? '#7996CE')),
+                  onUpdate((p) => p.copyWith(accentColor: v ?? '#C42A4A')),
             ),
           ],
         ),
@@ -472,16 +479,14 @@ class _GeneralTab extends StatelessWidget {
             if (preset.hasBgImage) ...[
               _SliderRow(
                 label: 'theme_dimming'.tr(),
-                // Slider reads as dimming amount (0 = no dim, 1 = full dim)
-                // but `bgOpacity` stores image visibility (1 - dimming).
-                value: 1.0 - preset.bgOpacity,
+                // 0 = untouched image, 1 = fully black overlay.
+                value: preset.bgDim,
                 min: 0,
                 max: 1,
                 divisions: 20,
                 unit: '%',
                 displayMultiplier: 100,
-                onChanged: (v) =>
-                    onUpdate((p) => p.copyWith(bgOpacity: 1.0 - v)),
+                onChanged: (v) => onUpdate((p) => p.copyWith(bgDim: v)),
               ),
               _SliderRow(
                 label: 'theme_bg_blur'.tr(),
@@ -878,21 +883,46 @@ class _ChatColorsTab extends ConsumerWidget {
         MenuGroup(
           header: 'theme_message_meta'.tr(),
           items: [
-            _SwitchRow(
-              label: 'menu_hide_msg_id'.tr(),
-              value: hideMessageId,
-              onChanged: (v) => onUpdate((p) => p.copyWith(hideMessageId: v)),
+            // Tri-state, because these three also exist as app settings and the
+            // preset wins over them (see chat_screen's `preset.x ?? app.x`).
+            // The include switch is what "this preset overrides it" looks like;
+            // turning it off clears the override and hands the row back to the
+            // app setting, which is otherwise unreachable from the UI.
+            _MetaOverrideRow(
+              label: 'menu_show_msg_id'.tr(),
+              overridden: preset.hideMessageId != null,
+              shown: !hideMessageId,
+              onOverrideChanged: (on) => onUpdate(
+                (p) => p.copyWith(
+                  hideMessageId: on ? appSettings.hideMessageId : null,
+                ),
+              ),
+              onChanged: (show) =>
+                  onUpdate((p) => p.copyWith(hideMessageId: !show)),
             ),
-            _SwitchRow(
-              label: 'menu_hide_gen_time'.tr(),
-              value: hideGenerationTime,
-              onChanged: (v) =>
-                  onUpdate((p) => p.copyWith(hideGenerationTime: v)),
+            _MetaOverrideRow(
+              label: 'menu_show_gen_time'.tr(),
+              overridden: preset.hideGenerationTime != null,
+              shown: !hideGenerationTime,
+              onOverrideChanged: (on) => onUpdate(
+                (p) => p.copyWith(
+                  hideGenerationTime: on ? appSettings.hideGenerationTime : null,
+                ),
+              ),
+              onChanged: (show) =>
+                  onUpdate((p) => p.copyWith(hideGenerationTime: !show)),
             ),
-            _SwitchRow(
-              label: 'menu_hide_token_count'.tr(),
-              value: hideTokenCount,
-              onChanged: (v) => onUpdate((p) => p.copyWith(hideTokenCount: v)),
+            _MetaOverrideRow(
+              label: 'menu_show_token_count'.tr(),
+              overridden: preset.hideTokenCount != null,
+              shown: !hideTokenCount,
+              onOverrideChanged: (on) => onUpdate(
+                (p) => p.copyWith(
+                  hideTokenCount: on ? appSettings.hideTokenCount : null,
+                ),
+              ),
+              onChanged: (show) =>
+                  onUpdate((p) => p.copyWith(hideTokenCount: !show)),
             ),
           ],
         ),
@@ -1053,6 +1083,42 @@ class _SliderRow extends StatelessWidget {
   }
 }
 
+/// A message-metadata row that can either follow the app setting or override it
+/// for this preset.
+///
+/// The small include switch on the left is the override; the trailing switch is
+/// the value, disabled while the row follows the app setting so it reads as
+/// inherited rather than editable.
+class _MetaOverrideRow extends StatelessWidget {
+  final String label;
+  final bool overridden;
+  final bool shown;
+  final ValueChanged<bool> onOverrideChanged;
+  final ValueChanged<bool> onChanged;
+
+  const _MetaOverrideRow({
+    required this.label,
+    required this.overridden,
+    required this.shown,
+    required this.onOverrideChanged,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return MenuSwitchItem(
+      label: label,
+      description: overridden
+          ? 'theme_override_app_setting'.tr()
+          : 'theme_follows_app_setting'.tr(),
+      included: overridden,
+      onIncludedChanged: onOverrideChanged,
+      value: shown,
+      onChanged: onChanged,
+    );
+  }
+}
+
 class _SwitchRow extends StatelessWidget {
   final String label;
   final bool value;
@@ -1187,12 +1253,13 @@ class _FontSizeRow extends StatelessWidget {
                 child: Text(label, style: TextStyle(fontSize: 15, color: context.cs.onSurfaceVariant, fontWeight: FontWeight.w400)),
               ),
               const Spacer(),
-              TextButton(
-                onPressed: () => onChanged(_isSystem ? 14.0 : 'system'),
-                child: Text(
-                  _isSystem ? 'theme_system_font_size'.tr() : '${_numVal.toInt()}px',
-                  style: TextStyle(color: context.cs.primary),
-                ),
+              GlazeActionChip(
+                icon: Icons.text_fields_rounded,
+                label: _isSystem
+                    ? 'theme_system_font_size'.tr()
+                    : '${_numVal.toInt()}px',
+                tooltip: label,
+                onTap: () => onChanged(_isSystem ? 14.0 : 'system'),
               ),
             ],
           ),
@@ -1820,7 +1887,7 @@ class _ColorPickerSheetState extends ConsumerState<_ColorPickerSheet> {
   @override
   void initState() {
     super.initState();
-    _committedHex = widget.current ?? '#7996CE';
+    _committedHex = widget.current ?? '#C42A4A';
     _lastCustomHex = _committedHex;
     _hexCtrl = TextEditingController(text: _committedHex);
     final currentColor = _hex(_committedHex);
@@ -1916,7 +1983,7 @@ class _ColorPickerSheetState extends ConsumerState<_ColorPickerSheet> {
   /// gradient stop, depending on the current mode.
   void _sink(String hex) {
     if (_gradientMode) {
-      final c = _parseHexSafe(hex) ?? const Color(0xFF7996CE);
+      final c = _parseHexSafe(hex) ?? const Color(0xFFC42A4A);
       if (_activeStop == 0) {
         _gColor1 = c;
       } else {
@@ -2055,7 +2122,7 @@ class _ColorPickerSheetState extends ConsumerState<_ColorPickerSheet> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final currentColor = _parseHexSafe(_committedHex) ?? const Color(0xFF7996CE);
+    final currentColor = _parseHexSafe(_committedHex) ?? const Color(0xFFC42A4A);
     final isAutoSelected = widget.allowNull && _hexCtrl.text.trim().isEmpty;
     final primaryPalette = widget.palette.skip(1).take(5).toList();
     return GlazeBottomSheetFrame(
@@ -2408,7 +2475,7 @@ class _ColorPickerSheetState extends ConsumerState<_ColorPickerSheet> {
                                   TextField(
                                     controller: _hexCtrl,
                                     decoration: InputDecoration(
-                                      hintText: '#7996CE',
+                                      hintText: '#C42A4A',
                                       labelText: 'theme_hex_color'.tr(),
                                       errorText: _error,
                                       prefixText:
@@ -2870,7 +2937,7 @@ Future<void> _pickGoogleFont(
   required bool isUi,
   required ThemePreset preset,
 }) async {
-  final selected = await showModalBottomSheet<String>(
+  final selected = await showGlazeSheet<String>(
     context: context,
     useRootNavigator: true,
     isScrollControlled: true,
@@ -2948,16 +3015,16 @@ class _GoogleFontPickerSheetState extends State<_GoogleFontPickerSheet> {
                   ),
                 ),
                 Flexible(
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: filtered.length,
-                    itemBuilder: (_, i) {
-                      final font = filtered[i];
-                      return ListTile(
-                        title: Text(font, style: TextStyle(color: cs.onSurface)),
-                        onTap: () => Navigator.pop(context, font),
-                      );
-                    },
+                  child: SingleChildScrollView(
+                    child: MenuGroup(
+                      items: [
+                        for (final font in filtered)
+                          MenuItem(
+                            label: font,
+                            onTap: () => Navigator.pop(context, font),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               ],

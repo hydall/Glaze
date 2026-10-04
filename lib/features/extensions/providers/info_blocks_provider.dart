@@ -38,8 +38,7 @@ class InfoBlocksNotifier extends StateNotifier<List<InfoBlock>> {
   final Ref _ref;
   final String sessionId;
 
-  InfoBlocksRepository get _repo =>
-      InfoBlocksRepository(_ref.read(appDbProvider));
+  InfoBlocksRepository get _repo => _ref.read(infoBlocksRepoProvider);
 
   Future<void> _load({bool stopStaleRunning = false}) async {
     var blocks = await _repo.getBySessionId(sessionId);
@@ -59,7 +58,8 @@ class InfoBlocksNotifier extends StateNotifier<List<InfoBlock>> {
         if (!mounted) return;
         blocks = blocks
             .map(
-              (b) => b.status == BlockRunStatus.running &&
+              (b) =>
+                  b.status == BlockRunStatus.running &&
                       b.createdAt < _providerBootMillis
                   ? b.copyWith(status: BlockRunStatus.stopped)
                   : b,
@@ -92,11 +92,13 @@ class InfoBlocksNotifier extends StateNotifier<List<InfoBlock>> {
     int? agentSwipeId,
   }) {
     state = state
-        .where((b) =>
-            !(b.messageId == messageId &&
-                b.blockId == blockId &&
-                (swipeId == null || b.swipeId == swipeId) &&
-                (agentSwipeId == null || b.agentSwipeId == agentSwipeId)))
+        .where(
+          (b) =>
+              !(b.messageId == messageId &&
+                  b.blockId == blockId &&
+                  (swipeId == null || b.swipeId == swipeId) &&
+                  (agentSwipeId == null || b.agentSwipeId == agentSwipeId)),
+        )
         .toList();
   }
 
@@ -122,10 +124,12 @@ class InfoBlocksNotifier extends StateNotifier<List<InfoBlock>> {
   /// Removes all blocks for [messageId] from in-memory state.
   void removeByMessageId(String messageId, {int? swipeId, int? agentSwipeId}) {
     state = state
-        .where((b) =>
-            !(b.messageId == messageId &&
-                (swipeId == null || b.swipeId == swipeId) &&
-                (agentSwipeId == null || b.agentSwipeId == agentSwipeId)))
+        .where(
+          (b) =>
+              !(b.messageId == messageId &&
+                  (swipeId == null || b.swipeId == swipeId) &&
+                  (agentSwipeId == null || b.agentSwipeId == agentSwipeId)),
+        )
         .toList();
   }
 
@@ -166,19 +170,27 @@ class InfoBlocksNotifier extends StateNotifier<List<InfoBlock>> {
   /// prevents blocks from disappearing after app restart when the message's
   /// `agentSwipeId` (default 0 from freezed) doesn't match the block's
   /// `agentSwipeId` (-1, set when post-cleaner was disabled/skipped).
-  List<InfoBlock> getByMessageId(String messageId, {int swipeId = 0, int agentSwipeId = -1}) {
+  List<InfoBlock> getByMessageId(
+    String messageId, {
+    int swipeId = 0,
+    int agentSwipeId = -1,
+  }) {
     var blocks = state
-        .where((b) =>
-            b.messageId == messageId &&
-            b.swipeId == swipeId &&
-            b.agentSwipeId == agentSwipeId)
+        .where(
+          (b) =>
+              b.messageId == messageId &&
+              b.swipeId == swipeId &&
+              b.agentSwipeId == agentSwipeId,
+        )
         .toList();
     if (blocks.isEmpty && agentSwipeId != -1) {
       blocks = state
-          .where((b) =>
-              b.messageId == messageId &&
-              b.swipeId == swipeId &&
-              b.agentSwipeId == -1)
+          .where(
+            (b) =>
+                b.messageId == messageId &&
+                b.swipeId == swipeId &&
+                b.agentSwipeId == -1,
+          )
           .toList();
     }
     final byBlockId = <String, InfoBlock>{};
@@ -192,13 +204,52 @@ class InfoBlocksNotifier extends StateNotifier<List<InfoBlock>> {
       ..sort((a, b) => a.order.compareTo(b.order));
   }
 
+  /// The `agentSwipeId` this message's blocks actually live under.
+  ///
+  /// [getByMessageId] matches the exact binding first and only falls back to
+  /// the legacy `-1` rows when nothing matches exactly. A run that writes a
+  /// fresh row under the requested binding therefore makes the exact match
+  /// non-empty and hides every legacy sibling, which the panel then re-renders
+  /// as `pending`. Callers that start a run for an existing message resolve the
+  /// binding through this method first, so a new row joins its siblings instead
+  /// of orphaning them.
+  int resolveAgentSwipeId(
+    String messageId, {
+    int swipeId = 0,
+    int agentSwipeId = -1,
+  }) {
+    if (agentSwipeId == -1) return -1;
+    final hasExact = state.any(
+      (b) =>
+          b.messageId == messageId &&
+          b.swipeId == swipeId &&
+          b.agentSwipeId == agentSwipeId,
+    );
+    if (hasExact) return agentSwipeId;
+    final hasLegacy = state.any(
+      (b) =>
+          b.messageId == messageId &&
+          b.swipeId == swipeId &&
+          b.agentSwipeId == -1,
+    );
+    return hasLegacy ? -1 : agentSwipeId;
+  }
+
   /// Aggregated status for a message:
   /// - 'running' if any block is running
   /// - 'error' if any block errored (and none running)
   /// - 'done' if all blocks done/stopped
   /// - null if no blocks
-  String? aggregatedStatus(String messageId, {int swipeId = 0, int agentSwipeId = -1}) {
-    final blocks = getByMessageId(messageId, swipeId: swipeId, agentSwipeId: agentSwipeId);
+  String? aggregatedStatus(
+    String messageId, {
+    int swipeId = 0,
+    int agentSwipeId = -1,
+  }) {
+    final blocks = getByMessageId(
+      messageId,
+      swipeId: swipeId,
+      agentSwipeId: agentSwipeId,
+    );
     if (blocks.isEmpty) return null;
     if (blocks.any((b) => b.status == BlockRunStatus.running)) return 'running';
     if (blocks.any((b) => b.status == BlockRunStatus.error)) return 'error';

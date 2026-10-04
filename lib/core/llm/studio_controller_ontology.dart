@@ -1,55 +1,50 @@
 import '../models/studio_config.dart';
 
-/// One hard-coded Studio controller slot. The decomposition engine assigns
-/// preset blocks to these stable slots and synthesizes one agent per slot.
+/// One hard-coded agent spec slot — the fixed identity an agent is born from.
 class StudioControllerSpec {
   final String id;
   final String name;
   final String purpose;
   final String outputContract;
+  final String laneOwns;
+  final String laneSkip;
   final String refreshPolicy;
-  final List<String> invalidationSignals;
   final double temperature;
   final int maxTokens;
   final int timeoutMs;
   final bool isFinal;
   final String phase;
   final int contextSize;
+  final bool lockedOn;
+  final String? requiresSpecId;
 
   const StudioControllerSpec({
     required this.id,
     required this.name,
     required this.purpose,
     required this.outputContract,
+    required this.laneOwns,
+    required this.laneSkip,
     required this.refreshPolicy,
-    required this.invalidationSignals,
     required this.temperature,
     required this.maxTokens,
     required this.timeoutMs,
     this.isFinal = false,
-    // Feature 6 — which phase this controller's agent runs in. Default
-    // `pre_generation` (runs before the final generator, produces a brief).
-    // `post_processing` = runs after the generator, receives its response.
-    // No built-in post-processing specs exist yet (the user's preset blocks
-    // route to pre-gen trackers; post-processing is a future expansion), but
-    // the field is here so the decomposition engine CAN produce
-    // post-processing agents when such specs are added without touching the
-    // spec class again. See docs/PLAN_AGENTIC_STUDIO.md §5.7.1 + Feature 6.
-    // ignore: unused_element_parameter
     this.phase = 'pre_generation',
-    // Default tracker context size (trailing chat messages forwarded to this
-    // agent). 0 = inherit the StudioAgent freezed default of 5.
     this.contextSize = 0,
+    this.lockedOn = false,
+    this.requiresSpecId,
   });
 }
 
-/// The fixed set of Studio controller slots + lookup helpers. Pure data
-/// extracted from `StudioDecompositionService` (plan §3).
+/// The fixed set of Studio controller lanes + lookup helpers. Each lane is a
+/// stable tracker target; agents are created by `buildDefaultAgents` and
+/// blocks are routed by `targetAgentId`.
 class StudioControllerOntology {
   StudioControllerOntology._();
 
-  /// All controller slots, in pipeline order (the last one is the final
-  /// generator). The decomposition engine builds one agent per spec.
+  /// All controller lanes, in pipeline order (the last one is the final
+  /// generator). `buildDefaultAgents` creates one agent per spec.
   static const List<StudioControllerSpec> specs = <StudioControllerSpec>[
     StudioControllerSpec(
       id: 'continuity',
@@ -58,11 +53,15 @@ class StudioControllerOntology {
           'Track source-of-truth facts, recent chat state, unresolved threads, who knows what, and contradictions to avoid.',
       outputContract:
           'At chat time, output a compact continuity brief only: facts, constraints, risks, and next-turn continuity notes. No scene prose.',
+      laneOwns:
+          'established facts, who-knows-what, unresolved threads, physical-object/state continuity, and contradictions to avoid.',
+      laneSkip:
+          'prose style, pacing, length, dialogue cadence, repetition/anti-loop bans, NPC/world activity, and user-agency rules.',
       refreshPolicy: 'turn',
-      invalidationSignals: ['last_user_message_changed', 'memory_changed'],
       temperature: 0.3,
       maxTokens: 1600,
       timeoutMs: 60000,
+      requiresSpecId: 'ledger',
     ),
     StudioControllerSpec(
       id: 'agency',
@@ -71,26 +70,13 @@ class StudioControllerOntology {
           'Enforce user sovereignty, character autonomy, character psychology, subjective knowledge, and believable behavior.',
       outputContract:
           'At chat time, output actionable constraints for user agency and character behavior. No scene prose, no drafted actions, no dialogue. You may add an optional "Options" list of 1-3 branchable character-behavior approaches the final writer can pick from (describe the approach only, e.g. "let the character deflect" vs "let a crack of honesty show"); never write ready-made lines or actions.',
+      laneOwns:
+          'user sovereignty (never write the user) and character autonomy/psychology: what a character can plausibly know, feel, and do this turn.',
+      laneSkip:
+          'plain factual continuity, prose style/length, dialogue formatting, repetition bans, and ambient world/NPC texture.',
       refreshPolicy: 'turn',
-      invalidationSignals: [
-        'active_cast_changed',
-        'relationship_state_changed',
-      ],
       temperature: 0.3,
       maxTokens: 1400,
-      timeoutMs: 60000,
-    ),
-    StudioControllerSpec(
-      id: 'narrative',
-      name: 'Narrative / Pacing / Style Controller',
-      purpose:
-          'Convert the active preset\'s narrative mode, style, POV, pacing, sensory budget, tone, and genre rules into a compact response-shape contract for the final writer.',
-      outputContract:
-          'At chat time, output a compact operational brief that applies the active Studio preset\'s response-shape rules to the current turn. Include only the dimensions the active preset requests, such as beat, pacing, POV/camera, sensory budget, opening constraint, dialogue/action balance, and stopping point. No scene prose, drafted actions, or dialogue.',
-      refreshPolicy: 'turn',
-      invalidationSignals: ['scene_changed', 'tone_changed', 'pacing_changed'],
-      temperature: 0.3,
-      maxTokens: 1600,
       timeoutMs: 60000,
     ),
     StudioControllerSpec(
@@ -100,27 +86,43 @@ class StudioControllerOntology {
           'Control dialogue cadence, speech texture, monologue segmentation, interaction balance, and when silence is appropriate. Your job is dialogue RATIO and TEXTURE — you do NOT decide beat type or paragraph budget (that is the Narrative Controller\'s lane). Provide a dialogue ratio that is compatible with the scene\'s actual beat: action beats can still be dialogue-heavy (characters talk while moving/riding/fighting); a high dialogue ratio does NOT downgrade an action beat into a short conversational one.',
       outputContract:
           'At chat time, output dialogue guidance only: who may plausibly speak, desired dialogue ratio (low / medium / high — relative to the beat, not absolute), speech constraints, and silence constraints. State the ratio as a proportion of the response that should be spoken lines vs physical action/narration, compatible with whatever beat type the Narrative Controller chose. No drafted lines. You may add an optional "Options" list of 1-3 branchable dialogue approaches the final writer can pick from (describe the approach only, e.g. "answer with silence and a gesture" vs "give one clipped deflecting line"); never write the actual dialogue.',
+      laneOwns:
+          'dialogue cadence only: who may plausibly speak, speech ratio (low/medium/high relative to the beat), silence, and quoting/formatting of speech. A high dialogue ratio does NOT downgrade an action beat into a short conversational one — action beats can be dialogue-heavy.',
+      laneSkip:
+          'factual continuity, character knowledge/psychology, prose length/pacing, repetition bans, and world/NPC activity.',
       refreshPolicy: 'turn',
-      invalidationSignals: [
-        'last_user_message_changed',
-        'active_speaker_changed',
-      ],
       temperature: 0.3,
       maxTokens: 1200,
       timeoutMs: 60000,
     ),
     StudioControllerSpec(
-      id: 'guard',
-      name: 'Anti-Loop & Prose Guard',
+      id: 'guard_ru',
+      name: 'Anti-Loop & Prose Guard (RU)',
       purpose:
-          'Enforce anti-loop, anti-echo, banlists, anti-cliche, anti-slop, no-tells, and stable prose quality rules.',
+          'Enforce anti-loop, anti-echo, banlists, anti-cliche, anti-slop, no-tells, and stable Russian prose quality rules.',
       outputContract:
-          'At chat time, output a compact guard checklist and forbidden items for this turn. No rewritten scene prose.',
+          'At chat time, output a compact guard checklist and forbidden items for this turn. Focus on Russian-language prose quality. No rewritten scene prose.',
+      laneOwns:
+          'anti-repetition for Russian prose: forbidden openings/phrases vs the last replies, banned cliches/slop words, and safe structural variation this turn. Structural variation must never force {{user}} movement, decisions, reactions, silence, or other user-controlled progression.',
+      laneSkip:
+          'plot facts, character psychology, agency, pacing targets, dialogue content, and world/NPC texture.',
       refreshPolicy: 'turn',
-      invalidationSignals: [
-        'last_3_replies_changed',
-        'last_user_message_changed',
-      ],
+      temperature: 0.2,
+      maxTokens: 1400,
+      timeoutMs: 60000,
+    ),
+    StudioControllerSpec(
+      id: 'guard_en',
+      name: 'Anti-Loop & Prose Guard (EN)',
+      purpose:
+          'Enforce anti-loop, anti-echo, banlists, anti-cliche, anti-slop, no-tells, and stable English prose quality rules.',
+      outputContract:
+          'At chat time, output a compact guard checklist and forbidden items for this turn. Focus on English-language prose quality. No rewritten scene prose.',
+      laneOwns:
+          'anti-repetition for English prose: forbidden openings/phrases vs the last replies, banned cliches/slop words, and safe structural variation this turn. Structural variation must never force {{user}} movement, decisions, reactions, silence, or other user-controlled progression.',
+      laneSkip:
+          'plot facts, character psychology, agency, pacing targets, dialogue content, and world/NPC texture.',
+      refreshPolicy: 'turn',
       temperature: 0.2,
       maxTokens: 1400,
       timeoutMs: 60000,
@@ -132,12 +134,11 @@ class StudioControllerOntology {
           'Control living-world texture, NPC ecology, offscreen pressure, public-space activity, and background consequences without stealing focus.',
       outputContract:
           'At chat time, output world/NPC guidance only: active NPCs, off-focus thread, environmental pressure, and what not to add. No prose. You may add an optional "Options" list of 1-3 branchable world-texture approaches the final writer can pick from (describe the approach only, e.g. "let an offscreen sound intrude" vs "keep the world still and pressureless"); never write ready-made prose.',
+      laneOwns:
+          'living-world texture only: active NPCs, off-screen pressure, environmental/ambient activity, and what world detail NOT to add.',
+      laneSkip:
+          'the two leads\' psychology, factual continuity, prose style/length, dialogue formatting, and repetition bans.',
       refreshPolicy: 'turn',
-      invalidationSignals: [
-        'scene_changed',
-        'location_changed',
-        'active_cast_changed',
-      ],
       temperature: 0.3,
       maxTokens: 1200,
       timeoutMs: 60000,
@@ -150,43 +151,56 @@ class StudioControllerOntology {
       outputContract:
           'At chat time, output a compact meta brief ONLY. Decide one of: '
           '`meta_ooc: due | topic: <X>` (user addressed the meta-persona OOC), '
-          '`meta_periodic_note: due | last_note: <N turns ago> | voice: <from block> | length: <from block> | format: <from block>` (the Nth assistant turn fired the period rule — relay the voice/length/format/wrapper from the assigned meta block so the Main Responder writes in the user\'s chosen style), '
-          'or `meta: silent` (neither condition met). Never write in-scene prose, never write the actual OOC reply — that is the Main Responder\'s job, guided by your brief.',
+          '`meta_periodic_note: due | last_note: <N turns ago> | voice: <from block> | length: <from block> | format: <from block>` (the Nth assistant turn fired the period rule — relay the voice/length/format/wrapper from the assigned meta block so the Main Writer writes in the user\'s chosen style), '
+          'or `meta: silent` (neither condition met). Never write in-scene prose, never write the actual OOC reply — that is the Main Writer\'s job, guided by your brief.',
+      laneOwns: 'only this controller\'s configured specialty.',
+      laneSkip: 'concerns that belong to the other Studio controllers.',
       refreshPolicy: 'turn',
-      invalidationSignals: [
-        'last_user_message_changed',
-        'assistant_turn_count_changed',
-      ],
-      temperature: 0.2,
-      maxTokens: 1200,
-      timeoutMs: 60000,
-    ),
-    StudioControllerSpec(
-      id: 'beauty',
-      name: 'Beauty Shard',
-      purpose:
-          'Track reusable visual styling state only: HTML/CSS palette, background, text/font colors, speaker colors, typography, gradients, and art-style labels. Skip concrete HTML widgets, trackers, infoblocks, and image-generation instructions.',
-      outputContract:
-          'At chat time, output a compact beauty-state brief only: current reusable style variables, constraints for preserving/updating them, and items to avoid. Do NOT write scene prose. Do NOT handle concrete UI artifacts (phone screens, taxi menus, terminals), trackers, infoblocks, topbars, or image-gen blocks.',
-      refreshPolicy: 'turn',
-      invalidationSignals: ['last_user_message_changed', 'style_state_changed'],
       temperature: 0.2,
       maxTokens: 1200,
       timeoutMs: 60000,
     ),
     StudioControllerSpec(
       id: 'final',
-      name: 'Main Responder',
+      name: 'Main Writer',
       purpose:
           'Write the final visible RP response using the full prompt and the prior controller briefs.',
       outputContract:
           'At chat time, output only the final visible RP response. Obey all controller briefs and final formatting/content constraints.',
+      laneOwns: 'the final response prose — all scene writing, dialogue, narration, and action.',
+      laneSkip: 'analysis, tracking, constraint checking — those belong to the pre-generation agents.',
       refreshPolicy: 'turn',
-      invalidationSignals: ['last_user_message_changed'],
       temperature: 0.8,
       maxTokens: 8000,
       timeoutMs: 90000,
       isFinal: true,
+      lockedOn: true,
+    ),
+    StudioControllerSpec(
+      id: 'post_clean',
+      name: 'Post Clean',
+      purpose: 'Audit the final response for factual errors and cliches, then rewrite it cleanly. Applies styling state from the current beauty state.',
+      outputContract: 'Output the cleaned/rewritten assistant message. Append a <glaze_beauty_state> JSON marker if styling state changed.',
+      laneOwns: 'factual accuracy, cliche/echo removal, prose cleanup, and styling application.',
+      laneSkip: 'scene content, character decisions, dialogue substance — the Main Writer already wrote those.',
+      refreshPolicy: 'turn',
+      temperature: 0.3,
+      maxTokens: 8000,
+      timeoutMs: 90000,
+      phase: 'post_processing',
+    ),
+    StudioControllerSpec(
+      id: 'ledger',
+      name: 'Studio Ledger',
+      purpose: 'Track session-level state: present characters, location, time, unresolved threads, and key facts — a canonical source of truth for continuity.',
+      outputContract: 'Output a compact session-state delta (present now, location, time, facts, threads). Used by Continuity and available as {{studio_session_state}}.',
+      laneOwns: 'session-level canonical state: who is present, where, when, what facts are established, and which threads are open.',
+      laneSkip: 'scene prose, dialogue, character psychology, pacing — those belong to the other agents.',
+      refreshPolicy: 'turn',
+      temperature: 0.2,
+      maxTokens: 1600,
+      timeoutMs: 60000,
+      phase: 'post_processing',
     ),
   ];
 
@@ -204,33 +218,42 @@ class StudioControllerOntology {
       agents.add(
         StudioAgent(
           id: 'agent_${sessionId}_${spec.id}_$now',
+          controllerId: spec.id,
           name: spec.name,
           role: 'system',
           order: i,
           enabled: spec.id != 'meta',
-          temperature: spec.temperature,
-          maxTokens: spec.maxTokens,
-          timeoutMs: spec.timeoutMs,
           refreshPolicy: spec.refreshPolicy,
-          invalidationSignals: spec.invalidationSignals,
           phase: spec.phase,
-          contextSize: spec.contextSize > 0 ? spec.contextSize : 5,
+          specId: spec.id,
         ),
       );
     }
     return agents;
   }
 
-  /// Map an existing agent back to its controller spec — by id/name match,
-  /// falling back to pipeline-order position. Used by single-agent regen.
-  static StudioControllerSpec specForAgent(StudioAgent agent) {
-    final text = '${agent.id}\n${agent.name}'.toLowerCase();
-    return specs.firstWhere(
-      (spec) =>
-          text.contains(spec.id) || text.contains(spec.name.toLowerCase()),
-      orElse: () => agent.order >= specs.length - 1
-          ? specs.last
-          : specs[agent.order.clamp(0, specs.length - 1)],
-    );
+  /// Trailing chat messages a controller is handed. Specs that leave it at 0
+  /// fall back to the pipeline default of 5. Accepts a nullable spec for
+  /// convenience with [specForAgent].
+  static int contextSizeOf(StudioControllerSpec? spec) =>
+      spec != null && spec.contextSize > 0 ? spec.contextSize : 5;
+
+  /// Map an existing agent back to its controller spec. Prefers the agent's
+  /// [StudioAgent.specId], then its [StudioAgent.controllerId]; returns null
+  /// when neither maps to a known spec (e.g. legacy/unknown agents).
+  static StudioControllerSpec? specForAgent(StudioAgent agent) {
+    if (agent.specId.isNotEmpty) {
+      final match = specs.where((s) => s.id == agent.specId).firstOrNull;
+      if (match != null) return match;
+    }
+    for (final spec in specs) {
+      if (spec.id == agent.controllerId) return spec;
+    }
+    return null;
+  }
+
+  /// Stable controller target for canonical Studio block routing.
+  static String? targetIdForAgent(StudioAgent agent) {
+    return specForAgent(agent)?.id;
   }
 }

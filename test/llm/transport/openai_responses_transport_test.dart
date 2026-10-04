@@ -9,8 +9,18 @@ import 'package:glaze_flutter/core/llm/transport/openai_responses_transport.dart
 
 import '_sse_adapter.dart';
 
-ChatTransportRequest _request({bool stream = true}) => ChatTransportRequest(
-  endpoint: 'https://api.rout.my/v1/chat/completions',
+ChatTransportRequest _request({
+  bool stream = true,
+  bool omitTemperature = false,
+  bool omitTopP = false,
+  double frequencyPenalty = 0,
+  double presencePenalty = 0,
+  int topK = 0,
+  String? sessionId,
+  String sessionIdMode = 'openrouter',
+  String reasoningEffort = 'high',
+}) => ChatTransportRequest(
+  endpoint: 'https://api.rout.my/v1/responses',
   apiKey: 'test-key',
   model: 'openai/gpt-5.6-sol',
   messages: const [
@@ -28,9 +38,16 @@ ChatTransportRequest _request({bool stream = true}) => ChatTransportRequest(
   maxTokens: 500,
   temperature: 0.7,
   topP: 0.9,
+  topK: topK,
+  frequencyPenalty: frequencyPenalty,
+  presencePenalty: presencePenalty,
+  omitTemperature: omitTemperature,
+  omitTopP: omitTopP,
+  sessionId: sessionId,
+  sessionIdMode: sessionIdMode,
   stream: stream,
   requestReasoning: true,
-  reasoningEffort: 'high',
+  reasoningEffort: reasoningEffort,
   showNativeReasoning: true,
   useResponsesApi: true,
 );
@@ -107,6 +124,8 @@ void main() {
       'https://api.rout.my/v1/responses',
     );
     expect(body['max_output_tokens'], 500);
+    expect(body['temperature'], 0.7);
+    expect(body['top_p'], 0.9);
     expect(body['reasoning'], {'summary': 'auto', 'effort': 'high'});
     expect(body['input'], [
       {
@@ -117,6 +136,61 @@ void main() {
         ],
       },
     ]);
+  });
+
+  test('omit toggles drop sampling for reasoning models', () {
+    final body = OpenAiResponsesTransport.buildBody(
+      _request(omitTemperature: true, omitTopP: true),
+    );
+
+    expect(body.containsKey('temperature'), isFalse);
+    expect(body.containsKey('top_p'), isFalse);
+  });
+
+  test('caps maximum reasoning effort at high', () {
+    final body = OpenAiResponsesTransport.buildBody(
+      _request(reasoningEffort: 'max'),
+    );
+
+    expect(body['reasoning'], {'summary': 'auto', 'effort': 'high'});
+  });
+
+  test('parameters with no Responses equivalent are never sent', () {
+    final body = OpenAiResponsesTransport.buildBody(
+      _request(frequencyPenalty: 1.5, presencePenalty: -1, topK: 40),
+    );
+
+    for (final key in const [
+      'frequency_penalty',
+      'presence_penalty',
+      'top_k',
+      'messages',
+      'max_tokens',
+    ]) {
+      expect(body.containsKey(key), isFalse, reason: key);
+    }
+  });
+
+  test('session_id follows the same gate as Chat Completions', () {
+    // Default 'openrouter' mode: a plain OpenAI endpoint gets nothing.
+    expect(
+      OpenAiResponsesTransport.buildBody(
+        _request(sessionId: 'sess-1'),
+      ).containsKey('session_id'),
+      isFalse,
+    );
+    expect(
+      OpenAiResponsesTransport.buildBody(
+        _request(sessionId: 'sess-1', sessionIdMode: 'always'),
+      )['session_id'],
+      'sess-1',
+    );
+    expect(
+      OpenAiResponsesTransport.buildBody(
+        _request(sessionId: 'sess-1', sessionIdMode: 'off'),
+      ).containsKey('session_id'),
+      isFalse,
+    );
   });
 
   test('parses streamed output text and reasoning summary', () async {
@@ -170,7 +244,7 @@ data: {"type":"response.completed","response":{"id":"resp_1"}}
   test('router keeps Chat Completions as the default', () async {
     final chat = _FakeTransport();
     final responses = _FakeTransport();
-    final transport = OpenAiCompatibleTransport(
+    final transport = CustomChatCompletionTransport(
       chatCompletions: chat,
       responses: responses,
     );

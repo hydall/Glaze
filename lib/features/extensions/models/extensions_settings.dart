@@ -5,10 +5,8 @@ part 'extensions_settings.g.dart';
 
 @freezed
 abstract class ExtensionsSettings with _$ExtensionsSettings {
-  const factory ExtensionsSettings({
-    @Default(false) bool enabled,
-    String? activePresetId,
-  }) = _ExtensionsSettings;
+  const factory ExtensionsSettings({String? activePresetId}) =
+      _ExtensionsSettings;
 
   factory ExtensionsSettings.fromJson(Map<String, dynamic> json) =>
       _$ExtensionsSettingsFromJson(json);

@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/services/deep_link_service.dart';
+import '../../../../core/services/oauth_state.dart';
 import '../oauth_local_server.dart';
 import '../../sync_config.dart';
 
@@ -79,22 +80,31 @@ class DropboxAuth {
           '&code_challenge=$codeChallenge&code_challenge_method=S256&state=$state'
           '&token_access_type=offline';
       final deepLinkService = DeepLinkService.instance;
-      await launchUrl(Uri.parse(authUrl), mode: LaunchMode.externalApplication);
-      final callbackUri = await deepLinkService.waitForOAuthCallback('dropbox');
-      final code = callbackUri.queryParameters['code'];
-      final returnedState = callbackUri.queryParameters['state'];
-      if (code == null) {
-        throw StateError(
-          'No authorization code in callback (uri=$callbackUri)',
+      // Registered before the browser is launched, not after it returns: the
+      // redirect can reach the app before this line would otherwise run, and a
+      // callback with nothing to match it against is what used to be kept and
+      // handed to the next attempt.
+      deepLinkService.beginOAuth('dropbox', state);
+      try {
+        await launchUrl(
+          Uri.parse(authUrl),
+          mode: LaunchMode.externalApplication,
         );
+        final callbackUri = await deepLinkService.awaitOAuthCallback('dropbox');
+        final code = callbackUri.queryParameters['code'];
+        final returnedState = callbackUri.queryParameters['state'];
+        if (code == null) {
+          throw StateError(
+            'No authorization code in callback (uri=$callbackUri)',
+          );
+        }
+        final mismatch = oauthStateMismatchMessage(state, returnedState);
+        if (mismatch != null) throw StateError(mismatch);
+        await _handleCodeExchange(code, redirectUri);
+        return;
+      } finally {
+        deepLinkService.endOAuth('dropbox', state);
       }
-      if (returnedState != state) {
-        throw StateError(
-          'OAuth state mismatch (expected=$state got=$returnedState)',
-        );
-      }
-      await _handleCodeExchange(code, redirectUri);
-      return;
     }
 
     final result = await OAuthLocalServer.authenticate(

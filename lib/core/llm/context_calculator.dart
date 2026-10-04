@@ -1,27 +1,70 @@
+import 'history_trim.dart';
 import 'tokenizer.dart';
 import 'history_assembler.dart';
 
 class StaticBlock {
   final String id;
+
+  /// The text the request carries for this block. All of it counts toward the
+  /// prompt total and the history budget.
   final String content;
-  const StaticBlock({required this.id, required this.content});
 
-  Map<String, dynamic> toJson() => {'id': id, 'content': content};
+  /// The preset-authored part of [content] — external injections (character
+  /// fields, persona, summary, lorebooks, names) blanked, see INV-PS5. When
+  /// set, these tokens go to the preset row and the rest of [content] to the
+  /// block's own source; null attributes all of [content] to the source.
+  final String? presetContent;
 
-  factory StaticBlock.fromJson(Map<String, dynamic> json) =>
-      StaticBlock(id: json['id'] as String, content: json['content'] as String);
+  const StaticBlock({
+    required this.id,
+    required this.content,
+    this.presetContent,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'content': content,
+    if (presetContent != null) 'presetContent': presetContent,
+  };
+
+  factory StaticBlock.fromJson(Map<String, dynamic> json) => StaticBlock(
+    id: json['id'] as String,
+    content: json['content'] as String,
+    presetContent: json['presetContent'] as String?,
+  );
 }
 
 class ContextCalculator {
   final int contextSize;
   final int maxTokens;
   final int reasoningHistoryCount;
+  final bool excludeReasoningFromContextBudget;
+
+  /// [HistoryTrimMode.sliding] or [HistoryTrimMode.stepped].
+  final String historyTrimMode;
+
+  /// Oldest message the last stepped trim anchored on, when there is one. It is
+  /// honoured only while the window it opens still fits the budget — that check
+  /// is what makes a smaller window (a raised `maxTokens`, a grown lorebook)
+  /// move the anchor instead of silently overflowing.
+  final String? historyAnchorId;
+
+  /// Stepped mode: how full the held window may get before the anchor moves,
+  /// and how much of the budget the move gives back. Percentages of the history
+  /// budget, clamped to sane ranges by the trim itself.
+  final int historyTrimTriggerPercent;
+  final int historyTrimStepPercent;
 
   ContextCalculator({
     required this.contextSize,
     required this.maxTokens,
     this.reasoningHistoryCount = 0,
-  });
+    this.excludeReasoningFromContextBudget = false,
+    String historyTrimMode = HistoryTrimMode.sliding,
+    this.historyAnchorId,
+    this.historyTrimTriggerPercent = kDefaultHistoryTrimTriggerPercent,
+    this.historyTrimStepPercent = kDefaultHistoryTrimStepPercent,
+  }) : historyTrimMode = HistoryTrimMode.normalize(historyTrimMode);
 
   /// Context window available for the *prompt*, i.e. everything we send.
   ///
@@ -48,11 +91,28 @@ class ContextCalculator {
     final sourceTokens = <String, int>{};
     var staticTotal = 0;
 
+    void attribute(String source, int tokens) {
+      sourceTokens[source] = (sourceTokens[source] ?? 0) + tokens;
+    }
+
     for (final block in staticBlocks) {
       final tokens = estimateTokens(block.content);
       final source = _sourceForBlock(block.id);
-      sourceTokens[source] = (sourceTokens[source] ?? 0) + tokens;
       staticTotal += tokens;
+      final presetContent = block.presetContent;
+      if (presetContent == null) {
+        attribute(source, tokens);
+        continue;
+      }
+      // The preset row keeps its own chrome (setvar definitions included,
+      // which never reach the request); whatever the block injected on top
+      // belongs to its source. Injections into a generic preset block are
+      // shown through `macroTokens`, so only the total carries them here.
+      final chrome = estimateTokens(presetContent);
+      attribute('preset', chrome);
+      if (source != 'preset' && tokens > chrome) {
+        attribute(source, tokens - chrome);
+      }
     }
 
     final actualLorebook =
@@ -68,6 +128,13 @@ class ContextCalculator {
       historyMessages,
       historyBudget > 0 ? historyBudget : 0,
     );
+
+    // The anchor a stepped trim settled on, for the caller to persist. Null in
+    // sliding mode, so switching back to stepped re-anchors from scratch
+    // instead of resurrecting a stale cutoff.
+    final resolvedAnchor = historyTrimMode == HistoryTrimMode.stepped
+        ? trimmedHistory.firstOrNull?.sourceMessageId
+        : null;
 
     final historyTokens = _historyTokens(trimmedHistory);
     sourceTokens['history'] = historyTokens;
@@ -96,6 +163,7 @@ class ContextCalculator {
       totalTokens: sentTokens,
       cutoffIndex: cutoffIndex,
       trimmedHistory: trimmedHistory,
+      historyAnchorId: resolvedAnchor,
       lorebookReserveTokens: lorebookReserveTokens,
       memoryTokens: memoryTokens,
       vectorLoreTokens: vectorLoreTokens,
@@ -131,7 +199,53 @@ class ContextCalculator {
     int budget,
   ) {
     if (budget <= 0) return (<PromptMessage>[], messages.length);
+    return historyTrimMode == HistoryTrimMode.stepped
+        ? _trimStepped(messages, budget)
+        : _trimSliding(messages, budget);
+  }
 
+  /// Keeps the start of the history still for as long as it fits, then jumps it
+  /// forward by a block instead of a message.
+  ///
+  /// Between jumps every request begins with the same bytes, which is what lets
+  /// a provider's prefix cache hit; a sliding cut moves the start almost every
+  /// turn and misses every time. See [HistoryTrimMode.stepped].
+  (List<PromptMessage>, int) _trimStepped(
+    List<PromptMessage> messages,
+    int budget,
+  ) {
+    final anchorId = historyAnchorId;
+    if (anchorId != null && anchorId.isNotEmpty) {
+      final index = messages.indexWhere((m) => m.sourceMessageId == anchorId);
+      // A missing anchor means the message was deleted or this is a branch —
+      // step afresh rather than silently falling back to the whole history.
+      if (index >= 0) {
+        final kept = messages.sublist(index);
+        // Trigger below 100 %: stepping only once the window is already over
+        // budget leaves no room for the turn that pushed it there, and the
+        // anchor would have to move again immediately.
+        final trigger = historyTrimTriggerPercent.clamp(1, 100) / 100;
+        if (_historyTokens(kept) <= budget * trigger) return (kept, index);
+      }
+    }
+
+    // Re-anchor with headroom: the freed share is what the following turns
+    // grow into, and how long the prefix — and the cache with it — holds still.
+    final step = historyTrimStepPercent.clamp(1, 95) / 100;
+    final target = (budget * (1 - step)).floor();
+    if (target > 0) {
+      final stepped = _trimSliding(messages, target);
+      // Unless the newest message alone is bigger than the reduced target: a
+      // stepped prompt must never carry less history than a sliding one would.
+      if (stepped.$1.isNotEmpty) return stepped;
+    }
+    return _trimSliding(messages, budget);
+  }
+
+  (List<PromptMessage>, int) _trimSliding(
+    List<PromptMessage> messages,
+    int budget,
+  ) {
     final kept = <PromptMessage>[];
     var used = 0;
     final includeAllReasoning = reasoningHistoryCount == -1;
@@ -145,7 +259,9 @@ class ContextCalculator {
           (includeAllReasoning || remainingReasoning > 0) &&
           message.role == 'assistant' &&
           reasoning?.isNotEmpty == true;
-      if (includesReasoning) tokens += estimateTokens(reasoning!);
+      if (includesReasoning && !excludeReasoningFromContextBudget) {
+        tokens += estimateTokens(reasoning!);
+      }
       if (used + tokens > budget) break;
       used += tokens;
       kept.insert(0, message);
@@ -184,6 +300,10 @@ class TokenBreakdown {
   final int totalTokens;
   final int cutoffIndex;
   final List<PromptMessage> trimmedHistory;
+
+  /// Oldest kept message under [HistoryTrimMode.stepped] — the anchor the next
+  /// turn should reuse. Null in sliding mode, where there is nothing to hold.
+  final String? historyAnchorId;
   final int lorebookReserveTokens;
   final int memoryTokens;
   final int vectorLoreTokens;
@@ -200,6 +320,7 @@ class TokenBreakdown {
     required this.totalTokens,
     required this.cutoffIndex,
     required this.trimmedHistory,
+    this.historyAnchorId,
     this.lorebookReserveTokens = 0,
     this.memoryTokens = 0,
     this.vectorLoreTokens = 0,
@@ -217,6 +338,7 @@ class TokenBreakdown {
     'totalTokens': totalTokens,
     'cutoffIndex': cutoffIndex,
     'trimmedHistory': trimmedHistory.map((m) => m.toJson()).toList(),
+    'historyAnchorId': historyAnchorId,
     'lorebookReserveTokens': lorebookReserveTokens,
     'memoryTokens': memoryTokens,
     'vectorLoreTokens': vectorLoreTokens,
@@ -236,6 +358,7 @@ class TokenBreakdown {
     trimmedHistory: (json['trimmedHistory'] as List)
         .map((m) => PromptMessage.fromJson(m as Map<String, dynamic>))
         .toList(),
+    historyAnchorId: json['historyAnchorId'] as String?,
     lorebookReserveTokens: json['lorebookReserveTokens'] as int? ?? 0,
     memoryTokens: json['memoryTokens'] as int? ?? 0,
     vectorLoreTokens: json['vectorLoreTokens'] as int? ?? 0,
@@ -245,6 +368,21 @@ class TokenBreakdown {
         .whereType<String>()
         .toSet(),
   );
+
+  /// Oldest message the prompt still carries — where the history the model
+  /// sees begins. Null when the trim kept nothing, or when the kept messages
+  /// carry no source id (a Studio-built window, a synthetic block).
+  ///
+  /// Read from [trimmedHistory] rather than from [historyAnchorId]: the anchor
+  /// exists only under [HistoryTrimMode.stepped], and the chat marks the same
+  /// boundary whichever mode produced it.
+  String? get windowStartMessageId {
+    for (final message in trimmedHistory) {
+      final id = message.sourceMessageId;
+      if (id != null && id.isNotEmpty) return id;
+    }
+    return null;
+  }
 
   int get lorebookTotal =>
       (sourceTokens['lorebook'] ?? 0) +
@@ -268,11 +406,38 @@ class TokenBreakdown {
       totalTokens: totalTokens,
       cutoffIndex: cutoffIndex,
       trimmedHistory: trimmedHistory,
+      historyAnchorId: historyAnchorId,
       lorebookReserveTokens: lorebookReserveTokens,
       memoryTokens: memoryTokens,
       vectorLoreTokens: vectorLoreTokens,
       fixedTotal: fixedTotal,
       remaining: remaining,
+      visibleMessageIds: visibleMessageIds,
+    );
+  }
+
+  /// This breakdown with [tokens] of vector lorebook added — for a build that
+  /// skipped the vector search (it can take seconds through the embedding
+  /// endpoint) but whose last real generation found entries. Without it the
+  /// Context tab would fold them into the lorebook reserve instead of showing
+  /// a "Vector Lorebook" row.
+  TokenBreakdown withVectorLore(int tokens) {
+    if (tokens <= 0 || vectorLoreTokens > 0) return this;
+    return TokenBreakdown(
+      sourceTokens: {...sourceTokens, 'vectorLore': tokens},
+      macroTokens: macroTokens,
+      staticTotal: staticTotal,
+      historyBudget: historyBudget,
+      historyTokens: historyTokens,
+      totalTokens: totalTokens + tokens,
+      cutoffIndex: cutoffIndex,
+      trimmedHistory: trimmedHistory,
+      historyAnchorId: historyAnchorId,
+      lorebookReserveTokens: lorebookReserveTokens,
+      memoryTokens: memoryTokens,
+      vectorLoreTokens: tokens,
+      fixedTotal: fixedTotal + tokens,
+      remaining: remaining - tokens,
       visibleMessageIds: visibleMessageIds,
     );
   }

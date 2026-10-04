@@ -2,38 +2,116 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:freezed_annotation/freezed_annotation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'dart:async';
+
 import '../../core/platform/haptics.dart';
+import '../../core/platform/system_settings.dart';
 import '../../core/state/shared_prefs_provider.dart';
 
 part 'app_settings_provider.freezed.dart';
 
 const supportedAppLanguages = {'en', 'ru'};
 
-bool _readBoolPref(
-  SharedPreferences prefs,
-  String key, {
-  required bool defaultValue,
-}) {
-  final value = prefs.get(key);
+/// Where a JanitorAI card, its hidden definition or its lorebooks are read
+/// from.
+///
+/// * [local] — Glaze's own offscreen WebView session on janitorai.com
+///   (`JanitorWebViewProxy`). Reads what the logged-in account can see and, for
+///   the closed card/lorebook, captures the assembled prompt.
+/// * [datacat] — datacat.run's scraped copy. No Janitor.AI account needed, but
+///   it only carries what DataCat has already extracted, and its lorebooks come
+///   from the character's *public* scripts only (private books are metadata
+///   stubs there — see `extractCharacterBookFromScripts` in the
+///   SillyTavern-CharacterLibrary reference).
+enum ExtractionSource {
+  local,
+  datacat;
+
+  static ExtractionSource? parse(Object? value) {
+    if (value is ExtractionSource) return value;
+    if (value is! String) return null;
+    final normalized = value.trim().toLowerCase();
+    for (final s in ExtractionSource.values) {
+      if (s.name == normalized) return s;
+    }
+    return null;
+  }
+}
+
+/// What drives the reduced-motion, reduced-blur "Battery Saver UI".
+///
+/// [system] follows the OS power-save mode, which is the default: a phone that
+/// has decided to save power should not be asked to paint blurs and rolling
+/// digits. It resolves to off wherever the platform cannot answer — Windows,
+/// Linux and macOS have no signal to follow, so nothing is being followed.
+/// [on] and [off] pin it regardless of what the OS is doing.
+enum BatterySaverMode {
+  system,
+  on,
+  off;
+
+  static BatterySaverMode? parse(Object? value) {
+    if (value is BatterySaverMode) return value;
+    if (value is! String) return null;
+    final normalized = value.trim().toLowerCase();
+    for (final m in BatterySaverMode.values) {
+      if (m.name == normalized) return m;
+    }
+    return null;
+  }
+}
+
+bool? _coerceBool(Object? value) {
   if (value is bool) return value;
   if (value is int) return value != 0;
   if (value is String) {
     final normalized = value.toLowerCase();
-    return normalized == '1' || normalized == 'true';
+    if (normalized == '1' || normalized == 'true') return true;
+    if (normalized == '0' || normalized == 'false') return false;
   }
-  return defaultValue;
+  return null;
 }
 
-double _readDoublePref(
-  SharedPreferences prefs,
-  String key, {
-  required double defaultValue,
-}) {
-  final value = prefs.get(key);
+double? _coerceDouble(Object? value) {
   if (value is int) return value.toDouble();
   if (value is double) return value;
-  if (value is String) return double.tryParse(value) ?? defaultValue;
-  return defaultValue;
+  if (value is String) return double.tryParse(value);
+  return null;
+}
+
+/// The source an upgrading install meant, read from the three split settings
+/// this one replaces. The card source was Local by default and so carries no
+/// choice; a Local extraction or lorebook source is the intent that survives
+/// the merge. Falls back to the pre-split `extractJanitorLocally` opt-in. Null
+/// when nothing was ever written, leaving the new default in charge.
+ExtractionSource? _legacyJanitorSource(SharedPreferences prefs) {
+  final character = ExtractionSource.parse(prefs.get('janitorCharacterSource'));
+  final lorebook = ExtractionSource.parse(prefs.get('janitorLorebookSource'));
+  if (character == ExtractionSource.local ||
+      lorebook == ExtractionSource.local) {
+    return ExtractionSource.local;
+  }
+  if (character != null || lorebook != null) return ExtractionSource.datacat;
+  final legacy = _coerceBool(prefs.get('extractJanitorLocally'));
+  if (legacy == null) return null;
+  return legacy ? ExtractionSource.local : ExtractionSource.datacat;
+}
+
+/// Reads the Battery Saver choice, migrating the install that only ever stored
+/// a bool.
+///
+/// The old setting defaulted to **on**, so a stored `true` is indistinguishable
+/// from never having touched it — those installs take the new default,
+/// [BatterySaverMode.system]. A stored `false` is a choice the old UI could
+/// only reach deliberately, so it is kept as [BatterySaverMode.off]; under
+/// `system` it would have flipped itself on the next time the phone started
+/// saving power, which is not what that reader asked for.
+BatterySaverMode _batterySaverMode(SharedPreferences prefs) {
+  final stored = BatterySaverMode.parse(prefs.get('batterySaverMode'));
+  if (stored != null) return stored;
+  return _coerceBool(prefs.get('batterySaver')) == false
+      ? BatterySaverMode.off
+      : BatterySaverMode.system;
 }
 
 final appSettingsProvider =
@@ -48,117 +126,383 @@ abstract class AppSettings with _$AppSettings {
     @Default(false) bool hideMessageId,
     @Default(false) bool hideGenerationTime,
     @Default(false) bool hideTokenCount,
-    @Default(false) bool groupDialogs,
-    @Default(true) bool batterySaver,
+    @Default(true) bool groupDialogs,
+
+    /// The resolved answer the whole app reads: whether the reduced UI is on
+    /// right now. Derived from [batterySaverMode] — under [BatterySaverMode
+    /// .system] it tracks the OS, so it changes without anyone touching a
+    /// setting. Persisted as the last known value so a cold start paints the
+    /// right thing before the platform has answered.
+    @Default(false) bool batterySaver,
+
+    /// What the reader actually chose. [batterySaver] is what that choice
+    /// currently works out to.
+    @Default(BatterySaverMode.system) BatterySaverMode batterySaverMode,
     @Default(false) bool hideTooltips,
     @Default(false) bool disableSwipeRegeneration,
     @Default(false) bool allowMessageScripts,
+
+    /// Whether deleting one or more chat messages asks for confirmation first.
+    /// On by default: a delete also rolls back Studio trackers, MemoryBook
+    /// entries and other data derived from the deleted point onward, so the
+    /// user confirms before it happens. Off restores the old immediate delete.
+    @Default(true) bool confirmMessageDelete,
     @Default('en') String language,
     @Default(false) bool virtualKeyboardSend,
-    @Default(30) double tokenizerHidePercent,
-    @Default(85) double tokenizerHistoryFillThreshold,
     @Default(true) bool showOurPicks,
-    @Default(true) bool forceMobileLayout,
+
+    /// Widest the chat column is allowed to get, in logical pixels. 0 means
+    /// "fill the column". Only ever binds on desktop — phones are narrower than
+    /// the default — and is dragged directly by the chat column's edge grips.
+    @Default(900) double chatMaxWidth,
+
+    /// Desktop (>=768px wide) three-column layout is the default on wide
+    /// windows and on a tablet held in landscape; a tablet in portrait keeps the
+    /// phone layout. This switch forces the phone layout back on for users who
+    /// prefer it.
+    @Default(false) bool forceMobileLayout,
     @Default(false) bool addBlockAtTop,
     @Default(true) bool openCardAfterImport,
     @Default(true) bool hapticFeedback,
     @Default(true) bool messageVibration,
-    @Default(false) bool extractJanitorLocally,
+
+    /// Where a JanitorAI character — its catalog card, its closed definition
+    /// and its closed lorebooks — is loaded and recovered from.
+    ///
+    /// [datacat] reads DataCat's scraped copy and needs no Janitor.AI account.
+    /// [local] goes through the WebView proxy — the only way to see a card the
+    /// creator restricted to logged-in visitors — and captures the assembled
+    /// prompt through the signed-in session.
+    ///
+    /// One source for all three on purpose: loading a card from DataCat while
+    /// extracting it locally is a contradiction, since a closed definition only
+    /// exists inside DataCat's copy or the locally assembled prompt.
+    @Default(ExtractionSource.datacat) ExtractionSource janitorSource,
+
+    /// User-edited system prompt for the closed-lorebook build (the JanitorAI
+    /// extraction flow). Empty means the built-in default
+    /// (`kLorebookSystemPrompt`) is used — that is also what clearing the field
+    /// in the extraction settings does.
+    @Default('') String lorebookBuildPrompt,
+
+    /// Same, for the scripted ("advanced" / Nine API) lorebook path, which asks
+    /// the model to recover entries from JavaScript source instead of splitting
+    /// concatenated bodies. Empty → `kLorebookSystemPromptJs`.
+    @Default('') String lorebookBuildPromptJs,
 
     /// When on, the shuffle button opens a random character straight in the
     /// detail sheet (the classic behaviour) instead of the randomizing
     /// (Holocard) discovery overlay. Off by default.
     @Default(false) bool useStandardRandomizer,
+
+    /// Hides the context coverage card that floats under the chat header (the
+    /// memory + lorebook panel). Stored as "hide" like the other chat-surface
+    /// switches, so an absent preference keeps the card on.
+    @Default(false) bool hideContextCard,
   }) = _AppSettings;
 }
 
+/// Canonical SharedPreferences schema for [AppSettings]. Cloud sync uses the
+/// same codec as the settings provider so newly added fields cannot silently
+/// be omitted from one of the two paths.
+abstract final class AppSettingsPreferences {
+  static const keys = <String>{
+    'enterToSend',
+    'hideMessageId',
+    'hideGenerationTime',
+    'hideTokenCount',
+    'dialogGrouping',
+    'batterySaver',
+    'batterySaverMode',
+    'hideTooltips',
+    'disableSwipeRegeneration',
+    'allowMessageScripts',
+    'confirmMessageDelete',
+    'language',
+    'virtualKeyboardSend',
+    'showOurPicks',
+    'gz_force_mobile_layout',
+    'gz_chat_max_width',
+    'addBlockAtTop',
+    'openCardAfterImport',
+    'hapticFeedback',
+    'messageVibration',
+    'janitorSource',
+    'lorebookBuildPrompt',
+    'lorebookBuildPromptJs',
+    'useStandardRandomizer',
+    'hideContextCard',
+  };
+
+  static AppSettings read(SharedPreferences prefs) {
+    const defaults = AppSettings();
+    final savedLanguage = prefs.getString('language');
+    return AppSettings(
+      enterToSend:
+          _coerceBool(prefs.get('enterToSend')) ?? defaults.enterToSend,
+      hideMessageId:
+          _coerceBool(prefs.get('hideMessageId')) ?? defaults.hideMessageId,
+      hideGenerationTime:
+          _coerceBool(prefs.get('hideGenerationTime')) ??
+          defaults.hideGenerationTime,
+      hideTokenCount:
+          _coerceBool(prefs.get('hideTokenCount')) ?? defaults.hideTokenCount,
+      groupDialogs:
+          _coerceBool(prefs.get('dialogGrouping')) ?? defaults.groupDialogs,
+      batterySaverMode: _batterySaverMode(prefs),
+      batterySaver:
+          _coerceBool(prefs.get('batterySaver')) ?? defaults.batterySaver,
+      hideTooltips:
+          _coerceBool(prefs.get('hideTooltips')) ?? defaults.hideTooltips,
+      disableSwipeRegeneration:
+          _coerceBool(prefs.get('disableSwipeRegeneration')) ??
+          defaults.disableSwipeRegeneration,
+      allowMessageScripts:
+          _coerceBool(prefs.get('allowMessageScripts')) ??
+          defaults.allowMessageScripts,
+      confirmMessageDelete:
+          _coerceBool(prefs.get('confirmMessageDelete')) ??
+          defaults.confirmMessageDelete,
+      language: supportedAppLanguages.contains(savedLanguage)
+          ? savedLanguage!
+          : defaults.language,
+      virtualKeyboardSend:
+          _coerceBool(prefs.get('virtualKeyboardSend')) ??
+          defaults.virtualKeyboardSend,
+      showOurPicks:
+          _coerceBool(prefs.get('showOurPicks')) ?? defaults.showOurPicks,
+      forceMobileLayout:
+          _coerceBool(prefs.get('gz_force_mobile_layout')) ??
+          defaults.forceMobileLayout,
+      chatMaxWidth:
+          _coerceDouble(prefs.get('gz_chat_max_width')) ??
+          defaults.chatMaxWidth,
+      addBlockAtTop:
+          _coerceBool(prefs.get('addBlockAtTop')) ?? defaults.addBlockAtTop,
+      openCardAfterImport:
+          _coerceBool(prefs.get('openCardAfterImport')) ??
+          defaults.openCardAfterImport,
+      hapticFeedback:
+          _coerceBool(prefs.get('hapticFeedback')) ?? defaults.hapticFeedback,
+      messageVibration:
+          _coerceBool(prefs.get('messageVibration')) ??
+          defaults.messageVibration,
+      janitorSource:
+          ExtractionSource.parse(prefs.get('janitorSource')) ??
+          _legacyJanitorSource(prefs) ??
+          defaults.janitorSource,
+      lorebookBuildPrompt:
+          prefs.getString('lorebookBuildPrompt') ??
+          defaults.lorebookBuildPrompt,
+      lorebookBuildPromptJs:
+          prefs.getString('lorebookBuildPromptJs') ??
+          defaults.lorebookBuildPromptJs,
+      useStandardRandomizer:
+          _coerceBool(prefs.get('useStandardRandomizer')) ??
+          defaults.useStandardRandomizer,
+      hideContextCard:
+          _coerceBool(prefs.get('hideContextCard')) ?? defaults.hideContextCard,
+    );
+  }
+
+  static Map<String, dynamic> encode(AppSettings settings) {
+    final normalized = _normalize(settings);
+    return {
+      'enterToSend': normalized.enterToSend,
+      'hideMessageId': normalized.hideMessageId,
+      'hideGenerationTime': normalized.hideGenerationTime,
+      'hideTokenCount': normalized.hideTokenCount,
+      'dialogGrouping': normalized.groupDialogs,
+      'batterySaver': normalized.batterySaver,
+      'batterySaverMode': normalized.batterySaverMode.name,
+      'hideTooltips': normalized.hideTooltips,
+      'disableSwipeRegeneration': normalized.disableSwipeRegeneration,
+      'allowMessageScripts': normalized.allowMessageScripts,
+      'confirmMessageDelete': normalized.confirmMessageDelete,
+      'language': normalized.language,
+      'virtualKeyboardSend': normalized.virtualKeyboardSend,
+      'showOurPicks': normalized.showOurPicks,
+      'gz_force_mobile_layout': normalized.forceMobileLayout,
+      'gz_chat_max_width': normalized.chatMaxWidth,
+      'addBlockAtTop': normalized.addBlockAtTop,
+      'openCardAfterImport': normalized.openCardAfterImport,
+      'hapticFeedback': normalized.hapticFeedback,
+      'messageVibration': normalized.messageVibration,
+      'janitorSource': normalized.janitorSource.name,
+      'lorebookBuildPrompt': normalized.lorebookBuildPrompt,
+      'lorebookBuildPromptJs': normalized.lorebookBuildPromptJs,
+      'useStandardRandomizer': normalized.useStandardRandomizer,
+      'hideContextCard': normalized.hideContextCard,
+    };
+  }
+
+  static Future<void> write(
+    SharedPreferences prefs,
+    AppSettings settings,
+  ) async {
+    final values = encode(settings);
+    for (final entry in values.entries) {
+      final value = entry.value;
+      if (value is bool) {
+        await prefs.setBool(entry.key, value);
+      } else if (value is double) {
+        await prefs.setDouble(entry.key, value);
+      } else if (value is String) {
+        await prefs.setString(entry.key, value);
+      }
+    }
+  }
+
+  /// Applies only recognized, valid fields. Missing fields from older clients
+  /// preserve their local values instead of resetting newly introduced prefs.
+  static Future<void> applyPartial(
+    SharedPreferences prefs,
+    Map<String, dynamic> values,
+  ) async {
+    final merged = encode(read(prefs));
+    for (final key in keys) {
+      if (!values.containsKey(key)) continue;
+      final incoming = values[key];
+      final current = merged[key];
+      if (current is bool) {
+        final parsed = _coerceBool(incoming);
+        if (parsed != null) merged[key] = parsed;
+      } else if (current is double) {
+        final parsed = _coerceDouble(incoming);
+        if (parsed != null) merged[key] = parsed;
+      } else if (current is String && incoming is String) {
+        if (_extractionSourceKeys.contains(key)) {
+          // An unknown source name from a newer (or corrupted) client keeps the
+          // local value rather than silently resetting it to the default.
+          final parsed = ExtractionSource.parse(incoming);
+          if (parsed != null) merged[key] = parsed.name;
+        } else if (key == 'batterySaverMode') {
+          final parsed = BatterySaverMode.parse(incoming);
+          if (parsed != null) merged[key] = parsed.name;
+        } else {
+          merged[key] =
+              key == 'language' && !supportedAppLanguages.contains(incoming)
+              ? 'en'
+              : incoming;
+        }
+      }
+    }
+    await write(prefs, _fromMap(merged));
+  }
+
+  /// Keys whose value is an [ExtractionSource] name rather than free text.
+  static const _extractionSourceKeys = <String>{'janitorSource'};
+
+  /// Keys no longer written but still read once, to carry an upgrading install's
+  /// choice over. Cleared alongside the live ones so a reset really resets.
+  static const legacyKeys = <String>{
+    'extractJanitorLocally',
+    'janitorLorebookSource',
+    'janitorCardSource',
+    'janitorCharacterSource',
+  };
+
+  static Future<void> removeAll(SharedPreferences prefs) async {
+    for (final key in {...keys, ...legacyKeys}) {
+      await prefs.remove(key);
+    }
+  }
+
+  static AppSettings _normalize(AppSettings settings) =>
+      supportedAppLanguages.contains(settings.language)
+      ? settings
+      : settings.copyWith(language: 'en');
+
+  static AppSettings _fromMap(Map<String, dynamic> values) => AppSettings(
+    enterToSend: values['enterToSend'] as bool,
+    hideMessageId: values['hideMessageId'] as bool,
+    hideGenerationTime: values['hideGenerationTime'] as bool,
+    hideTokenCount: values['hideTokenCount'] as bool,
+    groupDialogs: values['dialogGrouping'] as bool,
+    batterySaver: values['batterySaver'] as bool,
+    batterySaverMode:
+        BatterySaverMode.parse(values['batterySaverMode']) ??
+        const AppSettings().batterySaverMode,
+    hideTooltips: values['hideTooltips'] as bool,
+    disableSwipeRegeneration: values['disableSwipeRegeneration'] as bool,
+    allowMessageScripts: values['allowMessageScripts'] as bool,
+    confirmMessageDelete: values['confirmMessageDelete'] as bool,
+    language: values['language'] as String,
+    virtualKeyboardSend: values['virtualKeyboardSend'] as bool,
+    showOurPicks: values['showOurPicks'] as bool,
+    forceMobileLayout: values['gz_force_mobile_layout'] as bool,
+    chatMaxWidth: values['gz_chat_max_width'] as double,
+    addBlockAtTop: values['addBlockAtTop'] as bool,
+    openCardAfterImport: values['openCardAfterImport'] as bool,
+    hapticFeedback: values['hapticFeedback'] as bool,
+    messageVibration: values['messageVibration'] as bool,
+    janitorSource:
+        ExtractionSource.parse(values['janitorSource']) ??
+        const AppSettings().janitorSource,
+    lorebookBuildPrompt: values['lorebookBuildPrompt'] as String,
+    lorebookBuildPromptJs: values['lorebookBuildPromptJs'] as String,
+    useStandardRandomizer: values['useStandardRandomizer'] as bool,
+    hideContextCard: values['hideContextCard'] as bool,
+  );
+}
+
 class AppSettingsNotifier extends AsyncNotifier<AppSettings> {
+  StreamSubscription<bool>? _powerSaveSub;
+
   @override
   Future<AppSettings> build() async {
     final prefs = await ref.read(sharedPreferencesProvider.future);
-    final savedLanguage = prefs.getString('language');
-    final hapticFeedback = _readBoolPref(
-      prefs,
-      'hapticFeedback',
-      defaultValue: true,
-    );
-    final messageVibration = _readBoolPref(
-      prefs,
-      'messageVibration',
-      defaultValue: true,
-    );
+    var settings = AppSettingsPreferences.read(prefs);
     // Cache the toggles so the central [Haptics] gate can decide synchronously
     // in tap handlers and on message completion.
-    Haptics.configure(enabled: hapticFeedback);
-    Haptics.configureMessageVibration(enabled: messageVibration);
-    return AppSettings(
-      enterToSend: _readBoolPref(prefs, 'enterToSend', defaultValue: true),
-      hideMessageId: _readBoolPref(prefs, 'hideMessageId', defaultValue: false),
-      hideGenerationTime: _readBoolPref(
-        prefs,
-        'hideGenerationTime',
-        defaultValue: false,
-      ),
-      hideTokenCount: _readBoolPref(
-        prefs,
-        'hideTokenCount',
-        defaultValue: false,
-      ),
-      groupDialogs: _readBoolPref(prefs, 'dialogGrouping', defaultValue: false),
-      batterySaver: _readBoolPref(prefs, 'batterySaver', defaultValue: true),
-      hideTooltips: _readBoolPref(prefs, 'hideTooltips', defaultValue: false),
-      disableSwipeRegeneration: _readBoolPref(
-        prefs,
-        'disableSwipeRegeneration',
-        defaultValue: false,
-      ),
-      allowMessageScripts: _readBoolPref(
-        prefs,
-        'allowMessageScripts',
-        defaultValue: false,
-      ),
-      language: supportedAppLanguages.contains(savedLanguage)
-          ? savedLanguage!
-          : 'en',
-      virtualKeyboardSend: _readBoolPref(
-        prefs,
-        'virtualKeyboardSend',
-        defaultValue: false,
-      ),
-      tokenizerHidePercent: _readDoublePref(
-        prefs,
-        'tokenizerHidePercent',
-        defaultValue: 30,
-      ),
-      tokenizerHistoryFillThreshold: _readDoublePref(
-        prefs,
-        'tokenizerHistoryFillThreshold',
-        defaultValue: 85,
-      ),
-      showOurPicks: _readBoolPref(prefs, 'showOurPicks', defaultValue: true),
-      forceMobileLayout: _readBoolPref(
-        prefs,
-        'gz_force_mobile_layout',
-        defaultValue: true,
-      ),
-      addBlockAtTop: _readBoolPref(prefs, 'addBlockAtTop', defaultValue: false),
-      openCardAfterImport: _readBoolPref(
-        prefs,
-        'openCardAfterImport',
-        defaultValue: true,
-      ),
-      hapticFeedback: hapticFeedback,
-      messageVibration: messageVibration,
-      extractJanitorLocally: _readBoolPref(
-        prefs,
-        'extractJanitorLocally',
-        defaultValue: false,
-      ),
-      useStandardRandomizer: _readBoolPref(
-        prefs,
-        'useStandardRandomizer',
-        defaultValue: false,
-      ),
+    Haptics.configure(enabled: settings.hapticFeedback);
+    Haptics.configureMessageVibration(enabled: settings.messageVibration);
+
+    // Under `system` the persisted flag is only the last known answer; ask the
+    // OS for the current one before anything paints from it.
+    if (settings.batterySaverMode == BatterySaverMode.system) {
+      settings = settings.copyWith(
+        batterySaver: await SystemSettings.isPowerSaveMode(),
+      );
+    }
+    _listenForPowerSaveChanges();
+    return settings;
+  }
+
+  /// Follows the OS while `system` is selected. The subscription is kept open
+  /// under the other two modes as well — they are a user's answer, not a
+  /// platform one, and switching back to `system` must not need a restart to
+  /// start hearing again.
+  void _listenForPowerSaveChanges() {
+    _powerSaveSub?.cancel();
+    _powerSaveSub = SystemSettings.powerSaveModeChanges().listen(
+      _onPowerSaveChanged,
+    );
+    ref.onDispose(() {
+      _powerSaveSub?.cancel();
+      _powerSaveSub = null;
+    });
+  }
+
+  Future<void> _onPowerSaveChanged(bool powerSaving) async {
+    final current = state.value;
+    if (current == null) return;
+    if (current.batterySaverMode != BatterySaverMode.system) return;
+    if (current.batterySaver == powerSaving) return;
+    await save(current.copyWith(batterySaver: powerSaving));
+  }
+
+  /// Sets what drives Battery Saver UI and resolves it in the same write, so
+  /// the screen never shows a mode and an effect that disagree.
+  Future<void> setBatterySaverMode(BatterySaverMode mode) async {
+    final current = state.value ?? const AppSettings();
+    final resolved = switch (mode) {
+      BatterySaverMode.on => true,
+      BatterySaverMode.off => false,
+      BatterySaverMode.system => await SystemSettings.isPowerSaveMode(),
+    };
+    await save(
+      current.copyWith(batterySaverMode: mode, batterySaver: resolved),
     );
   }
 
@@ -167,42 +511,7 @@ class AppSettingsNotifier extends AsyncNotifier<AppSettings> {
     final normalized = supportedAppLanguages.contains(settings.language)
         ? settings
         : settings.copyWith(language: 'en');
-    await prefs.setBool('enterToSend', settings.enterToSend);
-    await prefs.setBool('hideMessageId', settings.hideMessageId);
-    await prefs.setBool('hideGenerationTime', settings.hideGenerationTime);
-    await prefs.setBool('hideTokenCount', settings.hideTokenCount);
-    await prefs.setBool('dialogGrouping', settings.groupDialogs);
-    await prefs.setBool('batterySaver', settings.batterySaver);
-    await prefs.setBool('hideTooltips', settings.hideTooltips);
-    await prefs.setBool(
-      'disableSwipeRegeneration',
-      settings.disableSwipeRegeneration,
-    );
-    await prefs.setBool('allowMessageScripts', settings.allowMessageScripts);
-    await prefs.setString('language', normalized.language);
-    await prefs.setBool('virtualKeyboardSend', normalized.virtualKeyboardSend);
-    await prefs.setDouble(
-      'tokenizerHidePercent',
-      normalized.tokenizerHidePercent,
-    );
-    await prefs.setDouble(
-      'tokenizerHistoryFillThreshold',
-      normalized.tokenizerHistoryFillThreshold,
-    );
-    await prefs.setBool('showOurPicks', normalized.showOurPicks);
-    await prefs.setBool('gz_force_mobile_layout', normalized.forceMobileLayout);
-    await prefs.setBool('addBlockAtTop', normalized.addBlockAtTop);
-    await prefs.setBool('openCardAfterImport', normalized.openCardAfterImport);
-    await prefs.setBool('hapticFeedback', normalized.hapticFeedback);
-    await prefs.setBool('messageVibration', normalized.messageVibration);
-    await prefs.setBool(
-      'extractJanitorLocally',
-      normalized.extractJanitorLocally,
-    );
-    await prefs.setBool(
-      'useStandardRandomizer',
-      normalized.useStandardRandomizer,
-    );
+    await AppSettingsPreferences.write(prefs, normalized);
     Haptics.configure(enabled: normalized.hapticFeedback);
     Haptics.configureMessageVibration(enabled: normalized.messageVibration);
     state = AsyncData(normalized);

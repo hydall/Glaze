@@ -100,7 +100,7 @@ class MemoryAgentRecorder {
       _appendOperation(
         AgentOperationRecord(
           id: 'studio-tracker-$sessionId-${now.microsecondsSinceEpoch}',
-          kind: AgentOperationKind.studioTracker,
+          kind: AgentOperationKind.studioController,
           status: status,
           sessionId: sessionId,
           messageId: messageId,
@@ -138,7 +138,7 @@ class MemoryAgentRecorder {
       _appendOperation(
         AgentOperationRecord(
           id: 'studio-tracker-${brief.agentId}-$sessionId-$idStamp',
-          kind: AgentOperationKind.studioTracker,
+          kind: AgentOperationKind.studioController,
           status: briefStatus,
           sessionId: sessionId,
           messageId: messageId,

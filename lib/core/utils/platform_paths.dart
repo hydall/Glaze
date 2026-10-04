@@ -37,11 +37,17 @@ Future<String> getAppDataDir() async {
 /// base is cached yet (very early startup) the input is returned unchanged.
 String? resolveGlazeFilePath(String? path) {
   if (path == null || path.isEmpty) return path;
+  // A stored path can also be a URL (`data:`, `https:`) — a catalog card whose
+  // picture was never downloaded. It is not absolute, so without this it would
+  // be joined onto the data root and come back as a path no file lives at.
+  // [relativeGlazeFilePath], this function's inverse, has always left URLs
+  // alone; this is the other half of that symmetry.
+  if (_urlSchemeRegex.hasMatch(path)) return path;
   final base = _cachedAppDataDir;
   if (base == null) return path;
 
   if (!p.isAbsolute(path)) {
-    return p.join(base, path);
+    return p.joinAll([base, ...path.split(RegExp(r'[/\\]'))]);
   }
   // Absolute: first prefer the matching file in this build channel's data
   // root. A copied/imported database can still contain paths from another
@@ -64,22 +70,70 @@ String? resolveGlazeFilePath(String? path) {
   return path;
 }
 
-/// Returns the on-disk path to the 512px thumbnail JPG for a stored avatar
-/// path when that thumbnail exists, otherwise the resolved full-resolution
-/// avatar path (or `null` when there is no avatar).
+/// [path] spelled relative to the Glaze data root when it lives inside it.
+///
+/// The inverse of [resolveGlazeFilePath], and the spelling every image path is
+/// stored in: a relative path survives the data root moving under it — a new
+/// iOS container UUID, a database copied between the desktop build channels —
+/// where an absolute one silently stops pointing at a file. Paths outside the
+/// data root (and anything that is already relative, or a URL) come back
+/// unchanged.
+String relativeGlazeFilePath(String path) {
+  if (path.isEmpty) return path;
+  if (_urlSchemeRegex.hasMatch(path)) return path;
+  final normalized = path.replaceAll('\\', '/');
+  if (!p.isAbsolute(path)) return normalized;
+
+  final base = _cachedAppDataDir;
+  if (base != null) {
+    final relative = p.relative(path, from: base);
+    if (!p.isAbsolute(relative) && !relative.startsWith('..')) {
+      return relative.replaceAll('\\', '/');
+    }
+  }
+  // No base cached yet (very early startup), or the file belongs to another
+  // installed build channel: the data-root name still tells us where it sat,
+  // and [resolveGlazeFilePath] rebases that suffix onto the current root.
+  final match = RegExp(
+    r'/(?:Glaze|Glaze-staging|Glaze-nightly)/',
+    caseSensitive: false,
+  ).allMatches(normalized).lastOrNull;
+  if (match != null) {
+    final suffix = normalized.substring(match.end);
+    if (suffix.isNotEmpty) return suffix;
+  }
+  return path;
+}
+
+/// A URL scheme, which a stored image path can also be (`data:`, `https:`).
+/// Two characters minimum, so a Windows drive letter is not read as one.
+final RegExp _urlSchemeRegex = RegExp(r'^[a-zA-Z][a-zA-Z0-9+.-]+:');
+
+/// Extensions a generated list/card thumbnail can carry, most-preferred first.
+///
+/// Transparent portraits are stored as PNG so their cut-out survives; opaque
+/// art stays a smaller JPEG. Both are valid on disk, so path resolution checks
+/// them in this order.
+const List<String> kThumbnailExtensions = ['png', 'jpg'];
+
+/// Returns the on-disk path to the generated list/card thumbnail for a stored
+/// avatar path when one exists, otherwise the resolved full-resolution avatar
+/// path (or `null` when there is no avatar).
 ///
 /// Lists (character grid, folder cards, chat history) should prefer this over
-/// [resolveGlazeFilePath] so that scrolling decodes small square JPGs instead
-/// of the multi-megabyte source PNGs — the latter causes visible jank and
-/// delayed "pop-in" the first time each card scrolls into view.
+/// [resolveGlazeFilePath] so that scrolling decodes small JPG/PNG thumbnails
+/// instead of the multi-megabyte source PNGs — the latter causes visible jank
+/// and delayed "pop-in" the first time each card scrolls into view.
 String? resolveGlazeThumbnailPath(String? avatarPath) {
   final resolved = resolveGlazeFilePath(avatarPath);
   if (resolved == null || resolved.isEmpty) return resolved;
   final name = p.basenameWithoutExtension(resolved);
-  // avatars/<id>.png -> <base>/thumbnails/<id>.jpg
+  // avatars/<id>.png -> <base>/thumbnails/<id>.png (transparent) or .jpg
   final base = p.dirname(p.dirname(resolved));
-  final thumb = p.join(base, 'thumbnails', '$name.jpg');
-  if (File(thumb).existsSync()) return thumb;
+  for (final ext in kThumbnailExtensions) {
+    final thumb = p.join(base, 'thumbnails', '$name.$ext');
+    if (File(thumb).existsSync()) return thumb;
+  }
   return resolved;
 }
 

@@ -5,12 +5,12 @@ import '../state/post_cleaner_state_provider.dart';
 import '../state/studio_cycle_state_provider.dart';
 import 'chat_status_card_shell.dart';
 
-/// Floating card shown at the top of the chat while the Studio tracker-cycle
+/// Floating card shown at the top of the chat while the Studio controller-cycle
 /// is running, and for a brief moment after it finishes (done/agentErrors/
 /// error).
 ///
 /// Unifies the three Studio phases into a single `n/3` progress indicator:
-///   1/3 — Trackers Gen (intermediate agents)
+///   1/3 — Controllers Gen (intermediate agents)
 ///   2/3 — Main agent (final generator streaming)
 ///   3/3 — Cleaning (POST-cleaner rewrite, only when Studio was active)
 ///
@@ -80,7 +80,7 @@ class _StudioStatusCardState extends ConsumerState<StudioStatusCard> {
     final bool showSpinner;
 
     if (state.phase == StudioCyclePhase.running) {
-      label = '1/$totalSteps - Trackers Gen';
+      label = '1/$totalSteps - Controllers Gen';
       icon = Icons.auto_awesome_outlined;
       accent = cs.primary;
       showSpinner = true;
@@ -124,7 +124,7 @@ class _StudioStatusCardState extends ConsumerState<StudioStatusCard> {
         showSpinner = true;
       } else {
         final names = state.failedAgentNames.join(', ');
-        label = 'Trackers failed: $names';
+        label = 'Controllers failed: $names';
         icon = Icons.warning_amber_outlined;
         accent = Colors.orange;
         showSpinner = false;

@@ -26,10 +26,14 @@ abstract class SyncInfoBlockStore {
 }
 
 abstract class SyncManifestProvider {
-  Future<SyncManifest> buildLocalManifest({SyncManifest? cloudManifest});
+  Future<SyncManifest> buildLocalManifest({
+    SyncManifest? cloudManifest,
+    bool applyAcceptedHashes = true,
+  });
   Future<SyncManifest> readLocalManifest();
   Future<void> writeLocalManifest(SyncManifest manifest);
   Future<void> clearLocalManifest();
   Future<void> clearDeleted();
   Future<String> getDeviceId();
+  Future<bool> isDeleted(String type, String id);
 }

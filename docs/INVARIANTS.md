@@ -50,7 +50,7 @@ Continuation uses the same delta merge. Error, rollback, and abort paths do not
 apply the generated delta.
 
 `currentSessionVars` lives only inside the isolate's local scope during
-`buildPrompt()` (`lib/core/llm/prompt_builder.dart:279`) — nothing is persisted
+`buildPrompt()` in `lib/core/llm/prompt_builder.dart`; nothing is persisted
 before the success branch, so there is no variable rollback write. Non-success
 paths reload or preserve the latest durable variables.
 
@@ -69,16 +69,77 @@ Guard: `AbortHandler.isCurrentGen(genId)` — exposed to the stream as
 → `StreamGenerationService.run()`. `AbortHandler.nextGenId()` increments `_activeGenId`
 on abort and on each new generation start.
 
+### INV-C8: The typing bubble lives exactly as long as a reply is on its way
+
+The "Generating…" bubble is not a message. It is a virtual one — a single
+constant id (`__streaming__`) that Flutter puts up, streams text into and takes
+away, while the page draws it. Nothing persists it, so the *only* record that
+it exists is `ChatWebViewSyncState.streamingSent` in the widget that put it up,
+and on mobile the page outlives that widget: `chatWebViewKeepAlive` makes it a
+singleton, so a bubble stays in its DOM across a chat being closed and
+reopened. Two halves follow, and neither is sufficient alone.
+
+**The presence of the bubble is level-triggered, not edge-triggered.** The
+rising and falling edges in `ChatWebViewSyncDispatcher.dispatch` are an
+optimisation, not the authority: an edge is consumed by the `!ready` early
+return during init, by a session switch, and by the widget being disposed
+mid-run. So `reconcileActiveGenerationBridge`
+(`chat_streaming_bridge_sync.dart`) re-derives the whole presentation from the
+current state — a run in flight gets its bubble appended or updated, an idle
+chat gets any bubble retired — and it runs after init, after a session switch,
+and after every message-list sync. Clearing the flags without retiring the node
+is what let a bubble outlive its run: the flags are the widget's, the node is
+the page's.
+
+**A bubble is carried across a re-render only while some run is streaming into
+it.** `setMessages` deliberately carries it (`_detachStreamingPlaceholder` →
+`_reattachStreamingPlaceholder`), because dropping it mid-run leaves every
+following delta updating a node that is gone. The page cannot tell a live
+bubble from a leftover, so Flutter decides: `ChatWebViewInitializer.run()` calls
+`bridge.retireTypingPlaceholder()` before its `setMessages` whenever
+`isGenerating` and `isSendPending` are both false. That call is itself
+level-triggered on the page's own belief (`_placeholderActive`), which is what
+keeps it from cutting short the exit animation `removeMessage` started.
+
+Without both halves, leaving a chat mid-run and returning after the reply
+landed reopened it with the finished reply *and* a typing bubble standing under
+itself — the "duplicate message" that did not go away on a reload, because
+every re-render of that session carried it forward again.
+
+Covered by `specs/placeholder_lifecycle.spec.js` (page side),
+`chat_webview_sync_dispatcher_test.dart` (the reconcile) and
+`chat_webview_initializer_placeholder_test.dart` (the call order at init).
+
 ---
 
 ## 2. Image Generation Invariants
 
 ### INV-IG1: Image generation runs after text generation completes
 
-`ChatGenerationService.processImageTags()` is called only after the SSE stream completes
-and the assistant message is saved, via `GenerationPipeline._runPostTextSide()`.
-It never runs concurrently with text generation. **Exception:** `continueMessage()`
-bypasses `GenerationPipeline` — see INV-CM2.
+`ImageTagStage` is scheduled by `PostGenCoordinator` only after the SSE stream
+completes and the assistant message commit succeeds. With Studio disabled it
+runs against that committed result. With Studio enabled it awaits
+`CleanerStage`, reloads the canonical session from `ChatRepo`, and only then
+processes image tags, so images bind to the selected final/cleaned/partial
+swipe. It never runs concurrently with text generation. `continueMessage()`
+uses the same pipeline and post-generation coordinator, bound to the merged
+message — see INV-CM2. An errored stream returns before post-gen, and an abort
+bumps `AbortHandler`'s gen id so every stage bails, so neither reaches the
+image stage at all.
+
+The WebView says the same thing. `ChatState.isGeneratingImage` is raised by
+`ImageGenProcessor` before it dispatches the first block of a message and
+dropped after the last — on the pipeline path and on every manual retry — and
+it reaches the page through `bridge.setImageGenerating()`. A pending block is
+rendered *queued* whenever that flag is down: no elapsed clock (nothing is
+elapsing), no Stop button (there is no `_imgGenCancelToken` to cancel yet), and
+a label that says so. That covers the whole reply stream and the post-gen work
+before the image stage, which with Studio on runs the cleaner first and can
+take seconds. The flip carries no re-render of its own — the reply's last chunk
+is already painted — so `refreshImgGenPlaceholderState()` restamps the blocks
+on screen, and restamps `data-start` with them: the clock was stamped when the
+block was *rendered*, so without that a block that waited out a long reply
+would jump straight to "48.2s" the moment it went live.
 
 ### INV-IG2: Image generation has independent abort infrastructure
 
@@ -90,18 +151,222 @@ state (separate from `isGenerating`).
 Both `abortGeneration()` and `cancelImageGeneration()` clear the flag.
 Cancelled image tags are replaced with `[IMG:ERROR:...]`.
 
+### INV-IG4: One image at a time unless the user opts out
+
+`ImageGenService.processMessageImages()` walks the image tags of a message in
+document order and awaits each generation from start to end before starting the
+next. `ImageGenSettings.concurrentGeneration` (off by default) is the only way
+to fire them together; even then the results are written back in tag order.
+
+### INV-IG5: A pending image tag is only ever replaced by its own outcome
+
+Every rewrite goes through `ImageTagMarkup.scanPendingTags()` and touches the
+span of a single tag. An image that fails, is cancelled, or is refused becomes
+`[IMG:ERROR:...]` carrying its original instruction — a block is never dropped
+from the message, so the UI can always offer a regenerate action for it.
+
+### INV-IG6: Image actions address one block, by document position
+
+`ImageTagMarkup.scanImageBlocks()` numbers every image block of a message —
+pending, finished and failed alike — in document order. The chat formatter
+stamps that same position on each rendered block as `data-img-index`, the
+webview sends it back with `onImgRetry` / `onImgFind` / `onImgRegen` /
+`onImgOptions`, and `ImageRecoveryService` resolves it through
+`resetImageBlockAt()` / `replaceImageBlockWithResult()`. A reroll therefore
+regenerates the tapped image only and leaves the other images of the message
+untouched. A missing index (markdown images) disables the generation actions
+rather than falling back to the whole message.
+
+### INV-IG8: A block keeps every image it generates
+
+`ImageBlockPayload` (image_tag_markup.dart) is the single codec for a block's
+images: they are listed oldest first and the visible one is marked, so a
+regeneration appends rather than overwrites. A pending block carries them
+through behind `@` (`[IMG:GEN:@/a.png;;/b.png|<instruction>]`) and an error
+card behind its `variants` string. Only the visible image counts as context for
+the next generation (`extractImageResultPaths`), and `rewriteResultPaths`
+resolves every variant so the switcher can page through them without a round
+trip to Dart.
+
+What a block keeps is images it actually has: a regeneration drops the paths
+whose file is gone (`ImageRecoveryService.dropMissingImages`) before it carries
+the rest forward, so a switcher never pages onto a picture that cannot load.
+
+### INV-IG9: An image block is stored as an `<img>` element with a relative src
+
+A finished block is written by `ImageTagMarkup.encodeResultElement()` only:
+
+```html
+<img data-iig-instruction='{"prompt":"…"}'
+     data-iig-variants='generated/a.jpg;;generated/b.jpg'
+     data-iig-index='1' src="generated/b.jpg">
+```
+
+* `src` is the visible image and is always **relative to the Glaze data root**
+  (`_saveGeneratedImage`, `findImageOnDisk`, `restoreChatWebViewLocalFilePath`
+  all store it that way, `resolveGlazeFilePath` joins it back onto the current
+  root). An absolute path stops resolving when that root moves — a new iOS
+  container UUID, a database copied between desktop build channels — and a
+  loopback `/__glaze_file__` URL, whose port only exists for one app launch,
+  breaks the picture permanently. Neither may reach storage: every text the
+  WebView hands back (`onEditSave`, `onMessageContext`, `onSelectionAction`)
+  goes through `ChatBridgeController.restoreImgResults()` first, and
+  `chatWebViewResolveLocalFileUrl` unwraps a URL that was stored by an older
+  build instead of requiring a migration.
+* the block's other images ride along in `data-iig-variants` so `src` stays one
+  plain path, readable by anything that renders HTML.
+* `[IMG:RESULT:…]` is still **read** everywhere a block is read — older
+  messages keep rendering, resetting and regenerating unchanged — but it is
+  never written any more. The same `<img data-iig-instruction…>` element with
+  no image in its `src` is a *pending* block, which is what keeps
+  `scanPendingTags()` and `scanResultElements()` from ever claiming the same
+  element (`ImgGenPatterns.isPendingIigElement`).
+* the WebView formatter parses the element with `parseImageResultElement()`,
+  the mirror of the Dart writer, and a pending one with
+  `parseImagePendingElement()`. Both spellings of a pending element
+  (`<img data-iig-instruction… src="[IMG:GEN]">` and the bare
+  `<img src="[IMG:GEN:…]">`) are consumed **whole** and rendered as the loading
+  placeholder. Leaving the tag in the markup would put an `<img>` with no
+  loadable source into the message, and the reader would watch the browser's
+  broken-image icon for the length of the generation.
+
+### INV-IG10: The loading placeholder is sealed off from message CSS
+
+A message body is authored content — cards ship their own `<style>`, and those
+rules land in the same shadow root as everything the formatter renders. The
+`[IMG:GEN…]` placeholder is app chrome, so
+`renderer/imggen_placeholder.js` gives each `.imggen-loading` a shadow root of
+its own and moves its content inside, out of reach of message rules that a
+specificity war could never win (a card's `!important` beats any selector in
+`SHADOW_STYLE`). Two leaks are closed by hand: the host still lives in the
+message tree, so its geometry is pinned as inline `!important`; and inherited
+properties cross a shadow boundary, so the wrapper inside starts from
+`all: initial`. The nested root is **open** — `InteractionDispatch` finds the
+stop button through `composedPath()` and `ImgGenTimer` descends into it for the
+elapsed-time ticker, both of which a closed root would break.
+
+### INV-IG11: A tag inside a reasoning block never generates
+
+A model plans its images out loud — "then I'll put `[IMG:GEN:…]` here" — and a
+tag it writes inside `<think>…</think>` is a note to itself, not a request.
+Generating from it produces a picture nobody asked for, in the middle of the
+model's own scratchpad.
+
+`ImgGenPatterns.reasoningSpans()` marks those spans and
+`ImageTagMarkup.scanPendingTags()` walks past them. That scan is the single
+gate every generation goes through — `hasImageGenTags`, `scanImageBlocks`, the
+replace/reset helpers and `ImageGenProcessor` all read a message through it —
+so a reasoning tag is never generated, never rewritten into an error or
+"disabled" card, and never counted in the block numbering.
+
+The WebView agrees on both halves, which is what keeps `data-img-index`
+addressing the same block on either side: `_processText` carries an
+`inReasoning` flag into the recursive pass over a think block, and the three
+pending spellings there are restored as the literal text the model wrote (step
+19b) instead of becoming an image block. Only a **closed** block counts as
+reasoning, on both sides — an unclosed `<think>` is not folded away by the
+formatter either, so a tag after one still generates.
+
+Finished `<img data-iig-…>` blocks are deliberately *not* filtered: they are
+pictures that already exist, and `scanResultElements()` is what keeps their
+paths resolving and strips them from a sync payload.
+
+### INV-IG12: A model never reads or writes a finished image block
+
+Glaze is the only writer of a finished block: `encodeResultElement()` runs the
+moment the image file has been saved, so the `src` and `data-iig-variants` of a
+stored block always name files that exist on *this* device.
+
+Neither is any use to a model, and handing them over is actively harmful. The
+history used to carry the stored element verbatim, and a model that reads one
+writes one back: a block pointing at files nobody generated, which renders as
+the browser's broken-image icon under a variant switcher counting pictures that
+never existed — one more of them with every turn, until the count reads like
+the length of the chat.
+
+`ImageTagMarkup.reduceBlocksToInstructions()` is the single gate. Whatever
+state a block is in, it comes out as `[IMG:GEN:<instruction>]` — the tag that
+asked for the picture, and the only spelling a model may see or write:
+
+* chat text on its way **into** a prompt goes through it — `HistoryAssembler`
+  (main model and Studio), `ExtensionContextAssembler` and the
+  `InfoBlockService` prompt builders;
+* a reply on its way **into** storage goes through it in
+  `SavedMessageWriter.writeAssistant()`, so a finished block a model wrote by
+  hand lands as a pending one and the post-gen image stage generates a real
+  picture for it (INV-IG1);
+* the cloud-sync payload uses the same reduction
+  (`SyncSerialization.normalizeImageGenContent`), for the same reason — a path
+  into one device's data root means nothing on another.
+
+A tag inside a reasoning block is still left alone (INV-IG11): the reduction
+reads the message through `scanImageBlocks()` like everything else.
+
+### INV-IG13: An image tag in a user message is never a block
+
+Only an assistant message is ever generated from. A user message that carries
+`[IMG:GEN…]` — a person spelling out an example, or a note about the tag — is
+the human's own text, and the formatter renders it as exactly that.
+
+Left as a block it becomes a placeholder that can never resolve, yet
+`bridge.isGeneratingImage` is one flag for the whole chat: while any other
+message's image generation is live, that phantom flips to "Generating image…"
+with a stop button, and stopping it cancels the unrelated generation the user
+was waiting on. `Formatter.format` already receives `isUser`, so
+`protectRegions` forwards it to `extractImageBlocks`, where every image spelling
+is kept as literal text — the same treatment a tag inside reasoning gets
+(INV-IG11).
+
+### INV-IG7: Regenerating an image never adds a message swipe
+
+`ImageRecoveryService` resets the retried blocks through
+`ImageGenProcessor.resetImageContentInPlace()`, which rewrites the swipe the
+user is looking at (content, `swipes[swipeId]`, its agent swipe and metadata)
+and clears the error flag left by the failed block. Rerolling a picture must
+not grow the reply's swipe count or duplicate the text around the image — only
+a text generation creates swipes.
+
 ---
 
 ## 3. Summary Generation Invariants
 
 ### INV-S1: Summary is always non-streaming
 
-`SummaryService.generateSummary()` uses `_dio.post()` (plain HTTP POST). No SSE.
+`SummaryService.generateSummary()` goes through `AuxLlmClient.callOnce()`, which
+calls the protocol's `ChatTransport` with `stream: false`. No SSE. The protocol
+comes from `ApiConfig.protocol` — the summary must never hardcode one provider's
+wire format.
+
+The connection is resolved by `SummaryGenerationService` from the Memory slot
+(`PipelineSettings.memoryBookApi`), the same slot memory drafts run on, falling
+back to the active chat connection when the slot names none. Its model override
+and output cap are folded into the `ApiConfig` handed down; its temperature is
+applied only when it is set, so summarizing otherwise stays at
+`kSummaryDefaultTemperature`.
 
 ### INV-S2: Summary does not create generation registry entries
 
 Summary generation does not touch `ChatState.isGenerating` or any `charId`-keyed
-generation guard. It has no `CancelToken` — once started, it cannot be aborted.
+generation guard. Neither the manual run (`summary_tab.dart`) nor the automatic
+one (`AutoSummaryStage`) passes a `CancelToken`, so once started it cannot be
+aborted.
+
+### INV-S4: Auto-summary only fires on a bot turn
+
+`AutoSummaryStage` runs from `PostGenCoordinator` (post-assistant-turn only) and
+additionally requires `session.messages.last` to be a non-error assistant /
+character message. A user message must never trigger it.
+
+### INV-S5: A summary run is given the summary it replaces ✅ ENFORCED
+
+`SummaryService.generateSummary` reads the stored summary before it writes the
+new one and passes it to `buildSummaryPrompt`, which places it at
+`{{previous_summary}}` or, when the template does not, under
+`summaryPreviousHeader` between the instructions and the transcript. A run must
+never re-derive the chat from the transcript alone — that silently drops
+whatever the previous summary had distilled out of messages the model now
+weighs differently. The first run of a session adds nothing. Covered by
+`test/summary_service_test.dart`.
 
 ### INV-S3: Summary does not mutate chat messages
 
@@ -121,31 +386,51 @@ It never reads or writes `ChatState.isGenerating`.
 
 `MemoryDraftGenerator.generate()` calls the API with `stream: false` unconditionally.
 
-### INV-M3: Memory draft cannot start while chat generation is active ✅ ENFORCED (PR-B C12)
+### INV-M3: Chat and memory draft generation may overlap ✅ ENFORCED
 
-`MemoryBookController.generateDraft()` rejects a start request
-when `chatProvider(_charId).value?.isGenerating == true` for the
-target character. The user gets a "Chat generation is active"
-error message via the existing `onError` callback.
+The two pipelines own separate transports, callbacks, response accumulators,
+cancel tokens, and persistence targets. A memory result may mutate only its
+target `MemoryDraft`; a chat result may mutate only its owned chat generation
+and session state. Cancelling either operation must not cancel or publish into
+the other.
 
-The check is read-only on the chat notifier — it does not wait for
-the generation to finish; the user must explicitly abort the chat
-generation or wait for it to complete.
+This contract is exercised in `test/memory_chat_concurrency_test.dart` with
+distinct marker responses and reversed completion order.
 
-### INV-M4: Chat generation cannot start while memory draft is active ✅ ENFORCED (PR-B C12)
+### INV-M3a: A memory draft generation outlives the sheet that started it ✅ ENFORCED
 
-`ChatNotifier.sendMessage()`, `ChatNotifier.regenerateLastAssistant()`,
-and `ChatNotifier.continueMessage()` reject a start request when a
-memory draft is currently being generated for the same `sessionId`.
+The request, its cancel token, its session lease and its persistence belong to
+`memoryDraftJobsProvider`, not to the memory sheet. Closing the sheet mid-request
+must not cancel it, must not lose its result, and must not leak the lease; the
+result is written with `MemoryBookRepo.mutateDraft`, and reopening the sheet
+shows the same job with the same start time. Nothing in this path may reach for
+a `WidgetRef` after the await — a ref whose widget is gone throws instead of
+persisting, which is how finished drafts used to be discarded.
 
-Both invariants share a single new state container:
+Whoever writes a memory book from outside the sheet bumps
+`memoryBookRevisionProvider` afterwards, so an open sheet re-reads rather than
+saving its own stale copy back over the write. Covered by
+`test/memory_draft_jobs_test.dart`.
+
+### INV-M3b: Memory drafting runs on the shared auxiliary client ✅ ENFORCED
+
+`MemoryDraftGenerator` calls `AuxLlmClient.callOnce`, never a `ChatTransport`
+directly. That is what gives drafting the retry policy every other auxiliary
+call has — three attempts with backoff on 5xx (504 included), timeouts and
+transient connection errors. A direct transport call has no retry, so one
+gateway hiccup failed the draft outright. Covered by
+`test/memory_draft_transport_test.dart`.
+
+### INV-M4: Memory draft ownership remains exclusive ✅ ENFORCED
+
+Starting the same draft twice remains prohibited. Memory workflows use:
 `lib/features/memory/state/memory_active_drafts_provider.dart`
-(`StateNotifierProvider<MemoryActiveDraftsNotifier, Set<String>>`).
-Drafts are added to the set when generation starts and removed when
-it ends (success, error, or cancel).
+to coordinate manual and automatic memory work for a session. The lease is not
+a chat-generation mutex and chat entry points must not reject because it is
+active.
 
 Shared state contract is pinned by
-`test/characterization/memory_draft_mutex_test.dart` (7 tests).
+`test/characterization/memory_draft_mutex_test.dart`.
 
 ### INV-M5: Memory draft approval preserves source range ✅ ENFORCED
 
@@ -175,42 +460,41 @@ path writes MemoryBook entries.
 
 ## 4b. Studio Tracker Invariants
 
-These cover the tracker-around-generator pipeline introduced in Phase 5
-(`docs/PLAN_AGENTIC_STUDIO.md`). See also `docs/rules/generation.md` § Studio
-Mode for the rules every contributor touching `MemoryStudioService` /
-`AgentRunner` / `TrackerBatcher` must follow.
+These cover the tracker-around-generator pipeline used by Studio. See also
+`docs/rules/generation.md` for the rules every contributor touching `MemoryStudioService`,
+`ControllerPhaseRunner`, `StudioAgentExecutor`, or `ControllerBatcher` must
+follow.
 
 ### INV-ST1: Trackers receive ≤ contextSize last messages, not full history ✅ ENFORCED (Phase 3)
 
-`MemoryStudioService._limitTrackerHistory(history, contextSize)` slices
-`history.slice(-contextSize)` before building tracker messages. Each message is
-run through `_truncateAgentText` (head 40% + `[Trimmed ...]` marker + tail 60%,
-rune-counted) and `_stripHtmlTags` (conservative tag regex preserving `==...==`
-markers and code fences). `StudioAgent.contextSize` default 5, hard-cap 200.
+`StudioHistoryLimiter.limitTrackerHistory` owns the tracker history cap and
+slices the trailing `contextSize` messages before tracker prompt construction.
+It also owns per-message text truncation (head 40% + `[Trimmed ...]` marker +
+tail 60%, rune-counted) and conservative HTML stripping that preserves
+`==...==` markers and code fences. The tracker context hard-cap is 200.
 
 The final generator does NOT use this trim — it uses
-`StudioConfig.maxFinalHistoryMessages` (default 30). MemoryBook injection
+`StudioPreset.maxFinalHistoryMessages` (default 50). MemoryBook injection
 (`dynamic_context` block: memory, summary, worldInfo) is NOT trimmed — only
 the `chat_history` block is. Users without rolling summary keep long-term memory
 via MemoryBook (static `dynamic_context` injection), not via chat history.
 
 ### INV-ST2: maxFinalHistoryMessages applies to the generator ✅ ENFORCED
 
-`_limitFinalHistory` trims `chat_history` to the last
-`StudioConfig.maxFinalHistoryMessages` (default 30) messages for the final
-generator only (`_runFinalGenerator` → `_buildAgentMessages(isFinalResponse:
-true)`). An additional token budget of 60K (estimated via o200k_base) is
-enforced: messages are accumulated from the end of history until either the
-message count or the token budget is reached, whichever comes first. Trackers are governed by INV-ST1 instead.
+`StudioHistoryLimiter` keeps a persisted, stable `chat_history` suffix for the
+final generator. After a completed assistant turn crosses either
+`StudioPreset.maxFinalHistoryMessages` (default 50) or the 70K estimated token
+high-water mark, it advances the boundary by roughly half the current window
+on a complete user-assistant chunk boundary. A trailing user message never
+rotates the window. Trackers are governed by INV-ST1 instead.
 
-### INV-ST3: Same-(provider, model) trackers batch into one LLM request ✅ ENFORCED (Phase 5)
+### INV-ST3: Same-(provider, model, phase) trackers batch into one LLM request ✅ ENFORCED (Phase 5)
 
-`TrackerBatcher.groupAgents` keys batch groups by `"${resolved.protocol}|${resolved.model}"`.
-Agents with `StudioAgent.runIndividually = true` (or whose name matches
-`expression` / `illustrator` / `lorebook`, case-insensitive) are pulled out of
-the batch and run as individual requests. There is no `postProcessingDataKey`
-grouping (yet) — all trackers are pre-generation; the POST-cleaner is a separate
-post-gen rewrite pass, not a tracker.
+`ControllerBatcher.groupAgents` keys batch groups by resolved protocol, model,
+and agent phase. Agents selected by `shouldRunIndividually` are pulled out and
+run as individual requests. Pre-generation and post-processing agents must not
+share a batch because their runtime context differs; the POST-cleaner remains a
+separate post-generation rewrite pass.
 
 ### INV-ST4: Nested agentSwipes (cleaned / final) ✅ ENFORCED
 
@@ -265,17 +549,14 @@ never leaks across runs.
 
 ### INV-ST5: Tracker failure aborts Studio after two retries ✅ ENFORCED
 
-`AgentRunner.runAgent` wraps any tracker exception (timeout, transport, idle,
-invalid output) in `AgentRunFailedException`. Chat-time Studio tracker calls get
-the initial attempt plus two retries. If the tracker still fails, or if a batch
-response is returned but one or more `<result>` blocks cannot be parsed,
-`MemoryStudioService.runTrackerCycle` returns `StudioPipelineResult(status:
-'error')` before the final generator runs.
-
-Batch failures retry the same batch twice. There is no individual fallback from
-a failed batch, and the final generator does not run with partial tracker
-output. The final generator rethrows normally — its failure also aborts the
-turn.
+`ControllerPhaseRunner` owns the tracker phase and the hard-failure decision.
+`StudioBatchCoordinator` owns whole-batch retries, while
+`StudioAgentExecutor` owns individual tracker retries; each path gets the
+initial attempt plus two retries. If a tracker still fails, or a batch response
+has a missing/unparseable `<result>` block, `ControllerPhaseRunner` returns an
+error before the final generator runs. There is no individual fallback from an
+exhausted batch and no final generation with partial tracker output. The final
+generator's own failure also aborts the turn.
 
 ### INV-ST6: Batch budget and concurrency caps ✅ ENFORCED (Phase 5.7.2)
 
@@ -292,13 +573,13 @@ risk).
 
 ### INV-ST7: Studio cache-friendly prompt ordering ✅ ENFORCED (Phase 6.1)
 
-`TrackerBatcher.buildBatchSystemPrompt` orders the batch system prompt as
+`ControllerBatcher.buildBatchSystemPrompt` orders the batch system prompt as
 `<role>` (shared role text) → `<lore>` (shared static + dynamic + trimmed
 history) → `<agents>` (per-agent `<agent_task>` XML) → required output format.
 Shared stable content sits at the prefix; per-agent volatile content sits at
-the tail. `MemoryStudioService._buildSharedBatchMessages` orders shared
-messages as `static_context` → `dynamic_context` → `chat_history` for the same
-reason. This gives the provider's prompt cache (Anthropic ephemeral /
+the tail. `StudioMessageBuilder.buildSharedBatchMessages` orders shared messages
+as `static_context` → `dynamic_context` → `chat_history` for the same reason.
+This gives the provider's prompt cache (Anthropic ephemeral /
 OpenRouter `cache_control`) a long stable prefix to hit across turns.
 `cacheControlTtl` / `cacheBreakpointMode` are wired through
 `ResolvedAgentConfig.fromApiConfig` → `ChatTransportRequest` → transport.
@@ -311,6 +592,12 @@ POST-cleaner, and Ledger. Downstream stages must prefer the supplied snapshot
 and must not re-read mutable Studio preset, API, or pipeline settings during
 that turn. The API-config list is immutable. A manual action that starts a
 separate operation may resolve a fresh snapshot.
+
+`StudioLedgerService` remains the compatibility facade, but it does not own
+durable mutation details. `LedgerTurnCommitter` exclusively owns normal-turn
+Ledger/fact/snapshot writes, and `LedgerReconciliationCommitter` exclusively
+owns reconciliation and replacement writes. Their transaction and stale-fence
+ordering must not be bypassed by runners, stages, or callers.
 
 ### INV-ST9: Cleaner execution has lease authority ✅ ENFORCED
 
@@ -368,9 +655,10 @@ when newer rows are deleted. Applying that selected snapshot to the mutable
 `tracker_rows` materialization is explicit and transactional.
 
 Code refs: `lib/core/db/repositories/tracker_snapshot_repo.dart`,
-`lib/core/llm/studio_ledger_service.dart`,
-`lib/features/chat/chat_message_service.dart:commitDeleteMessages` →
-`deleteForMessages`. The UI publishes the shortened message list before this
+`lib/core/llm/ledger/ledger_turn_committer.dart`,
+`lib/core/llm/ledger/ledger_reconciliation_committer.dart`, and
+`ChatMessageService.commitDeleteMessages` → `deleteForMessages`. The UI
+publishes the shortened message list before this
 commit runs (`ChatMessageOpsController.deleteMessages` is optimistic), so the
 snapshot rollback is *not* observable state — it lands with the transaction,
 and a failed commit restores the pre-delete session in the UI.
@@ -386,8 +674,9 @@ full-character cleanup) may drop it.
 This guarantees legacy sessions (migrated from `tracker_rows` in v51)
 always have a baseline snapshot until the session itself is deleted.
 
-Code ref: `lib/core/db/repositories/tracker_snapshot_repo.dart:deleteForMessage`
-— the `where` clause filters by `messageId.equals(messageId)` and the
+Code ref: `TrackerSnapshotRepo.deleteForMessage` in
+`lib/core/db/repositories/tracker_snapshot_repo.dart`: its `where` clause
+filters by `messageId.equals(messageId)` and the
 sentinel anchor has `messageId = ''`, so it is never matched.
 
 ### INV-TS3: Read path is snapshot-first with `tracker_rows` fallback ✅ ENFORCED (Phase 3)
@@ -422,9 +711,9 @@ state; the original `'final'` snapshot is preserved. Two paths:
 - **Legacy fallback (`post_cleaner_service.applyCleanedText`):** used when
   pre-create failed earlier; clones after the append inside `applyCleanedText`.
 
-Code ref: `lib/features/chat/services/stages/cleaner_stage.dart` (pre-create
-snapshot clone) and `lib/core/llm/post_cleaner_service.dart:applyCleanedText`
-(fallback) — both call `snapshotRepo.upsertTrackers(...)` with the parent's
+Code ref: `CleanerStage` (pre-create snapshot clone) and
+`PostCleanerService.applyCleanedText` (fallback); both call
+`snapshotRepo.upsertTrackers(...)` with the parent's
 `messageId`/`swipeId` and the new `agentSwipeId`.
 
 ### INV-TS6: Branch copies snapshots for sliced messages ✅ ENFORCED (Phase 5)
@@ -436,13 +725,13 @@ point are not copied (the branch starts fresh from the slice). The PK
 includes `sessionId` as a prefix, so branches don't alias even though
 messages are not re-id'd on branch.
 
-Code ref: `lib/core/db/repositories/tracker_snapshot_repo.dart:copyForSessionBranch`,
-`lib/features/chat/chat_session_service.dart:branchSession`.
+Code refs: `TrackerSnapshotRepo.copyForSessionBranch` and
+`ChatSessionService.branchSession`.
 
 ### INV-TS7: Snapshots are covered by backup + cloud sync ✅ ENFORCED (Phase 8, 9)
 
 `tracker_snapshots` entered the backup format at v5 and remains in the current
-backup whitelist (`backup_exporter.dart`, backup schema v10). It has full cloud
+backup whitelist (`backup_exporter.dart`, backup schema v12). It has full cloud
 sync coverage via
 `SyncTrackerSnapshotStore` + `TrackerSnapshotSyncStore` adapter (Phase 9).
 Session deletes record `SyncDeletionTracker.record('tracker_snapshot',
@@ -464,19 +753,119 @@ If a block is disabled, that field is omitted. `PromptBuilder` is the sole enfor
 
 ### INV-PS1b: Image attachments are sent to the model unless explicitly hidden
 
-`ChatMessage.imageHidden` defaults to `false`, so a picture attached to a
-message travels with it into the request (`PromptMessage.imagePath` →
-`toApiMap()` → the protocol converters). The eye button on the attachment
+`ChatMessage.imageHidden` defaults to `false`, so the pictures attached to a
+message travel with it into the request (`PromptMessage.imagePaths` →
+`toApiMap()`, one `image_url` content part each, in order → the protocol
+converters). The eye button on the attachment
 (`toggle-image-hidden` → `onToggleImageHidden` →
 `ChatMessageService.toggleImageHidden`) flips the flag; `HistoryAssembler.assemble`
-and `buildFallbackPrompt` then drop `imagePath` from the prompt message. The
-bubble keeps rendering the image either way — hiding affects the request only.
+and `buildFallbackPrompt` then drop every attachment from the prompt message.
+The bubble keeps rendering them either way — hiding affects the request only.
+
+### INV-PS1c: A message carries up to `maxMessageAttachments` images
+
+The composer accepts at most `maxMessageAttachments` (4, in
+`lib/core/models/chat_message.dart`) images per message. Nothing caps their
+size. They arrive by three routes, and the composer offers no button of its
+own for any of them, because the system already offers one wherever a paste is
+possible:
+
+* the file picker (the attach button);
+* a paste — Ctrl/Cmd+V, or the field's own selection toolbar, which
+  `_buildContextMenu` rebuilds so **Paste** reaches `ClipboardImages` and is
+  offered even when the clipboard holds no text;
+* content committed by the on-screen keyboard — Gboard's clipboard chip and
+  its sticker/GIF pickers — which never touches the clipboard at all and
+  arrives through `TextField.contentInsertionConfiguration` instead.
+
+Storage keeps the attachments split — `ChatMessage.imagePath` is the first and
+`extraImagePaths` the rest — so a session written before multi-attach still
+renders; `ChatMessage.attachments` is the single list every reader uses, and
+`splitAttachments` is the only writer of the pair. One `imageHidden` flag
+covers the whole set (INV-PS1b), and the WebView renders it as one
+`.msg-image-attachment` block: a free-size picture for one, a tile grid for
+two to four (`renderer/image_embed.js` + the `.count-N` rules in
+`styles.css`). Raising the limit needs a matching grid case in both.
 
 ### INV-PS2: Vector scan runs before keyword scan; keyword deduplicates vector
 
 1. Vector lorebook scan runs async in `PromptPayloadBuilder.buildFromSession()` — results packed into `PromptPayload.vectorEntries`.
 2. Keyword lorebook scan runs synchronously in `PromptBuilder` (inside the Dart isolate).
 3. `mergeKeywordVector()` deduplicates: vector entries whose IDs appear in keyword results are dropped. Keyword results always win.
+
+### INV-PS2b: Vector / embedding / index UI hangs off the API toggle
+
+`vectorSearchAvailableProvider` (`lib/core/state/lorebook_embedding_provider.dart`)
+is the single source of truth for whether the app shows anything about vectors,
+embeddings or indexes. It mirrors the condition `resolveEmbeddingConfig` uses —
+a selected **embedding preset** (`activeEmbeddingConfigProvider`, see INV-PS2c)
+with `embeddingEnabled` on (the **Embeddings → Vector search** switch of the
+API screen). With no embedding preset at all it is `false`.
+
+While it is `false`, these stay hidden rather than disabled: the lorebook
+search-type picker and vector params (list + global + per-book settings), the
+embedding-settings entry point, the editor's index / reindex / drop-indexes
+toolbar, the reindex banner, the per-entry vector section and its `vec` / `idx`
+badges, and the memory sheet's retrieval-mode row, reindex / drop-indexes
+actions and index badges. Stored values are never rewritten by the gate — the
+previous choices come back when the toggle is switched on again.
+
+### INV-PS2c: Embedding presets are a list of their own
+
+The API screen's **LLM** and **Embeddings** tabs each have their own presets,
+their own selection and their own pill. Both live in the `api_configs` table
+and are told apart by `ApiConfig.mode`: `apiListProvider` serves everything
+that is **not** `'embedding'` (the LLM tab, Studio slots, every model picker),
+`embeddingPresetListProvider` serves everything that is. A row saved through
+`EmbeddingPresetListNotifier.put` is forced into that mode, so the two lists
+can never share a row.
+
+The chat side follows `activeApiPresetIdProvider` (SharedPreferences
+`activeApiConfigId`), the embedding side `activeEmbeddingPresetIdProvider`
+(`activeEmbeddingConfigId`), and switching one never moves the other — a vector
+index is tied to the model that produced it, so it must not follow the chat
+connection around.
+
+`EmbeddingPresetListNotifier.build` seeds the list once (guarded by
+`embeddingPresetsSeeded`) from the embedding settings that used to live on a
+chat preset, pinning the new preset to the chat preset it came from so the
+borrow below resolves exactly as it did before. Nothing is seeded when nothing
+was configured: the tab shows its own empty state instead of a blank preset. A
+JS backup import clears both keys so the imported settings are carried over the
+same way.
+
+The one link left between the two sides is the embedding preset's **Use LLM
+API** toggle (`embeddingUseSame`, and the same fallback when its dedicated
+endpoint is blank): the endpoint and key are borrowed from the LLM preset named
+by `ApiConfig.embeddingLlmPresetId` — the *Endpoint from* row under the toggle
+— falling back to the active LLM preset when it names none, or names one that
+is gone (`embeddingLlmSourceProvider`). The model, chunk size and rate limit
+always come from the embedding preset. With the toggle off,
+`embeddingConfigProvider` does not watch any chat state at all.
+
+Saving follows the same split: `ApiConfigDraft.applyLlmTo` writes the
+connection / sampling / reasoning half to the chat preset, `applyEmbeddingTo`
+the embedding half (plus its own name) to the embedding preset, and either half
+saves on its own when the other tab has no preset.
+
+### INV-PS2d: One definition of what a lorebook entry embeds, and of which pool it is in
+
+`lorebook_embedding_text.dart` is the only place that answers either question.
+`lorebookEmbeddingText` resolves the book's `embeddingTarget` to the text that
+represents an entry — `content` (the default, and SillyTavern's only
+behaviour), `comment`, `keys` or `both`, falling back to the body when the
+chosen field is empty on that entry — and `lorebookVectorPoolFor` sorts the
+entry into the main pool (its own `vectorSearch` flag, or every entry when the
+book sets `vectorizeAllEntries`), the keyless fallback pool, or neither.
+
+`LorebookEmbeddingService`, `SessionLorebookEmbeddingWorker`,
+`LorebookVectorSearch`, `VectorRebuildService` and the lorebook editor all go
+through those two functions. They cannot each carry their own copy: the indexer
+stores a hash of the embedded text and the search recomputes it to decide
+whether the stored vector still describes the entry, so any disagreement drops
+the entry out of every vector pass with no error anywhere to show for it — and
+an entry the search expects a vector for but the indexer never embedded is the
+same silent miss.
 
 ### INV-PS3: History cutoff is oldest-first
 
@@ -620,6 +1009,21 @@ character/persona payloads.
 `presetNetTokens` equals `sourceTokens['preset']` (no further
 subtraction — external macros are already excluded in accounting).
 
+**Totals count what is sent.** The accounting split only decides which
+row a token is shown on. Each preset block reaches `ContextCalculator`
+as a `StaticBlock` carrying both: `content` (the expanded text, minus a
+deferred `{{memory}}` placeholder, which `memoryTokens` covers) goes into
+`staticTotal`, `totalTokens` and the history budget; `presetContent`
+(`contentForAccounting`) goes to the preset row, and the remainder of a
+dedicated block (`char_card` → `description`, `user_persona` → `persona`,
+…) to that block's own row. A setvar-only block and an
+`appendToLastMessage` block add nothing to the total — the first sends
+nothing, the second travels inside the last user message the history
+already counts. With external injections left out of the total, the
+character card, persona and every `{{char}}` / `{{user}}` were missing
+from the budget, and the history was allowed to overflow the window by
+exactly that much.
+
 ### INV-PS7: Macro resolution order is fixed
 
 Within a single `MacroEngine.replaceMacros()` call, macros resolve in this order:
@@ -653,6 +1057,68 @@ Rules (enforced in `lib/core/llm/prompt_builder.dart:_assembleMessages` via `app
 4. If the history has no user-role messages (empty chat / first message is assistant or system), the appended blocks are **silently dropped**.
 5. The block is still subject to the standard `enabled` and `isStashed` gates — disabled or stashed blocks are ignored.
 6. The append happens in `_assembleMessages` **after** `HistoryAssembler.assemble(history)` and **before** `interleaveDepthWithHistory`, so depth blocks are still positioned by history depth and regex pipeline sees a single merged user message.
+
+### INV-PS10: Empty block emission is explicit
+
+After macro expansion, content that is empty or whitespace-only is not sent as
+an API message by default. `PresetBlock.sendEmptyBlock = true` is the explicit
+per-block opt-in for emitting that blank message.
+
+Enforced at four points:
+
+1. `resolveBlockContent()` checks trimmed content before and after macros (`lib/core/llm/prompt_block_resolver.dart`). Variable mutations still run even when their block is not emitted.
+2. `_assembleMessages` carries the block opt-in into the built message (`lib/core/llm/prompt_builder.dart`).
+3. The final message filter in `buildPrompt`, same file.
+4. `buildApiMessages()` retains whitespace only when `sendEmptyBlock` is true (images remain independently sufficient), mirrored by `buildPreviewMessages()`.
+
+Consequences:
+
+- Non-empty block content is not rewritten or trimmed on the way out. The trim is only an emptiness test.
+- A block containing only `{{setvar::...}}`, `{{memory}}`, or another macro that resolves empty does not create an accidental blank message. Setvar accounting remains as described in INV-PS5.
+- Two places stay trim-based on purpose, because neither emits a block as its own message: `applyAppendToLastMessage` (INV-PS9) joins block text into an existing user message, where whitespace would only add blank lines; and lorebook attribution reporting, which maps rendered entries back to snapshots.
+
+### INV-PS11: Preset folders are declared, never inferred
+
+A chat preset's folders are data the preset carries: `Preset.blockFolders`
+lists them (`id`, `name`, `enabled`, `exclusive`) and a block joins one by
+naming it in `PresetBlock.folderId`. Folders are **never** derived from a block's name or
+content — no marker, prefix, or divider prompt creates one — so a preset
+imported from another frontend stays the flat block list it is, and no import
+path invents grouping.
+
+Rules (`lib/core/models/preset_block_groups.dart`):
+
+1. A block whose `folderId` names a folder the preset does not declare is
+   top-level. A hand-edited or partially copied JSON therefore degrades to a
+   plain list instead of hiding blocks.
+2. The flat block order stays authoritative for placement: a folder is drawn
+   where its first block sits and owns every block naming it; a folder with no
+   blocks yet is drawn after the block rows and cannot be dragged, having no
+   slot in the order.
+3. A disabled folder takes its blocks out of the prompt.
+   `applyPresetFolderEnablement()` resolves that into the blocks' own `enabled`
+   flags **once** — `resolvePresetFolders()` at the top of `_buildPromptOnce()`
+   (`lib/core/llm/prompt_builder.dart`) and in `presetOnlyTokenCount()`
+   (`lib/core/llm/preset_macro_attribution.dart`). Nothing downstream of those
+   two points knows folders exist.
+4. Toggling a folder writes the folder only, never its blocks, so re-enabling
+   it restores the per-block selection it had. Deleting a folder drops the
+   declaration and clears the references; the blocks stay in the preset.
+5. `exclusive` is the folder's kind, and it is the only difference between the
+   two: a checklist folder toggles each block on its own, a pick-one folder
+   holds at most one enabled block and offers radios. The one-enabled rule is
+   kept wherever membership or the kind changes —
+   `selectExclusivePresetBlock()` when the pick moves,
+   `movePresetBlockIntoFolder()` when a block joins a folder that already has
+   its pick (it arrives disabled), and `setPresetFolderExclusive()` when a
+   checklist becomes pick-one (the first enabled block stays picked). Nothing
+   in prompt assembly special-cases it: exclusivity is an editing rule over the
+   same per-block `enabled` flags.
+6. On the wire (`savePresetJson` / `parseSillyTavernPreset`) folders are a
+   separate top-level `block_folders` list plus a `folder` id on a prompt
+   entry. Both are additive: a frontend that ignores them reads the same
+   prompts it always did, and an importer that skips `block_folders` gets a
+   preset with no folders rather than a broken one.
 
 ---
 
@@ -723,16 +1189,20 @@ If abort fails to clear `isGenerating`, the subsequent check rejects.
 
 ### INV-CM1: Continue message appends to the last assistant message
 
-`ChatNotifier.continueMessage()` calls `ChatGenerationService.generate()` directly
-(not `GenerationPipeline.run()`). After the stream completes, it joins the
-original and generated content with a paragraph boundary, then uses
-`ChatRepo.mutateSession` to replace only the expected durable last assistant
-message. The guard checks target ID, last-message position, content, `swipeId`,
-and `agentSwipeId`; a conflict is reloaded instead of overwritten. The session
-variable delta is merged into the latest row, and only the returned durable
-session is published. It does not create a new swipe or keep the temporary
-generated message. The active green and nested swipes are updated to the same
-merged content.
+`ChatNotifier.continueMessage()` runs the ordinary chat pipeline —
+`GenerationPipeline.run(continueTargetId: <last assistant id>)` — so the request
+uses the same transport, protocol, prompt assembly and post-generation stages as
+a send. The pipeline branches into `_resolveContinuation()` once the stream
+completes: it folds the generated block into the message being extended
+(`mergeContinuationMessages`, paragraph boundary) and commits that one message
+through `ChatRepo.commitGenerationResult(regenTargetId: <target id>)`. The
+commit's anchor guard checks content, `swipeId`, `agentSwipeId`, `swipes` and
+`swipesMeta` against the pre-run snapshot; a conflict is rejected instead of
+overwritten. It does not create a new swipe or keep the temporary generated
+message. The active green and nested swipes are updated to the same merged
+content. Passing the target as `regenTargetId` also keeps Studio history
+rotation out of the continue path: continue adds no turn, so the window must not
+advance.
 
 While the continuation streams, `ChatState.continuationTargetId` holds the id of
 that assistant message. The WebView layer keys off it: the sync dispatcher skips
@@ -747,30 +1217,133 @@ Stop during a continuation merges the partial text into the target message
 (`AbortHandler._finalizeContinuationAbort`) rather than appending it as a new
 assistant message. `continueMessage()` clears `abortHandler.restorationMessage`
 before starting, so a snapshot left by an earlier regenerate cannot be
-re-appended by that abort (the pipeline's own clearing does not apply here — see
-INV-CM2).
+re-appended by that abort.
 
 When the last message is **not** an assistant message there is nothing to
 extend: a trailing user message is delegated to `regenerateLastAssistant()`,
 which generates a normal reply through `GenerationPipeline`; any other trailing
 role is a no-op.
 
-Mutex: `continueMessage()` rejects when `_isMemoryDraftActive` (same as
-`sendMessage` / `regenerateLastAssistant`) — see INV-M4.
+`continueMessage()` may overlap memory draft generation under the same
+ownership and persistence isolation contract as other chat entry points (INV-M3).
 
-### INV-CM2: Continue skips post-SSE pipeline side effects
+### INV-CM2: Continue runs the same post-generation stages as a send
 
-Because `continueMessage()` does not use `GenerationPipeline`, the following do
-**not** run on the continue path (by design today — document before changing):
+`_resolveContinuation()` hands the merged message to `PostGenCoordinator.run()`,
+so the continue path runs the full post-SSE tail: sync + notification, POST-
+cleaner / Ledger (Studio ON), ExtBlocks, inline `[IMG:GEN]` processing, chat
+embedding, memory drafts and auto-summary — all bound to the merged message,
+which is the session's last message by then.
 
-- `processImageTags()` — inline `[IMG:GEN]` tags in the continued chunk
-- `processExtensions()` — info-block / extension image post-gen
-- `notifySyncMessageGenerated()` from the pipeline
-- Regen rollback / `restorationMessage` handling from the pipeline
+Two pipeline behaviours stay off the continue path by construction:
+regen rollback (continue keeps no `restorationMessage`) and the append-a-new-
+message commit (continue commits the merged message in place).
 
-Notification start/complete in `continueMessage()` itself still runs.
-If continue should match send/regen post-processing, route it through
-`GenerationPipeline` with a dedicated continue mode.
+### INV-CM3: Continue prompt injects one system turn after the extended reply
+
+`PromptPayload.continueInstruction` carries `kContinueInstruction`
+(`"Expand your latest message, continue."`, `core/services/preset_defaults.dart`)
+and is set only when `StreamGenerationService.run()` is given a
+`continueTargetId`. `insertContinueInstruction()` (`core/llm/history_assembler.dart`)
+places it as a `system` turn immediately after the last chat message, ahead of
+the depth-0 injections pinned to the end of the window and ahead of every preset
+block ordered after `chat_history`. Depth-anchored blocks at depth ≥ 1 stay
+where they are: they sit *before* the extended reply, so they cannot come
+between it and the instruction.
+
+Three assembly paths honour it: the ordinary preset builder
+(`prompt_builder.dart`), the preset-less fallback (`fallback_prompt_builder.dart`),
+and the Studio final writer (`studio_message_builder.dart`, via
+`StudioContext.continueInstruction`). Studio's **controller** agents never see
+it — they analyse the scene rather than extend the reply, so
+`buildAgentMessages` passes it through only when `isFinalResponse` is true.
+
+Consequence: the request's last message is a system turn, not the assistant
+reply. Continue therefore never relies on provider prefill — no Anthropic
+prefill echo prepended to the streamed text, and no dropped trailing assistant
+turn when extended thinking is on.
+
+### INV-CM4: A failed continuation writes nothing to the message
+
+A continuation that fails — transport error, first-chunk timeout, thrown
+pipeline exception, or a completion carrying no usable text — must leave the
+message it was extending byte-for-byte as the user saw it. No error swipe, no
+appended error bubble, no partial merge.
+
+`StreamGenerationService` routes every error site through `_continueFailure()`
+when `continueTargetId` is set: it returns a settled `ChatState` carrying
+`error`, and never calls `SavedMessageWriter.writeError` /
+`writeRegenError`. `GenerationPipeline._settleContinuationFailure()` (and the
+continue branch of `_handlePipelineError`) then clears the streaming flags and
+publishes a `ContinueFailureNotice` on `continueFailureProvider`.
+
+That notice is the failure's only surface: `ContinueFailureListener` (mounted in
+`app.dart`) turns it into the red `Continue Failed` toast.
+
+### INV-CM5: Continuation reasoning is filed, never leaked
+
+Reasoning produced by a continuation — native (`reasoning_content` /
+`thinking` deltas) or inline (`<think>` tags parsed by `StreamAccumulator`) —
+must never reach the reply text. `joinContinuationReasoning()` appends it to the
+message's existing reasoning block, separated by a horizontal rule and headed by
+`==accent==Continue==` (accent-coloured, see `docs/markdown-markers.md`). The
+merged value is written to the message, the active green swipe's meta and the
+active nested swipe, so a swipe round-trip restores it.
+
+The live WebView preview uses the same function, so the streaming reasoning
+block shows exactly what the merge will persist. An aborted continuation goes
+through the same merge (`AbortHandler._finalizeContinuationAbort`), so partial
+reasoning is filed the same way.
+
+### INV-CM6: The extended message shows a `Continuing…` footer
+
+For the whole streaming window the message being extended carries a
+`Continuing…` badge in its footer meta column. `ChatState.continuationTargetId`
+is mirrored onto `ChatBridgeController.continuationTargetId` by the sync
+dispatcher, so every message map `ChatMessageMapper` builds during the run flags
+that one bubble with `isContinuing`. The renderer level-reconciles the badge in
+`_createFooter` and `updateMessageMeta`; partial patches (memory badges, plain
+content updates) carry no `role` and leave it alone. When the run settles the
+dispatcher pushes one update with the flag cleared — the only thing that drops
+the badge on the failure path, where no message changed.
+
+### INV-CM7: A continued message keeps its stats and knows where it grew
+
+A continuation folds into the message it extends, so everything derived from
+that message has to account for two runs instead of one.
+
+**Generation stats accumulate.** `mergeContinuationMessage` writes
+`sumContinuationTokens(original, generated)` and
+`sumContinuationGenTime(original, generated)` — the badge reports what was spent
+on that one message, not just on the last run. A stat missing on either side
+falls through to the other, and a `genTime` that does not parse counts as
+absent, so a malformed value can never wipe out a good one. The sums are
+written to the message, to `swipesMeta[swipeId]` and to the active nested swipe,
+because a swipe round-trip restores from the meta
+(`ChatMessageService.setSwipe`).
+
+**The WebView reconciles the stat row, it never assumes it.** During the
+streaming window `updateMessageMeta` removes `.token-count-inline` (the count
+belongs to the finished text) while the surrounding `.gen-stat` survives on the
+clock. The update that brings the merged message back therefore finds the parent
+but not the child: `_reconcileTokenCount` / `_reconcileGenTime` retext when the
+element is there and rebuild it when it is not. The clock is inserted at the
+front of the row, so a rebuilt badge keeps the clock-then-count order.
+
+**The boundary is recorded.** `ChatMessage.continuationOffset` is the index in
+`content` where the newest segment starts (`continuationOffsetFor` — past the
+blank line `joinContinuation` inserts). Preview surfaces truncate from the
+front, so without it they keep quoting the opening the user has already read:
+`previewSource(content, continuationOffset)` is what the notification body
+(`buildMessagePreview`) and both of `ChatRepo`'s session-metadata projections
+slice with. An offset that does not address the current text is ignored, so a
+stale value degrades to the whole message rather than an empty preview.
+
+The boundary is per-green-swipe and dies with the text it described: it is
+stored in `swipesMeta[swipeId]`, restored on swipe navigation, cleared when the
+user hand-edits the message (`ChatMessageService.editMessage`), and left alone
+by nested (blue) swipe switching, which does not change the green swipe's text.
+A continuation that produced no text keeps the previous boundary.
 
 ---
 
@@ -778,14 +1351,18 @@ If continue should match send/regen post-processing, route it through
 
 ### INV-EG1: Extensions run only after a successful normal/regen chat completion
 
-`ExtensionPostGenService.processAfterGeneration()` is invoked from
-`ChatGenerationService.processExtensions()`, which is called only from
-`GenerationPipeline._runPostTextSide()` after text is saved. It does not run during
-SSE streaming and does not run for `continueMessage()` (INV-CM2).
+After-assistant ExtBlocks dispatch through `ExtBlocksStage` under
+`PostGenCoordinator`: directly as background work for ordinary chat, or from
+`CleanerStage` after Studio selects and reloads the canonical swipe.
+`ExtBlocksStage` then calls `ExtensionPostGenService.processAfterGeneration()`.
+They do not run during SSE streaming. `continueMessage()` uses the same pipeline
+and post-generation coordinator, bound to the merged message (INV-CM2).
+After-user blocks use the separate
+`ExtensionPostGenService.runAfterUserBlocks()` entrypoint.
 
 ### INV-EG2: Extension failures do not fail chat generation
 
-`ChatGenerationService.processExtensions()` catches errors and logs them; the
+`ExtBlocksStage` catches errors and reports post-generation status; the
 assistant message and chat state remain committed.
 
 ### INV-EG3: Extensions are gated by settings
@@ -796,21 +1373,19 @@ Processing is a no-op when `extensionsSettings.enabled` is false or
 
 ### INV-EG4: Block chain does not start if text generation was aborted or errored
 
-`ExtensionPostGenService.processAfterGeneration()` is only reached via
-`GenerationPipeline._runPostTextSide()`, which itself only executes when the SSE
-stream completes successfully. An aborted generation never reaches the pipeline's
-post-text side; therefore the block chain never starts. When the stream returns
-an error (via `SavedMessageWriter.writeError` / `writeRegenError`), the last
-assistant message has `isError: true`; `_runPostTextSide()` checks this flag and
-skips `processExtensions()`, so the block chain does not start on error either.
-The regen path additionally gates on `regenSucceeded` (`!regenMsg.isError`).
+`PostGenCoordinator` is reached only after the generation result is committed.
+An aborted generation never reaches this dispatch. `ExtBlocksStage` and
+`ExtensionPostGenService.processAfterGeneration()` reject a trailing user or
+errored message, so the block chain cannot start for an error result either.
+The regen path additionally requires a non-error regenerated message.
 
 ### INV-EG5: Extension cancel token is independent of the chat generation cancel token
 
-`ExtensionPostGenService` owns `_extensionBlocksCancelToken` (`CancelToken`).
-`cancelBlocks()` cancels this token; it does not touch the chat `_cancelToken` or
-`_imgGenCancelToken`. Conversely, aborting chat generation does not cancel in-flight
-extension blocks (they have already started post-SSE). Stopped blocks are marked
+`ExtensionPostGenService` owns the plural `_blocksCancelTokens` set because
+after-user, after-assistant, manual, and periodic runs may overlap.
+`cancelBlocks()` cancels every token in that set; it does not touch the chat
+generation or image-generation tokens. Conversely, aborting chat generation
+does not cancel already-started ExtBlocks. Stopped persisted blocks are marked
 `BlockRunStatus.stopped` in the DB.
 
 ### INV-EG6: `dependsOnPrevious = true` blocks run serially; output chaining is preserved
@@ -824,9 +1399,11 @@ builder. Blocks with `dependsOnPrevious = false` (default) are launched without
 ### INV-EG7: Image-gen block results are stored via `ImageStorageService`; content holds the path token
 
 After `ImageGenService.generateImage()` succeeds, the image bytes are saved to disk
-through `ImageStorageService`. `InfoBlock.content` is set to `[IMG:RESULT:<path>]`
-(same format as inline img-gen). The WebView bridge renders this token as an `<img>`
-element inside the ext-blocks panel.
+through `ImageStorageService`. `InfoBlock.content` is set to the stored image
+block — an `<img data-iig-…>` element whose `src` is relative to the Glaze data
+root, same format as inline img-gen (INV-IG9). The WebView bridge renders it
+with the panel's own image controls inside the ext-blocks panel, and still
+reads the `[IMG:RESULT:<path>]` of blocks written before that form.
 
 ### INV-EG8: JS Runner / interactive panel code runs in a sandboxed iframe with null origin ✅ ENFORCED
 
@@ -902,7 +1479,7 @@ read-modify-write in a Drift transaction:
 (no NaN, finite numbers, string keys, ≤ 64 KiB total per payload) and
 surfaces failures as `ArgumentError` → bridge `invalid_request` code.
 
-### INV-JS3: `glaze.triggerGeneration` respects generation mutexes (INV-C1, INV-M3/M4) ✅ ENFORCED
+### INV-JS3: `glaze.triggerGeneration` respects chat ownership (INV-C1) ✅ ENFORCED
 
 `GenerationDispatcher.dispatch(charId, rawMode, reason)` is the only
 entry point that touches the chat notifier from a JS call. The
@@ -910,8 +1487,9 @@ dispatcher returns `TriggerResult`:
 
 * `TriggerNoSession` — no chat state for `charId`
 * `TriggerBusy(busyKind: 'chat')` — INV-C1 violated
-* `TriggerBusy(busyKind: 'memory_draft')` — INV-M3/M4 violated
 * `TriggerAccepted` / `TriggerError`
+
+An active memory draft does not make chat busy (INV-M3).
 
 `auto` mode resolves to `continue` (last msg = assistant) or
 `regenerate` (last msg = user). The dispatcher never auto-aborts;
@@ -954,17 +1532,192 @@ all handler exceptions and returns `CommandResult.error`.
 
 ### INV-JS6: Periodic scheduler pauses on app background, never produces catch-up ticks ✅ ENFORCED
 
+`SessionLifecycleTracker` bootstraps `periodicTriggerSchedulerProvider` while a
+visual chat is mounted and publishes its real `charId`/`sessionId` through
+`GenerationNotificationService.activeChatContext`. A tick requires that active
+authority and the matching registered Chat WebView bridge; authority changes
+cancel in-flight periodic execution. There is no headless fallback.
+
 `PeriodicTriggerScheduler` is a `WidgetsBindingObserver`. On
 `paused` / `inactive` / `hidden` / `detached` it cancels every timer.
 On `resumed` it rebuilds the timer set from the current active preset;
 the first tick after a long backgrounding period is **not** a catch-up
 firing — the timer is fresh.
 
-`_tick` is `unawaited` (fire-and-forget): the chain itself owns its
-own cancel token and writes via `infoBlocksProvider.notifier.addOrReplace()`
-without blocking the scheduler. The `debugLifecycleState` test seam
-in `periodic_lifecycle_test.dart` exercises the full pause/resume
-contract.
+`_tick` is `unawaited` (fire-and-forget). `PeriodicJsBlockRunner` owns the
+per-tick cancel token and executes directly through the visual bridge without
+creating an `InfoBlock` row. The `debugLifecycleState` test seam in
+`periodic_lifecycle_test.dart` exercises the pause/resume contract.
+
+### INV-JS7: The message-scripts toggle stops JS and nothing else ✅ ENFORCED
+
+Every message body goes through `sanitizeMessageHtml` before insertion —
+`writeShadowContent` (`renderer/markdown.js`) and the search re-render
+(`message_renderer.js`) both call it with
+`{ allowScripts: allowMessageScripts }`, and neither keeps a second path.
+
+With execution **on** the formatted HTML is inserted verbatim. With execution
+**off** `stripMessageCode` removes exactly what runs code — `<script>`,
+`<iframe>` / `<object>` / `<embed>`, `on…=` attributes, `srcdoc`, and
+`javascript:` / `vbscript:` / non-image `data:` URLs — and touches nothing
+else. No element is dropped for how it looks, and `<style>` blocks and
+`style="…"` attributes reach the per-message shadow root byte-identical: the
+CSS policy in `css_sanitizer.js` belongs to the ExtBlock path, which lands in
+the light DOM, and is never applied to a message.
+
+`renderer/css_diagnostics.js` is the one other pass that looks at message CSS,
+and it only reads: it appends a `CSS ERROR` report next to a broken `<style>`
+without changing a byte of it. `renderer/target_toggle.js` is the single pass
+that *writes* message CSS — the `:target` re-key of INV-JS8 — and it runs
+identically in both modes, so it never makes the toggle visible either.
+
+So an HTML/CSS card renders the same before and after the user enables message
+scripts — `position: fixed`, `url()` backgrounds, `@font-face`, `<form>` and
+SVG animation all behave identically in both modes; only script execution (and
+the frame elements that host it) follows the toggle.
+`test/webview_assets_test.dart` pins both halves (`message HTML is filtered for
+code only, never for markup`, `a message may not run code while execution is
+off`).
+
+### INV-JS8: A fragment link inside a message toggles that message's own card ✅ ENFORCED
+
+Message bodies live in a per-message shadow root (`.message-content`), and a
+URL fragment is only ever resolved against the document tree. An id written by
+a message therefore never becomes the document's target element, so an
+ST-style card that opens a panel with `<a href="#panel">` plus
+`#panel:target { … }` renders a button that does nothing — and the WebView's
+navigation policy (`chatWebViewNavigationPolicy`) cancels the navigation
+anyway.
+
+Two halves close that gap, and both are required:
+
+* `renderer/target_toggle.js` re-keys `:target` in the message's own `<style>`
+  on `[data-glaze-target]`. It runs on **every** path that writes a message
+  body — `writeShadowContent` (`renderer/markdown.js`) and the search
+  re-render (`message_renderer.js`) — because either one replaces the tree.
+  A message without a `:target` rule keeps its stylesheet byte-identical.
+* `InteractionDispatch.handleClick` resolves the clicked link through
+  `composedPath()` (`e.target` is retargeted to the shadow host, so
+  `e.target.closest('a')` never sees a link the message wrote) and, for a
+  `#…` href, stamps that attribute on the matching element **inside the link's
+  own root** instead of navigating. Document semantics are kept: at most one
+  target per root, and an empty fragment (`href="#"`, what a card's close
+  button uses) clears it.
+
+Every other href still goes to Flutter as `onLinkClick` — which is also what
+finally makes an ordinary markdown link inside a message open.
+
+`test/webview_assets_test.dart` pins both halves in the group named
+"`:target` cards in message HTML".
+
+---
+
+## 11. Message Document Contract
+
+A message body renders into a shadow root (`.message-content`), which is what
+keeps a card's CSS out of the app chrome. Cards, though, are written against a
+*document* — they look elements up with `document.getElementById`, declare
+functions their `onclick=` attributes call, wait for `DOMContentLoaded`, and
+put a modal in `document.body`.
+
+This section is the **whole list** of what a card may rely on inside that
+shadow root. It is finite and written down on purpose: for a while each case
+was found by a user and patched on its own, and the next card always found the
+next hole. Implementation: `assets/chat_webview/renderer/message_document.js`
+(plus `target_toggle.js` for `:target`). Every item has a case in
+`test/webview_js/specs/document_contract.spec.js`.
+
+**Add to this contract rather than shimming one more thing where it happens to
+be needed.**
+
+### INV-MR1: A message script runs in the page's global scope
+
+A card's `<script>` is executed by appending a real `<script>` element to the
+document's head, so `function toggle() {}` in the card becomes a global and the
+`onclick="toggle()"` in the same card resolves. `new Function(src)()` gave the
+script a function scope of its own, and the attribute pointed at nothing.
+
+`document.currentScript` is shimmed for the duration to the element the script
+was written next to, so ST-style cards that read
+`currentScript.previousElementSibling` still find what they decorate. The
+`<script>` is removed from the message afterwards, and so is the injected one.
+
+### INV-MR2: The app's own document is restored exactly
+
+Every shim is an **own property** on `document` / `window`, installed with
+`Object.defineProperty` and removed with `delete`. Nothing on a prototype is
+rewritten, and after a message's code has run, `document` is what it was.
+
+App chrome appended while a message's code may be running has to say so:
+`appBody()` (from `message_document.js`) returns the real body, and the
+selection bar uses it. Reading `document.body` there would put the app's own
+element inside somebody's card.
+
+### INV-MR3: Document lookups find the message's own elements first
+
+`getElementById`, `querySelector`, `querySelectorAll`, `getElementsByClassName`,
+`getElementsByTagName` and `getElementsByName` search the message root first and
+**fall back to the real document** when it has no answer. The fallback is what
+keeps app-level code called from a card working.
+
+### INV-MR4: The document's collections are the message's
+
+`document.forms`, `document.images`, `document.links` and `document.styleSheets`
+return the message's own, for the same reason.
+
+### INV-MR5: An `@import` is hoisted into the document head
+
+`@import` inside a shadow root is ignored by the browser, and a `@font-face`
+can only be registered from the document — so a card that pulls a web font
+this way rendered in `cursive` with nothing on screen to say why.
+
+`hoistStyleImports` reads the `<style>` bodies as the message wrote them
+(before the CSS policy strips the rule) and lifts each sheet to a
+`<link rel="stylesheet" data-glaze-import>` in the document head.
+
+The cost is deliberate and bounded:
+
+- **only `https:`** — `http:` is a downgrade, and a `data:`/`javascript:`
+  stylesheet href is rule injection rather than a font. Anything else is
+  refused and reported in the message's CSS-error box.
+- **each URL once**, and at most 32 per session, so a message cannot turn the
+  app into a request generator.
+- what remains is accepted knowingly: the sheet is fetched from a third party,
+  which learns the reader's IP, and its rules apply to the whole document —
+  app chrome included. `bridge/css_sanitizer.js` still rejects every `url()`
+  *inside* message CSS, and `@font-face`, `@page` and `@namespace` are still
+  dropped and reported (`inspectBlockedAtRules`).
+
+### INV-MR6: `document.body` is the message's overlay layer
+
+A node handed to `document.body` goes into `.glaze-message-overlay`, a
+`display: contents` child of the message root. It lays out where the card
+expected it to and stays under the card's own stylesheet, instead of rendering
+naked in the app chrome. `document.head` is the message root for the same
+reason: a `<style>` a card appends belongs to that message.
+
+### INV-MR7: The load events a card waits for still arrive
+
+The real `DOMContentLoaded` and `load` fired long before the message existed. A
+`DOMContentLoaded` / `load` / `readystatechange` listener registered by a
+message script — through `document.addEventListener`, `window.addEventListener`
+or `window.onload` — is **collected instead of registered**, and called once the
+message's scripts have all run. The app's own listeners are never touched.
+
+### INV-MR8: The scope lasts as long as the message's code can run
+
+A card's modal is appended from its click handler, not from its `<script>`. The
+document scope is therefore re-installed for the length of any dispatch of a
+common interaction event whose composed path passes through a message root, and
+removed on the microtask that follows it.
+
+Only for a message whose own code has actually run: a message with no
+`<script>` never needs the scope, so for all but a handful of messages the
+app's document is never touched at all.
+
+Message scripts are off by default. With the toggle off nothing here runs at
+all: `<script>` elements are dropped before insertion, and the message is still
+rendered exactly as written — markup and CSS are not a script policy.
 
 ---
 
@@ -976,18 +1729,27 @@ Before merging any structural PR:
 - [ ] Stop generation (abort) preserves partial text when available
 - [ ] Regenerate while generating aborts the current generation first
 - [ ] Switching characters during generation continues background generation
+- [ ] Leaving a chat mid-generation and returning shows the typing bubble again,
+      still with its elapsed clock running (INV-C8)
+- [ ] Leaving a chat mid-generation and returning *after* the reply landed shows
+      the reply once, with no typing bubble under it (INV-C8)
 - [ ] Prompt block order matches preset definition
 - [ ] Vector scan runs before keyword scan; results deduplicated
 - [x] Memory injection respects token budget (PR-B C13 / INV-PS4)
 - [ ] History cutoff trims oldest messages first
 - [ ] Summary returns a string without affecting chat state
-- [x] Memory draft mutex with chat generation (PR-B C12 / INV-M3, INV-M4)
-- [ ] Image generation completes after text generation (not on continue path — INV-CM2)
-  - [ ] Extensions post-gen runs after normal/regen only (INV-EG1; not on continue)
+- [x] Chat/memory concurrency keeps independent ownership and persistence (INV-M3, INV-M4)
+- [ ] Image generation completes after text generation (continue included — INV-CM2)
+  - [ ] Extensions post-gen runs after normal/regen/continue (INV-EG1, INV-CM2)
+  - [ ] Continue injects one system turn after the extended reply (INV-CM3)
+  - [ ] A failed continue leaves the message untouched and toasts (INV-CM4)
+  - [ ] Continue reasoning lands in the reasoning block, not the reply (INV-CM5)
+  - [ ] After Continue the token/time badge is back and counts both runs (INV-CM7)
+  - [ ] The notification and chat-list row quote the continuation (INV-CM7)
   - [ ] Block chain does not start on aborted or errored generation (INV-EG4)
   - [ ] Extension cancel token is separate from chat cancel token (INV-EG5)
   - [ ] `dependsOnPrevious` blocks await the preceding block; output is chained (INV-EG6)
-  - [ ] Image-gen block results stored via ImageStorageService; content = `[IMG:RESULT:<path>]` (INV-EG7)
+  - [ ] Image-gen block results stored via ImageStorageService; content = the `<img data-iig-…>` element (INV-EG7, INV-IG9)
   - [ ] JS Runner / interactive panel code runs in null-origin iframe (INV-EG8)
   - [ ] Bridge `glaze.*` calls gated by preset capabilities (INV-JS1)
   - [ ] Variable writes are atomic + JSON-validated + ≤ 64 KiB (INV-JS2)
@@ -995,6 +1757,8 @@ Before merging any structural PR:
   - [ ] `glaze.playAudio` does not leak the audio session (INV-JS4)
   - [ ] `executeCommand` wired registry routes to the same services (INV-JS5)
   - [ ] Periodic scheduler pauses on app background; no catch-up tick (INV-JS6)
+  - [ ] A message's `:target` card still opens, closes and survives a search
+        re-render (INV-JS8)
 - [ ] Context limit exceeded shows an error to the user
 - [ ] API not configured shows an error to the user
 - [ ] Abort closes the TCP connection (not just UI state)
