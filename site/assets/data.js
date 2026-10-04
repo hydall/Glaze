@@ -142,7 +142,7 @@ window.GLAZE = {
       asset_arm64: 'arm64',
       asset_arm32: 'arm32',
 
-      roadmap_lead: 'Ровно то, что выходило в релизах, начиная с первой публичной альфы. Сверху то, над чем работаем сейчас.',
+      roadmap_lead: '',
       status_planned: 'Планы',
       status_dev: 'В разработке',
       status_alpha: 'alpha',
@@ -280,7 +280,7 @@ window.GLAZE = {
       asset_arm64: 'arm64',
       asset_arm32: 'arm32',
 
-      roadmap_lead: 'Exactly what shipped, starting from the first public alpha. What we are working on now is at the top.',
+      roadmap_lead: '',
       status_planned: 'Planned',
       status_dev: 'In development',
       status_alpha: 'alpha',
