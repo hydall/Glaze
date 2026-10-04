@@ -35,6 +35,7 @@ import '../services/janitor_webview_proxy.dart';
 import 'datacat_phase_label.dart';
 import 'janitor_build_widgets.dart';
 import 'janitor_extraction_settings_sheet.dart';
+import 'janitor_lorebook_intro_sheet.dart';
 import 'janitor_lorebooks_tab.dart';
 import '../../../shared/widgets/glaze_sheet.dart';
 
@@ -62,12 +63,17 @@ extension _PhaseLabel on _Phase {
 ///
 /// [characterId] is the Glaze character the saved books are scoped to; null
 /// saves them as standalone (global) lorebooks.
+///
+/// The very first open is preceded by a one-time explainer
+/// ([maybeShowJanitorLorebookIntro]).
 Future<void> showJanitorLorebookCaptureSheet(
   BuildContext context, {
   required JanitorLorebookArgs args,
   String? characterId,
   ExtractionResult? initialExtraction,
-}) {
+}) async {
+  await maybeShowJanitorLorebookIntro(context);
+  if (!context.mounted) return;
   return showGlazeSheet<void>(
     context: context,
     useRootNavigator: true,
