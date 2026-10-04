@@ -808,7 +808,8 @@ body.viewer-open { overflow: hidden; }
 .about-head { padding: 0 16px; margin: 0 0 12px; }
 .about-head h3 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -0.1px; }
 .about-resources { margin-top: 8px; margin-bottom: 28px; }
-.about-credits { margin-bottom: 28px; }
+.about-people { margin-bottom: 28px; }
+.about-credits { margin-bottom: 0; }
 .about-credits .group { padding-top: 6px; }
 .credits .sub-header { padding-top: 14px; }
 .credits-list .tile { color: var(--accent); }

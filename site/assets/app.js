@@ -699,6 +699,24 @@
           ${LINK_CARDS.map((c) => linkCard({ href: c.url, svg: c.key === 'bmc' ? ms('coffee') : BRAND[c.key], color: c.color, label: c.label, sub: t(c.sub), host: c.url.replace(/^https:\/\//, '') })).join('')}
         </div>
       </div>
+      <div class="about-people">
+        <div class="about-head"><h3>${esc(t('creators_header'))}</h3></div>
+        <div class="about-grid">
+          ${group({
+            title: t('authors_header'),
+            body: author('hydall', t('role_hydall'), 'hydall.jpg', '#C42A4A')
+              + author('danvitv', t('role_danvitv'), 'danvitv.png', '#79CE96', t('danvitv_until')),
+          })}
+          <div class="group testers ${state.testersOpen ? 'open' : ''}">
+            <button class="group-header testers-head" type="button" data-testers aria-expanded="${state.testersOpen}">
+              <h3>${esc(t('testers_header'))}</h3><span class="testers-count">${G.testers.length}</span>${ms('keyboard_arrow_down', 'arrow')}
+            </button>
+            <div class="testers-body"><div>
+              <div class="tester-list">${G.testers.map((n) => `<span class="tester">${esc(n)}</span>`).join('')}</div>
+            </div></div>
+          </div>
+        </div>
+      </div>
       <div class="about-credits">
         <div class="about-head"><h3>${esc(t('credits_header'))}</h3></div>
         <div class="group credits" data-glow>
@@ -717,24 +735,6 @@
                 <span class="tile">${ms('tune')}</span>
                 <span class="row-text"><span class="tile-label">${esc(p.name)}</span><span class="tile-sub">${esc(t('credits_by'))}: ${esc(p.author)}</span></span>
               </div>`).join('')}
-          </div>
-        </div>
-      </div>
-      <div class="about-people">
-        <div class="about-head"><h3>${esc(t('creators_header'))}</h3></div>
-        <div class="about-grid">
-          ${group({
-            title: t('authors_header'),
-            body: author('hydall', t('role_hydall'), 'hydall.jpg', '#C42A4A')
-              + author('danvitv', t('role_danvitv'), 'danvitv.png', '#79CE96', t('danvitv_until')),
-          })}
-          <div class="group testers ${state.testersOpen ? 'open' : ''}">
-            <button class="group-header testers-head" type="button" data-testers aria-expanded="${state.testersOpen}">
-              <h3>${esc(t('testers_header'))}</h3><span class="testers-count">${G.testers.length}</span>${ms('keyboard_arrow_down', 'arrow')}
-            </button>
-            <div class="testers-body"><div>
-              <div class="tester-list">${G.testers.map((n) => `<span class="tester">${esc(n)}</span>`).join('')}</div>
-            </div></div>
           </div>
         </div>
       </div>
