@@ -504,7 +504,10 @@ a.article-author:hover span { color: var(--accent-text); }
 .article .article-author img { width: 34px; height: 34px; }
 
 .article-page { max-width: 820px; }
-.article-back { display: inline-flex; margin-bottom: 16px; }
+.article-tools { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.article-back { display: inline-flex; }
+.article-share { display: inline-flex; align-items: center; gap: 6px; background: none; border: 0; padding: 0; font: inherit; cursor: pointer; }
+.article-share .ms { font-size: 18px; }
 .article { padding: 28px 32px 32px; }
 .article h1 { margin: 12px 0 0; font-size: 34px; line-height: 1.15; font-weight: 800; letter-spacing: -0.8px; }
 .article-note {

@@ -442,6 +442,9 @@
       $('#articles').innerHTML = `<div class="container article-page">${back}<p class="article-status">${esc(t('article_not_found'))}</p></div>`;
       return;
     }
+    // The shareable copy of this page: a real path with its own meta tags for
+    // link previews, which the hash route can never give a crawler.
+    const share = `<button class="text-link article-share" type="button" data-copy-article="${esc(a.slug)}">${ms('link')}<span>${esc(t('article_share'))}</span></button>`;
     loadArticle(a);
     const body = articleCache.get(`${a.slug}.${articleLang(a)}`);
     const content = body === 'failed'
@@ -450,7 +453,7 @@
       ? `<p class="article-status">${esc(t('article_loading'))}</p>`
       : `<div class="article-body">${body}</div>`;
     $('#articles').innerHTML = `<div class="container article-page">
-      ${back}
+      <div class="article-tools">${back}${share}</div>
       <article class="group article">
         ${articleMeta(a, { link: true })}
         <h1>${esc(pick(a.title))}</h1>
@@ -870,6 +873,20 @@
       if (open) state.open.add(key); else state.open.delete(key);
       document.getElementById('release-' + key).classList.toggle('open', open);
       rel.setAttribute('aria-expanded', open);
+      return;
+    }
+    const copy = e.target.closest('[data-copy-article]');
+    if (copy) {
+      const url = new URL(`articles/${copy.dataset.copyArticle}/`, location.href).href;
+      const done = () => {
+        const label = copy.querySelector('span');
+        const was = label.textContent;
+        label.textContent = t('article_copied');
+        clearTimeout(copy._t);
+        copy._t = setTimeout(() => { label.textContent = was; }, 2000);
+      };
+      if (navigator.clipboard) navigator.clipboard.writeText(url).then(done, done);
+      else done();
       return;
     }
     const shot = e.target.closest('[data-shot]');

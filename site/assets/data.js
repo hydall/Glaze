@@ -68,6 +68,8 @@ window.GLAZE = {
       article_failed: 'Не удалось загрузить статью.',
       article_not_found: 'Такой статьи нет.',
       article_only_ru: 'Статья доступна только на русском.',
+      article_share: 'Скопировать ссылку',
+      article_copied: 'Ссылка скопирована',
       kind_changelog: 'Чейнджлог',
       kind_news: 'Новости',
 
@@ -206,6 +208,8 @@ window.GLAZE = {
       article_failed: 'Could not load the post.',
       article_not_found: 'There is no such post.',
       article_only_ru: 'This post is only available in Russian.',
+      article_share: 'Copy link',
+      article_copied: 'Link copied',
       kind_changelog: 'Changelog',
       kind_news: 'News',
 
