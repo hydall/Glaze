@@ -9,6 +9,7 @@ ChatMessage _msg({
   required String content,
   bool isError = false,
   bool isTyping = false,
+  bool isHidden = false,
 }) {
   return ChatMessage(
     id: id,
@@ -16,6 +17,7 @@ ChatMessage _msg({
     content: content,
     isError: isError,
     isTyping: isTyping,
+    isHidden: isHidden,
   );
 }
 
@@ -41,7 +43,7 @@ void main() {
       expect(result, 'User: Hello\n\nAssistant: Hi there');
     });
 
-    test('uses "Assistant" for assistant role, "User" for everything else', () {
+    test('keeps only user and assistant roles', () {
       final result = extractRecentHistoryText([
         _msg(id: 'm1', role: 'user', content: 'Q'),
         _msg(id: 'm2', role: 'assistant', content: 'A'),
@@ -49,7 +51,7 @@ void main() {
       ]);
       expect(result.contains('User: Q'), isTrue);
       expect(result.contains('Assistant: A'), isTrue);
-      expect(result.contains('User: S'), isTrue);
+      expect(result.contains('S'), isFalse);
     });
 
     test('skips error messages', () {
@@ -77,6 +79,25 @@ void main() {
         _msg(id: 'm3', role: 'assistant', content: 'Real reply'),
       ]);
       expect(result, 'User: Hello\n\nAssistant: Real reply');
+    });
+
+    test('skips hidden messages before applying the limit', () {
+      final result = extractRecentHistoryText([
+        _msg(id: 'm1', role: 'user', content: 'Kept'),
+        _msg(id: 'm2', role: 'assistant', content: 'Hidden', isHidden: true),
+        _msg(id: 'm3', role: 'assistant', content: 'Visible'),
+      ], maxMessages: 2);
+
+      expect(result, 'User: Kept\n\nAssistant: Visible');
+    });
+
+    test('excludes a response supplied separately to Ledger', () {
+      final result = extractRecentHistoryText([
+        _msg(id: 'u1', role: 'user', content: 'Question'),
+        _msg(id: 'a1', role: 'assistant', content: 'Answer'),
+      ], excludeMessageId: 'a1');
+
+      expect(result, 'User: Question');
     });
 
     test('limits to last N messages', () {

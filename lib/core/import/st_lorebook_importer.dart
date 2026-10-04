@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../llm/glaze_matcher.dart';
+import '../services/character_book_converter.dart';
 import '../utils/id_generator.dart';
 import '../utils/time_helpers.dart';
 import '../models/lorebook.dart';
@@ -19,7 +21,7 @@ LorebookEntry _convertSTEntry(dynamic rawEntry, int index) {
 
   List<String> parseKeys(dynamic v) {
     if (v is List) return v.map((k) => k.toString().trim()).where((k) => k.isNotEmpty).toList();
-    if (v is String && v.isNotEmpty) return v.split(',').map((k) => k.trim()).where((k) => k.isNotEmpty).toList();
+    if (v is String && v.isNotEmpty) return splitLorebookKeys(v);
     return [];
   }
 
@@ -51,14 +53,8 @@ LorebookEntry _convertSTEntry(dynamic rawEntry, int index) {
   }
 
   final rawFilter = e['characterFilter'];
-  LorebookCharacterFilter? charFilter;
-  if (rawFilter is List && rawFilter.isNotEmpty) {
-    charFilter = LorebookCharacterFilter(
-      names: rawFilter.map((n) => n.toString()).toList(),
-    );
-  } else if (rawFilter is String && rawFilter.isNotEmpty) {
-    charFilter = LorebookCharacterFilter(names: [rawFilter]);
-  }
+  LorebookCharacterFilter? charFilter = _parseCharacterFilter(rawFilter) ??
+      _parseCharacterFilter(glazeMeta?['characterFilter']);
 
   return LorebookEntry(
     id: (e['uid']?.toString()) ?? '${DateTime.now().millisecondsSinceEpoch}_$index',
@@ -72,20 +68,63 @@ LorebookEntry _convertSTEntry(dynamic rawEntry, int index) {
     position: resolvePosition(),
     order: (e['order'] as int?) ?? 100,
     scanDepth: e['scanDepth'] as int?,
-    caseSensitive: (e['caseSensitive'] as bool?) ?? false,
-    matchWholeWords: (e['matchWholeWords'] as bool?) ?? false,
+    // Deliberately not `?? false`. Both are three-state on an entry — null
+    // means "follow the book, then the global setting", which is what
+    // `LorebookScanner` resolves (`entry.caseSensitive ?? book ?? global`) and
+    // what SillyTavern means by them too. Defaulting null to false turned
+    // "inherit" into an explicit "never", so an entry imported from ST stopped
+    // following a global the reader had set on purpose — and did it silently,
+    // since the switch reads the same either way.
+    caseSensitive: e['caseSensitive'] as bool?,
+    matchWholeWords: e['matchWholeWords'] as bool?,
     probability: (e['probability'] as int?) ?? 100,
-    preventRecursion: (e['preventRecursion'] as bool?) ?? false,
+    preventRecursion:
+        (e['preventRecursion'] as bool?) ?? (e['excludeRecursion'] as bool?) ?? false,
     sticky: (e['sticky'] as int?) ?? 0,
     cooldown: (e['cooldown'] as int?) ?? 0,
     delay: (e['delay'] as int?) ?? 0,
     group: (e['group'] as String?) ?? '',
-    groupProminence: (e['groupProminence'] as int?) ?? 100,
+    groupProminence:
+        (e['groupProminence'] as int?) ?? (e['groupWeight'] as int?) ?? 100,
     characterFilter: charFilter,
-    ignoreBudget: (e['ignoreBudget'] as bool?) ?? false,
-    vectorSearch: (e['vectorSearch'] as bool?) ?? (e['vector_search'] as bool?) ?? false,
-    useKeywordSearch: (e['useKeywordSearch'] as bool?) ?? (e['use_keyword_search'] as bool?) ?? true,
+    ignoreBudget:
+        (e['ignoreBudget'] as bool?) ?? (glazeMeta?['ignoreBudget'] as bool?) ?? false,
+    vectorSearch: (e['vectorSearch'] as bool?) ??
+        (e['vector_search'] as bool?) ??
+        (glazeMeta?['vectorSearch'] as bool?) ??
+        false,
+    useKeywordSearch: (e['useKeywordSearch'] as bool?) ??
+        (e['use_keyword_search'] as bool?) ??
+        (glazeMeta?['useKeywordSearch'] as bool?) ??
+        true,
+    delayUntilRecursion: (e['delayUntilRecursion'] as bool?) ?? false,
+    useGroupScoring: (e['useGroupScoring'] as bool?) ?? false,
   );
+}
+
+/// Accepts the shapes seen in the wild:
+/// - ST native map: `{isExclude: bool, names: [...], tags: [...]}`
+/// - Glaze `glazeMetadata` map: `{names: [...], isExclude: bool}`
+/// - bare name list `[...]` or a single `'Name'` string.
+LorebookCharacterFilter? _parseCharacterFilter(dynamic raw) {
+  if (raw is Map) {
+    final names = (raw['names'] as List?)
+            ?.map((n) => n.toString())
+            .where((n) => n.isNotEmpty)
+            .toList() ??
+        const <String>[];
+    if (names.isEmpty) return null;
+    return LorebookCharacterFilter(names: names, isExclude: raw['isExclude'] == true);
+  }
+  if (raw is List && raw.isNotEmpty) {
+    return LorebookCharacterFilter(
+      names: raw.map((n) => n.toString()).toList(),
+    );
+  }
+  if (raw is String && raw.isNotEmpty) {
+    return LorebookCharacterFilter(names: [raw]);
+  }
+  return null;
 }
 
 Future<STLorebookImportResult> importSTLorebookFromFile(String filePath, {String? nameOverride}) async {
@@ -95,7 +134,91 @@ Future<STLorebookImportResult> importSTLorebookFromFile(String filePath, {String
   return importSTLorebook(json, nameOverride: nameOverride ?? file.uri.pathSegments.last);
 }
 
+/// The book-level `glazeMetadata` a Glaze export writes, when this file came
+/// from one. Absent for a book written by SillyTavern itself, which is the
+/// point: the settings are restored when they were ours to begin with, and a
+/// foreign book keeps Glaze's defaults rather than inventing values for it.
+LorebookSettings? _bookSettings(Map<String, dynamic> json) {
+  final meta = json['glazeMetadata'];
+  if (meta is! Map) return null;
+  final settings = meta['settings'];
+  if (settings is! Map) return null;
+  try {
+    return LorebookSettings.fromJson(
+      settings.map((key, value) => MapEntry(key.toString(), value)),
+    );
+  } catch (_) {
+    // A book written by an older or newer Glaze, whose settings no longer
+    // parse. The entries are the valuable part and they are already read;
+    // losing the tuning is better than losing the import.
+    return null;
+  }
+}
+
+String _bookDescription(Map<String, dynamic> json) {
+  final meta = json['glazeMetadata'];
+  if (meta is! Map) return '';
+  final description = meta['description'];
+  return description is String ? description : '';
+}
+
+/// The embedded lorebook of a character card, if this file is one.
+///
+/// A Character Card V2/V3 envelope keeps the book under `data.character_book`;
+/// a bare book object carries it at `character_book`. Either way the entries
+/// live *inside* that book, not at the file's top level, so the plain World Info
+/// reader below would import the card as an empty book.
+Map<String, dynamic>? _embeddedCharacterBook(Map<String, dynamic> json) {
+  final data = json['data'];
+  final nested = data is Map ? data['character_book'] : null;
+  final book = nested ?? json['character_book'];
+  return book is Map ? Map<String, dynamic>.from(book) : null;
+}
+
+bool _hasEntries(Map<String, dynamic> json) {
+  final entries = json['entries'];
+  return (entries is List && entries.isNotEmpty) ||
+      (entries is Map && entries.isNotEmpty);
+}
+
+/// Pulls a card's embedded book in as a standalone, globally-enabled lorebook.
+///
+/// The entry mapping runs through [convertCharacterBook] — the same reader the
+/// character import uses — so an entry's keys, position, scan depth, whole-word
+/// and probability flags come out identical to importing the character itself.
+STLorebookImportResult _importEmbeddedCharacterBook(
+  Map<String, dynamic> book,
+  String nameOverride,
+) {
+  final converted = convertCharacterBook(book, 'st_import');
+  final explicitName = (book['name'] as String?)?.trim() ?? '';
+  final fallbackName = nameOverride.replaceAll('.json', '');
+  final lorebook = Lorebook(
+    id: generateId(),
+    name: explicitName.isNotEmpty ? explicitName : fallbackName,
+    enabled: true,
+    activationScope: 'global',
+    entries: converted.entries,
+    settings: converted.settings,
+    updatedAt: currentTimestampSeconds(),
+  );
+  return STLorebookImportResult(
+    lorebook: lorebook,
+    entryCount: lorebook.entries.length,
+  );
+}
+
 STLorebookImportResult importSTLorebook(Map<String, dynamic> json, {String nameOverride = 'Imported'}) {
+  // A character card is not a World Info file. When the file has no top-level
+  // entries of its own, read its embedded `character_book` instead of reporting
+  // an empty import.
+  if (!_hasEntries(json)) {
+    final embedded = _embeddedCharacterBook(json);
+    if (embedded != null) {
+      return _importEmbeddedCharacterBook(embedded, nameOverride);
+    }
+  }
+
   final entriesRaw = json['entries'] ?? <dynamic>[];
 
   List<dynamic> normalizedEntries;
@@ -119,6 +242,8 @@ STLorebookImportResult importSTLorebook(Map<String, dynamic> json, {String nameO
     enabled: true,
     activationScope: 'global',
     entries: entries,
+    settings: _bookSettings(json),
+    description: _bookDescription(json),
     updatedAt: currentTimestampSeconds(),
   );
 

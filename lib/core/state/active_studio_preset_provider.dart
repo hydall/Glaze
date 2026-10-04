@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/studio_config.dart';
 import 'db_provider.dart';
 
 /// Global singleton for the active Studio preset.
@@ -32,3 +33,19 @@ class ActiveStudioPresetNotifier extends AsyncNotifier<String> {
     state = AsyncData(presetId);
   }
 }
+
+/// The Studio preset a turn actually runs: the one [activeStudioPresetProvider]
+/// names, falling back to the seeded `default` row when that id no longer
+/// resolves.
+///
+/// This must mirror `StudioTurnConfigResolver.resolve` exactly. Anything that
+/// reads or writes a preset's API slots (`cheapApiConfigId`,
+/// `expensiveApiConfigId`, `cleanerApiConfigId`, `ledgerApiConfigId`) has to go
+/// through the same preset generation reads — editing `default` while a turn
+/// runs a different preset silently drops the binding, leaving the global model
+/// override pointed at whatever connection the turn falls back to.
+final studioPresetProvider = FutureProvider<StudioPreset?>((ref) async {
+  final repo = ref.watch(studioPresetRepoProvider);
+  final activeId = await ref.watch(activeStudioPresetProvider.future);
+  return await repo.getById(activeId) ?? await repo.getDefault();
+});

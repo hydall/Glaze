@@ -46,12 +46,31 @@ class ChatWebViewBridgeHost {
     required this.overlayContextResolver,
     required this.currentSessionId,
     required this.currentCharacterId,
+    required this.isActive,
   });
 
   final WidgetRef ref;
   final BuildContext? Function() overlayContextResolver;
   final String? Function() currentSessionId;
   final String? Function() currentCharacterId;
+  final bool Function() isActive;
+  bool _disposed = false;
+
+  bool get active => !_disposed && isActive();
+
+  void _ensureActive() {
+    if (!active) throw StateError('ChatWebViewBridgeHost is inactive');
+  }
+
+  String? _activeSessionId() {
+    _ensureActive();
+    return currentSessionId();
+  }
+
+  String? _activeCharacterId() {
+    _ensureActive();
+    return currentCharacterId();
+  }
 
   static const ConnectionProfileResolver _profileResolver =
       ConnectionProfileResolver();
@@ -64,6 +83,7 @@ class ChatWebViewBridgeHost {
   /// `false` (default-deny) if the lookup fails. Mirrors the previous
   /// in-widget `_bridgePermissionCheck`.
   bool _bridgePermissionCheck(String capabilityId) {
+    if (!active) return false;
     try {
       final permissions = ref.read(activePresetPermissionsProvider);
       return permissions.isGrantedById(capabilityId);
@@ -75,8 +95,10 @@ class ChatWebViewBridgeHost {
   /// Build a fresh [JsBridgeService] wired to the current widget state.
   /// Called from `onWebViewCreated`; its command registry re-enters this same
   /// bridge so dedicated capabilities and context resolution remain canonical.
-  Future<JsBridgeService> buildJsBridgeService() async {
+  Future<JsBridgeService?> buildJsBridgeService() async {
+    if (!active) return null;
     final globalRepo = await ref.read(globalVariablesRepoProvider.future);
+    if (!active) return null;
     late final JsBridgeService bridge;
     final commandRegistry = buildWiredCommandRegistry(
       WiredCommandDeps(bridgeDispatch: (request) => bridge.dispatch(request)),
@@ -85,9 +107,12 @@ class ChatWebViewBridgeHost {
       chatRepo: ref.read(chatRepoProvider),
       characterRepo: ref.read(characterRepoProvider),
       globalVariablesRepo: globalRepo,
-      messageVariables: () => ref.read(messageVariablesProvider.notifier),
-      currentSessionId: currentSessionId,
-      currentCharacterId: currentCharacterId,
+      messageVariables: () {
+        _ensureActive();
+        return ref.read(messageVariablesProvider.notifier);
+      },
+      currentSessionId: _activeSessionId,
+      currentCharacterId: _activeCharacterId,
       generateText: _generateBridgeText,
       injectPrompt: _injectBridgePrompt,
       uninjectPrompt: _uninjectBridgePrompt,
@@ -98,6 +123,7 @@ class ChatWebViewBridgeHost {
           _executeBridgeCommand(commandRegistry, command, args, context),
       showToast: _showBridgeToast,
     );
+    if (!active) return null;
     return bridge;
   }
 
@@ -106,7 +132,9 @@ class ChatWebViewBridgeHost {
     Map<String, dynamic> options,
     Map<String, dynamic> bridgeContext,
   ) async {
+    _ensureActive();
     await ref.read(apiListProvider.future);
+    _ensureActive();
     final configs = ref.read(apiListProvider).value ?? const [];
     final activeApiConfig = ref.read(activeApiConfigProvider);
     final profile =
@@ -144,7 +172,7 @@ class ChatWebViewBridgeHost {
             {'role': 'user', 'content': prompt},
           ],
           stream: false,
-          sessionId: currentSessionId(),
+          sessionId: _activeSessionId(),
         ),
         cancelToken: cancelToken,
         onComplete: (text, _, {rawResponseJson}) {
@@ -170,8 +198,9 @@ class ChatWebViewBridgeHost {
     Map<String, dynamic> options,
     Map<String, dynamic> bridgeContext,
   ) {
+    _ensureActive();
     final sessionId =
-        (bridgeContext['sessionId'] as String?) ?? currentSessionId();
+        (bridgeContext['sessionId'] as String?) ?? _activeSessionId();
     if (sessionId == null || sessionId.isEmpty) {
       throw StateError('Chat session context is not available');
     }
@@ -202,8 +231,9 @@ class ChatWebViewBridgeHost {
     String id,
     Map<String, dynamic> bridgeContext,
   ) {
+    _ensureActive();
     final sessionId =
-        (bridgeContext['sessionId'] as String?) ?? currentSessionId();
+        (bridgeContext['sessionId'] as String?) ?? _activeSessionId();
     if (sessionId == null || sessionId.isEmpty) {
       throw StateError('Chat session context is not available');
     }
@@ -217,8 +247,9 @@ class ChatWebViewBridgeHost {
     String? charId,
     Map<String, dynamic> params,
   ) async {
+    if (!active) return TriggerNoSession(mode: TriggerMode.auto).toMap();
     final resolvedCharId =
-        (params['characterId'] as String?) ?? (charId) ?? currentCharacterId();
+        (params['characterId'] as String?) ?? (charId) ?? _activeCharacterId();
     if (resolvedCharId == null || resolvedCharId.isEmpty) {
       return TriggerNoSession(mode: TriggerMode.auto).toMap();
     }
@@ -227,14 +258,18 @@ class ChatWebViewBridgeHost {
       dispatcher: dispatcher,
       log: (line) => debugPrint(line),
     );
-    return handler.handle(charId: resolvedCharId, params: params);
+    final result = await handler.handle(charId: resolvedCharId, params: params);
+    _ensureActive();
+    return result;
   }
 
   Future<void> _playBridgeAudio(String? source, Map<String, dynamic> options) {
+    if (!active) return Future.value();
     return _audioBridge.play(source, options);
   }
 
   void _showBridgeToast(String? message, Map<String, dynamic> options) {
+    if (!active) return;
     final severity = GlazeToastSeverity.parse(options['severity'] as String?);
     // Re-resolve the BuildContext on every call so the toast surfaces
     // from the currently mounted screen, not the snapshot at bridge init.
@@ -252,8 +287,9 @@ class ChatWebViewBridgeHost {
     Map<String, dynamic> args,
     Map<String, dynamic> context,
   ) async {
+    _ensureActive();
     final characterId =
-        (context['characterId'] as String?) ?? currentCharacterId();
+        (context['characterId'] as String?) ?? _activeCharacterId();
     final result = await commandRegistry.run(
       command,
       args,
@@ -263,11 +299,12 @@ class ChatWebViewBridgeHost {
         bridgeContext: {
           ...context,
           if (!context.containsKey('sessionId'))
-            'sessionId': currentSessionId(),
+            'sessionId': _activeSessionId(),
           if (!context.containsKey('characterId')) 'characterId': characterId,
         },
       ),
     );
+    _ensureActive();
     return result.toMap();
   }
 
@@ -275,6 +312,8 @@ class ChatWebViewBridgeHost {
   /// widget's [State.dispose]. Mirrors the previous in-widget disposal
   /// path: drop the audio player.
   Future<void> dispose() async {
+    if (_disposed) return;
+    _disposed = true;
     await _audioBridge.dispose();
   }
 }

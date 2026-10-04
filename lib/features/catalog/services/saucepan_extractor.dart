@@ -92,6 +92,18 @@ class SaucepanException implements Exception {
   String toString() => message;
 }
 
+/// Thrown when a companion's definition is closed to Glaze's account. Unlike a
+/// transient failure this cannot be retried away: the definition is withheld
+/// from third-party clients, and Glaze has no plan to import closed ones.
+class SaucepanClosedException extends SaucepanException {
+  SaucepanClosedException()
+    : super(
+        'This companion has a closed definition. Glaze cannot import it, and '
+        'does not plan to support closed definitions.',
+        status: 403,
+      );
+}
+
 /// The result of a companion extraction: the recovered character and its id.
 class SaucepanExtraction {
   final String companionId;
@@ -250,6 +262,13 @@ class SaucepanExtractor {
             sc is Map ? assembleFragments(sc['message']) : '';
         if (text.trim().isNotEmpty) greetings.add(text);
       }
+    }
+
+    // A definition withheld from third-party clients comes back with no
+    // sections and no reassembled body at all. That is the closed-definition
+    // case, not an empty character: say so instead of importing a husk.
+    if (sections.isEmpty && description.trim().isEmpty && greetings.isEmpty) {
+      throw SaucepanClosedException();
     }
 
     // Advanced Prompt / Response Formatting have no dedicated V2 field — keep

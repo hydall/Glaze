@@ -6,16 +6,38 @@ import '../../../core/models/character.dart';
 import '../../../core/utils/error_format.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_error_dialog.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import '../../character_list/character_detail_screen.dart';
 import '../../settings/app_settings_provider.dart';
 import '../catalog_models.dart';
 import '../catalog_provider.dart';
+import '../chub_account_provider.dart';
+import '../janitor_account_provider.dart';
 import '../services/chub_provider.dart';
-import '../services/datacat_provider.dart';
+// `ExtractionResult` here is DataCat's own; the one this file uses is
+// JanitorExtractor's, so the DataCat name is hidden to keep it unambiguous.
+import '../services/datacat_provider.dart' hide ExtractionResult;
 import '../services/janitor_extractor.dart';
+import '../services/datacat/datacat_cards.dart';
 import '../services/janitor_provider.dart';
+import '../services/janitor_public_lorebook.dart';
+import '../services/janitor_webview_proxy.dart';
 import '../services/janny_provider.dart';
+import '../third_party_providers_provider.dart';
+import 'datacat_phase_label.dart';
+import 'janitor_login_sheet.dart';
+import 'janitor_lorebook_capture_sheet.dart';
+import 'janitor_refused_sheet.dart';
+import 'datacat/datacat_community_section.dart';
+import 'datacat/datacat_creator_screen.dart';
+import 'datacat/datacat_verification_sheet.dart';
 import 'janitor_lorebooks_tab.dart';
+
+/// Thrown when a JanitorAI card could be read from neither source because its
+/// creator restricted it to logged-in visitors and DataCat has no copy.
+class _JanitorLoginRequired implements Exception {
+  const _JanitorLoginRequired();
+}
 
 /// Fetches a catalog item's full character data and presents
 /// `CharacterDetailScreen` in preview mode (Import FAB, no destructive
@@ -42,10 +64,24 @@ class _CatalogDetailLauncherState
   bool _importing = false;
   String? _importPhase;
 
+  /// Set once the user has seen the "proxies are forbidden" sheet and asked for
+  /// the public part anyway, so the import that follows skips the capture that
+  /// cannot work instead of showing the same sheet again.
+  bool _refusalAcknowledged = false;
+
+  /// Progress text for the initial load, set only while the DataCat copy of a
+  /// closed JanitorAI card is being fetched — that one can take a while.
+  String? _loadPhase;
+
   /// Raw JanitorAI metadata (only for the janitor provider) — drives the
   /// public-vs-closed decision and the Lorebooks tab.
   Map<String, dynamic>? _janitorMeta;
   bool _definitionPublic = false;
+
+  /// The creator restricted this card to logged-in visitors, we are not one,
+  /// and DataCat has no copy either — so there is nothing to preview and the
+  /// notice replaces the card.
+  bool _loginRequired = false;
 
   @override
   void initState() {
@@ -54,49 +90,203 @@ class _CatalogDetailLauncherState
   }
 
   Future<void> _fetch() async {
+    // A retry starts from scratch: a DataCat miss last time (or a login that
+    // has happened since) must not be remembered as settled.
+    _datacatTried = false;
+    _datacatResult = null;
     try {
       DownloadedCharacter result;
       switch (widget.provider) {
         case CatalogProvider.janitor:
-          // Always read the card from /hampter so the catalog card carries the
-          // public info. If the definition is public we use it verbatim; if it
-          // is closed we still show what we have (the closed card/lorebook can
-          // then be extracted locally — see _doImport / the Lorebooks tab).
-          final meta = await janitorFetchCharacterMeta(widget.item.id);
-          _janitorMeta = meta;
-          _definitionPublic = janitorDefinitionPublic(meta);
-          result = janitorCharacterFromMeta(meta);
+          result = await _fetchJanitorCard();
         case CatalogProvider.janny:
           result = await jannyFetchCharacter(widget.item.id, widget.item.slug);
         case CatalogProvider.datacat:
-          result = await datacatGetCharacter(widget.item.id);
+          result = await _fetchDatacatCard();
         case CatalogProvider.chub:
           result = await chubGetCharacter(
             widget.item.fullPath ?? widget.item.id,
+            apiKey: ref.read(chubAccountProvider).apiKey,
           );
       }
       if (mounted) setState(() => _downloaded = result);
+    } on _JanitorLoginRequired {
+      if (mounted) setState(() => _loginRequired = true);
     } catch (e) {
       if (mounted) setState(() => _error = formatError(e));
     }
   }
 
+  /// The DataCat card, through the Client API's protected transfer.
+  ///
+  /// Needs a human-verification lease, which is why the preview asks for one
+  /// here rather than at import time: a card that cannot be transferred is a
+  /// card there is nothing to preview of, and finding that out after the user
+  /// has read the page and pressed Import is worse. One lease covers twenty
+  /// characters, so browsing a few in a row verifies once.
+  Future<DownloadedCharacter> _fetchDatacatCard() {
+    return datacatFetchCard(
+      widget.item.id,
+      sourceKind: widget.item.sourceKind,
+      obtainLease: () =>
+          ensureDatacatLease(context, characterId: widget.item.id),
+    );
+  }
+
+  /// The JanitorAI card, from whichever source "Extract JanitorAI cards with"
+  /// points at.
+  ///
+  /// The card and the metadata are two different things: the metadata
+  /// (`/hampter/characters/{id}`, read through the WebView proxy) carries the
+  /// lorebook scripts, `allow_proxy` and the public blurb, so it is read on
+  /// both paths — best effort in DataCat mode, where a proxy failure must not
+  /// cost us a card DataCat can serve anyway.
+  Future<DownloadedCharacter> _fetchJanitorCard() async {
+    final datacatFirst = _source == ExtractionSource.datacat;
+    // The restriction that sent us to DataCat, and the metadata failure we are
+    // tolerating — kept apart because only the first one ends in the login
+    // notice.
+    Object? hidden;
+    Object? metaError;
+
+    try {
+      await _loadJanitorMeta();
+    } catch (e) {
+      if (datacatFirst) {
+        metaError = e;
+      } else if (_janitorRestricted(e) && !_janitorLoggedIn) {
+        hidden = e;
+      } else {
+        rethrow;
+      }
+    }
+
+    if (datacatFirst || hidden != null) {
+      // A card we could not read because we are anonymous is exactly what
+      // DataCat is for: name that reason instead of the generic opening line.
+      final card = await _datacatCard(
+        openingLabel: hidden != null
+            ? 'catalog_datacat_anonymous_fallback'.tr()
+            : null,
+      );
+      if (card != null) return card;
+      // Hidden from us here AND unknown to DataCat: the card exists, we simply
+      // may not see it. Say that instead of an HTTP status.
+      if (hidden != null) throw const _JanitorLoginRequired();
+    }
+
+    final meta = _janitorMeta;
+    // DataCat mode with nothing on either side — surface the proxy's own error.
+    if (meta == null) throw metaError ?? const _JanitorLoginRequired();
+
+    // The card as the proxy has it. A closed definition leaves it empty (only
+    // the public blurb, no prompt); DataCat mode already had its chance above
+    // and had no copy, so there is nothing left to fill it in with.
+    return janitorCharacterFromMeta(meta);
+  }
+
+  /// Reads `/hampter/characters/{id}` through the WebView proxy and records what
+  /// the rest of the preview needs from it.
+  Future<void> _loadJanitorMeta() async {
+    final meta = await janitorFetchCharacterMeta(widget.item.id);
+    _janitorMeta = meta;
+    _definitionPublic = janitorDefinitionPublic(meta);
+  }
+
+  /// Whether [e] is JanitorAI saying "not for you" — the card is restricted to
+  /// logged-in visitors, or gone. A Cloudflare challenge or a transport failure
+  /// is neither, and must not be papered over with a login notice.
+  bool _janitorRestricted(Object e) {
+    if (e is JanitorAuthException) return true;
+    if (e is JanitorCfException) return false;
+    final text = e.toString();
+    return text.contains('HTTP 401') ||
+        text.contains('HTTP 403') ||
+        text.contains('HTTP 404');
+  }
+
+  bool get _janitorLoggedIn => ref.read(janitorAccountProvider).isLoggedIn;
+
   /// Whether importing should run the local JanitorAI extraction (proxy capture
   /// + LLM lorebook rebuild) instead of a plain catalog import: only for a
-  /// JanitorAI character whose definition is closed, when the user opted in.
+  /// JanitorAI character whose definition is closed, when the source is Local.
   bool get _useLocalExtraction {
     if (widget.provider != CatalogProvider.janitor) return false;
     if (_definitionPublic) return false;
-    final settings = ref.read(appSettingsProvider).value;
-    return settings?.extractJanitorLocally ?? false;
+    return _source == ExtractionSource.local;
+  }
+
+  AppSettings? get _settings => ref.read(appSettingsProvider).value;
+
+  /// Where the card, its closed definition and its closed lorebooks all come
+  /// from ("Extract JanitorAI cards with").
+  ExtractionSource get _source =>
+      _settings?.janitorSource ?? const AppSettings().janitorSource;
+
+  /// [_datacatCard]'s answer, kept so the two questions it can be asked in one
+  /// load ("is the card here at all?" and "does it carry the closed prompt?")
+  /// cost one extraction, not two. Cleared by [_fetch] so a retry re-asks.
+  DownloadedCharacter? _datacatResult;
+  bool _datacatTried = false;
+
+  /// The same JanitorAI character as DataCat has it: DataCat scrapes closed
+  /// cards, so its copy carries the prompt the hampter endpoint withholds.
+  ///
+  /// Best-effort — a card DataCat has never seen is extracted on demand (slow,
+  /// hence the phase text), and anything that fails or comes back without a
+  /// prompt leaves the hampter card in place rather than making the preview an
+  /// error.
+  Future<DownloadedCharacter?> _datacatCard({String? openingLabel}) async {
+    if (_datacatTried) return _datacatResult;
+    _datacatTried = true;
+    final url = _sourceUrl();
+    if (url == null) return null;
+    if (mounted) {
+      setState(
+        () => _loadPhase = openingLabel ?? 'catalog_datacat_card_phase'.tr(),
+      );
+    }
+    try {
+      final res = await datacatExtractAndPoll(
+        url,
+        // DataCat reports its own phase names, and sends an empty one between
+        // steps — keep the opening line rather than blanking the label.
+        onPhaseChange: (p) {
+          if (mounted && p.trim().isNotEmpty) {
+            setState(() => _loadPhase = datacatPhaseLabel(p));
+          }
+        },
+      );
+      final data = res.charData;
+      if (data == null || data.description.trim().isEmpty) return null;
+      return _datacatResult = DownloadedCharacter(
+        charData: data,
+        avatarUrl: res.avatarUrl,
+      );
+    } catch (e) {
+      debugPrint('[catalog] DataCat fallback failed: $e');
+      return null;
+    } finally {
+      if (mounted) setState(() => _loadPhase = null);
+    }
   }
 
   Character _toCharacter(DownloadedCharacter d) {
     final data = d.charData;
+    // A closed JanitorAI definition hides the real prompt (it isn't in the
+    // public card, only in the blurb which we keep out of the description).
+    // Show a hint in the preview's prompt slot instead of a blank field.
+    // Display-only: _doImport imports `downloaded` (empty description), not
+    // this preview object, so the hint text is never written to the library.
+    final janitorClosed =
+        widget.provider == CatalogProvider.janitor && !_definitionPublic;
+    final description = janitorClosed && data.description.trim().isEmpty
+        ? 'catalog_janitor_closed_prompt'.tr()
+        : data.description;
     return Character(
       id: 'preview:${widget.item.id}',
       name: data.name.isEmpty ? widget.item.name : data.name,
-      description: data.description,
+      description: description,
       personality: data.personality,
       scenario: data.scenario,
       firstMes: data.firstMes,
@@ -111,19 +301,81 @@ class _CatalogDetailLauncherState
     );
   }
 
-  Future<void> _doImport({bool includeLorebooks = false}) async {
+  /// The JanitorAI lorebook context, when this preview has one. Lorebook work
+  /// (downloading the public books, capturing and rebuilding the closed one)
+  /// runs in the capture sheet, which owns the context choices the automatic
+  /// rebuild would have to guess at.
+  JanitorLorebookArgs? get _lorebookArgs =>
+      widget.provider == CatalogProvider.janitor
+          ? JanitorLorebookArgs(
+              characterId: widget.item.id,
+              sourceUrl: _sourceUrl() ?? widget.item.id,
+              meta: _janitorMeta ?? const {},
+              definitionPublic: _definitionPublic,
+            )
+          : null;
+
+  /// Whether the character has any lorebook at all — public, private or
+  /// scripted. "Character + lorebooks" hands every one of them to the capture
+  /// sheet (nothing is attached silently during the import), so this is the
+  /// condition for opening it; a character with no books never does.
+  ///
+  /// Deliberately the same test the preview uses to decide whether to offer the
+  /// "Character + lorebooks" choice at all (`_previewHasLorebooks`): if the
+  /// question was asked, the sheet that answers it must open.
+  bool get _hasAnyLorebooks => lorebookScriptRefs(_janitorMeta).isNotEmpty;
+
+  /// [skipExtraction] runs the plain catalog import even for a closed JanitorAI
+  /// card: the path taken after the user acknowledged that JanitorAI refuses to
+  /// assemble this character's prompt and asked for the public part anyway.
+  Future<void> _doImport({
+    CatalogImportMode mode = CatalogImportMode.character,
+    bool skipExtraction = false,
+  }) async {
     final downloaded = _downloaded;
     if (downloaded == null || _importing) return;
+
+    // Normally the Import tap already cleared this (see _confirmImportPossible);
+    // this is the backstop for a lorebooks-only import reached from elsewhere.
+    if (!skipExtraction && !_refusalAcknowledged && _capturesLocally(mode)) {
+      final refused = _importRefusal ??
+          JanitorWebViewProxy.instance.refusalFor(widget.item.id);
+      if (refused != null) {
+        final anyway = await showJanitorRefusedSheet(
+          context,
+          refused,
+          // Lorebooks-only imports nothing into the library, so there is no
+          // public part left to fall back to.
+          offerImportAnyway: mode != CatalogImportMode.lorebooks,
+        );
+        if (!mounted || !anyway) return;
+        return _doImport(mode: mode, skipExtraction: true);
+      }
+    }
+
+    // Lorebooks only: nothing is added to the character library, so hand
+    // straight over to the capture sheet without an import at all.
+    final lorebookArgs = _lorebookArgs;
+    if (mode == CatalogImportMode.lorebooks) {
+      if (lorebookArgs == null) return;
+      await showJanitorLorebookCaptureSheet(context, args: lorebookArgs);
+      return;
+    }
+
     setState(() {
       _importing = true;
       _importPhase = null;
     });
     try {
       final String importedCharId;
-      if (_useLocalExtraction) {
-        // Closed JanitorAI card + opt-in: capture the hidden card and closed
-        // lorebook locally via the proxy, then rebuild the lorebook with the
-        // active LLM (a lorebook failure still keeps the character).
+      // Kept so the capture sheet can start from this pass instead of running a
+      // second one (see JanitorLorebookCapture.initialExtraction).
+      ExtractionResult? extraction;
+      // A closed JanitorAI card with the opt-in on: the card itself only exists
+      // inside the assembled prompt, so it is captured locally via the proxy.
+      // The lorebook is NOT rebuilt here — that is the capture sheet's job below
+      // when the user asked for lorebooks too.
+      if (_useLocalExtraction && !skipExtraction && !_refusalAcknowledged) {
         final extractor = ref.read(janitorExtractorProvider);
         final result = await extractor.extract(
           _sourceUrl() ?? widget.item.id,
@@ -131,46 +383,137 @@ class _CatalogDetailLauncherState
             if (mounted) setState(() => _importPhase = p);
           },
         );
+        extraction = result;
+        // Lorebooks are never attached here, not even the public ones: with
+        // "Character + lorebooks" every book — public, private or scripted —
+        // is handed to the capture sheet below, so it is the single place they
+        // are saved from and nothing lands in the library twice.
         final commit = await extractor.commit(
           result,
+          rebuildLorebook: false,
+          attachPublicLorebooks: false,
+          janitorMeta: _janitorMeta,
           onPhase: (p) {
             if (mounted) setState(() => _importPhase = p);
           },
         );
         importedCharId = commit.glazeCharacterId;
-        if (mounted && commit.lorebookError != null) {
-          GlazeErrorDialog.show(
-            context,
-            'Character imported, but the closed lorebook could not be rebuilt: '
-            '${commit.lorebookError}',
-          );
-        }
       } else {
-        if (includeLorebooks && mounted) {
-          setState(() => _importPhase = 'catalog_import_lorebooks_phase'.tr());
-        }
+        // Public definition: a plain catalog import. Lorebooks stay out of it —
+        // the capture sheet below owns all of them (see above).
         importedCharId = await ref
             .read(catalogProvider.notifier)
             .importCharacter(
               downloaded,
               sourceUrl: _sourceUrl(),
-              attachLorebooks: includeLorebooks,
+              attachLorebooks: false,
               janitorMeta: _janitorMeta,
             );
       }
-      if (mounted) {
-        Navigator.of(context, rootNavigator: true).pop(importedCharId);
+      if (!mounted) return;
+      // Character + lorebooks: the character is in the library, so the lorebook
+      // half of the import starts now. The capture sheet opens over the preview,
+      // scoped to the character we just imported so its books land on it, and
+      // the preview closes once the user is done with it.
+      if (mode.importsLorebooks && lorebookArgs != null && _hasAnyLorebooks) {
+        await showJanitorLorebookCaptureSheet(
+          context,
+          args: lorebookArgs,
+          characterId: importedCharId,
+          initialExtraction: extraction,
+        );
+        if (!mounted) return;
       }
+      Navigator.of(context, rootNavigator: true).pop(importedCharId);
     } catch (e) {
-      if (mounted) {
-        setState(() => _importing = false);
-        GlazeErrorDialog.show(context, e, prefix: 'Import failed: ');
+      if (!mounted) return;
+      setState(() => _importing = false);
+      // The account session went stale mid-import. Ask for a fresh login and
+      // pick the import back up once it is done.
+      if (e is JanitorAuthException) {
+        // The session survived neither the refresh nor the retry, so stop
+        // claiming an account is signed in while every call to it 401s.
+        await ref.read(janitorAccountProvider.notifier).setUserName(null);
+        if (!mounted) return;
+        final loggedIn = await showJanitorSessionExpiredSheet(context);
+        if (mounted && loggedIn) {
+          await _doImport(mode: mode, skipExtraction: skipExtraction);
+        }
+        return;
       }
+      // A refusal is JanitorAI's policy, not a failure to retry: explain it and
+      // offer the public part instead of an error dialog.
+      if (e is JanitorRefusedException) {
+        final anyway = await showJanitorRefusedSheet(context, e);
+        if (mounted && anyway) {
+          await _doImport(mode: mode, skipExtraction: true);
+        }
+        return;
+      }
+      GlazeErrorDialog.show(
+        context,
+        e,
+        prefix: 'error_import_failed_prefix'.tr(),
+      );
     }
+  }
+
+  /// Whether [mode] would run the local JanitorAI capture — the step a refusal
+  /// makes impossible.
+  bool _capturesLocally(CatalogImportMode mode) =>
+      mode == CatalogImportMode.lorebooks
+          ? widget.provider == CatalogProvider.janitor &&
+                _source == ExtractionSource.local
+          : _useLocalExtraction;
+
+  /// The refusal standing in the way of a capture-backed import, if any: the
+  /// character's own metadata (`allow_proxy: false`), or a refusal JanitorAI
+  /// returned earlier this session for a reason the metadata does not carry
+  /// (a ban, a limit).
+  JanitorRefusedException? get _importRefusal {
+    if (!_useLocalExtraction || _refusalAcknowledged) return null;
+    if (!janitorAllowsProxy(_janitorMeta)) {
+      return const JanitorRefusedException.proxyForbidden();
+    }
+    return JanitorWebViewProxy.instance.refusalFor(widget.item.id);
+  }
+
+  /// The action on the "logged-in visitors only" notice: log in, then read the
+  /// card again — this time as someone allowed to see it. Also the way back for
+  /// a user who logs in and finds DataCat had a copy after all.
+  Future<void> _loginAndRetry() async {
+    await openJanitorAccountSheet(context, ref);
+    if (!mounted) return;
+    setState(() {
+      _loginRequired = false;
+      _error = null;
+    });
+    await _fetch();
+  }
+
+  /// Runs on the Import tap, before the mode is chosen: a character JanitorAI
+  /// will not assemble a prompt for cannot be recovered at all, so say that
+  /// first rather than after the user has picked what to pull. Returns whether
+  /// the import should go ahead.
+  Future<bool> _confirmImportPossible() async {
+    final refusal = _importRefusal;
+    if (refusal == null) return true;
+    final anyway = await showJanitorRefusedSheet(context, refusal);
+    if (!mounted || !anyway) return false;
+    setState(() => _refusalAcknowledged = true);
+    return true;
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_loginRequired) {
+      return _ErrorView(
+        icon: Icons.lock_outline_rounded,
+        message: 'catalog_janitor_login_required'.tr(),
+        actionLabel: 'catalog_janitor_login_required_btn'.tr(),
+        onRetry: _loginAndRetry,
+      );
+    }
     if (_error != null) {
       return _ErrorView(message: _error!, onRetry: () {
         setState(() => _error = null);
@@ -179,15 +522,21 @@ class _CatalogDetailLauncherState
     }
     final downloaded = _downloaded;
     if (downloaded == null) {
-      return const _LoadingView();
+      return _LoadingView(phase: _loadPhase);
     }
     final char = _toCharacter(downloaded);
     final avatarUrl =
         downloaded.avatarUrl ?? widget.item.avatarUrl;
+    // Adult imagery on this row with the blur setting on: the hero image and
+    // the images inside the bio are drawn blurred. Results and imports are
+    // untouched, and the sheet's menu can reveal them for this view.
+    final blurNsfwImages =
+        ref.watch(blurNsfwImagesProvider) && shouldBlurNsfwItem(widget.item);
     return CharacterDetailScreen(
       charId: char.id,
       previewCharacter: char,
       previewAvatarUrl: avatarUrl,
+      previewBlurNsfwImages: blurNsfwImages,
       previewSourceUrl: _sourceUrl(),
       previewAuthorUrl: _authorUrl(),
       // Only JanitorAI exposes a comments/reviews endpoint keyed by character id.
@@ -195,19 +544,37 @@ class _CatalogDetailLauncherState
           ? widget.item.id
           : null,
       // JanitorAI previews get a Lorebooks tab (public + closed lorebooks).
-      janitorLorebookArgs: widget.provider == CatalogProvider.janitor
-          ? JanitorLorebookArgs(
-              characterId: widget.item.id,
-              sourceUrl: _sourceUrl() ?? widget.item.id,
-              meta: _janitorMeta ?? const {},
-              definitionPublic: _definitionPublic,
-            )
-          : null,
+      janitorLorebookArgs: _lorebookArgs,
+      datacatCommunityArgs: _communityArgs,
+      onOpenCreator: _openCreator,
       onImport: _doImport,
+      onBeforeImport: _confirmImportPossible,
       importing: _importing,
       importPhase: _importPhase,
     );
   }
+
+  /// The creator's own screen, for a source that has one.
+  ///
+  /// DataCat addresses creators by `ref`, not by the raw id — a Saucepan
+  /// creator's ref carries a `saucepan:` prefix — so a row without one has no
+  /// page to open and the author line stays plain text.
+  VoidCallback? get _openCreator {
+    if (widget.provider != CatalogProvider.datacat) return null;
+    final ref = widget.item.creatorRef;
+    if (ref == null || ref.isEmpty) return null;
+    return () => openDatacatCreatorScreen(
+      context,
+      creatorRef: ref,
+      creatorName: widget.item.creator,
+    );
+  }
+
+  /// Kudos and comments, for a source that exposes them.
+  DatacatCommunityArgs? get _communityArgs =>
+      widget.provider == CatalogProvider.datacat
+      ? DatacatCommunityArgs(characterId: widget.item.id)
+      : null;
 
   /// External URL of the character's page on its source site. Only Janitor
   /// exposes a stable per-character web URL today; other providers return null
@@ -233,7 +600,11 @@ class _CatalogDetailLauncherState
 }
 
 class _LoadingView extends StatelessWidget {
-  const _LoadingView();
+  /// What the wait is for, when it is long enough to need saying (the DataCat
+  /// card fetch). Null renders the bare spinner.
+  final String? phase;
+
+  const _LoadingView({this.phase});
 
   @override
   Widget build(BuildContext context) {
@@ -244,17 +615,42 @@ class _LoadingView extends StatelessWidget {
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       child: Center(
-        child: CircularProgressIndicator(color: context.cs.primary),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            GlazeSpinner(color: context.cs.primary),
+            if (phase != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                phase!,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: context.cs.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
 }
 
+/// The card that could not be shown, and the one thing to do about it. Doubles
+/// as the "visible to logged-in visitors only" notice, which is not a failure
+/// to retry but a login to make — hence the icon and the action label.
 class _ErrorView extends StatelessWidget {
   final String message;
   final VoidCallback onRetry;
+  final IconData icon;
+  final String? actionLabel;
 
-  const _ErrorView({required this.message, required this.onRetry});
+  const _ErrorView({
+    required this.message,
+    required this.onRetry,
+    this.icon = Icons.error_outline_rounded,
+    this.actionLabel,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -268,11 +664,7 @@ class _ErrorView extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
-            Icons.error_outline_rounded,
-            size: 48,
-            color: context.cs.onSurfaceVariant,
-          ),
+          Icon(icon, size: 48, color: context.cs.onSurfaceVariant),
           const SizedBox(height: 16),
           Text(
             message,
@@ -291,9 +683,9 @@ class _ErrorView extends StatelessWidget {
                 color: context.cs.primary,
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: const Text(
-                'Retry',
-                style: TextStyle(
+              child: Text(
+                actionLabel ?? 'Retry',
+                style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.w600,
                 ),

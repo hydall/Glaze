@@ -4,7 +4,8 @@
 
 # Glaze
 
-[![Discord](https://img.shields.io/discord/1355184294868484196?color=5865F2&logo=discord&logoColor=white)](https://discord.gg/jnGhd7p6Ht)
+[![Download](https://img.shields.io/github/v/release/hydall/Glaze?include_prereleases&label=download&color=C42A4A)](https://github.com/hydall/Glaze/releases/latest)
+[![Discord](https://img.shields.io/badge/Discord-Join-5865F2?style=flat&logo=discord&logoColor=white)](https://discord.gg/jnGhd7p6Ht)
 [![Telegram](https://img.shields.io/badge/Telegram-2CA5E0?style=flat&logo=telegram&logoColor=white)](https://t.me/glazeapp)
 [![Boosty](https://img.shields.io/badge/Boosty-F15F2C?style=flat&logo=boosty&logoColor=white)](https://boosty.to/hydall)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-FFDD00?style=flat&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/hydall)
@@ -54,44 +55,21 @@ Glaze включает изолированную систему расшире�
 
 ## 📥 Установка
 
-Загрузите последний релиз со страницы [Releases](../../releases).
+Загрузите последний релиз со страницы [Releases](https://github.com/hydall/Glaze/releases/latest).
 
 - **Android** — Установите APK-файл напрямую на ваше устройство.
 - **iOS** — Установите IPA методом неофициальной загрузки (sideloading) через [AltStore](https://altstore.io/) или аналогичный инструмент. Приложение пока недоступно в App Store.
 - **Windows** — Загрузите сборку для Windows и запустите её на своём ПК.
-- **macOS / Linux** — Собираются из исходников, но ещё не публикуются как готовые сборки; упаковка и подпись в планах.
+- **Linux** — На Arch-подобных дистрибутивах установите pacman-пакет (он сам подтянет WPE WebKit), на других rolling-дистрибутивах распакуйте архив `.tar.zst`, предварительно установив WPE WebKit. Ubuntu и Debian пока не поддерживаются: в их репозиториях нет WPE WebKit.
+- **macOS** — Собирается из исходников, но пока не публикуется как готовая сборка.
 
 Резервные копии из **SillyTavern** (`.zip`) можно импортировать через **Меню → Бекапы**.
 
 ## 🛠️ Разработка
 
-Создано на Flutter с локальным SQLite-хранилищем, нативной поддержкой десктопа и изолированным окружением для расширений. Используется Riverpod, Drift/SQLite, Dio, GoRouter и WebView-рендеринг чата.
+Glaze построен на Flutter с локальным SQLite-хранилищем, нативной поддержкой десктопа и изолированным окружением для расширений. Используется Riverpod, Drift/SQLite, Dio, GoRouter и WebView-рендеринг чата.
 
-### 📋 Предварительные Требования
-
-- [Flutter](https://docs.flutter.dev/get-started/install) 3.44+ (или новее, совместимый с Dart 3.12+)
-- Инструментарий для целевой платформы — [Android Studio](https://developer.android.com/studio) для Android, Xcode для iOS/macOS, Visual Studio с нагрузкой C++ для десктопа для Windows
-- Git
-
-### 🏗️ Настройка
-
-```bash
-git clone https://github.com/hydall/Glaze.git
-cd Glaze
-flutter pub get
-```
-
-### 🚀 Запуск
-
-```bash
-flutter run
-```
-
-### 🧪 Тестирование
-
-```bash
-flutter test
-```
+Требования, настройка, команды сборки, кодогенерация, тесты и структура проекта — в [`CONTRIBUTING.md`](CONTRIBUTING.md). Правила работы с git, PR, CI и релизами — в [`docs/WORKFLOW.md`](docs/WORKFLOW.md).
 
 ## 🙏 Благодарности
 
@@ -99,6 +77,13 @@ flutter test
 - [SillyTavern-CharacterLibrary](https://github.com/Sillyanonymous/SillyTavern-CharacterLibrary) — референс для извлечения JanitorAI через браузер.
 - [Marinara Engine](https://github.com/Pasta-Devs/Marinara-Engine) — вдохновение для agentic workflow.
 - [Lumiverse](https://github.com/prolix-oc/Lumiverse) — вдохновение для agentic workflow.
+
+### 🧪 Тестеры
+
+Те, кто находит баги раньше релиза — Зал Славы в самом приложении
+(**Меню → О Glaze → Зал Славы**):
+
+**nightsyr** *(почётный тестер)*, Саша Белый, múrx, lina, ShikiN, N K, Сатаник1155.
 
 ## 📜 Лицензия
 

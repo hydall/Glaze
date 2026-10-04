@@ -17,8 +17,8 @@
          without recreating the Activity), so we pin it to the brand vk-blue. -->
     <style name="NormalTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">?android:colorBackground</item>
-        <item name="android:colorAccent">#FF7996CE</item>
-        <item name="android:colorControlActivated">#FF7996CE</item>
-        <item name="android:colorControlHighlight">#407996CE</item>
+        <item name="android:colorAccent">#FFC42A4A</item>
+        <item name="android:colorControlActivated">#FFC42A4A</item>
+        <item name="android:colorControlHighlight">#40C42A4A</item>
     </style>
 </resources>

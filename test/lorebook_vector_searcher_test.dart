@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/db/repositories/embedding_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/session_lorebook_evolution_repo.dart';
 import 'package:glaze_flutter/core/llm/embedding_service.dart';
 import 'package:glaze_flutter/core/llm/embedding_types.dart';
 import 'package:glaze_flutter/core/llm/lorebook_vector_search.dart';
@@ -33,6 +34,7 @@ class _StubVectorSearch extends LorebookVectorSearch {
     LorebookActivations? activations,
     String? chatId,
     int? overrideTopK,
+    Set<SessionLorebookTarget> sessionOverlayTargets = const {},
     CancelToken? cancelToken,
   }) async {
     if (error != null) throw error!;
@@ -87,7 +89,19 @@ void main() {
 
       final entries = await fixture.container
           .read(searcherProvider)
-          .search(const [], 'query', null, null);
+          .search(
+            const [],
+            'query',
+            null,
+            null,
+            lorebooks: const [
+              Lorebook(
+                id: 'book',
+                name: 'Book',
+                entries: [LorebookEntry(id: 'entry', content: 'content')],
+              ),
+            ],
+          );
 
       expect(entries.single.id, 'entry');
       expect(entries.single.lorebookId, 'book');
@@ -108,7 +122,19 @@ void main() {
 
     final entries = await fixture.container
         .read(searcherProvider)
-        .search(const [], 'query', null, null);
+        .search(
+          const [],
+          'query',
+          null,
+          null,
+          lorebooks: const [
+            Lorebook(
+              id: 'book',
+              name: 'Book',
+              entries: [LorebookEntry(id: 'entry', content: 'content')],
+            ),
+          ],
+        );
 
     expect(entries, isEmpty);
     expect(diagnostics, hasLength(1));

@@ -46,6 +46,7 @@ void main() {
         'onChangeGreeting',
         'onRegenerate',
         'onHeaderScroll',
+        'onScrollToTopVisibility',
         'onStop',
         'onSelectionAction',
         'onEditSave',
@@ -56,6 +57,7 @@ void main() {
         'onToggleHidden',
         'onInjectClick',
         'onImgRetry',
+        'onImgEnableRetry',
         'onImgFind',
         'onImgRegen',
         'onImgCancel',
@@ -75,6 +77,7 @@ void main() {
         'onReady',
         'onLoadMore',
         'onHeaderScroll',
+        'onScrollToTopVisibility',
         'onLinkClick',
         'onImageClick',
         'onMessageContext',
@@ -90,6 +93,7 @@ void main() {
         'onSelectionChange',
         'onInjectClick',
         'onImgRetry',
+        'onImgEnableRetry',
         'onImgFind',
         'onImgRegen',
         'onImgCancel',
@@ -155,6 +159,7 @@ void main() {
           'onWebViewReady',
           'onLoadMore',
           'onHeaderScroll',
+          'onScrollToTopVisibility',
           'onLinkClick',
           'onImageClick',
           'onMessageContext',
@@ -170,6 +175,7 @@ void main() {
           'onSelectionChange',
           'onInjectClick',
           'onImgRetry',
+          'onImgEnableRetry',
           'onImgFind',
           'onImgRegen',
           'onImgCancel',
@@ -198,16 +204,25 @@ void main() {
     );
 
     test(
-      'image callbacks (retry/find/regen) have (String, String) signature',
+      'image callbacks (retry/enable/find/regen) carry the tapped block index',
       () {
-        for (final name in ['onImgRetry', 'onImgFind', 'onImgRegen']) {
+        // Whitespace-normalized so the assertion survives reformatting.
+        final source = bridgeControllerSource.replaceAll(RegExp(r'\s+'), ' ');
+        for (final name in [
+          'onImgRetry',
+          'onImgEnableRetry',
+          'onImgFind',
+          'onImgRegen',
+        ]) {
           expect(
-            bridgeControllerSource,
+            source,
             contains(
-              'void Function(String instruction, String messageId)? $name;',
+              'void Function(String instruction, String messageId, '
+              'int? blockIndex)? $name;',
             ),
             reason:
-                '$name must accept (String instruction, String messageId) parameters',
+                '$name must accept (String instruction, String messageId, '
+                'int? blockIndex) so an action applies to one image',
           );
         }
       },

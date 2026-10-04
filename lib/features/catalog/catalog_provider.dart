@@ -11,8 +11,11 @@ import '../../../core/services/character_book_converter.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/state/lorebook_provider.dart';
 import '../../../core/state/shared_prefs_provider.dart';
+import '../../../core/utils/error_format.dart';
 import 'catalog_models.dart';
-import 'services/datacat_provider.dart';
+import 'chub_account_provider.dart';
+import 'services/datacat/datacat_discovery.dart';
+import 'services/datacat/datacat_sort.dart';
 import 'services/janitor_provider.dart';
 import 'services/janitor_public_lorebook.dart';
 import 'services/janny_provider.dart';
@@ -32,7 +35,7 @@ String _filtersKeyFor(CatalogProvider p) => '${_filtersKey}_${p.name}';
 const providerSortDefaults = <CatalogProvider, String>{
   CatalogProvider.janitor: 'trending',
   CatalogProvider.janny: 'newest',
-  CatalogProvider.datacat: 'recent',
+  CatalogProvider.datacat: 'fresh',
   CatalogProvider.chub: 'popular',
 };
 
@@ -47,6 +50,16 @@ class CatalogState {
   final CatalogProvider activeProvider;
   final CatalogFilters filters;
 
+  /// Where the next page starts, for a provider that pages by cursor rather
+  /// than by page number. Reset with the results.
+  final int nextOffset;
+
+  /// True while Chub's "Timeline" recommendation feed is selected. The feed is
+  /// served from its own endpoint that only reads `nsfw`/`nsfl`, so the UI hides
+  /// the query and the other filters while this is set.
+  bool get chubTimelineActive =>
+      activeProvider == CatalogProvider.chub && filters.sort == 'timeline';
+
   const CatalogState({
     this.results = const [],
     this.loading = false,
@@ -57,6 +70,7 @@ class CatalogState {
     this.total = 0,
     this.activeProvider = CatalogProvider.janitor,
     this.filters = const CatalogFilters(),
+    this.nextOffset = 0,
   });
 
   CatalogState copyWith({
@@ -69,6 +83,7 @@ class CatalogState {
     int? total,
     CatalogProvider? activeProvider,
     CatalogFilters? filters,
+    int? nextOffset,
   }) {
     return CatalogState(
       results: results ?? this.results,
@@ -80,6 +95,7 @@ class CatalogState {
       total: total ?? this.total,
       activeProvider: activeProvider ?? this.activeProvider,
       filters: filters ?? this.filters,
+      nextOffset: nextOffset ?? this.nextOffset,
     );
   }
 }
@@ -116,7 +132,7 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
   CatalogNotifier(this._ref, {this._fetchOverride})
     : super(const CatalogState()) {
     _loadSavedState();
-    // If the active provider gets disabled on the Third-Party providers screen,
+    // If the active provider gets disabled on the content providers screen,
     // fall back to an enabled one so the catalog never shows a hidden source.
     _ref.listen<List<CatalogProvider>>(enabledCatalogProvidersProvider, (
       _,
@@ -129,6 +145,19 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
       if (enabled.isNotEmpty && !enabled.contains(state.activeProvider)) {
         setProvider(enabled.first);
       }
+    });
+    // A Chub account key unlocks account-scoped results (NSFL). Reload when it
+    // changes while Chub is the active source — this also covers the stored key
+    // arriving from prefs after the first anonymous search.
+    _ref.listen<ChubAccount>(chubAccountProvider, (previous, next) {
+      if (previous?.apiKey == next.apiKey && previous?.nsfl == next.nsfl) {
+        return;
+      }
+      if (!_savedStateApplied || state.activeProvider != CatalogProvider.chub) {
+        return;
+      }
+      resetChubTagCache();
+      unawaited(search(reset: true));
     });
   }
 
@@ -165,7 +194,7 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
     _savedStateApplied = true;
     state = state.copyWith(
       activeProvider: provider,
-      filters: savedFilters.copyWith(sort: savedSort),
+      filters: _migrated(provider, savedFilters.copyWith(sort: savedSort)),
     );
     await search(reset: true);
   }
@@ -194,11 +223,36 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
           tagNames: (json['tagNames'] as List?)?.cast<String>() ?? [],
           minTokens: json['minTokens'] as int? ?? 29,
           maxTokens: json['maxTokens'] as int? ?? 100000,
+          nsfwOnly: json['nsfwOnly'] as bool? ?? false,
+          requireImages: json['requireImages'] as bool? ?? false,
+          requireLore: json['requireLore'] as bool? ?? false,
+          requireCustomPrompt: json['requireCustomPrompt'] as bool? ?? false,
+          requireExampleDialogues:
+              json['requireExampleDialogues'] as bool? ?? false,
+          requireAlternateGreetings:
+              json['requireAlternateGreetings'] as bool? ?? false,
+          recommendedVerified: json['recommendedVerified'] as bool? ?? false,
+          excludeMine: json['excludeMine'] as bool? ?? false,
+          inclusiveOr: json['inclusiveOr'] as bool? ?? false,
+          minAiRating: json['minAiRating'] as int? ?? 0,
+          minTags: json['minTags'] as int? ?? 0,
+          window: json['window'] as String? ?? 'all',
         );
       }
     } catch (_) {}
     return const CatalogFilters();
   }
+
+  /// Rewrites a restored DataCat sort that predates the Client API.
+  ///
+  /// The old keys folded a sort field and a time window into one label
+  /// (`score_week`); the API takes them as two parameters. Translating on
+  /// restore rather than on every request means the migration happens once and
+  /// the persisted value is the new shape from then on.
+  CatalogFilters _migrated(CatalogProvider provider, CatalogFilters filters) =>
+      provider == CatalogProvider.datacat
+      ? DatacatSort.migrate(filters)
+      : filters;
 
   Future<void> _saveState() async {
     final prefs = await _ref.read(sharedPreferencesProvider.future);
@@ -216,6 +270,18 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
         'tagNames': state.filters.tagNames,
         'minTokens': state.filters.minTokens,
         'maxTokens': state.filters.maxTokens,
+        'nsfwOnly': state.filters.nsfwOnly,
+        'requireImages': state.filters.requireImages,
+        'requireLore': state.filters.requireLore,
+        'requireCustomPrompt': state.filters.requireCustomPrompt,
+        'requireExampleDialogues': state.filters.requireExampleDialogues,
+        'requireAlternateGreetings': state.filters.requireAlternateGreetings,
+        'recommendedVerified': state.filters.recommendedVerified,
+        'excludeMine': state.filters.excludeMine,
+        'inclusiveOr': state.filters.inclusiveOr,
+        'minAiRating': state.filters.minAiRating,
+        'minTags': state.filters.minTags,
+        'window': state.filters.window,
       }),
     );
   }
@@ -239,27 +305,75 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
     final savedFilters = _loadFilters(prefs, provider);
     state = state.copyWith(
       activeProvider: provider,
-      filters: savedFilters.copyWith(sort: savedSort),
+      filters: _migrated(provider, savedFilters.copyWith(sort: savedSort)),
     );
     unawaited(_saveState());
     unawaited(search(reset: true));
   }
 
   void setSort(String sort) {
-    state = state.copyWith(filters: state.filters.copyWith(sort: sort));
+    var filters = state.filters.copyWith(sort: sort);
+    // Timeline is a fixed recommendation feed served by its own endpoint: its
+    // query and every filter but nsfw/nsfl never reach it, so switching to it
+    // drops those selections instead of leaving dead controls lit.
+    if (sort == 'timeline') {
+      filters = _stripForTimeline(filters);
+    }
+    state = state.copyWith(
+      filters: filters,
+      query: sort == 'timeline' ? '' : state.query,
+    );
+    _saveState();
+    search(reset: true);
+  }
+
+  /// Changes the time window a listing is scoped to. Its own action rather
+  /// than part of [setFilters] because it reads as a sort choice to the user
+  /// and lives next to the sort chip, not in the filter sheet.
+  void setWindow(String window) {
+    if (window == state.filters.window) return;
+    state = state.copyWith(filters: state.filters.copyWith(window: window));
     _saveState();
     search(reset: true);
   }
 
   void setFilters(CatalogFilters filters) {
+    // Timeline ignores everything but nsfw/nsfl; don't let stale selections ride.
+    if (state.chubTimelineActive) {
+      filters = _stripForTimeline(filters);
+    }
     state = state.copyWith(filters: filters);
     _saveState();
     search(reset: true);
   }
 
   void setQuery(String query) {
+    // The Timeline feed ignores free-text search; keep its query pinned empty.
+    if (state.chubTimelineActive) return;
     state = state.copyWith(query: query);
   }
+
+  /// The Timeline endpoint reads only `nsfw` and `nsfl`; every other field in
+  /// [CatalogFilters] is silently dropped, so reset them instead of carrying
+  /// selections the filter sheet no longer exposes.
+  CatalogFilters _stripForTimeline(CatalogFilters filters) => filters.copyWith(
+    tagIds: const [],
+    tagNames: const [],
+    excludeTagNames: const [],
+    minTokens: 29,
+    maxTokens: 100000,
+    nsfwOnly: false,
+    requireImages: false,
+    requireLore: false,
+    requireCustomPrompt: false,
+    requireExampleDialogues: false,
+    requireAlternateGreetings: false,
+    recommendedVerified: false,
+    excludeMine: false,
+    inclusiveOr: false,
+    minAiRating: 0,
+    minTags: 0,
+  );
 
   Future<void> search({bool reset = false}) async {
     // Pagination must not stack on top of an in-flight page, but a reset search
@@ -271,7 +385,13 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
     final epoch = ++_searchEpoch;
 
     if (reset) {
-      state = state.copyWith(page: 1, results: [], hasMore: true, error: null);
+      state = state.copyWith(
+        page: 1,
+        results: [],
+        hasMore: true,
+        error: null,
+        nextOffset: 0,
+      );
     }
 
     if (!state.hasMore) return;
@@ -300,11 +420,12 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
             (items.isNotEmpty &&
                 (state.results.length + items.length) < (result.total)),
         page: state.page + 1,
+        nextOffset: result.nextOffset ?? state.nextOffset + items.length,
         loading: false,
       );
     } catch (e) {
       if (!mounted || epoch != _searchEpoch) return;
-      state = state.copyWith(loading: false, error: e.toString());
+      state = state.copyWith(loading: false, error: formatError(e));
     }
   }
 
@@ -325,17 +446,13 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
           filters: state.filters,
         );
       case CatalogProvider.datacat:
-        await datacatEnsureSession();
-        if (state.query.isNotEmpty) {
-          return datacatSearch(
-            query: state.query,
-            page: state.page,
-            limit: _pageSize,
-            filters: state.filters,
-          );
-        }
-        return datacatBrowse(
-          page: state.page,
+        // Browse and search are the same endpoint now — an empty query is
+        // simply an unfiltered listing — so there is no second code path to
+        // drift out of sync. Paged by the server's own cursor rather than by
+        // multiplying the page number, because DataCat filters after paging.
+        return datacatFetchCharacters(
+          query: state.query,
+          offset: state.nextOffset,
           limit: _pageSize,
           filters: state.filters,
         );
@@ -345,6 +462,8 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
           page: state.page,
           limit: _pageSize,
           filters: state.filters,
+          apiKey: _ref.read(chubAccountProvider).apiKey,
+          accountNsfl: _ref.read(chubAccountProvider).nsfl,
         );
     }
   }
@@ -367,7 +486,18 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
     final charData = downloaded.charData;
 
     String? avatarPath;
-    if (downloaded.avatarUrl != null) {
+    // A source whose image endpoint needs the same credentials as the card
+    // hands the bytes over with it — they cannot be re-fetched from a bare URL
+    // afterwards, so they are saved rather than re-downloaded.
+    final carriedBytes = downloaded.avatarBytes;
+    if (carriedBytes != null && carriedBytes.isNotEmpty) {
+      try {
+        avatarPath = await imageStorage.saveAvatar(
+          id,
+          Uint8List.fromList(carriedBytes),
+        );
+      } catch (_) {}
+    } else if (downloaded.avatarUrl != null) {
       try {
         final bytes = await _fetchImageBytes(downloaded.avatarUrl!);
         avatarPath = await imageStorage.saveAvatar(id, bytes);

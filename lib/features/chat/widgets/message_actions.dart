@@ -1,15 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../chat_provider.dart';
 import '../editing_message_provider.dart';
+import 'message_delete_confirmation.dart';
 
 void showMessageContextMenu({
   required BuildContext context,
   required WidgetRef ref,
   required String charId,
+  required String? sessionId,
   required String content,
   required int messageIndex,
   required String messageId,
@@ -21,6 +24,7 @@ void showMessageContextMenu({
   required bool isHidden,
   required bool canDeleteSwipe,
   required bool canDeleteAgentSwipe,
+  Future<bool> Function()? beforeRegenerate,
 }) {
   // Notifier is read fresh inside each onTap callback instead of captured
   // here. If the provider is invalidated while the menu is open (e.g. by a
@@ -71,9 +75,12 @@ void showMessageContextMenu({
         BottomSheetItem(
           icon: Icons.refresh,
           label: 'Regenerate',
-          onTap: () {
+          onTap: () async {
             Navigator.of(context, rootNavigator: true).pop();
-            ref.read(chatProvider(charId).notifier).regenerateLastAssistant();
+            if (await beforeRegenerate?.call() == false) return;
+            await ref
+                .read(chatProvider(charId).notifier)
+                .regenerateLastAssistant();
           },
         ),
       if (isActivelyGenerating)
@@ -90,9 +97,18 @@ void showMessageContextMenu({
         BottomSheetItem(
           icon: Icons.call_split,
           label: 'Branch',
-          onTap: () {
+          onTap: () async {
             Navigator.of(context, rootNavigator: true).pop();
-            ref.read(chatProvider(charId).notifier).branchSession(messageIndex);
+            final branch = await ref
+                .read(chatProvider(charId).notifier)
+                .branchSession(messageIndex);
+            if (branch != null && context.mounted) {
+              // A branch that kept the source card lands on that character's
+              // next session index, not on 0.
+              context.go(
+                '/chat/${branch.characterId}?session=${branch.sessionIndex}',
+              );
+            }
           },
         ),
       BottomSheetItem(
@@ -129,14 +145,24 @@ void showMessageContextMenu({
                 .deleteActiveAgentSwipe(messageIndex);
           },
         ),
-      if (isLast && !isGenerating)
+      if (!isGenerating)
         BottomSheetItem(
           icon: Icons.delete,
           label: 'Delete',
           isDestructive: true,
-          onTap: () {
+          onTap: () async {
             Navigator.of(context, rootNavigator: true).pop();
-            ref.read(chatProvider(charId).notifier).deleteMessage(messageIndex);
+            if (!await confirmMessageDeletion(
+              context,
+              ref,
+              sessionId: sessionId,
+            )) {
+              return;
+            }
+            if (!context.mounted) return;
+            await ref
+                .read(chatProvider(charId).notifier)
+                .deleteMessage(messageIndex);
           },
         ),
     ],

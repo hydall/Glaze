@@ -6,9 +6,11 @@ import 'package:flutter/foundation.dart';
 
 import '../../utils/error_format.dart';
 import '../converters/gemini_messages.dart';
+import '../converters/structured_response.dart';
 import '../converters/thinking_budget.dart';
 import 'chat_transport.dart';
 import 'chat_transport_request.dart';
+import 'endpoint_normalizer.dart';
 import 'extra_request_parameters.dart';
 
 /// Result of [GeminiChatTransport.buildRequest] — URL/body/headers ready to
@@ -35,8 +37,10 @@ class GeminiBuiltRequest {
 ///   `generationConfig` (incl. `thinkingConfig`) + `safetySettings`.
 ///
 /// Behaviours:
-/// - Unconditionally collapses non-assistant chrome via `mergeNonAssistant`
-///   before converting (per user requirement).
+/// - Message shaping matches SillyTavern's `convertGooglePrompt`: only the
+///   leading run of genuine `system` messages is lifted into
+///   `systemInstruction` (one part each), everything else keeps its place and
+///   consecutive same-role turns are squashed inside `contents`.
 /// - Safety settings: all five HARM_* categories set to `OFF`.
 /// - Extended thinking: `generationConfig.thinkingConfig.thinkingBudget`
 ///   (int) or `.thinkingLevel` (string for Gemini 3) per
@@ -70,44 +74,47 @@ class GeminiChatTransport implements ChatTransport {
             ),
           );
 
-  static String _normaliseBase(String endpoint) {
-    var base = endpoint.trim();
-    if (base.isEmpty) return '';
-    if (!base.startsWith(RegExp(r'https?://'))) base = 'https://$base';
-    while (base.endsWith('/')) {
-      base = base.substring(0, base.length - 1);
-    }
-    return base;
-  }
+  /// Gemini builds `{base}/v1beta/models/{model}:{action}` itself, so the base
+  /// must not carry a version segment — `EndpointNormalizer.geminiBase` strips
+  /// one the user may have pasted along with the URL.
+  static String _normaliseBase(String endpoint) =>
+      EndpointNormalizer.geminiBase(endpoint);
 
   static String buildGenerateUrl({
     required String endpoint,
-    required String model,
     required String apiKey,
-    required bool stream,
   }) {
-    final base = _normaliseBase(endpoint);
-    final responseType = stream ? 'streamGenerateContent' : 'generateContent';
-    final params = <String>[
-      'key=${Uri.encodeQueryComponent(apiKey)}',
-      if (stream) 'alt=sse',
-    ];
-    return '$base/$_apiVersion/models/$model:$responseType?${params.join('&')}';
+    final uri = Uri.parse(endpoint.trim());
+    return uri
+        .replace(
+          queryParameters: {
+            ...uri.queryParameters,
+            'key': apiKey,
+            if (endpoint.contains(':streamGenerateContent')) 'alt': 'sse',
+          },
+        )
+        .toString();
   }
 
   /// Pure: build URL + body + headers from a [ChatTransportRequest]. Exposed
   /// for unit tests.
   static GeminiBuiltRequest buildRequest(ChatTransportRequest request) {
-    final converted = convertGoogleMessagesMerged(request.messages);
+    final converted = convertGoogleMessages(
+      request.messages,
+      useSystemInstruction: request.useSystemInstruction,
+    );
 
     final generationConfig = <String, dynamic>{'candidateCount': 1};
     if (request.maxTokens > 0) {
       generationConfig['maxOutputTokens'] = request.maxTokens;
     }
-    if (!request.omitTemperature && request.temperature > 0) {
+    // Gated on the omit* flags only — see the note in
+    // `OpenAiChatTransport.buildBody`. topK keeps its `> 0` guard because
+    // Gemini rejects `topK: 0`.
+    if (!request.omitTemperature) {
       generationConfig['temperature'] = request.temperature;
     }
-    if (!request.omitTopP && request.topP > 0 && request.topP < 1) {
+    if (!request.omitTopP) {
       generationConfig['topP'] = request.topP;
     }
     if (!request.omitTopK && request.topK > 0) {
@@ -133,6 +140,11 @@ class GeminiChatTransport implements ChatTransport {
       generationConfig['thinkingConfig'] = thinkingConfig;
     }
 
+    if (request.responseJsonSchema != null) {
+      generationConfig['responseMimeType'] = 'application/json';
+      generationConfig['responseSchema'] = request.responseJsonSchema;
+    }
+
     final body = <String, dynamic>{
       'contents': converted.contents,
       'safetySettings': _safetyAllOff,
@@ -150,9 +162,7 @@ class GeminiChatTransport implements ChatTransport {
 
     final url = buildGenerateUrl(
       endpoint: request.endpoint,
-      model: request.model,
       apiKey: request.apiKey,
-      stream: request.stream,
     );
 
     return GeminiBuiltRequest(
@@ -183,7 +193,7 @@ class GeminiChatTransport implements ChatTransport {
     for (var attempt = 0; attempt <= _maxRetries; attempt++) {
       try {
         final built = buildRequest(request);
-        if (request.stream) {
+        if (request.stream && request.responseJsonSchema == null) {
           await _streamResponse(
             built.url,
             built.headers,
@@ -205,6 +215,7 @@ class GeminiChatTransport implements ChatTransport {
             omitReasoning:
                 !(request.showNativeReasoning ?? !request.omitReasoning),
             receiveTimeoutMs: request.receiveTimeoutMs,
+            unwrapStructured: request.responseJsonSchema != null,
           );
         }
         return; // success — no retry needed
@@ -268,11 +279,20 @@ class GeminiChatTransport implements ChatTransport {
     StreamSubscription<List<int>>? subscription;
     var buffer = '';
 
+    Future<void> finishAfterCancel([Object? error, StackTrace? stack]) async {
+      await subscription?.cancel();
+      if (completer.isCompleted) return;
+      if (error == null) {
+        completer.complete();
+      } else {
+        completer.completeError(error, stack);
+      }
+    }
+
     subscription = stream.listen(
       (chunk) {
         if (cancelToken?.isCancelled == true) {
-          subscription?.cancel();
-          if (!completer.isCompleted) completer.complete();
+          unawaited(finishAfterCancel());
           return;
         }
         buffer += utf8.decode(chunk, allowMalformed: true);
@@ -280,9 +300,8 @@ class GeminiChatTransport implements ChatTransport {
         buffer = lines.removeLast();
 
         for (final line in lines) {
-          final trimmed = line.trim();
-          if (!trimmed.startsWith('data:')) continue;
-          final payload = trimmed.substring(5).trim();
+          final payload = _sseData(line);
+          if (payload == null) continue;
           if (payload.isEmpty) continue;
           lastRawPayload = payload;
 
@@ -320,20 +339,16 @@ class GeminiChatTransport implements ChatTransport {
           }
         }
       },
-      onDone: () {
-        if (!completer.isCompleted) completer.complete();
-      },
-      onError: (Object e) {
-        if (!completer.isCompleted) completer.completeError(e);
-      },
+      onDone: () => unawaited(finishAfterCancel()),
+      onError: (Object e, StackTrace stack) =>
+          unawaited(finishAfterCancel(e, stack)),
       cancelOnError: true,
     );
 
     if (cancelToken != null) {
       unawaited(
-        cancelToken.whenCancel.then((_) {
-          subscription?.cancel();
-          if (!completer.isCompleted) completer.complete();
+        cancelToken.whenCancel.then((_) async {
+          await finishAfterCancel();
         }),
       );
     }
@@ -361,6 +376,15 @@ class GeminiChatTransport implements ChatTransport {
     );
   }
 
+  String? _sseData(String line) {
+    final normalized = line.endsWith('\r')
+        ? line.substring(0, line.length - 1)
+        : line;
+    if (!normalized.startsWith('data:')) return null;
+    final value = normalized.substring(5);
+    return value.startsWith(' ') ? value.substring(1) : value;
+  }
+
   Future<void> _oneShotResponse(
     String url,
     Map<String, String> headers,
@@ -369,6 +393,7 @@ class GeminiChatTransport implements ChatTransport {
     ChatTransportOnComplete? onComplete,
     bool omitReasoning = false,
     int? receiveTimeoutMs,
+    bool unwrapStructured = false,
   }) async {
     final response = await _dio.post<dynamic>(
       url,
@@ -426,8 +451,11 @@ class GeminiChatTransport implements ChatTransport {
       }
     }
 
+    final finalText = unwrapStructured
+        ? unwrapStructuredResponse(textBuf.toString())
+        : textBuf.toString();
     onComplete?.call(
-      textBuf.toString(),
+      finalText,
       reasoningBuf.isEmpty ? null : reasoningBuf.toString(),
       rawResponseJson: rawJson ?? jsonEncode(data),
     );

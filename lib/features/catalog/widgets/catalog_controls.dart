@@ -1,16 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glass_surface.dart';
-import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/list_controls.dart';
 import '../catalog_models.dart';
 import '../catalog_provider.dart';
 import '../third_party_providers_provider.dart';
 import 'catalog_filter_sheet.dart';
+import 'datacat/datacat_sort_sheet.dart';
+import 'provider_logo.dart';
 import 'third_party_providers_screen.dart';
+
 import 'package:easy_localization/easy_localization.dart';
+import '../../../shared/widgets/glaze_sheet.dart';
 
 class CatalogControls extends ConsumerWidget {
   final CatalogState state;
@@ -44,15 +47,12 @@ class CatalogControls extends ConsumerWidget {
           'tokens_asc': 'catalog_sort_janny_tokens_asc'.tr(),
           'relevant': 'catalog_sort_janny_relevant'.tr(),
         },
-        CatalogProvider.datacat => {
-          'recent': 'catalog_sort_datacat_recent'.tr(),
-          'fresh': 'catalog_sort_datacat_fresh'.tr(),
-          'score_week': 'catalog_sort_datacat_score_week'.tr(),
-          'score_24h': 'catalog_sort_datacat_score_24h'.tr(),
-          'chat_count_week': 'catalog_sort_datacat_chat_count_week'.tr(),
-          'chat_count_24h': 'catalog_sort_datacat_chat_count_24h'.tr(),
-        },
+        // The five sort fields the Client API accepts. The time window is a
+        // second choice in the same picker, so every field can be combined with
+        // every window instead of only the four pairings the old labels named.
+        CatalogProvider.datacat => datacatSortOptions(),
         CatalogProvider.chub => {
+          'timeline': 'catalog_sort_chub_timeline'.tr(),
           'popular': 'catalog_sort_chub_popular'.tr(),
           'trending_week': 'catalog_sort_chub_trending_week'.tr(),
           'trending_24h': 'catalog_sort_chub_trending_24h'.tr(),
@@ -61,6 +61,11 @@ class CatalogControls extends ConsumerWidget {
           'updated': 'catalog_sort_chub_updated'.tr(),
         },
       };
+
+  /// Whether this provider can filter by token count. DataCat's API takes no
+  /// token bounds, so the slider is hidden there rather than quietly ignored.
+  static bool supportsTokenRange(CatalogProvider p) =>
+      p != CatalogProvider.datacat;
 
   int _activeFilterCount() {
     final f = state.filters;
@@ -72,18 +77,41 @@ class CatalogControls extends ConsumerWidget {
     if (state.activeProvider == CatalogProvider.chub && f.nsfl) count++;
     if (f.tagIds.isNotEmpty) count += f.tagIds.length;
     if (f.tagNames.isNotEmpty) count += f.tagNames.length;
-    if (f.minTokens != 29) count++;
-    if (f.maxTokens != 100000) count++;
+    // Only counted where the filter exists — a leftover token range from
+    // another provider must not badge a provider that cannot apply it.
+    if (supportsTokenRange(state.activeProvider)) {
+      if (f.minTokens != 29) count++;
+      if (f.maxTokens != 100000) count++;
+    }
+    // The Chub-only refinements share the same rule as NSFL: they only apply to
+    // chub, so they only count toward chub's badge.
+    if (state.activeProvider == CatalogProvider.chub) {
+      if (f.nsfwOnly) count++;
+      if (f.requireImages) count++;
+      if (f.requireLore) count++;
+      if (f.requireCustomPrompt) count++;
+      if (f.requireExampleDialogues) count++;
+      if (f.requireAlternateGreetings) count++;
+      if (f.recommendedVerified) count++;
+      if (f.excludeMine) count++;
+      if (f.inclusiveOr) count++;
+      if (f.minAiRating > 0) count++;
+      if (f.minTags > 0) count++;
+    }
     return count;
   }
 
   String _currentSortLabel() {
+    if (state.activeProvider == CatalogProvider.datacat) {
+      return datacatSortOptions()[state.filters.sort] ?? state.filters.sort;
+    }
     final opts = sortOptionsForProvider(state.activeProvider);
     return opts[state.filters.sort] ?? state.filters.sort;
   }
 
   // Icon per sort-mode key, shared across providers since the same key
-  // (e.g. 'latest', 'popular') always carries the same meaning.
+  // (e.g. 'latest', 'popular') always carries the same meaning. DataCat's own
+  // fields live with its combined picker in [datacat_sort_sheet.dart].
   static const Map<String, IconData> _sortIcons = {
     'trending': Icons.trending_up_rounded,
     'trending_week': Icons.trending_up_rounded,
@@ -95,37 +123,43 @@ class CatalogControls extends ConsumerWidget {
     'tokens_desc': Icons.arrow_downward_rounded,
     'tokens_asc': Icons.arrow_upward_rounded,
     'relevant': Icons.auto_awesome_rounded,
-    'recent': Icons.schedule_rounded,
-    'fresh': Icons.new_releases_rounded,
-    'score_week': Icons.star_rounded,
-    'score_24h': Icons.local_fire_department_rounded,
-    'chat_count_week': Icons.chat_bubble_rounded,
-    'chat_count_24h': Icons.whatshot_rounded,
     'rating': Icons.thumb_up_rounded,
     'updated': Icons.update_rounded,
+    'timeline': Icons.timeline_rounded,
   };
 
   static IconData sortIconForKey(String key) =>
       _sortIcons[key] ?? Icons.sort_rounded;
 
-  IconData _currentSortIcon() => sortIconForKey(state.filters.sort);
+  IconData _currentSortIcon() {
+    if (state.activeProvider == CatalogProvider.datacat) {
+      return datacatSortIconFor(state.filters.sort);
+    }
+    return sortIconForKey(state.filters.sort);
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final enabledProviders = ref.watch(enabledCatalogProvidersProvider);
-    return Row(
+    // The DataCat chip shows the window as its text, so resolve its label once.
+    final datacatWindowLabel = state.activeProvider == CatalogProvider.datacat
+        ? datacatWindowOptions()[state.filters.window] ?? state.filters.window
+        : '';
+    final row = Row(
       children: [
-        _LabeledChip(
+        GlazeDropdownChip(
           label: providerLabel(state.activeProvider),
-          onTap: () => _showPickerSheet(
+          leading: ProviderLogo.catalog(provider: state.activeProvider),
+          onTap: () => showGlazePickerSheet(
             context,
             title: 'blacklist_glossary_chip'.tr(),
             items: enabledProviders
                 .map(
-                  (p) => _PickerItem(
+                  (p) => GlazePickerItem(
                     label: providerLabel(p),
                     isActive: p == state.activeProvider,
                     value: p,
+                    iconWidget: ProviderLogo.catalog(provider: p, size: 20),
                   ),
                 )
                 .toList(),
@@ -139,9 +173,9 @@ class CatalogControls extends ConsumerWidget {
           ),
         ),
         const Spacer(),
-        _FilterIconButton(
+        GlazeFilterIconButton(
           count: _activeFilterCount(),
-          onTap: () => showModalBottomSheet<void>(
+          onTap: () => showGlazeSheet<void>(
             context: context,
             isScrollControlled: true,
             useRootNavigator: true,
@@ -150,94 +184,60 @@ class CatalogControls extends ConsumerWidget {
             builder: (_) => CatalogFilterSheet(
               filters: state.filters,
               provider: state.activeProvider,
+              timelineMode: state.chubTimelineActive,
               onApply: (f) => notifier.setFilters(f),
               onBlockedTagsChanged: () => notifier.search(reset: true),
             ),
           ),
         ),
-        const SizedBox(width: 8),
-        _SortIconChip(
-          icon: _currentSortIcon(),
-          tooltip: _currentSortLabel(),
-          onTap: () => _showPickerSheet(
-            context,
-            title: 'sort_by'.tr(),
-            items: sortOptionsForProvider(state.activeProvider).entries
-                .map(
-                  (e) => _PickerItem(
-                    label: e.value,
-                    isActive: e.key == state.filters.sort,
-                    value: e.key,
-                    icon: sortIconForKey(e.key),
-                  ),
-                )
-                .toList(),
-            onSelect: (v) => notifier.setSort(v as String),
+        if (state.activeProvider == CatalogProvider.datacat) ...[
+          const SizedBox(width: 8),
+          // One chip for the whole listing order: the sort field's icon and the
+          // time window's text, both edited in the same sheet.
+          GlazeActionChip(
+            icon: _currentSortIcon(),
+            label: datacatWindowLabel,
+            tooltip: '${_currentSortLabel()} · $datacatWindowLabel',
+            onTap: () => showDatacatSortSheet(
+              context,
+              filters: state.filters,
+              onSort: notifier.setSort,
+              onWindow: notifier.setWindow,
+            ),
           ),
-        ),
+        ] else ...[
+          const SizedBox(width: 8),
+          GlazeSortIconChip(
+            icon: _currentSortIcon(),
+            tooltip: _currentSortLabel(),
+            onTap: () => showGlazePickerSheet(
+              context,
+              title: 'sort_by'.tr(),
+              items: sortOptionsForProvider(state.activeProvider).entries
+                  .map(
+                    (e) => GlazePickerItem(
+                      label: e.value,
+                      isActive: e.key == state.filters.sort,
+                      value: e.key,
+                      icon: sortIconForKey(e.key),
+                    ),
+                  )
+                  .toList(),
+              onSelect: (v) => notifier.setSort(v as String),
+            ),
+          ),
+        ],
       ],
     );
-  }
 
-  void _showPickerSheet(
-    BuildContext context, {
-    required String title,
-    required List<_PickerItem> items,
-    required ValueChanged<dynamic> onSelect,
-    Widget? headerAction,
-  }) {
-    GlazeBottomSheet.show<void>(
-      context,
-      title: title,
-      headerAction: headerAction,
-      items: items
-          .map(
-            (item) => BottomSheetItem(
-              icon: item.icon ?? (item.isActive ? Icons.check_rounded : null),
-              iconColor: item.icon != null
-                  ? (item.isActive
-                        ? context.cs.primary
-                        : context.cs.onSurfaceVariant)
-                  : context.cs.primary,
-              label: item.label,
-              actions: item.icon != null && item.isActive
-                  ? [
-                      BottomSheetAction(
-                        icon: Icons.check_rounded,
-                        color: context.cs.primary,
-                        onTap: () {
-                          Navigator.of(context, rootNavigator: true).pop();
-                          onSelect(item.value);
-                        },
-                      ),
-                    ]
-                  : const [],
-              onTap: () {
-                Navigator.of(context, rootNavigator: true).pop();
-                onSelect(item.value);
-              },
-            ),
-          )
-          .toList(),
-    );
+    // One backdrop capture for the row instead of one per chip: these are
+    // plain siblings that never overlap. See [GlassBackdropGroup].
+    return GlassBackdropGroup(child: row);
   }
-}
-
-class _PickerItem {
-  final String label;
-  final bool isActive;
-  final dynamic value;
-  final IconData? icon;
-  const _PickerItem({
-    required this.label,
-    required this.isActive,
-    required this.value,
-    this.icon,
-  });
 }
 
 /// Gear button pinned to the provider-picker sheet header; opens the
-/// Third-Party providers screen where sources can be enabled/disabled.
+/// content providers screen where sources can be enabled/disabled.
 class _SettingsGearButton extends StatelessWidget {
   final VoidCallback onTap;
 
@@ -250,155 +250,6 @@ class _SettingsGearButton extends StatelessWidget {
       icon: Icon(Icons.settings_outlined, size: 22, color: context.cs.primary),
       tooltip: 'third_party_providers_title'.tr(),
       visualDensity: VisualDensity.compact,
-    );
-  }
-}
-
-class _LabeledChip extends StatelessWidget {
-  final String label;
-  final VoidCallback onTap;
-
-  const _LabeledChip({required this.label, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: SizedBox(
-        height: 32,
-        child: GlassSurface(
-          borderRadius: BorderRadius.circular(16),
-          tint: context.cs.surface,
-          border: Border.all(color: context.cs.primary.withValues(alpha: 0.18)),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: context.cs.primary,
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Icon(
-                  Icons.keyboard_arrow_down_rounded,
-                  size: 18,
-                  color: context.cs.primary,
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SortIconChip extends StatelessWidget {
-  final IconData icon;
-  final String tooltip;
-  final VoidCallback onTap;
-
-  const _SortIconChip({
-    required this.icon,
-    required this.tooltip,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: GestureDetector(
-        onTap: onTap,
-        child: SizedBox(
-          height: 32,
-          child: GlassSurface(
-            borderRadius: BorderRadius.circular(16),
-            tint: context.cs.surface,
-            border: Border.all(color: context.cs.primary.withValues(alpha: 0.18)),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(icon, size: 18, color: context.cs.primary),
-                  const SizedBox(width: 2),
-                  Icon(
-                    Icons.keyboard_arrow_down_rounded,
-                    size: 18,
-                    color: context.cs.primary,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _FilterIconButton extends StatelessWidget {
-  final int count;
-  final VoidCallback onTap;
-
-  const _FilterIconButton({required this.count, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: SizedBox(
-        width: 32,
-        height: 32,
-        child: Stack(
-          clipBehavior: Clip.none,
-          alignment: Alignment.center,
-          children: [
-            GlassSurface(
-              borderRadius: BorderRadius.circular(16),
-              tint: context.cs.surface,
-              border: Border.all(color: context.cs.primary.withValues(alpha: 0.18)),
-              child: Center(
-                child: Icon(
-                  Icons.filter_list_rounded,
-                  size: 18,
-                  color: context.cs.primary,
-                ),
-              ),
-            ),
-            if (count > 0)
-              Positioned(
-                top: -2,
-                right: -2,
-                child: Container(
-                  constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  decoration: BoxDecoration(
-                    color: context.cs.primary,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Center(
-                    child: Text(
-                      '$count',
-                      style: const TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white,
-                        height: 1.0,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
     );
   }
 }

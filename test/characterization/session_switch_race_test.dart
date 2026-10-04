@@ -684,12 +684,12 @@ void main() {
 
       // Try to switch to a non-existent session (index 99).
       // switchToSession will throw StateError.
-      await ctrl.switchSession(99);
+      await expectLater(ctrl.switchSession(99), throwsA(isA<StateError>()));
 
-      // Catch block fires — restores the state to session 0.
-      // This is correct error recovery behavior.
+      // The active state stays intact, and the failure is propagated so the
+      // caller can show an error instead of reporting a successful switch.
       expect(box.value.value?.session?.sessionIndex, 0,
-          reason: 'Catch block restored session 0 after error');
+          reason: 'Session 0 remains active after the failed switch');
     });
 
     test('switch then createNewSession — only the new session writes state', () async {

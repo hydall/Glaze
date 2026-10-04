@@ -260,7 +260,7 @@ void main() {
         cleanerBlocks: const [
           StudioPresetBlock(
             id: 'cleaner_beauty',
-            section: 'cleaner',
+            injectionPoint: 'cleaner',
             content: 'BEAUTY SELF-CONTAINED {{beautyBrief}}',
           ),
         ],

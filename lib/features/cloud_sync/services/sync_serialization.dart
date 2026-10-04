@@ -4,14 +4,17 @@ import 'package:crypto/crypto.dart';
 
 import '../../../core/models/chat_message.dart';
 import '../../../core/models/memory_book.dart';
-import '../../../core/constants/image_gen_patterns.dart';
 import '../../../features/extensions/models/info_block.dart';
+import '../../../features/image_gen/services/image_tag_markup.dart';
 import '../cloud_adapter.dart';
 import '../sync_models.dart';
 
 class SyncSerialization {
   static const pipelineSettingsKey = 'pipelineSettings';
   static const activeStudioPresetKey = 'activeStudioPresetId';
+  static const globalRegexScriptsKey = 'gz_global_regex_scripts';
+  static const studioRegexScriptsKey = 'gz_studio_regex_scripts';
+  static const appSettingsKey = 'appSettings';
 
   /// Content fingerprint for manifest conflict detection (not full session JSON).
   static String computeChatMetadataHash(SessionMetadata metadata) {
@@ -30,6 +33,13 @@ class SyncSerialization {
   static String computeSyncHash(dynamic data) {
     final json = jsonEncode(data);
     return sha256.convert(utf8.encode(json)).toString();
+  }
+
+  static String computeStudioConfigHash(Map<String, dynamic> json) {
+    final content = Map<String, dynamic>.from(json)
+      ..remove('createdAt')
+      ..remove('updatedAt');
+    return computeSyncHash(content);
   }
 
   /// Device-local / derived fields excluded so parity does not false-conflict.
@@ -105,33 +115,31 @@ class SyncSerialization {
     };
   }
 
-  /// Normalizes an InfoBlock for cloud storage:
-  /// - imageGen blocks: replaces [IMG:RESULT:/path|json] with [IMG:GEN:json]
-  ///   so images can be regenerated on pull without storing device-local paths.
-  /// - All other block types: stored as-is.
+  /// Normalizes an InfoBlock for cloud storage: a finished image is replaced
+  /// by the instruction that produced it, so the block can be regenerated on
+  /// pull and no device-local path ever leaves the device. A block holding no
+  /// image is stored as-is.
+  ///
+  /// The test is the content, not the block's type. It used to be
+  /// `blockType == 'imageGen'`, which was safe only while images could come
+  /// from nothing else; now that any generated block can draw one, that check
+  /// would upload the file paths of every block the old image type did not
+  /// cover.
   static Map<String, dynamic> normalizeInfoBlockForSync(InfoBlock block) {
     final json = block.toJson();
-    if (block.blockType != 'imageGen') return json;
-    final normalized = Map<String, dynamic>.from(json);
-    normalized['content'] = normalizeImageGenContent(block.content);
-    return normalized;
+    final normalized = normalizeImageGenContent(block.content);
+    if (normalized == block.content) return json;
+    return Map<String, dynamic>.from(json)..['content'] = normalized;
   }
 
   /// Replaces [IMG:RESULT:/abs/path|json] → [IMG:GEN:json]
   /// and [IMG:ERROR:...] → [IMG:GEN] so that pulled blocks can be regenerated.
-  static String normalizeImageGenContent(String content) {
-    var result = content.replaceAllMapped(ImgGenPatterns.imgResultRegex, (m) {
-      final payload = m.group(1) ?? '';
-      final pipeIdx = payload.indexOf('|');
-      if (pipeIdx >= 0) {
-        final instruction = payload.substring(pipeIdx + 1);
-        return '[IMG:GEN:$instruction]';
-      }
-      return '[IMG:GEN]';
-    });
-    result = result.replaceAll(ImgGenPatterns.imgErrorStripRegex, '[IMG:GEN]');
-    return result;
-  }
+  ///
+  /// The stored `<img data-iig-…>` form of a finished block goes the same way:
+  /// the image file itself never leaves the device, so what is uploaded is the
+  /// instruction that can produce it again.
+  static String normalizeImageGenContent(String content) =>
+      ImageTagMarkup.reduceBlocksToInstructions(content);
 
   static String computeBinaryHash(List<int> bytes) {
     return sha256.convert(bytes).toString();
@@ -147,11 +155,17 @@ class SyncSerialization {
   static Map<String, dynamic> localStoragePayload({
     String? pipelineSettings,
     String? activeStudioPresetId,
+    String? globalRegexScripts,
+    String? studioRegexScripts,
+    Map<String, dynamic>? appSettings,
   }) {
     return {
       '__localStorage': true,
       pipelineSettingsKey: ?pipelineSettings,
       activeStudioPresetKey: ?activeStudioPresetId,
+      globalRegexScriptsKey: ?globalRegexScripts,
+      studioRegexScriptsKey: ?studioRegexScripts,
+      appSettingsKey: ?appSettings,
     };
   }
 
@@ -190,5 +204,21 @@ class SyncSerialization {
     } catch (_) {
       return null;
     }
+  }
+
+  static Future<Map<String, dynamic>> readRequiredCloudEntity(
+    CloudAdapter adapter,
+    SyncManifestEntry entry,
+  ) async {
+    final raw = await adapter.download(entry.path);
+    if (raw.isEmpty) {
+      throw StateError('Empty cloud entity: ${entry.key}');
+    }
+    if (raw.length > maxSyncPayloadBytes) {
+      throw Exception(
+        'Payload exceeds ${maxSyncPayloadBytes ~/ 1024 ~/ 1024}MB limit',
+      );
+    }
+    return jsonDecode(raw) as Map<String, dynamic>;
   }
 }

@@ -5,9 +5,9 @@ import 'package:flutter_riverpod/legacy.dart';
 
 import '../models/persona.dart';
 import '../models/preset.dart';
+import 'db_provider.dart';
 import 'shared_prefs_provider.dart';
 import 'memory_settings_provider.dart';
-import 'pipeline_settings_provider.dart';
 
 export 'active_regex_provider.dart';
 export 'persona_resolution.dart';

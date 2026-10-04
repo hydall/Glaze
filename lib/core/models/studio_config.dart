@@ -1,22 +1,70 @@
 import 'package:flutter/foundation.dart';
 import 'package:freezed_annotation/freezed_annotation.dart';
 
+import '../llm/studio/studio_context.dart';
+import 'card_rewriter_settings.dart';
+import 'cleaner_settings.dart';
+import 'ledger_prompt_injection_mode.dart';
+import 'ledger_settings.dart';
+
 part 'studio_config.freezed.dart';
 part 'studio_config.g.dart';
 
-enum StudioExecutionMode {
-  legacy,
-  direct,
-  assisted;
+enum StudioBlockType { instruction, context, history, priorBriefs }
 
-  String get wireName => name;
+/// Legacy persisted selector retained for Studio preset JSON compatibility.
+/// Runtime extraction always uses [currentReconciled].
+enum StudioLedgerEngine { currentReconciled, legacyTurnOnly }
 
-  static StudioExecutionMode fromWireName(String value) {
-    return StudioExecutionMode.values.firstWhere(
-      (mode) => mode.wireName == value,
-      orElse: () => StudioExecutionMode.legacy,
-    );
-  }
+/// Per-preset runtime metadata.
+///
+/// The three post-processing lanes — Post Clean, Studio Ledger and Card
+/// Rewriter — are configured **per preset**: [cleaner], [ledger] and
+/// [cardRewriter] each hold that preset's own copy of the settings object
+/// otherwise found in the global [PipelineSettings].
+///
+/// All three are nullable, and null means *not configured on this preset*: the
+/// global value applies. That is what an install carries before it first edits
+/// a preset's lane, so nothing changes until the user touches a setting —
+/// `applyStudioPresetOverrides` (studio_pipeline_overrides.dart) is the single
+/// place that folds one over the other, and every runtime consumer reads the
+/// folded result rather than either source.
+///
+/// Everything else (the pre-generation controller and final-writer model
+/// overrides, MemoryBook) is still global and does not appear here.
+@freezed
+abstract class StudioRuntimeSettings with _$StudioRuntimeSettings {
+  const factory StudioRuntimeSettings({
+    @Default(1) int version,
+
+    /// This preset's Post Clean settings, or null to use the global ones.
+    CleanerSettings? cleaner,
+
+    /// This preset's Studio Ledger settings, or null to use the global ones.
+    LedgerSettings? ledger,
+
+    /// This preset's Card Rewriter settings, or null to use the global ones.
+    /// The lane's API slot and model override live inside it — unlike the
+    /// other stages, Card Rewriter has no `*ApiConfigId` column of its own on
+    /// [StudioPreset], because it was per-preset from the day it moved here.
+    CardRewriterSettings? cardRewriter,
+    @Default([]) List<String> broadcastBlocks,
+    @JsonKey(unknownEnumValue: StudioLedgerEngine.currentReconciled)
+    @Default(StudioLedgerEngine.currentReconciled)
+    StudioLedgerEngine ledgerEngine,
+    LedgerPromptInjectionMode? requestedLedgerPromptInjectionMode,
+    String? requestedLedgerPromptInjectionAlgorithmVersion,
+
+    /// Optional override of the reasoning tags used by the agent pipeline.
+    /// When non-empty, takes priority over the API config's
+    /// `reasoningTagStart`/`reasoningTagEnd`. Empty/null falls back to the API
+    /// config, then to the built-in `ⵎ`/`</antml:thinking>` defaults.
+    String? reasoningTagStart,
+    String? reasoningTagEnd,
+  }) = _StudioRuntimeSettings;
+
+  factory StudioRuntimeSettings.fromJson(Map<String, dynamic> json) =>
+      _$StudioRuntimeSettingsFromJson(json);
 }
 
 /// Reusable Studio configuration profile.
@@ -27,35 +75,8 @@ enum StudioExecutionMode {
 @freezed
 abstract class StudioConfig with _$StudioConfig {
   const factory StudioConfig({
-    /// Storage id. Older rows used the chat session id; profile rows use a
-    /// stable Studio profile id and can be reused by many sessions.
     required String sessionId,
-    @Default('') String profileId,
-    @Default('') String profileName,
     @Default(false) bool enabled,
-    @Default([]) List<StudioAgent> agents,
-    @Default('') String finalPresetId,
-    @Default('') String runApiConfigId,
-    @Default('') String expensiveApiConfigId,
-    @Default('') String cheapApiConfigId,
-    @Default('') String cleanerApiConfigId,
-    @Default('') String runModelOverride,
-
-    /// Maximum number of trailing user/assistant chat messages forwarded to the
-    /// FINAL Studio agent (the generator). Trackers (intermediate agents) are
-    /// trimmed per their own [StudioAgent.contextSize]. The final writer leans
-    /// on the tracker briefs instead of re-reading the whole transcript.
-    /// 0 = no message-count limit (a 60K token budget still applies).
-    /// See [StudioHistoryLimiter.finalHistoryTokenBudget].
-    @Default(30) int maxFinalHistoryMessages,
-
-    /// Verbatim content of "broadcast" preset blocks — cross-cutting rules
-    /// (output language + prose-quality guards: anti-loop/echo/cliché/slop,
-    /// banlists) that must govern not only their primary agent but also the
-    /// POST-cleaner rewrite. Captured at build time so the POST-cleaner can
-    /// apply the user's own rules verbatim without re-running any LLM. Each
-    /// entry is one block's `[Block: name]\n<content>` text.
-    @Default([]) List<String> broadcastBlocks,
     @Default(0) int createdAt,
     @Default(0) int updatedAt,
   }) = _StudioConfig;
@@ -65,30 +86,59 @@ abstract class StudioConfig with _$StudioConfig {
 }
 
 @freezed
-abstract class PromptShardBlock with _$PromptShardBlock {
-  const factory PromptShardBlock({
-    @Default('system') String role,
-    @Default('') String content,
-    @Default('') String blockName,
-    @Default('') String blockId,
-  }) = _PromptShardBlock;
-
-  factory PromptShardBlock.fromJson(Map<String, dynamic> json) =>
-      _$PromptShardBlockFromJson(json);
-}
-
-@freezed
 abstract class StudioPresetBlock with _$StudioPresetBlock {
   const factory StudioPresetBlock({
     required String id,
     @Default('') String title,
-    @Default('custom_text') String kind,
+    @Default(StudioBlockType.instruction) StudioBlockType type,
+    StudioContextSlot? contextSlot,
+    String? targetAgentId,
     @Default('system') String role,
     @Default('') String content,
     @Default(true) bool enabled,
     @Default(false) bool locked,
     @Default(0) int order,
     @Default('pregen') String section,
+    @Default('direct') String mode,
+
+    /// How a `functionPrefill` block forces the start of the reply.
+    /// `'tool'` (default): the legacy synthetic `tool_calls` tail — breaks on
+    /// Gemini 3.8, which requires a `thought_signature` on tool calls it did
+    /// not author. `'structured'`: an OpenAI `response_format` / Gemini
+    /// `responseMimeType`+`responseSchema` instead, so no tool call is ever
+    /// emitted. `'two-pass'`: the final generator runs twice — a quiet pass
+    /// produces the `<thinking>` block, a second pass writes the visible reply
+    /// seeded by that block. Only meaningful for `mode: 'functionPrefill'`
+    /// blocks; carried through preset import/export so it can be set per-preset
+    /// without a code change.
+    @Default('tool') String prefillStyle,
+    @Default(false) bool isStatic,
+    @Default('pregen') String injectionPoint,
+    @Default('') String sourceAgentId,
+    @Default('none') String groupBoundary,
+
+    /// `'relative'` (default): the block is concatenated in `order` sequence
+    /// within its `injectionPoint` bucket, before/after the whole chat-history
+    /// splice. `'depth'`: the block is instead interleaved INSIDE the chat
+    /// history array at [depth] messages counted from the end (0 = right
+    /// before generation, matching the classic (non-Studio) preset pipeline's
+    /// `insertionMode`/`depth` fields — see `PresetBlock` in `preset.dart`
+    /// and `interleaveDepthWithHistory` in `history_assembler.dart`). Only
+    /// meaningful for `type: instruction` blocks; ignored on `history`
+    /// blocks themselves.
+    @Default('relative') String insertionMode,
+    int? depth,
+
+    /// When true, this block's content (after macro expansion) is appended to
+    /// the last user-role message in the chat history at prompt-assembly time,
+    /// mirroring the classic (non-Studio) `PresetBlock.appendToLastMessage`
+    /// (see `preset.dart` and `applyAppendToLastMessage` in
+    /// `prompt_builder.dart`). The block's own [role] is ignored in this mode —
+    /// content is always merged into the last user message, and the block is
+    /// NOT additionally emitted as its own message. If no user message exists
+    /// in history, the block is silently dropped. Only meaningful for
+    /// `type: instruction` blocks; ignored on `history`/`context` blocks.
+    @Default(false) bool appendToLastMessage,
   }) = _StudioPresetBlock;
 
   factory StudioPresetBlock.fromJson(Map<String, dynamic> json) =>
@@ -104,6 +154,15 @@ abstract class StudioPreset with _$StudioPreset {
     required String id,
     @Default('') String name,
     @Default([]) List<StudioPresetBlock> blocks,
+    @Default([]) List<StudioAgent> agents,
+    @Default('') String expensiveApiConfigId,
+    @Default('') String cheapApiConfigId,
+    @Default('') String cleanerApiConfigId,
+    @Default('') String ledgerApiConfigId,
+
+    /// Maximum trailing messages sent to the final generator. Trackers use
+    /// their own [StudioAgent.contextSize]. 0 disables the message-count cap.
+    @Default(50) int maxFinalHistoryMessages,
 
     /// Per-agent on/off overrides keyed by controller spec id
     /// (e.g. `'continuity'`, `'narrative'`, `'final'`).
@@ -111,9 +170,25 @@ abstract class StudioPreset with _$StudioPreset {
     /// Travel with the preset on import/export so agent toggles are portable.
     @Default({}) Map<String, bool> agentEnabled,
 
-    /// Explicit topology prevents stale stored agents from reviving pregen
-    /// calls when a Direct/Assisted preset is selected.
-    @Default(StudioExecutionMode.legacy) StudioExecutionMode executionMode,
+    /// Agent states that were auto-disabled due to a cascade dependency
+    /// (e.g. Continuity was turned off because Ledger was disabled).
+    /// Restored when the required agent is re-enabled.
+    @Default({}) Map<String, bool> agentEnabledBeforeDependencyOff,
+
+    /// Per-agent restore state for the controller radio-folder feature.
+    ///
+    /// When a controller is enabled, the block IDs that were enabled and are
+    /// listed as its alternatives are saved here so that disabling the
+    /// controller can restore them. Keyed by controller spec id.
+    @Default({}) Map<String, List<String>> agentBlockRestoreState,
+
+    /// Per-controller mapping of specId → list of block IDs that the
+    /// controller replaces. When the controller is toggled ON, these blocks
+    /// are disabled (and saved for restore). When toggled OFF, they are
+    /// restored. Blocks not in this list are left untouched (add-ons).
+    @Default({}) Map<String, List<String>> controllerAlternativeBlockIds,
+
+    @Default(StudioRuntimeSettings()) StudioRuntimeSettings runtime,
     @Default(0) int updatedAt,
   }) = _StudioPreset;
 
@@ -129,37 +204,28 @@ abstract class StudioPreset with _$StudioPreset {
 /// - Briefs from previous agents in the pipeline
 ///
 /// The [order] field determines pipeline execution order.
+///
+/// Generation parameters (model, temperature, max tokens, timeout, context
+/// size) and cadence (run interval, keyword activation, run-individually) are
+/// deliberately NOT here: an agent's identity is pinned to its
+/// [StudioControllerSpec] (§4), so those come from the spec, from the Studio
+/// slot settings, or from the chat's own connection. A per-agent copy could
+/// only drift from the spec it was built from.
 @freezed
 abstract class StudioAgent with _$StudioAgent {
   const factory StudioAgent({
     required String id,
+    @Default('') String controllerId,
     @Default('') String name,
     @Default('') String role,
     @Default(0) int order,
     @Default(true) bool enabled,
-    @Default('') String endpoint,
-    @Default(4000) int timeoutMs,
-    @Default(0.3) double temperature,
-    @Default(8000) int maxTokens,
-    @Default('') String sourceBlockNames,
+    @Default('') String specId,
 
     /// Controls whether an intermediate agent should be refreshed every turn
     /// or can reuse a previous brief. Supported values: static, scene, turn.
     /// Final agents always run every turn.
     @Default('turn') String refreshPolicy,
-    @Default([]) List<String> invalidationSignals,
-
-    /// Number of trailing chat messages forwarded to this tracker (intermediate
-    /// agent). Default 5 to keep trackers focused on local turn state; the
-    /// final agent ignores this and uses [StudioConfig.maxFinalHistoryMessages]
-    /// instead. 0 = no limit (not recommended for trackers).
-    @Default(5) int contextSize,
-
-    /// How often this tracker runs, in assistant turns. 1 = every turn
-    /// (default), 3 = every 3rd turn, etc. Useful for "director"-style
-    /// trackers whose guidance changes slowly. The final agent (generator)
-    /// always runs every turn regardless of this field.
-    @Default(1) int runInterval,
 
     /// Maximum number of parallel jobs this agent can be split into inside a
     /// batch group (Marinara `AgentSettings.maxParallelJobs`, clamped to
@@ -167,25 +233,6 @@ abstract class StudioAgent with _$StudioAgent {
     /// group = one LLM request — but the field is kept so the model can grow
     /// later without a migration.
     @Default(1) int maxParallelJobs,
-
-    /// Force this tracker to run as its own individual LLM request, never
-    /// batched with others. Set heuristically for "heavy" trackers whose large
-    /// private extras must not leak into other trackers' batch prompt
-    /// (Marinara `shouldRunAgentIndividually`). Default false.
-    @Default(false) bool runIndividually,
-
-    /// Optional keyword-activation gate for this tracker. When non-empty,
-    /// the tracker activates ONLY on turns where at least one of these
-    /// keywords appears in the last [activationScanDepth] chat messages
-    /// (case-insensitive, whole-word-optional substring match). When empty
-    /// (the default), the tracker always activates (subject to
-    /// [runInterval] and [enabled]).
-    @Default([]) List<String> activationKeywords,
-
-    /// Number of trailing chat messages scanned for [activationKeywords].
-    /// Default 5 (matches `DEFAULT_AGENT_CONTEXT_SIZE`). 0 = scan the
-    /// entire available history (not recommended — expensive and stale).
-    @Default(5) int activationScanDepth,
 
     /// Which phase this agent runs in. `pre_generation` (default) = runs
     /// before the final generator, produces a brief that feeds into the

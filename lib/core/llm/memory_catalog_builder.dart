@@ -30,6 +30,8 @@ class MemoryCatalogBuilder {
     final revision = _hash({
       'content': entry.content,
       'keys': entry.keys,
+      'keyParagraphs': entry.keyParagraphs,
+      'ledgerRange': entry.ledgerRange,
       'status': entry.status,
       'sourceHash': sourceHash,
       'messageRange': entry.messageRange?.toJson(),

@@ -3,46 +3,43 @@ import 'dart:collection';
 
 import 'package:dio/dio.dart';
 
+import 'transport/llm_capture_context.dart';
+import 'transport/llm_request_capture.dart';
+
 import 'embedding_request_gate.dart';
+import 'transport/endpoint_normalizer.dart';
+import 'transport/endpoint_resolution_cache.dart';
 
 class EmbeddingConfig {
   final String endpoint;
   final String apiKey;
   final String model;
   final int maxChunkTokens;
+  final int requestsPerMinute;
 
   const EmbeddingConfig({
     required this.endpoint,
     this.apiKey = '',
     this.model = '',
     this.maxChunkTokens = 8192,
+    this.requestsPerMinute = 50,
   });
 }
 
 /// Resolves a raw embedding endpoint into the concrete `/embeddings` URL.
 ///
-/// Mirrors the chat transport's `normalizeEndpoint`: trims whitespace and
-/// prepends `https://` when no scheme is present. Without the scheme a
-/// separate embedding endpoint entered as `api.host/v1` becomes a malformed
-/// scheme-less URL that iOS's HTTP stack rejects — which is why embeddings
-/// failed on iPhone whenever the vector endpoint differed from the (already
-/// schemed) chat endpoint, yet worked when both were shared.
-String resolveEmbeddingEndpoint(String endpoint) {
-  var normalized = endpoint.trim();
-  if (normalized.isEmpty) return normalized;
-  if (!normalized.startsWith(RegExp(r'https?://', caseSensitive: false))) {
-    normalized = 'https://$normalized';
-  }
-  if (RegExp(r'/embeddings/?$', caseSensitive: false).hasMatch(normalized)) {
-    return normalized;
-  }
-  return '${normalized.replaceFirst(RegExp(r'/+$'), '')}/embeddings';
-}
+/// Shares [EndpointNormalizer] with the chat transports, so the vector
+/// endpoint tolerates exactly what the chat endpoint tolerates: a missing
+/// scheme (which iOS's HTTP stack rejects outright), a missing or misspelled
+/// `/v1`, or a full `…/v1/embeddings` pasted from the provider's docs.
+String resolveEmbeddingEndpoint(String endpoint) =>
+    EndpointNormalizer.embeddingsUrl(endpoint);
 
 String embeddingModelSignature(EmbeddingConfig config) {
-  final endpoint = config.endpoint.trim();
+  final endpoint = resolveEmbeddingEndpoint(config.endpoint);
   final model = config.model.trim();
-  return '${endpoint.isEmpty ? '<endpoint>' : endpoint}|${model.isEmpty ? '<model>' : model}';
+  return '${endpoint.isEmpty ? '<endpoint>' : endpoint}|'
+      '${model.isEmpty ? '<model>' : model}|chunks:${config.maxChunkTokens}';
 }
 
 Map<String, dynamic> embeddingMetadataForConfig(
@@ -56,7 +53,7 @@ Map<String, dynamic> embeddingMetadataForConfig(
   if (hints != null) metadata['hints'] = hints;
   if (chunks != null) metadata['chunks'] = chunks;
   metadata['embeddingModel'] = config.model.trim();
-  metadata['embeddingEndpoint'] = config.endpoint.trim();
+  metadata['embeddingEndpoint'] = resolveEmbeddingEndpoint(config.endpoint);
   metadata['embeddingSignature'] = embeddingModelSignature(config);
   metadata['embeddingDimension'] = vectors.isEmpty ? 0 : vectors.first.length;
   return metadata;
@@ -87,7 +84,8 @@ class _EmbeddingCache {
   final LinkedHashMap<String, _Entry> _store = LinkedHashMap();
 
   String _key(String text, EmbeddingConfig config) =>
-      '${config.endpoint}|${config.model}|${text.hashCode}|$text';
+      '${resolveEmbeddingEndpoint(config.endpoint)}|${config.model}|'
+      '${text.hashCode}|$text';
 
   List<double>? get(String text, EmbeddingConfig config) {
     final entry = _store[_key(text, config)];
@@ -119,6 +117,8 @@ class _Entry {
 }
 
 class EmbeddingService {
+  static const String _embeddingsRoute = '/embeddings';
+
   final Dio _dio = Dio(
     BaseOptions(
       connectTimeout: const Duration(seconds: 30),
@@ -132,6 +132,7 @@ class EmbeddingService {
     List<String> texts,
     EmbeddingConfig config, {
     CancelToken? cancelToken,
+    LlmCaptureContext? captureContext,
   }) async {
     final allChunks = <List<String>>[];
     final chunkMap = <int, int>{};
@@ -151,6 +152,7 @@ class EmbeddingService {
       flatChunks,
       config,
       cancelToken: cancelToken,
+      captureContext: captureContext,
     );
 
     final result = <List<double>>[];
@@ -173,6 +175,7 @@ class EmbeddingService {
     List<String> texts,
     EmbeddingConfig config, {
     CancelToken? cancelToken,
+    LlmCaptureContext? captureContext,
   }) async {
     final allChunks = <String>[];
     final textChunkRanges = <_ChunkRange>[];
@@ -188,6 +191,7 @@ class EmbeddingService {
       allChunks,
       config,
       cancelToken: cancelToken,
+      captureContext: captureContext,
     );
 
     final result = <EmbeddingChunk>[];
@@ -213,6 +217,7 @@ class EmbeddingService {
     List<String> chunks,
     EmbeddingConfig config, {
     CancelToken? cancelToken,
+    LlmCaptureContext? captureContext,
   }) async {
     const batchSize = 32;
     final allVectors = <List<double>>[];
@@ -246,6 +251,7 @@ class EmbeddingService {
         missingTexts,
         config,
         cancelToken: cancelToken,
+        captureContext: captureContext,
       );
       final batchVectors = List<List<double>?>.filled(batch.length, null);
       for (final entry in cached.entries) {
@@ -276,10 +282,18 @@ class EmbeddingService {
     List<String> texts,
     EmbeddingConfig config, {
     CancelToken? cancelToken,
+    LlmCaptureContext? captureContext,
   }) async {
     if (texts.isEmpty) return [];
 
-    final url = resolveEmbeddingEndpoint(config.endpoint);
+    final urls = EndpointResolutionCache.order(
+      config.endpoint,
+      _embeddingsRoute,
+      EndpointNormalizer.embeddingsCandidates(config.endpoint),
+    );
+    if (urls.isEmpty) {
+      throw 'Embedding endpoint is empty or not a valid URL';
+    }
 
     final headers = <String, String>{'Content-Type': 'application/json'};
     if (config.apiKey.isNotEmpty) {
@@ -291,11 +305,29 @@ class EmbeddingService {
       if (requestToken.isCancelled) {
         throw requestToken.cancelError!;
       }
-      final response = await _dio.post<Map<String, dynamic>>(
-        url,
-        data: {'model': config.model, 'input': texts},
-        options: Options(headers: headers),
-        cancelToken: requestToken,
+      await EmbeddingRequestRateLimiter.acquire(
+        config.requestsPerMinute,
+        requestToken,
+      );
+      // Embeddings never touch a chat transport, so nothing captured them and
+      // a turn's vector search was invisible in the Requests timeline. Only the
+      // texts that actually go out are recorded — cache hits never reach here.
+      LlmRequestCapture.recordAuxiliary(
+        stage: captureContext?.stage ?? 'embedding',
+        endpoint: config.endpoint,
+        model: config.model,
+        context: captureContext,
+        messages: [
+          for (final text in texts) {'role': 'input', 'content': text},
+        ],
+        params: {'inputCount': texts.length},
+      );
+      final response = await _postEmbeddings(
+        urls: urls,
+        rawEndpoint: config.endpoint,
+        body: {'model': config.model, 'input': texts},
+        headers: headers,
+        requestToken: requestToken,
       );
 
       final data = response.data;
@@ -331,6 +363,42 @@ class EmbeddingService {
     } finally {
       EmbeddingRequestGate.endRequest(requestToken);
     }
+  }
+
+  /// POSTs to the first candidate URL that answers. A 404/405 means the base
+  /// path is wrong rather than the request, so the next candidate is tried
+  /// (see [EndpointNormalizer.candidates]); the winner is remembered.
+  Future<Response<Map<String, dynamic>>> _postEmbeddings({
+    required List<String> urls,
+    required String rawEndpoint,
+    required Map<String, dynamic> body,
+    required Map<String, String> headers,
+    required CancelToken requestToken,
+  }) async {
+    DioException? firstError;
+    for (var i = 0; i < urls.length; i++) {
+      try {
+        final response = await _dio.post<Map<String, dynamic>>(
+          urls[i],
+          data: body,
+          options: Options(headers: headers),
+          cancelToken: requestToken,
+        );
+        EndpointResolutionCache.record(rawEndpoint, _embeddingsRoute, urls[i]);
+        return response;
+      } on DioException catch (e) {
+        final reportable = firstError ?? e;
+        firstError = reportable;
+        final status = e.response?.statusCode;
+        if (i < urls.length - 1 &&
+            (status == 404 || status == 405) &&
+            !requestToken.isCancelled) {
+          continue;
+        }
+        throw reportable;
+      }
+    }
+    throw firstError!;
   }
 
   List<String> _chunkText(String text, int maxTokens) {

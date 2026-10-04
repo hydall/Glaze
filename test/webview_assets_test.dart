@@ -29,14 +29,30 @@ void main() {
   late String rendererMessageJs;
   late String formatterIndexJs;
   late String formatterFormatterJs;
+  late String formatterTextFormatJs;
+  late String formatterHtmlScanJs;
+  late String formatterProtectJs;
+  late String formatterInlineSyntaxJs;
+  late String formatterBlockSyntaxJs;
+  late String formatterDomFormatJs;
+  late String formatterImageBlocksJs;
   late String bridgeIndexJs;
   late String bridgeControllerJs;
+  late String virtualScrollJs;
   late String editControllerJs;
   late String genTimerJs;
   late String interactionDispatchJs;
   late String panelHostJs;
   late String htmlSanitizerJs;
+  late String cssDiagnosticsJs;
+  late String targetToggleJs;
+  late String markdownJs;
+  late String messageDocumentJs;
+  late String cssSanitizerJs;
+  late String imgGenPlaceholderJs;
+  late String imgGenTimerJs;
   late String selectionManagerJs;
+  late String typingPhaseJs;
   late String swipeHandlerJs;
   late String glazeSdkJs;
   late String indexHtml;
@@ -48,21 +64,39 @@ void main() {
     rendererMessageJs = _rendererAsset('message_renderer.js');
     formatterIndexJs = _formatterAsset('index.js');
     formatterFormatterJs = _formatterAsset('formatter.js');
+    formatterTextFormatJs = _formatterAsset('text_format.js');
+    formatterHtmlScanJs = _formatterAsset('html_scan.js');
+    formatterProtectJs = _formatterAsset('protect.js');
+    formatterInlineSyntaxJs = _formatterAsset('inline_syntax.js');
+    formatterBlockSyntaxJs = _formatterAsset('block_syntax.js');
+    formatterDomFormatJs = _formatterAsset('dom_format.js');
+    formatterImageBlocksJs = _formatterAsset('image_blocks.js');
     rendererJs = [
       _rendererAsset('shadow_style.js'),
       _rendererAsset('markdown.js'),
+      _rendererAsset('message_document.js'),
       _rendererAsset('image_embed.js'),
+      _rendererAsset('local_image_retry.js'),
       _rendererAsset('message_template.js'),
       rendererMessageJs,
     ].join('\n');
     bridgeIndexJs = _bridgeAsset('index.js');
     bridgeControllerJs = _bridgeAsset('chat_bridge_controller.js');
+    virtualScrollJs = _asset('useVirtualScroll.js');
     editControllerJs = _bridgeAsset('edit_controller.js');
     genTimerJs = _bridgeAsset('gen_timer.js');
     interactionDispatchJs = _bridgeAsset('interaction_dispatch.js');
     panelHostJs = _bridgeAsset('panel_host.js');
     htmlSanitizerJs = _bridgeAsset('html_sanitizer.js');
+    imgGenPlaceholderJs = _rendererAsset('imggen_placeholder.js');
+    imgGenTimerJs = _bridgeAsset('imggen_timer.js');
+    cssDiagnosticsJs = _rendererAsset('css_diagnostics.js');
+    targetToggleJs = _rendererAsset('target_toggle.js');
+    markdownJs = _rendererAsset('markdown.js');
+    messageDocumentJs = _rendererAsset('message_document.js');
+    cssSanitizerJs = _bridgeAsset('css_sanitizer.js');
     selectionManagerJs = _bridgeAsset('selection_manager.js');
+    typingPhaseJs = _rendererAsset('typing_phase.js');
     swipeHandlerJs = _bridgeAsset('swipe_gesture_handler.js');
     glazeSdkJs = _asset('glaze_sdk.js');
     indexHtml = _asset('index.html');
@@ -70,12 +104,12 @@ void main() {
     stylessCss = _asset('styles.css').replaceAll('\r\n', '\n');
   });
 
-  group('rendered text copy', () {
-    test('message copy preserves rendered line boundaries', () {
+  group('message copy', () {
+    test('message copy preserves source markdown', () {
       final idx = bridgeControllerJs.indexOf('_extractText(section)');
       final body = bridgeControllerJs.substring(idx, idx + 500);
-      expect(body, contains('root.innerText'));
-      expect(body, isNot(contains('root.textContent')));
+      expect(body, contains("return section.dataset.rawText || '';"));
+      expect(body, isNot(contains('root.innerText')));
     });
 
     test('selection copy serializes cloned rendered ranges', () {
@@ -84,6 +118,165 @@ void main() {
         contains('selection.getRangeAt(i).cloneContents()'),
       );
       expect(selectionManagerJs, contains('content.innerText.trim()'));
+    });
+  });
+
+  group('memory badge and virtual-scroll settling', () {
+    test('game-time metadata can be added, updated, and removed live', () {
+      final body = _extractBlockBody(
+        rendererMessageJs,
+        rendererMessageJs.indexOf('updateMessageMeta(sectionEl, msg)'),
+      );
+      expect(body, contains("querySelector('.msg-game-time')"));
+      expect(body, contains(r'clock.textContent = `⏱ ${msg.gameTime}`'));
+      expect(body, contains('clock?.remove()'));
+      expect(body, contains("hasOwnProperty.call(msg, 'gameTime')"));
+      expect(body, contains("hasOwnProperty.call(msg, 'gameTime')"));
+    });
+
+    test('late memory state patches metadata without a full render', () {
+      final body = _extractBlockBody(
+        bridgeControllerJs,
+        bridgeControllerJs.indexOf('patchMemoryStatuses(statusesJson)'),
+      );
+      expect(body, contains('this.virtualList.itemMap?.get(id)'));
+      expect(body, contains('this.renderer.updateMessageMeta(section'));
+      expect(body, isNot(contains('renderMessage(')));
+      expect(
+        rendererMessageJs,
+        contains("querySelector('.msg-memory-badge')?.remove()"),
+      );
+    });
+
+    test('late height changes re-pin only a still-pinned viewport', () {
+      expect(
+        virtualScrollJs,
+        contains('this.resizeObserver = new ResizeObserver'),
+      );
+      expect(
+        virtualScrollJs,
+        contains('const wasPinned = this._pinnedToBottom'),
+      );
+      expect(
+        virtualScrollJs,
+        contains(
+          'if (this.mounted && this._pinnedToBottom) this.smartScroll()',
+        ),
+      );
+      expect(virtualScrollJs, contains('if (!this._pinnedToBottom) return'));
+    });
+
+    test('a late height change keeps an unpinned reader on their anchor', () {
+      expect(
+        virtualScrollJs,
+        contains('_topVisibleIndexFromCache()'),
+        reason:
+            'The anchor has to come from the height cache before the loop '
+            'writes to it: the row that grew can itself become the first to '
+            'cross the viewport, which would hide that it sits above the '
+            'reader and drop the offset entirely.',
+      );
+      expect(
+        virtualScrollJs,
+        contains('if (!wasPinned && anchorDelta !== 0)'),
+        reason:
+            'A still-pinned viewport is owned by the streaming follow, and an '
+            'editing row by the browser caret reveal; only an unpinned reader '
+            'needs scrollTop offset by the growth above them.',
+      );
+      expect(
+        virtualScrollJs,
+        contains('this.container.scrollTop += anchorDelta'),
+      );
+    });
+
+    test('the streaming follow detaches on any upward scroll', () {
+      final body = _extractBlockBody(
+        virtualScrollJs,
+        virtualScrollJs.indexOf('_onContainerScroll() {'),
+      );
+      expect(
+        body,
+        contains('const movedUp = scrollTop < this._lastScrollTop - 1'),
+        reason:
+            'The pin has to be directional: with a plain isNearBottom(100) band '
+            'the next streamed chunk re-pinned the list before the user could '
+            'scroll out of those 100px, so scrolling up during generation was '
+            'impossible.',
+      );
+      expect(
+        body,
+        contains('this.isNearBottom(BOTTOM_PIN_EPSILON)'),
+        reason:
+            'The follow resumes only when the list rests at the very end of the '
+            'container, not anywhere inside a wide band above it.',
+      );
+      expect(
+        body,
+        isNot(contains('this._pinnedToBottom = this.isNearBottom(100)')),
+      );
+    });
+
+    test('a jump measures the row instead of summing the height cache', () {
+      final body = _extractBlockBody(
+        virtualScrollJs,
+        virtualScrollJs.indexOf('_alignToIndex(index, behavior'),
+      );
+      expect(body, contains('getBoundingClientRect()'));
+      expect(
+        body,
+        contains('this.container.scrollTop + delta'),
+        reason:
+            'The landing is a delta on the live rect. An absolute offset summed '
+            'out of the height cache is wrong by however wrong the estimates '
+            'for the never-mounted rows were — screens, in a chat of long '
+            'messages.',
+      );
+      expect(
+        virtualScrollJs,
+        isNot(contains('this.cache.computeTargetTop(this.renderStart, index')),
+      );
+    });
+
+    test('a settling jump owns the scroll position alone', () {
+      final recovery = _extractBlockBody(
+        virtualScrollJs,
+        virtualScrollJs.indexOf('_recoverIfViewportIsBlank() {'),
+      );
+      // The weaker of the two recoveries stands down: it maps a scroll position
+      // through a cache that has not caught up yet, which unmounts the row
+      // being landed on. The settle re-mounts its target on every pass and runs
+      // the blank check itself when it finishes.
+      expect(recovery, contains('if (this._settleActive) return false;'));
+      final settle = _extractBlockBody(
+        virtualScrollJs,
+        virtualScrollJs.indexOf('_settleOn(index, afterAnimation = false)'),
+      );
+      expect(settle, contains('this._recoverIfViewportIsBlank()'));
+      // Everything else that scrolls retires the jump first, and so does the
+      // reader's first wheel notch or touch.
+      expect(
+        virtualScrollJs,
+        contains("addEventListener('wheel', this._onUserScrollIntent"),
+      );
+      final bottom = _extractBlockBody(
+        virtualScrollJs,
+        virtualScrollJs.indexOf("scrollToBottom(behavior = 'auto')"),
+      );
+      expect(bottom, contains('this._cancelSettle()'));
+    });
+
+    test('scroll-to-bottom resolves after its correction pass', () {
+      final body = _extractBlockBody(
+        virtualScrollJs,
+        virtualScrollJs.indexOf("scrollToBottom(behavior = 'auto')"),
+      );
+      expect(body, contains('return new Promise'));
+      expect(
+        body,
+        contains('this.container.scrollTop = this.container.scrollHeight'),
+      );
+      expect(body, contains('resolve()'));
     });
   });
 
@@ -138,17 +331,20 @@ void main() {
     });
 
     test('disabled path removes scripts before returning', () {
-      final marker = 'export function executeInlineScripts';
-      final body = _extractBlockBody(rendererJs, rendererJs.indexOf(marker));
+      final marker = 'export function runMessageScripts';
+      final body = _extractBlockBody(
+        messageDocumentJs,
+        messageDocumentJs.indexOf(marker),
+      );
       expect(body, contains('if (!allowMessageScripts)'));
       expect(body, contains('script.remove()'));
       expect(
         body.indexOf('script.remove()'),
-        lessThan(body.indexOf('new Function(src)()')),
+        lessThan(body.indexOf('runInGlobalScope(')),
       );
     });
 
-    test('disabled path sanitizes active HTML before innerHTML insertion', () {
+    test('every render sanitizes active HTML before innerHTML insertion', () {
       expect(
         rendererJs,
         contains(
@@ -156,11 +352,14 @@ void main() {
         ),
       );
       final writeBlock = _extractWriteShadowContent(rendererJs);
-      final sanitize = writeBlock.indexOf('sanitizeMessageHtml(formatted)');
+      final sanitize = writeBlock.indexOf('sanitizeMessageHtml(formatted, {');
       final insertion = writeBlock.indexOf('root.innerHTML =');
       expect(sanitize, isNonNegative);
       expect(insertion, isNonNegative);
-      expect(writeBlock, contains('allowMessageScripts'));
+      expect(writeBlock, contains('allowScripts: allowMessageScripts'));
+      // No raw-insertion branch: enabling message scripts must not hand the
+      // message a different HTML/CSS policy, only script execution.
+      expect(writeBlock, isNot(contains('? formatted')));
     });
 
     test('search re-render sanitizes active HTML before insertion', () {
@@ -174,11 +373,80 @@ void main() {
         rendererMessageJs,
         rendererMessageJs.indexOf('setSearch(query, activeIndex = -1'),
       );
-      final sanitize = searchBlock.indexOf('sanitizeMessageHtml(highlighted)');
+      final sanitize = searchBlock.indexOf(
+        'sanitizeMessageHtml(highlighted, {',
+      );
       final insertion = searchBlock.indexOf('root.innerHTML =');
       expect(sanitize, isNonNegative);
       expect(insertion, isNonNegative);
-      expect(searchBlock, contains('this.allowMessageScripts'));
+      expect(searchBlock, contains('allowScripts: this.allowMessageScripts'));
+      expect(searchBlock, isNot(contains('? highlighted')));
+    });
+
+    test('search refresh pass can re-number without scrolling', () {
+      expect(
+        rendererMessageJs,
+        contains('setSearch(query, activeIndex = -1, scroll = true'),
+      );
+      final searchBlock = _extractBlockBody(
+        rendererMessageJs,
+        rendererMessageJs.indexOf('setSearch(query, activeIndex = -1'),
+      );
+      expect(searchBlock, contains('if (!scroll) return;'));
+      // The clamp retry must keep the caller's scroll choice.
+      expect(searchBlock, contains('this.setSearch(query, total - 1, scroll,'));
+      expect(
+        bridgeControllerJs,
+        contains('setSearch(query, activeIndex, scroll = true)'),
+      );
+    });
+
+    test('walking the search hits moves a class, not the chat', () {
+      final searchBlock = _extractBlockBody(
+        rendererMessageJs,
+        rendererMessageJs.indexOf('setSearch(query, activeIndex = -1'),
+      );
+      // The prev/next arrows change one thing — which highlight is active. The
+      // full pass re-formats and rewrites the shadow body of every message in
+      // the chat to arrive at that, which on a long chat takes longer than the
+      // gap between two presses.
+      expect(
+        searchBlock,
+        contains('this._moveActiveMatch(activeIndex, scroll)'),
+      );
+      final move = _extractBlockBody(
+        rendererMessageJs,
+        rendererMessageJs.indexOf('_moveActiveMatch(activeIndex, scroll) {'),
+      );
+      expect(move, isNot(contains('this.formatter.format')));
+      // …but only while the highlights in the page are the set the last pass
+      // numbered; otherwise the class lands on the wrong word.
+      expect(move, contains('found.length !== this.searchTotal'));
+    });
+
+    test('the active hit is revealed through the virtual list', () {
+      // One thing writes scrollTop per landing: the node is handed to the jump
+      // so its correction passes aim at the hit, instead of a second scroll of
+      // our own racing them.
+      expect(rendererMessageJs, contains('fineTarget: match.node'));
+      expect(
+        rendererMessageJs,
+        isNot(contains('.scrollIntoView(')),
+        reason:
+            'scrollIntoView on the highlight animates against the scrolling '
+            'of the list itself, and the hit lands anywhere but in view.',
+      );
+    });
+
+    test('leaving edit mode re-numbers the open search', () {
+      expect(editControllerJs, contains('if (renderer.searchQuery) {'));
+      expect(
+        editControllerJs,
+        contains(
+          'renderer.setSearch(renderer.searchQuery, '
+          'renderer.activeSearchIndex, false);',
+        ),
+      );
     });
 
     test('app bridge changes only the message renderer policy', () {
@@ -188,6 +456,43 @@ void main() {
         contains('this.renderer.allowMessageScripts = enabled === true'),
       );
       expect(headlessHtml, contains('runSandboxedScript'));
+    });
+
+    test('blocked scripts are detected before the sanitizer strips them', () {
+      final writeBlock = _extractWriteShadowContent(rendererJs);
+      final detect = writeBlock.indexOf('SCRIPT_TAG.test(formatted)');
+      final sanitize = writeBlock.indexOf('sanitizeMessageHtml(formatted, {');
+      expect(detect, isNonNegative);
+      expect(detect, lessThan(sanitize));
+      expect(writeBlock, contains('!allowMessageScripts'));
+      expect(rendererJs, contains('notifyMessageScriptBlocked()'));
+      expect(
+        rendererJs,
+        contains('window.bridge?.notifyMessageScriptBlocked?.()'),
+      );
+    });
+
+    test('bridge reports a blocked script to Flutter once per load', () {
+      expect(bridgeControllerJs, contains('notifyMessageScriptBlocked()'));
+      expect(
+        bridgeControllerJs,
+        contains('this._messageScriptBlockedNotified = false'),
+      );
+      final body = _extractBlockBody(
+        bridgeControllerJs,
+        bridgeControllerJs.indexOf('notifyMessageScriptBlocked() {'),
+      );
+      expect(body, contains('if (this._messageScriptBlockedNotified) return'));
+      expect(body, contains("_sendToFlutter('onMessageScriptBlocked', [])"));
+    });
+
+    test('flipping the policy re-renders the messages already on screen', () {
+      final body = _extractBlockBody(
+        bridgeControllerJs,
+        bridgeControllerJs.indexOf('setAllowMessageScripts(enabled)'),
+      );
+      expect(body, contains('this.renderer.rerenderMessageBodies()'));
+      expect(rendererMessageJs, contains('rerenderMessageBodies()'));
     });
   });
 
@@ -223,15 +528,12 @@ void main() {
         "'meta'",
         "'link'",
         "'base'",
-        "'style'",
         "name.startsWith('on')",
         "name === 'srcdoc'",
         "compact.startsWith('javascript:')",
         'SAFE_IMAGE_DATA_URL',
-        'hasUnsafeCssUrl',
         'isSafeDataUrl',
-        'EXT_BLOCK_STYLE_PROPERTIES',
-        'UNSAFE_CSS',
+        'sanitizeStyleDeclaration',
       ]) {
         expect(htmlSanitizerJs, contains(token));
       }
@@ -241,7 +543,274 @@ void main() {
       expect(bridgeControllerJs, contains('_renderExtBlockImageHtml'));
       expect(bridgeControllerJs, contains('data-action="image-click"'));
       expect(bridgeControllerJs, contains('data-action="img-download"'));
-      expect(htmlSanitizerJs, contains("'style'"));
+      expect(htmlSanitizerJs, contains('SAFE_IMAGE_DATA_URL'));
+    });
+  });
+
+  group('message CSS diagnostics', () {
+    test('a render reports broken message CSS after the body is in place', () {
+      expect(
+        rendererJs,
+        contains("import { reportCssErrors } from './css_diagnostics.js'"),
+      );
+      final writeBlock = _extractWriteShadowContent(rendererJs);
+      final insertion = writeBlock.indexOf('root.innerHTML =');
+      final report = writeBlock.indexOf('reportCssErrors(root, cssPolicyNotes(');
+      expect(insertion, isNonNegative);
+      expect(report, greaterThan(insertion));
+      // A reply still arriving is half a stylesheet: every unclosed brace in it
+      // is on its way to being closed, so only a settled message is reported.
+      expect(writeBlock, contains('if (!isTyping && !window.bridge?.isGenerating) {'));
+      expect(
+        writeBlock,
+        contains('reportCssErrors(root, cssPolicyNotes(styles, refusedImports));'),
+      );
+    });
+
+    test('the search re-render puts the report back', () {
+      final searchBlock = _extractBlockBody(
+        rendererMessageJs,
+        rendererMessageJs.indexOf('setSearch(query, activeIndex = -1'),
+      );
+      expect(searchBlock, contains('reportCssErrors(root)'));
+    });
+
+    test('the report reads the stylesheet and never rewrites it', () {
+      expect(cssDiagnosticsJs, contains('inspectCss(style.textContent)'));
+      // Reading only: no assignment back into a <style>, and no innerHTML
+      // anywhere — the report quotes selectors the message wrote.
+      expect(cssDiagnosticsJs, isNot(contains('style.textContent =')));
+      expect(cssDiagnosticsJs, isNot(contains('innerHTML')));
+      expect(cssDiagnosticsJs, contains('item.textContent = problem;'));
+      expect(
+        cssSanitizerJs,
+        contains('export function withParsedSheet(css, read)'),
+      );
+    });
+
+    test('the scan names the failures a generated card actually makes', () {
+      for (final token in [
+        'unclosed',
+        'unexpected',
+        'unterminated comment',
+        'unterminated string',
+        'rule ignored',
+        'const MAX_REPORTED = 5',
+      ]) {
+        expect(cssDiagnosticsJs, contains(token));
+      }
+      // Memoized like the CSS parser cache: a streaming reply re-renders the
+      // same <style> on every chunk.
+      expect(
+        cssDiagnosticsJs,
+        contains('cache.delete(cache.keys().next().value)'),
+      );
+    });
+
+    test('the report has shadow-root styling of its own', () {
+      for (final selector in [
+        '.glaze-message .glaze-css-error {',
+        '.glaze-message .glaze-css-error-head {',
+        '.glaze-message .glaze-css-error-item',
+      ]) {
+        expect(rendererJs, contains(selector));
+      }
+    });
+  });
+
+  group('CSS survives with message scripts disabled', () {
+    test('message CSS reaches the shadow root untouched', () {
+      // No CSS policy on the message path at all: `<style>` blocks and
+      // `style="…"` attributes are inserted verbatim whether or not message
+      // scripts are enabled.
+      final body = _extractBlockBody(
+        htmlSanitizerJs,
+        htmlSanitizerJs.indexOf('function stripMessageCode('),
+      );
+      expect(body, isNot(contains('style')));
+    });
+
+    test('ExtBlock sanitizer keeps <style> and delegates CSS to its policy', () {
+      expect(
+        htmlSanitizerJs,
+        contains(
+          "import { sanitizeCssText, sanitizeStyleDeclaration } "
+          "from './css_sanitizer.js'",
+        ),
+      );
+      final blocked = _extractBlockBody(
+        htmlSanitizerJs,
+        htmlSanitizerJs.indexOf('const BLOCKED_ELEMENTS'),
+        open: '[',
+        close: ']',
+      );
+      expect(blocked, contains("'script'"));
+      expect(blocked, isNot(contains("'style'")));
+      expect(htmlSanitizerJs, contains('sanitizeCssText(element.textContent'));
+      // Message HTML is written into a per-message shadow root (already
+      // scoped); ExtBlock HTML lands in the light DOM and must stay pinned to
+      // the block body.
+      expect(
+        htmlSanitizerJs,
+        contains("const EXT_BLOCK_CSS_SCOPE = '.ext-block-content'"),
+      );
+      expect(
+        htmlSanitizerJs,
+        contains('return sanitizeHtml(html, EXT_BLOCK_CSS_SCOPE)'),
+      );
+    });
+
+    test('message HTML is filtered for code only, never for markup', () {
+      expect(
+        htmlSanitizerJs,
+        contains('sanitizeMessageHtml(html, { allowScripts = false } = {})'),
+      );
+      // Scripts on: the message HTML is inserted exactly as written.
+      expect(
+        htmlSanitizerJs,
+        contains("if (allowScripts) return String(html == null ? '' : html);"),
+      );
+      expect(htmlSanitizerJs, contains('return stripMessageCode(html);'));
+      // Scripts off: only the things that run code are removed. The strict
+      // element / CSS policy is the ExtBlock path's, and must not be reached
+      // from here — a card renders the same with execution on and off.
+      final body = _extractBlockBody(
+        htmlSanitizerJs,
+        htmlSanitizerJs.indexOf('function stripMessageCode('),
+      );
+      expect(
+        htmlSanitizerJs,
+        contains(
+          "const MESSAGE_CODE_ELEMENTS = new Set("
+          "['script', 'iframe', 'object', 'embed']);",
+        ),
+      );
+      expect(body, contains('MESSAGE_CODE_ELEMENTS.has('));
+      expect(body, contains("name.startsWith('on') || name === 'srcdoc'"));
+      expect(body, contains('isMessageCodeUrl(compact)'));
+      for (final forbidden in [
+        'BLOCKED_ELEMENTS',
+        'sanitizeStyleElement',
+        'sanitizeStyleAttribute',
+        'sanitizeCssText',
+        'sanitizeStyleDeclaration',
+      ]) {
+        expect(
+          body,
+          isNot(contains(forbidden)),
+          reason: 'message HTML/CSS must reach the shadow root untouched',
+        );
+      }
+    });
+
+    test('a message may not run code while execution is off', () {
+      final body = _extractBlockBody(
+        htmlSanitizerJs,
+        htmlSanitizerJs.indexOf('function isMessageCodeUrl('),
+      );
+      expect(body, contains("compact.startsWith('javascript:')"));
+      expect(body, contains("compact.startsWith('vbscript:')"));
+      // A `data:` document runs script on navigation; a `data:image/…` is a
+      // picture and stays, like the rest of the markup.
+      expect(body, contains("compact.startsWith('data:')"));
+      expect(body, contains("!compact.startsWith('data:image/')"));
+    });
+
+    test('inline styles are filtered by policy, not an allowlist', () {
+      expect(cssSanitizerJs, isNot(contains('EXT_BLOCK_STYLE_PROPERTIES')));
+      final body = _extractBlockBody(
+        htmlSanitizerJs,
+        htmlSanitizerJs.indexOf('function sanitizeStyleAttribute'),
+      );
+      expect(body, contains('sanitizeStyleDeclaration(element.style)'));
+    });
+
+    test('CSS policy parses without applying or fetching anything', () {
+      // A constructed stylesheet is never attached to a document and drops
+      // @import by spec; the inert-document fallback has no browsing context.
+      expect(cssSanitizerJs, contains('new CSSStyleSheet()'));
+      expect(cssSanitizerJs, contains('sheet.replaceSync(css)'));
+      expect(
+        cssSanitizerJs,
+        contains("document.implementation.createHTMLDocument('glaze-css')"),
+      );
+      expect(cssSanitizerJs, contains('holder.remove()'));
+    });
+
+    test('CSS policy rejects network, script and overlay primitives', () {
+      final allowed = _extractBlockBody(
+        cssSanitizerJs,
+        cssSanitizerJs.indexOf('function isAllowedDeclaration'),
+      );
+      expect(allowed, contains('BLOCKED_PROPERTIES.has(name)'));
+      expect(allowed, contains('isUnsafeValue(text)'));
+      expect(allowed, contains("name === 'position'"));
+      expect(allowed, contains(r'/\bfixed\b/i.test(text)'));
+      expect(allowed, contains("name.startsWith('--')"));
+      for (final token in [
+        'url',
+        'image-set',
+        'expression',
+        'javascript',
+        'vbscript',
+      ]) {
+        expect(cssSanitizerJs, contains(token));
+      }
+      for (final property in ['behavior', '-moz-binding']) {
+        expect(
+          _extractBlockBody(
+            cssSanitizerJs,
+            cssSanitizerJs.indexOf('const BLOCKED_PROPERTIES'),
+            open: '[',
+            close: ']',
+          ),
+          contains("'$property'"),
+        );
+      }
+    });
+
+    test('only style, keyframe and grouping rules are re-emitted', () {
+      final body = _extractBlockBody(
+        cssSanitizerJs,
+        cssSanitizerJs.indexOf('function serializeRule('),
+      );
+      expect(body, contains("isInstanceOf(rule, 'CSSStyleRule')"));
+      expect(body, contains("isInstanceOf(rule, 'CSSKeyframesRule')"));
+      expect(body, contains("isInstanceOf(rule, 'CSSGroupingRule')"));
+      // Everything else (@import, @font-face, @page, @namespace) is dropped.
+      expect(
+        body.replaceAll('\r\n', '\n').trimRight(),
+        endsWith("return '';\n}"),
+      );
+    });
+
+    test('ExtBlock selectors are scoped, selector lists stay intact', () {
+      final body = _extractBlockBody(
+        cssSanitizerJs,
+        cssSanitizerJs.indexOf('function scopeSelector'),
+      );
+      expect(body, contains(r'`${scope} ${selector}`'));
+      expect(cssSanitizerJs, contains('function splitSelectorList'));
+    });
+  });
+
+  group('edit opens the stored text, not the rendering', () {
+    test('section carries sourceText when Dart sends one', () {
+      expect(
+        rendererMessageJs,
+        contains('section.dataset.sourceText = messageData.sourceText'),
+      );
+    });
+
+    test('startEdit prefers sourceText over rawText', () {
+      expect(
+        editControllerJs,
+        contains('section.dataset.sourceText ?? section.dataset.rawText'),
+      );
+    });
+
+    test('an update without sourceText clears a stale one', () {
+      expect(bridgeControllerJs, contains('delete section.dataset.sourceText'));
     });
   });
 
@@ -296,6 +865,21 @@ void main() {
         contains("const storedPersonaName = stored === 'You' ? '' : stored"),
       );
     });
+
+    // A user message carries the persona it was sent as, and the renderer
+    // stamps `data-avatar-pinned` on it. An identity push repaints every
+    // avatar in the DOM, so it has to leave those alone — otherwise switching
+    // persona re-faces the whole history, and a message from a deleted persona
+    // borrows the picture of whoever is active now.
+    test('identity refresh leaves a message-pinned avatar alone', () {
+      for (final source in [bridgeControllerJs, _asset('bridge.legacy.js')]) {
+        expect(
+          source,
+          contains("const pinned = section.dataset.avatarPinned === '1'"),
+        );
+        expect(source, contains('section.dataset.avatarUrl || null'));
+      }
+    });
   });
 
   group('renderer ES module layout', () {
@@ -328,6 +912,24 @@ void main() {
       }
     });
 
+    // The Dart mapper sends `avatarFallback` for a message whose stored persona
+    // no longer resolves (deleted, or never given a picture). The renderer must
+    // draw the initial letter for it instead of falling through to the active
+    // persona's avatar.
+    test('message renderer pins the avatar of a stored persona', () {
+      expect(
+        rendererMessageJs,
+        contains('const pinnedAvatar = !!(m.avatarUrl || m.avatarFallback)'),
+      );
+      expect(
+        rendererMessageJs,
+        contains(
+          'if (messageData.avatarUrl || messageData.avatarFallback) '
+          "section.dataset.avatarPinned = '1'",
+        ),
+      );
+    });
+
     test('legacy renderer shim points at active module entrypoint', () {
       expect(_asset('renderer.js'), contains('renderer/index.js'));
     });
@@ -351,71 +953,640 @@ void main() {
       expect(formatterIndexJs, contains('window.Formatter = Formatter'));
     });
 
-    test('formatter imports extracted text formatting modules', () {
-      expect(formatterFormatterJs, contains("'./macros.js'"));
-      expect(formatterFormatterJs, contains("'./text_format.js'"));
-      expect(formatterFormatterJs, contains('renderStyledSegment('));
+    test('formatter imports its render phases', () {
+      for (final module in [
+        './macros.js',
+        './html_scan.js',
+        './protect.js',
+        './dom_format.js',
+        './image_blocks.js',
+      ]) {
+        expect(formatterFormatterJs, contains("'$module'"));
+      }
+      // The inline pass is reached through phase B, which owns the run it
+      // formats. The entrypoint stopped wiring it directly when style markers
+      // moved out of the pre-parse stage and into formatRun.
+      expect(formatterDomFormatJs, contains("'./inline_syntax.js'"));
+      expect(formatterInlineSyntaxJs, contains("'./text_format.js'"));
+      expect(formatterInlineSyntaxJs, contains('renderStyledSegment('));
     });
 
     test('legacy formatter shim points at active module entrypoint', () {
       expect(_asset('formatter.js'), contains('formatter/index.js'));
     });
+
+    test('a style marker is rendered by an inline-only pass', () {
+      // A marker is a <span>. A <p> inside one is markup the browser throws
+      // straight back out, which used to leave a coloured marker showing as
+      // empty text. Its content goes through formatInlineMasked, which cannot
+      // emit a paragraph: it never reaches the block pass at all.
+      expect(
+        formatterInlineSyntaxJs,
+        contains('export function formatInlineMasked('),
+      );
+      expect(formatterInlineSyntaxJs, isNot(contains('block_syntax.js')));
+      expect(formatterTextFormatJs, contains('processRichText'));
+    });
+
+    test('unmatched emphasis markers cannot consume a later line', () {
+      expect(
+        formatterProtectJs,
+        contains(r'(?<!\*)\*(?=[^*\n]*[^ \t*\n])[^*\n]+?\*(?!\*)'),
+      );
+      expect(
+        formatterInlineSyntaxJs,
+        contains(r'.replace(/\*([^*\n]+?)\*/g'),
+      );
+    });
+
+    test('orphan emphasis markers cannot consume the next action segment', () {
+      expect(
+        formatterProtectJs,
+        contains(r'`\\*([ \\t]+)(?=${SENTINEL}S_\\d+${SENTINEL})`'),
+      );
+    });
+
+    test('style markers are taken from a run, never from the message', () {
+      // The one pass that used to read markdown out of a string with live
+      // HTML in it. A `*` before a card and a `*` inside it matched as one
+      // emphasis run over the whole card; the same scan reached inside a
+      // <pre> the block pass never formats and lost what it held there.
+      // It now runs in formatRun, where the string is one container's text
+      // with its elements already masked — so a marker cannot leave the
+      // container it was written in, and the tree enforces that, not a count.
+      expect(formatterFormatterJs, isNot(contains('extractMarkers')));
+      final body = _extractBlockBody(
+        formatterDomFormatJs,
+        formatterDomFormatJs.indexOf('function formatRun('),
+      );
+      final masked = body.indexOf(r'`${SENTINEL}E_${kept.length - 1}${SENTINEL}`');
+      final markers = body.indexOf('extractMarkers(masked, markers)');
+      final block = body.indexOf('applyBlockSyntax(staged');
+      expect(masked, isNonNegative);
+      expect(markers, greaterThan(masked));
+      // Before the block pass, not per line: a colour marker may wrap more
+      // than one, and applyBlockSyntax formats a line at a time.
+      expect(block, greaterThan(markers));
+
+      // Nothing masks tags for a markdown pass any more, because no markdown
+      // pass ever sees one.
+      expect(formatterHtmlScanJs, isNot(contains('export function maskTags(')));
+      expect(formatterProtectJs, isNot(contains('holdsOwnMarkup')));
+    });
+
+    test('nested guillemets cannot consume styled-segment placeholders', () {
+      expect(
+        formatterInlineSyntaxJs,
+        contains(r'(«)([^»\\u0001]*?(?:«[^»\\u0001]*?»[^»\\u0001]*?)*?)(»)'),
+        reason:
+            'a malformed outer quote must not cross a styled segment while '
+            'searching for its closing guillemet',
+      );
+    });
   });
 
-  // ─── markdown image options button ────────────────────────────────────────
-  group('markdown image card (formatter/formatter.js)', () {
-    test('the card is stashed whole, not emitted as raw HTML mid-pipeline', () {
-      // Raw HTML emitted before the tag extraction gets torn apart: <img>,
-      // <svg> and <path> are *block* tags, so the paragraph step isolates each
-      // of them and the wrapper <span>, the image and the options <button> end
-      // up in three different <p> elements. The button then loses its
-      // positioned wrapper and its `position: absolute` resolves against the
-      // message container — the 3-dot menu jumps to the top of the message.
-      expect(formatterFormatterJs, contains('const mdImages = []'));
-      expect(formatterFormatterJs, contains('mdImages.push('));
-
-      final pushIdx = formatterFormatterJs.indexOf('mdImages.push(');
-      final tagExtractIdx = formatterFormatterJs.indexOf(
-        '// 6. Extract HTML Tags',
+  group('two-phase render (formatter/)', () {
+    // What each of these guards is *behaviour*, and the behaviour itself is
+    // covered by test/webview_js — the browser suite that renders the card
+    // corpus. These keep the shape of the pipeline honest: the message is
+    // parsed first, and nothing here decides structure by hand again.
+    test('the message is parsed before anything formats its text', () {
+      final protect = formatterFormatterJs.indexOf('protectRegions(source');
+      final parse = formatterFormatterJs.indexOf(
+        'parseHtml(code.unmask(escapeProseTags(code.masked, styled))',
       );
-      expect(tagExtractIdx, isNot(-1));
+      final format = formatterFormatterJs.indexOf('formatContainer(tree');
+      expect(protect, isNonNegative);
+      expect(parse, greaterThan(protect));
+      expect(format, greaterThan(parse));
+    });
+
+    test('nothing sorts tags into block and inline by hand', () {
+      // The `blockTags` list and the "orphan" counter are what every card
+      // that *almost* matched them used to break on. How an element nests,
+      // and where an unclosed tag ends, are the parser's answers now.
+      expect(formatterFormatterJs, isNot(contains('blockTags')));
+      expect(formatterFormatterJs, isNot(contains('tagCounts')));
+      expect(formatterHtmlScanJs, contains('export function isKnownElement('));
+      expect(formatterHtmlScanJs, contains('export function escapeProseTags('));
+    });
+
+    test('an unknown element is markup when the card owns it', () {
+      // `<вздох>` in prose is a word; `<loomledger>` in a card is a
+      // container. What separates them is the card's own CSS and its
+      // closing tag — not how many times the name occurs.
+      final body = _extractBlockBody(
+        formatterHtmlScanJs,
+        formatterHtmlScanJs.indexOf('export function escapeProseTags('),
+      );
+      expect(body, contains('isKnownElement(name)'));
+      expect(body, contains('styled.has(name)'));
+      expect(body, contains('opened.has(name) && closed.has(name)'));
+      expect(body, contains(r"tag.replace(/</g, '&lt;')"));
+    });
+
+    test('a void element needs no exemption from anything', () {
+      // `<source>` inside a `<video>` is written once and never closed. The
+      // parser knows that; the old orphan rule had to be told, tag by tag.
+      for (final name in [
+        'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link',
+        'meta', 'param', 'source', 'track', 'wbr',
+      ]) {
+        expect(
+          RegExp('(?<![A-Za-z-])$name(?![A-Za-z-])')
+              .hasMatch(formatterHtmlScanJs),
+          isTrue,
+          reason: '$name must be in the element vocabulary',
+        );
+      }
+    });
+
+    test('a <style> or <script> body is never read as prose', () {
+      // The tag scan before the parse would misread code — `i<n; i++) { if (i>`
+      // inside a script is a tag to it, and escaping that corrupts the script.
+      // The body is masked for its length and put back for the parser. The
+      // markdown passes need no such guard: they run after the parse, and
+      // <style> / <script> are OPAQUE to them.
+      final mask = formatterFormatterJs.indexOf('maskCodeElements(staged)');
+      final escape = formatterFormatterJs.indexOf(
+        'code.unmask(escapeProseTags(code.masked, styled))',
+      );
+      expect(mask, isNonNegative);
+      expect(escape, greaterThan(mask));
       expect(
-        pushIdx < tagExtractIdx,
+        formatterProtectJs,
+        contains(r'/<(style|script)\b[^>]*>[\s\S]*?(?:<\/\1\s*>|$)/gi'),
+      );
+    });
+
+    test('markdown never reaches inside code, style or an attribute', () {
+      for (final name in ["'script'", "'style'", "'pre'", "'code'", "'textarea'"]) {
+        expect(formatterHtmlScanJs, contains(name));
+      }
+      expect(formatterHtmlScanJs, contains('RAW_TEXT_ELEMENTS'));
+      expect(formatterDomFormatJs, contains('const OPAQUE ='));
+      // Elements are masked out of the string the markdown passes run over,
+      // so no pass can read into a tag or an attribute value.
+      expect(
+        formatterDomFormatJs,
+        contains(r'`${SENTINEL}E_${kept.length - 1}${SENTINEL}`'),
+      );
+    });
+
+    test('inline code is protected before the message is parsed', () {
+      final inlineCode = formatterProtectJs.indexOf("kind: 'inline-code'");
+      final imageCard = formatterProtectJs.indexOf(
+        "store.hold({ kind: 'html', html: markdownImageCard(alt, url) })",
+      );
+      expect(inlineCode, isNonNegative);
+      expect(imageCard, greaterThan(inlineCode));
+      // Restored escaped: a tag written inside backticks is shown, not run.
+      expect(
+        formatterFormatterJs,
+        contains(r'return `<code>${escapeHtml(region.code)}</code>`;'),
+      );
+    });
+
+    test('headings, tables, lists and dinkus lines are block constructs', () {
+      for (final marker in [
+        r'const HEADING = /^(#{1,6})[ \t]+(.+?)[ \t]*#*$/;',
+        r'const RULE = /^(_{3,}|-{3,}|\*{3,})$/;',
+        'const BULLET',
+        'const NUMBERED',
+        'const TABLE_SEPARATOR',
+      ]) {
+        expect(formatterBlockSyntaxJs, contains(marker));
+      }
+      // A table needs its separator row — otherwise a line of prose that uses
+      // pipes would become a table.
+      expect(formatterBlockSyntaxJs, contains(r'\|[ \t:|-]+\|'));
+      expect(formatterBlockSyntaxJs, contains('const startAttr = start === 1'));
+    });
+
+    test('an indented list item nests inside the item above it', () {
+      final body = _extractBlockBody(
+        formatterBlockSyntaxJs,
+        formatterBlockSyntaxJs.indexOf('function renderList('),
+      );
+      expect(body, contains('item.depth'));
+      expect(body, contains(r'out += `<li>${inline(item.text)}</li>`;'));
+    });
+
+    test('markdown image dimensions never reach the URL', () {
+      expect(
+        formatterProtectJs,
+        contains(r'const sized = url.match(/^(.*?)\s+=(\d+)?x(\d+)?$/);'),
+      );
+      expect(formatterProtectJs, contains('sized ? sized[1] : url'));
+    });
+  });
+
+  group('CSS-only card adjacency (formatter/dom_format.js)', () {
+    test('<p> is only ever added at the top level of a message', () {
+      // `#toggle:checked ~ .overlay` — the sibling selector every CSS-only
+      // card is built on — stops matching the moment a `<p>` reparents the
+      // checkbox. Inside markup the author wrote, nothing is wrapped at all.
+      expect(
+        formatterDomFormatJs,
+        contains('paragraphs: isRoot && !touchesBlockSibling(current)'),
+      );
+      expect(
+        formatterBlockSyntaxJs,
+        contains(r'paragraphs && !bare ? `<p>${body}</p>` : body'),
+      );
+    });
+
+    test('a run that touches a card keeps its paragraph off', () {
+      // `<input id="t1"><label>…</label><div class="ov">` is one card, not a
+      // paragraph followed by a card: no blank line separates them.
+      final body = _extractBlockBody(
+        formatterDomFormatJs,
+        formatterDomFormatJs.indexOf('function touchesBlockSibling('),
+      );
+      expect(body, contains('tightBefore'));
+      expect(body, contains('tightAfter'));
+      expect(body, contains('hasBlankLine'));
+    });
+
+    test('a protected region is never wrapped in a paragraph', () {
+      // A <p> around an image block or a code block is a <p> the browser
+      // throws straight back out, taking the block's position with it.
+      expect(formatterBlockSyntaxJs, contains('const ONLY_REGIONS ='));
+      expect(formatterBlockSyntaxJs, contains('ONLY_REGIONS.test(line)'));
+    });
+  });
+
+  group('generated image (formatter/image_blocks.js, renderer/markdown.js)', () {
+    test('the result image loads eagerly', () {
+      // A lazy image at the bottom edge of the WebView can be evaluated while
+      // the row is still off-screen and never fetched, leaving the picture the
+      // user waited for as a broken tag.
+      final imgIdx = formatterImageBlocksJs.indexOf('class="imggen-result"');
+      expect(imgIdx, isNot(-1));
+      final chunk = formatterImageBlocksJs.substring(
+        formatterImageBlocksJs.lastIndexOf('<img', imgIdx),
+        formatterImageBlocksJs.indexOf('>', imgIdx),
+      );
+      expect(chunk, contains('loading="eager"'));
+      expect(chunk, isNot(contains('loading="lazy"')));
+    });
+
+    test('the block switcher renders only for more than one image', () {
+      // The count is `variants.length > 1` on both the switcher and the data
+      // attributes, so a single-image block keeps its historical markup.
+      expect(formatterImageBlocksJs, contains('imggen-variants'));
+      expect(
+        formatterImageBlocksJs,
+        contains("data-action=\"img-variant-prev\""),
+      );
+      expect(
+        formatterImageBlocksJs,
+        contains("data-action=\"img-variant-next\""),
+      );
+      expect(
+        RegExp(r'variants\.length > 1').allMatches(formatterImageBlocksJs).length,
+        greaterThanOrEqualTo(3),
+      );
+      expect(formatterImageBlocksJs, contains('data-variants='));
+      expect(formatterImageBlocksJs, contains('data-variant-index='));
+    });
+
+    test('the payload parser mirrors the Dart codec', () {
+      expect(
+        formatterImageBlocksJs,
+        contains('export function parseImageResultPayload('),
+      );
+      expect(formatterImageBlocksJs, contains("IMG_VARIANT_SEPARATOR = ';;'"));
+      expect(formatterImageBlocksJs, contains("IMG_VARIANT_ACTIVE_MARKER = '*'"));
+    });
+
+    test('the stored <img data-iig-…> block renders as an image block', () {
+      // INV-IG9: the form every finished block is written in. It is pulled out
+      // with the other image tags in step 5c, so it gets the options button,
+      // the switcher and its data-img-index — not the bare <img> that step 6
+      // would leave.
+      expect(
+        formatterImageBlocksJs,
+        contains('export function parseImageResultElement('),
+      );
+      expect(formatterImageBlocksJs, contains('IIG_ELEMENT_REGEX'));
+      expect(formatterImageBlocksJs, contains("data-iig-variants"));
+      expect(formatterImageBlocksJs, contains("data-iig-index"));
+      expect(
+        RegExp(
+          r'out = out\.replace\(IIG_ELEMENT_REGEX[\s\S]*?'
+          r"hold\(\{\s*type: 'result'",
+        ).hasMatch(formatterImageBlocksJs),
         isTrue,
-        reason: 'the image card must be stashed before tag extraction runs',
+      );
+      // An element with no image yet is a *pending* block and must fall
+      // through to the [IMG:GEN] handling instead.
+      expect(
+        formatterImageBlocksJs,
+        contains("if (!src || src.startsWith('[IMG:GEN')) return null;"),
+      );
+    });
+
+    test('an ext block renders the stored element with its own controls', () {
+      expect(
+        bridgeControllerJs,
+        contains('_extBlockLegacyImageTokens(block.content)'),
+      );
+      expect(
+        bridgeControllerJs,
+        contains(
+          "import { parseImageResultElement, parseImagePendingPayload } from "
+          "'../formatter/formatter.js';",
+        ),
+      );
+    });
+
+    test('paging a block swaps the picture in the page', () {
+      expect(interactionDispatchJs, contains('_stepImageVariant('));
+      expect(interactionDispatchJs, contains("'img-variant-prev'"));
+      expect(interactionDispatchJs, contains("'img-variant-next'"));
+      // The lightbox and the download button read data-src, so it moves too.
+      expect(interactionDispatchJs, contains('img.dataset.src = src'));
+      expect(interactionDispatchJs, contains("_sendToFlutter('onImgVariant'"));
+    });
+
+    test('the switcher is small and see-through', () {
+      final css = rendererJs;
+      final start = css.indexOf('.imggen-variants {');
+      expect(start, isNot(-1));
+      final rule = css.substring(start, css.indexOf('}', start));
+      expect(rule, contains('position: absolute'));
+      expect(rule, contains('height: 18px'));
+      expect(rule, contains('opacity: 0.45'));
+      expect(rule, contains('rgba(0, 0, 0, 0.38)'));
+    });
+
+    test('a block still waiting for its picture renders no <img>', () {
+      // An <img> whose src is the [IMG:GEN…] placeholder has nothing to load,
+      // so the only thing it can paint is the browser's broken-image glyph.
+      // Both stored spellings are pulled out as pending blocks instead.
+      expect(
+        formatterImageBlocksJs,
+        contains('export function parseImagePendingElement('),
+      );
+      expect(formatterImageBlocksJs, contains('IMG_SRC_GEN_ELEMENT_REGEX'));
+      expect(
+        RegExp(
+          r'out = out\.replace\(IIG_ELEMENT_REGEX[\s\S]*?'
+          r"hold\(\{ type: 'gen'",
+        ).hasMatch(formatterImageBlocksJs),
+        isTrue,
+        reason: 'a pending stored element must render the loading placeholder',
+      );
+      // The bare `<img src="[IMG:GEN…]">` element has to be consumed whole,
+      // before the pass that would take only the payload out of its src.
+      final srcElementIdx =
+          formatterImageBlocksJs.indexOf('out.replace(IMG_SRC_GEN_ELEMENT_REGEX');
+      final bareTagIdx = formatterImageBlocksJs.indexOf(
+        r'out.replace(/\[IMG:GEN(?::(.*?))?\]/g',
+      );
+      expect(srcElementIdx, isNonNegative);
+      expect(bareTagIdx, isNonNegative);
+      expect(srcElementIdx, lessThan(bareTagIdx));
+    });
+
+    test('a tag inside a reasoning block never becomes a block', () {
+      // INV-IG11: Dart does not generate from a tag the model wrote while
+      // thinking, so the WebView must not render a placeholder whose picture
+      // is never coming — nor allocate a data-img-index Dart does not count.
+      expect(
+        formatterFormatterJs,
+        contains('_render(text, isUser, inReasoning)'),
+      );
+      // The reasoning body is the one recursive pass that sets the flag.
+      expect(
+        formatterFormatterJs,
+        contains('this._render(region.content, isUser, true)'),
+      );
+      // All three pending spellings fall through to the inert text collector.
+      expect(
+        RegExp('if [(]inReasoning[)] return inert[(]match[)];')
+            .allMatches(formatterImageBlocksJs)
+            .length,
+        3,
+      );
+      expect(formatterProtectJs, contains("inert: (raw) => store.hold("));
+      // The split-out `message.reasoning` panel is reasoning too, and Dart
+      // never scans that field at all — so it renders with the same flag.
+      expect(
+        formatterFormatterJs,
+        contains(r'const key = `${text}:${isUser}:${inReasoning}`'),
+        reason: 'the format cache must not serve a body render to a '
+            'reasoning panel, or the other way round',
+      );
+      expect(
+        rendererMessageJs,
+        contains("isReasoning: true"),
+      );
+      expect(
+        rendererMessageJs,
+        contains('this._writeShadowContent(shadowHost, reasoning, isUser, false, {'),
+      );
+      expect(
+        rendererJs,
+        contains(RegExp(r'formatMessageBody\([^)]*isReasoning')),
+      );
+      // Restored as the literal text the model wrote, before the leak sweep.
+      expect(formatterFormatterJs, contains("case 'text':"));
+      expect(formatterFormatterJs, contains('return escapeHtml(region.text);'));
+      final restoreIdx = formatterFormatterJs.indexOf(
+        "replacePlaceholders(tree, 'P'",
+      );
+      final sweepIdx = formatterFormatterJs.indexOf(
+        'result.replace(ANY_PLACEHOLDER',
+      );
+      expect(restoreIdx, isNonNegative);
+      expect(sweepIdx, isNonNegative);
+    });
+
+    test('the stop button is an SVG, not an emoji glyph', () {
+      // ⏹ is a font-dependent emoji: a different size and colour on every
+      // platform. A path takes `fill: currentColor` and stays put.
+      expect(formatterImageBlocksJs, contains('const STOP_SVG ='));
+      expect(formatterImageBlocksJs, contains('<rect x="7" y="7"'));
+      final stopIdx = formatterImageBlocksJs.indexOf('class="imggen-stop-btn"');
+      expect(stopIdx, isNonNegative);
+      final button = formatterImageBlocksJs.substring(
+        stopIdx,
+        formatterImageBlocksJs.indexOf('</button>', stopIdx),
+      );
+      expect(button, contains(r'${STOP_SVG}'));
+      expect(button, isNot(contains('⏹')));
+      // The icon takes the button's colour instead of the font's.
+      expect(imgGenPlaceholderJs, contains('fill: currentColor'));
+    });
+
+    test('a pending block reads as queued until the image stage runs', () {
+      // INV-IG1: generation starts only after the reply has finished
+      // streaming and post-gen reaches the image stage. Until then there is
+      // nothing to time and nothing to stop — a running placeholder would be
+      // a lie, and its Stop button would cancel a token that does not exist.
+      expect(formatterImageBlocksJs, contains('class="imggen-queued-hint"'));
+      expect(
+        imgGenPlaceholderJs,
+        contains('return !bridge.isGeneratingImage;'),
+        reason: 'the image stage flag is what makes a block live',
+      );
+      expect(
+        imgGenPlaceholderJs,
+        contains(':host(.imggen-queued) .imggen-loading-timer,'),
+      );
+      expect(
+        imgGenPlaceholderJs,
+        contains(':host(.imggen-queued) .imggen-stop-btn { display: none; }'),
+      );
+      // The clock has to measure the generation, not the wait before it: the
+      // block was stamped when it rendered, possibly a whole reply ago.
+      expect(
+        imgGenPlaceholderJs,
+        contains('function restartTimer(block)'),
+      );
+      expect(
+        imgGenPlaceholderJs,
+        contains('timer.dataset.start = String(start)'),
+      );
+      // The start belongs to the generation, not to the element showing
+      // it: every render replaces the placeholder, and the formatter
+      // memoizes the stamp baked into its HTML, so neither can hold it.
+      expect(
+        imgGenPlaceholderJs,
+        contains('const clockStarts = new Map()'),
+      );
+      expect(
+        imgGenPlaceholderJs,
+        contains('function resumeTimer(block, messageId)'),
+        reason: 'a re-render mid-generation must find the clock it left '
+            'running, not start a new one',
+      );
+      expect(
+        imgGenPlaceholderJs,
+        contains('function pruneClocks()'),
+        reason: 'and a retry must start from zero, so the entry has to go '
+            'once the block stops being pending',
+      );
+      // The flip carries no re-render of its own, so the bridge drives it.
+      expect(
+        bridgeControllerJs,
+        contains('refreshImgGenPlaceholderState()'),
+      );
+      expect(bridgeControllerJs, contains('setImageGenerating(value)'));
+      // A hidden clock must not hold the ticker's interval open.
+      expect(
+        imgGenTimerJs,
+        contains("block.classList.contains('imggen-queued')"),
+      );
+    });
+
+    test('the loading placeholder is sealed off from message CSS', () {
+      // A card ships its own <style>, and its rules — !important included —
+      // land in the same shadow root as the placeholder. A boundary is the
+      // only thing that keeps app chrome looking like app chrome.
+      expect(
+        imgGenPlaceholderJs,
+        contains('export function isolateImgGenPlaceholders('),
+      );
+      expect(imgGenPlaceholderJs, contains("attachShadow({ mode: 'open' })"));
+      // Inherited properties cross a shadow boundary; `all: initial` stops
+      // them at the wrapper inside.
+      expect(imgGenPlaceholderJs, contains('all: initial'));
+      // The host still lives in the message tree, so its geometry is pinned
+      // with the one declaration a message stylesheet cannot outrank.
+      expect(
+        imgGenPlaceholderJs,
+        contains("host.style.setProperty(property, value, 'important')"),
+      );
+      // Both render paths re-isolate: a search pass rewrites innerHTML too.
+      expect(
+        RegExp(r'isolateImgGenPlaceholders\(root(, [A-Za-z.]+)?\)')
+            .allMatches(rendererJs)
+            .length,
+        greaterThanOrEqualTo(2),
+      );
+      // The id is passed, not looked up: a section is built and written
+      // before it is appended, so there is no `data-message-id` above the
+      // placeholder to walk up to on the render that creates it.
+      expect(
+        rendererJs,
+        contains('isolateImgGenPlaceholders(root, messageId)'),
+      );
+      expect(rendererMessageJs, contains('messageId: id,'));
+    });
+
+    test('the elapsed timer reaches into the placeholder shadow root', () {
+      // The ticker's elements are one boundary deeper than the message body
+      // once the placeholder is isolated, so a flat query never sees them.
+      expect(imgGenTimerJs, contains('_updateIn(root, now)'));
+      expect(imgGenTimerJs, contains('block.shadowRoot'));
+      expect(
+        imgGenTimerJs,
+        contains(r"querySelectorAll('.imggen-loading')"),
+      );
+    });
+
+    test('a failed local image re-requests itself', () {
+      // One bounded retry serves every locally served picture, not just the
+      // generated one — an ext-block card or an avatar has no renderer to
+      // rebuild it, so a single lost loopback fetch would stay broken.
+      expect(
+        _rendererAsset('local_image_retry.js'),
+        contains('export function retryFailedLocalImages('),
+      );
+      expect(rendererJs, contains('retryFailedLocalImages(root)'));
+      expect(rendererJs, contains('__glaze_file__'));
+      // A fresh query string keeps a cached failure from being replayed.
+      expect(rendererJs, contains('__glaze_retry='));
+    });
+
+    test('avatars, attachments and ext-block cards are covered too', () {
+      // The message body pass only sees the shadow root, so the light-DOM
+      // pictures are wired where they are inserted.
+      expect(rendererMessageJs, contains('retryFailedLocalImages(section)'));
+      expect(bridgeControllerJs, contains('retryFailedLocalImages(body)'));
+      // An attachment at the viewport edge is evaluated while off-screen like
+      // the generated and ext-block images, so it loads eagerly as well.
+      expect(
+        _rendererAsset('image_embed.js'),
+        contains("img.loading = 'eager'"),
+      );
+    });
+  });
+
+  group('markdown image card (formatter/protect.js)', () {
+    test('the card is one protected region, never loose markup', () {
+      // Emitted as raw HTML mid-pipeline the card gets torn apart: the
+      // wrapper <span>, the <img> and the options <button> end up in
+      // different blocks, the button loses its positioned wrapper, and its
+      // `position: absolute` resolves against the whole message instead.
+      expect(formatterProtectJs, contains('function markdownImageCard('));
+      expect(
+        formatterProtectJs,
+        contains("store.hold({ kind: 'html', html: markdownImageCard(alt, url) })"),
       );
     });
 
     test('wrapper, image and options button live in one atomic chunk', () {
-      final pushIdx = formatterFormatterJs.indexOf('mdImages.push(');
-      final chunk = formatterFormatterJs.substring(
-        pushIdx,
-        formatterFormatterJs.indexOf('\n', pushIdx),
+      final body = _extractBlockBody(
+        formatterProtectJs,
+        formatterProtectJs.indexOf('function markdownImageCard('),
       );
-      expect(chunk, contains('janitor-img-wrapper'));
-      expect(chunk, contains('class="janitor-img"'));
-      expect(chunk, contains('janitor-options-btn'));
-      expect(chunk, contains(r'data-action="img-options"'));
+      expect(body, contains('janitor-img-wrapper'));
+      expect(body, contains('class="janitor-img"'));
+      expect(body, contains('janitor-options-btn'));
+      expect(body, contains(r'data-action="img-options"'));
     });
 
-    test('the card is restored after paragraph splitting', () {
-      final restoreIdx = formatterFormatterJs.indexOf(
-        r'html = html.replace(/\x01MI_(\d+)\x01/g',
+    test('the card is put back after the markdown passes, not before', () {
+      final format = formatterFormatterJs.indexOf('formatContainer(tree');
+      final restore = formatterFormatterJs.indexOf(
+        "replacePlaceholders(tree, 'P'",
       );
-      expect(
-        restoreIdx,
-        isNot(-1),
-        reason: 'markdown image placeholders must be restored',
-      );
-      final paragraphIdx = formatterFormatterJs.indexOf('// 11. Paragraphs');
-      expect(paragraphIdx, isNot(-1));
-      expect(
-        restoreIdx > paragraphIdx,
-        isTrue,
-        reason:
-            'restoring before the paragraph step would expose the card to the '
-            'block-placeholder isolation again',
-      );
+      expect(format, isNonNegative);
+      expect(restore, greaterThan(format));
     });
 
     test('options button is positioned against the image wrapper', () {
@@ -511,7 +1682,7 @@ void main() {
     });
 
     test('clearAll() also closes all panels', () {
-      final marker = 'clearAll() {';
+      final marker = 'clearAll(keepPlaceholder = true) {';
       final idx = bridgeControllerJs.indexOf(marker);
       expect(idx, isNot(-1));
       final body = _extractBlockBody(bridgeControllerJs, idx);
@@ -858,14 +2029,49 @@ void main() {
       );
     });
 
-    test('the shrink is measured against the Flutter-reported box height', () {
+    test('the shrink is measured against the scrollport', () {
       expect(
         bridgeControllerJs,
-        contains('full - this.virtualList.container.clientHeight'),
+        contains('full - this._visibleViewportH()'),
         reason:
             'The shrink must be measured, not assumed — that is what keeps the '
             'same code correct on embedders that resize the WebView and on '
             'those that do not.',
+      );
+      final idx = bridgeControllerJs.indexOf('_visibleViewportH() {');
+      expect(idx, isNot(-1));
+      final body = _extractBlockBody(bridgeControllerJs, idx);
+      expect(
+        body,
+        contains('this.virtualList.container.clientHeight'),
+        reason: 'The scrollport is the container, so that is what to measure.',
+      );
+      expect(
+        body,
+        isNot(contains('visualViewport')),
+        reason:
+            'What the padding buys is scroll range — room to push the end of '
+            'the list out from under the chrome. Only a scrollport that got '
+            'shorter needs less of it, and a keyboard that merely overlays the '
+            'page does not shorten this one, it covers it. Measuring the '
+            'visual viewport took the keyboard back off the padding while the '
+            'range it stood in for never appeared, so at maximum scroll the '
+            'last lines sat behind the keyboard with nothing left to scroll. '
+            'An embedder that really does resize the WebView still shrinks the '
+            'container, which is the case this subtraction exists for.',
+      );
+    });
+
+    test('the chat container is sized by the dynamic viewport', () {
+      expect(
+        indexHtml,
+        contains('height: 100vh; height: 100dvh;'),
+        reason:
+            '`100vh` is the viewport with every retractable UI retracted — by '
+            'definition it does not shrink for a keyboard, so the shrink the '
+            'bridge measures was always zero and the keyboard was counted '
+            'twice: once as screen the reader cannot see, once as padding. '
+            '`vh` stays first as the fallback for engines without `dvh`.',
       );
     });
 
@@ -920,6 +2126,96 @@ void main() {
     });
   });
 
+  // ─── document scroll lock ─────────────────────────────────────────────────
+  // Flutter mirrors its glass chrome into the page as `position: fixed`
+  // strips. Any scroll of the page itself (a caret/selection reveal, an
+  // embedder panning the viewport for the keyboard) moves those strips out of
+  // alignment with the Flutter chrome, so the page must not scroll: only
+  // #chat-container may.
+  group('document scroll lock (index.html + chat_bridge_controller.js)', () {
+    test('the keyboard resizes the layout viewport instead of panning it', () {
+      expect(
+        indexHtml,
+        contains('interactive-widget=resizes-content'),
+        reason:
+            'Without it the soft keyboard pans the visual viewport, which drags '
+            'every fixed layer — the Flutter-glass strips included — out from '
+            'under the Flutter chrome.',
+      );
+    });
+
+    test('html and body are fixed and cannot scroll', () {
+      final idx = indexHtml.indexOf('html, body {');
+      expect(idx, isNot(-1));
+      final body = _extractBlockBody(indexHtml, idx);
+      expect(body, contains('position: fixed'));
+      expect(body, contains('overflow: hidden'));
+      expect(body, contains('overscroll-behavior: none'));
+    });
+
+    test('a document scroll is undone and handed to the container', () {
+      expect(bridgeControllerJs, contains('_setupDocumentScrollLock()'));
+      final idx = bridgeControllerJs.indexOf('_setupDocumentScrollLock() {');
+      expect(idx, isNot(-1));
+      final body = _extractBlockBody(bridgeControllerJs, idx);
+      expect(body, contains('doc.scrollTop = 0'));
+      expect(
+        body,
+        contains('container.scrollTop += top'),
+        reason:
+            'The movement the browser aimed at the page has to land on the '
+            'chat, or a caret reveal would jump nowhere.',
+      );
+    });
+  });
+
+  // ─── message attachments ──────────────────────────────────────────────────
+  group('message attachments', () {
+    // The Dart mapper sends `imagePaths` (every attachment) alongside
+    // `imagePath` (the first). The renderer must prefer the list, or a
+    // multi-image message renders only its first picture.
+    test('the renderer lays out the whole attachment list', () {
+      expect(
+        rendererMessageJs,
+        contains('imagePaths && imagePaths.length ? imagePaths : imagePath'),
+      );
+      expect(
+        _rendererAsset('image_embed.js'),
+        contains('export function createImageAttachments'),
+      );
+    });
+
+    test('several attachments are a grid, not a stack', () {
+      expect(
+        stylessCss,
+        contains('.msg-image-attachment.multi {'),
+        reason:
+            'Without the grid rules a multi-image message renders as one '
+            'full-width picture under another.',
+      );
+      for (final rule in [
+        '.msg-image-attachment.count-2 {',
+        '.msg-image-attachment.count-3,',
+        '.msg-image-attachment.count-4 {',
+        '.msg-image-attachment.count-3 img:first-child { grid-row: span 2; }',
+      ]) {
+        expect(stylessCss, contains(rule));
+      }
+    });
+
+    // One `imageHidden` flag covers the message, so the block keeps exactly
+    // one eye toggle however many pictures it holds — and `updateMessage`
+    // lifts that single block out of the body and puts it back.
+    test('the attachment block stays a single element', () {
+      final embedJs = _rendererAsset('image_embed.js');
+      expect(embedJs, contains("wrap.className = 'msg-image-attachment'"));
+      expect(
+        rendererMessageJs,
+        contains("const image = body.querySelector('.msg-image-attachment')"),
+      );
+    });
+  });
+
   // ─── edit textarea CSS (styles.css) ───────────────────────────────────────
   group('edit textarea CSS (styles.css)', () {
     test('overscroll-behavior:contain prevents scroll bleed to parent', () {
@@ -929,6 +2225,25 @@ void main() {
         reason:
             'Without overscroll-behavior:contain, reaching the end of the textarea '
             'causes the parent chat container to scroll',
+      );
+    });
+
+    test('the edit footer reserves its own room inside the message', () {
+      expect(
+        stylessCss,
+        contains('.message-section.editing .msg-footer {'),
+        reason:
+            'The Save/Cancel row must be sized inside the edited message so the '
+            'chat container clears it with its ordinary bottom inset — Flutter '
+            'no longer reserves edit-only scroll room (chat_screen.dart).',
+      );
+      expect(
+        stylessCss,
+        contains('.message-section.layout-bubble.editing .edit-buttons {'),
+        reason:
+            'In bubble layout the footer is a wrapping flex row that follows the '
+            'bubble width; the edit buttons need a row of their own or a narrow '
+            'bubble squeezes them against the meta/switcher columns.',
       );
     });
   });
@@ -990,6 +2305,226 @@ void main() {
     });
   });
 
+  // ─── Fragment links inside a message ───────────────────────────────────────
+  group('`:target` cards in message HTML', () {
+    test('target_toggle.js re-keys `:target` on an attribute', () {
+      expect(
+        targetToggleJs,
+        contains("export const TARGET_ATTRIBUTE = 'data-glaze-target'"),
+      );
+      expect(
+        targetToggleJs,
+        contains('export function rewriteTargetSelectors(root)'),
+      );
+      expect(
+        targetToggleJs,
+        contains(r'/:target(?![\w-])/g'),
+        reason:
+            '`:target` must be re-keyed as a whole selector token, so '
+            '`::target-text` keeps its own meaning',
+      );
+    });
+
+    test('both message-HTML insertion points re-key `:target`', () {
+      // A URL fragment never resolves inside a shadow root, so a card that
+      // toggles a panel with `:target` needs the re-key on every path that
+      // writes a message body. The render path goes through the document
+      // contract; the search re-render rewrites innerHTML on its own.
+      expect(
+        markdownJs,
+        contains(
+          "import { hoistStyleImports, installMessageDocument } from "
+          "'./message_document.js';",
+        ),
+      );
+      expect(markdownJs, contains('installMessageDocument(root, { allowMessageScripts })'));
+      expect(
+        messageDocumentJs,
+        contains("import { rewriteTargetSelectors } from './target_toggle.js';"),
+      );
+      expect(messageDocumentJs, contains('rewriteTargetSelectors(root);'));
+      expect(
+        rendererMessageJs,
+        contains("import { rewriteTargetSelectors } from './target_toggle.js';"),
+      );
+      expect(rendererMessageJs, contains('rewriteTargetSelectors(root);'));
+    });
+
+    test('links are resolved through composedPath, not e.target', () {
+      expect(interactionDispatchJs, contains('_closestLinkInPath(e)'));
+      expect(interactionDispatchJs, contains("node.localName === 'a'"));
+      expect(
+        interactionDispatchJs,
+        isNot(contains("const link = e.target.closest('a');")),
+        reason:
+            'e.target is retargeted to the shadow host, so a link written by '
+            'the message is invisible to e.target.closest()',
+      );
+    });
+
+    test('a fragment link toggles in its own root; other links reach Flutter',
+        () {
+      expect(interactionDispatchJs, contains("href.startsWith('#')"));
+      expect(
+        interactionDispatchJs,
+        contains('_toggleFragmentTarget(link, href.slice(1))'),
+      );
+      expect(interactionDispatchJs, contains('link.getRootNode()'));
+      expect(
+        interactionDispatchJs,
+        contains("_sendToFlutter('onLinkClick', [link.href])"),
+      );
+    });
+  });
+
+  // ─── What a card may rely on inside a message shadow root ─────────────────
+  group('message document contract (renderer/message_document.js)', () {
+    // Behaviour is covered case by case in test/webview_js —
+    // specs/document_contract.spec.js, one test per INV-MR item. These keep
+    // the contract in one module instead of a shim per complaint.
+    test('a card script runs in the page global scope', () {
+      // A function scope of its own is what left `onclick="jscToggle()"`
+      // pointing at nothing: the card declared the handler, and nobody could
+      // see it (INV-MR1).
+      final body = _extractBlockBody(
+        messageDocumentJs,
+        messageDocumentJs.indexOf('function runInGlobalScope('),
+      );
+      expect(body, contains("document.createElement('script')"));
+      expect(
+        body,
+        contains('REAL_HEAD.appendChild(element)'),
+        reason: 'document.head is the message root while the scope is on, and '
+            'a script appended to a shadow root never runs',
+      );
+    });
+
+    test('every shim is an own property, so restoring is a delete', () {
+      // INV-MR2: the app's own document must come back exactly as it was.
+      final body = _extractBlockBody(
+        messageDocumentJs,
+        messageDocumentJs.indexOf('function installDocumentScope('),
+      );
+      expect(
+        body,
+        contains('Object.defineProperty(target, name, { configurable: true'),
+      );
+      expect(
+        body,
+        contains('for (const { target, name } of defined) delete target[name];'),
+      );
+    });
+
+    test('the contract covers every document lookup a card makes', () {
+      for (final name in [
+        'getElementById',
+        'querySelector',
+        'querySelectorAll',
+        'getElementsByClassName',
+        'getElementsByTagName',
+        'getElementsByName',
+        'forms',
+        'images',
+        'links',
+        'styleSheets',
+        'body',
+        'head',
+      ]) {
+        expect(
+          messageDocumentJs,
+          contains("'$name'"),
+          reason: 'INV-MR3/MR4: $name must resolve inside the message',
+        );
+      }
+    });
+
+    test('a lookup the message cannot answer reaches the real document', () {
+      expect(
+        messageDocumentJs,
+        contains('documentQuery.getElementById.call(document, id)'),
+      );
+      expect(
+        messageDocumentJs,
+        contains('documentQuery.querySelector.call(document, selector)'),
+      );
+    });
+
+    test('document.body is the message overlay; app chrome opts out', () {
+      // INV-MR6. A node the card hands to the document stays under the
+      // message's stylesheet instead of rendering naked in the app chrome.
+      expect(
+        messageDocumentJs,
+        contains("define(document, 'body', { get: () => messageOverlay(root) })"),
+      );
+      expect(messageDocumentJs, contains('export function appBody()'));
+      expect(rendererJs, contains('.glaze-message-overlay { display: contents; }'));
+      // App chrome appended during a message event has to say so, or it lands
+      // inside somebody's card.
+      expect(selectionManagerJs, contains('appBody().appendChild'));
+      expect(selectionManagerJs, isNot(contains('document.body.appendChild')));
+    });
+
+    test('the load events a card waits for are collected and replayed', () {
+      // INV-MR7: the real DOMContentLoaded fired before the message existed,
+      // so a card that waits for it would wait forever.
+      expect(
+        messageDocumentJs,
+        contains(
+          "const READY_EVENTS = new Set(['DOMContentLoaded', 'load', "
+          "'readystatechange'])",
+        ),
+      );
+      expect(
+        messageDocumentJs,
+        contains("listener.call(document, new Event('DOMContentLoaded'))"),
+      );
+      expect(messageDocumentJs, contains("define(window, 'onload'"));
+    });
+
+    test('the scope outlives the script, for the length of an event', () {
+      // A card's modal is appended from its click handler, long after its
+      // <script> finished running.
+      expect(messageDocumentJs, contains('const SCOPED_EVENTS ='));
+      expect(messageDocumentJs, contains('queueMicrotask(restore)'));
+      expect(messageDocumentJs, contains('setTimeout(restore, 0)'));
+      // …and only for a message whose own code has actually run, so the app's
+      // document is untouched for every message that carries no script.
+      expect(messageDocumentJs, contains('scripted.has(root)'));
+    });
+
+    test('an @import is hoisted, and only over https', () {
+      // INV-MR5: `@import` cannot work inside a shadow root, and a @font-face
+      // can only be registered from the document — so the sheet is lifted to
+      // a <link> in the head. `http:` and `data:` are refused there, and the
+      // rest of the CSS policy is unchanged.
+      expect(messageDocumentJs, contains('export function hoistStyleImports('));
+      final body = _extractBlockBody(
+        messageDocumentJs,
+        messageDocumentJs.indexOf('export function hoistStyleImports('),
+      );
+      expect(body, contains(r"if (!/^https:\/\//i.test(url))"));
+      expect(body, contains('hoisted.has(url)'));
+      expect(body, contains('hoisted.size >= MAX_HOISTED'));
+      expect(body, contains("link.dataset.glazeImport = ''"));
+      expect(body, contains('REAL_HEAD.appendChild(link)'));
+      expect(markdownJs, contains('hoistStyleImports(styles)'));
+
+      // The rules with nowhere to go are still dropped, and still reported.
+      expect(
+        cssDiagnosticsJs,
+        contains('export function inspectBlockedAtRules('),
+      );
+      expect(cssDiagnosticsJs, contains('@(font-face|page|namespace)'));
+      expect(
+        cssSanitizerJs,
+        contains('// @import, @font-face, @page, @namespace, @charset and anything unknown.'),
+        reason: 'the sanitizer still strips the rule from message CSS itself; '
+            'the hoist reads the source before it runs',
+      );
+    });
+  });
+
+
   // ─── GenTimer extraction (Phase 3.5) ───────────────────────────────────────
   group('GenTimer (bridge.js)', () {
     test('GenTimer class exists', () {
@@ -1018,9 +2553,22 @@ void main() {
       expect(body, contains('this._syncGenerationTimer()'));
     });
 
-    test('upward scroll restores a hidden header during generation', () {
-      final marker = 'if (this.isGenerating) {';
-      final updateHeaderIdx = bridgeControllerJs.indexOf('const updateHeader = () => {');
+    test('hide-on-scroll is not frozen for the whole streaming window', () {
+      final idx = bridgeControllerJs.indexOf('const updateHeader = () => {');
+      expect(idx, isNot(-1));
+      final body = _extractBlockBody(bridgeControllerJs, idx);
+      // Gating the tracker on the generation flag suspended hide-on-scroll for
+      // as long as a reply streamed — the header stopped responding to
+      // scrolling entirely. Only our own scrolls may be suppressed.
+      expect(body, isNot(contains('this.isGenerating')));
+      expect(body, contains('this._isProgrammaticScroll()'));
+    });
+
+    test('upward scroll restores a hidden header during auto-follow', () {
+      final marker = 'if (this._isProgrammaticScroll()) {';
+      final updateHeaderIdx = bridgeControllerJs.indexOf(
+        'const updateHeader = () => {',
+      );
       expect(updateHeaderIdx, isNot(-1));
       final idx = bridgeControllerJs.indexOf(marker, updateHeaderIdx);
       expect(idx, isNot(-1));
@@ -1029,6 +2577,60 @@ void main() {
       expect(body, contains('this._headerHidden = false'));
       expect(body, contains("this._sendToFlutter('onHeaderScroll', [false])"));
       expect(body, isNot(contains('[true]')));
+    });
+
+    test('programmatic-scroll probe reads the virtual list flag', () {
+      final marker = '_isProgrammaticScroll() {';
+      final idx = bridgeControllerJs.indexOf(marker);
+      expect(idx, isNot(-1));
+      final body = _extractBlockBody(bridgeControllerJs, idx);
+      // Streaming auto-follow / scroll-to-bottom / anchor restore raise the
+      // virtual list's own flag; the bottom-inset re-pin glide raises
+      // `_repinAnimating`. Both are ours, neither is the user scrolling.
+      expect(body, contains('this.virtualList?.isProgrammaticScrolling'));
+      expect(body, contains('this._repinAnimating'));
+      expect(virtualScrollJs, contains('this.isProgrammaticScrolling = true'));
+    });
+
+    test('ending a generation re-shows the header only if it is stranded', () {
+      final marker = 'setGenerating(value) {';
+      final idx = bridgeControllerJs.indexOf(marker);
+      expect(idx, isNot(-1));
+      final body = _extractBlockBody(bridgeControllerJs, idx);
+      // A hide the user asked for by scrolling down mid-stream must survive the
+      // end of the generation, so the falling edge no longer force-shows.
+      expect(body, contains('this._ensureHeaderReachable()'));
+      expect(body, isNot(contains("this._sendToFlutter('onHeaderScroll'")));
+
+      final helperIdx = bridgeControllerJs.indexOf(
+        '_ensureHeaderReachable() {',
+      );
+      expect(helperIdx, isNot(-1));
+      final helper = _extractBlockBody(bridgeControllerJs, helperIdx);
+      // Only when the list no longer has the scroll range that an upward
+      // scroll would need to bring the header back.
+      expect(helper, contains('if (!this._headerHidden) return'));
+      expect(
+        helper,
+        contains('container.scrollHeight - container.clientHeight > 50'),
+      );
+      expect(helper, contains('this._headerHidden = false'));
+      expect(
+        helper,
+        contains("this._sendToFlutter('onHeaderScroll', [false])"),
+      );
+    });
+
+    test('a trimmed message re-checks that the header is reachable', () {
+      final idx = bridgeControllerJs.indexOf('removeMessage(messageId) {');
+      expect(idx, isNot(-1));
+      final body = _extractBlockBody(bridgeControllerJs, idx);
+      // The cancelled-generation placeholder is dropped ~340ms later, behind
+      // its exit animation — long after setGenerating() ran its own check.
+      expect(
+        '_ensureHeaderReachable()'.allMatches(body).length,
+        greaterThanOrEqualTo(2),
+      );
     });
 
     test('showHeader re-shows the header and re-baselines the tracker', () {
@@ -1058,7 +2660,9 @@ void main() {
 
     test('post-gen activity does not keep the generation timer running', () {
       expect(bridgeControllerJs, contains('setPostGenRunning(value)'));
-      final postGenIdx = bridgeControllerJs.indexOf('setPostGenRunning(value) {');
+      final postGenIdx = bridgeControllerJs.indexOf(
+        'setPostGenRunning(value) {',
+      );
       expect(postGenIdx, isNot(-1));
       final postGenBody = _extractBlockBody(bridgeControllerJs, postGenIdx);
       expect(postGenBody, isNot(contains('_syncGenerationTimer')));
@@ -1069,8 +2673,40 @@ void main() {
       final body = _extractBlockBody(bridgeControllerJs, idx);
       expect(body, contains('this.isGenerating'));
       expect(body, isNot(contains('this.isPostGenRunning')));
-      expect(body, contains('this._genTimer.start()'));
+      expect(body, contains('this._genTimer.ensureRunning()'));
       expect(body, contains('this._genTimer.stop()'));
+    });
+
+    test('the elapsed clock runs for the whole send window', () {
+      // The bubble goes up on the send and the generation is published a
+      // durable append later. Keying the clock on `isGenerating` alone left
+      // the bubble sitting there without one for that whole write.
+      final marker = '_syncGenerationTimer() {';
+      final idx = bridgeControllerJs.indexOf(marker);
+      expect(idx, isNot(-1));
+      final body = _extractBlockBody(bridgeControllerJs, idx);
+      expect(body, contains('this.isSendPending'));
+
+      final sendPendingIdx = bridgeControllerJs.indexOf(
+        'setSendPending(value) {',
+      );
+      expect(sendPendingIdx, isNot(-1));
+      final sendPendingBody = _extractBlockBody(
+        bridgeControllerJs,
+        sendPendingIdx,
+      );
+      expect(sendPendingBody, contains('this.isSendPending = !!value'));
+      expect(sendPendingBody, contains('this._syncGenerationTimer()'));
+    });
+
+    test('the hand-off to the generation does not restart the clock', () {
+      // Both edges reconcile through _syncGenerationTimer, so `start()` on the
+      // second one would reset a timer the user has already watched count.
+      final idx = genTimerJs.indexOf('ensureRunning() {');
+      expect(idx, isNot(-1));
+      final body = _extractBlockBody(genTimerJs, idx);
+      expect(body, contains('if (this._interval) return'));
+      expect(body, contains('this.start()'));
     });
 
     test(
@@ -1093,6 +2729,49 @@ void main() {
       expect(body, contains("rerun.className = 'msg-rerun-cleaner'"));
       expect(body, contains("rerun.dataset.action = 'rerun-cleaner'"));
       expect(body, contains('agentSwipeTotal >= 1'));
+    });
+  });
+
+  group('scroll-to-top button (chat_bridge_controller.js)', () {
+    test('visibility is emitted through _sendToFlutter, deduped', () {
+      expect(
+        bridgeControllerJs,
+        contains("this._sendToFlutter('onScrollToTopVisibility'"),
+      );
+      final idx = bridgeControllerJs.indexOf(
+        '_emitScrollToTopVisibility(show) {',
+      );
+      expect(idx, isNot(-1));
+      final body = _extractBlockBody(bridgeControllerJs, idx);
+      expect(body, contains('this._lastScrollToTopShown === show'));
+    });
+
+    test('only a reader scroll arms the latch', () {
+      final idx = bridgeControllerJs.indexOf('const isUserScrollUp = (st) =>');
+      expect(idx, isNot(-1));
+      final tail = bridgeControllerJs.substring(idx, idx + 300);
+      expect(tail, contains('SCROLL_TO_TOP_THRESHOLD_PX'));
+      expect(tail, contains('this._lastUserScrollInputAt'));
+      expect(tail, contains('USER_SCROLL_INPUT_WINDOW_MS'));
+      // Input events mark the tracker, so a layout correction cannot arm it.
+      expect(
+        bridgeControllerJs,
+        contains("['wheel', 'touchstart', 'touchmove', 'keydown']"),
+      );
+    });
+
+    test('showHeader and scrollToTop retire the button', () {
+      final headerIdx = bridgeControllerJs.indexOf('showHeader() {');
+      expect(headerIdx, isNot(-1));
+      final header = _extractBlockBody(bridgeControllerJs, headerIdx);
+      expect(header, contains('this._scrolledUpFromTop = false'));
+      expect(header, contains('this._emitScrollToTopVisibility(false)'));
+
+      final topIdx = bridgeControllerJs.indexOf('scrollToTop() {');
+      expect(topIdx, isNot(-1));
+      final top = _extractBlockBody(bridgeControllerJs, topIdx);
+      expect(top, contains('this.virtualList.scrollToTop()'));
+      expect(top, contains('this._emitScrollToTopVisibility(false)'));
     });
   });
 
@@ -1137,6 +2816,35 @@ void main() {
       );
     });
 
+    test('selection classes reach messages outside the render window', () {
+      // Selection is held by id and covers the whole chat, but what the reader
+      // sees was written to the document — which in a virtualised list is the
+      // rows mounted right now. The list re-mounts the element it already
+      // built rather than re-rendering it, so a row outside the window at the
+      // time of the click never learned it had been selected.
+      final apply = _extractBlockBody(
+        selectionManagerJs,
+        selectionManagerJs.indexOf('_applySelectionClasses() {'),
+      );
+      expect(apply, contains('this._sections()'));
+      expect(
+        apply,
+        isNot(contains("document.querySelectorAll('.message-section')")),
+      );
+      final mode = _extractBlockBody(
+        selectionManagerJs,
+        selectionManagerJs.indexOf('setSelectionMode(enabled) {'),
+      );
+      expect(mode, contains('this._sections()'));
+      expect(
+        mode,
+        isNot(contains("document.querySelectorAll('.message-section')")),
+      );
+      // The whole-chat element list comes from the virtual list's items, the
+      // same place range selection reads its id order from.
+      expect(bridgeControllerJs, contains('_allMessageSections()'));
+    });
+
     test('bridge.js does not access _selectionMode directly', () {
       expect(
         bridgeControllerJs,
@@ -1177,9 +2885,8 @@ void main() {
       final body = _extractBlockBody(rendererJs, idx);
       expect(
         body,
-        contains('!isTyping && !isError && !animate'),
-        reason:
-            'Fast path condition must check not-typing, not-error, not-animate',
+        contains('!isError && !animate'),
+        reason: 'Fast path condition must check not-error, not-animate',
       );
       expect(
         body,
@@ -1233,6 +2940,215 @@ void main() {
         reason:
             '_createFooter must delegate to _createGenStat instead of inline DOM construction',
       );
+    });
+  });
+
+  // The typing placeholder is a virtual message with one constant id, and it
+  // now goes up while the user's own message is still being persisted — so a
+  // persisted message can land while it is on screen.
+  group('typing placeholder pinning (chat_bridge_controller.js)', () {
+    test('a batch append keeps the placeholder at the tail', () {
+      // virtualList.append lands after whatever is last, so an unpinned
+      // placeholder would end up above the message that just arrived.
+      final idx = bridgeControllerJs.indexOf('appendMessages(messagesJson) {');
+      expect(idx, isNot(-1));
+      final body = _extractBlockBody(bridgeControllerJs, idx);
+      expect(body, contains('_keepingPlaceholderLast('));
+    });
+
+    test('appending the placeholder itself does not pin behind itself', () {
+      final idx = bridgeControllerJs.indexOf('appendMessage(messageJson) {');
+      expect(idx, isNot(-1));
+      final body = _extractBlockBody(bridgeControllerJs, idx);
+      expect(body, contains('msg.id === STREAMING_ID'));
+      expect(body, contains('_keepingPlaceholderLast('));
+    });
+
+    test('a full re-render carries the placeholder across', () {
+      // clearAll + setMessages used to drop it while Flutter still believed
+      // it was on screen — every following delta then updated nothing and the
+      // reply streamed into a removed node.
+      final clearIdx = bridgeControllerJs.indexOf(
+        'clearAll(keepPlaceholder = true) {',
+      );
+      expect(clearIdx, isNot(-1));
+      final clearBody = _extractBlockBody(bridgeControllerJs, clearIdx);
+      expect(clearBody, contains('this._detachStreamingPlaceholder()'));
+      expect(
+        clearBody,
+        contains('this._parkedPlaceholder = keepPlaceholder ? parked : null'),
+      );
+
+      final setIdx = bridgeControllerJs.indexOf(
+        'setMessages(messagesJson, preserveScroll = false) {',
+      );
+      expect(setIdx, isNot(-1));
+      final setBody = _extractBlockBody(bridgeControllerJs, setIdx);
+      expect(setBody, contains('this._parkedPlaceholder'));
+      expect(setBody, contains('_reattachStreamingPlaceholder(carriedPlaceholder)'));
+    });
+
+    test('a leftover bubble can be retired without an exit animation', () {
+      // The carry above is only sound because Flutter retires a leftover
+      // before the setMessages that reopens a chat. `removeMessage` cannot do
+      // that job: it hands the node to a ~340ms exit animation, and the
+      // setMessages that follows would still find it at the tail and carry it.
+      final idx = bridgeControllerJs.indexOf('retireTypingPlaceholder() {');
+      expect(idx, isNot(-1));
+      final body = _extractBlockBody(bridgeControllerJs, idx);
+      // Level-triggered on the page's own belief: a node still on screen with
+      // the flag already cleared is playing the animation Flutter started.
+      expect(
+        body,
+        contains('!this._placeholderActive && !this._parkedPlaceholder'),
+      );
+      expect(body, contains('this._placeholderActive = false'));
+      expect(body, contains('this._parkedPlaceholder = null'));
+      expect(body, contains('this.virtualList.remove(STREAMING_ID)'));
+      expect(body, isNot(contains('animateRemoveSection')));
+    });
+
+    test('replacing the chat drops the placeholder instead of parking it', () {
+      // The bubble belongs to the session being left. Carried into the chat
+      // being opened it claims a reply is on its way there, and it then rides
+      // along on every following re-render.
+      final clearIdx = bridgeControllerJs.indexOf(
+        'clearAll(keepPlaceholder = true) {',
+      );
+      expect(clearIdx, isNot(-1));
+      final clearBody = _extractBlockBody(bridgeControllerJs, clearIdx);
+      expect(
+        clearBody,
+        contains('if (!keepPlaceholder) this._placeholderActive = false'),
+      );
+    });
+
+    test('an update for a lost placeholder re-creates it, but only while '
+        'one is wanted', () {
+      final idx = bridgeControllerJs.indexOf('_executeUpdateMessage(msg) {');
+      expect(idx, isNot(-1));
+      final body = _extractBlockBody(bridgeControllerJs, idx);
+      final guard = body.substring(0, body.indexOf('const animate'));
+      expect(guard, contains('msg.id === STREAMING_ID'));
+      expect(guard, contains('_renderAndAppend(msg)'));
+      // `updateMessage` is rAF-batched, so a delta issued before the
+      // placeholder was taken away can execute after it. Re-creating one then
+      // puts the finished reply back on screen as a second copy of itself,
+      // and it outlives the run that produced it.
+      expect(guard, contains('this._placeholderActive'));
+
+      final removeIdx = bridgeControllerJs.indexOf('removeMessage(messageId) {');
+      expect(removeIdx, isNot(-1));
+      expect(
+        _extractBlockBody(bridgeControllerJs, removeIdx),
+        contains('if (messageId === STREAMING_ID) this._placeholderActive = false'),
+      );
+
+      final setIdx = bridgeControllerJs.indexOf(
+        'setMessages(messagesJson, preserveScroll = false) {',
+      );
+      expect(
+        _extractBlockBody(bridgeControllerJs, setIdx),
+        contains('if (carriedPlaceholder) this._placeholderActive = true'),
+        reason:
+            'a re-render that carries one says it is live; one that does not '
+            'says nothing — the node may simply have been lost, which is what '
+            'the re-create branch is for',
+      );
+    });
+  });
+
+  group('Regenerate button (renderer/message_renderer.js)', () {
+    test('the send window withholds Regenerate at render time', () {
+      final idx = rendererMessageJs.indexOf('const showRegen =');
+      expect(idx, isNot(-1));
+      final line = rendererMessageJs.substring(idx, idx + 200);
+      expect(
+        line,
+        contains('!m.isSendPending'),
+        reason:
+            'the renderer draws this button from the map alone, so the send '
+            'window has to reach it there — setLastMessage only cleans up a '
+            'button on the element it flagged as last',
+      );
+      expect(line, contains('!m.isGenerating'));
+      expect(line, contains('!m.isEditing'));
+    });
+  });
+
+  // The typing bubble used to say "Generating..." from the moment it appeared
+  // — through prompt assembly, memory retrieval and the wait for the first
+  // token. The label is now pushed from Flutter as the run advances.
+  group('typing phase label (renderer/typing_phase.js)', () {
+    test('the typing container is not hardcoded to one label', () {
+      // The definition, not the two call sites that render into a body.
+      final idx = rendererMessageJs.indexOf('_createTypingContainer() {');
+      expect(idx, isNot(-1));
+      final body = _extractBlockBody(rendererMessageJs, idx);
+      expect(
+        body,
+        contains('window.bridge?.generationPhaseText'),
+        reason:
+            'a bubble rendered mid-run (scrollback, re-render) must pick up '
+            'the phase already reached, not rewind to the default',
+      );
+      expect(body, contains('DEFAULT_TYPING_TEXT'));
+      expect(
+        body,
+        isNot(contains('>Generating...<')),
+        reason: 'the label is data now, not markup',
+      );
+    });
+
+    test('message renderer imports the phase module', () {
+      expect(rendererMessageJs, contains("'./typing_phase.js'"));
+    });
+
+    test('setGenerationPhase repaints every live typing label', () {
+      expect(bridgeControllerJs, contains('setGenerationPhase(text) {'));
+      final idx = bridgeControllerJs.indexOf('_applyGenerationPhase() {');
+      expect(idx, isNot(-1));
+      final body = _extractBlockBody(bridgeControllerJs, idx);
+      expect(body, contains('.typing-container .typing-text'));
+      expect(body, contains('applyTypingPhase('));
+      expect(
+        body,
+        contains('prefers-reduced-motion'),
+        reason: 'the swap animation must respect the reduced-motion setting',
+      );
+      expect(
+        body,
+        contains('this.batterySaver'),
+        reason: 'battery saver keeps repeated animations off the compositor',
+      );
+    });
+
+    test('a phase that changes mid-swap settles on the newest label', () {
+      final idx = typingPhaseJs.indexOf('export function applyTypingPhase(');
+      expect(idx, isNot(-1));
+      final body = _extractBlockBody(typingPhaseJs, idx);
+      expect(
+        body,
+        contains('clearTimeout(el._phaseTimer)'),
+        reason: 'a second swap must cancel the pending one, not stack on it',
+      );
+      expect(body, contains('_phasePending'));
+      expect(
+        body,
+        contains('DEFAULT_TYPING_TEXT'),
+        reason: 'an empty label falls back to the default text',
+      );
+    });
+
+    test('the swap animation is defined and cancelled with the label swap', () {
+      expect(stylessCss, contains('.typing-text.phase-out'));
+      expect(stylessCss, contains('.typing-text.phase-in'));
+      expect(stylessCss, contains('@keyframes typingPhaseOut'));
+      expect(stylessCss, contains('@keyframes typingPhaseIn'));
+      // The text is replaced when the out-animation ends, so the two
+      // durations have to agree — see SWAP_OUT_MS in typing_phase.js.
+      expect(typingPhaseJs, contains('const SWAP_OUT_MS = 130;'));
+      expect(stylessCss, contains('animation: typingPhaseOut 0.13s'));
     });
   });
 }
@@ -1296,14 +3212,19 @@ String _extractTextareaWheelListener(String src) {
 
 /// Extracts the body of a JS method/class block starting from [fromIndex].
 /// Walks braces to find the matching close.
-String _extractBlockBody(String src, int fromIndex) {
-  int start = src.indexOf('{', fromIndex);
+String _extractBlockBody(
+  String src,
+  int fromIndex, {
+  String open = '{',
+  String close = '}',
+}) {
+  int start = src.indexOf(open, fromIndex);
   if (start == -1) return '';
   int depth = 0;
   for (int i = start; i < src.length; i++) {
-    if (src[i] == '{') {
+    if (src[i] == open) {
       depth++;
-    } else if (src[i] == '}') {
+    } else if (src[i] == close) {
       depth--;
       if (depth == 0) return src.substring(start, i + 1);
     }

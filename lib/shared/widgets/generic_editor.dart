@@ -4,17 +4,26 @@ import 'dart:io';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import '../../core/utils/platform_paths.dart';
+import '../shell/desktop/desktop_layout_provider.dart';
+import '../shell/shell_header_provider.dart';
 import '../theme/app_colors.dart';
 import 'fullscreen_editor.dart';
 import 'glaze_bottom_sheet.dart';
 import 'glass_surface.dart';
 import 'menu_group.dart';
 
+/// Room an editor leaves under its last field, past the bottom inset: clear of
+/// a phone's floating nav bar, but only a margin inside a desktop window, where
+/// nothing sits under the content and a phone's clearance reads as a strange
+/// empty band.
+double editorTrailingGap(BuildContext context) =>
+    DetachedShellHost.drawsChrome(context) ? 16 : 60;
+
 class GenericEditorField {
   final String key;
   final String label;
   final String
-  type; // 'text', 'number', 'tags', 'textarea', 'greeting_list', 'select', 'info'
+  type; // 'text', 'number', 'tags', 'textarea', 'greeting_list', 'select', 'switch', 'info'
   final bool expandable;
   final String? helpTerm;
   final String? placeholder;
@@ -50,6 +59,7 @@ class GenericEditor extends StatefulWidget {
   final List<GenericEditorSection> config;
   final bool showAvatar;
   final String avatarField;
+
   /// Defaults to the localized `hint_change_avatar` when not supplied — it
   /// cannot be a constructor default because `.tr()` is not a constant.
   final String? avatarHint;
@@ -64,6 +74,12 @@ class GenericEditor extends StatefulWidget {
   final void Function(Map<String, dynamic> values)? onSave;
   final Duration debounceDuration;
   final EdgeInsetsGeometry? padding;
+
+  /// Key of a `textarea` that, in a scrollable editor on desktop, stretches to
+  /// take whatever height the other fields leave — the prompt block's content
+  /// in its own window, which otherwise ends in an empty band. The editor then
+  /// scrolls as a whole once the fields stop fitting.
+  final String? fillField;
 
   const GenericEditor({
     super.key,
@@ -81,6 +97,7 @@ class GenericEditor extends StatefulWidget {
     this.onSave,
     this.debounceDuration = const Duration(milliseconds: 1000),
     this.padding,
+    this.fillField,
   });
 
   @override
@@ -92,6 +109,13 @@ class _GenericEditorState extends State<GenericEditor> {
   final Map<String, TextEditingController> _controllers = {};
   Timer? _saveTimer;
   bool _hasPendingSave = false;
+  bool _syncingControllers = false;
+
+  /// Whether the editor is laid out for desktop; refreshed every build.
+  bool _desktop = false;
+
+  /// Whether [GenericEditor.fillField] stretches in this build.
+  bool _filling = false;
 
   @override
   void initState() {
@@ -111,23 +135,28 @@ class _GenericEditorState extends State<GenericEditor> {
       }
     }
     if (changed) {
-      for (final section in widget.config) {
-        for (final field in section.fields) {
-          if (field.type == 'text' ||
-              field.type == 'textarea' ||
-              field.type == 'number') {
-            final val = _localItem[field.key]?.toString() ?? '';
-            if (_controllers[field.key]?.text != val) {
-              _controllers[field.key]?.text = val;
-            }
-          } else if (field.type == 'tags') {
-            final val = _localItem[field.key];
-            final strVal = (val is List) ? val.join(', ') : '';
-            if (_controllers[field.key]?.text != strVal) {
-              _controllers[field.key]?.text = strVal;
+      _syncingControllers = true;
+      try {
+        for (final section in widget.config) {
+          for (final field in section.fields) {
+            if (field.type == 'text' ||
+                field.type == 'textarea' ||
+                field.type == 'number') {
+              final val = _localItem[field.key]?.toString() ?? '';
+              if (_controllers[field.key]?.text != val) {
+                _controllers[field.key]?.text = val;
+              }
+            } else if (field.type == 'tags') {
+              final val = _localItem[field.key];
+              final strVal = (val is List) ? val.join(', ') : '';
+              if (_controllers[field.key]?.text != strVal) {
+                _controllers[field.key]?.text = strVal;
+              }
             }
           }
         }
+      } finally {
+        _syncingControllers = false;
       }
     }
   }
@@ -154,6 +183,7 @@ class _GenericEditorState extends State<GenericEditor> {
   }
 
   void _updateField(String key, String type, String text) {
+    if (_syncingControllers) return;
     if (type == 'number') {
       _localItem[key] = num.tryParse(text) ?? _localItem[key];
     } else if (type == 'tags') {
@@ -257,25 +287,87 @@ class _GenericEditorState extends State<GenericEditor> {
 
   // ── Selectors ──────────────────────────────────────────────────────────────────
 
-  void _openSelectSelector(GenericEditorField field) {
+  void _selectOption(GenericEditorField field, Object? value) {
+    _localItem[field.key] = value;
+    widget.onChanged(_localItem);
+    _scheduleSave();
+    setState(() {});
+  }
+
+  /// Picks a value for a `select` field: a dropdown anchored to the field on
+  /// desktop, a bottom sheet on phones.
+  void _openSelectSelector(GenericEditorField field, BuildContext anchor) {
+    final options = field.options ?? const <Map<String, dynamic>>[];
     final currentVal = _localItem[field.key];
-    final items =
-        field.options?.map((opt) {
-          final isSelected = currentVal == opt['value'];
-          return BottomSheetItem(
-            label: opt['label'] as String? ?? opt['value'].toString(),
-            icon: isSelected ? Icons.check : null,
+    String labelOf(Map<String, dynamic> opt) =>
+        opt['label'] as String? ?? opt['value'].toString();
+
+    if (isDesktopLayout(context)) {
+      final box = anchor.findRenderObject() as RenderBox?;
+      final overlay =
+          Overlay.of(context).context.findRenderObject() as RenderBox?;
+      if (box == null || overlay == null) return;
+      // Anchored under the field's input box: the row's bottom edge minus
+      // its bottom padding, spanning the input's width (the row's 16px side
+      // gutters trimmed off).
+      final topLeft = box.localToGlobal(
+        Offset(16, box.size.height - 8),
+        ancestor: overlay,
+      );
+      final width = box.size.width - 32;
+      showMenu<Object?>(
+        context: context,
+        position: RelativeRect.fromLTRB(
+          topLeft.dx,
+          topLeft.dy + 4,
+          overlay.size.width - topLeft.dx - width,
+          0,
+        ),
+        constraints: BoxConstraints(minWidth: width, maxWidth: width),
+        color: context.cs.surfaceContainerHigh,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: context.cs.outlineVariant),
+        ),
+        items: [
+          for (final opt in options)
+            PopupMenuItem<Object?>(
+              value: opt['value'],
+              height: 40,
+              child: Row(
+                children: [
+                  Expanded(child: Text(labelOf(opt))),
+                  if (currentVal == opt['value'])
+                    Icon(Icons.check, size: 18, color: context.cs.primary),
+                ],
+              ),
+            ),
+        ],
+      ).then((value) {
+        // A dismissed menu yields null, which is also a legal option value;
+        // only treat it as a choice when some option really is null.
+        if (!mounted) return;
+        if (value == null && !options.any((o) => o['value'] == null)) return;
+        _selectOption(field, value);
+      });
+      return;
+    }
+
+    GlazeBottomSheet.show<void>(
+      context,
+      title: field.label,
+      items: [
+        for (final opt in options)
+          BottomSheetItem(
+            label: labelOf(opt),
+            icon: currentVal == opt['value'] ? Icons.check : null,
             onTap: () {
               Navigator.of(context, rootNavigator: true).pop();
-              _localItem[field.key] = opt['value'];
-              widget.onChanged(_localItem);
-              _scheduleSave();
-              setState(() {});
+              _selectOption(field, opt['value']);
             },
-          );
-        }).toList() ??
-        [];
-    GlazeBottomSheet.show<void>(context, title: field.label, items: items);
+          ),
+      ],
+    );
   }
 
   String _getSelectedLabel(GenericEditorField field) {
@@ -303,8 +395,12 @@ class _GenericEditorState extends State<GenericEditor> {
       hintText: field.placeholder,
       onChanged: (value) {
         if (!mounted) return;
+        // No setState: the field below the overlay is driven by this
+        // controller and repaints from it on its own. The rebuild this used to
+        // force ran the whole form again on every character typed in the
+        // expanded editor, on top of the parent rebuild the change already
+        // causes.
         ctrl.text = value;
-        setState(() {});
       },
     );
   }
@@ -347,36 +443,163 @@ class _GenericEditorState extends State<GenericEditor> {
 
   // ── Build ──────────────────────────────────────────────────────────────────────
 
+  /// Width from which a scrollable editor switches to its desktop layout: the
+  /// avatar in a column of its own beside the fields, and the fields held to
+  /// a readable width instead of stretching across the whole window.
+  static const double _wideBreakpoint = 720;
+
+  /// Width of the avatar column in the wide layout.
+  static const double _avatarPaneWidth = 300;
+
+  /// Widest the field column grows in the wide layout.
+  static const double _fieldsMaxWidth = 760;
+
+  /// Largest the avatar card gets on a narrow desktop panel (the right sidebar,
+  /// a sheet window), where the phone's full-width square would dwarf the
+  /// fields.
+  static const double _narrowDesktopAvatarMax = 320;
+
   @override
   Widget build(BuildContext context) {
-    final children = [
-      if (widget.showAvatar) _buildAvatarCard(),
+    _desktop = isDesktopLayout(context);
+    _filling =
+        widget.fillField != null &&
+        widget.scrollable &&
+        _desktop &&
+        !widget.showAvatar;
+    final sections = [
       for (final section in widget.config) _buildSection(section),
     ];
 
-    if (widget.scrollable) {
+    if (!widget.scrollable) {
       return Material(
         type: MaterialType.transparency,
-        child: ListView(
-          padding:
-              widget.padding ??
-              EdgeInsets.only(
-                top: MediaQuery.of(context).padding.top + 16,
-                bottom: MediaQuery.of(context).padding.bottom + 60,
-              ),
-          children: children,
+        child: Padding(
+          padding: widget.padding ?? EdgeInsets.zero,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (widget.showAvatar) _buildAvatarCard(),
+              ...sections,
+            ],
+          ),
         ),
       );
     }
+
+    final padding =
+        widget.padding?.resolve(Directionality.of(context)) ??
+        EdgeInsets.only(
+          top: MediaQuery.of(context).padding.top + 16,
+          bottom:
+              MediaQuery.of(context).padding.bottom +
+              editorTrailingGap(context),
+        );
+
     return Material(
       type: MaterialType.transparency,
-      child: Padding(
-        padding: widget.padding ?? EdgeInsets.zero,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: children,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.maxWidth;
+          if (_filling) {
+            final gutter = width < _wideBreakpoint
+                ? 0.0
+                : ((width - _fieldsMaxWidth) / 2).clamp(0.0, double.infinity);
+            return _buildFilling(
+              constraints.maxHeight,
+              padding.copyWith(
+                left: padding.left + gutter,
+                right: padding.right + gutter,
+              ),
+              sections,
+            );
+          }
+          if (!_desktop || width < _wideBreakpoint) {
+            return ListView(
+              padding: padding,
+              children: [
+                if (widget.showAvatar) _buildAvatarCard(),
+                ...sections,
+              ],
+            );
+          }
+          return _buildWide(width, padding, sections);
+        },
+      ),
+    );
+  }
+
+  /// The fields in a column at least as tall as the viewport, the section
+  /// holding [GenericEditor.fillField] taking up the slack; taller than that,
+  /// it scrolls like the list it replaces.
+  Widget _buildFilling(
+    double viewport,
+    EdgeInsets padding,
+    List<Widget> sections,
+  ) {
+    return SingleChildScrollView(
+      padding: padding,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          minHeight: (viewport - padding.vertical).clamp(0.0, double.infinity),
+        ),
+        child: IntrinsicHeight(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: sections,
+          ),
         ),
       ),
+    );
+  }
+
+  /// Desktop layout: fields centered at a readable width; with an avatar, the
+  /// avatar stays pinned in a column on the left while the fields scroll.
+  ///
+  /// The field list still spans to the right edge, so its scrollbar and the
+  /// mouse wheel work from anywhere on that side, not just over the fields.
+  Widget _buildWide(
+    double width,
+    EdgeInsets padding,
+    List<Widget> sections,
+  ) {
+    final contentWidth = widget.showAvatar
+        ? _avatarPaneWidth + _fieldsMaxWidth
+        : _fieldsMaxWidth;
+    final gutter = ((width - contentWidth) / 2).clamp(0.0, double.infinity);
+
+    if (!widget.showAvatar) {
+      return ListView(
+        padding: padding.copyWith(
+          left: padding.left + gutter,
+          right: padding.right + gutter,
+        ),
+        children: sections,
+      );
+    }
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(width: gutter + padding.left),
+        SizedBox(
+          width: _avatarPaneWidth,
+          child: SingleChildScrollView(
+            padding: EdgeInsets.only(top: padding.top, bottom: padding.bottom),
+            child: _buildAvatarCard(),
+          ),
+        ),
+        Expanded(
+          child: ListView(
+            padding: EdgeInsets.only(
+              top: padding.top,
+              bottom: padding.bottom,
+              right: gutter + padding.right,
+            ),
+            children: sections,
+          ),
+        ),
+      ],
     );
   }
 
@@ -385,11 +608,19 @@ class _GenericEditorState extends State<GenericEditor> {
         .where((f) => f.showIf == null || f.showIf!(_localItem))
         .toList();
     if (visibleFields.isEmpty) return const SizedBox.shrink();
-    return MenuGroup(
+    bool fills(GenericEditorField field) =>
+        _filling && field.key == widget.fillField;
+    final group = MenuGroup(
       header: section.title,
       headerVariant: MenuGroupHeaderVariant.accentCaps,
-      items: visibleFields.map(_buildFieldItem).toList(),
+      items: [
+        for (final field in visibleFields)
+          fills(field)
+              ? Expanded(child: _buildFieldItem(field))
+              : _buildFieldItem(field),
+      ],
     );
+    return visibleFields.any(fills) ? Expanded(child: group) : group;
   }
 
   Widget _buildFieldItem(GenericEditorField field) {
@@ -403,6 +634,8 @@ class _GenericEditorState extends State<GenericEditor> {
       case 'textarea':
         final ctrl = _controllers[field.key];
         if (ctrl == null) return const SizedBox.shrink();
+        final isArea = field.type == 'textarea';
+        final rows = field.rows ?? 3;
         return MenuFieldItem(
           label: field.label,
           helpTerm: field.helpTerm,
@@ -410,17 +643,37 @@ class _GenericEditorState extends State<GenericEditor> {
           placeholder: field.placeholder,
           keyboardType: field.type == 'number'
               ? TextInputType.number
-              : field.type == 'textarea'
+              : isArea
               ? TextInputType.multiline
               : TextInputType.text,
-          maxLines: field.type == 'textarea' ? (field.rows ?? 3) : 1,
+          // On desktop a text area starts at its configured height and grows
+          // with its text, the way a web form's auto-sizing textarea does —
+          // with a mouse and a tall window, scrolling inside a three-line box
+          // is the phone compromise.
+          maxLines: isArea ? (_desktop ? rows * 4 : rows) : 1,
+          minLines: isArea && _desktop ? rows : null,
+          expands: isArea && _filling && field.key == widget.fillField,
           onExpand: field.expandable ? () => _openFieldEditor(field) : null,
         );
       case 'select':
-        return MenuSelectorItem(
+        return Builder(
+          builder: (anchor) => MenuSelectorItem(
+            label: field.label,
+            helpTerm: field.helpTerm,
+            currentValue: _getSelectedLabel(field),
+            onTap: () => _openSelectSelector(field, anchor),
+          ),
+        );
+      case 'switch':
+        return MenuSwitchItem(
           label: field.label,
-          currentValue: _getSelectedLabel(field),
-          onTap: () => _openSelectSelector(field),
+          helpTerm: field.helpTerm,
+          value: _localItem[field.key] as bool? ?? false,
+          onChanged: (value) {
+            setState(() => _localItem[field.key] = value);
+            widget.onChanged(_localItem);
+            _scheduleSave();
+          },
         );
       case 'greeting_list':
         return _buildGreetingItems();
@@ -449,95 +702,38 @@ class _GenericEditorState extends State<GenericEditor> {
         for (int i = 0; i < greets.length; i++)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-            child: Container(
-              decoration: BoxDecoration(
-                color: context.cs.outlineVariant.withValues(alpha: 0.08),
-                border: Border.all(color: context.cs.outlineVariant),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          '#${i + 1}',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: context.cs.onSurfaceVariant,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        Row(
-                          children: [
-                            GestureDetector(
-                              onTap: () => _openGreetingEditor(i),
-                              child: Icon(
-                                Icons.edit_outlined,
-                                size: 18,
-                                color: context.cs.primary,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            GestureDetector(
-                              onTap: () => _confirmDeleteGreeting(i),
-                              child: const Icon(
-                                Icons.delete_outline,
-                                size: 18,
-                                color: Color(0xFFFF4444),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    GestureDetector(
-                      onTap: () => _openGreetingEditor(i),
-                      child: Text(
-                        greets[i].isEmpty
-                            ? 'action_add_greeting'.tr()
-                            : greets[i],
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: context.cs.onSurface.withValues(alpha: 0.9),
-                          height: 1.4,
-                        ),
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+            child: _GreetingCard(
+              index: i,
+              text: greets[i],
+              maxLines: _desktop ? 5 : 3,
+              onEdit: () => _openGreetingEditor(i),
+              onDelete: () => _confirmDeleteGreeting(i),
             ),
           ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-          child: GestureDetector(
-            onTap: _addGreeting,
-            child: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: context.cs.primary.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.add, size: 20, color: context.cs.primary),
-                  const SizedBox(width: 8),
-                  Text(
-                    'action_add_greeting'.tr(),
-                    style: TextStyle(
-                      color: context.cs.primary,
-                      fontWeight: FontWeight.w500,
+          child: Material(
+            color: context.cs.primary.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(10),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: _addGreeting,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.add, size: 20, color: context.cs.primary),
+                    const SizedBox(width: 8),
+                    Text(
+                      'action_add_greeting'.tr(),
+                      style: TextStyle(
+                        color: context.cs.primary,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -548,7 +744,7 @@ class _GenericEditorState extends State<GenericEditor> {
 
   Widget _buildAvatarCard() {
     final avatarPath = _localItem[widget.avatarField] as String?;
-    return Container(
+    final card = Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       child: GlassSurface(
         onTap: widget.onAvatarTap,
@@ -562,7 +758,7 @@ class _GenericEditorState extends State<GenericEditor> {
                 color: context.cs.surfaceContainerHighest,
                 child: avatarPath != null && avatarPath.isNotEmpty
                     ? Image.file(
-                        File(resolveGlazeFilePath(avatarPath)!),
+                        File(resolveGlazeThumbnailPath(avatarPath)!),
                         fit: BoxFit.cover,
                       )
                     : Container(
@@ -636,6 +832,104 @@ class _GenericEditorState extends State<GenericEditor> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+    if (!_desktop) return card;
+    // Desktop: never wider than a portrait-sized card, whatever column it
+    // lands in — the phone's full-width square turned into a poster on a
+    // desktop panel.
+    return Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(
+          maxWidth: _narrowDesktopAvatarMax + 32,
+        ),
+        child: card,
+      ),
+    );
+  }
+}
+
+/// One greeting in a `greeting_list` field: its number, edit and delete
+/// buttons, and a preview of its text that opens the editor when clicked.
+class _GreetingCard extends StatelessWidget {
+  final int index;
+  final String text;
+  final int maxLines;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  const _GreetingCard({
+    required this.index,
+    required this.text,
+    required this.maxLines,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const deleteColor = Color(0xFFFF4444);
+    return Material(
+      color: context.cs.outlineVariant.withValues(alpha: 0.08),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: context.cs.outlineVariant),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onEdit,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 4, 4, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '#${index + 1}',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: context.cs.onSurfaceVariant,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.edit_outlined, size: 18),
+                    color: context.cs.primary,
+                    tooltip: 'action_edit'.tr(),
+                    visualDensity: VisualDensity.compact,
+                    onPressed: onEdit,
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline, size: 18),
+                    color: deleteColor,
+                    tooltip: 'action_delete'.tr(),
+                    visualDensity: VisualDensity.compact,
+                    onPressed: onDelete,
+                  ),
+                ],
+              ),
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Text(
+                  text.isEmpty ? 'action_add_greeting'.tr() : text,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: text.isEmpty
+                        ? context.cs.onSurfaceVariant
+                        : context.cs.onSurface.withValues(alpha: 0.9),
+                    height: 1.4,
+                  ),
+                  maxLines: maxLines,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

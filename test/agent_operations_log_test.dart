@@ -58,11 +58,11 @@ void main() {
       expect(next.records.first.id, 'r2');
     });
 
-    test('studioTracker kind survives append/filter/label', () {
+    test('studioController kind survives append/filter/label', () {
       var state = const AgentOperationsLogState();
       final rec = AgentOperationRecord(
         id: 'st1',
-        kind: AgentOperationKind.studioTracker,
+        kind: AgentOperationKind.studioController,
         status: AgentOperationStatus.error,
         sessionId: 's1',
         attempts: const [
@@ -82,8 +82,8 @@ void main() {
       );
       state = state.append(rec);
       expect(state.records.length, 1);
-      expect(state.records.first.kind, AgentOperationKind.studioTracker);
-      expect(state.records.first.kind.label, 'Studio tracker');
+      expect(state.records.first.kind, AgentOperationKind.studioController);
+      expect(state.records.first.kind.label, 'Pre-gen controller');
       expect(state.failures.length, 1);
       expect(state.failures.first.id, 'st1');
       expect(state.forSession('s1').length, 1);

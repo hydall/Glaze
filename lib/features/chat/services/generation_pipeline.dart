@@ -4,10 +4,17 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/llm/generation_phase.dart';
+import '../../../core/models/character.dart';
 import '../../../core/models/chat_message.dart';
-import '../../../core/db/repositories/chat_repo.dart';
+import '../../../core/db/repositories/lorebook_use_manifest_repo.dart';
+import '../../../core/llm/prompt/exact_lorebook_manifest.dart';
+import '../../../core/llm/studio/studio_history_limiter.dart';
+import '../../../core/llm/studio/studio_stream_interceptor.dart';
+import '../../../core/llm/studio_turn_config_snapshot.dart';
 import '../../../core/services/generation_notification_service.dart';
 import '../../../core/state/db_provider.dart';
+import '../../../core/state/lorebook_embedding_provider.dart';
 import '../../../core/utils/time_helpers.dart';
 import '../../../core/state/studio_turn_config_resolver.dart';
 import '../../chat_history/chat_history_provider.dart';
@@ -15,12 +22,15 @@ import '../abort_handler.dart';
 import '../chat_generation_service.dart';
 import '../chat_session_service.dart';
 import '../chat_state.dart';
+import '../state/studio_history_rotation_provider.dart';
 import 'stages/cleaner_stage.dart';
 import 'stages/ext_blocks_stage.dart';
 import 'stages/ledger_stage.dart';
 import 'stages/post_gen_coordinator.dart';
 import 'stages/regen_resolver.dart';
 import 'stages/stage_context.dart';
+import 'continuation_message_merger.dart';
+import '../state/continue_failure_provider.dart';
 
 // Re-export for backward compatibility (tracker_memory_recovery_service,
 // test files).
@@ -87,6 +97,7 @@ class GenerationPipeline {
     required ChatSession session,
     required ChatSession? saveSession,
     required String? guidanceText,
+    String guidanceType = 'GENERATION',
     required List<String>? previousSwipes,
     int previousSwipeId = 0,
     String? previousReasoning,
@@ -94,13 +105,19 @@ class GenerationPipeline {
     int? previousTokens,
     List<Map<String, dynamic>>? previousSwipesMeta,
     String? regenTargetId,
+    String? continueTargetId,
   }) async {
     if (!ctx.ref.mounted) return null;
     ctx.abortHandler.clearStreaming();
 
     final notifService = GenerationNotificationService.instance;
+    GenerationForegroundLease? notificationLease;
 
     try {
+      notificationLease = await notifService.acquireGenerationLease('Glaze');
+      if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) {
+        return null;
+      }
       final studioTurnConfig = await ctx.ref
           .read(studioTurnConfigResolverProvider)
           .resolve(session.id);
@@ -112,11 +129,6 @@ class GenerationPipeline {
       if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) {
         return null;
       }
-      await notifService.onGenerationStarted(character?.name ?? 'Unknown');
-      if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) {
-        return null;
-      }
-
       final service = ctx.ref.read(chatGenerationServiceProvider);
       var result = await service.generate(
         session: session,
@@ -135,7 +147,9 @@ class GenerationPipeline {
         previousTokens: previousTokens,
         previousSwipesMeta: previousSwipesMeta,
         guidanceText: guidanceText,
+        guidanceType: guidanceType,
         regenTargetId: regenTargetId,
+        continueTargetId: continueTargetId,
         studioTurnConfig: studioTurnConfig,
       );
 
@@ -147,18 +161,50 @@ class GenerationPipeline {
         await _handlePipelineError(
           StateError('Generation completed without a chat session'),
           genId,
-          notifService,
+          continueTargetId: continueTargetId,
         );
         return null;
+      }
+      final completedMessageId =
+          continueTargetId ??
+          regenTargetId ??
+          result.session!.messages.lastOrNull?.id;
+      if (completedMessageId == null) {
+        await _handlePipelineError(
+          StateError('Generation completed without a message'),
+          genId,
+          continueTargetId: continueTargetId,
+        );
+        return null;
+      }
+
+      // Continue mode extends an existing assistant message instead of adding
+      // a turn, so it owns its own commit + post-gen tail (INV-CM1). Awaited
+      // rather than returned directly: the notification lease is released in
+      // this method's `finally`, which would otherwise run first.
+      if (continueTargetId != null) {
+        final outcome = await _resolveContinuation(
+          result: result,
+          session: session,
+          continueTargetId: continueTargetId,
+          genId: genId,
+          character: character,
+          service: service,
+          notifService: notifService,
+          studioTurnConfig: studioTurnConfig,
+        );
+        return outcome;
       }
 
       final durableSession = await _commitGenerationResult(
         baseSession: saveSession ?? session,
         generatedSession: result.session!,
         regenTargetId: regenTargetId,
+        manifest:
+            result.mainModelContextSnapshot?.promptResult.exactLorebookManifest,
+        studioTurnConfig: studioTurnConfig,
       );
       if (durableSession == null) {
-        await notifService.onGenerationAborted();
         return null;
       }
       result = result.copyWith(session: durableSession);
@@ -179,7 +225,6 @@ class GenerationPipeline {
           isPostGenRunning: false,
         );
         ctx.setState(AsyncData(settled));
-        await notifService.onGenerationAborted();
         return GenerationOutcome(state: settled, clearRestorationMessage: null);
       }
 
@@ -220,6 +265,7 @@ class GenerationPipeline {
             character: character,
             service: service,
             notifService: notifService,
+            completedMessageId: completedMessageId,
             regenTargetId: regenTargetId,
             studioTurnConfig: studioTurnConfig,
           );
@@ -233,7 +279,7 @@ class GenerationPipeline {
             }
           }
         } else {
-          await notifService.onGenerationAborted();
+          // The owning pipeline releases its foreground lease in finally.
         }
         return regenOutcome;
       }
@@ -265,7 +311,6 @@ class GenerationPipeline {
           return null;
         }
         if (restoredSession == null) {
-          await notifService.onGenerationAborted();
           return null;
         }
         ChatSessionService.updateCache(restoredSession);
@@ -308,6 +353,7 @@ class GenerationPipeline {
         character: character,
         service: service,
         notifService: notifService,
+        completedMessageId: completedMessageId,
         regenTargetId: regenTargetId,
         studioTurnConfig: studioTurnConfig,
       );
@@ -326,65 +372,230 @@ class GenerationPipeline {
         clearRestorationMessage: null,
       );
     } catch (e) {
-      await _handlePipelineError(e, genId, notifService);
+      await _handlePipelineError(e, genId, continueTargetId: continueTargetId);
       return null;
+    } finally {
+      // The run is over on every exit path — success, error, or a stale genId
+      // (where setPhase is a no-op, so the newer run keeps its own label).
+      ctx.setPhase(GenerationPhase.idle, genId: genId);
+      await notificationLease?.release();
     }
+  }
+
+  /// Continue mode tail: fold the generated block into the assistant message
+  /// the run was extending, commit that single message, then run the ordinary
+  /// post-generation stages against it. A continuation that produced nothing
+  /// usable settles through [_settleContinuationFailure] and leaves the target
+  /// message byte-for-byte as the user saw it (INV-CM4).
+  Future<GenerationOutcome?> _resolveContinuation({
+    required ChatState result,
+    required ChatSession session,
+    required String continueTargetId,
+    required int genId,
+    required Character? character,
+    required ChatGenerationService service,
+    required GenerationNotificationService notifService,
+    required StudioTurnConfigSnapshot studioTurnConfig,
+  }) async {
+    final target = session.messages
+        .where((message) => message.id == continueTargetId)
+        .firstOrNull;
+    final generated = result.session!.messages.lastOrNull;
+    // `generated.id == continueTargetId` means the writer never appended a
+    // block (aborted run) — there is nothing to fold in.
+    final produced =
+        target != null &&
+        generated != null &&
+        generated.id != continueTargetId &&
+        generated.role == 'assistant' &&
+        !generated.isError &&
+        generated.content.trim().isNotEmpty;
+    final merged = produced
+        ? mergeContinuationMessages(result.session!.messages, target)
+        : null;
+    if (merged == null) {
+      return _settleContinuationFailure(result: result, session: session);
+    }
+
+    var continued = result.copyWith(
+      session: result.session!.copyWith(messages: merged),
+    );
+    final durableSession = await _commitGenerationResult(
+      baseSession: session,
+      generatedSession: continued.session!,
+      regenTargetId: continueTargetId,
+      manifest:
+          result.mainModelContextSnapshot?.promptResult.exactLorebookManifest,
+      studioTurnConfig: studioTurnConfig,
+    );
+    if (durableSession == null) return null;
+    if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) return null;
+    ChatSessionService.updateCache(durableSession);
+    ctx.ref.invalidate(chatHistoryProvider);
+
+    ctx.abortHandler.clearStreaming();
+    ctx.abortHandler.restorationMessage = null;
+
+    // The text stream is complete. PostGenCoordinator acquires the foreground
+    // post-gen flag only for real foreground work.
+    continued = continued.copyWith(
+      session: durableSession,
+      isGenerating: false,
+      continuationTargetId: null,
+    );
+    ctx.setState(AsyncData(continued));
+
+    await _postGenCoordinator.run(
+      result: continued,
+      genId: genId,
+      character: character,
+      service: service,
+      notifService: notifService,
+      completedMessageId: continueTargetId,
+      regenTargetId: continueTargetId,
+      studioTurnConfig: studioTurnConfig,
+    );
+    if (ctx.ref.mounted && ctx.abortHandler.isCurrentGen(genId)) {
+      final after = ctx.getState().value;
+      if (after != null && after.isPostGenRunning) {
+        ctx.setState(AsyncData(after.copyWith(isPostGenRunning: false)));
+      }
+    }
+
+    return GenerationOutcome(
+      state: ctx.getState().value ?? continued,
+      clearRestorationMessage: null,
+    );
+  }
+
+  /// A continuation that failed leaves no trace on the message it was
+  /// extending — no error swipe, no appended error bubble. The run settles and
+  /// publishes a [ContinueFailureNotice] for the toast (INV-CM4).
+  GenerationOutcome _settleContinuationFailure({
+    required ChatState result,
+    required ChatSession session,
+  }) {
+    ctx.abortHandler.clearStreaming();
+    ctx.abortHandler.restorationMessage = null;
+    final current = ctx.getState().value;
+    final error = result.error ?? 'Continuation produced no text';
+    final settled = (current ?? result).copyWith(
+      session: current?.session ?? session,
+      isGenerating: false,
+      isGeneratingImage: false,
+      isPostGenRunning: false,
+      continuationTargetId: null,
+      error: error,
+    );
+    ctx.setState(AsyncData(settled));
+    reportContinueFailure(
+      ctx.ref,
+      charId: ctx.charId,
+      sessionId: settled.session?.id ?? session.id,
+      error: error,
+    );
+    return GenerationOutcome(state: settled, clearRestorationMessage: null);
   }
 
   Future<ChatSession?> _commitGenerationResult({
     required ChatSession baseSession,
     required ChatSession generatedSession,
     required String? regenTargetId,
-  }) {
-    return ctx.ref
-        .read(chatRepoProvider)
-        .mutateSession(
-          sessionId: generatedSession.id,
-          updatedAt: generatedSession.updatedAt,
-          mutate: (latest) {
-            final messages = List<ChatMessage>.from(latest.messages);
-            if (regenTargetId != null) {
-              final baseIndex = baseSession.messages.indexWhere(
-                (message) => message.id == regenTargetId,
-              );
-              final generatedIndex = generatedSession.messages.indexWhere(
-                (message) => message.id == regenTargetId,
-              );
-              final latestIndex = messages.indexWhere(
-                (message) => message.id == regenTargetId,
-              );
-              if (baseIndex < 0 || generatedIndex < 0 || latestIndex < 0) {
-                return null;
-              }
-              final base = baseSession.messages[baseIndex];
-              final current = messages[latestIndex];
-              if (!_sameGenerationAnchor(base, current)) return null;
-              messages[latestIndex] = generatedSession.messages[generatedIndex]
-                  .copyWith(
-                    isHidden: current.isHidden,
-                    imageHidden: current.imageHidden,
-                  );
-            } else {
-              if (generatedSession.messages.length !=
-                  baseSession.messages.length + 1) {
-                return null;
-              }
-              final expectedTail = baseSession.messages.lastOrNull?.id;
-              final currentTail = messages.lastOrNull?.id;
-              if (expectedTail != currentTail) return null;
-              messages.add(generatedSession.messages.last);
-            }
-
-            return latest.copyWith(
-              messages: messages,
-              sessionVars: ChatRepo.applySessionVarDelta(
-                latest.sessionVars,
-                baseSession.sessionVars,
-                generatedSession.sessionVars,
-              ),
-            );
+    required ExactLorebookManifest? manifest,
+    required StudioTurnConfigSnapshot studioTurnConfig,
+  }) async {
+    final durableManifest = validateGenerationManifestForCommit(manifest);
+    var sessionToCommit = generatedSession;
+    StudioHistoryWindowPlan? rotation;
+    if (regenTargetId == null &&
+        studioTurnConfig.enabled &&
+        generatedSession.messages.lastOrNull?.isError != true) {
+      final settings = studioTurnConfig.pipelineSettings.studioAgent;
+      final finalContextSize = settings.studioFinalContextSize > 0
+          ? settings.studioFinalContextSize
+          : studioTurnConfig.preset!.maxFinalHistoryMessages;
+      rotation = StudioStreamInterceptor.planCompletedHistoryWindow(
+        generatedSession.messages,
+        finalContextSize: finalContextSize,
+        historyWindowStartMessageId:
+            baseSession.sessionVars[StudioHistoryLimiter.historyWindowStartVar],
+        reasoningHistoryCount: settings.studioFinalReasoningHistoryCount,
+        excludeReasoningFromContextBudget:
+            settings.studioFinalExcludeReasoningFromContextBudget,
+      );
+      final startId = rotation.startMessageId;
+      if (rotation.didRotate && startId != null) {
+        sessionToCommit = generatedSession.copyWith(
+          sessionVars: {
+            ...generatedSession.sessionVars,
+            StudioHistoryLimiter.historyWindowStartVar: startId,
           },
         );
+      }
+    }
+    var wakeLoreEmbeddingWorker = false;
+    final chatRepo = ctx.ref.read(chatRepoProvider);
+    Future<ChatSession?> commit(ExactLorebookManifest? manifest) =>
+        chatRepo.commitGenerationResult(
+          baseSession: baseSession,
+          generatedSession: sessionToCommit,
+          regenTargetId: regenTargetId,
+          manifest: manifest,
+          beforeWrite: (before, after) async {
+            final changedIds = changedRegenerationEvidenceIds(
+              before: before,
+              after: after,
+              regenTargetId: regenTargetId,
+            );
+            if (changedIds.isNotEmpty) {
+              await ctx.ref
+                  .read(cardEvolutionProposalRunRepoProvider)
+                  .cancelPendingForMessageMutationInTransaction(
+                    sessionId: after.id,
+                    messageIds: changedIds,
+                  );
+              await ctx.ref
+                  .read(ledgerReconciliationRunRepoProvider)
+                  .invalidateForMessageMutation(
+                    sessionId: after.id,
+                    messageIds: changedIds,
+                    reason: 'message_evidence_changed',
+                    createdAt: currentTimestampSeconds(),
+                  );
+            }
+            final canonRollback = await ctx.ref
+                .read(sessionCanonRollbackRepoProvider)
+                .reconcileInTransaction(
+                  sessionId: after.id,
+                  survivingMessages: after.messages,
+                );
+            wakeLoreEmbeddingWorker =
+                canonRollback.shouldWakeLoreEmbeddingWorker;
+          },
+        );
+    final committed = await commitGenerationWithManifestFallback(
+      manifest: durableManifest,
+      commit: commit,
+      onManifestFailure: () => wakeLoreEmbeddingWorker = false,
+    );
+    if (committed == null) {
+      debugPrint(
+        '[GenerationPipeline] generation commit rejected by stale anchor '
+        'session=${generatedSession.id} regenTarget=$regenTargetId',
+      );
+    }
+    if (wakeLoreEmbeddingWorker) {
+      unawaited(ctx.ref.read(sessionLorebookEmbeddingWorkerProvider).drain());
+    }
+    if (committed != null && rotation?.didRotate == true && ctx.ref.mounted) {
+      ctx.ref
+          .read(studioHistoryRotationProvider(ctx.charId).notifier)
+          .state = StudioHistoryRotationNotice(
+        sessionId: committed.id,
+        droppedMessageCount: rotation!.droppedMessageCount,
+      );
+    }
+    return committed;
   }
 
   static bool _sameGenerationAnchor(ChatMessage expected, ChatMessage current) {
@@ -412,15 +623,40 @@ class GenerationPipeline {
 
   Future<void> _handlePipelineError(
     Object e,
-    int genId,
-    GenerationNotificationService notifService,
-  ) async {
+    int genId, {
+    String? continueTargetId,
+  }) async {
     if (!ctx.ref.mounted) return;
-    if (!ctx.abortHandler.isCurrentGen(genId)) {
-      await notifService.onGenerationAborted();
+    if (!ctx.abortHandler.isCurrentGen(genId)) return;
+    final current = ctx.getState().value;
+    // A continuation that threw leaves the message it was extending untouched
+    // and settles through the toast instead of an error block (INV-CM4).
+    if (continueTargetId != null) {
+      ctx.abortHandler.clearStreaming();
+      ctx.abortHandler.restorationMessage = null;
+      final busy =
+          current != null && (current.isGenerating || current.isPostGenRunning);
+      if (busy) {
+        ctx.setState(
+          AsyncData(
+            current.copyWith(
+              isGenerating: false,
+              isGeneratingImage: false,
+              isPostGenRunning: false,
+              continuationTargetId: null,
+              error: e.toString(),
+            ),
+          ),
+        );
+      }
+      reportContinueFailure(
+        ctx.ref,
+        charId: ctx.charId,
+        sessionId: current?.session?.id,
+        error: e.toString(),
+      );
       return;
     }
-    final current = ctx.getState().value;
     if (current != null && (current.isGenerating || current.isPostGenRunning)) {
       final restoration = ctx.abortHandler.restorationMessage;
       if (restoration != null) {
@@ -493,7 +729,6 @@ class GenerationPipeline {
       }
       ctx.abortHandler.restorationMessage = null;
     }
-    await notifService.onGenerationAborted();
   }
 
   static ChatSession? _restoreAfterError({
@@ -531,5 +766,72 @@ class GenerationPipeline {
       return null;
     }
     return latest.copyWith(messages: [...latest.messages, restoration]);
+  }
+}
+
+@visibleForTesting
+Set<String> changedRegenerationEvidenceIds({
+  required ChatSession before,
+  required ChatSession after,
+  required String? regenTargetId,
+}) {
+  if (regenTargetId == null || regenTargetId.isEmpty) return const {};
+  final previous = before.messages
+      .where((message) => message.id == regenTargetId)
+      .firstOrNull;
+  final current = after.messages
+      .where((message) => message.id == regenTargetId)
+      .firstOrNull;
+  if (previous == null ||
+      current == null ||
+      previous.role != current.role ||
+      previous.content != current.content ||
+      previous.swipeId != current.swipeId ||
+      previous.agentSwipeId != current.agentSwipeId ||
+      previous.isHidden != current.isHidden ||
+      previous.isError != current.isError ||
+      previous.isTyping != current.isTyping) {
+    return {regenTargetId};
+  }
+  return const {};
+}
+
+@visibleForTesting
+ExactLorebookManifest? validateGenerationManifestForCommit(
+  ExactLorebookManifest? manifest,
+) {
+  if (manifest == null) return null;
+  try {
+    return ExactLorebookManifest.decodeDurable(manifest.toJson());
+  } catch (error, stackTrace) {
+    // Lorebook provenance is auxiliary. A malformed manifest must not roll
+    // back an otherwise valid generated message or regenerated swipe.
+    debugPrint(
+      '[GenerationPipeline] discarding invalid lorebook manifest: '
+      '$error\n$stackTrace',
+    );
+    return null;
+  }
+}
+
+@visibleForTesting
+Future<T?> commitGenerationWithManifestFallback<T>({
+  required ExactLorebookManifest? manifest,
+  required Future<T?> Function(ExactLorebookManifest? manifest) commit,
+  void Function()? onManifestFailure,
+}) async {
+  try {
+    return await commit(manifest);
+  } on LorebookUseManifestIntegrityConflict catch (error, stackTrace) {
+    // Provenance is auxiliary to the generated message. Preserve the strict
+    // manifest transaction, then retry the same guarded message commit
+    // without provenance so a malformed/conflicting manifest cannot eat a
+    // completed response or regenerated swipe.
+    debugPrint(
+      '[GenerationPipeline] lorebook manifest commit failed; preserving '
+      'generated message without provenance: $error\n$stackTrace',
+    );
+    onManifestFailure?.call();
+    return commit(null);
   }
 }

@@ -208,6 +208,18 @@ void main() {
       );
     });
 
+    test('deep inherits balanced missing-context diagnostics', () {
+      final diagnostics = MemoryDiagnostics.fromSelection(
+        const MemorySelection(),
+        budget: const MemoryBudgetBreakdown(source: 'none'),
+        currentText: 'Where were we last time?',
+        memoryMode: 'deep',
+      );
+
+      expect(diagnostics.missingContextSuspected, isTrue);
+      expect(diagnostics.missingContextReasons, contains('empty_retrieval'));
+    });
+
     test('marks conflicting top candidates in diagnostics', () {
       final selection = MemorySelector.select(
         MemorySelectionInput(

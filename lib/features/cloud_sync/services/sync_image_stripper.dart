@@ -1,4 +1,5 @@
 import 'package:glaze_flutter/core/constants/image_gen_patterns.dart';
+import 'package:glaze_flutter/features/image_gen/services/image_tag_markup.dart';
 
 final _imgResultRegex = ImgGenPatterns.imgResultStripRegex;
 final _imgErrorRegex = ImgGenPatterns.imgErrorStripRegex;
@@ -87,6 +88,11 @@ List<dynamic> _stripAgentSwipes(List<dynamic> swipes, void Function() changed) {
 
 String stripImageContent(String text) {
   var result = text;
+  // The stored `<img data-iig-…>` form of a finished block carries a path into
+  // this device's data root, so it goes the same way as [IMG:RESULT:…].
+  for (final element in ImageTagMarkup.scanResultElements(result).reversed) {
+    result = result.replaceRange(element.start, element.end, '');
+  }
   result = result.replaceAll(_imgResultRegex, '');
   result = result.replaceAll(_imgErrorRegex, '');
   result = result.replaceAll(_imgGenRegex, '');

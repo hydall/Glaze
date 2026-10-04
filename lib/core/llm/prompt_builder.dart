@@ -1,35 +1,53 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
+
+import '../utils/cast_helpers.dart';
 
 import '../models/character.dart';
 import '../models/persona.dart';
 import '../models/preset.dart';
+import '../models/preset_block_groups.dart';
 import '../models/chat_message.dart';
 import '../models/lorebook.dart';
 import 'macro_engine.dart';
+import 'game_time.dart';
+import 'converters/no_assistant.dart';
 import 'history_assembler.dart';
 import 'context_calculator.dart';
-import 'lorebook_coverage.dart';
 import 'lorebook_scanner.dart';
-import 'lorebook_merger.dart';
 import 'prompt_block_resolver.dart';
 import 'prompt_regex_applicator.dart';
+import 'regex_service.dart';
 import 'fallback_prompt_builder.dart';
 import 'tokenizer.dart';
 import 'memory_excerpt_selector.dart';
+import 'prompt/exact_lorebook_manifest.dart';
+import 'prompt/lorebook_context_resolver.dart';
 import 'prompt/lorebook_classifier.dart';
 import 'prompt/memory_block_injector.dart';
+import 'prompt/memory_context_resolver.dart';
 import 'prompt/prompt_payload.dart';
 import 'prompt/prompt_result.dart';
 import 'prompt/recalled_message_chunk.dart';
+import 'prompt/recalled_messages_resolver.dart';
 import 'prompt/resolved_block.dart';
+import '../models/ledger_prompt_injection_mode.dart';
+import '../models/ledger_prompt_injection_policy.dart';
+import 'prompt/effective_canon_prompt_materializer.dart';
+import 'prompt/selective_ledger_projection_filter.dart';
 
 export 'prompt/prompt_payload.dart';
 export 'prompt/prompt_result.dart';
 export 'prompt/runtime_prompt_block.dart';
 export 'prompt/recalled_message_chunk.dart';
+export 'prompt/recalled_messages_resolver.dart';
 export 'prompt/resolved_block.dart';
 export 'prompt/lorebook_classifier.dart';
+export 'prompt/lorebook_context_resolver.dart';
+export 'prompt/memory_context_resolver.dart';
 export 'prompt/memory_block_injector.dart';
+export 'prompt/exact_lorebook_manifest.dart';
 
 const _stToInternalBlockId = <String, String>{
   'personaDescription': 'user_persona',
@@ -44,9 +62,108 @@ String normalizeBlockId(String blockId) {
 }
 
 PromptResult buildPrompt(PromptPayload payload) {
+  final projection = payload.effectiveCanonProjection;
+  if (projection == null) return _buildPromptOnce(payload);
+
+  final policy = payload.ledgerPromptInjectionPolicy;
+  final mode = policy.effectiveMode;
+  final baselineMaterialization =
+      EffectiveCanonPromptMaterializer.materializeSafely(
+        SelectiveLedgerProjectionInput(
+          policy: LedgerPromptInjectionPolicy(
+            presetOptIn: policy.presetOptIn,
+            mode: mode == LedgerPromptInjectionMode.disabled
+                ? LedgerPromptInjectionMode.disabled
+                : LedgerPromptInjectionMode.legacy,
+            algorithmVersion: policy.algorithmVersion,
+            reverseScanDepth: policy.reverseScanDepth,
+          ),
+          consumerPath: payload.preset == null ? 'fallback' : 'ordinary',
+          projection: projection,
+          visibleMessages: const [],
+          selectedSwipeByMessageId: const {},
+          focalUserName: payload.persona?.name ?? '',
+        ),
+        sessionId: payload.sessionId ?? '',
+        latestUserText: _latestLedgerText(payload.history, 'user'),
+        latestAssistantText: _latestLedgerText(payload.history, 'assistant'),
+      );
+  final baselinePayload = payload.withLedgerMaterialization(
+    baselineMaterialization,
+  );
+
+  // Disabled and shadow callers remain single pass. Both user-facing modes
+  // take the same frozen visible window for relevance; only Gap Filler may
+  // additionally suppress facts already covered by that history.
+  if (mode == LedgerPromptInjectionMode.disabled ||
+      mode == LedgerPromptInjectionMode.shadow) {
+    return _buildPromptOnce(baselinePayload);
+  }
+
+  final baseline = _buildPromptOnce(baselinePayload);
+  final visibleIds = baseline.breakdown.visibleMessageIds;
+  final depth = policy.reverseScanDepth;
+  final visible = payload.history
+      .where(
+        (message) =>
+            visibleIds.contains(message.id) &&
+            !message.isHidden &&
+            !message.isTyping &&
+            (message.role == 'user' || message.role == 'assistant'),
+      )
+      .toList(growable: false);
+  final clamped = visible.length <= depth
+      ? visible
+      : visible.sublist(visible.length - depth);
+  final selected = EffectiveCanonPromptMaterializer.materializeSafely(
+    SelectiveLedgerProjectionInput(
+      policy: policy,
+      consumerPath: payload.preset == null ? 'fallback' : 'ordinary',
+      projection: projection,
+      visibleMessages: clamped,
+      selectedSwipeByMessageId: {
+        for (final message in clamped) message.id: message.swipeId,
+      },
+      focalUserName: payload.persona?.name ?? '',
+      freshness: payload.ledgerProjectionFreshnessProvenCurrent
+          ? LedgerProjectionFreshness.provenCurrent
+          : LedgerProjectionFreshness.unknown,
+    ),
+    sessionId: payload.sessionId ?? '',
+    latestUserText: _latestLedgerText(clamped, 'user'),
+    latestAssistantText: _latestLedgerText(clamped, 'assistant'),
+  );
+  final rebuilt = _buildPromptOnce(payload.withLedgerMaterialization(selected));
+  // Legacy uses relevance only, so it cannot suppress based on source
+  // coverage. Gap Filler verifies that coverage evidence still survives the
+  // second build before accepting its selected result.
+  if (mode != LedgerPromptInjectionMode.gapFiller) return rebuilt;
+  final suppressionEvidence = selected.diagnostics
+      .where((item) => !item.selected)
+      .expand((item) => item.matchingSourceIds)
+      .toSet();
+  if (!rebuilt.breakdown.visibleMessageIds.containsAll(suppressionEvidence)) {
+    return baseline;
+  }
+  return rebuilt;
+}
+
+String _latestLedgerText(List<ChatMessage> history, String role) => history
+    .lastWhere(
+      (message) =>
+          message.role == role && !message.isHidden && !message.isTyping,
+      orElse: () => const ChatMessage(id: '', role: '', content: ''),
+    )
+    .content;
+
+/// One-pass assembly primitive. Ledger fields must already be materialized.
+PromptResult _buildPromptOnce(PromptPayload payload) {
   if (payload.preset == null) return buildFallbackPrompt(payload);
 
-  final preset = payload.preset!;
+  // A disabled folder takes its blocks out of the prompt. Resolve that into
+  // the blocks' own enabled flags once, up front, and the rest of assembly
+  // needs to know nothing about folders.
+  final preset = resolvePresetFolders(payload.preset!);
   final char = payload.character;
   final persona = payload.persona;
 
@@ -85,6 +202,9 @@ PromptResult buildPrompt(PromptPayload payload) {
     arcContent: payload.arcContent,
     entitiesContent: payload.entitiesContent,
     studioSessionState: payload.studioSessionStateContent,
+    gameTime: payload.gameTime,
+    gameDate: payload.gameDate,
+    gameDay: payload.gameDay,
   );
 
   var currentSessionVars = Map<String, String>.from(payload.sessionVars);
@@ -95,144 +215,45 @@ PromptResult buildPrompt(PromptPayload payload) {
   final depthBlocks = <ResolvedDepthBlock>[];
   final relativeBlocks = <ResolvedRelativeBlock>[];
 
-  final visibleHistory = payload.history
-      .where((m) => !m.isHidden && !m.isTyping)
-      .toList();
   final deferMemoryMacro = payload.memorySelection != null;
-
-  final loreEntries =
-      payload.preScannedEntries ??
-      scanLorebooks(
-        history: visibleHistory,
-        char: char,
-        textToScan:
-            visibleHistory.where((m) => m.role == 'user').lastOrNull?.content ??
-            '',
-        chatId: payload.sessionId,
-        lorebooks: payload.lorebooks,
-        globalSettings: payload.lorebookSettings,
-        activations: payload.lorebookActivations,
-        applyPerBookLimits: false,
-      );
-
-  final vectorEntries = payload.vectorEntries.map((entry) {
-    if (entry.lorebookId.isNotEmpty) return entry;
-    final matches = payload.lorebooks.where(
-      (book) => book.entries.any(
-        (candidate) =>
-            candidate.id == entry.id && candidate.content == entry.content,
-      ),
-    );
-    final book = matches.length == 1 ? matches.single : null;
-    return book == null
-        ? entry
-        : entry.copyWith(lorebookId: book.id, lorebookName: book.name);
-  }).toList();
-
-  final mergedEntries = mergeKeywordVector(
-    keywordEntries: loreEntries,
-    vectorEntries: vectorEntries,
+  final loreContext = const LorebookContextResolver().resolve(
+    history: payload.history,
+    character: char,
+    sessionId: payload.sessionId,
+    lorebooks: payload.lorebooks,
     settings: payload.lorebookSettings,
+    activations: payload.lorebookActivations,
+    vectorEntries: payload.vectorEntries,
+    macroContext: currentMacroCtx,
+    preScannedEntries: payload.preScannedEntries,
   );
-
-  final keywordIdToEntry = <String, ScannedEntry>{};
-  for (final e in loreEntries) {
-    keywordIdToEntry['${e.lorebookId}_${e.id}'] = e;
-  }
-  final coverageKeywordIdToEntry = <String, CoverageEntry>{};
-  if (payload.lorebookSettings.searchType != 'vector') {
-    final coverage = computeLorebookCoverage(
-      history: visibleHistory,
-      char: char,
-      textToScan:
-          visibleHistory.where((m) => m.role == 'user').lastOrNull?.content ??
-          '',
-      chatId: payload.sessionId,
-      lorebooks: payload.lorebooks,
-      globalSettings: payload.lorebookSettings,
-      activations: payload.lorebookActivations,
-    );
-    for (final e in coverage.entries) {
-      final isKeywordLike =
-          e.constant ||
-          (e.activated &&
-              e.matchedKeys.isNotEmpty &&
-              !e.matchedKeys.contains('[vector]'));
-      if (isKeywordLike) {
-        coverageKeywordIdToEntry['${e.lorebookId}_${e.id}'] = e;
-      }
-    }
-  }
-  final vectorIdToEntry = <String, LorebookEntry>{};
-  for (final e in vectorEntries) {
-    vectorIdToEntry['${e.lorebookId}_${e.id}'] = e;
-  }
-
-  final vectorLoreContent = mergedEntries
-      .where((entry) {
-        final key = '${entry.lorebookId}_${entry.id}';
-        return vectorIdToEntry.containsKey(key) &&
-            !keywordIdToEntry.containsKey(key);
-      })
-      .map((entry) => entry.content)
-      .join('\n\n');
-  final vectorLoreTokens = vectorLoreContent.isEmpty
-      ? 0
-      : estimateTokens(vectorLoreContent);
-
-  final triggeredLorebooks = <TriggeredEntry>[];
-  for (final merged in mergedEntries) {
-    final mergedKey = '${merged.lorebookId}_${merged.id}';
-    final kw = keywordIdToEntry[mergedKey];
-    if (kw != null) {
-      triggeredLorebooks.add(
-        TriggeredEntry(
-          id: kw.id,
-          name: kw.comment.isNotEmpty ? kw.comment : kw.id,
-          lorebookName: kw.lorebookName,
-          lorebookId: kw.lorebookId,
-          source: kw.constant ? 'constant' : 'keyword',
-        ),
-      );
-      continue;
-    }
-    final coverageKw = coverageKeywordIdToEntry[mergedKey];
-    if (coverageKw != null) {
-      triggeredLorebooks.add(
-        TriggeredEntry(
-          id: coverageKw.id,
-          name: coverageKw.comment.isNotEmpty
-              ? coverageKw.comment
-              : coverageKw.id,
-          lorebookName: coverageKw.lorebookName,
-          lorebookId: coverageKw.lorebookId,
-          source: coverageKw.constant ? 'constant' : 'keyword',
-        ),
-      );
-      continue;
-    }
-    final vec = vectorIdToEntry[mergedKey];
-    if (vec != null) {
-      triggeredLorebooks.add(
-        TriggeredEntry(
-          id: vec.id,
-          name: vec.comment.isNotEmpty ? vec.comment : vec.id,
-          lorebookName: vec.lorebookName,
-          lorebookId: vec.lorebookId,
-          source: 'vector',
-        ),
-      );
-    }
-  }
-
-  final classified = classifyLorebooks(
-    mergedEntries,
-    currentMacroCtx,
-    payload.lorebookSettings,
+  final exactLorebookManifest = _buildExactLorebookManifest(
+    entries: loreContext.mergedEntries,
+    payload: payload,
+    preset: preset,
+    macroContext: currentMacroCtx,
+    keywordEntries: loreContext.keywordEntries,
+    vectorEntries: loreContext.vectorEntries,
   );
-  final loreBefore = classified.loreBefore;
-  final loreAfter = classified.loreAfter;
-  final macroLoreContent = classified.loreMacroBuffer.join('\n\n');
+  // Capture attribution from the actual block assembly path.  This is an
+  // assembly declaration, not an inference from matching prompt text.
+  final blockLoreClassifications = <String, Set<String>>{};
+  for (final block in preset.blocks) {
+    if (!block.enabled || block.isStashed) continue;
+    final content = block.content.toLowerCase();
+    final classifications = <String>{
+      if (content.contains('{{lorebooks}}')) 'lorebooksMacro',
+      if (content.contains('{{scenario}}')) 'charScenario',
+      if (content.contains('{{personality}}')) 'charPersonality',
+      if (content.contains('{{description}}')) 'charDescription',
+    };
+    if (classifications.isNotEmpty) {
+      blockLoreClassifications[normalizeBlockId(block.id)] = classifications;
+    }
+  }
+  final loreBefore = loreContext.loreBefore;
+  final loreAfter = loreContext.loreAfter;
+  final macroLoreContent = loreContext.loreMacroBuffer.join('\n\n');
 
   // Apply char-field injections: prepend constant lore entries to the corresponding
   // MacroContext field so that {{scenario}}, {{personality}}, {{description}} macros
@@ -241,21 +262,21 @@ PromptResult buildPrompt(PromptPayload payload) {
   String? patchedPersonality = currentMacroCtx.charPersonality;
   String? patchedDescription = currentMacroCtx.charDescription;
 
-  if (classified.loreScenario.isNotEmpty) {
-    final prefix = classified.loreScenario.join('\n\n');
+  if (loreContext.loreScenario.isNotEmpty) {
+    final prefix = loreContext.loreScenario.join('\n\n');
     patchedScenario = patchedScenario != null && patchedScenario.isNotEmpty
         ? '$prefix\n\n$patchedScenario'
         : prefix;
   }
-  if (classified.lorePersonality.isNotEmpty) {
-    final prefix = classified.lorePersonality.join('\n\n');
+  if (loreContext.lorePersonality.isNotEmpty) {
+    final prefix = loreContext.lorePersonality.join('\n\n');
     patchedPersonality =
         patchedPersonality != null && patchedPersonality.isNotEmpty
         ? '$prefix\n\n$patchedPersonality'
         : prefix;
   }
-  if (classified.loreDescription.isNotEmpty) {
-    final prefix = classified.loreDescription.join('\n\n');
+  if (loreContext.loreDescription.isNotEmpty) {
+    final prefix = loreContext.loreDescription.join('\n\n');
     patchedDescription =
         patchedDescription != null && patchedDescription.isNotEmpty
         ? '$prefix\n\n$patchedDescription'
@@ -291,6 +312,7 @@ PromptResult buildPrompt(PromptPayload payload) {
       // runtime payload value, then the resolver default).
       summaryPrefix: rawBlock.prefix ?? payload.summaryPrefix,
       authorsNote: payload.authorsNote,
+      sendEmptyBlock: rawBlock.sendEmptyBlock,
     );
 
     if (notifyObj.varsChanged) {
@@ -320,6 +342,7 @@ PromptResult buildPrompt(PromptPayload payload) {
           content: resolved.content,
           depth: rawBlock.depth ?? 0,
           isSummary: blockIsSummary,
+          sendEmptyBlock: rawBlock.sendEmptyBlock,
         ),
       );
     } else {
@@ -332,6 +355,7 @@ PromptResult buildPrompt(PromptPayload payload) {
           contentForAccounting: resolved.contentForAccounting,
           isSummary: blockIsSummary,
           appendToLastMessage: rawBlock.appendToLastMessage,
+          sendEmptyBlock: rawBlock.sendEmptyBlock,
         ),
       );
     }
@@ -427,10 +451,58 @@ PromptResult buildPrompt(PromptPayload payload) {
     payload: payload,
     char: char,
     persona: persona,
-    triggeredLorebooks: triggeredLorebooks,
+    triggeredLorebooks: loreContext.triggeredEntries,
+    exactLorebookManifest: exactLorebookManifest,
+    blockLoreClassifications: blockLoreClassifications,
     triggeredMemories: payload.triggeredMemories,
     macroTokens: macroTokens,
-    vectorLoreTokens: vectorLoreTokens,
+    vectorLoreTokens: loreContext.vectorLoreTokens,
+  );
+}
+
+ExactLorebookManifest _buildExactLorebookManifest({
+  required List<LorebookEntry> entries,
+  required PromptPayload payload,
+  required Preset preset,
+  required MacroContext macroContext,
+  required Map<String, ScannedEntry> keywordEntries,
+  required Map<String, LorebookEntry> vectorEntries,
+}) {
+  final canon =
+      payload.effectiveCanonRevisionNumber == null &&
+          payload.effectiveCanonRevisionHash == null &&
+          payload.effectiveCanonCacheIdentity.isEmpty
+      ? null
+      : ExactLorebookEffectiveCanonProvenance(
+          revisionNumber: payload.effectiveCanonRevisionNumber ?? 0,
+          revisionHash: payload.effectiveCanonRevisionHash ?? '',
+          cacheIdentity: payload.effectiveCanonCacheIdentity,
+        );
+  return buildExactLorebookManifest(
+    entries: entries,
+    characterId: payload.character.id,
+    personaId: payload.persona?.id ?? '',
+    sessionId: payload.sessionId ?? '',
+    presetSnapshotHash: computeHash(jsonEncode(preset.toJson())),
+    macroContext: macroContext,
+    sourceByEntryKey: {
+      for (final entry in entries)
+        '${entry.lorebookId}_${entry.id}':
+            keywordEntries['${entry.lorebookId}_${entry.id}']?.constant == true
+            ? 'constant'
+            : keywordEntries.containsKey('${entry.lorebookId}_${entry.id}')
+            ? 'keyword'
+            : vectorEntries.containsKey('${entry.lorebookId}_${entry.id}')
+            ? 'vector'
+            : 'unknown',
+    },
+    classificationByEntryKey: {
+      for (final entry in entries)
+        '${entry.lorebookId}_${entry.id}': entry.position == 'matchGlobal'
+            ? payload.lorebookSettings.injectionPosition
+            : entry.position,
+    },
+    effectiveCanonProvenance: canon,
   );
 }
 
@@ -448,32 +520,62 @@ PromptResult _assembleMessages({
   required Character char,
   Persona? persona,
   List<TriggeredEntry> triggeredLorebooks = const [],
+  ExactLorebookManifest? exactLorebookManifest,
+  Map<String, Set<String>> blockLoreClassifications = const {},
   List<TriggeredEntry> triggeredMemories = const [],
   Map<String, int> macroTokens = const {},
   int vectorLoreTokens = 0,
 }) {
   final messages = <PromptMessage>[];
+  final assemblyReports = <ExactLorebookInjectionReport>[];
   final attributionBlocks = <StaticBlock>[];
-  String? mergeBuffer;
-  String? mergeRole;
 
-  final resolvedDepthMsgs = depthBlocks
+  // Keep the attribution declaration alongside each resolved block until its
+  // concrete emission site.  Do not recover it from rendered message text.
+  final resolvedDepthBlocks = depthBlocks
       .map(
-        (b) => PromptMessage(
-          role: b.role,
-          content: b.content,
-          blockId: b.id,
-          depth: b.depth,
-          isDepth: true,
-          isSummary: b.isSummary,
+        (b) => (
+          message: PromptMessage(
+            role: b.role,
+            content: b.content,
+            blockId: b.id,
+            depth: b.depth,
+            isDepth: true,
+            isSummary: b.isSummary,
+            sendEmptyBlock: b.sendEmptyBlock,
+          ),
+          classifications: blockLoreClassifications[b.id] ?? const <String>{},
         ),
       )
+      .toList();
+  final resolvedDepthMsgs = resolvedDepthBlocks
+      .map((block) => block.message)
       .toList();
 
   // Track whether loreBefore/loreAfter were injected via char_card trigger.
   // If the preset has no char_card block, they fall through to the end.
   bool loreBeforeInjected = false;
   bool loreAfterInjected = false;
+
+  void recordAssembly(Iterable<String> classifications) {
+    final manifest = exactLorebookManifest;
+    if (manifest == null) return;
+    final expected = classifications.toSet();
+    for (final entry in manifest.entries) {
+      if (!expected.contains(entry.classification) ||
+          entry.renderedContent.trim().isEmpty) {
+        continue;
+      }
+      assemblyReports.add(
+        ExactLorebookInjectionReport(
+          namespacedId: entry.namespacedId,
+          placement: entry.injectionIndex,
+          renderedContent: entry.renderedContent,
+          classification: entry.classification,
+        ),
+      );
+    }
+  }
 
   void injectLoreBefore() {
     if (loreBeforeInjected || loreBefore.isEmpty) return;
@@ -490,6 +592,7 @@ PromptResult _assembleMessages({
     attributionBlocks.add(
       StaticBlock(id: 'worldInfoBefore', content: combined),
     );
+    recordAssembly(const {'worldInfoBefore'});
     loreBeforeInjected = true;
   }
 
@@ -506,6 +609,7 @@ PromptResult _assembleMessages({
       ),
     );
     attributionBlocks.add(StaticBlock(id: 'worldInfoAfter', content: combined));
+    recordAssembly(const {'worldInfoAfter'});
     loreAfterInjected = true;
   }
 
@@ -519,22 +623,16 @@ PromptResult _assembleMessages({
     if (block.content.trim().isEmpty) continue;
     appendedEntries.add(block);
   }
+  final appendedClassifications = <String>{
+    for (final block in appendedEntries) ...?blockLoreClassifications[block.id],
+  };
+  final appendedHistoryMessageIds = <String>{};
 
   for (final block in relativeBlocks) {
     // worldInfoBefore injects just before char_card (mirrors JS generationWorker.js:739)
     if (block.id == 'char_card') injectLoreBefore();
 
     if (block.id == 'chat_history') {
-      if (mergeBuffer != null) {
-        messages.add(
-          PromptMessage(
-            role: mergeRole ?? 'system',
-            blockId: 'preset',
-            content: mergeBuffer,
-          ),
-        );
-        mergeBuffer = null;
-      }
       // worldInfoAfter injects just before chat_history (mirrors JS generationWorker.js:680)
       injectLoreAfter();
 
@@ -559,38 +657,70 @@ PromptResult _assembleMessages({
           .map((b) => (name: b.name, content: b.content))
           .toList();
       applyAppendToLastMessage(historyMsgs, appendedForHistory);
-      messages.addAll(
-        interleaveDepthWithHistory(historyMsgs, resolvedDepthMsgs),
+      if (appendedEntries.isNotEmpty) {
+        final lastUser = historyMsgs.lastWhere(
+          (message) => message.role == 'user' && message.isHistory,
+          orElse: () => const PromptMessage(role: '', content: ''),
+        );
+        if (lastUser.sourceMessageId != null) {
+          appendedHistoryMessageIds.add(lastUser.sourceMessageId!);
+        }
+      }
+      final assembledHistory = interleaveDepthWithHistory(
+        historyMsgs,
+        resolvedDepthMsgs,
       );
+      messages.addAll(
+        insertContinueInstruction(
+          assembledHistory,
+          payload.continueInstruction,
+        ),
+      );
+      for (final block in resolvedDepthBlocks) {
+        if (block.message.content.trim().isNotEmpty) {
+          recordAssembly(block.classifications);
+        }
+      }
       for (final db in resolvedDepthMsgs) {
         attributionBlocks.add(
           StaticBlock(id: db.blockId ?? 'preset', content: db.content),
         );
       }
     } else {
-      final content = block.content.trim();
-      final accountingContent = block.contentForAccounting.trim();
+      final content = block.content;
+      final accountingContent = block.contentForAccounting;
 
-      // setvar-only blocks: no LLM-visible text, but definitions count toward preset.
-      if (content.isEmpty) {
+      // setvar-only blocks: no LLM-visible text, but definitions count toward
+      // the preset row. Nothing is sent, so nothing counts toward the total.
+      if (content.trim().isEmpty && !block.sendEmptyBlock) {
         if (accountingContent.isNotEmpty) {
           attributionBlocks.add(
-            StaticBlock(id: block.id, content: accountingContent),
+            StaticBlock(
+              id: block.id,
+              content: '',
+              presetContent: accountingContent,
+            ),
           );
         }
         if (block.id == 'char_card') injectLoreAfter();
         continue;
       }
 
-      // attributionBlocks feed the token breakdown. We pass the
-      // "accounting" content (dynamic macros blanked out) so that the
-      // preset's static chrome is attributed to sourceTokens['preset']
-      // and NOT double-counted under sourceTokens['memory'] /
-      // sourceTokens['summary'] / sourceTokens['lorebooks']. The
-      // dynamic injections are counted separately via dedicated
-      // StaticBlocks (hard-block injection) and macroTokens.
+      // attributionBlocks feed the token breakdown. The total and the history
+      // budget count what is sent; the "accounting" content (external
+      // injections blanked) is what the preset row shows, so the preset's
+      // chrome is not double-counted under memory / summary / lorebooks.
+      // A deferred {{memory}} is still its placeholder here and is counted as
+      // memoryTokens once finalized. An appended block travels inside the last
+      // user message, which the history already counts.
       attributionBlocks.add(
-        StaticBlock(id: block.id, content: accountingContent),
+        StaticBlock(
+          id: block.id,
+          content: block.appendToLastMessage
+              ? ''
+              : content.replaceAll(deferredMemoryPlaceholder, ''),
+          presetContent: accountingContent,
+        ),
       );
 
       // appendToLastMessage blocks are merged into the last user message in
@@ -599,34 +729,18 @@ PromptResult _assembleMessages({
       // twice. See docs/INVARIANTS.md INV-PS9.
       if (block.appendToLastMessage) continue;
 
-      if (preset.mergePrompts && block.role != 'assistant') {
-        if (mergeBuffer != null) {
-          mergeBuffer = '$mergeBuffer\n\n$content';
-        } else {
-          mergeBuffer = content;
-          mergeRole = preset.mergeRole;
-        }
-      } else {
-        if (mergeBuffer != null) {
-          messages.add(
-            PromptMessage(
-              role: mergeRole ?? 'system',
-              blockId: 'preset',
-              content: mergeBuffer,
-            ),
-          );
-          mergeBuffer = null;
-        }
-        messages.add(
-          PromptMessage(
-            role: block.role,
-            blockId: block.id,
-            blockName: block.name,
-            content: content,
-            isSummary: block.isSummary,
-          ),
-        );
-      }
+      recordAssembly(blockLoreClassifications[block.id] ?? const {});
+
+      messages.add(
+        PromptMessage(
+          role: block.role,
+          blockId: block.id,
+          blockName: block.name,
+          content: content,
+          isSummary: block.isSummary,
+          sendEmptyBlock: block.sendEmptyBlock,
+        ),
+      );
 
       // worldInfoAfter injects just after char_card (mirrors JS generationWorker.js:792)
       if (block.id == 'char_card') injectLoreAfter();
@@ -636,15 +750,6 @@ PromptResult _assembleMessages({
   // Fallback: if preset had no char_card block, inject remaining lore at the end
   injectLoreBefore();
   injectLoreAfter();
-  if (mergeBuffer != null) {
-    messages.add(
-      PromptMessage(
-        role: mergeRole ?? 'system',
-        blockId: 'preset',
-        content: mergeBuffer,
-      ),
-    );
-  }
 
   // Memory block injection.
   // - payload.memoryContent set, payload.memorySelection == null:
@@ -712,6 +817,12 @@ PromptResult _assembleMessages({
     contextSize: payload.apiConfig.contextSize,
     maxTokens: payload.apiConfig.maxTokens,
     reasoningHistoryCount: payload.apiConfig.reasoningHistoryCount,
+    excludeReasoningFromContextBudget:
+        payload.apiConfig.excludeReasoningFromContextBudget,
+    historyTrimMode: payload.apiConfig.historyTrimMode,
+    historyAnchorId: payload.sessionVars[ChatSessionX.historyAnchorVarKey],
+    historyTrimTriggerPercent: payload.apiConfig.historyTrimTriggerPercent,
+    historyTrimStepPercent: payload.apiConfig.historyTrimStepPercent,
   );
   var historyOnly = messages.where((m) => m.isHistory).toList();
 
@@ -720,11 +831,32 @@ PromptResult _assembleMessages({
   // uses memoryTokens=0, producing a wider visible window than the final
   // breakdown — messages in that "phantom zone" get excluded from memory
   // (sourceWindowExclusion) yet also dropped from history, so the model
-  // sees neither. We use the selection's totalTokens (actual sum of picked
-  // entries) as the estimate; excerpting may reduce this further, but the
-  // visible window stays conservative (fewer excluded messages is always
-  // safe — the model still sees them in history).
-  final estimatedMemoryTokens = payload.memorySelection?.totalTokens ?? 0;
+  // sees neither. Reserve the packed content including expanded temporal
+  // headers; the body-only selection cost undercounts that envelope.
+  final requestClock = GameTimeState(
+    time: payload.gameTime,
+    date: payload.gameDate,
+    day: int.tryParse(payload.gameDay ?? ''),
+  );
+  final estimatedMemoryTokens = payload.memorySelection == null
+      ? 0
+      : const MemoryContextResolver()
+            .resolve(
+              selection: payload.memorySelection!,
+              visibleMessageIds: const {},
+              disableSourceWindowExclusion:
+                  payload.disableSourceWindowExclusion,
+              excerptingEnabled: payload.memoryExcerptingEnabled,
+              packingMode: payload.memoryPackingMode,
+              excerptTokensPerChunk: payload.memoryExcerptTokensPerChunk,
+              excerptChunksPerEntry: payload.memoryExcerptChunksPerEntry,
+              chunkFirstTopEntries: payload.chunkFirstTopEntries,
+              chunkFirstTopChunks: payload.chunkFirstTopChunks,
+              summaryExcerpt: payload.summaryContent,
+              gameTime: requestClock,
+            )
+            .excerptSelection
+            .totalTokens;
 
   var breakdown = calculator.calculate(
     staticBlocks: attributionBlocks,
@@ -743,9 +875,12 @@ PromptResult _assembleMessages({
       payload.sourceWindowVisibleMessageIds.isNotEmpty
       ? payload.sourceWindowVisibleMessageIds
       : breakdown.visibleMessageIds;
-  final recalledMessagesContent = effectiveRecalledMessagesContent(
-    payload,
+  final recalledMessagesContent = const RecalledMessagesResolver().resolve(
+    chunks: payload.recalledMessageChunks,
     visibleMessageIds: recallVisibleMessageIds,
+    fallbackContent: payload.recalledMessagesContent,
+    disableSourceWindowExclusion: payload.disableSourceWindowExclusion,
+    gameTime: requestClock,
   );
   if (recalledMessagesContent != null && recalledMessagesContent.isNotEmpty) {
     injectRecalledMessagesBlock(
@@ -782,6 +917,11 @@ PromptResult _assembleMessages({
       calculator: calculator,
       lorebookReserve: lorebookReserve,
       vectorLoreTokens: vectorLoreTokens,
+      gameTime: GameTimeState(
+        time: payload.gameTime,
+        date: payload.gameDate,
+        day: int.tryParse(payload.gameDay ?? ''),
+      ),
     );
     breakdown = result.breakdown;
     finalMemorySelection = result.finalMemorySelection;
@@ -798,9 +938,12 @@ PromptResult _assembleMessages({
         // Use live history messages so deferred {{memory}} replacement on
         // appendToLastMessage blocks is not lost to a stale trimmed copy.
         finalMessages.add(msg);
+        if (appendedHistoryMessageIds.contains(msg.sourceMessageId)) {
+          recordAssembly(appendedClassifications);
+        }
       }
       historySeen++;
-    } else if (msg.content.trim().isNotEmpty) {
+    } else if (msg.content.trim().isNotEmpty || msg.sendEmptyBlock) {
       finalMessages.add(msg);
     }
   }
@@ -821,6 +964,14 @@ PromptResult _assembleMessages({
           globalVars: currentGlobalVars,
           regexScripts: regexScripts,
         );
+  final injectionReports = _transformLorebookAssemblyReports(
+    reports: assemblyReports,
+    regexScripts: regexScripts,
+    char: char,
+    persona: persona,
+    sessionVars: currentSessionVars,
+    globalVars: currentGlobalVars,
+  );
 
   final finalMemoryCoverage = finalizeMemoryCoverage(
     payload.memoryCoverage,
@@ -840,9 +991,82 @@ PromptResult _assembleMessages({
     sessionVars: currentSessionVars,
     globalVars: currentGlobalVars,
     triggeredLorebooks: triggeredLorebooks,
+    exactLorebookManifest: exactLorebookManifest
+        ?.confirmedBy(injectionReports)
+        .withProviderMessagesHash(
+          computeHash(
+            jsonEncode(
+              buildApiMessages(
+                finalMessagesWithRegex,
+                reasoningHistoryCount: payload.apiConfig.reasoningHistoryCount,
+                noAssistant: NoAssistantOptions.of(payload.apiConfig),
+              ),
+            ),
+          ),
+        ),
     triggeredMemories: finalTriggeredMemories,
     memoryCoverage: finalMemoryCoverage,
   );
+}
+
+List<ExactLorebookInjectionReport> _transformLorebookAssemblyReports({
+  required List<ExactLorebookInjectionReport> reports,
+  required List<PresetRegex> regexScripts,
+  required Character char,
+  required Persona? persona,
+  required Map<String, String> sessionVars,
+  required Map<String, String> globalVars,
+}) {
+  if (reports.isEmpty) return const [];
+  // Events originate at real assembly sites.  Deliberately never search the
+  // final prompt (or preset) for matching content to infer attribution.
+  final transformedReports = <ExactLorebookInjectionReport>[];
+  final context = RegexApplyContext(
+    char: char,
+    persona: persona,
+    sessionVars: sessionVars,
+    globalVars: globalVars,
+  );
+  final byClassification = <String, List<ExactLorebookInjectionReport>>{};
+  for (final report in reports) {
+    byClassification.putIfAbsent(report.classification, () => []).add(report);
+  }
+  for (final group in byClassification.values) {
+    group.sort((a, b) => a.placement.compareTo(b.placement));
+    final joined = group.map((report) => report.renderedContent).join('\n\n');
+    final transformed = regexScripts.isEmpty
+        ? joined
+        : applyRegexes(
+            joined,
+            group.first.classification.startsWith('worldInfo') ? 5 : 4,
+            2,
+            regexScripts,
+            context,
+            isPrompt: true,
+          );
+    // A transform that crossed entry boundaries (merged or removed parts)
+    // cannot prove per-entry post-transform content. The assembly event
+    // already happened at the emission site, so the entries stay confirmed
+    // with their pre-transform content — coverage must never report a false
+    // "not injected" because a regex pass reshaped the joined block.
+    final parts = transformed.split('\n\n');
+    if (parts.length != group.length) {
+      transformedReports.addAll(group);
+      continue;
+    }
+    for (var index = 0; index < group.length; index++) {
+      if (parts[index].trim().isEmpty) continue;
+      transformedReports.add(
+        ExactLorebookInjectionReport(
+          namespacedId: group[index].namespacedId,
+          placement: group[index].placement,
+          renderedContent: parts[index],
+          classification: group[index].classification,
+        ),
+      );
+    }
+  }
+  return transformedReports;
 }
 
 /// Filters [PromptPayload.recalledMessageChunks] by the source-window
@@ -859,45 +1083,17 @@ PromptResult _assembleMessages({
 String? effectiveRecalledMessagesContent(
   PromptPayload payload, {
   Set<String>? visibleMessageIds,
-}) {
-  if (payload.recalledMessageChunks.isEmpty) {
-    return payload.recalledMessagesContent;
-  }
-  final visible = visibleMessageIds ?? payload.sourceWindowVisibleMessageIds;
-  final chunks = payload.disableSourceWindowExclusion || visible.isEmpty
-      ? payload.recalledMessageChunks
-      : payload.recalledMessageChunks
-            .where(
-              (chunk) =>
-                  chunk.messageIds.isEmpty ||
-                  !chunk.messageIds.any(visible.contains),
-            )
-            .toList(growable: false);
-  if (chunks.isEmpty) return null;
-
-  final block = StringBuffer();
-  block.writeln('<recalled_messages>');
-  block.writeln(
-    'Earlier accepted raw-message evidence. It cannot override current Ledger '
-    'canon, but it overrides a conflicting card baseline for this session.',
-  );
-  block.writeln(
-    'Semantically relevant raw message chunks from earlier in this chat. '
-    'Do not explicitly reference "remembering" these — use them as ground '
-    'truth context.',
-  );
-  for (final chunk in chunks) {
-    final text = chunk.text.trim();
-    if (text.isEmpty) continue;
-    block.writeln('---');
-    block.writeln(text);
-  }
-  block.writeln('</recalled_messages>');
-  final content = block.toString().trim();
-  return content == '<recalled_messages>\n</recalled_messages>'
-      ? null
-      : content;
-}
+}) => const RecalledMessagesResolver().resolve(
+  chunks: payload.recalledMessageChunks,
+  visibleMessageIds: visibleMessageIds ?? payload.sourceWindowVisibleMessageIds,
+  fallbackContent: payload.recalledMessagesContent,
+  disableSourceWindowExclusion: payload.disableSourceWindowExclusion,
+  gameTime: GameTimeState(
+    time: payload.gameTime,
+    date: payload.gameDate,
+    day: int.tryParse(payload.gameDay ?? ''),
+  ),
+);
 
 /// Appends the contents of preset blocks with `appendToLastMessage = true` to
 /// the last user-role history message. No-op when [historyMsgs] has no user
@@ -935,6 +1131,6 @@ void applyAppendToLastMessage(
     blockName: '${original.blockName ?? 'Last user'} + $blockNames',
     sourceMessageId: original.sourceMessageId,
     reasoningContent: original.reasoningContent,
-    imagePath: original.imagePath,
+    imagePaths: original.imagePaths,
   );
 }

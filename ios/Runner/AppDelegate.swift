@@ -5,6 +5,8 @@ import UIKit
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private let backgroundAudio = BackgroundAudioManager()
   private let systemSettingsChannelName = "app.glaze.flutter/system_settings"
+  private let powerSaveEventsChannelName = "app.glaze.flutter/power_save_events"
+  private let powerSaveStreamHandler = PowerSaveStreamHandler()
 
   override func application(
     _ application: UIApplication,
@@ -39,10 +41,17 @@ import UIKit
         case "openNotificationSettings":
           self?.openNotificationSettings()
           result(nil)
+        case "isPowerSaveMode":
+          result(ProcessInfo.processInfo.isLowPowerModeEnabled)
         default:
           result(FlutterMethodNotImplemented)
         }
       }
+
+      FlutterEventChannel(
+        name: powerSaveEventsChannelName,
+        binaryMessenger: settingsRegistrar.messenger()
+      ).setStreamHandler(powerSaveStreamHandler)
     }
 
     guard let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "GlazeBackgroundAudio") else { return }
@@ -77,5 +86,39 @@ import UIKit
     }
 
     UIApplication.shared.open(url)
+  }
+}
+
+/// Pushes Low Power Mode on every change. Polling cannot see the moment the
+/// phone flips, which is the only thing "follow the system" is about;
+/// `NSProcessInfoPowerStateDidChange` is the notification that can.
+private class PowerSaveStreamHandler: NSObject, FlutterStreamHandler {
+  private var sink: FlutterEventSink?
+
+  func onListen(
+    withArguments arguments: Any?,
+    eventSink events: @escaping FlutterEventSink
+  ) -> FlutterError? {
+    sink = events
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(powerStateChanged),
+      name: Notification.Name.NSProcessInfoPowerStateDidChange,
+      object: nil
+    )
+    // Seed the stream so a listener that attached after a change still starts
+    // from the truth rather than from its own default.
+    events(ProcessInfo.processInfo.isLowPowerModeEnabled)
+    return nil
+  }
+
+  func onCancel(withArguments arguments: Any?) -> FlutterError? {
+    NotificationCenter.default.removeObserver(self)
+    sink = nil
+    return nil
+  }
+
+  @objc private func powerStateChanged() {
+    sink?(ProcessInfo.processInfo.isLowPowerModeEnabled)
   }
 }

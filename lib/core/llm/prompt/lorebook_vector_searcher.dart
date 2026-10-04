@@ -2,9 +2,9 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../state/db_provider.dart';
 import '../../state/lorebook_embedding_provider.dart';
 import '../../state/lorebook_provider.dart';
+import '../../db/repositories/session_lorebook_evolution_repo.dart';
 import '../embedding_types.dart';
 import '../lorebook_vector_search.dart';
 import '../../models/character.dart';
@@ -38,6 +38,8 @@ class LorebookVectorSearcher {
     String currentText,
     String? charWorld,
     Character? character, {
+    required List<Lorebook> lorebooks,
+    Set<SessionLorebookTarget> sessionOverlayTargets = const {},
     String? chatId,
     CancelToken? cancelToken,
   }) async {
@@ -47,7 +49,6 @@ class LorebookVectorSearcher {
     final config = _ref.read(embeddingConfigProvider);
     if (config.endpoint.isEmpty) return [];
 
-    final lorebooks = await _ref.read(lorebookRepoProvider).getAll();
     if (lorebooks.isEmpty) return [];
 
     try {
@@ -74,6 +75,7 @@ class LorebookVectorSearcher {
         character: character,
         activations: activations,
         chatId: chatId,
+        sessionOverlayTargets: sessionOverlayTargets,
         cancelToken: cancelToken,
       );
 

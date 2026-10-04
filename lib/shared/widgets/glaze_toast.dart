@@ -30,6 +30,7 @@ class GlazeToast {
     int duration = 2500,
     ToastPosition position = ToastPosition.bottom,
     bool isError = false,
+    bool isWarning = false,
     bool showCopyButton = false,
   }) {
     final overlay = _resolveOverlay(context);
@@ -40,6 +41,7 @@ class GlazeToast {
         duration: duration,
         position: position,
         isError: isError,
+        isWarning: isWarning,
         showCopyButton: showCopyButton,
       );
     }
@@ -51,44 +53,48 @@ class GlazeToast {
     int duration = 2500,
     ToastPosition position = ToastPosition.bottom,
     bool isError = false,
+    bool isWarning = false,
     bool showCopyButton = false,
   }) {
-    _current?.cancel();
+    _current?.dismiss();
 
     final key = GlobalKey<_ToastAnimatorState>();
-    late final OverlayEntry entry;
+    late final _ActiveToast toast;
 
-    entry = OverlayEntry(
+    final entry = OverlayEntry(
       builder: (_) => _ToastAnimator(
         key: key,
         text: text,
         position: position,
         isError: isError,
+        isWarning: isWarning,
         showCopyButton: showCopyButton,
-        onRemove: () {
-          entry.remove();
-          if (_current?.entry == entry) _current = null;
-        },
+        visibleDuration: Duration(milliseconds: duration),
+        onDismissRequest: () => toast.dismiss(),
+        onRemove: () => toast.remove(),
       ),
     );
 
-    overlay.insert(entry);
-
-    final timer = Timer(
-      Duration(milliseconds: duration),
-      () => key.currentState?.dismiss(),
+    toast = _ActiveToast(
+      entry: entry,
+      key: key,
+      onRemoved: () {
+        if (identical(_current, toast)) _current = null;
+      },
     );
 
-    _current = _ActiveToast(entry: entry, key: key, timer: timer);
+    overlay.insert(entry);
+    _current = toast;
   }
 
-  static void hide() => _current?.cancel();
+  static void hide() => _current?.dismiss();
 
   static void showWithoutContext(
     String text, {
     int duration = 2500,
     ToastPosition position = ToastPosition.bottom,
     bool isError = false,
+    bool isWarning = false,
   }) {
     final overlay = _resolveOverlay(null);
     if (overlay != null) {
@@ -98,8 +104,39 @@ class GlazeToast {
         duration: duration,
         position: position,
         isError: isError,
+        isWarning: isWarning,
       );
     }
+  }
+
+  /// Amber toast for a non-fatal notice the user should still see — a stepped
+  /// history trim, say. Distinct from [isError]: nothing failed.
+  static void warning(
+    BuildContext context,
+    String text, {
+    int duration = 3500,
+    ToastPosition position = ToastPosition.bottom,
+  }) {
+    show(
+      context,
+      text,
+      duration: duration,
+      position: position,
+      isWarning: true,
+    );
+  }
+
+  static void warningWithoutContext(
+    String text, {
+    int duration = 3500,
+    ToastPosition position = ToastPosition.bottom,
+  }) {
+    showWithoutContext(
+      text,
+      duration: duration,
+      position: position,
+      isWarning: true,
+    );
   }
 
   static void error(BuildContext context, String prefix, Object err) {
@@ -128,16 +165,58 @@ class GlazeToast {
 
 // ── Internal state tracker ────────────────────────────────────────────────────
 
+/// Owns one inserted overlay entry and guarantees it leaves the overlay again.
+/// Every dismissal path — the visibility timeout, a tap, [GlazeToast.hide], a
+/// replacing toast — goes through [dismiss], and every removal through
+/// [remove], so a toast can neither be removed twice nor be left behind.
 class _ActiveToast {
   final OverlayEntry entry;
   final GlobalKey<_ToastAnimatorState> key;
-  final Timer timer;
 
-  _ActiveToast({required this.entry, required this.key, required this.timer});
+  /// Lets [GlazeToast] drop its reference once this toast is gone.
+  final VoidCallback onRemoved;
 
-  void cancel() {
-    timer.cancel();
-    key.currentState?.dismiss();
+  /// Hard stop for a leave animation that never reports back. The animation
+  /// runs on a ticker, and a ticker that is cancelled or never ticks at all
+  /// (no frames while the app sits in the background) would otherwise leave
+  /// the entry in the overlay for the rest of the process's life.
+  static const _leaveWatchdog = Duration(seconds: 2);
+
+  Timer? _watchdog;
+  bool _removed = false;
+
+  _ActiveToast({
+    required this.entry,
+    required this.key,
+    required this.onRemoved,
+  });
+
+  /// Animated dismissal when the toast is on screen, immediate removal when it
+  /// is not. Safe to call repeatedly.
+  void dismiss() {
+    if (_removed) return;
+    final state = key.currentState;
+    if (state == null) {
+      // The entry was inserted but never built: the overlay produces no frames
+      // while the app is in the background, and a toast that is replaced
+      // before the next frame never reaches initState either. There is no
+      // animator to run the leave animation and nothing else holds this entry,
+      // so drop it outright — leaving it behind is what used to pin a
+      // `Continue Failed` toast on screen until the app was restarted.
+      remove();
+      return;
+    }
+    _watchdog ??= Timer(_leaveWatchdog, remove);
+    state.dismiss();
+  }
+
+  void remove() {
+    if (_removed) return;
+    _removed = true;
+    _watchdog?.cancel();
+    _watchdog = null;
+    entry.remove();
+    onRemoved();
   }
 }
 
@@ -147,7 +226,16 @@ class _ToastAnimator extends StatefulWidget {
   final String text;
   final ToastPosition position;
   final bool isError;
+  final bool isWarning;
   final bool showCopyButton;
+
+  /// How long the chip stays up once it is actually on screen.
+  final Duration visibleDuration;
+
+  /// Asks the owning [_ActiveToast] to start the leave animation.
+  final VoidCallback onDismissRequest;
+
+  /// Called once the leave animation is over, or once its ticker is cancelled.
   final VoidCallback onRemove;
 
   const _ToastAnimator({
@@ -155,7 +243,10 @@ class _ToastAnimator extends StatefulWidget {
     required this.text,
     required this.position,
     this.isError = false,
+    this.isWarning = false,
     this.showCopyButton = false,
+    required this.visibleDuration,
+    required this.onDismissRequest,
     required this.onRemove,
   });
 
@@ -173,6 +264,9 @@ class _ToastAnimatorState extends State<_ToastAnimator>
   static const _enterCurve = Cubic(0.34, 1.56, 0.64, 1);
   static const _enterDuration = Duration(milliseconds: 300);
   static const _leaveDuration = Duration(milliseconds: 250);
+
+  Timer? _visibility;
+  bool _leaving = false;
 
   @override
   void initState() {
@@ -197,19 +291,34 @@ class _ToastAnimatorState extends State<_ToastAnimator>
     ).animate(CurvedAnimation(parent: _ctrl, curve: _enterCurve));
 
     _ctrl.forward();
+
+    // The countdown starts when the chip is on screen, not when the entry was
+    // inserted. An entry inserted while the app is in the background is not
+    // built until the app is resumed, and a toast whose lifetime had already
+    // run out unseen would either be dropped before the user could read it or
+    // — before this was tied to the widget — never be dismissed at all.
+    _visibility = Timer(widget.visibleDuration, widget.onDismissRequest);
   }
 
   @override
   void dispose() {
+    _visibility?.cancel();
     _ctrl.dispose();
     super.dispose();
   }
 
-  Future<void> dismiss() async {
-    if (!mounted) return;
+  void dismiss() {
+    if (!mounted || _leaving) return;
+    _leaving = true;
+    _visibility?.cancel();
     _ctrl.duration = _leaveDuration;
-    await _ctrl.animateBack(0.0, curve: Curves.easeIn);
-    if (mounted) widget.onRemove();
+    // A `TickerFuture`'s primary future never resolves when its ticker is
+    // cancelled, so awaiting the leave animation silently drops the removal
+    // whenever anything interrupts it. `whenCompleteOrCancel` fires on both
+    // paths, and `onRemove` tolerates being called more than once.
+    _ctrl
+        .animateBack(0.0, curve: Curves.easeIn)
+        .whenCompleteOrCancel(widget.onRemove);
   }
 
   @override
@@ -241,8 +350,9 @@ class _ToastAnimatorState extends State<_ToastAnimator>
                     opacity: _opacity.value,
                     child: _ToastChip(
                       text: widget.text,
-                      onTap: dismiss,
+                      onTap: widget.onDismissRequest,
                       isError: widget.isError,
+                      isWarning: widget.isWarning,
                       showCopyButton: widget.showCopyButton,
                     ),
                   ),
@@ -262,12 +372,14 @@ class _ToastChip extends ConsumerStatefulWidget {
   final String text;
   final VoidCallback onTap;
   final bool isError;
+  final bool isWarning;
   final bool showCopyButton;
 
   const _ToastChip({
     required this.text,
     required this.onTap,
     this.isError = false,
+    this.isWarning = false,
     this.showCopyButton = false,
   });
 
@@ -276,6 +388,11 @@ class _ToastChip extends ConsumerStatefulWidget {
 }
 
 class _ToastChipState extends ConsumerState<_ToastChip> {
+  /// Every toast — error or not — carries the same grey hairline outline, so
+  /// the chip keeps a defined edge against a light bubble or a bright image
+  /// underneath it. Only the fill separates the two kinds.
+  static const _toastBorderColor = Color(0x59A0A0A0);
+
   bool _copied = false;
 
   void _copy() {
@@ -311,9 +428,20 @@ class _ToastChipState extends ConsumerState<_ToastChip> {
   }
 
   Widget _toastContent({bool opaque = false}) {
-    final bgColor = opaque
-        ? (widget.isError ? const Color(0xFF5C1A1A) : const Color(0xFF1E1E1E))
-        : (widget.isError ? const Color(0xEB5C1A1A) : const Color(0xEB1E1E1E));
+    // Battery saver drops the backdrop blur, so its fill stays a touch more
+    // opaque — without the blur behind it, chat text would otherwise read
+    // straight through the chip.
+    final Color bgColor;
+    if (widget.isError) {
+      bgColor = opaque ? const Color(0xE65C1A1A) : const Color(0xC25C1A1A);
+    } else if (widget.isWarning) {
+      // Amber reads as a notice, not a failure; the dark text keeps it legible
+      // where white on yellow would not.
+      bgColor = opaque ? const Color(0xE6F5B301) : const Color(0xC2F5B301);
+    } else {
+      bgColor = opaque ? const Color(0xE61E1E1E) : const Color(0xC21E1E1E);
+    }
+    final textColor = widget.isWarning ? const Color(0xFF2A1E00) : Colors.white;
     return Container(
       constraints: BoxConstraints(
         maxWidth: MediaQuery.of(context).size.width - 48,
@@ -321,9 +449,7 @@ class _ToastChipState extends ConsumerState<_ToastChip> {
       padding: EdgeInsets.fromLTRB(20, 10, widget.showCopyButton ? 8 : 20, 10),
       decoration: BoxDecoration(
         color: bgColor,
-        border: widget.isError
-            ? Border.all(color: const Color(0x80FF4444), width: 1)
-            : null,
+        border: Border.all(color: _toastBorderColor, width: 1),
         borderRadius: BorderRadius.circular(24),
         boxShadow: const [
           BoxShadow(
@@ -341,10 +467,10 @@ class _ToastChipState extends ConsumerState<_ToastChip> {
             child: Text(
               widget.text,
               textAlign: TextAlign.left,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w500,
-                color: Colors.white,
+                color: textColor,
                 height: 1.3,
                 decoration: TextDecoration.none,
               ),
@@ -360,15 +486,17 @@ class _ToastChipState extends ConsumerState<_ToastChip> {
                   vertical: 4,
                 ),
                 decoration: BoxDecoration(
-                  color: const Color(0x33FFFFFF),
+                  color: widget.isWarning
+                      ? const Color(0x332A1E00)
+                      : const Color(0x33FFFFFF),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
                   _copied ? 'Copied' : 'Copy',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
-                    color: Colors.white,
+                    color: textColor,
                     decoration: TextDecoration.none,
                   ),
                 ),

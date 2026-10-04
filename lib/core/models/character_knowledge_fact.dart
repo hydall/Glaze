@@ -93,6 +93,8 @@ class CharacterKnowledgeFact {
     this.sourceKind = 'studio_ledger',
     this.supersedesId,
     this.lifecycle = CharacterKnowledgeFactLifecycle.tentative,
+    this.basisRevisionNumber = 0,
+    this.basisRevisionHash = '',
     this.createdAt = 0,
     this.updatedAt = 0,
   });
@@ -118,6 +120,8 @@ class CharacterKnowledgeFact {
   final String sourceKind;
   final String? supersedesId;
   final CharacterKnowledgeFactLifecycle lifecycle;
+  final int basisRevisionNumber;
+  final String basisRevisionHash;
   final int createdAt;
   final int updatedAt;
 
@@ -144,6 +148,8 @@ class CharacterKnowledgeFact {
     String? supersedesId,
     bool clearSupersedesId = false,
     CharacterKnowledgeFactLifecycle? lifecycle,
+    int? basisRevisionNumber,
+    String? basisRevisionHash,
     int? createdAt,
     int? updatedAt,
   }) => CharacterKnowledgeFact(
@@ -170,6 +176,8 @@ class CharacterKnowledgeFact {
         ? null
         : (supersedesId ?? this.supersedesId),
     lifecycle: lifecycle ?? this.lifecycle,
+    basisRevisionNumber: basisRevisionNumber ?? this.basisRevisionNumber,
+    basisRevisionHash: basisRevisionHash ?? this.basisRevisionHash,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
   );

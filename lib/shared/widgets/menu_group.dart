@@ -1,11 +1,210 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
 import '../../core/platform/haptics.dart';
 import '../theme/app_colors.dart';
+import '../shell/shell_header_provider.dart';
 import 'glass_surface.dart';
+import 'glow_ripple.dart';
 import 'help_tip.dart';
+import 'glaze_switch.dart';
 
 enum MenuGroupHeaderVariant { standard, accentCaps }
+
+// ── Collapsible section ────────────────────────────────────────────────────────
+
+/// A disclosure header that hides a run of [MenuGroup]s until tapped.
+///
+/// Use it for settings that exist for troubleshooting or provider quirks
+/// rather than day-to-day tuning: the screen stays readable for someone who
+/// only needs an endpoint and a key, and the rest is one tap away. Collapsed
+/// state is per-mount on purpose — reopening the screen starts tidy again.
+///
+/// Expanded, the header and what it reveals are **one** card. The header used
+/// to be a card of its own with a 12 px gap under it, so opening a section
+/// produced a floating strip above a stack of unrelated-looking groups and
+/// nothing on screen said which rows belonged to it. Now the chevron is the
+/// only thing that changes, the children render flat (see [MenuGroupNesting])
+/// and the block simply grows downward.
+class MenuCollapsibleSection extends StatefulWidget {
+  final String label;
+  final String? helpTerm;
+  final List<Widget> children;
+
+  const MenuCollapsibleSection({
+    super.key,
+    required this.label,
+    this.helpTerm,
+    required this.children,
+  });
+
+  @override
+  State<MenuCollapsibleSection> createState() => _MenuCollapsibleSectionState();
+}
+
+class _MenuCollapsibleSectionState extends State<MenuCollapsibleSection> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final flat = DetachedShellHost.drawsChrome(context);
+    final radius = flat ? BorderRadius.zero : BorderRadius.circular(20);
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        InkWell(
+          // Only the top corners round while the section is open: the card
+          // continues past the header into its own content.
+          borderRadius: _expanded
+              ? BorderRadius.vertical(top: radius.topLeft)
+              : radius,
+          onTap: () {
+            Haptics.selectionClick();
+            setState(() => _expanded = !_expanded);
+          },
+          child: _buildHeader(context),
+        ),
+        // The children are laid out inside this card, so they must not draw
+        // cards of their own. The last one also drops its separator rule,
+        // which would otherwise double up against the card's own edge.
+        if (_expanded)
+          for (var i = 0; i < widget.children.length; i++)
+            MenuGroupNesting(
+              showDivider: i < widget.children.length - 1,
+              child: widget.children[i],
+            ),
+      ],
+    );
+
+    if (flat) return _FlatGroupSurface(child: content);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: GlassSurface(
+        enableRipple: true,
+        borderRadius: radius,
+        border: Border.all(color: context.cs.outlineVariant),
+        child: content,
+      ),
+    );
+  }
+
+  /// The header carries a top-to-bottom wash of the accent colour while the
+  /// section is open, so the block reads as one thing with a lid rather than
+  /// as a row that happens to sit above some rows.
+  Widget _buildHeader(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 150),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: _expanded
+              ? [
+                  context.cs.primary.withValues(alpha: 0.22),
+                  context.cs.primary.withValues(alpha: 0.0),
+                ]
+              : [
+                  context.cs.primary.withValues(alpha: 0.0),
+                  context.cs.primary.withValues(alpha: 0.0),
+                ],
+        ),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      child: Row(
+        children: [
+          // Expanded, not bare: a long or localized label used to push the
+          // chevron off the row and overflow it. It takes the free space
+          // itself rather than leaving it to a Spacer, which would compete
+          // with it and ellipsise a label that had room.
+          Expanded(
+            child: Text(
+              widget.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: _expanded
+                    ? context.cs.onSurface
+                    : context.cs.onSurfaceVariant,
+                fontSize: 16,
+                fontWeight: _expanded ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
+          ),
+          if (widget.helpTerm != null) HelpTip(term: widget.helpTerm!),
+          AnimatedRotation(
+            turns: _expanded ? 0.5 : 0,
+            duration: const Duration(milliseconds: 150),
+            child: Icon(
+              Icons.keyboard_arrow_down_rounded,
+              color: _expanded
+                  ? context.cs.primary
+                  : context.cs.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A group's surface inside a host that draws its own frame (see
+/// [DetachedShellHost.drawsChrome]): the rule under it and the tap glow, but
+/// no glass. The window's own fill is already under it, and a second tint
+/// over that marked out a lighter band exactly as tall as the groups, with
+/// the bare window showing below the last one.
+class _FlatGroupSurface extends StatelessWidget {
+  final Widget child;
+
+  const _FlatGroupSurface({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return GlowRippleOverlay(
+      glowColor: context.cs.primary,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: context.cs.outlineVariant)),
+        ),
+        // What a [GlassSurface] gives its content: a Material the rows' ink
+        // lands on (the window's own sits under the screen's fill), and glass
+        // inside that blurs on its own rather than joining the list's group.
+        child: Material(
+          type: MaterialType.transparency,
+          child: GlassBackdropGroup.none(child: child),
+        ),
+      ),
+    );
+  }
+}
+
+/// Marks a subtree as living *inside* another card, so the [MenuGroup]s in it
+/// drop their own surface, gutters and rounding and render as plain runs of
+/// rows separated by a rule.
+///
+/// The same thing [DetachedShellHost] does for a screen hosted in the floating
+/// window, scoped to one widget: a card drawn inside a card reads as a mistake
+/// either way. The difference is that a nested group paints no glass of its
+/// own — the enclosing card already did, and a second pass of tint and blur
+/// over the same pixels only muddies them.
+class MenuGroupNesting extends InheritedWidget {
+  /// Whether a rule is drawn under this group. False for the last one in a
+  /// section, where the card's own edge already closes the block.
+  final bool showDivider;
+
+  const MenuGroupNesting({
+    super.key,
+    this.showDivider = true,
+    required super.child,
+  });
+
+  static MenuGroupNesting? of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<MenuGroupNesting>();
+
+  @override
+  bool updateShouldNotify(MenuGroupNesting oldWidget) =>
+      oldWidget.showDivider != showDivider;
+}
 
 // ── Group container ────────────────────────────────────────────────────────────
 
@@ -23,6 +222,10 @@ class MenuGroup extends StatelessWidget {
   final MenuGroupHeaderVariant headerVariant;
   final IconData? headerIcon;
 
+  /// Arbitrary widget shown in place of [headerIcon], for a branded mark that
+  /// cannot be expressed as an [IconData] (e.g. a source's SVG logo).
+  final Widget? headerIconWidget;
+
   /// Kept for call-site compatibility; no longer affects visual style.
   // ignore: avoid_unused_constructor_parameters
   final bool compact;
@@ -36,33 +239,73 @@ class MenuGroup extends StatelessWidget {
     required this.items,
     this.headerVariant = MenuGroupHeaderVariant.standard,
     this.headerIcon,
+    this.headerIconWidget,
     this.compact = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    final hasItems = items.isNotEmpty;
+    final body = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (header != null) _buildHeader(context, hasItems: hasItems),
+        ...items,
+        // The trailing gap only separates the last row from the card's bottom
+        // edge. An items-less group (the Catalog master switch, say) has no
+        // row to separate from, and its header already carries the matching
+        // bottom padding — the gap would only pad the hint's own line twice.
+        if (hasItems) const SizedBox(height: 6),
+      ],
+    );
+
+    // Inside an expanded [MenuCollapsibleSection] the section's own card is
+    // already painted underneath, so the group contributes rows and a rule and
+    // nothing else — no gutters, no rounding, and no second pane of glass.
+    final nesting = MenuGroupNesting.of(context);
+    if (nesting != null) {
+      return DecoratedBox(
+        decoration: BoxDecoration(
+          border: nesting.showDivider
+              ? Border(bottom: BorderSide(color: context.cs.outlineVariant))
+              : null,
+        ),
+        child: body,
+      );
+    }
+
+    // Inside the floating window the host already draws a frame, so a group
+    // that keeps its own card reads as a card inside a card. There it runs
+    // edge to edge — no side gutters, no left/right edges, no rounding — and
+    // only the rule under it separates one group from the next.
+    if (DetachedShellHost.drawsChrome(context)) {
+      return _FlatGroupSurface(child: body);
+    }
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       child: GlassSurface(
         enableRipple: true,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: context.cs.outlineVariant),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (header != null) _buildHeader(context),
-            ...items,
-            const SizedBox(height: 6),
-          ],
-        ),
+        // A group card only ever has the static app background behind it (the
+        // list itself does not paint anything under a card), so it can read the
+        // once-baked backdrop texture instead of blurring per frame.
+        backdropSample: true,
+        child: body,
       ),
     );
   }
 
-  Widget _buildHeader(BuildContext context) {
+  Widget _buildHeader(BuildContext context, {required bool hasItems}) {
     final isAccentCaps = headerVariant == MenuGroupHeaderVariant.accentCaps;
+    // With rows below, the header only needs a hairline gap before them, and
+    // the hint sits tight under the title. Without rows the header *is* the
+    // group, so it takes a full bottom pad to mirror the 16pt top — otherwise
+    // the description ends up a few pixels from the card's edge.
+    final bottomPad = hasItems ? (description != null ? 2.0 : 4.0) : 16.0;
     return Padding(
-      padding: EdgeInsets.fromLTRB(16, 16, 8, description != null ? 2 : 4),
+      padding: EdgeInsets.fromLTRB(16, 16, 8, bottomPad),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -72,7 +315,14 @@ class MenuGroup extends StatelessWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (headerIcon != null) ...[
+                    if (headerIconWidget != null) ...[
+                      SizedBox(
+                        width: isAccentCaps ? 16 : 18,
+                        height: isAccentCaps ? 16 : 18,
+                        child: Center(child: headerIconWidget),
+                      ),
+                      const SizedBox(width: 8),
+                    ] else if (headerIcon != null) ...[
                       Icon(
                         headerIcon,
                         size: isAccentCaps ? 16 : 18,
@@ -324,21 +574,9 @@ class MenuSwitchItem extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 16),
-            Switch(
+            GlazeSwitch(
               value: value,
-              onChanged: included ?? true
-                  ? (v) {
-                      Haptics.selectionClick();
-                      onChanged(v);
-                    }
-                  : null,
-              activeThumbColor: context.cs.primary,
-              activeTrackColor: context.cs.primary.withValues(alpha: 0.5),
-              trackOutlineColor: WidgetStateProperty.resolveWith(
-                (states) => states.contains(WidgetState.selected)
-                    ? Colors.transparent
-                    : context.cs.outlineVariant,
-              ),
+              onChanged: included ?? true ? onChanged : null,
             ),
           ],
         ),
@@ -360,7 +598,33 @@ class MenuFieldItem extends StatelessWidget {
   final List<TextInputFormatter>? inputFormatters;
   final ValueChanged<String>? onChanged;
   final int maxLines;
+
+  /// Lines the field keeps even when empty; with a larger [maxLines] the
+  /// field grows with its text up to that many lines before it scrolls.
+  final int? minLines;
   final VoidCallback? onExpand;
+
+  /// Muted hint under the label — for legends that would otherwise be crammed
+  /// into the label itself.
+  final String? description;
+
+  /// Small caption *under* the field — used to show what a value resolves to
+  /// (the endpoint field previews the URL that will actually be called).
+  final String? helper;
+
+  /// Renders [helper] as a warning instead of a neutral caption.
+  final bool helperIsError;
+
+  /// When non-null, a reset button is drawn to the left of the field and calls
+  /// this to restore the default value. The caller passes it only while the
+  /// field actually differs from that default.
+  final VoidCallback? onReset;
+
+  /// Stretches the input to the height this item is given, text starting at
+  /// the top, instead of sizing it by its lines. Only for an item laid out
+  /// with a bounded height (an [Expanded] one); [maxLines] and [minLines] are
+  /// ignored then.
+  final bool expands;
 
   const MenuFieldItem({
     super.key,
@@ -374,46 +638,37 @@ class MenuFieldItem extends StatelessWidget {
     this.inputFormatters,
     this.onChanged,
     this.maxLines = 1,
+    this.minLines,
     this.onExpand,
+    this.description,
+    this.helper,
+    this.helperIsError = false,
+    this.onReset,
+    this.expands = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  color: context.cs.onSurfaceVariant,
-                  fontSize: 13,
-                ),
-              ),
-              if (helpTerm != null) HelpTip(term: helpTerm!, size: 14),
-              const Spacer(),
-              if (onExpand != null)
-                GestureDetector(
-                  onTap: onExpand,
-                  child: Icon(
-                    Icons.open_in_full,
-                    size: 16,
-                    color: context.cs.primary,
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          TextField(
+    final input = Row(
+      crossAxisAlignment: expands
+          ? CrossAxisAlignment.stretch
+          : CrossAxisAlignment.center,
+      children: [
+        if (onReset != null) ...[
+          _ResetToDefaultButton(onPressed: onReset!),
+          const SizedBox(width: 6),
+        ],
+        Expanded(
+          child: TextField(
             controller: controller,
             obscureText: obscure,
             keyboardType: keyboardType,
             inputFormatters: inputFormatters,
             onChanged: onChanged,
-            maxLines: maxLines,
+            maxLines: expands ? null : maxLines,
+            minLines: expands ? null : minLines,
+            expands: expands,
+            textAlignVertical: expands ? TextAlignVertical.top : null,
             style: TextStyle(color: context.cs.onSurface, fontSize: 15),
             decoration: InputDecoration(
               hintText: placeholder,
@@ -421,7 +676,7 @@ class MenuFieldItem extends StatelessWidget {
                 color: context.cs.onSurfaceVariant.withValues(alpha: 0.4),
               ),
               filled: true,
-              fillColor: const Color(0xFF252525),
+              fillColor: context.inputFill,
               suffixIcon: suffix,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
@@ -445,6 +700,66 @@ class MenuFieldItem extends StatelessWidget {
               isDense: true,
             ),
           ),
+        ),
+      ],
+    );
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  color: context.cs.onSurfaceVariant,
+                  fontSize: 13,
+                ),
+              ),
+              if (helpTerm != null) HelpTip(term: helpTerm!, size: 14),
+              const Spacer(),
+              if (onExpand != null)
+                MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: GestureDetector(
+                    onTap: onExpand,
+                    child: Icon(
+                      Icons.open_in_full,
+                      size: 16,
+                      color: context.cs.primary,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          if (description != null) ...[
+            const SizedBox(height: 1),
+            Text(
+              description!,
+              style: const TextStyle(
+                color: Color(0xFF99A2AD),
+                fontSize: 12,
+                fontWeight: FontWeight.normal,
+              ),
+            ),
+          ],
+          const SizedBox(height: 6),
+          if (expands) Expanded(child: input) else input,
+          if (helper != null && helper!.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              helper!,
+              style: TextStyle(
+                color: helperIsError
+                    ? context.cs.error
+                    : context.cs.onSurfaceVariant.withValues(alpha: 0.7),
+                fontSize: 11.5,
+                height: 1.3,
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -456,20 +771,33 @@ class MenuFieldItem extends StatelessWidget {
 class MenuRangeItem extends StatefulWidget {
   final String label;
   final String? helpTerm;
+
+  /// Muted hint under the label — same role as [MenuFieldItem.description].
+  final String? description;
   final double value;
   final double min;
   final double max;
   final int divisions;
   final bool editableValue;
   final int decimalPlaces;
+
+  /// Unit shown after the value — `%` on a percentage slider. Display only:
+  /// the stored value stays a plain number.
+  final String? unit;
   final bool? included;
   final ValueChanged<bool>? onIncludedChanged;
   final ValueChanged<double> onChanged;
+
+  /// When non-null, a reset button is drawn to the left of the value field and
+  /// calls this to restore the default. The caller passes it only while the
+  /// parameter is enabled and its value actually differs from that default.
+  final VoidCallback? onReset;
 
   const MenuRangeItem({
     super.key,
     required this.label,
     this.helpTerm,
+    this.description,
     required this.value,
     required this.min,
     required this.max,
@@ -477,8 +805,10 @@ class MenuRangeItem extends StatefulWidget {
     this.divisions = 200,
     this.editableValue = false,
     this.decimalPlaces = 2,
+    this.unit,
     this.included,
     this.onIncludedChanged,
+    this.onReset,
   }) : assert(
          (included == null) == (onIncludedChanged == null),
          'included and onIncludedChanged must be provided together',
@@ -594,6 +924,10 @@ class _MenuRangeItemState extends State<MenuRangeItem> {
                   ],
                 ),
               ),
+              if (widget.onReset != null) ...[
+                _ResetToDefaultButton(onPressed: widget.onReset!, size: 16),
+                const SizedBox(width: 2),
+              ],
               AnimatedCrossFade(
                 duration: _toggleDuration,
                 sizeCurve: Curves.easeInOut,
@@ -608,6 +942,18 @@ class _MenuRangeItemState extends State<MenuRangeItem> {
               ),
             ],
           ),
+          if (widget.description != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 1),
+              child: Text(
+                widget.description!,
+                style: const TextStyle(
+                  color: Color(0xFF99A2AD),
+                  fontSize: 12,
+                  fontWeight: FontWeight.normal,
+                ),
+              ),
+            ),
           AnimatedCrossFade(
             duration: _toggleDuration,
             sizeCurve: Curves.easeInOut,
@@ -629,7 +975,7 @@ class _MenuRangeItemState extends State<MenuRangeItem> {
   Widget _buildValueControl(BuildContext context) {
     if (widget.editableValue) {
       return SizedBox(
-        width: 72,
+        width: widget.unit == null ? 72 : 88,
         height: 36,
         child: TextField(
           controller: _controller,
@@ -654,7 +1000,12 @@ class _MenuRangeItemState extends State<MenuRangeItem> {
           ),
           decoration: InputDecoration(
             filled: true,
-            fillColor: const Color(0xFF252525),
+            fillColor: context.inputFill,
+            suffixText: widget.unit,
+            suffixStyle: TextStyle(
+              color: context.cs.onSurfaceVariant,
+              fontSize: 13,
+            ),
             contentPadding: const EdgeInsets.symmetric(horizontal: 8),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
@@ -676,7 +1027,7 @@ class _MenuRangeItemState extends State<MenuRangeItem> {
       );
     }
     return Text(
-      _display,
+      widget.unit == null ? _display : '$_display${widget.unit}',
       style: TextStyle(
         color: context.cs.onSurfaceVariant,
         fontSize: 14,
@@ -836,6 +1187,14 @@ class MenuSelectorItem extends StatelessWidget {
   final ValueChanged<bool>? onIncludedChanged;
   final VoidCallback onTap;
 
+  /// Muted hint under the label — same role as [MenuFieldItem.description].
+  final String? description;
+
+  /// When non-null, a reset button is drawn to the left of the selector and
+  /// calls this to restore the default. The caller passes it only while the
+  /// parameter is enabled and its value actually differs from that default.
+  final VoidCallback? onReset;
+
   const MenuSelectorItem({
     super.key,
     required this.label,
@@ -844,6 +1203,8 @@ class MenuSelectorItem extends StatelessWidget {
     this.included,
     this.onIncludedChanged,
     required this.onTap,
+    this.description,
+    this.onReset,
   }) : assert(
          (included == null) == (onIncludedChanged == null),
          'included and onIncludedChanged must be provided together',
@@ -885,36 +1246,101 @@ class MenuSelectorItem extends StatelessWidget {
                 if (helpTerm != null) HelpTip(term: helpTerm!, size: 14),
               ],
             ),
-            const SizedBox(height: 6),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              height: 46,
-              decoration: BoxDecoration(
-                color: const Color(0xFF252525),
-                borderRadius: BorderRadius.circular(12),
+            if (description != null) ...[
+              const SizedBox(height: 1),
+              Text(
+                description!,
+                style: const TextStyle(
+                  color: Color(0xFF99A2AD),
+                  fontSize: 12,
+                  fontWeight: FontWeight.normal,
+                ),
               ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      currentValue,
-                      style: TextStyle(
-                        color: isIncluded
-                            ? context.cs.onSurface
-                            : context.cs.onSurface.withValues(alpha: 0.4),
-                        fontSize: 15,
-                      ),
+            ],
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                if (onReset != null) ...[
+                  _ResetToDefaultButton(onPressed: onReset!),
+                  const SizedBox(width: 6),
+                ],
+                // Same box as [MenuFieldItem]'s text field — fill, radius,
+                // border and metrics. Without the outline a selector read as a
+                // different kind of control from the fields it sits between.
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                    constraints: const BoxConstraints(minHeight: 48),
+                    decoration: BoxDecoration(
+                      color: context.inputFill,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: context.cs.outlineVariant),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            currentValue,
+                            style: TextStyle(
+                              color: isIncluded
+                                  ? context.cs.onSurface
+                                  : context.cs.onSurface.withValues(alpha: 0.4),
+                              fontSize: 15,
+                            ),
+                          ),
+                        ),
+                        Icon(
+                          Icons.keyboard_arrow_down_rounded,
+                          color: context.cs.onSurfaceVariant.withValues(
+                            alpha: 0.5,
+                          ),
+                          size: 22,
+                        ),
+                      ],
                     ),
                   ),
-                  Icon(
-                    Icons.keyboard_arrow_down_rounded,
-                    color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
-                    size: 22,
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Restores a single setting to its factory value.
+///
+/// Sits immediately left of the control it belongs to and is only built while
+/// the current value differs from the default — the caller decides that and
+/// passes [MenuFieldItem.onReset] / [MenuRangeItem.onReset] /
+/// [MenuSelectorItem.onReset] only for the rows that can be reset.
+class _ResetToDefaultButton extends StatelessWidget {
+  final VoidCallback onPressed;
+  final double size;
+
+  const _ResetToDefaultButton({required this.onPressed, this.size = 18});
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'reset_to_default'.tr(),
+      child: InkResponse(
+        onTap: () {
+          Haptics.selectionClick();
+          onPressed();
+        },
+        radius: 18,
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: Icon(
+            Icons.undo_rounded,
+            size: size,
+            color: context.cs.primary,
+          ),
         ),
       ),
     );

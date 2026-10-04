@@ -44,6 +44,8 @@ class _CharacterFolderCardState extends State<CharacterFolderCard> {
       child: GestureDetector(
         onTap: widget.onTap,
         onLongPress: widget.onLongPress,
+        // Desktop equivalent of the long press (Vue: `@contextmenu.prevent`).
+        onSecondaryTap: widget.onLongPress,
         onTapDown: (_) => setState(() => _pressed = true),
         onTapUp: (_) => setState(() => _pressed = false),
         onTapCancel: () => setState(() => _pressed = false),
@@ -82,12 +84,7 @@ class _CharacterFolderCardState extends State<CharacterFolderCard> {
                   height: 150,
                   child: _BottomGradient(),
                 ),
-                Positioned(
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  child: _info(context),
-                ),
+                Positioned(bottom: 0, left: 0, right: 0, child: _info(context)),
                 Positioned.fill(
                   child: IgnorePointer(
                     child: Container(
@@ -248,8 +245,11 @@ class NewFolderCard extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.create_new_folder_rounded,
-                  size: 32, color: context.cs.primary),
+              Icon(
+                Icons.create_new_folder_rounded,
+                size: 32,
+                color: context.cs.primary,
+              ),
               const SizedBox(height: 8),
               Text(
                 'folder_new'.tr(),

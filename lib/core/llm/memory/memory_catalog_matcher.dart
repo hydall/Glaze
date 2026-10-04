@@ -4,6 +4,7 @@ import '../../models/chat_message.dart';
 import '../../models/memory_book.dart';
 import '../retrieval_query_builder.dart';
 import '../memory_catalog_builder.dart' show MemoryCatalogRowJson;
+import '../memory_retrieval_mode.dart';
 import '../memory_selector.dart' show memoryKeyMatchesGlaze;
 import 'memory_vector_searcher.dart' show MemoryVectorSearcher;
 
@@ -77,10 +78,7 @@ class MemoryCatalogMatcher {
         termsByEntryId[row.memoryEntryId] = matched;
         scores[row.memoryEntryId] = catalogScore(matched, row);
       }
-      return CatalogMatchResult(
-        scores: scores,
-        termsByEntryId: termsByEntryId,
-      );
+      return CatalogMatchResult(scores: scores, termsByEntryId: termsByEntryId);
     } catch (_) {
       return const CatalogMatchResult();
     }
@@ -95,7 +93,7 @@ class MemoryCatalogMatcher {
     List<ChatMessage> history,
     String currentText,
   ) {
-    if (settings.memoryMode == 'legacy') {
+    if (MemoryRetrievalMode.fromValue(settings.memoryMode).isLegacy) {
       return MemoryVectorSearcher.legacyVectorQuery(
         history,
         currentText,

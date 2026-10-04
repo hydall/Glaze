@@ -11,21 +11,58 @@ abstract class PresetBlock with _$PresetBlock {
     required String role,
     required String content,
     @Default(true) bool enabled,
+    @Default(false) bool isStashed,
     @Default(false) bool isStatic,
     @Default('relative') String insertionMode,
     int? depth,
     String? prefix,
-    @Default(false) bool isStashed,
+
     /// When true, this block's content is appended (after macro expansion) to
     /// the last user-role message in the chat history at prompt-assembly time.
     /// The block's own `role` is ignored in this mode — content is always
     /// merged into the last user message. If no user message exists in
     /// history, the block is silently dropped. See docs/INVARIANTS.md.
     @Default(false) bool appendToLastMessage,
+
+    /// Emits this block as an API message even when macro expansion leaves no
+    /// visible content. Disabled by default to avoid accidental blank turns.
+    @Default(false) bool sendEmptyBlock,
+
+    /// Id of the [PresetBlockFolder] this block belongs to, or null when it
+    /// sits at the top level. Membership is always explicit — it is never
+    /// inferred from the block's name or content. A reference to a folder the
+    /// preset does not declare is ignored, and the block renders top-level.
+    String? folderId,
   }) = _PresetBlock;
 
   factory PresetBlock.fromJson(Map<String, dynamic> json) =>
       _$PresetBlockFromJson(_normalizeBlock(json));
+}
+
+/// A user-created folder grouping blocks inside one preset.
+///
+/// Folders are declared data, never parsed out of block names or content: a
+/// preset has exactly the folders its JSON lists, so a preset written by
+/// another frontend never grows folders on import, and a Glaze preset opened
+/// elsewhere is still a plain block list.
+@freezed
+abstract class PresetBlockFolder with _$PresetBlockFolder {
+  const factory PresetBlockFolder({
+    required String id,
+    required String name,
+
+    /// Disabling a folder takes every block in it out of the prompt, without
+    /// touching the blocks' own switches.
+    @Default(true) bool enabled,
+
+    /// Pick-one folder: at most one of its blocks is enabled, and the editor
+    /// offers radio buttons instead of switches. Default is the checklist
+    /// folder, where every block toggles on its own.
+    @Default(false) bool exclusive,
+  }) = _PresetBlockFolder;
+
+  factory PresetBlockFolder.fromJson(Map<String, dynamic> json) =>
+      _$PresetBlockFolderFromJson(json);
 }
 
 @freezed
@@ -45,6 +82,7 @@ abstract class PresetRegex with _$PresetRegex {
     @Default(false) bool markdownOnly,
     @Default(false) bool promptOnly,
     @Default(false) bool runOnEdit,
+    @Default(false) bool memoryBookRetrieval,
     @Default(0) int substituteRegex,
   }) = _PresetRegex;
 
@@ -58,7 +96,17 @@ abstract class Preset with _$Preset {
     required String id,
     required String name,
     String? author,
+
+    /// Cover image shown on the preset cards. Either a path to a user-picked
+    /// file under the Glaze data dir, or a bundled `assets/...` path carried
+    /// over from a featured preset (e.g. when one is cloned). Null = no cover;
+    /// featured presets resolve theirs from their fixed id instead.
+    String? imagePath,
     @Default([]) List<PresetBlock> blocks,
+
+    /// Folders the blocks may reference by [PresetBlock.folderId]. Empty for
+    /// every preset that does not declare any.
+    @Default([]) List<PresetBlockFolder> blockFolders,
     @Default([]) List<PresetRegex> regexes,
     @Default(false) bool reasoningEnabled,
     String? reasoningStart,
@@ -67,8 +115,6 @@ abstract class Preset with _$Preset {
     String? guidedImpersonationPrompt,
     String? impersonationPrompt,
     String? summaryPrompt,
-    @Default(false) bool mergePrompts,
-    @Default('system') String mergeRole,
     @Default(0) int createdAt,
   }) = _Preset;
 
@@ -95,13 +141,14 @@ const _staticBlockIds = <String>{
 Map<String, dynamic> _normalizeBlock(Map<String, dynamic> json) {
   final n = Map<String, dynamic>.from(json);
   n['enabled'] = _coerceBool(n['enabled'], true);
+  n['isStashed'] = _coerceBool(n['isStashed'], false);
   // Auto-promote known system block ids to isStatic=true so existing presets
   // created before this field was introduced are handled correctly.
   final id = n['id'] as String?;
   final alreadyStatic = _coerceBool(n['isStatic'], false);
   n['isStatic'] = alreadyStatic || (id != null && _staticBlockIds.contains(id));
-  n['isStashed'] = _coerceBool(n['isStashed'], false);
   n['appendToLastMessage'] = _coerceBool(n['appendToLastMessage'], false);
+  n['sendEmptyBlock'] = _coerceBool(n['sendEmptyBlock'], false);
   n['depth'] = _coerceInt(n['depth']);
   // Bring the guided-generation wrapper to parity with hydall/Glaze. Presets
   // still carrying the legacy '[System Note: {{guidance}}]' default (i.e.
@@ -119,19 +166,23 @@ Map<String, dynamic> _normalizeRegex(Map<String, dynamic> json) {
   final n = Map<String, dynamic>.from(json);
 
   // ST key mappings → canonical Glaze keys (defensive for direct fromJson calls)
-  if (!n.containsKey('name') || (n['name'] is String && (n['name'] as String).isEmpty)) {
+  if (!n.containsKey('name') ||
+      (n['name'] is String && (n['name'] as String).isEmpty)) {
     final stName = n['scriptName'];
     if (stName is String && stName.isNotEmpty) n['name'] = stName;
   }
-  if (!n.containsKey('regex') || (n['regex'] is String && (n['regex'] as String).isEmpty)) {
+  if (!n.containsKey('regex') ||
+      (n['regex'] is String && (n['regex'] as String).isEmpty)) {
     final stRegex = n['findRegex'];
     if (stRegex is String && stRegex.isNotEmpty) n['regex'] = stRegex;
   }
-  if (!n.containsKey('replacement') || (n['replacement'] is String && (n['replacement'] as String).isEmpty)) {
+  if (!n.containsKey('replacement') ||
+      (n['replacement'] is String && (n['replacement'] as String).isEmpty)) {
     final stRepl = n['replaceString'];
     if (stRepl is String) n['replacement'] = stRepl;
   }
-  if (!n.containsKey('trimOut') || (n['trimOut'] is String && (n['trimOut'] as String).isEmpty)) {
+  if (!n.containsKey('trimOut') ||
+      (n['trimOut'] is String && (n['trimOut'] as String).isEmpty)) {
     n['trimOut'] = _joinTrimForNormalize(n['trimStrings']);
   }
 
@@ -142,10 +193,16 @@ Map<String, dynamic> _normalizeRegex(Map<String, dynamic> json) {
   n['markdownOnly'] = _coerceBool(n['markdownOnly'], false);
   n['promptOnly'] = _coerceBool(n['promptOnly'], false);
   n['runOnEdit'] = _coerceBool(n['runOnEdit'], false);
+  n['memoryBookRetrieval'] = _coerceBool(
+    n['memoryBookRetrieval'] ?? n['memory_book_retrieval'],
+    false,
+  );
   n['substituteRegex'] = _coerceInt(n['substituteRegex']) ?? 0;
   if (n['placement'] is List) {
     n['placement'] = _migrateGlazePlacementIds(
-      (n['placement'] as List).map((e) => e is int ? e : int.tryParse(e.toString()) ?? 1).toList(),
+      (n['placement'] as List)
+          .map((e) => e is int ? e : int.tryParse(e.toString()) ?? 1)
+          .toList(),
     );
   }
   return n;
@@ -168,7 +225,6 @@ String _joinTrimForNormalize(dynamic trim) {
 Map<String, dynamic> _normalizePreset(Map<String, dynamic> json) {
   final n = Map<String, dynamic>.from(json);
   n['reasoningEnabled'] = _coerceBool(n['reasoningEnabled'], false);
-  n['mergePrompts'] = _coerceBool(n['mergePrompts'], false);
   n['createdAt'] = _coerceInt(n['createdAt']) ?? 0;
   return n;
 }

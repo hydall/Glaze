@@ -147,7 +147,7 @@ class JsPresetImporter extends BackupHelpers {
     for (final p in presetsList) {
       if (p is! Map<String, dynamic>) continue;
       try {
-        final preset = ThemePreset.fromJson(p);
+        final preset = themePresetFromStoredJson(p);
         imported.add(preset);
       } catch (_) {
         continue;

@@ -57,6 +57,30 @@ void main() {
     expect(result, raw);
   });
 
+  test('an image-only card is content, not an empty block', () {
+    const cfg = BlockConfig(
+      id: '4',
+      name: 'image_lite',
+      template: '<image_lite>\n...\n</image_lite>',
+    );
+    const raw = '<image_lite>\n'
+        '<img data-iig-instruction=\'{"prompt":"x"}\' src="[IMG:GEN]" />\n'
+        '</image_lite>';
+    final result = resolveBlockContent(
+      rawResponse: raw,
+      blockConfig: cfg,
+      resolvedTemplate: cfg.template,
+    );
+    expect(result, contains('<img'));
+  });
+
+  test('markup-only content with a renderable element is not blank', () {
+    expect(isBlankBlockContent('<img src="[IMG:GEN]" />'), isFalse);
+    expect(isBlankBlockContent('<iframe src="about:blank"></iframe>'), isFalse);
+    expect(isBlankBlockContent('<p></p>'), isTrue);
+    expect(isBlankBlockContent('   '), isTrue);
+  });
+
   test('tag name comes from template, not display name', () {
     const cfg = BlockConfig(
       id: '3',

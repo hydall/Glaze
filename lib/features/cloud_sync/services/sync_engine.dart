@@ -17,7 +17,8 @@ import '../../../core/models/chat_message.dart';
 import '../../../core/models/lorebook.dart';
 import '../../../core/models/api_config.dart';
 import '../../../core/models/preset.dart';
-import '../../../core/models/studio_config.dart';
+import '../../../core/models/studio_agent_codec.dart';
+import '../../../core/models/studio_preset_codec.dart';
 import '../../../core/application/session_deletion_store.dart';
 import '../../../core/application/character_deletion_store.dart';
 import '../../../shared/theme/theme_preset.dart';
@@ -25,6 +26,7 @@ import '../sync_repo_interfaces.dart';
 import '../../../features/extensions/models/extension_preset.dart';
 import '../../../features/extensions/models/extensions_settings.dart';
 import '../../../features/extensions/models/info_block.dart';
+import '../../settings/app_settings_provider.dart';
 
 class SyncProgress {
   final int current;
@@ -56,11 +58,17 @@ class SyncEngine {
   final SyncStudioPresetStore? _studioPresetStore;
   final SyncChatSummaryStore? _chatSummaryStore;
   final SyncCharacterFolderStore? _characterFolderStore;
+  final SyncFolderStore? _folderStore;
   final SyncMemoryGraphStore? _memoryGraphStore;
   final SyncCharacterKnowledgeStore? _characterKnowledgeStore;
+  final SyncReconciliationStateStore? _reconciliationStateStore;
+  final SyncSessionLorebookOverlayStore? _sessionLorebookOverlayStore;
   final SessionDeletionStore _sessionDeletionStore;
   final CharacterDeletionStore _characterDeletionStore;
   final Future<void> Function(LorebookActivations) _saveLorebookActivations;
+  final Future<void> Function(Set<String>)? _reconcilePulledSessions;
+  final int _operationDelayMs;
+  final Duration _wipePollInterval;
   final SyncQueue _queue = SyncQueue();
   late final SyncBinaryAssetSyncer _binarySyncer;
   bool _includeApiKeys = false;
@@ -87,16 +95,23 @@ class SyncEngine {
     this._studioPresetStore,
     this._chatSummaryStore,
     this._characterFolderStore,
+    this._folderStore,
     this._memoryGraphStore,
     this._characterKnowledgeStore,
     this._sessionDeletionStore,
     this._characterDeletionStore,
-    this._saveLorebookActivations,
-  ) {
+    this._saveLorebookActivations, [
+    this._reconciliationStateStore,
+    this._sessionLorebookOverlayStore,
+    this._reconcilePulledSessions,
+    this._operationDelayMs = 300,
+    this._wipePollInterval = const Duration(seconds: 2),
+  ]) {
     _binarySyncer = SyncBinaryAssetSyncer(
       _adapter,
       _characterRepo,
       _personaRepo,
+      _presetRepo,
       _imageStorage,
     );
   }
@@ -112,6 +127,7 @@ class SyncEngine {
     await _adapter.ensureFolder('$cloudBase/chats');
     await _adapter.ensureFolder('$cloudBase/memory_books');
     await _adapter.ensureFolder('$cloudBase/persona_avatars');
+    await _adapter.ensureFolder('$cloudBase/preset_images');
     await _adapter.ensureFolder('$cloudBase/extension_presets');
     await _adapter.ensureFolder('$cloudBase/info_blocks');
     await _adapter.ensureFolder('$cloudBase/tracker_snapshots');
@@ -121,9 +137,11 @@ class SyncEngine {
     await _adapter.ensureFolder('$cloudBase/chat_summaries');
     await _adapter.ensureFolder('$cloudBase/memory_graphs');
     await _adapter.ensureFolder('$cloudBase/character_knowledge');
+    await _adapter.ensureFolder('$cloudBase/session_lorebook_overlays');
+    await _adapter.ensureFolder('$cloudBase/reconciliation_state');
 
     onProgress(const SyncProgress(message: 'Building sync manifest...'));
-    final localManifest = await _manifestBuilder.buildLocalManifest();
+    final previousManifest = await _manifestBuilder.readLocalManifest();
     SyncManifest? cloudManifest;
     try {
       final raw = await _adapter.download(cloudPath('manifest', 'manifest'));
@@ -136,6 +154,10 @@ class SyncEngine {
       debugPrint('[sync] cloud manifest download failed: $e\n$st');
       rethrow;
     }
+    await _mergeCloudReconciliationState(cloudManifest, previousManifest);
+    final localManifest = await _manifestBuilder.buildLocalManifest(
+      cloudManifest: cloudManifest,
+    );
 
     final entries = localManifest.entries.values.toList();
     final candidatePaths = cloudManifest == null
@@ -247,7 +269,7 @@ class SyncEngine {
       final result = await _queue.enqueueAll(
         tasks,
         concurrency: 3,
-        delayMs: 300,
+        delayMs: _operationDelayMs,
       );
       taskErrors = result.errors;
     }
@@ -266,7 +288,9 @@ class SyncEngine {
       entries: cleanedEntries,
       apiKeysIncluded: _includeApiKeys,
     );
-    final manifestJson = jsonEncode(updatedManifest.toJson());
+    final manifestJson = jsonEncode(
+      updatedManifest.toJson(includeLocalState: false),
+    );
     await _adapter.upload(cloudPath('manifest', 'manifest'), manifestJson);
     await _manifestBuilder.writeLocalManifest(updatedManifest);
     await _manifestBuilder.clearDeleted();
@@ -324,12 +348,17 @@ class SyncEngine {
     final entries = cloudManifest.entries.values.toList();
     final conflicts = <SyncConflict>[];
     final pullEntries = <SyncManifestEntry>[];
+    final acceptedCloudEntries = <SyncManifestEntry>[];
 
     for (final cloudEntry in entries) {
       final localEntry = localManifest.entries[cloudEntry.key];
+      final previouslyAccepted = previousManifest.entries[cloudEntry.key];
 
-      if (cloudEntry.hash == localEntry?.hash &&
-          cloudEntry.deleted == localEntry?.deleted) {
+      if (_isAlreadyCurrentOrAccepted(
+        cloudEntry,
+        localEntry,
+        previouslyAccepted,
+      )) {
         continue;
       }
 
@@ -341,11 +370,19 @@ class SyncEngine {
         continue;
       }
 
+      // This aggregate is merge-only, but validating it reads the owning chat.
+      // Defer the merge until the ordered pull phase has applied that chat.
+      if (cloudEntry.type == 'reconciliation_state') {
+        pullEntries.add(cloudEntry);
+        continue;
+      }
+
       if (await _entriesSemanticallyEqual(
         cloudEntry,
         localEntry,
         cloudManifest,
       )) {
+        acceptedCloudEntries.add(cloudEntry);
         continue;
       }
 
@@ -395,12 +432,17 @@ class SyncEngine {
         localManifest,
         cloudManifest,
         onProgress,
+        acceptedCloudEntries: acceptedCloudEntries,
       );
     } else if (conflicts.isEmpty) {
       onProgress(
         const SyncProgress(current: 0, total: 0, message: 'Nothing to pull'),
       );
-      await _finalizePull(localManifest, cloudManifest);
+      await _finalizePull(
+        localManifest,
+        cloudManifest,
+        acceptedCloudEntries: acceptedCloudEntries,
+      );
     } else {
       await _saveCloudManifestForPendingPull(cloudManifest);
     }
@@ -415,16 +457,26 @@ class SyncEngine {
         await _loadCloudManifestForPendingPull() ??
         await _downloadCloudManifest();
     if (cloudManifest == null) return;
+    final previousManifest = await _manifestBuilder.readLocalManifest();
     final localManifest = await _manifestBuilder.buildLocalManifest(
       cloudManifest: cloudManifest,
     );
 
     final pullEntries = <SyncManifestEntry>[];
+    final acceptedCloudEntries = <SyncManifestEntry>[];
 
     for (final cloudEntry in cloudManifest.entries.values) {
       final localEntry = localManifest.entries[cloudEntry.key];
-      if (cloudEntry.hash == localEntry?.hash &&
-          cloudEntry.deleted == localEntry?.deleted) {
+      final previouslyAccepted = previousManifest.entries[cloudEntry.key];
+      if (_isAlreadyCurrentOrAccepted(
+        cloudEntry,
+        localEntry,
+        previouslyAccepted,
+      )) {
+        continue;
+      }
+      if (cloudEntry.type == 'reconciliation_state') {
+        pullEntries.add(cloudEntry);
         continue;
       }
       if (await _entriesSemanticallyEqual(
@@ -432,6 +484,7 @@ class SyncEngine {
         localEntry,
         cloudManifest,
       )) {
+        acceptedCloudEntries.add(cloudEntry);
         continue;
       }
       if (SyncConflictDetector.needsConflict(localEntry, cloudEntry)) {
@@ -450,12 +503,17 @@ class SyncEngine {
         localManifest,
         cloudManifest,
         onProgress,
+        acceptedCloudEntries: acceptedCloudEntries,
       );
     } else {
       onProgress(
         const SyncProgress(current: 0, total: 0, message: 'Nothing to pull'),
       );
-      await _finalizePull(localManifest, cloudManifest);
+      await _finalizePull(
+        localManifest,
+        cloudManifest,
+        acceptedCloudEntries: acceptedCloudEntries,
+      );
     }
 
     // A local conflict winner must become cloud truth immediately. In
@@ -475,66 +533,152 @@ class SyncEngine {
     List<SyncManifestEntry> pullEntries,
     SyncManifest localManifest,
     SyncManifest cloudManifest,
-    void Function(SyncProgress) onProgress,
-  ) async {
-    final tasks = <Future<void> Function()>[];
+    void Function(SyncProgress) onProgress, {
+    List<SyncManifestEntry> acceptedCloudEntries = const [],
+  }) async {
+    final appliedEntries = <SyncManifestEntry>[];
     var processed = 0;
+    final primaryEntries = pullEntries
+        .where(
+          (entry) =>
+              entry.type != 'session_lorebook_overlays' &&
+              entry.type != 'reconciliation_state',
+        )
+        .toList(growable: false);
+    final overlayEntries = pullEntries
+        .where((entry) => entry.type == 'session_lorebook_overlays')
+        .toList(growable: false);
+    final reconciliationEntries = pullEntries
+        .where((entry) => entry.type == 'reconciliation_state')
+        .toList(growable: false);
 
-    for (final entry in pullEntries) {
-      tasks.add(() async {
-        processed++;
-        onProgress(
-          SyncProgress(
-            current: processed,
-            total: tasks.length,
-            message: 'Pulling ${entry.type}:${entry.id}',
-          ),
-        );
-        await _pullEntry(entry);
-      });
+    Future<List<Object>> applyEntries(List<SyncManifestEntry> entries) async {
+      final tasks = <Future<void> Function()>[];
+      for (final entry in entries) {
+        tasks.add(() async {
+          processed++;
+          onProgress(
+            SyncProgress(
+              current: processed,
+              total: pullEntries.length,
+              message: 'Pulling ${entry.type}:${entry.id}',
+            ),
+          );
+          await _pullEntry(entry);
+          appliedEntries.add(entry);
+        });
+      }
+      if (tasks.isEmpty) return const [];
+      final result = await _queue.enqueueAll(
+        tasks,
+        concurrency: 3,
+        delayMs: _operationDelayMs,
+      );
+      return result.errors;
     }
 
     onProgress(
       SyncProgress(
         current: 0,
-        total: tasks.length,
-        message: 'Pulling ${tasks.length} items...',
+        total: pullEntries.length,
+        message: 'Pulling ${pullEntries.length} items...',
       ),
     );
 
-    List<Object>? taskErrors;
-    if (tasks.isNotEmpty) {
-      final result = await _queue.enqueueAll(
-        tasks,
-        concurrency: 3,
-        delayMs: 300,
-      );
-      taskErrors = result.errors;
+    // Both dependent aggregates validate against chats/base lorebooks. Apply
+    // primary entities first, current lore projections second, and immutable
+    // reconciliation provenance last.
+    final primaryErrors = await applyEntries(primaryEntries);
+    if (primaryErrors.isNotEmpty) {
+      throw SyncQueueAggregateError(primaryErrors);
+    }
+    final touchedSessionIds = primaryEntries
+        .where(
+          (entry) =>
+              entry.type == 'chat' ||
+              entry.type == 'tracker_snapshot' ||
+              entry.type == 'tracker_value',
+        )
+        .map((entry) => entry.id)
+        .toSet();
+    if (touchedSessionIds.isNotEmpty) {
+      await _reconcilePulledSessions?.call(touchedSessionIds);
     }
 
-    await _finalizePull(localManifest, cloudManifest);
+    final taskErrors = <Object>[
+      ...await applyEntries(overlayEntries),
+      ...await applyEntries(reconciliationEntries),
+    ];
 
-    if (taskErrors != null && taskErrors.isNotEmpty) {
+    await _finalizePull(
+      localManifest,
+      cloudManifest,
+      acceptedCloudEntries: [...acceptedCloudEntries, ...appliedEntries],
+    );
+
+    if (taskErrors.isNotEmpty) {
       throw SyncQueueAggregateError(taskErrors);
     }
   }
 
   Future<void> _finalizePull(
     SyncManifest localManifest,
-    SyncManifest cloudManifest,
-  ) async {
+    SyncManifest cloudManifest, {
+    List<SyncManifestEntry> acceptedCloudEntries = const [],
+  }) async {
     final rebuilt = await _manifestBuilder.buildLocalManifest(
       cloudManifest: cloudManifest,
+      applyAcceptedHashes: false,
     );
+    final entries = Map<String, SyncManifestEntry>.from(rebuilt.entries);
+    final acceptedLocalHashes = <String, String>{};
+
+    for (final accepted in localManifest.acceptedLocalHashes.entries) {
+      final rebuiltEntry = rebuilt.entries[accepted.key];
+      final baselineEntry = localManifest.entries[accepted.key];
+      if (rebuiltEntry == null ||
+          baselineEntry == null ||
+          rebuiltEntry.hash != accepted.value) {
+        continue;
+      }
+      entries[accepted.key] = baselineEntry;
+      acceptedLocalHashes[accepted.key] = accepted.value;
+    }
+    for (final entry in acceptedCloudEntries) {
+      final rebuiltEntry = rebuilt.entries[entry.key];
+      entries[entry.key] = entry;
+      if (rebuiltEntry != null && rebuiltEntry.hash != entry.hash) {
+        acceptedLocalHashes[entry.key] = rebuiltEntry.hash;
+      } else {
+        acceptedLocalHashes.remove(entry.key);
+      }
+    }
     await _manifestBuilder.writeLocalManifest(
       rebuilt.copyWith(
         createdAt: cloudManifest.createdAt != 0
             ? cloudManifest.createdAt
             : rebuilt.createdAt,
         lastSync: DateTime.now().millisecondsSinceEpoch,
+        entries: entries,
+        acceptedLocalHashes: acceptedLocalHashes,
       ),
     );
     await _manifestBuilder.clearDeleted();
+  }
+
+  bool _isAlreadyCurrentOrAccepted(
+    SyncManifestEntry cloudEntry,
+    SyncManifestEntry? localEntry,
+    SyncManifestEntry? previouslyAccepted,
+  ) {
+    if (cloudEntry.hash == localEntry?.hash &&
+        cloudEntry.deleted == localEntry?.deleted) {
+      return true;
+    }
+    return (cloudEntry.type == 'reconciliation_state' ||
+            cloudEntry.type == 'session_lorebook_overlays') &&
+        cloudEntry.hash == previouslyAccepted?.hash &&
+        cloudEntry.deleted == previouslyAccepted?.deleted;
   }
 
   Future<SyncManifest?> _downloadCloudManifest() async {
@@ -570,7 +714,9 @@ class SyncEngine {
   }
 
   Future<void> resolveConflict(SyncConflict conflict, String choice) async {
-    if (choice == 'cloud') {
+    final deferCloudApply =
+        conflict.type == 'session_lorebook_overlays' && choice == 'cloud';
+    if (choice == 'cloud' && !deferCloudApply) {
       await _pullEntry(conflict.cloudEntry);
     }
 
@@ -580,7 +726,7 @@ class SyncEngine {
     );
     final rebuiltEntry = updatedEntries[conflict.key];
 
-    if (choice == 'cloud') {
+    if (choice == 'cloud' && !deferCloudApply) {
       // Align manifest with cloud so the same conflict does not reappear.
       updatedEntries[conflict.key] = conflict.cloudEntry;
     } else if (choice == 'local' && rebuiltEntry != null) {
@@ -618,7 +764,7 @@ class SyncEngine {
 
     onProgress(const SyncProgress(message: 'Waiting for cloud to finalize...'));
     for (var i = 0; i < 10; i++) {
-      await Future<void>.delayed(const Duration(seconds: 2));
+      await Future<void>.delayed(_wipePollInterval);
       try {
         final files = await _adapter.listFolder(cloudBase);
         if (files.isEmpty) break;
@@ -650,6 +796,11 @@ class SyncEngine {
     if (entry.type == 'persona') {
       await _binarySyncer.pushPersonaAvatar(entry.id);
     }
+    // Presets travel as one singleton entry, so their covers are pushed as a
+    // batch keyed by preset id rather than per manifest entry.
+    if (entry.type == 'theme_presets') {
+      await _binarySyncer.pushPresetImages();
+    }
   }
 
   Future<void> _pullEntry(SyncManifestEntry entry) async {
@@ -670,6 +821,9 @@ class SyncEngine {
     if (entry.type == 'persona') {
       await _binarySyncer.pullPersonaAvatar(entry.id);
     }
+    if (entry.type == 'theme_presets') {
+      await _binarySyncer.pullPresetImages();
+    }
     if (entry.type == 'chat') {
       final charId = cloudData['characterId'] as String?;
       if (charId != null) {
@@ -688,6 +842,18 @@ class SyncEngine {
     if (cloudEntry.hash == localEntry.hash) return true;
 
     switch (cloudEntry.type) {
+      case 'reconciliation_state':
+        final store = _reconciliationStateStore;
+        if (store == null) return false;
+        final cloudData = await SyncSerialization.readRequiredCloudEntity(
+          _adapter,
+          cloudEntry,
+        );
+        await store.mergeBySessionId(cloudEntry.id, cloudData);
+        // This aggregate intentionally normalizes or discards stale derived
+        // provenance. A successful merge is therefore semantic equality even
+        // when the resulting canonical payload no longer has the cloud hash.
+        return true;
       case 'memory_book':
         final localMb = await _memoryBookRepo.getBySessionId(cloudEntry.id);
         if (localMb == null) return false;
@@ -702,6 +868,16 @@ class SyncEngine {
         final cloudHash = SyncSerialization.computeMemoryBookHash(cloudData);
         final equal = localHash == cloudHash;
         return equal;
+      case 'studio_config':
+        final localConfig = await _studioConfigStore.getById(cloudEntry.id);
+        if (localConfig == null) return false;
+        final cloudData = await SyncSerialization.readCloudEntity(
+          _adapter,
+          cloudEntry,
+        );
+        if (cloudData == null) return false;
+        return SyncSerialization.computeStudioConfigHash(cloudData) ==
+            SyncSerialization.computeStudioConfigHash(localConfig.toJson());
       case 'api_presets':
         if (cloudManifest.apiKeysIncluded) return false;
         final localAll = await _apiRepo.getAll();
@@ -750,7 +926,8 @@ class SyncEngine {
           if (mb == null) return null;
           return mb.toJson();
         case 'lorebooks':
-          final all = await _lorebookRepo.getAll();
+          final all = await _lorebookRepo.getAll()
+            ..sort((a, b) => a.id.compareTo(b.id));
           return {
             '__singleton': true,
             'items': all.map((l) => l.toJson()).toList(),
@@ -792,11 +969,9 @@ class SyncEngine {
           return SyncSerialization.infoBlocksPayload(blocks);
         case 'tracker_snapshot':
           final snaps = await _trackerSnapshotStore.getBySessionId(id);
-          if (snaps.isEmpty) return null;
           return {'__trackerSnapshots': true, 'items': snaps};
         case 'tracker_value':
           final trackers = await _trackerValueStore.getBySessionId(id);
-          if (trackers.isEmpty) return null;
           return {'__trackerValues': true, 'items': trackers};
         case 'studio_config':
           final config = await _studioConfigStore.getById(id);
@@ -811,12 +986,21 @@ class SyncEngine {
         case 'character_folders':
           if (_characterFolderStore == null) return null;
           return _characterFolderStore.getAll();
+        case 'folders':
+          if (_folderStore == null) return null;
+          return await _folderStore.getAll();
         case 'memory_graph':
           if (_memoryGraphStore == null) return null;
           return _memoryGraphStore.getBySessionId(id);
         case 'character_knowledge':
           if (_characterKnowledgeStore == null) return null;
           return _characterKnowledgeStore.getBySessionId(id);
+        case 'session_lorebook_overlays':
+          if (_sessionLorebookOverlayStore == null) return null;
+          return _sessionLorebookOverlayStore.getBySessionId(id);
+        case 'reconciliation_state':
+          if (_reconciliationStateStore == null) return null;
+          return _reconciliationStateStore.getBySessionId(id);
         default:
           return null;
       }
@@ -885,11 +1069,13 @@ class SyncEngine {
           await _applyCloudTrackerValues(id, data);
           break;
         case 'studio_config':
-          await _studioConfigStore.put(StudioConfig.fromJson(data));
+          await _studioConfigStore.put(StudioAgentCodec.decodeConfig(data));
           break;
         case 'studio_preset':
           if (_studioPresetStore != null) {
-            await _studioPresetStore.put(StudioPreset.fromJson(data));
+            await _studioPresetStore.put(
+              StudioPresetCodec.decodePreset(data).preset,
+            );
           }
           break;
         case 'chat_summary':
@@ -902,6 +1088,11 @@ class SyncEngine {
             await _characterFolderStore.applyAll(data);
           }
           break;
+        case 'folders':
+          if (_folderStore != null) {
+            await _folderStore.applyAll(data);
+          }
+          break;
         case 'memory_graph':
           if (_memoryGraphStore != null) {
             await _memoryGraphStore.applyBySessionId(id, data);
@@ -912,8 +1103,28 @@ class SyncEngine {
             await _characterKnowledgeStore.applyBySessionId(id, data);
           }
           break;
+        case 'session_lorebook_overlays':
+          if (_sessionLorebookOverlayStore != null) {
+            await _sessionLorebookOverlayStore.applyBySessionId(id, data);
+          }
+          break;
+        case 'reconciliation_state':
+          if (_reconciliationStateStore != null) {
+            await _reconciliationStateStore.mergeBySessionId(id, data);
+          }
+          break;
       }
-    } catch (_) {}
+    } catch (_) {
+      if (type == 'chat' ||
+          type == 'lorebooks' ||
+          type == 'extension_preset' ||
+          type == 'tracker_snapshot' ||
+          type == 'tracker_value' ||
+          type == 'reconciliation_state' ||
+          type == 'session_lorebook_overlays') {
+        rethrow;
+      }
+    }
   }
 
   Future<void> _applyCloudInfoBlocks(
@@ -1078,22 +1289,16 @@ class SyncEngine {
       }
     }
 
-    // Upsert all cloud lorebooks.
-    for (final lb in parsed) {
-      await _lorebookRepo.put(lb);
-    }
+    await _lorebookRepo.putAll(parsed);
 
-    // Rebuild lorebookActivations prefs from the DB truth so that the
-    // connections UI and the scanner use consistent data across devices.
-    await _rebuildLorebookActivationsPrefs();
+    await _rebuildLorebookActivationsPrefs(parsed);
   }
 
   /// Reads all lorebooks from the DB and rewrites the `lorebookActivations`
   /// SharedPreferences key from their activationScope / activationTargetId
   /// fields. Called after a lorebook pull to eliminate stale prefs that would
   /// otherwise show phantom character/chat connections in the UI.
-  Future<void> _rebuildLorebookActivationsPrefs() async {
-    final all = await _lorebookRepo.getAll();
+  Future<void> _rebuildLorebookActivationsPrefs(List<Lorebook> all) async {
     final charMap = <String, List<String>>{};
     final chatMap = <String, List<String>>{};
     for (final lb in all) {
@@ -1161,7 +1366,7 @@ class SyncEngine {
     } else {
       items = [data];
     }
-    final presets = items.map((j) => ThemePreset.fromJson(j)).toList();
+    final presets = items.map((j) => themePresetFromStoredJson(j)).toList();
     await _themePresetRepo.putAll(presets);
   }
 
@@ -1241,9 +1446,58 @@ class SyncEngine {
             await _characterKnowledgeStore.deleteBySessionId(id);
           }
           break;
+        case 'session_lorebook_overlays':
+          if (_sessionLorebookOverlayStore != null) {
+            await _sessionLorebookOverlayStore.deleteBySessionId(id);
+          }
+          break;
+        case 'reconciliation_state':
+          if (_reconciliationStateStore != null) {
+            await _reconciliationStateStore.deleteBySessionId(id);
+          }
+          break;
         // extensions_settings has no meaningful "delete" — it's always present.
       }
     } catch (_) {}
+  }
+
+  Future<void> _mergeCloudReconciliationState(
+    SyncManifest? cloudManifest,
+    SyncManifest previousManifest,
+  ) async {
+    final store = _reconciliationStateStore;
+    if (store == null || cloudManifest == null) return;
+    for (final entry in cloudManifest.entries.values) {
+      if (entry.type != 'reconciliation_state' || entry.deleted) continue;
+      final previouslyAccepted = previousManifest.entries[entry.key];
+      if (previouslyAccepted != null &&
+          !previouslyAccepted.deleted &&
+          previouslyAccepted.hash == entry.hash) {
+        continue;
+      }
+      if (await _manifestBuilder.isDeleted(entry.type, entry.id) ||
+          await _manifestBuilder.isDeleted('chat', entry.id)) {
+        continue;
+      }
+      if (await _chatRepo.getById(entry.id) == null) {
+        final chatEntry = cloudManifest.entries[entryKey('chat', entry.id)];
+        if (chatEntry == null || chatEntry.deleted) {
+          throw StateError(
+            'Reconciliation state has no owning cloud chat: ${entry.id}',
+          );
+        }
+        final chatData = await SyncSerialization.readRequiredCloudEntity(
+          _adapter,
+          chatEntry,
+        );
+        await _chatRepo.put(ChatSession.fromJson(chatData));
+      }
+      final cloudData = await SyncSerialization.readRequiredCloudEntity(
+        _adapter,
+        entry,
+      );
+      await store.mergeBySessionId(entry.id, cloudData);
+    }
   }
 
   Future<Map<String, dynamic>?> _readLocalStorage() async {
@@ -1254,10 +1508,21 @@ class SyncEngine {
     final activeStudioPresetId = prefs.getString(
       SyncSerialization.activeStudioPresetKey,
     );
-    if (pipelineSettings == null && activeStudioPresetId == null) return null;
+    final globalRegexScripts = prefs.getString(
+      SyncSerialization.globalRegexScriptsKey,
+    );
+    final studioRegexScripts = prefs.getString(
+      SyncSerialization.studioRegexScriptsKey,
+    );
+    final appSettings = AppSettingsPreferences.encode(
+      AppSettingsPreferences.read(prefs),
+    );
     return SyncSerialization.localStoragePayload(
       pipelineSettings: pipelineSettings,
       activeStudioPresetId: activeStudioPresetId,
+      globalRegexScripts: globalRegexScripts,
+      studioRegexScripts: studioRegexScripts,
+      appSettings: appSettings,
     );
   }
 
@@ -1285,11 +1550,45 @@ class SyncEngine {
         );
       }
     }
+    await _applyLocalStorageString(
+      prefs,
+      data,
+      SyncSerialization.globalRegexScriptsKey,
+    );
+    await _applyLocalStorageString(
+      prefs,
+      data,
+      SyncSerialization.studioRegexScriptsKey,
+    );
+    final rawAppSettings = data[SyncSerialization.appSettingsKey];
+    if (rawAppSettings is Map) {
+      await AppSettingsPreferences.applyPartial(
+        prefs,
+        Map<String, dynamic>.from(rawAppSettings),
+      );
+    }
+  }
+
+  Future<void> _applyLocalStorageString(
+    SharedPreferences prefs,
+    Map<String, dynamic> data,
+    String key,
+  ) async {
+    final value = data[key];
+    if (value is! String) return;
+    if (value.isEmpty) {
+      await prefs.remove(key);
+    } else {
+      await prefs.setString(key, value);
+    }
   }
 
   Future<void> _deleteLocalStorage() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(SyncSerialization.pipelineSettingsKey);
     await prefs.remove(SyncSerialization.activeStudioPresetKey);
+    await prefs.remove(SyncSerialization.globalRegexScriptsKey);
+    await prefs.remove(SyncSerialization.studioRegexScriptsKey);
+    await AppSettingsPreferences.removeAll(prefs);
   }
 }

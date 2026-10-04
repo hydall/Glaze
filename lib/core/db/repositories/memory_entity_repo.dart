@@ -27,27 +27,29 @@ class MemoryEntityRepo {
   }
 
   Future<void> upsert(MemoryEntity entity) {
-    return db.into(db.memoryEntityRows).insertOnConflictUpdate(
-      MemoryEntityRowsCompanion.insert(
-        id: entity.id,
-        chatSessionId: entity.chatSessionId,
-        memoryEntryId: entity.memoryEntryId,
-        name: entity.name,
-        entityType: Value(entity.entityType),
-        aliasesJson: Value(jsonEncode(entity.aliases)),
-        description: Value(entity.description),
-        salienceAvg: Value(entity.salienceAvg),
-        saliencePeak: Value(entity.saliencePeak),
-        status: Value(entity.status),
-        factsJson: Value(jsonEncode(entity.facts)),
-        emotionalValenceJson: Value(jsonEncode(entity.emotionalValence)),
-        mentionCount: Value(entity.mentionCount),
-        lastSeenMessageIndex: Value(entity.lastSeenMessageIndex),
-        sourceHash: Value(entity.sourceHash),
-        createdAt: Value(entity.createdAt),
-        updatedAt: Value(currentTimestampSeconds()),
-      ),
-    );
+    return db
+        .into(db.memoryEntityRows)
+        .insertOnConflictUpdate(
+          MemoryEntityRowsCompanion.insert(
+            id: entity.id,
+            chatSessionId: entity.chatSessionId,
+            memoryEntryId: entity.memoryEntryId,
+            name: entity.name,
+            entityType: Value(entity.entityType),
+            aliasesJson: Value(jsonEncode(entity.aliases)),
+            description: Value(entity.description),
+            salienceAvg: Value(entity.salienceAvg),
+            saliencePeak: Value(entity.saliencePeak),
+            status: Value(entity.status),
+            factsJson: Value(jsonEncode(entity.facts)),
+            emotionalValenceJson: Value(jsonEncode(entity.emotionalValence)),
+            mentionCount: Value(entity.mentionCount),
+            lastSeenMessageIndex: Value(entity.lastSeenMessageIndex),
+            sourceHash: Value(entity.sourceHash),
+            createdAt: Value(entity.createdAt),
+            updatedAt: Value(currentTimestampSeconds()),
+          ),
+        );
   }
 
   Future<void> deleteByEntryId(String entryId) {
@@ -104,9 +106,10 @@ class MemoryEntityRepo {
 
     Map<String, double> emotionalValence;
     try {
-      emotionalValence = (jsonDecode(row.emotionalValenceJson)
-              as Map<String, dynamic>)
-          .map((k, v) => MapEntry(k, (v as num).toDouble()));
+      emotionalValence =
+          (jsonDecode(row.emotionalValenceJson) as Map<String, dynamic>).map(
+            (k, v) => MapEntry(k, (v as num).toDouble()),
+          );
     } catch (_) {
       emotionalValence = {};
     }

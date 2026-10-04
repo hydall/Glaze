@@ -1,7 +1,38 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
+
+import '../../../core/services/oauth_state.dart';
+
+/// The authorization code carried by a loopback redirect's [params], or a
+/// thrown error saying why there is none.
+///
+/// Separate from the request handler so the desktop flow's checks can be run
+/// without a browser, and so all three outcomes produce one sentence each
+/// instead of three shapes of HTML deciding what the error says.
+@visibleForTesting
+String oauthCodeFromRedirect(
+  Map<String, String> params, {
+  String? expectedState,
+}) {
+  if (params.containsKey('code')) {
+    // The desktop flow sends a `state` exactly as the mobile one does and
+    // never looked at what came back, so any page that reached the loopback
+    // port while it was open could hand Glaze an authorization code — binding
+    // the reader's app to whichever account issued it.
+    final mismatch = oauthStateMismatchMessage(expectedState, params['state']);
+    if (mismatch != null) throw StateError(mismatch);
+    return params['code']!;
+  }
+  if (params.containsKey('error')) {
+    final error = params['error'] ?? 'unknown';
+    final desc = params['error_description'] ?? '';
+    throw Exception('OAuth error: $error $desc');
+  }
+  throw Exception('No authorization code received');
+}
 
 class OAuthLocalServer {
   static const _successHtml = '''<!DOCTYPE html>
@@ -26,6 +57,10 @@ class OAuthLocalServer {
     String successPattern = 'code=',
     Duration timeout = const Duration(minutes: 5),
   }) async {
+    // Read from the request being made rather than passed in alongside it, so
+    // it cannot drift away from what the provider was actually asked.
+    final expectedState = Uri.parse(authUrl).queryParameters['state'];
+
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     final port = server.port;
 
@@ -38,36 +73,26 @@ class OAuthLocalServer {
     final codeCompleter = Completer<String>();
 
     server.listen((request) async {
-      final params = request.uri.queryParameters;
       final response = request.response;
-
-      if (params.containsKey('code')) {
+      try {
+        final code = oauthCodeFromRedirect(
+          request.uri.queryParameters,
+          expectedState: expectedState,
+        );
         response
           ..statusCode = 200
           ..headers.contentType = ContentType.html
           ..write(_successHtml);
         await response.close();
-        codeCompleter.complete(params['code']!);
-      } else if (params.containsKey('error')) {
-        final error = params['error'] ?? 'unknown';
-        final desc = params['error_description'] ?? '';
+        codeCompleter.complete(code);
+      } catch (e) {
+        final message = e is StateError ? e.message : '$e';
         response
           ..statusCode = 400
           ..headers.contentType = ContentType.html
-          ..write(_errorHtml.replaceAll('id="err">', 'id="err">$error: $desc'));
+          ..write(_errorHtml.replaceAll('id="err">', 'id="err">$message'));
         await response.close();
-        codeCompleter.completeError(Exception('OAuth error: $error $desc'));
-      } else {
-        response
-          ..statusCode = 400
-          ..headers.contentType = ContentType.html
-          ..write(
-            _errorHtml.replaceAll('id="err">', 'id="err">No code in response'),
-          );
-        await response.close();
-        codeCompleter.completeError(
-          Exception('No authorization code received'),
-        );
+        codeCompleter.completeError(e);
       }
 
       await server.close(force: true);

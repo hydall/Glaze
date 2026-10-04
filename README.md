@@ -4,7 +4,8 @@
 
 # Glaze
 
-[![Discord](https://img.shields.io/discord/1355184294868484196?color=5865F2&logo=discord&logoColor=white)](https://discord.gg/jnGhd7p6Ht)
+[![Download](https://img.shields.io/github/v/release/hydall/Glaze?include_prereleases&label=download&color=C42A4A)](https://github.com/hydall/Glaze/releases/latest)
+[![Discord](https://img.shields.io/badge/Discord-Join-5865F2?style=flat&logo=discord&logoColor=white)](https://discord.gg/jnGhd7p6Ht)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-FFDD00?style=flat&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/hydall)
 
 [Русский](README.ru.md)
@@ -52,94 +53,21 @@ See `docs/ARCHITECTURE.md` section 9 and `docs/INVARIANTS.md` for the bridge arc
 
 ## 📥 Installation
 
-Download the latest release from the [Releases](../../releases) page.
+Download the latest release from the [Releases](https://github.com/hydall/Glaze/releases/latest) page.
 
 - **Android** — Install the APK directly on your device.
 - **iOS** — Sideload the IPA using [AltStore](https://altstore.io/) or a similar tool. App Store distribution is not yet available.
 - **Windows** — Download the Windows build and run it directly on your PC.
-- **macOS / Linux** — Buildable from source, but not published as prebuilt releases yet; packaging and signing are still to be set up.
+- **Linux** — Install the pacman package on Arch-based distros (it pulls in WPE WebKit), or unpack the `.tar.zst` archive on another rolling distro with WPE WebKit installed. Ubuntu and Debian are not supported yet: they do not package WPE WebKit.
+- **macOS** — Buildable from source, but not currently published as a prebuilt release.
 
 Backups from **SillyTavern** (`.zip`) can be imported via **Menu → Backups**.
 
-## 🛠️ Development
+## 🛠️ Contributing
 
-Built with Flutter, using local SQLite storage, native desktop support, and a sandboxed extension runtime. Powered by Riverpod, Drift/SQLite, Dio, GoRouter, and a WebView-based chat renderer.
+Glaze is built with Flutter, using local SQLite storage, native desktop support, and a sandboxed extension runtime. Powered by Riverpod, Drift/SQLite, Dio, GoRouter, and a WebView-based chat renderer.
 
-### 📋 Prerequisites
-
-- [Flutter](https://docs.flutter.dev/get-started/install) 3.44+ (or newer, compatible with Dart 3.12+)
-- A toolchain for the platform you want to build — [Android Studio](https://developer.android.com/studio) for Android, Xcode for iOS/macOS, Visual Studio with the C++ desktop workload for Windows
-- Git
-
-### 🏗️ Setup
-
-```bash
-git clone https://github.com/hydall/Glaze.git
-cd Glaze
-flutter pub get
-```
-
-A `.env` file in the project root is **required to build** — it is declared as an asset in `pubspec.yaml`, so the build fails if it is missing:
-
-```bash
-cp .env.example .env
-```
-
-It holds the OAuth credentials for cloud sync. Leaving the values empty is fine — the app builds and runs, and only Dropbox / Google Drive sync stays unavailable.
-
-### 🚀 Dev Run
-
-```bash
-flutter run -d windows   # or: -d android, -d chrome, ...
-```
-
-### 🏭 Builds
-
-```bash
-flutter build apk        # Android
-flutter build windows    # Windows
-flutter build ios        # iOS
-```
-
-### ⚙️ Code Generation
-
-Drift, Freezed, and JSON-serializable models are generated. After editing any of them:
-
-```bash
-dart run build_runner build
-```
-
-### 🧪 Tests and Analysis
-
-```bash
-flutter analyze
-flutter test
-```
-
-## 📚 Project Layout
-
-```text
-lib/
-  main.dart                 # Entry point
-  app.dart                  # GlazeApp: router and boot-time initialization
-  core/                     # Models, services, providers, LLM pipeline, navigation
-  features/
-    chat/                   # Chat UI, WebView bridge, generation flow
-    extensions/             # Post-generation blocks and JS bridge SDK
-    character_list/         # Character CRUD and editor
-    lorebooks/              # Lorebook UI and management
-    presets/                # Prompt preset editor
-    image_gen/              # Image generation UI and services
-    cloud_sync/             # Dropbox / Google Drive sync
-    settings/               # API, app, and theme settings
-  shared/                   # Shell, theme, shared widgets
-assets/chat_webview/        # WebView HTML/JS/CSS renderer and bridge assets
-assets/translations/        # Localization files
-docs/                       # Architecture, invariants, rules, workflow, build notes
-test/                       # Unit, characterization, extension, and asset-guard tests
-```
-
-Primary technical references: `docs/ARCHITECTURE.md`, `docs/INVARIANTS.md`, `docs/rules/`, `docs/WORKFLOW.md`, and `docs/BUILD_NOTES.md` for Windows build and dependency-override context.
+Prerequisites, setup, build commands, codegen, tests, and the project layout live in [`CONTRIBUTING.md`](CONTRIBUTING.md). Git, PR, CI, and release rules are in [`docs/WORKFLOW.md`](docs/WORKFLOW.md).
 
 ## 🙏 Credits
 
@@ -147,6 +75,13 @@ Primary technical references: `docs/ARCHITECTURE.md`, `docs/INVARIANTS.md`, `doc
 - [SillyTavern-CharacterLibrary](https://github.com/Sillyanonymous/SillyTavern-CharacterLibrary) — reference for JanitorAI extraction through a browser.
 - [Marinara Engine](https://github.com/Pasta-Devs/Marinara-Engine) — inspiration for the agentic workflow.
 - [Lumiverse](https://github.com/prolix-oc/Lumiverse) — inspiration for the agentic workflow.
+
+### 🧪 Testers
+
+The people who find the bugs before the release does — the app's own Hall of Fame
+(**Menu → About Glaze → Hall of Fame**):
+
+**nightsyr** *(honorary tester)*, Саша Белый, múrx, lina, ShikiN, N K, Сатаник1155.
 
 ## 📜 License
 

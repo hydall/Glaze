@@ -192,6 +192,7 @@ pubget.txt
 
 # Agent session artifacts (plans / scratch scripts, per-machine)
 .hermes/
+docs/untracked/
 
 # Browser-Claude chat output (patches / PR drafts, not committed as-is)
 docs/chatoutput/
@@ -202,3 +203,19 @@ opencode.jsonc
 .opencode.json
 .opencode.jsonc
 .opencode/
+
+# Local deepwork progress state
+.slim/deepwork/
+
+# Python bytecode (tools/bug_triage)
+__pycache__/
+*.pyc
+
+# WebView asset browser tests (test/webview_js)
+test/webview_js/node_modules/
+test/webview_js/test-results/
+test/webview_js/playwright-report/
+# The Node manifests above are ignored repo-wide (a leftover of the Vue app).
+# This one is a committed test project, so it opts back in.
+!test/webview_js/package.json
+!test/webview_js/package-lock.json

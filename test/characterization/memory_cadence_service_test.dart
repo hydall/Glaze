@@ -30,6 +30,28 @@ void main() {
       expect(should, isFalse);
     });
 
+    test('legacy mode stays outside modern enrichment cadence', () async {
+      await service.incrementAssistant('s1');
+      final should = await service.shouldRun(
+        's1',
+        'graph',
+        memoryMode: 'legacy',
+        cadenceInterval: 1,
+      );
+      expect(should, isFalse);
+    });
+
+    test('deep mode inherits balanced enrichment cadence', () async {
+      await service.incrementAssistant('s1');
+      final should = await service.shouldRun(
+        's1',
+        'graph',
+        memoryMode: 'deep',
+        cadenceInterval: 1,
+      );
+      expect(should, isTrue);
+    });
+
     test('runs when assistant count reaches interval', () async {
       await service.incrementAssistant('s1');
       await service.incrementAssistant('s1');

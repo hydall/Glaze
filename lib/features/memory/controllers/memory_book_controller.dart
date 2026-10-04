@@ -4,23 +4,25 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/llm/memory_injection_service.dart';
 import '../../../core/llm/memory_draft_planner.dart';
 import '../../../core/models/memory_book.dart';
+import '../../../core/models/memory_entry_revisions.dart';
 import '../../../core/models/pipeline_settings.dart';
 import '../../../core/state/lorebook_embedding_provider.dart';
-import '../../../core/state/memory_agent_providers.dart';
 import '../../../core/state/memory_book_ops_provider.dart';
 import '../../../core/state/memory_settings_provider.dart';
 import '../../../core/state/pipeline_settings_provider.dart';
 import '../../chat/chat_provider.dart';
 import '../../settings/api_list_provider.dart';
-import 'memory_draft_generation_controller.dart';
+import '../state/memory_draft_jobs_provider.dart';
+import 'memory_book_write_queue.dart';
 import 'memory_settings_mapper.dart';
 
 /// Controller for memory book operations, separating business logic from UI.
 ///
 /// Thin orchestrator: owns the [MemoryBook] + entry/index CRUD + settings
-/// mapping + reindex, and delegates the draft-generation lifecycle (active
-/// set, cancel tokens, elapsed timer, INV-M3 mutex) to
-/// [MemoryDraftGenerationController].
+/// mapping + reindex. The draft-generation lifecycle (requests in flight,
+/// cancel tokens, memory-workflow leases) is not its to own — it lives in
+/// [memoryDraftJobsProvider], which outlives the sheet this controller is
+/// built for, so a generation is not lost when the sheet closes.
 class MemoryBookController {
   final WidgetRef _ref;
   final String _sessionId;
@@ -30,26 +32,20 @@ class MemoryBookController {
   bool _loading = true;
   bool _isReindexing = false;
   final MemorySettingsMapper _settingsMapper = const MemorySettingsMapper();
-  late final MemoryDraftGenerationController _draftGen =
-      MemoryDraftGenerationController(
-        ref: _ref,
-        charId: _charId,
-        sessionId: _sessionId,
-        settingsMapper: _settingsMapper,
-        bookGetter: () => _book,
-        persistAndSet: (book) async {
-          _book = book;
-          await save();
-        },
-      );
+  late final MemoryBookWriteQueue _bookWrites = MemoryBookWriteQueue(
+    readLatest: () => _book,
+    persist: (book) => _ref.read(memoryBookOpsProvider).saveMemoryBook(book),
+  );
 
   MemoryBookController(this._ref, this._sessionId, this._charId);
 
   MemoryBook? get book => _book;
   bool get loading => _loading;
   bool get isReindexing => _isReindexing;
-  Map<String, bool> get generatingDrafts => _draftGen.generatingDrafts;
-  Map<String, DateTime> get genStartTimes => _draftGen.genStartTimes;
+
+  MemoryDraftJobsState get _jobs => _ref.read(memoryDraftJobsProvider);
+  MemoryDraftJobsNotifier get _jobRunner =>
+      _ref.read(memoryDraftJobsProvider.notifier);
 
   MemoryGlobalSettings get globalSettings =>
       _ref.read(memoryGlobalSettingsProvider);
@@ -69,54 +65,97 @@ class MemoryBookController {
 
   Future<void> save() async {
     if (_book == null) return;
-    await _ref.read(memoryBookOpsProvider).saveMemoryBook(_book!);
+    await _bookWrites.saveLatest();
   }
 
   MemoryBookSettings globalSettingsAsBookSettings() =>
       _settingsMapper.globalToBook(globalSettings);
 
-  String get settingsSummary {
-    if (_book == null) return '';
+  /// The active retrieval mode, as shown on the collapsed configuration row.
+  String get modeLabel => switch (globalSettings.memoryMode) {
+    'balanced' => 'memory_mode_balanced'.tr(),
+    'deep' => 'memory_mode_deep'.tr(),
+    'legacy' => 'memory_mode_legacy'.tr(),
+    // `agentic` was removed in Phase 4 — migrate to `deep` for display.
+    'agentic' => 'memory_mode_deep'.tr(),
+    _ => 'memory_mode_fast'.tr(),
+  };
+
+  /// The configuration shown above the list, as label/value rows.
+  ///
+  /// Was a single `•`-joined string of 13 fields: it did not fit the 12 px
+  /// subtitle it rendered into, and it glued translated fragments to English
+  /// literals (`msgs`, `Batch`, `th=`, `entries`, `chunks`), which no locale
+  /// could repair. Each row now carries its own key on both halves.
+  List<MemoryConfigRow> get configRows {
+    if (_book == null) return const [];
     final s = globalSettings;
-    final mode = switch (s.memoryMode) {
-      'balanced' => 'memory_mode_balanced'.tr(),
-      'deep' => 'memory_mode_deep'.tr(),
-      'legacy' => 'memory_mode_legacy'.tr(),
-      // `agentic` was removed in Phase 4 — migrate to `deep` for display.
-      'agentic' => 'memory_mode_deep'.tr(),
-      _ => 'memory_mode_fast'.tr(),
-    };
-    final interval = s.autoCreateInterval;
-    final autoCreate = s.autoCreateEnabled
-        ? 'memory_books_summary_auto_on'.tr()
-        : 'memory_books_summary_auto_off'.tr();
-    final autoGen = s.autoGenerateEnabled
-        ? 'memory_books_summary_auto_text'.tr()
-        : 'memory_books_summary_manual_text'.tr();
-    final delayed = s.useDelayedAutomation
-        ? 'memory_books_summary_delayed'.tr()
-        : 'memory_books_summary_immediate'.tr();
-    final target = s.injectionTarget == 'macro'
-        ? 'memory_injection_macro'.tr()
-        : 'memory_injection_hard_block'.tr();
-    final vectorThreshold = s.vectorThreshold.toStringAsFixed(2);
-    final maxEntries = s.maxInjectedEntries;
+    final pg = pipelineSettings;
+
     final packing = switch (s.memoryPackingMode) {
       'full' => 'memory_packing_full'.tr(),
       'chunk_first' => 'memory_packing_chunk_first'.tr(),
       _ => 'memory_packing_hybrid'.tr(),
     };
-    final memoryBudget = s.maxInjectedTokens == null
+    final maxTokens = pg.memoryBookApi.generationMaxTokens;
+    final budget = s.maxInjectedTokens == null
         ? 'memory_books_summary_auto_out'.tr()
-        : '${s.maxInjectedTokens} memory tokens';
-    final batchSize = s.batchSize;
-    final pg = pipelineSettings;
-    final outTokens =
-        (pg.memoryBookApi.generationMaxTokens != null &&
-            pg.memoryBookApi.generationMaxTokens! > 0)
-        ? '${pg.memoryBookApi.generationMaxTokens} out'
-        : 'memory_books_summary_auto_out'.tr();
-    return '$mode • $interval msgs • Batch $batchSize • $outTokens • $autoCreate • $autoGen • $delayed • $target • th=$vectorThreshold • $maxEntries entries • $memoryBudget • $packing • ${s.memoryExcerptChunksPerEntry}x${s.memoryExcerptTokensPerChunk} chunks';
+        : 'memory_tokens_n'.plural(s.maxInjectedTokens!);
+
+    return [
+      MemoryConfigRow('memory_mode'.tr(), modeLabel),
+      MemoryConfigRow(
+        'memory_books_auto_create'.tr(),
+        s.autoCreateEnabled
+            ? 'memory_books_summary_auto_on'.tr()
+            : 'memory_books_summary_auto_off'.tr(),
+      ),
+      MemoryConfigRow(
+        'memory_books_auto_generate'.tr(),
+        s.autoGenerateEnabled
+            ? 'memory_books_summary_auto_text'.tr()
+            : 'memory_books_summary_manual_text'.tr(),
+      ),
+      MemoryConfigRow(
+        'memory_books_auto_create_interval'.tr(),
+        'memory_messages_n'.plural(s.autoCreateInterval),
+      ),
+      MemoryConfigRow('memory_books_batch_size'.tr(), '${s.batchSize}'),
+      MemoryConfigRow(
+        'label_embedding_target'.tr(),
+        s.injectionTarget == 'macro'
+            ? 'memory_injection_macro'.tr()
+            : 'memory_injection_hard_block'.tr(),
+      ),
+      MemoryConfigRow('label_search_type'.tr(), searchTypeLabel),
+      if (s.vectorSearchEnabled)
+        MemoryConfigRow(
+          'label_similarity_threshold'.tr(),
+          s.vectorThreshold.toStringAsFixed(2),
+        ),
+      MemoryConfigRow(
+        'memory_books_max_entries_prompt'.tr(),
+        '${s.maxInjectedEntries}',
+      ),
+      MemoryConfigRow('memory_budget'.tr(), budget),
+      MemoryConfigRow('memory_packing_mode'.tr(), packing),
+      MemoryConfigRow(
+        'memory_excerpt_chunks_per_entry'.tr(),
+        'memory_chunks_shape'.tr(
+          namedArgs: {
+            'chunks': '${s.memoryExcerptChunksPerEntry}',
+            'tokens': '${s.memoryExcerptTokensPerChunk}',
+          },
+        ),
+      ),
+      MemoryConfigRow('label_model'.tr(), searchModelLabel),
+      MemoryConfigRow(
+        'memory_books_generation_max_tokens'.tr(),
+        maxTokens != null && maxTokens > 0
+            ? 'memory_tokens_n'.plural(maxTokens)
+            : 'memory_books_summary_auto_out'.tr(),
+      ),
+    ];
   }
 
   String get searchModelLabel {
@@ -126,9 +165,11 @@ class MemoryBookController {
         : 'memory_books_current_llm_model'.tr();
   }
 
+  /// Reads the global settings, which is what [cycleSearchType] writes — the
+  /// per-book snapshot is a projection of them and would otherwise pin the
+  /// label to whatever the book was last saved with.
   String get searchTypeLabel {
-    final s = _book?.settings;
-    if (s == null) return 'memory_books_search_vector'.tr();
+    final s = globalSettings;
     if (!s.vectorSearchEnabled) return 'memory_books_search_keys'.tr();
     if (s.keyMatchMode == 'both') return 'memory_books_vector_and_keys'.tr();
     return 'memory_books_search_vector'.tr();
@@ -172,68 +213,59 @@ class MemoryBookController {
     return 'memory_books_drafts_created'.tr(args: ['${plan.drafts.length}']);
   }
 
-  void generateAllPending() => _draftGen.generateAllPending();
-
-  /// Generates a draft. Callbacks are for UI updates.
-  Future<void> generateDraft(
-    String draftId, {
-    required void Function() onStart,
-    required void Function() onComplete,
-    required void Function(String error) onError,
-  }) => _draftGen.generateDraft(
-    draftId,
-    onStart: onStart,
-    onComplete: onComplete,
-    onError: onError,
+  /// Starts a generation and returns. Progress, failures and the result are
+  /// published through [memoryDraftJobsProvider] and the repository, so the
+  /// sheet does not have to be on screen for any of them to arrive.
+  Future<void> generateDraft(String draftId) => _jobRunner.generate(
+    sessionId: _sessionId,
+    charId: _charId,
+    draftId: draftId,
   );
 
   void cancelDraftGeneration(String draftId) =>
-      _draftGen.cancelDraftGeneration(draftId);
+      _jobRunner.cancel(_sessionId, draftId);
 
-  Future<void> batchGenerate({
-    required void Function() onStart,
-    required void Function() onComplete,
-    required void Function(String error) onError,
-  }) => _draftGen.batchGenerate(
-    onStart: onStart,
-    onComplete: onComplete,
-    onError: onError,
-  );
+  Future<void> batchGenerate() =>
+      _jobRunner.generateBatch(sessionId: _sessionId, charId: _charId);
+
+  bool isDraftGenerating(String draftId) =>
+      _jobs.isGenerating(_sessionId, draftId);
 
   Future<void> approveDraft(String draftId) async {
     if (_book == null) return;
+    // The card hides Approve while generating; keep the same invariant at the
+    // controller boundary for stale callbacks or programmatic callers.
+    if (isDraftGenerating(draftId)) return;
     final draftIndex = _book!.pendingDrafts.indexWhere((d) => d.id == draftId);
     if (draftIndex < 0) return;
     final draft = _book!.pendingDrafts[draftIndex];
     if (draft.content.isEmpty) return;
-
-    final entry = MemoryEntry(
-      id: draft.id.replaceAll('draft_', 'mem_'),
-      title: draft.title,
-      content: draft.content,
-      keys: draft.keys,
-      vectorSearch: draft.vectorSearch,
-      messageIds: draft.messageIds,
-      messageRange: draft.messageRange,
-      status: 'active',
-      createdAt: DateTime.now().millisecondsSinceEpoch,
-      // Preserve the draft's provenance marker for scan/manual entries.
-      source: draft.source,
-      kind: 'curated',
-    );
-
-    _book = _book!.copyWith(
-      entries: [..._book!.entries, entry],
-      pendingDrafts: _book!.pendingDrafts
-          .where((d) => d.id != draftId)
-          .toList(),
-    );
-    await save();
-    await _autoIndexEntry(entry);
+    MemoryEntry? entry;
+    await _bookWrites.runDurableOperation(() async {
+      final approved = await _ref
+          .read(memoryBookOpsProvider)
+          .approveDraft(_sessionId, draftId, draft);
+      if (approved == null) return;
+      entry = approved.entries
+          .where((e) => e.id == draft.id.replaceAll('draft_', 'mem_'))
+          .firstOrNull;
+      final latest = _book;
+      if (latest == null || entry == null) return;
+      _book = latest.copyWith(
+        entries: [...latest.entries.where((e) => e.id != entry!.id), entry!],
+        pendingDrafts: latest.pendingDrafts
+            .where((d) => d.id != draftId)
+            .toList(),
+      );
+    });
+    if (entry != null) await _autoIndexEntry(entry!);
   }
 
   Future<void> deleteDraft(String draftId) async {
     if (_book == null) return;
+    // Invalidate an in-flight request before removing the draft so a late
+    // completion cannot publish it back into the book.
+    cancelDraftGeneration(draftId);
     _book = _book!.copyWith(
       pendingDrafts: _book!.pendingDrafts
           .where((d) => d.id != draftId)
@@ -244,6 +276,9 @@ class MemoryBookController {
 
   Future<void> deleteAllDrafts() async {
     if (_book == null) return;
+    for (final draft in _book!.pendingDrafts) {
+      cancelDraftGeneration(draft.id);
+    }
     _book = _book!.copyWith(pendingDrafts: []);
     await save();
   }
@@ -277,14 +312,17 @@ class MemoryBookController {
     return newGlobal;
   }
 
-  /// Reindexes all memory entries. Returns a result message.
-  Future<String?> reindexAll() async {
-    if (_book == null) return null;
+  /// Reindexes all memory entries.
+  ///
+  /// Returns a typed outcome rather than a display string: the caller used to
+  /// decide between an error dialog and a toast by matching the English
+  /// prefixes of an already-translated message, so in any non-English locale
+  /// both branches missed and a failure degraded to a toast.
+  Future<ReindexOutcome> reindexAll() async {
+    if (_book == null) return const ReindexNotReady();
     await _ref.read(apiListProvider.future);
     final config = _ref.read(embeddingConfigProvider);
-    if (config.endpoint.isEmpty) {
-      return 'memory_books_setup_embedding_first'.tr();
-    }
+    if (config.endpoint.isEmpty) return const ReindexNeedsEmbeddingApi();
 
     _isReindexing = true;
     try {
@@ -296,15 +334,13 @@ class MemoryBookController {
         config: config,
         embeddingTarget: 'content',
       );
-      return 'memory_books_reindex_result'.tr(
-        namedArgs: {
-          'indexed': '${result.indexed}',
-          'skipped': '${result.skipped}',
-          'failed': '${result.failed}',
-        },
+      return ReindexDone(
+        indexed: result.indexed,
+        skipped: result.skipped,
+        failed: result.failed,
       );
     } catch (e) {
-      return 'memory_books_reindex_failed'.tr(args: ['$e']);
+      return ReindexFailed(e);
     } finally {
       _isReindexing = false;
     }
@@ -333,26 +369,74 @@ class MemoryBookController {
 
   Future<MemoryEntry?> editEntry(MemoryEntry entry, MemoryEntry result) async {
     if (_book == null) return null;
-    final entries = [..._book!.entries];
-    final idx = entries.indexWhere((e) => e.id == entry.id);
-    if (idx >= 0) entries[idx] = result;
-    _book = _book!.copyWith(entries: entries);
-    await save();
-    await _ref.read(memoryBookOpsProvider).deleteEmbeddingEntry(result.id);
-    await _autoIndexEntry(result);
-    return result;
+    MemoryEntry? revised;
+    await _bookWrites.runDurableOperation(() async {
+      revised = await _ref
+          .read(memoryBookOpsProvider)
+          .reviseEntry(
+            sessionId: _sessionId,
+            expected: entry,
+            proposed: result,
+          );
+      _publishRevision(revised);
+    });
+    if (revised == null) return null;
+    await _ref.read(memoryBookOpsProvider).deleteEmbeddingEntry(revised!.id);
+    await _autoIndexEntry(revised!);
+    return revised;
+  }
+
+  void _publishRevision(MemoryEntry? revised) {
+    final latest = _book;
+    if (latest == null || revised == null) return;
+    _book = latest.copyWith(
+      entries: latest.entries
+          .map((current) => current.id == revised.id ? revised : current)
+          .toList(),
+    );
   }
 
   Future<MemoryEntry?> addEntry(MemoryEntry result) async {
     if (_book == null) return null;
+    result = MemoryEntryRevisions.initialize(
+      result,
+      author: 'user',
+      reason: 'manual_create',
+      reviewer: 'user',
+    );
     _book = _book!.copyWith(entries: [..._book!.entries, result]);
     await save();
     await _autoIndexEntry(result);
     return result;
   }
 
+  Future<MemoryEntry?> restoreEntryRevision(
+    MemoryEntry entry,
+    String revisionId,
+  ) async {
+    if (_book == null) return null;
+    MemoryEntry? restored;
+    await _bookWrites.runDurableOperation(() async {
+      restored = await _ref
+          .read(memoryBookOpsProvider)
+          .restoreEntryRevision(
+            sessionId: _sessionId,
+            expected: entry,
+            revisionId: revisionId,
+          );
+      _publishRevision(restored);
+    });
+    if (restored == null) return null;
+    await _ref.read(memoryBookOpsProvider).deleteEmbeddingEntry(restored!.id);
+    await _autoIndexEntry(restored!);
+    return restored;
+  }
+
   Future<void> editDraft(MemoryDraft draft, MemoryEntry result) async {
     if (_book == null) return;
+    // Editing a draft that has an active generation would create ambiguous
+    // last-writer-wins semantics. Delete remains intentionally allowed.
+    if (isDraftGenerating(draft.id)) return;
     final drafts = [..._book!.pendingDrafts];
     final idx = drafts.indexWhere((d) => d.id == draft.id);
     if (idx >= 0) {
@@ -360,6 +444,8 @@ class MemoryBookController {
         title: result.title,
         content: result.content,
         keys: result.keys,
+        keyParagraphs: result.keyParagraphs,
+        ledgerRange: result.ledgerRange,
         updatedAt: DateTime.now().millisecondsSinceEpoch,
       );
     }
@@ -389,54 +475,93 @@ class MemoryBookController {
         .save(
           s.copyWith(vectorSearchEnabled: nextVector, keyMatchMode: nextMode),
         );
-  }
-
-  /// Runs memory deduplication. When [entryIds] is provided, dedup is
-  /// scoped to those entries only (used by the "only selected swipes"
-  /// filter). Returns a human-readable result string for toast display.
-  Future<String> runDedup({Set<String>? entryIds}) async {
-    final pipeline = _ref.read(pipelineSettingsProvider);
-    final dedupService = _ref.read(memoryDedupServiceProvider);
-
-    final result = await dedupService.runDedup(
-      sessionId: _sessionId,
-      settings: pipeline,
-      entryIds: entryIds,
-      threshold: pipeline.memoryPipeline.memoryDedupThreshold,
+    // Retrieval reads the book's own snapshot (`book.settings.keyMatchMode`),
+    // so mirror the two fields there as well — saving only the global settings
+    // left the sheet showing a value the search never used.
+    final book = _book;
+    if (book == null) return;
+    final bookSettings = book.settings.copyWith(
+      vectorSearchEnabled: nextVector,
+      keyMatchMode: nextMode,
     );
-
-    if (result.status == 'ok') {
-      await load();
-    }
-
-    return switch (result.status) {
-      'ok' =>
-        'Dedup: ${result.merged} merged, ${result.dropped} dropped, '
-            '${result.kept} kept (${result.pairsSentToLlm} pairs from '
-            '${result.candidatesChecked} entries)',
-      'no_book' => 'No memory book found.',
-      'aborted' => 'Dedup aborted.',
-      'timeout' => 'Dedup timed out.',
-      'llm_error' => 'Dedup: LLM error (${result.pairsSentToLlm} pairs found).',
-      'error' => 'Dedup failed.',
-      _ => 'Dedup: ${result.status}',
-    };
+    _book = book.copyWith(settings: bookSettings);
+    await _ref
+        .read(memoryBookOpsProvider)
+        .updateSettings(_sessionId, bookSettings);
   }
-
-  void dispose() => _draftGen.dispose();
 
   /// Updates the book state (called from UI when state changes).
   void updateBook(MemoryBook newBook) {
     _book = newBook;
   }
 
-  List<MemoryDraft> get draftsNeedingGeneration =>
-      _draftGen.draftsNeedingGeneration;
+  /// Drafts with nothing in them yet that no request is already covering.
+  List<MemoryDraft> get draftsNeedingGeneration {
+    final book = _book;
+    if (book == null) return const [];
+    return book.pendingDrafts
+        .where(
+          (draft) =>
+              draft.content.isEmpty &&
+              (draft.status == 'pending_generation' ||
+                  draft.status == 'needs_regeneration') &&
+              !isDraftGenerating(draft.id),
+        )
+        .toList();
+  }
 
-  bool get isGenerating => _draftGen.isGenerating;
+  bool get isGenerating => _jobs.isBusy(_sessionId);
 
   int get activeEntryCount =>
       _book?.entries.where((e) => e.status == 'active').length ?? 0;
   int get needsRebuildCount =>
       _book?.entries.where((e) => e.status == 'needs_rebuild').length ?? 0;
+}
+
+/// One label/value line of [MemoryBookController.configRows].
+class MemoryConfigRow {
+  final String label;
+  final String value;
+
+  const MemoryConfigRow(this.label, this.value);
+}
+
+/// Result of [MemoryBookController.reindexAll].
+///
+/// The UI maps each case to its own copy and its own presentation — a dialog
+/// for the two failures, a toast for the summary — instead of pattern-matching
+/// a localized sentence.
+sealed class ReindexOutcome {
+  const ReindexOutcome();
+}
+
+/// No book loaded yet; nothing was attempted and nothing is reported.
+class ReindexNotReady extends ReindexOutcome {
+  const ReindexNotReady();
+}
+
+/// No embedding endpoint is configured, so there is nothing to index against.
+class ReindexNeedsEmbeddingApi extends ReindexOutcome {
+  const ReindexNeedsEmbeddingApi();
+}
+
+/// The run finished; the three counters are what the summary reports.
+class ReindexDone extends ReindexOutcome {
+  final int indexed;
+  final int skipped;
+  final int failed;
+
+  const ReindexDone({
+    required this.indexed,
+    required this.skipped,
+    required this.failed,
+  });
+}
+
+/// The run threw. [error] is surfaced through `GlazeErrorDialog`, which
+/// formats it, so it is kept as the original object.
+class ReindexFailed extends ReindexOutcome {
+  final Object error;
+
+  const ReindexFailed(this.error);
 }

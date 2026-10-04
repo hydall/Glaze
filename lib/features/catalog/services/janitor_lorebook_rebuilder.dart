@@ -1,16 +1,17 @@
-import 'dart:async';
 import 'dart:convert';
 
-import 'package:dio/dio.dart';
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/llm/transport/chat_transport_request.dart';
-import '../../../core/llm/transport/transport_factory.dart';
+import '../../../core/llm/aux_llm_client.dart';
 import '../../../core/models/lorebook.dart';
+import '../../../core/utils/error_format.dart';
 import '../../../core/utils/id_generator.dart';
 import '../../../core/utils/time_helpers.dart';
 import '../../settings/api_list_provider.dart';
+import '../../settings/app_settings_provider.dart';
+import 'catalog_error_source.dart';
 
 /// Rebuilds raw, concatenated closed-lorebook text into structured
 /// [LorebookEntry]s using Glaze's **active LLM connection** — a Dart port of
@@ -20,7 +21,7 @@ import '../../settings/api_list_provider.dart';
 /// concatenated bodies of the entries the platform injected; this asks the LLM
 /// to split them back into discrete, keyed World Info entries.
 
-const String _systemPrompt = '''You reconstruct a SillyTavern World Info (lorebook) from raw text.
+const String kLorebookSystemPrompt = '''You reconstruct a SillyTavern World Info (lorebook) from raw text.
 
 You are given text extracted from an LLM chat prompt: one or more lorebook entries a
 roleplay platform injected because their trigger keywords matched. The character card and
@@ -48,7 +49,7 @@ No markdown, no prose, no code fences — JSON only.''';
 /// lorebook is shipped as JavaScript (e.g. `const loreEntries = [ ... ]`) rather
 /// than a JSON entries array, so the model is asked to recover the entries from
 /// the source instead of splitting concatenated bodies.
-const String _systemPromptJs =
+const String kLorebookSystemPromptJs =
     '''You reconstruct a SillyTavern World Info (lorebook) from JavaScript source.
 
 You are given the JavaScript source of a JanitorAI "advanced" / Nine API lorebook script. It
@@ -75,47 +76,10 @@ Your job:
    { "entries": [ { "comment": "...", "key": ["..."], "keysecondary": [], "content": "...", "order": 100 }, ... ] }
 No markdown, no prose, no code fences — JSON only.''';
 
-/// System prompt for the **full-prompt** path: used when the character has at
-/// least one JanitorAI "advanced" / Nine API lorebook. Such scripts inject their
-/// entries INLINE inside the persona block, so the mechanical separator can't
-/// isolate them — instead the whole assembled prompt is handed to the model,
-/// which separates the injected lorebook entries from the base card/scenario.
-const String _systemPromptFull =
-    '''You reconstruct a SillyTavern World Info (lorebook) from a full assembled chat prompt.
-
-You are given the COMPLETE system prompt of a roleplay chat. It contains the character
-card / persona, the scenario, optional example dialogue, AND lorebook (World Info) entries
-the platform injected because their trigger keywords matched. The injected entries are
-usually discrete topical blocks (a person, place, faction, item, rule, lore fact) — often
-bracketed like `[Name: ...]` — and may appear INLINE within the persona or after it.
-
-You may also be given the character card, catalog description, scenario and greetings as
-CONTEXT. Use them to tell the BASE character definition apart from the injected lorebook:
-the base persona/scenario/example prose is NOT a lorebook entry, even though it appears in
-the prompt.
-
-Your job:
-1. Extract ONLY the injected lorebook entries — discrete, self-contained World Info entries
-   about a single topic each. Do NOT output the base character card, persona, scenario,
-   example dialogue, or any system/jailbreak instructions as entries. Do NOT merge unrelated
-   topics; do NOT split a single topic across entries.
-2. For each entry write:
-   - "content": the entry body, faithful to the source (drop stray "undefined" tokens and
-     leftover wrapper tags).
-   - "key": array of primary trigger keywords/phrases (names, aliases, places, distinctive
-     nouns), inferred from the content and the provided context.
-   - "keysecondary": optional array of secondary keywords (else []).
-   - "comment": a short title (the topic name).
-   - "order": optional integer insertion order; default 100.
-3. Output ONLY a JSON object:
-   { "entries": [ { "comment": "...", "key": ["..."], "keysecondary": [], "content": "...", "order": 100 }, ... ] }
-No markdown, no prose, no code fences — JSON only.''';
-
 /// Thrown when no usable LLM connection is configured.
 class NoActiveConnectionException implements Exception {
   @override
-  String toString() =>
-      'No active LLM connection. Configure one in Settings → API first.';
+  String toString() => 'catalog_lorebooks_no_connection'.tr();
 }
 
 /// Thrown when the build LLM call returns nothing usable. Carries the raw
@@ -124,6 +88,11 @@ class NoActiveConnectionException implements Exception {
 /// filter, etc.).
 class LorebookBuildException implements Exception {
   final String message;
+
+  /// Who the failure belongs to, so the UI can head the error block with
+  /// "PROVIDER ERROR" rather than a bare "ERROR". Everything raised here is
+  /// the provider's answer in one form or another, hence the default.
+  final CatalogErrorSource source;
 
   /// The assistant text the transport surfaced (often empty on failure).
   final String rawText;
@@ -134,15 +103,50 @@ class LorebookBuildException implements Exception {
   /// The raw provider JSON payload (the most useful field for diagnosis).
   final String? rawResponseJson;
 
+  /// The exception the transport threw, when this wraps one. Kept so callers
+  /// can inspect the original (a `DioException` still carries the provider's
+  /// response body) rather than only its rendered message.
+  final Object? cause;
+
   LorebookBuildException(
     this.message, {
+    this.source = CatalogErrorSource.provider,
     this.rawText = '',
     this.reasoning,
     this.rawResponseJson,
+    this.cause,
   });
+
+  /// A transport-level failure — a refused key, a rate limit, a dead endpoint.
+  /// The message is rendered with the shared [formatError], so it reads like
+  /// every other provider error in Glaze (`HTTP 401: Invalid API key`) instead
+  /// of a raw `DioException` dump.
+  LorebookBuildException.fromProvider(
+    Object error, {
+    this.rawText = '',
+    this.reasoning,
+    this.rawResponseJson,
+  }) : message = formatError(error),
+       source = CatalogErrorSource.provider,
+       cause = error;
 
   @override
   String toString() => message;
+}
+
+/// The system prompt a build actually sends: the user's own, when they edited
+/// it in the extraction settings, otherwise the built-in default for the kind
+/// of source being rebuilt.
+///
+/// A blank override means "use the default" — that is what clearing the field
+/// in the settings sheet does, and what an unset setting looks like.
+String lorebookSystemPrompt(AppSettings? settings, {bool fromJs = false}) {
+  final custom =
+      (fromJs ? settings?.lorebookBuildPromptJs : settings?.lorebookBuildPrompt)
+          ?.trim() ??
+      '';
+  if (custom.isNotEmpty) return custom;
+  return fromJs ? kLorebookSystemPromptJs : kLorebookSystemPrompt;
 }
 
 /// Assembles the exact chat messages sent to the build LLM: a `system` prompt
@@ -161,7 +165,10 @@ List<Map<String, String>> buildLorebookMessages(
   String lorebookDescs = '',
   String extra = '',
   bool fromJs = false,
-  bool fromFullPrompt = false,
+  // System prompt to send. Defaults to the built-in one for this source kind;
+  // the UI passes [lorebookSystemPrompt] so a preview shows exactly what the
+  // build would send, edited prompt included.
+  String? systemPrompt,
 }) {
   final userParts = <String>[];
   void add(String value, String intro) {
@@ -181,20 +188,15 @@ List<Map<String, String>> buildLorebookMessages(
   add(extra,
       'CONTEXT — additional notes provided by the user (names, aliases, setting details). Use it ONLY to infer better trigger keys. Do NOT output any of this as entries:');
 
-  userParts.add(fromFullPrompt
-      ? 'Full assembled chat prompt to extract lorebook entries from:\n\n$lorebookText'
-      : fromJs
-          ? 'JavaScript lorebook source to convert into entries:\n\n$lorebookText'
-          : 'Raw lorebook text to convert into entries:\n\n$lorebookText');
+  userParts.add(fromJs
+      ? 'JavaScript lorebook source to convert into entries:\n\n$lorebookText'
+      : 'Raw lorebook text to convert into entries:\n\n$lorebookText');
 
-  final systemPrompt = fromFullPrompt
-      ? _systemPromptFull
-      : fromJs
-          ? _systemPromptJs
-          : _systemPrompt;
+  final system =
+      systemPrompt ?? (fromJs ? kLorebookSystemPromptJs : kLorebookSystemPrompt);
 
   return [
-    {'role': 'system', 'content': systemPrompt},
+    {'role': 'system', 'content': system},
     {'role': 'user', 'content': userParts.join('\n\n---\n\n')},
   ];
 }
@@ -282,7 +284,6 @@ Future<Lorebook> rebuildLorebookWithActiveLlm(
   String lorebookDescs = '',
   String extra = '',
   bool fromJs = false,
-  bool fromFullPrompt = false,
   String? characterId,
 }) async {
   await ref.read(apiListProvider.future);
@@ -290,6 +291,7 @@ Future<Lorebook> rebuildLorebookWithActiveLlm(
   if (config == null || config.endpoint.isEmpty || config.model.isEmpty) {
     throw NoActiveConnectionException();
   }
+  final settings = await ref.read(appSettingsProvider.future);
 
   final messages = buildLorebookMessages(
     lorebookText,
@@ -300,18 +302,27 @@ Future<Lorebook> rebuildLorebookWithActiveLlm(
     lorebookDescs: lorebookDescs,
     extra: extra,
     fromJs: fromJs,
-    fromFullPrompt: fromFullPrompt,
+    systemPrompt: lorebookSystemPrompt(settings, fromJs: fromJs),
   );
-  final completer = Completer<String>();
-  final transport = pickChatTransport(config.protocol);
 
   String? reasoningOut;
   String? rawJsonOut;
-  unawaited(transport.stream(
-    request: ChatTransportRequest(
-      endpoint: config.endpoint,
-      apiKey: config.apiKey,
-      model: config.model,
+  final String raw;
+  try {
+    // Same transport pipeline every other non-streaming call in Glaze uses —
+    // protocol picked from the connection, prompt post-processing, extra
+    // request parameters, retry policy and diagnostics all included. The
+    // rebuild deliberately owns no separate HTTP path of its own.
+    raw = await const AuxLlmClient().callOnce(
+      config: AuxApiConfig(
+        endpoint: config.endpoint,
+        apiKey: config.apiKey,
+        model: config.model,
+        protocol: config.protocol,
+        useResponsesApi: config.useResponsesApi,
+        omitTemperature: config.omitTemperature,
+        extraRequestParameters: config.extraRequestParameters,
+      ),
       messages: messages,
       // Do NOT cap output tokens (0 → the transport omits `max_tokens`, like
       // JAR). On reasoning models `max_tokens` bounds the COMBINED reasoning +
@@ -320,27 +331,26 @@ Future<Lorebook> rebuildLorebookWithActiveLlm(
       // model ever emits the JSON. Let the provider's full budget apply.
       maxTokens: 0,
       temperature: 0.2,
-      topP: 1.0,
-      stream: false,
-      useResponsesApi: config.useResponsesApi,
-      // Disable the transport's default HTTP receive timeout (0 → no cap). This
-      // is a single non-streaming request that reconstructs a whole lorebook
-      // from a large prompt, so on a slow model it can legitimately take longer
-      // than the default 2 min and must not be aborted with a receive timeout.
-      receiveTimeoutMs: 0,
-    ),
-    cancelToken: CancelToken(),
-    onComplete: (text, reasoning, {rawResponseJson}) {
-      reasoningOut = reasoning;
-      rawJsonOut = rawResponseJson;
-      if (!completer.isCompleted) completer.complete(text);
-    },
-    onError: (error) {
-      if (!completer.isCompleted) completer.completeError(error);
-    },
-  ));
-
-  final raw = await completer.future;
+      // 0 → no idle guard and no HTTP receive timeout. This is a single
+      // non-streaming request that reconstructs a whole lorebook from a large
+      // prompt, so on a slow model it can legitimately take far longer than the
+      // default two minutes and must not be cut off underneath the user.
+      timeoutMs: 0,
+      onRawResponse: (reasoning, rawResponseJson) {
+        reasoningOut = reasoning;
+        rawJsonOut = rawResponseJson;
+      },
+    );
+  } catch (e) {
+    // Everything the transport reports is the provider's answer: render it the
+    // way the chat renders a failed generation instead of leaking a raw
+    // `DioException` into the sheet.
+    throw LorebookBuildException.fromProvider(
+      e,
+      reasoning: reasoningOut,
+      rawResponseJson: rawJsonOut,
+    );
+  }
 
   String clip(String? s, int n) =>
       s == null ? '' : (s.length > n ? '${s.substring(0, n)}…' : s);
@@ -361,10 +371,7 @@ Future<Lorebook> rebuildLorebookWithActiveLlm(
 
   if (raw.trim().isEmpty) {
     throw LorebookBuildException(
-      'LLM returned an empty response. The model may have spent its token '
-      'budget on reasoning, the response may have been filtered, or the '
-      'transport could not read the content field. Open the details below to '
-      'see the raw provider payload.',
+      'catalog_lorebooks_err_empty'.tr(),
       rawText: raw,
       reasoning: reasoningOut,
       rawResponseJson: rawJsonOut,
@@ -377,7 +384,7 @@ Future<Lorebook> rebuildLorebookWithActiveLlm(
   } catch (_) {
     final preview = raw.length > 300 ? raw.substring(0, 300) : raw;
     throw LorebookBuildException(
-      'LLM did not return valid JSON. First 300 chars:\n$preview',
+      'catalog_lorebooks_err_json'.tr(args: [preview]),
       rawText: raw,
       reasoning: reasoningOut,
       rawResponseJson: rawJsonOut,
@@ -395,7 +402,7 @@ Future<Lorebook> rebuildLorebookWithActiveLlm(
   }
   if (entries.isEmpty) {
     throw LorebookBuildException(
-      'LLM produced no usable lorebook entries.',
+      'catalog_lorebooks_err_no_entries'.tr(),
       rawText: raw,
       reasoning: reasoningOut,
       rawResponseJson: rawJsonOut,

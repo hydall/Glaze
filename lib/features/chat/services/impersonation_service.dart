@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/llm/converters/no_assistant.dart';
 import '../../../core/llm/history_assembler.dart';
 import '../../../core/llm/idle_timeout_guard.dart';
 import '../../../core/llm/macro_engine.dart';
@@ -143,6 +144,7 @@ class ImpersonationService {
     final apiMessages = buildApiMessages(
       promptResult.messages,
       reasoningHistoryCount: apiConfig.reasoningHistoryCount,
+      noAssistant: NoAssistantOptions.of(apiConfig),
     );
 
     final accumulator = StreamAccumulator(
@@ -171,6 +173,8 @@ class ImpersonationService {
         apiConfig,
         messages: apiMessages,
         sessionId: session.id,
+        charName: character?.name ?? 'Character',
+        userName: persona?.name ?? 'User',
       ),
       cancelToken: cancelToken,
       onUpdate: (delta, reasoningDelta) {

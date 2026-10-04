@@ -5,7 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../shared/widgets/hover_glow.dart';
 import '../../shared/theme/app_colors.dart';
+import '../../shared/utils/time_formatter.dart';
 import '../../shared/utils/avatar_image.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
@@ -16,14 +18,18 @@ import '../../core/state/character_provider.dart'
         characterSessionCountsProvider,
         charactersProvider,
         revealHiddenCharactersProvider;
+import '../../core/platform/haptics.dart';
+import '../../core/state/chat_session_ops_provider.dart';
 import '../../shared/utils/variant_label.dart';
+import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/variation_chip.dart';
-import '../chat/chat_actions_service.dart';
-import '../chat/chat_provider.dart';
+import '../character_list/character_editor_screen.dart';
 import '../chat/generating_sessions_provider.dart';
 import '../chat/unread_sessions_provider.dart';
 import '../settings/app_settings_provider.dart';
+import 'chat_history_actions.dart';
 import 'chat_history_provider.dart';
+import 'chat_history_selection_provider.dart';
 import 'widgets/message_preview_text.dart';
 import 'widgets/typing_dots.dart';
 
@@ -42,6 +48,18 @@ class ChatHistoryList extends ConsumerStatefulWidget {
   /// Owned by the parent so a navbar re-tap can animate the list back to the top.
   final ScrollController? controller;
 
+  /// Whether a long press may start a multi-selection. Only the full-screen
+  /// dialogs list sets it: the selection bar lives in the shell header, and
+  /// the desktop sidebar's embedded copies publish no header to put it in —
+  /// there a long press keeps opening the row's own action menu.
+  final bool selectable;
+
+  /// Shown under the chat count — the desktop sidebar's dialog search. With
+  /// it the count and this widget stay fixed above the list rather than
+  /// scrolling with it, and stay when nothing matches: a search that finds no
+  /// chat must not take its own field away.
+  final Widget? belowCount;
+
   const ChatHistoryList({
     super.key,
     this.collapsed = false,
@@ -49,6 +67,8 @@ class ChatHistoryList extends ConsumerStatefulWidget {
     this.topPadding = 0,
     this.bottomPadding = 20,
     this.controller,
+    this.selectable = false,
+    this.belowCount,
   });
 
   @override
@@ -84,8 +104,7 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
     final settingsAsync = ref.watch(appSettingsProvider);
 
     return sessionsAsync.when(
-      loading: () =>
-          Center(child: CircularProgressIndicator(color: context.cs.primary)),
+      loading: () => Center(child: GlazeSpinner(color: context.cs.primary)),
       error: (e, _) => Center(child: Text('${'title_error'.tr()}: $e')),
       data: (list) {
         _precacheAvatars(list);
@@ -104,29 +123,46 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
               .toList();
         }
 
+        final Widget body;
         if (filtered.isEmpty) {
-          return _buildEmptyState();
+          body = _buildEmptyState();
+        } else if (settings.groupDialogs) {
+          body = _buildGroupedList(filtered);
+        } else {
+          body = _buildFlatList(filtered);
         }
 
-        if (settings.groupDialogs) {
-          return _buildGroupedList(filtered);
-        }
+        final belowCount = widget.belowCount;
+        if (belowCount == null || widget.collapsed) return body;
+        // One shape whether or not anything matched, so the field below the
+        // count is never remounted mid-typing.
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildCountLabel(filtered.length),
+            belowCount,
+            Expanded(child: body),
+          ],
+        );
+      },
+    );
+  }
 
-        return ListView.builder(
-          controller: widget.controller,
-          padding: EdgeInsets.only(
-            top: widget.topPadding,
-            bottom: widget.bottomPadding,
-          ),
-          itemCount: filtered.length + 1,
-          itemBuilder: (_, i) {
-            if (i == 0) return _buildCountHeader(filtered.length);
-            return _SessionTile(
-              info: filtered[i - 1],
-              collapsed: widget.collapsed,
-              index: i - 1,
-            );
-          },
+  Widget _buildFlatList(List<ChatSessionInfo> filtered) {
+    return ListView.builder(
+      controller: widget.controller,
+      padding: EdgeInsets.only(
+        top: widget.topPadding,
+        bottom: widget.bottomPadding,
+      ),
+      itemCount: filtered.length + 1,
+      itemBuilder: (_, i) {
+        if (i == 0) return _buildCountHeader(filtered.length);
+        return _SessionTile(
+          info: filtered[i - 1],
+          collapsed: widget.collapsed,
+          selectable: widget.selectable,
+          index: i - 1,
         );
       },
     );
@@ -197,6 +233,7 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
         return _ChatHistoryGroupSection(
           sessions: group,
           isExpanded: isExpanded,
+          selectable: widget.selectable,
           onTap: () {
             setState(() {
               if (isExpanded) {
@@ -211,8 +248,16 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
     );
   }
 
+  /// The count as the list's first row — unless it sits fixed above the list
+  /// (see [ChatHistoryList.belowCount]).
   Widget _buildCountHeader(int count) {
-    if (widget.collapsed) return const SizedBox.shrink();
+    if (widget.collapsed || widget.belowCount != null) {
+      return const SizedBox.shrink();
+    }
+    return _buildCountLabel(count);
+  }
+
+  Widget _buildCountLabel(int count) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
       child: Text(
@@ -226,12 +271,14 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
 class _ChatHistoryGroupSection extends StatefulWidget {
   final List<ChatSessionInfo> sessions;
   final bool isExpanded;
+  final bool selectable;
   final VoidCallback onTap;
 
   const _ChatHistoryGroupSection({
     required this.sessions,
     required this.isExpanded,
     required this.onTap,
+    this.selectable = false,
   });
 
   @override
@@ -333,6 +380,7 @@ class _ChatHistoryGroupSectionState extends State<_ChatHistoryGroupSection>
                           _SessionTile(
                             info: widget.sessions[i],
                             isGrouped: true,
+                            selectable: widget.selectable,
                             index: i,
                           ),
                         ],
@@ -354,6 +402,9 @@ class _SessionTile extends ConsumerStatefulWidget {
   final bool isGrouped;
   final bool collapsed;
 
+  /// See [ChatHistoryList.selectable].
+  final bool selectable;
+
   /// Row position within its list — staggers the fade-in so rows cascade in
   /// on load instead of popping in all at once. Capped below so long lists
   /// don't take forever to finish appearing.
@@ -363,6 +414,7 @@ class _SessionTile extends ConsumerStatefulWidget {
     required this.info,
     this.isGrouped = false,
     this.collapsed = false,
+    this.selectable = false,
     this.index = 0,
   });
 
@@ -421,11 +473,37 @@ class _SessionTileState extends ConsumerState<_SessionTile>
         ref.watch(
           unreadSessionsProvider.select((s) => s.contains(info.sessionId)),
         );
+    // Both reads are gated on a flag that is constant for the life of the row,
+    // so the watched set never changes shape between builds.
+    final selectionActive =
+        widget.selectable &&
+        ref.watch(chatHistorySelectionProvider.select((s) => s.active));
+    final selected =
+        widget.selectable &&
+        ref.watch(
+          chatHistorySelectionProvider.select(
+            (s) => s.contains(info.sessionId),
+          ),
+        );
     final Widget tile = widget.collapsed
         ? _buildCollapsedTile(context, ref, generating, unread)
         : widget.isGrouped
-        ? _buildGroupedTile(context, ref, generating, unread)
-        : _buildFullTile(context, ref, generating, unread);
+        ? _buildGroupedTile(
+            context,
+            ref,
+            generating,
+            unread,
+            selectionActive: selectionActive,
+            selected: selected,
+          )
+        : _buildFullTile(
+            context,
+            ref,
+            generating,
+            unread,
+            selectionActive: selectionActive,
+            selected: selected,
+          );
 
     return FadeTransition(
       opacity: _fadeAnim,
@@ -473,105 +551,112 @@ class _SessionTileState extends ConsumerState<_SessionTile>
     BuildContext context,
     WidgetRef ref,
     bool generating,
-    bool unread,
-  ) {
+    bool unread, {
+    required bool selectionActive,
+    required bool selected,
+  }) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () =>
-          context.go('/chat/${info.characterId}?session=${info.sessionIndex}'),
-      onLongPress: () => _showSessionActions(context, ref),
-      child: Container(
-        height: 72,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        decoration: unread
-            ? BoxDecoration(
-                color: context.cs.primary.withValues(alpha: 0.06),
-                border: Border(
-                  left: BorderSide(color: context.cs.primary, width: 3),
-                ),
-              )
-            : null,
-        child: Row(
-          children: [
-            _buildAvatar(context, ref),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Row(
-                          children: [
-                            if (unread) ...[
-                              _UnreadDot(color: context.cs.primary),
-                              const SizedBox(width: 6),
-                            ],
-                            Flexible(
-                              child: Text(
-                                info.characterName,
-                                style: TextStyle(
-                                  fontWeight: unread
-                                      ? FontWeight.w700
-                                      : FontWeight.w500,
-                                  fontSize: 16,
-                                  height: 20 / 16,
-                                  color: context.cs.onSurface,
+      onTap: () => _handleTap(selectionActive),
+      onLongPress: _handleContextGesture,
+      // Right-click is the desktop equivalent of a long press, matching the Vue
+      // list's `@contextmenu.prevent="openActions(chat)"`.
+      onSecondaryTap: _handleContextGesture,
+      child: HoverGlow(
+        child: Container(
+          height: 72,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: _rowDecoration(
+            context,
+            unread: unread,
+            selected: selected,
+          ),
+          child: Row(
+            children: [
+              if (selectionActive) ...[
+                _SelectionCheck(selected: selected),
+                const SizedBox(width: 12),
+              ],
+              _buildAvatar(context, ref),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Row(
+                            children: [
+                              if (unread) ...[
+                                _UnreadDot(color: context.cs.primary),
+                                const SizedBox(width: 6),
+                              ],
+                              Flexible(
+                                child: Text(
+                                  info.characterName,
+                                  style: TextStyle(
+                                    fontWeight: unread
+                                        ? FontWeight.w700
+                                        : FontWeight.w500,
+                                    fontSize: 16,
+                                    height: 20 / 16,
+                                    color: context.cs.onSurface,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
                               ),
-                            ),
-                            // Outside the Flexible on purpose: the character
-                            // name gives way to the ellipsis first, the chip
-                            // that identifies the variation always survives.
-                            if (info.variantName != null) ...[
-                              const SizedBox(width: 6),
-                              VariationChip(name: info.variantName!),
+                              // Outside the Flexible on purpose: the character
+                              // name gives way to the ellipsis first, the chip
+                              // that identifies the variation always survives.
+                              if (info.variantName != null) ...[
+                                const SizedBox(width: 6),
+                                VariationChip(name: info.variantName!),
+                              ],
                             ],
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      _buildChip(context),
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    info.sessionName?.isNotEmpty == true
-                        ? info.sessionName!
-                        : 'session_name'.tr(
-                            namedArgs: {
-                              'id': (info.sessionIndex + 1).toString(),
-                            },
                           ),
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: context.cs.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: 8),
+                        _buildChip(context),
+                      ],
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 2),
-                  generating
-                      ? const _GeneratingPreview()
-                      : MessagePreviewText(
-                          raw: info.lastMessage,
-                          style: TextStyle(
-                            fontSize: 13,
-                            height: 16 / 13,
-                            color: unread
-                                ? context.cs.onSurface
-                                : context.cs.onSurfaceVariant,
+                    const SizedBox(height: 2),
+                    Text(
+                      info.sessionName?.isNotEmpty == true
+                          ? info.sessionName!
+                          : 'session_name'.tr(
+                              namedArgs: {
+                                'id': (info.sessionIndex + 1).toString(),
+                              },
+                            ),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: context.cs.onSurfaceVariant,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    generating
+                        ? const _GeneratingPreview()
+                        : MessagePreviewText(
+                            raw: info.lastMessage,
+                            style: TextStyle(
+                              fontSize: 13,
+                              height: 16 / 13,
+                              color: unread
+                                  ? context.cs.onSurface
+                                  : context.cs.onSurfaceVariant,
+                            ),
                           ),
-                        ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -581,180 +666,149 @@ class _SessionTileState extends ConsumerState<_SessionTile>
     BuildContext context,
     WidgetRef ref,
     bool generating,
-    bool unread,
-  ) {
+    bool unread, {
+    required bool selectionActive,
+    required bool selected,
+  }) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () =>
-          context.go('/chat/${info.characterId}?session=${info.sessionIndex}'),
-      onLongPress: () => _showSessionActions(context, ref),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Row(
-                    children: [
-                      if (unread) ...[
-                        _UnreadDot(color: context.cs.primary),
-                        const SizedBox(width: 6),
-                      ],
-                      Flexible(
-                        child: Text(
-                          info.sessionName?.isNotEmpty == true
-                              ? info.sessionName!
-                              : 'session_name'.tr(
-                                  namedArgs: {
-                                    'id': (info.sessionIndex + 1).toString(),
-                                  },
-                                ),
-                          style: TextStyle(
-                            fontWeight: unread
-                                ? FontWeight.w700
-                                : FontWeight.w600,
-                            fontSize: 15,
-                            color: context.cs.onSurface,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      // Inside a group the rows are sessions of possibly
-                      // different variations, so each one names its own.
-                      if (info.variantName != null) ...[
-                        const SizedBox(width: 6),
-                        VariationChip(name: info.variantName!),
-                      ],
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                _buildChip(context),
+      onTap: () => _handleTap(selectionActive),
+      onLongPress: _handleContextGesture,
+      onSecondaryTap: _handleContextGesture,
+      child: HoverGlow(
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          color: selected ? context.cs.primary.withValues(alpha: 0.12) : null,
+          child: Row(
+            children: [
+              if (selectionActive) ...[
+                _SelectionCheck(selected: selected),
+                const SizedBox(width: 12),
               ],
-            ),
-            const SizedBox(height: 4),
-            generating
-                ? const _GeneratingPreview()
-                : MessagePreviewText(
-                    raw: info.lastMessage,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: unread
-                          ? context.cs.onSurface
-                          : context.cs.onSurfaceVariant,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Row(
+                            children: [
+                              if (unread) ...[
+                                _UnreadDot(color: context.cs.primary),
+                                const SizedBox(width: 6),
+                              ],
+                              Flexible(
+                                child: Text(
+                                  info.sessionName?.isNotEmpty == true
+                                      ? info.sessionName!
+                                      : 'session_name'.tr(
+                                          namedArgs: {
+                                            'id': (info.sessionIndex + 1)
+                                                .toString(),
+                                          },
+                                        ),
+                                  style: TextStyle(
+                                    fontWeight: unread
+                                        ? FontWeight.w700
+                                        : FontWeight.w600,
+                                    fontSize: 15,
+                                    color: context.cs.onSurface,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              // Inside a group the rows are sessions of
+                              // possibly different variations, so each one
+                              // names its own.
+                              if (info.variantName != null) ...[
+                                const SizedBox(width: 6),
+                                VariationChip(name: info.variantName!),
+                              ],
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        _buildChip(context),
+                      ],
                     ),
-                    maxLines: 2,
-                  ),
-          ],
+                    const SizedBox(height: 4),
+                    generating
+                        ? const _GeneratingPreview()
+                        : MessagePreviewText(
+                            raw: info.lastMessage,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: unread
+                                  ? context.cs.onSurface
+                                  : context.cs.onSurfaceVariant,
+                            ),
+                            maxLines: 2,
+                          ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
+    );
+  }
+
+  /// Opens a chat, or toggles the row while a multi-selection is running.
+  void _handleTap(bool selectionActive) {
+    if (selectionActive) {
+      ref.read(chatHistorySelectionProvider.notifier).toggle(info.sessionId);
+      return;
+    }
+    context.go('/chat/${info.characterId}?session=${info.sessionIndex}');
+  }
+
+  /// Long press — and right-click, its desktop equivalent. On the full-screen
+  /// list it starts or extends the multi-selection, whose actions then live in
+  /// the shell header; where selection is unavailable it opens this row's own
+  /// action menu, as it always did.
+  void _handleContextGesture() {
+    if (!widget.selectable) {
+      unawaited(showChatSessionActions(context, ref, [info]));
+      return;
+    }
+    unawaited(Haptics.selectionClick());
+    final notifier = ref.read(chatHistorySelectionProvider.notifier);
+    if (ref.read(chatHistorySelectionProvider).active) {
+      notifier.toggle(info.sessionId);
+    } else {
+      notifier.start(info.sessionId);
+    }
+  }
+
+  /// Row background: the selection tint wins over the unread accent, so a
+  /// selected row still reads as selected while it is also unread.
+  BoxDecoration? _rowDecoration(
+    BuildContext context, {
+    required bool unread,
+    required bool selected,
+  }) {
+    if (selected) {
+      return BoxDecoration(
+        color: context.cs.primary.withValues(alpha: 0.12),
+        border: Border(
+          left: BorderSide(color: context.cs.primary, width: 3),
+        ),
+      );
+    }
+    if (!unread) return null;
+    return BoxDecoration(
+      color: context.cs.primary.withValues(alpha: 0.06),
+      border: Border(left: BorderSide(color: context.cs.primary, width: 3)),
     );
   }
 
   String _formatTime() {
     if (info.lastMessageTime == 0) return '';
-    return formatTimeAgo(info.lastMessageTime);
-  }
-
-  void _showRenameDialog(BuildContext context, WidgetRef ref) {
-    final currentName = info.sessionName?.isNotEmpty == true
-        ? info.sessionName!
-        : 'session_name'.tr(
-            namedArgs: {'id': (info.sessionIndex + 1).toString()},
-          );
-    GlazeBottomSheet.show<void>(
-      context,
-      title: 'Rename Session',
-      input: BottomSheetInput(
-        placeholder: 'Session name',
-        value: currentName,
-        confirmLabel: 'action_rename'.tr(),
-        onConfirm: (val) {
-          Navigator.of(context, rootNavigator: true).pop();
-          if (val.trim().isNotEmpty) {
-            ref
-                .read(chatHistoryProvider.notifier)
-                .renameSession(info.sessionId, val.trim());
-            ref.invalidate(chatProvider(info.characterId));
-          }
-        },
-      ),
-    );
-  }
-
-  void _confirmDelete(BuildContext context, WidgetRef ref) {
-    GlazeBottomSheet.show<void>(
-      context,
-      title: 'action_delete_session'.tr(),
-      bigInfo: BottomSheetBigInfo(
-        icon: Icons.delete_outline,
-        description:
-            '${'action_delete_session'.tr()} \u2014 ${info.fullCharacterName}? ${'chat_clear_confirm'.tr()}',
-      ),
-      items: [
-        BottomSheetItem(
-          label: 'btn_delete'.tr(),
-          isDestructive: true,
-          centered: true,
-          onTap: () {
-            Navigator.of(context, rootNavigator: true).pop();
-            ref
-                .read(chatHistoryProvider.notifier)
-                .deleteSession(info.sessionId);
-          },
-        ),
-        BottomSheetItem(
-          label: 'btn_cancel'.tr(),
-          centered: true,
-          onTap: () => Navigator.of(context, rootNavigator: true).pop(),
-        ),
-      ],
-    );
-  }
-
-  void _showSessionActions(BuildContext context, WidgetRef ref) {
-    GlazeBottomSheet.show<String>(
-      context,
-      title: 'Session',
-      items: [
-        BottomSheetItem(
-          icon: Icons.upload_file,
-          label: 'action_export_chat'.tr(),
-          onTap: () => Navigator.of(context, rootNavigator: true).pop('export'),
-        ),
-        BottomSheetItem(
-          icon: Icons.drive_file_rename_outline,
-          label: 'action_rename'.tr(),
-          onTap: () => Navigator.of(context, rootNavigator: true).pop('rename'),
-        ),
-        BottomSheetItem(
-          icon: Icons.delete_outline,
-          label: 'action_delete'.tr(),
-          isDestructive: true,
-          onTap: () => Navigator.of(context, rootNavigator: true).pop('delete'),
-        ),
-      ],
-    ).then((result) {
-      if (!context.mounted) return;
-      switch (result) {
-        case 'export':
-          ref
-              .read(chatActionsServiceProvider)
-              .exportSessionUI(
-                context,
-                charId: info.characterId,
-                sessionId: info.sessionId,
-              );
-        case 'rename':
-          _showRenameDialog(context, ref);
-        case 'delete':
-          _confirmDelete(context, ref);
-      }
-    });
+    return formatSessionTimeAgo(info.lastMessageTime);
   }
 
   Widget _buildAvatar(BuildContext context, WidgetRef ref, {double size = 48}) {
@@ -842,100 +896,103 @@ class _GroupHeader extends ConsumerWidget {
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
       onLongPress: () => _showGroupActions(context, ref, latest),
-      child: Container(
-        height: 72,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        decoration: unread
-            ? BoxDecoration(
-                color: context.cs.primary.withValues(alpha: 0.06),
-                border: Border(
-                  left: BorderSide(color: context.cs.primary, width: 3),
-                ),
-              )
-            : null,
-        child: Row(
-          children: [
-            _buildAvatar(context, ref, latest),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Row(
-                          children: [
-                            if (unread) ...[
-                              _UnreadDot(color: context.cs.primary),
-                              const SizedBox(width: 6),
-                            ],
-                            Flexible(
-                              child: Text(
-                                latest.characterName,
-                                style: TextStyle(
-                                  fontWeight: unread
-                                      ? FontWeight.w700
-                                      : FontWeight.w500,
-                                  fontSize: 16,
-                                  height: 20 / 16,
-                                  color: context.cs.onSurface,
+      onSecondaryTap: () => _showGroupActions(context, ref, latest),
+      child: HoverGlow(
+        child: Container(
+          height: 72,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: unread
+              ? BoxDecoration(
+                  color: context.cs.primary.withValues(alpha: 0.06),
+                  border: Border(
+                    left: BorderSide(color: context.cs.primary, width: 3),
+                  ),
+                )
+              : null,
+          child: Row(
+            children: [
+              _buildAvatar(context, ref, latest),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Row(
+                            children: [
+                              if (unread) ...[
+                                _UnreadDot(color: context.cs.primary),
+                                const SizedBox(width: 6),
+                              ],
+                              Flexible(
+                                child: Text(
+                                  latest.characterName,
+                                  style: TextStyle(
+                                    fontWeight: unread
+                                        ? FontWeight.w700
+                                        : FontWeight.w500,
+                                    fontSize: 16,
+                                    height: 20 / 16,
+                                    color: context.cs.onSurface,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
                               ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      _buildTime(context, latest),
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        _subtitle(),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: context.cs.onSurfaceVariant,
-                        ),
-                      ),
-                      AnimatedRotation(
-                        turns: isExpanded ? 0.5 : 0,
-                        duration: const Duration(milliseconds: 200),
-                        curve: Curves.easeInOut,
-                        child: Icon(
-                          Icons.keyboard_arrow_down,
-                          color: context.cs.onSurfaceVariant,
-                          size: 20,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  generating
-                      ? const _GeneratingPreview()
-                      : MessagePreviewText(
-                          raw: latest.lastMessage,
-                          style: TextStyle(
-                            fontSize: 13,
-                            height: 16 / 13,
-                            color: unread
-                                ? context.cs.onSurface
-                                : context.cs.onSurfaceVariant,
+                            ],
                           ),
                         ),
-                ],
+                        const SizedBox(width: 8),
+                        _buildTime(context, latest),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          _subtitle(),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: context.cs.onSurfaceVariant,
+                          ),
+                        ),
+                        AnimatedRotation(
+                          turns: isExpanded ? 0.5 : 0,
+                          duration: const Duration(milliseconds: 200),
+                          curve: Curves.easeInOut,
+                          child: Icon(
+                            Icons.keyboard_arrow_down,
+                            color: context.cs.onSurfaceVariant,
+                            size: 20,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    generating
+                        ? const _GeneratingPreview()
+                        : MessagePreviewText(
+                            raw: latest.lastMessage,
+                            style: TextStyle(
+                              fontSize: 13,
+                              height: 16 / 13,
+                              color: unread
+                                  ? context.cs.onSurface
+                                  : context.cs.onSurfaceVariant,
+                            ),
+                          ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -1050,7 +1107,7 @@ class _GroupHeader extends ConsumerWidget {
     );
     if (result == null || !context.mounted) return;
     if (result == 'edit') {
-      unawaited(context.push('/character/${info.characterId}/edit'));
+      unawaited(openCharacterEditor(context, info.characterId));
       return;
     }
 
@@ -1064,9 +1121,13 @@ class _GroupHeader extends ConsumerWidget {
       variants,
     );
     if (charId == null || !context.mounted) return;
-    await ref.read(chatProvider(charId).notifier).createNewSession();
+    final hasSessions =
+        (await ref
+                .read(chatSessionOpsProvider.notifier)
+                .getSessionMetadataByCharacter(charId))
+            .isNotEmpty;
     if (!context.mounted) return;
-    context.go('/chat/$charId');
+    context.go(hasSessions ? '/chat/$charId?new=1' : '/chat/$charId');
   }
 
   /// The character a new session should be created for: the group's only
@@ -1113,6 +1174,35 @@ class _GroupHeader extends ConsumerWidget {
         )
         .toList()
       ..sort((a, b) => a.variantOrder.compareTo(b.variantOrder));
+  }
+}
+
+/// The circular checkbox each row grows on its leading edge while a
+/// multi-selection is running. Mirrors the character grid's selection mark.
+class _SelectionCheck extends StatelessWidget {
+  final bool selected;
+
+  const _SelectionCheck({required this.selected});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 24,
+      height: 24,
+      decoration: BoxDecoration(
+        color: selected ? context.cs.primary : Colors.transparent,
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: selected
+              ? context.cs.primary
+              : context.cs.onSurfaceVariant.withValues(alpha: 0.6),
+          width: 2,
+        ),
+      ),
+      child: selected
+          ? Icon(Icons.check_rounded, size: 14, color: context.cs.onPrimary)
+          : null,
+    );
   }
 }
 
@@ -1247,14 +1337,4 @@ class _StatusBadge extends StatelessWidget {
           : const SizedBox(width: 8, height: 8),
     );
   }
-}
-
-String formatTimeAgo(int epochMs) {
-  final now = DateTime.now();
-  final diff = now.difference(DateTime.fromMillisecondsSinceEpoch(epochMs));
-  if (diff.inMinutes < 1) return 'now';
-  if (diff.inHours < 1) return '${diff.inMinutes}m';
-  if (diff.inDays < 1) return '${diff.inHours}h';
-  if (diff.inDays < 7) return '${diff.inDays}d';
-  return '${diff.inDays ~/ 7}w';
 }

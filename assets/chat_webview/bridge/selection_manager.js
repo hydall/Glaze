@@ -1,13 +1,29 @@
 ﻿/* Extracted from ../bridge.legacy.js. Keep public behavior stable. */
 
+import { appBody } from '../renderer/message_document.js';
+
 export class SelectionManager {
-  constructor(sendToFlutter, getOrderedIds) {
+  constructor(sendToFlutter, getOrderedIds, getSections) {
     this._sendToFlutter = sendToFlutter;
     // Returns all real message ids in display order (top → bottom). Injected so
     // range selection can reach messages outside the virtual-scroll window.
     this._getOrderedIds = typeof getOrderedIds === 'function' ? getOrderedIds : () => [];
+    // Returns every message element, mounted or not — for the same reason.
+    // Selecting a run of messages picks ids the render window does not hold,
+    // and the list re-mounts the element it already built rather than
+    // re-rendering it, so a class written only to what is in the document now
+    // is a class those messages never get: the reader scrolls back to a
+    // message the toolbar counts as selected and sees it unselected, in a chat
+    // that does not look like it is in selection mode at all.
+    this._getSections = typeof getSections === 'function'
+      ? getSections
+      : () => Array.from(document.querySelectorAll('.message-section'));
     this._selectionMode = false;
     this._selectedIds = new Set();
+    // Last message the user tapped. The "select everything above / below"
+    // toolbar buttons are relative to it, so it survives that message being
+    // toggled back off.
+    this._lastTappedId = null;
     this._selectedText = '';
     this._barCreated = false;
   }
@@ -19,48 +35,87 @@ export class SelectionManager {
   setSelectionMode(enabled) {
     if (enabled && document.querySelector('.message-section.editing')) return;
     this._selectionMode = !!enabled;
-    if (!enabled) this._selectedIds.clear();
-    document.querySelectorAll('.message-section').forEach(msgEl => {
+    if (!enabled) {
+      this._selectedIds.clear();
+      this._lastTappedId = null;
+    }
+    this._sections().forEach(msgEl => {
       msgEl.classList.toggle('selection-mode', this._selectionMode);
       msgEl.classList.toggle('selected', this._selectedIds.has(msgEl.dataset.messageId));
     });
   }
 
   toggleMessageSelection(messageId) {
-    if (this._selectedIds.has(messageId)) this._selectedIds.delete(messageId);
-    else this._selectedIds.add(messageId);
-    const msgEl = document.querySelector(`[data-message-id="${messageId}"]`);
-    if (msgEl) {
-      msgEl.classList.toggle('selected', this._selectedIds.has(messageId));
-    }
+    this._toggleTapped(messageId);
   }
 
-  // Selects [messageId … last message]: the tapped message plus every message
-  // after it. Re-tapping always redefines the range from the newly tapped
-  // message, so tapping a lower message after an upper one collapses the
-  // selection down to that lower message and everything below it.
-  selectRangeFrom(messageId) {
-    const order = this._getOrderedIds();
-    const idx = order.indexOf(messageId);
-    const range = idx >= 0 ? order.slice(idx) : [messageId];
-    this._selectedIds = new Set(range);
+  // Selects only [messageId] and makes it the anchor for the above/below
+  // toolbar buttons.
+  selectOnly(messageId) {
+    this._selectedIds = new Set([messageId]);
+    this._lastTappedId = messageId;
     this._applySelectionClasses();
   }
 
-  // Topmost currently-selected id in display order (the range anchor), or null.
-  _anchorId() {
-    if (this._selectedIds.size === 0) return null;
-    const order = this._getOrderedIds();
-    for (const id of order) {
-      if (this._selectedIds.has(id)) return id;
-    }
-    return null;
+  // Toggles one message and remembers it as the anchor. Used by every tap in
+  // selection mode: a tap only ever affects the message under the finger.
+  _toggleTapped(messageId) {
+    this._lastTappedId = messageId;
+    if (this._selectedIds.has(messageId)) this._selectedIds.delete(messageId);
+    else this._selectedIds.add(messageId);
+    this._applySelectionClasses();
   }
 
-  // Sync the `selected` class for sections currently in the DOM. Sections that
-  // scroll into view later pick it up via applyClassesToSection().
+  // Anchor for the above/below buttons: the last tapped message, falling back
+  // to the outermost selected message on that side if the anchor is gone
+  // (deleted, or a session switch dropped it from the order).
+  _rangeAnchor(order, below) {
+    if (this._lastTappedId && order.includes(this._lastTappedId)) {
+      return this._lastTappedId;
+    }
+    const candidates = order.filter(id => this._selectedIds.has(id));
+    if (candidates.length === 0) return null;
+    return below ? candidates[candidates.length - 1] : candidates[0];
+  }
+
+  // Selects every message above (below === false) or below (below === true) the
+  // anchor, exclusive. Pressing again while that whole run is already selected
+  // deselects it, so the button toggles.
+  _selectSide(below) {
+    const order = this._getOrderedIds();
+    const anchor = this._rangeAnchor(order, below);
+    if (anchor == null) return;
+    const idx = order.indexOf(anchor);
+    if (idx < 0) return;
+    const range = below ? order.slice(idx + 1) : order.slice(0, idx);
+    if (range.length === 0) return;
+    const allSelected = range.every(id => this._selectedIds.has(id));
+    for (const id of range) {
+      if (allSelected) this._selectedIds.delete(id);
+      else this._selectedIds.add(id);
+    }
+    this._applySelectionClasses();
+    this._sendToFlutter('onSelectionChange', [JSON.stringify(this.getSelectedIds())]);
+    this.exitIfEmpty();
+  }
+
+  selectAbove() { this._selectSide(false); }
+
+  selectBelow() { this._selectSide(true); }
+
+  // Every message element the chat has, not only the ones the virtual list
+  // currently mounts. A section built before this ran picks the classes up
+  // through applyClassesToSection(); one already built and merely unmounted
+  // never renders again, so it has to be written to here.
+  _sections() {
+    return this._getSections().filter(
+      el => el && el.classList && el.classList.contains('message-section'),
+    );
+  }
+
+  // Sync the `selected` class across the whole chat.
   _applySelectionClasses() {
-    document.querySelectorAll('.message-section').forEach(msgEl => {
+    this._sections().forEach(msgEl => {
       msgEl.classList.toggle('selected', this._selectedIds.has(msgEl.dataset.messageId));
     });
   }
@@ -76,14 +131,8 @@ export class SelectionManager {
     e.preventDefault();
     e.stopPropagation();
     const id = section.dataset.messageId;
-    // Re-tapping the range anchor clears the whole selection (and exits mode);
-    // any other tap redefines the range from the tapped message downward.
-    if (id === this._anchorId()) {
-      this._selectedIds.clear();
-      this._applySelectionClasses();
-    } else {
-      this.selectRangeFrom(id);
-    }
+    // Plain toggle: a tap adds or removes exactly the tapped message.
+    this._toggleTapped(id);
     this._sendToFlutter('onSelectionChange', [JSON.stringify(this.getSelectedIds())]);
     this.exitIfEmpty();
     return true;
@@ -105,18 +154,13 @@ export class SelectionManager {
     e.preventDefault();
 
     if (this._selectionMode) {
-      if (id === this._anchorId()) {
-        this._selectedIds.clear();
-        this._applySelectionClasses();
-      } else {
-        this.selectRangeFrom(id);
-      }
+      this._toggleTapped(id);
       this._sendToFlutter('onSelectionChange', [JSON.stringify(this.getSelectedIds())]);
       this.exitIfEmpty();
     } else {
       if (document.querySelector('.message-section.editing')) return false;
       this.setSelectionMode(true);
-      this.selectRangeFrom(id);
+      this.selectOnly(id);
       this._sendToFlutter('onSelectionChange', [JSON.stringify(this.getSelectedIds())]);
     }
     return true;
@@ -157,7 +201,9 @@ export class SelectionManager {
       content.appendChild(selection.getRangeAt(i).cloneContents());
     }
     shadow.appendChild(content);
-    document.body.appendChild(host);
+    // appBody(), not document.body: this runs from a click that may have come
+    // out of a message, where `document.body` is that message's overlay.
+    appBody().appendChild(host);
     const text = content.innerText.trim();
     host.remove();
     return text;
@@ -169,7 +215,10 @@ export class SelectionManager {
       bar = document.createElement('div');
       bar.id = 'selection-bar';
       bar.className = 'selection-bar';
-      bar.innerHTML = '<button class="sel-btn" data-action="copy">Copy</button><button class="sel-btn" data-action="quote">Quote</button>';
+      // Copy only. A Quote button sat here for a long time sending a `quote`
+      // action that the Dart side never implemented — `onSelectionAction`
+      // handles `copy` and nothing else, so it was a button that did nothing.
+      bar.innerHTML = '<button class="sel-btn" data-action="copy">Copy</button>';
       bar.addEventListener('click', (e) => {
         const btn = e.target.closest('.sel-btn');
         if (!btn) return;
@@ -178,7 +227,7 @@ export class SelectionManager {
         this._hideSelectionBar();
         window.getSelection().removeAllRanges();
       });
-      document.body.appendChild(bar);
+      appBody().appendChild(bar);
       this._barCreated = true;
     }
     this._selectedText = text;

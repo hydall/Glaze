@@ -1,5 +1,28 @@
 ﻿/* Extracted from ../bridge.legacy.js. Keep public behavior stable. */
 
+/* Everything inside `.msg-content-stack` that belongs to the variation being
+ * switched, in DOM order. The reasoning box and the in-game clock are siblings
+ * of the body, not children of it, so a transform applied to `.msg-body` alone
+ * leaves them pinned and the message visibly tears in half mid-swipe. The
+ * footer is deliberately absent: its switcher and actions button stay put so
+ * they remain usable while the content moves. */
+const SWIPE_TARGET_SELECTORS = ['.msg-reasoning', '.msg-game-time', '.msg-body'];
+
+function swipeTargets(section) {
+  if (!section) return [];
+  const targets = [];
+  for (const selector of SWIPE_TARGET_SELECTORS) {
+    const el = section.querySelector(selector);
+    if (el) targets.push(el);
+  }
+  return targets;
+}
+
+/* Apply the same inline styles to every element the gesture is moving. */
+function styleAll(targets, styles) {
+  for (const el of targets) Object.assign(el.style, styles);
+}
+
 export class SwipeGestureHandler {
   constructor(sendToFlutter, getContainer, isGeneratingFn, disableRegenFn) {
     this._sendToFlutter = sendToFlutter;
@@ -12,7 +35,7 @@ export class SwipeGestureHandler {
     const THRESHOLD = 100;
     let startX = 0;
     let startY = 0;
-    let activeBody = null;
+    let activeTargets = [];
     let activeSection = null;
     let scrollingVertical = false;
     let axisLocked = false;
@@ -24,10 +47,9 @@ export class SwipeGestureHandler {
     // touchmove cancels scrolling for the rest of the gesture.
     const AXIS_LOCK_SLOP = 12;
 
-    const reset = (body) => {
-      body.style.transition = 'transform 0.3s ease';
-      body.style.transform = '';
-      setTimeout(() => { body.style.transition = ''; }, 300);
+    const reset = (targets) => {
+      styleAll(targets, { transition: 'transform 0.3s ease', transform: '' });
+      setTimeout(() => styleAll(targets, { transition: '' }), 300);
     };
 
     const onStart = (e) => {
@@ -48,20 +70,22 @@ export class SwipeGestureHandler {
       const section = e.target.closest?.('.message-section.char');
       if (!section) return;
       if (section.classList.contains('editing') || section.classList.contains('selection-mode')) return;
-      const body = section.querySelector('.msg-body');
-      if (!body) return;
+      // A touch that starts on the reasoning box drags the whole variation,
+      // not just the reply underneath it.
+      const targets = swipeTargets(section);
+      if (targets.length === 0) return;
       const t = e.touches ? e.touches[0] : e;
       startX = t.clientX;
       startY = t.clientY;
       scrollingVertical = false;
       axisLocked = false;
       activeSection = section;
-      activeBody = body;
-      body.style.transition = 'none';
+      activeTargets = targets;
+      styleAll(targets, { transition: 'none' });
     };
 
     const onMove = (e) => {
-      if (!activeBody || !activeSection) return;
+      if (activeTargets.length === 0 || !activeSection) return;
       const t = e.touches ? e.touches[0] : e;
       const dx = t.clientX - startX;
       const dy = t.clientY - startY;
@@ -77,7 +101,7 @@ export class SwipeGestureHandler {
         if (absX < AXIS_LOCK_SLOP && absY < AXIS_LOCK_SLOP) return;
         if (absY >= absX) {
           scrollingVertical = true;
-          activeBody.style.transform = '';
+          styleAll(activeTargets, { transform: '' });
           return;
         }
         axisLocked = true;
@@ -87,24 +111,35 @@ export class SwipeGestureHandler {
       const swipeTotal = parseInt(activeSection.dataset.swipeTotal || '1', 10);
       const isLast = activeSection.dataset.isLast === 'true';
       const greetingTotal = parseInt(activeSection.dataset.greetingTotal || '0', 10);
+      const greetingId = parseInt(activeSection.dataset.greetingId || '0', 10);
       const isFirstMsg = activeSection.dataset.messageIndex === '0';
       const canSwitchGreeting = isFirstMsg && greetingTotal > 1;
 
       const blockLastRegen = isLast && self._disableRegen();
-      if (dx < 0 && !canSwitchGreeting && (blockLastRegen || !isLast) && swipeId >= swipeTotal - 1) return;
-      if (dx > 0 && !canSwitchGreeting && swipeId <= 0) return;
+      // Greetings navigate their own list and no longer wrap, so they get the
+      // same hard edges as the swipes: nothing to switch to → no drag.
+      if (canSwitchGreeting) {
+        if (dx < 0 && greetingId >= greetingTotal - 1) return;
+        if (dx > 0 && greetingId <= 0) return;
+      } else {
+        if (dx < 0 && (blockLastRegen || !isLast) && swipeId >= swipeTotal - 1) return;
+        if (dx > 0 && swipeId <= 0) return;
+      }
 
       if (e.cancelable) e.preventDefault();
-      activeBody.style.transform = `translateX(${dx}px)`;
+      styleAll(activeTargets, { transform: `translateX(${dx}px)` });
     };
 
     const onEnd = (e) => {
-      if (!activeBody || !activeSection) return;
-      const body = activeBody;
+      if (activeTargets.length === 0 || !activeSection) return;
+      const targets = activeTargets;
       const section = activeSection;
-      activeBody = null;
+      activeTargets = [];
       activeSection = null;
-      if (scrollingVertical) { body.style.transform = ''; body.style.transition = ''; return; }
+      if (scrollingVertical) {
+        styleAll(targets, { transform: '', transition: '' });
+        return;
+      }
 
       const t = e.changedTouches ? e.changedTouches[0] : e;
       const dx = t.clientX - startX;
@@ -113,17 +148,18 @@ export class SwipeGestureHandler {
       const swipeTotal = parseInt(section.dataset.swipeTotal || '1', 10);
       const isLast = section.dataset.isLast === 'true';
       const greetingTotal = parseInt(section.dataset.greetingTotal || '0', 10);
+      const greetingId = parseInt(section.dataset.greetingId || '0', 10);
       const isFirstMsg = section.dataset.messageIndex === '0';
       const canSwitchGreeting = isFirstMsg && greetingTotal > 1;
       const msgId = section.dataset.messageId;
 
       if (canSwitchGreeting) {
-        if (dx < -THRESHOLD) {
+        if (dx < -THRESHOLD && greetingId < greetingTotal - 1) {
           self.animateVariantSwap(msgId, 'next', () => self._sendToFlutter('onChangeGreeting', [msgId, 1]), dx);
-        } else if (dx > THRESHOLD) {
+        } else if (dx > THRESHOLD && greetingId > 0) {
           self.animateVariantSwap(msgId, 'prev', () => self._sendToFlutter('onChangeGreeting', [msgId, -1]), dx);
         } else {
-          reset(body);
+          reset(targets);
         }
         return;
       }
@@ -132,24 +168,22 @@ export class SwipeGestureHandler {
         if (swipeId < swipeTotal - 1) {
           self.animateVariantSwap(msgId, 'next', () => self._sendToFlutter('onSwipe', [JSON.stringify({ id: msgId, direction: 'right' })]), dx);
         } else if (isLast && !self._disableRegen()) {
-          body.style.transition = 'transform 0.1s';
-          body.style.transform = 'translateX(-20px)';
+          styleAll(targets, { transition: 'transform 0.1s', transform: 'translateX(-20px)' });
           setTimeout(() => {
-            body.style.transform = '';
-            body.style.transition = '';
+            styleAll(targets, { transform: '', transition: '' });
             self._sendToFlutter('onRegenerate', [msgId, 'new_variant']);
           }, 100);
         } else {
-          reset(body);
+          reset(targets);
         }
       } else if (dx > THRESHOLD) {
         if (swipeId > 0) {
           self.animateVariantSwap(msgId, 'prev', () => self._sendToFlutter('onSwipe', [JSON.stringify({ id: msgId, direction: 'left' })]), dx);
         } else {
-          reset(body);
+          reset(targets);
         }
       } else {
-        reset(body);
+        reset(targets);
       }
     };
 
@@ -161,16 +195,34 @@ export class SwipeGestureHandler {
   }
 
   /* Slide + fade animation for variant switching.  Used by both the prev/next
-   * buttons and the touch-swipe gesture.  The body's height is locked through
-   * the swap and then animated to the new content's natural height, so the
-   * page doesn't jump when variants have different lengths.
+   * buttons and the touch-swipe gesture.  Every element of the variation moves
+   * together — reasoning box, in-game clock and reply body — and each has its
+   * own height locked through the swap and then animated to its new natural
+   * height, so the page doesn't jump when variants differ in length (including
+   * when one variant reasoned and the next did not).
    *
    * `currentX` lets the touch path pass the drag's current offset so the exit
    * continues the gesture outward instead of snapping back toward center. */
   animateVariantSwap(messageId, dir, after, currentX = 0) {
     const section = document.querySelector(`[data-message-id="${messageId}"]`);
-    const body = section?.querySelector('.msg-body');
-    if (!body) { after(); return; }
+    const targets = swipeTargets(section);
+    if (targets.length === 0) { after(); return; }
+
+    // Tapping the arrow again before the previous swap settled used to leave
+    // two runs fighting over the same inline styles: the older run's cleanup
+    // timer would fire mid-flight and strip the newer run's transition, or the
+    // newer run would measure a height that was still locked — either way the
+    // bubble could stay faded out or keep a frozen height. Tear the previous
+    // run down (timers, observer, inline styles) before starting a new one.
+    //
+    // The run is owned by the section rather than by the body: the set of
+    // moving elements changes between variations (a reasoning box appears or
+    // goes away), so the body is not a stable place to find the run that has
+    // to be aborted.
+    if (section._variantSwap) {
+      section._variantSwap.abort();
+      section._variantSwap = null;
+    }
 
     // dir: 'next' → exit to left, enter from right.  'prev' → mirror.
     const sign = dir === 'next' ? -1 : (dir === 'prev' ? 1 : 0);
@@ -179,52 +231,114 @@ export class SwipeGestureHandler {
     // Entrance always slides in from a fixed offset on the opposite side.
     const inX = sign * -28;
 
-    // Lock current height so the (async) content swap doesn't reflow the page.
-    const startHeight = body.offsetHeight;
-    body.style.height = `${startHeight}px`;
-    body.style.overflow = 'hidden';
-    body.style.transition = 'opacity 0.12s ease, transform 0.12s ease';
-    body.style.opacity = '0';
-    if (outX) body.style.transform = `translateX(${outX}px)`;
+    // Lock each element's current height so the (async) content swap doesn't
+    // reflow the page. Measured with any leftover lock cleared, so a swap that
+    // starts on top of an aborted one still reads the real content height.
+    const startHeights = targets.map((el) => el.offsetHeight);
+    targets.forEach((el, i) => {
+      el.style.height = `${startHeights[i]}px`;
+      el.style.overflow = 'hidden';
+    });
+    styleAll(targets, {
+      transition: 'opacity 0.12s ease, transform 0.12s ease',
+      opacity: '0',
+      ...(outX ? { transform: `translateX(${outX}px)` } : {}),
+    });
 
-    setTimeout(() => {
-      let done = false;
-      let fallback;
+    // Everything this run schedules, so a superseding run can tear it down.
+    const run = {
+      timers: [],
+      mo: null,
+      done: false,
+      sent: false,
+      send: () => {
+        if (run.sent) return;
+        run.sent = true;
+        after();
+      },
+      abort: () => {
+        run.done = true;
+        run.timers.forEach(clearTimeout);
+        run.timers.length = 0;
+        if (run.mo) run.mo.disconnect();
+        // The switch request itself is not the animation's to drop: a second
+        // tap that lands inside the 130 ms exit window must still reach Dart,
+        // in order, or one of the two steps is silently swallowed.
+        run.send();
+        // Hand the elements back in a neutral state; the new run re-locks
+        // whichever ones the incoming variation has.
+        styleAll(targets, {
+          transition: '',
+          transform: '',
+          height: '',
+          overflow: '',
+          opacity: '1',
+        });
+      },
+    };
+    section._variantSwap = run;
+
+    const schedule = (fn, ms) => {
+      const t = setTimeout(() => {
+        run.timers = run.timers.filter(id => id !== t);
+        fn();
+      }, ms);
+      run.timers.push(t);
+      return t;
+    };
+
+    schedule(() => {
       const finish = () => {
-        if (done) return;
-        done = true;
-        mo.disconnect();
-        clearTimeout(fallback);
+        if (run.done) return;
+        run.done = true;
+        run.mo.disconnect();
+        run.timers.forEach(clearTimeout);
+        run.timers.length = 0;
 
-        // Measure new content's natural height
-        body.style.height = 'auto';
-        const targetHeight = body.offsetHeight;
-        body.style.height = `${startHeight}px`;
+        // Measure each element's new natural height, then put the lock back so
+        // the animation has something to transition from. Measuring all of
+        // them before restoring any avoids a second reflow per element.
+        const targetHeights = targets.map((el) => {
+          el.style.height = 'auto';
+          return el.offsetHeight;
+        });
+        targets.forEach((el, i) => {
+          el.style.height = `${startHeights[i]}px`;
+        });
 
         requestAnimationFrame(() => {
-          body.style.transition = 'opacity 0.22s ease, transform 0.22s ease, height 0.22s ease';
-          body.style.opacity = '1';
-          body.style.transform = '';
-          body.style.height = `${targetHeight}px`;
-          setTimeout(() => {
-            body.style.transition = '';
-            body.style.transform = '';
-            body.style.height = '';
-            body.style.overflow = '';
+          // A newer swap took over between the frame request and this callback.
+          if (section._variantSwap !== run) return;
+          targets.forEach((el, i) => {
+            el.style.transition = 'opacity 0.22s ease, transform 0.22s ease, height 0.22s ease';
+            el.style.opacity = '1';
+            el.style.transform = '';
+            el.style.height = `${targetHeights[i]}px`;
+          });
+          schedule(() => {
+            styleAll(targets, {
+              transition: '',
+              transform: '',
+              height: '',
+              overflow: '',
+            });
+            if (section._variantSwap === run) section._variantSwap = null;
           }, 240);
         });
       };
 
       // The renderer rewrites section dataset (rawText / swipeId / etc) when
       // Flutter's updateMessage arrives — that's our cue to animate in.
-      const mo = new MutationObserver(finish);
-      mo.observe(section, { attributes: true });
+      run.mo = new MutationObserver(finish);
+      run.mo.observe(section, { attributes: true });
       // Fallback in case the update is a no-op or attribute setter is skipped.
-      fallback = setTimeout(finish, 300);
+      schedule(finish, 300);
 
-      after();
-      body.style.transition = 'none';
-      if (inX) body.style.transform = `translateX(${inX}px)`;
+      run.send();
+      styleAll(targets, {
+        transition: 'none',
+        ...(inX ? { transform: `translateX(${inX}px)` } : {}),
+      });
     }, 130);
   }
 

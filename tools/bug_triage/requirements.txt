@@ -1,0 +1,7 @@
+# Bug-triage agent dependencies (Python 3.11+)
+# Slim Pydantic AI + only the OpenAI-compatible backend (DeepSeek speaks it).
+# Pinned exactly: 0.0.49 predates the `output_type` / `result.output` API this
+# code is written against, and its unpinned OpenTelemetry floor broke outright
+# once opentelemetry-api dropped `_events`.
+pydantic-ai-slim[openai]==2.32.0
+requests==2.32.3

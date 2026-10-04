@@ -4,9 +4,12 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 
 import '../../utils/error_format.dart';
+import '../converters/reasoning_effort.dart';
 import 'chat_transport.dart';
 import 'chat_transport_request.dart';
+import 'endpoint_normalizer.dart';
 import 'extra_request_parameters.dart';
+import 'llm_protocol.dart';
 import 'openai_chat_transport.dart';
 
 /// Opt-in OpenAI Responses API transport. Existing OpenAI-compatible presets
@@ -26,16 +29,8 @@ class OpenAiResponsesTransport implements ChatTransport {
             ),
           );
 
-  static String buildResponsesUrl(String endpoint) {
-    var base = OpenAiChatTransport.normalizeEndpoint(endpoint);
-    final lower = base.toLowerCase();
-    if (lower.endsWith('/chat/completions')) {
-      base = base.substring(0, base.length - '/chat/completions'.length);
-    } else if (lower.endsWith('/responses')) {
-      return base;
-    }
-    return base.isEmpty ? '' : '$base/responses';
-  }
+  static String buildResponsesUrl(String endpoint) =>
+      EndpointNormalizer.responsesUrl(endpoint);
 
   static Map<String, dynamic> buildBody(ChatTransportRequest request) {
     final body = <String, dynamic>{
@@ -46,19 +41,42 @@ class OpenAiResponsesTransport implements ChatTransport {
     if (request.maxTokens > 0) {
       body['max_output_tokens'] = request.maxTokens;
     }
+    // Same rule as the Chat Completions body: the omit toggles are the only
+    // switch, never the value. `frequency_penalty`, `presence_penalty` and
+    // `top_k` have no Responses equivalent and are dropped; reasoning models
+    // reject sampling outright, which is what the omit toggles are for.
+    if (!request.omitTemperature) {
+      body['temperature'] = request.temperature;
+    }
+    if (!request.omitTopP) {
+      body['top_p'] = request.topP;
+    }
 
-    final showReasoning =
-        request.requestReasoning &&
-        !request.omitReasoning &&
-        (request.showNativeReasoning ?? true);
-    if (showReasoning) {
-      body['reasoning'] = <String, dynamic>{
-        'summary': 'auto',
-        if (!request.omitReasoningEffort &&
-            request.reasoningEffort != null &&
-            request.reasoningEffort != 'auto')
-          'effort': request.reasoningEffort,
+    // `showNativeReasoning` decides whether a summary is *displayed*, so it
+    // only controls `summary`. Whether reasoning is requested at all — and at
+    // which effort — stays with requestReasoning/omitReasoning, exactly as on
+    // Chat Completions. Conflating the two used to drop `effort` whenever the
+    // user hid the reasoning block.
+    final wantsReasoning = request.requestReasoning && !request.omitReasoning;
+    if (wantsReasoning) {
+      final effort = request.omitReasoningEffort
+          ? null
+          : resolveReasoningEffort(
+              protocol: LlmProtocol.openaiResponses,
+              effort: request.reasoningEffort,
+              model: request.model,
+            );
+      final reasoning = <String, dynamic>{
+        if (request.showNativeReasoning ?? true) 'summary': 'auto',
+        'effort': ?effort,
       };
+      if (reasoning.isNotEmpty) {
+        body['reasoning'] = reasoning;
+      }
+    }
+
+    if (request.shouldSendOpenAiSessionId) {
+      body['session_id'] = request.sessionId;
     }
 
     final tools = request.tools?.map(_convertTool).toList(growable: false);
@@ -119,22 +137,17 @@ class OpenAiResponsesTransport implements ChatTransport {
       onError?.call(Exception('API key is empty'));
       return;
     }
+    final url = request.endpoint.trim();
+    if (url.isEmpty) {
+      onError?.call(Exception('Endpoint is empty or not a valid URL'));
+      return;
+    }
+
     try {
       if (request.stream) {
-        await _streamResponse(
-          buildResponsesUrl(request.endpoint),
-          request,
-          cancelToken,
-          onUpdate,
-          onComplete,
-        );
+        await _streamResponse(url, request, cancelToken, onUpdate, onComplete);
       } else {
-        await _oneShotResponse(
-          buildResponsesUrl(request.endpoint),
-          request,
-          cancelToken,
-          onComplete,
-        );
+        await _oneShotResponse(url, request, cancelToken, onComplete);
       }
     } on DioException catch (error) {
       onError?.call(await decodeStreamingError(error));
@@ -183,9 +196,8 @@ class OpenAiResponsesTransport implements ChatTransport {
       final lines = buffer.split('\n');
       buffer = lines.removeLast();
       for (final line in lines) {
-        final trimmed = line.trim();
-        if (!trimmed.startsWith('data:')) continue;
-        final payload = trimmed.substring(5).trim();
+        final payload = _sseData(line);
+        if (payload == null) continue;
         if (payload.isEmpty || payload == '[DONE]') continue;
         try {
           final event = jsonDecode(payload) as Map<String, dynamic>;
@@ -223,6 +235,15 @@ class OpenAiResponsesTransport implements ChatTransport {
       rawResponseJson:
           rawResponseJson ?? jsonEncode(_aggregatedResponse(text, reasoning)),
     );
+  }
+
+  String? _sseData(String line) {
+    final normalized = line.endsWith('\r')
+        ? line.substring(0, line.length - 1)
+        : line;
+    if (!normalized.startsWith('data:')) return null;
+    final value = normalized.substring(5);
+    return value.startsWith(' ') ? value.substring(1) : value;
   }
 
   Future<void> _oneShotResponse(
@@ -315,15 +336,18 @@ class OpenAiResponsesTransport implements ChatTransport {
   ).fetchModels(endpoint: endpoint, apiKey: apiKey);
 }
 
-/// Routes each OpenAI-compatible request without changing existing presets.
-class OpenAiCompatibleTransport implements ChatTransport {
+/// Routes a custom endpoint to Chat Completions or Responses according to the
+/// preset's Responses API toggle.
+class CustomChatCompletionTransport implements ChatTransport {
   final ChatTransport chatCompletions;
   final ChatTransport responses;
 
-  OpenAiCompatibleTransport({
+  CustomChatCompletionTransport({
     ChatTransport? chatCompletions,
     ChatTransport? responses,
-  }) : chatCompletions = chatCompletions ?? OpenAiChatTransport(),
+  }) : chatCompletions =
+           chatCompletions ??
+           OpenAiChatTransport(protocol: LlmProtocol.customChatCompletion),
        responses = responses ?? OpenAiResponsesTransport();
 
   @override

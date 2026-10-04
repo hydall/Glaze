@@ -5,12 +5,17 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../features/studio/studio_availability.dart';
 import '../widgets/glass_nav_bar.dart';
+import '../widgets/glass_surface.dart';
 import '../widgets/glaze_background.dart';
 import '../widgets/glaze_scaffold.dart' show GlazeAppBar;
 import '../widgets/glaze_toast.dart';
 import 'animated_header_below.dart';
+import 'nav_bar_suppression_provider.dart';
+import 'nav_height_provider.dart';
 import 'shell_header_provider.dart';
+import 'shell_navigation_provider.dart';
 import 'desktop/desktop_layout_provider.dart';
 
 class ShellScreen extends ConsumerStatefulWidget {
@@ -24,6 +29,14 @@ class ShellScreen extends ConsumerStatefulWidget {
 class _ShellScreenState extends ConsumerState<ShellScreen> {
   int _lastBackPress = 0;
   int? _lastBranchIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) retireActiveStudio(context, ref);
+    });
+  }
 
   /// Reveals the header of a branch the moment it becomes active. Branch state
   /// (including each list's scroll offset) is preserved by the shell, and the
@@ -44,9 +57,36 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
     });
   }
 
+  /// Screens pad their bodies by [navHeightProvider], which [GlassNavBar]
+  /// publishes once on mount and never clears. A suppressed bar — or the
+  /// desktop layout, where the bar does not exist at all — would leave that
+  /// stale height behind as an empty strip, so zero it while the bar is gone;
+  /// it re-measures when it comes back.
+  void _clearNavHeight() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final notifier = ref.read(navHeightProvider.notifier);
+      if (notifier.state != 0) notifier.state = 0;
+    });
+  }
+
+  /// Publishes the shell so widgets outside it (the desktop sidebars) can
+  /// drive branch navigation. Deferred: mutating a provider during build is
+  /// forbidden.
+  void _publishShell() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final notifier = ref.read(shellNavigationProvider.notifier);
+      if (!identical(notifier.state, widget.navigationShell)) {
+        notifier.state = widget.navigationShell;
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final currentIndex = widget.navigationShell.currentIndex;
+    _publishShell();
     _revealHeaderOnBranchChange(currentIndex);
     final location = GoRouterState.of(context).uri.toString();
     final isDesktop = isDesktopLayout(context);
@@ -58,6 +98,13 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
     // outer fade completes, flashing a frame of the previous screen at the end
     // of the transition (most visible on iOS).
     if (isDesktop) {
+      // [GlassNavBar] never mounts here, but it may have published its height
+      // before the layout switched (the desktop layout can be entered at
+      // runtime by turning "force mobile layout" off). That stale value is
+      // read by every screen's bottom padding and by [SheetView], so it would
+      // reserve an empty strip along the bottom of the desktop layout until
+      // the app restarts. Zero it for as long as the desktop layout is live.
+      _clearNavHeight();
       return widget.navigationShell;
     }
 
@@ -70,7 +117,13 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
       '/menu/settings',
       '/menu/themes',
     };
+    // A full-height editor can claim the bar away while it is open (see
+    // [NavBarSuppressor]); route-based hiding alone cannot see it, because such
+    // an editor lives inline inside a sheet rather than on its own route.
+    final navSuppressed = ref.watch(navBarSuppressionProvider).isNotEmpty;
+    if (navSuppressed) _clearNavHeight();
     final showNavBar =
+        !navSuppressed &&
         !location.startsWith('/chat/') &&
         !hideNavBarRoutes.any((r) => location.startsWith(r));
     return GlazeBackground(
@@ -92,9 +145,7 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
           backgroundColor: Colors.transparent,
           body: Stack(
             children: [
-              Positioned.fill(
-                child: widget.navigationShell,
-              ),
+              Positioned.fill(child: widget.navigationShell),
               Positioned(
                 top: 0,
                 left: 0,
@@ -149,7 +200,12 @@ class _PersistentHeader extends ConsumerWidget {
       layoutBuilder: (currentChild, previousChildren) => Stack(
         alignment: Alignment.topCenter,
         children: [
-          ...previousChildren,
+          // An outgoing header sits exactly on top of the incoming one, so it
+          // must not join the header's backdrop group: overlapping surfaces
+          // cannot share a capture. Excluded here rather than app-side, so the
+          // group below stays a plain "the header chrome shares one blur".
+          for (final child in previousChildren)
+            GlassBackdropGroup.none(child: child),
           ?currentChild,
         ],
       ),
@@ -163,27 +219,37 @@ class _PersistentHeader extends ConsumerWidget {
                 actions: entry.config.actions,
                 showBack: entry.config.showBack,
                 onBack: entry.config.onBack,
+                leading: entry.config.leading,
               ),
             ),
     );
 
-    final content = SafeArea(
-      bottom: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            appBar,
-            // Decoupled from the app bar's cross-fade so that switching to a
-            // screen without a segmented control slides the control up and out
-            // on its own, instead of plain-fading with the rest of the header.
-            AnimatedHeaderBelow(
-              below: entry == null || entry.config.hidden
-                  ? null
-                  : entry.config.below,
-            ),
-          ],
+    // The app-bar row and the `below` slot beneath it are painted one after
+    // the other and never overlap, so the engine can blur the backdrop once
+    // for both instead of once each — on a tiled GPU that is one framebuffer
+    // resolve per frame rather than two, on every frame of every scroll. A
+    // glass element nested *inside* either of them (the active pill in a tab
+    // strip) keeps its own blur: [GlassSurface] closes the group around its
+    // own children.
+    final content = GlassBackdropGroup(
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              appBar,
+              // Decoupled from the app bar's cross-fade so that switching to a
+              // screen without a segmented control slides the control up and out
+              // on its own, instead of plain-fading with the rest of the header.
+              AnimatedHeaderBelow(
+                below: entry == null || entry.config.hidden
+                    ? null
+                    : entry.config.below,
+              ),
+            ],
+          ),
         ),
       ),
     );

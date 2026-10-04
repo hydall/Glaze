@@ -4,6 +4,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import '../catalog_models.dart';
 import '../services/janitor_provider.dart';
 
@@ -215,7 +216,7 @@ class _JanitorBlockedContentSectionState
                       child: SizedBox(
                         width: 16,
                         height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                        child: GlazeSpinner(),
                       ),
                     )
                   : null,

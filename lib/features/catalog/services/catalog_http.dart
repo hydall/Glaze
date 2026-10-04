@@ -24,6 +24,26 @@ final _dio = Dio(BaseOptions(
   validateStatus: (_) => true,
 ));
 
+/// Replaces the transport under the shared catalog client.
+///
+/// The client is a file-private singleton on purpose — every provider must
+/// carry the same browser UA — so this is the seam the provider tests use to
+/// answer a request without a network round-trip.
+@visibleForTesting
+void setCatalogHttpAdapter(HttpClientAdapter adapter) {
+  _dio.httpClientAdapter = adapter;
+}
+
+/// The HTTP status a catalog failure reported, or null when the request never
+/// reached a server that answered.
+///
+/// Providers used to decide whether to re-authenticate by searching
+/// `e.toString()` for `'401'`, which matches a 401 that merely appears
+/// somewhere in the server's *body* just as readily as a real one — and reads
+/// as a 401 for a request whose status was something else entirely.
+int? catalogErrorStatus(Object error) =>
+    error is DioException ? error.response?.statusCode : null;
+
 /// Raises a [DioException] carrying the response, so callers can run it through
 /// the shared `formatError()` (same friendly, localized handling as LLM
 /// requests) instead of showing a raw dump. The full body is logged in debug
@@ -72,6 +92,30 @@ Future<String> catalogGetText(
   return res.data ?? '';
 }
 
+/// Raw bytes, for endpoints that answer with an image rather than JSON.
+///
+/// DataCat's Client API serves archived character images from an endpoint that
+/// needs the same headers as every other call (client id, transfer lease), so
+/// the bytes cannot be fetched with a bare `Dio()` the way a public avatar URL
+/// can.
+Future<List<int>> catalogGetBytes(
+  String url,
+  Map<String, String> headers,
+) async {
+  final res = await _dio.get<List<int>>(
+    url,
+    options: Options(headers: headers, responseType: ResponseType.bytes),
+  );
+  if (res.statusCode != null && res.statusCode! >= 400) {
+    throw DioException.badResponse(
+      statusCode: res.statusCode!,
+      requestOptions: res.requestOptions,
+      response: res,
+    );
+  }
+  return res.data ?? const [];
+}
+
 Future<Map<String, dynamic>> catalogPost(
   String url,
   Map<String, dynamic> body,
@@ -87,6 +131,18 @@ Future<Map<String, dynamic>> catalogPost(
     _throwHttp(res);
   }
   return _parseJson(res.data ?? '');
+}
+
+/// A DELETE whose success is the status alone. Used by endpoints that answer
+/// `204 No Content`, where parsing a body would only ever fail.
+Future<void> catalogDelete(String url, Map<String, String> headers) async {
+  final res = await _dio.delete<String>(
+    url,
+    options: Options(headers: headers, responseType: ResponseType.plain),
+  );
+  if (res.statusCode != null && res.statusCode! >= 400) {
+    _throwHttp(res);
+  }
 }
 
 Map<String, dynamic> _parseJson(String text) {

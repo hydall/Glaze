@@ -2,8 +2,11 @@ import 'dart:convert';
 
 import 'package:drift/drift.dart';
 
+import '../../models/historical_message_window.dart';
+
 import '../../models/tracker.dart';
 import '../../models/tracker_snapshot.dart';
+import '../../llm/game_time.dart';
 import '../../utils/time_helpers.dart';
 import '../app_db.dart';
 
@@ -27,6 +30,31 @@ class TrackerSnapshotRepo {
   final AppDatabase db;
 
   const TrackerSnapshotRepo(this.db);
+
+  Future<TrackerSnapshot?> getCommittedInWindow(
+    String sessionId,
+    HistoricalMessageWindow window,
+  ) async {
+    final snapshots = await getBySessionId(sessionId);
+    final byMessage = {
+      for (final snapshot in snapshots)
+        if (snapshot.committed &&
+            window.containsAnchor(
+              snapshot.messageId,
+              snapshot.swipeId,
+              snapshot.agentSwipeId,
+            ))
+          snapshot.messageId: snapshot,
+    };
+    for (final message in window.messages.reversed) {
+      final snapshot = byMessage[message.id];
+      if (snapshot != null) return snapshot;
+    }
+    // Empty anchors are migration/bootstrap snapshots, never a future turn.
+    return snapshots
+        .where((s) => s.committed && s.messageId.isEmpty)
+        .firstOrNull;
+  }
 
   /// Upsert a snapshot for the anchor `(sessionId, messageId, swipeId,
   /// agentSwipeId)`. Re-runs replace the prior snapshot for the same anchor
@@ -94,6 +122,45 @@ class TrackerSnapshotRepo {
               ..where((t) => t.agentSwipeId.equals(agentSwipeId)))
             .getSingleOrNull();
     return row == null ? null : _rowToModel(row);
+  }
+
+  /// Replaces the complete clock tuple at an existing anchor while preserving
+  /// every unrelated tracker and the snapshot's identity/commit metadata.
+  Future<void> replaceGameClock({
+    required TrackerSnapshot snapshot,
+    required GameTimeState clock,
+    String provenance = 'manual_clock_edit',
+  }) async {
+    if (clock.format() == null) {
+      throw ArgumentError('A complete valid game clock is required');
+    }
+    final existingByName = {
+      for (final tracker in snapshot.trackers) tracker.name: tracker,
+    };
+    final values = <String, String>{
+      GameTimeState.timeKey: clock.time!,
+      GameTimeState.dateKey: clock.date!,
+      GameTimeState.dayKey: '${clock.day}',
+    };
+    final trackers = snapshot.trackers
+        .where((tracker) => !values.containsKey(tracker.name))
+        .toList();
+    for (final entry in values.entries) {
+      final existing = existingByName[entry.key];
+      trackers.add(
+        Tracker(
+          sessionId: snapshot.sessionId,
+          name: entry.key,
+          value: entry.value,
+          scope: existing?.scope ?? 'ledger',
+          provenance: provenance,
+          basisRevisionNumber: existing?.basisRevisionNumber ?? 0,
+          basisRevisionHash: existing?.basisRevisionHash ?? '',
+          updatedAt: existing?.updatedAt ?? snapshot.createdAt,
+        ),
+      );
+    }
+    await upsert(snapshot.copyWith(trackers: trackers));
   }
 
   /// Fetch the latest committed snapshot for [sessionId] (the accepted state

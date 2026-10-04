@@ -106,9 +106,10 @@ final characterVariantsProvider = StreamProvider.autoDispose
 /// variation badge and to reflect a favorite that lives on a non-cover
 /// variation. Watch it with `.select()` on the single group a widget cares
 /// about — the map identity changes on every character write.
-final variantGroupStatsProvider = StreamProvider<Map<String, VariantGroupStats>>(
-  (ref) => ref.read(characterRepoProvider).watchVariantGroupStats(),
-);
+final variantGroupStatsProvider =
+    StreamProvider<Map<String, VariantGroupStats>>(
+      (ref) => ref.read(characterRepoProvider).watchVariantGroupStats(),
+    );
 
 /// [VariantGroupStats] for one group, falling back to a lone unfavorited
 /// character while the stream is still loading.
@@ -121,9 +122,10 @@ VariantGroupStats variantGroupStatsOf(WidgetRef ref, String groupId) =>
 
 /// Chat-session counts per character id — the "N chats" line that tells two
 /// otherwise identical variations apart in the variations sheet.
-final characterSessionCountsProvider = StreamProvider.autoDispose<Map<String, int>>(
-  (ref) => ref.read(chatRepoProvider).watchSessionCountsByCharacter(),
-);
+final characterSessionCountsProvider =
+    StreamProvider.autoDispose<Map<String, int>>(
+      (ref) => ref.read(chatRepoProvider).watchSessionCountsByCharacter(),
+    );
 
 final infiniteCharactersProvider =
     AsyncNotifierProvider.family<
@@ -324,6 +326,20 @@ class CharactersNotifier extends AsyncNotifier<List<Character>> {
     ref.invalidateSelf();
   }
 
+  /// Inserts a whole chunk of imported characters in one batch and refreshes
+  /// the list **once**.
+  ///
+  /// [add] is fine for a single card, but a mass import called it per file:
+  /// each call re-read the entire characters table (`invalidateSelf` → `build`
+  /// → `getAll`) and woke every watcher, so importing a few hundred cards did
+  /// quadratic work on the UI isolate and ran the app out of memory.
+  Future<void> addAll(List<Character> characters) async {
+    if (characters.isEmpty) return;
+    final repo = ref.read(characterRepoProvider);
+    await repo.putAll(characters);
+    ref.invalidateSelf();
+  }
+
   Future<void> save(Character character) async {
     final repo = ref.read(characterRepoProvider);
     await repo.put(character);
@@ -370,6 +386,7 @@ class CharactersNotifier extends AsyncNotifier<List<Character>> {
       variantOrder: order,
       avatarPath: avatarPath,
       gallery: const [],
+      currentSessionIndex: 0,
       fav: false,
       createdAt: now,
       updatedAt: now,
@@ -453,20 +470,23 @@ class CharactersNotifier extends AsyncNotifier<List<Character>> {
       await SyncDeletionTracker.record('memory_book', sid);
       await SyncDeletionTracker.record('tracker_value', sid);
       await SyncDeletionTracker.record('tracker_snapshot', sid);
+      await SyncDeletionTracker.record('session_lorebook_overlays', sid);
+      await SyncDeletionTracker.record('reconciliation_state', sid);
       if (result.studioConfigSessionIds.contains(sid)) {
         await SyncDeletionTracker.record('studio_config', sid);
       }
     }
-    for (final lorebookId in result.lorebookIds) {
-      await SyncDeletionTracker.record('lorebooks', lorebookId);
-    }
     for (final id in result.characterIds) {
       await SyncDeletionTracker.record('character', id);
     }
+    // Lorebooks are never tombstoned here: the books the deleted characters
+    // were connected to survive as global books (see `CharacterDeletionRepo`)
+    // and travel to the cloud as a normal update of the lorebook collection.
 
     final activations = ref.read(lorebookActivationsProvider);
+    var cleaned = activations;
     if (result.characterIds.any(activations.character.containsKey)) {
-      final cleaned = LorebookActivations(
+      cleaned = LorebookActivations(
         character: {
           for (final entry in activations.character.entries)
             if (!result.characterIds.contains(entry.key))
@@ -477,24 +497,68 @@ class CharactersNotifier extends AsyncNotifier<List<Character>> {
       ref.read(lorebookActivationsProvider.notifier).state = cleaned;
       await saveLorebookActivations(cleaned);
     }
+    await _rebindDetachedLorebooks(result.detachedLorebookIds, cleaned);
+    if (result.detachedLorebookIds.isNotEmpty) {
+      ref.invalidate(lorebooksProvider);
+    }
 
     for (final character in characters) {
       await _cleanupFiles(character);
     }
   }
 
+  /// Re-points books the deletion detached (`activationScope: 'global'`) back
+  /// at a character that is still connected to them through the activation map.
+  ///
+  /// The scope/target columns are a denormalised mirror of that map, so a book
+  /// linked to several characters must keep pointing at one of the survivors
+  /// instead of falling back to global. A book with no survivor left stays
+  /// global — detached, fully intact, and ready to be connected again.
+  Future<void> _rebindDetachedLorebooks(
+    Set<String> detachedLorebookIds,
+    LorebookActivations activations,
+  ) async {
+    if (detachedLorebookIds.isEmpty) return;
+    final repo = ref.read(lorebookRepoProvider);
+    for (final lorebookId in detachedLorebookIds) {
+      String? survivor;
+      for (final entry in activations.character.entries) {
+        if (entry.value.contains(lorebookId)) {
+          survivor = entry.key;
+          break;
+        }
+      }
+      if (survivor == null) continue;
+      final lorebook = await repo.getById(lorebookId);
+      if (lorebook == null) continue;
+      await repo.put(
+        lorebook.copyWith(
+          activationScope: 'character',
+          activationTargetId: survivor,
+          updatedAt: DateTime.now().millisecondsSinceEpoch,
+        ),
+      );
+    }
+  }
+
   Future<void> _cleanupFiles(Character character) async {
     try {
       if (character.avatarPath != null && character.avatarPath!.isNotEmpty) {
-        final resolved =
-            resolveGlazeFilePath(character.avatarPath!) ??
-            character.avatarPath!;
-        final avatar = File(resolved);
-        if (await avatar.exists()) await avatar.delete();
-        final name = p.basenameWithoutExtension(resolved);
-        final dir = p.dirname(p.dirname(resolved));
-        final thumb = File(p.join(dir, 'thumbnails', '$name.jpg'));
-        if (await thumb.exists()) await thumb.delete();
+        final stillReferenced = (await ref.read(characterRepoProvider).getAll())
+            .any((item) => item.avatarPath == character.avatarPath);
+        if (!stillReferenced) {
+          final resolved =
+              resolveGlazeFilePath(character.avatarPath!) ??
+              character.avatarPath!;
+          final avatar = File(resolved);
+          if (await avatar.exists()) await avatar.delete();
+          final name = p.basenameWithoutExtension(resolved);
+          final dir = p.dirname(p.dirname(resolved));
+          for (final ext in kThumbnailExtensions) {
+            final thumb = File(p.join(dir, 'thumbnails', '$name.$ext'));
+            if (await thumb.exists()) await thumb.delete();
+          }
+        }
       }
       if (character.gallery.isNotEmpty) {
         final avatarDir = character.avatarPath != null

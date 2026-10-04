@@ -1,8 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/features/chat/chat_message_service.dart';
 import 'package:glaze_flutter/features/chat/services/saved_message_writer.dart';
+
+final _messageServiceProvider = Provider(ChatMessageService.new);
 
 void main() {
   group('AgentSwipe', () {
@@ -13,6 +16,7 @@ void main() {
         reasoning: 'thought',
         genTime: '1.5s',
         tokens: 42,
+        time: '12.05.2027 · RP_Day 2 · 14:12',
         studioOutputs: [
           {'id': 'out1', 'content': 'brief'},
         ],
@@ -25,6 +29,7 @@ void main() {
       expect(restored.reasoning, 'thought');
       expect(restored.genTime, '1.5s');
       expect(restored.tokens, 42);
+      expect(restored.time, '12.05.2027 · RP_Day 2 · 14:12');
       expect(restored.parentSwipeId, 0);
       expect(restored.studioOutputs.length, 1);
       expect(restored.studioOutputs[0]['id'], 'out1');
@@ -42,11 +47,16 @@ void main() {
     });
 
     test('copyWith creates a modified copy', () {
-      const original = AgentSwipe(content: 'a', kind: 'final');
+      const original = AgentSwipe(
+        content: 'a',
+        kind: 'final',
+        time: '12.05.2027 · RP_Day 2 · 14:12',
+      );
       final modified = original.copyWith(content: 'b', kind: 'cleaned');
       expect(modified.content, 'b');
       expect(modified.kind, 'cleaned');
       expect(modified.reasoning, isNull);
+      expect(modified.time, original.time);
     });
   });
 
@@ -101,6 +111,116 @@ void main() {
       final msg = ChatMessage.fromJson(json);
       expect(msg.agentSwipes, isEmpty);
       expect(msg.agentSwipeId, 0);
+    });
+  });
+
+  group('ChatMessageService nested swipe edits', () {
+    test('edited variation survives switching away and back', () {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      final service = container.read(_messageServiceProvider);
+      final message = ChatMessage(
+        id: 'a1',
+        role: 'assistant',
+        content: 'four',
+        swipes: const ['one', 'two', 'three', 'four'],
+        swipeId: 3,
+        swipesMeta: [
+          <String, dynamic>{},
+          <String, dynamic>{},
+          <String, dynamic>{},
+          <String, dynamic>{
+            'agentSwipes': [const AgentSwipe(content: 'four').toJson()],
+            'agentSwipeId': 0,
+          },
+        ],
+        agentSwipes: const [AgentSwipe(content: 'four')],
+      );
+      final session = ChatSession(
+        id: 's1',
+        characterId: 'c1',
+        sessionIndex: 0,
+        messages: [message],
+      );
+
+      final edited = service.editMessage(session, 0, 'four edited');
+      final editedMessage = edited.messages.single;
+      expect(editedMessage.agentSwipes.single.content, 'four edited');
+      final stored = editedMessage.swipesMeta[3]['agentSwipes'] as List;
+      expect(
+        AgentSwipe.fromJson(
+          Map<String, dynamic>.from(stored.single as Map<dynamic, dynamic>),
+        ).content,
+        'four edited',
+      );
+
+      final second = service.setSwipe(edited, 0, 1);
+      final fourth = service.setSwipe(second, 0, 3);
+      expect(fourth.messages.single.content, 'four edited');
+      expect(fourth.messages.single.swipes[3], 'four edited');
+    });
+
+    test('editing active nested swipe clears its reasoning only', () {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      final service = container.read(_messageServiceProvider);
+      final message = ChatMessage(
+        id: 'a1',
+        role: 'assistant',
+        content: 'cleaned',
+        reasoning: 'old thought',
+        swipes: const ['cleaned'],
+        swipesMeta: [
+          <String, dynamic>{
+            'agentSwipes': [
+              const AgentSwipe(
+                content: 'final',
+                kind: 'final',
+                reasoning: 'final thought',
+              ).toJson(),
+              const AgentSwipe(
+                content: 'cleaned',
+                kind: 'cleaned',
+                reasoning: 'old thought',
+              ).toJson(),
+            ],
+            'agentSwipeId': 1,
+          },
+        ],
+        agentSwipes: const [
+          AgentSwipe(
+            content: 'final',
+            kind: 'final',
+            reasoning: 'final thought',
+          ),
+          AgentSwipe(
+            content: 'cleaned',
+            kind: 'cleaned',
+            reasoning: 'old thought',
+          ),
+        ],
+        agentSwipeId: 1,
+      );
+      final session = ChatSession(
+        id: 's1',
+        characterId: 'c1',
+        sessionIndex: 0,
+        messages: [message],
+      );
+
+      final edited = service.editMessage(
+        session,
+        0,
+        'cleaned edit',
+        tagStart: '<think>',
+        tagEnd: '</think>',
+      );
+      final result = edited.messages.single;
+      expect(result.reasoning, isNull);
+      expect(result.agentSwipes[0].reasoning, 'final thought');
+      expect(result.agentSwipes[0].content, 'final');
+      expect(result.agentSwipes[1].reasoning, isNull);
+      expect(result.agentSwipes[1].content, 'cleaned edit');
     });
   });
 
@@ -285,6 +405,7 @@ void main() {
                 kind: 'cleaned',
                 reasoning: 'last reasoning',
                 tokens: 17,
+                time: '12.05.2027 · RP_Day 2 · 14:15',
               ).toJson(),
             ],
           },
@@ -306,6 +427,7 @@ void main() {
       expect(result.content, 'last cleaned');
       expect(result.reasoning, 'last reasoning');
       expect(result.tokens, 17);
+      expect(result.time, '12.05.2027 · RP_Day 2 · 14:15');
       expect(result.isError, isTrue);
     });
 
@@ -327,9 +449,22 @@ void main() {
         swipes: const ['final 2'],
         swipesMeta: const [<String, dynamic>{}],
         agentSwipes: const [
-          AgentSwipe(content: 'final 1', kind: 'final'),
-          AgentSwipe(content: 'final 2', kind: 'final'),
-          AgentSwipe(content: 'cleaned', kind: 'cleaned', parentSwipeId: 1),
+          AgentSwipe(
+            content: 'final 1',
+            kind: 'final',
+            time: '12.05.2027 · RP_Day 1 · 13:00',
+          ),
+          AgentSwipe(
+            content: 'final 2',
+            kind: 'final',
+            time: '12.05.2027 · RP_Day 1 · 14:00',
+          ),
+          AgentSwipe(
+            content: 'cleaned',
+            kind: 'cleaned',
+            parentSwipeId: 1,
+            time: '12.05.2027 · RP_Day 1 · 14:00',
+          ),
         ],
         agentSwipeId: 1,
       );
@@ -341,6 +476,7 @@ void main() {
       expect(result.content, 'cleaned');
       expect(result.swipes, ['final 1']);
       expect(result.agentSwipes[1].parentSwipeId, 0);
+      expect(result.time, '12.05.2027 · RP_Day 1 · 14:00');
       expect(result.swipesMeta[0]['agentSwipeId'], 1);
     });
 

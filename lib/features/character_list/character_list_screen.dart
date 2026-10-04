@@ -12,20 +12,23 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/db/repositories/character_repo.dart';
 import '../../core/services/character_export_helper.dart';
-import '../../core/services/character_importer.dart';
-import '../../core/services/character_import_persistence_coordinator.dart';
+import '../../core/services/character_bulk_import_service.dart';
 import '../../core/state/character_folder_provider.dart';
 import '../../core/state/character_provider.dart';
-import '../../core/state/db_provider.dart';
+import '../../shared/shell/desktop/desktop_layout_provider.dart';
 import '../../shared/shell/header_scroll_hider.dart';
 import '../../shared/shell/nav_height_provider.dart';
 import '../../shared/shell/nav_retap_provider.dart';
 import '../../shared/shell/shell_header_provider.dart';
+import '../../shared/shell/title_bar_header.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glass_surface.dart';
+import '../../shared/widgets/glaze_action_button.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/glaze_tab_bar.dart';
 import '../../shared/widgets/swipe_tab_switcher.dart';
+import '../../shared/widgets/tab_scroll_memory.dart';
 import '../../shared/widgets/tab_slide_switcher.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_toast.dart';
@@ -35,11 +38,15 @@ import '../catalog/widgets/widgets.dart';
 import '../picks/widgets/picks_grid.dart';
 import '../settings/app_settings_provider.dart';
 import 'character_sort.dart';
+import 'dropped_files_provider.dart';
 import 'character_import_persistence_provider.dart';
 import 'character_detail_screen.dart';
+import 'character_editor_screen.dart';
 import 'character_selection_provider.dart';
 import 'filtered_characters_provider.dart';
+import 'widgets/import_progress_dialog.dart';
 import 'widgets/widgets.dart';
+import '../../shared/widgets/glaze_sheet.dart';
 
 class CharacterListScreen extends ConsumerStatefulWidget {
   final String? initialCharacterId;
@@ -70,6 +77,12 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
   final FocusNode _searchFocus = FocusNode();
   bool _searchExpanded = false;
   Timer? _catalogDebounce;
+
+  /// Under the app's title bar (Windows desktop) the search is not a loupe in
+  /// the header but a strip that always leads the column, and search mode
+  /// follows whatever is typed in it. Kept up to date by
+  /// [didChangeDependencies].
+  bool _searchInStrip = false;
   String? _lastOpenedInitialCharacterId;
   bool _openingInitialCharacter = false;
 
@@ -79,11 +92,23 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
   // padding + the bar itself) so content can reserve room.
   static const double _kTabBarBlock = 52.0;
 
-  // Owns the scroll position of whichever list view is currently shown (the
-  // grids attach via PrimaryScrollController), so tapping the active tab can
-  // animate it back to the top.
-  final ScrollController _listScrollController = ScrollController();
+  /// Width the desktop tab strip settles at, leaving the rest of the row to
+  /// the Add button (Vue's `.tabs-row`). Mobile keeps a full-width strip.
+  static const double _kTabStripWidth = 420.0;
+
+  /// Height of the search strip that leads the column under the app's title
+  /// bar (see [_searchInStrip]), its bottom edge included.
+  static const double _kSearchStripBlock = 41.0;
+
+  // Owns one scroll position per sub-tab (the grids attach via
+  // PrimaryScrollController), so tapping the active tab can animate it back to
+  // the top and switching tabs returns each one to where it was left.
+  final TabScrollMemory _tabScroll = TabScrollMemory(tabCount: 2);
   final HeaderScrollHider _headerScrollHider = HeaderScrollHider();
+
+  /// The controller of the sub-tab currently on screen.
+  ScrollController get _activeScrollController =>
+      _tabScroll.controllerFor(_tabIndex);
 
   @override
   void initState() {
@@ -121,7 +146,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     _catalogDebounce?.cancel();
     _searchCtrl.dispose();
     _searchFocus.dispose();
-    _listScrollController.dispose();
+    _tabScroll.dispose();
     super.dispose();
   }
 
@@ -151,9 +176,10 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
   /// Animates the active list back to the top. Guarded so it never reads a
   /// position while two scroll views are briefly attached during a tab switch.
   void _scrollToTop() {
-    if (!_listScrollController.hasClients) return;
-    if (_listScrollController.positions.length != 1) return;
-    _listScrollController.animateTo(
+    final controller = _activeScrollController;
+    if (!controller.hasClients) return;
+    if (controller.positions.length != 1) return;
+    controller.animateTo(
       0,
       duration: const Duration(milliseconds: 400),
       curve: Curves.easeOutCubic,
@@ -168,18 +194,21 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     final catalogVisible = ref.read(catalogVisibleProvider);
     final inFolder = _tabIndex == 0 && _currentFolderId != null;
     final inPicks = inFolder && _currentFolderId == kPicksFolderId;
-    final inSearch = _searchExpanded && !inPicks;
+    final searchStrip = _searchInStrip && !inPicks;
+    final inSearch = _searchExpanded && !inPicks && !_searchInStrip;
+    // Chub's Timeline feed ignores free-text search, so the loupe is locked out
+    // while it's selected on the Discover tab.
+    final timelineLocked =
+        _tabIndex == 1 && ref.read(catalogProvider).chubTimelineActive;
     final folderTitle = inFolder ? _folderName(_currentFolderId!) : null;
     return ShellHeaderConfig(
       title: inSearch
           ? null
-          : (inPicks
-                ? _picksTitle
-                : (folderTitle ?? 'header_characters'.tr())),
+          : (inPicks ? _picksTitle : (folderTitle ?? 'header_characters'.tr())),
       titleWidget: inSearch ? _buildSearchField(context) : null,
       showBack: inFolder,
       onBack: inFolder ? _handleFolderBack : null,
-      actions: inPicks
+      actions: inPicks || _searchInStrip
           ? null
           : [
               SizedBox(
@@ -193,18 +222,35 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
                     size: 22,
                   ),
                   color: context.cs.primary,
-                  onPressed: _searchExpanded ? _closeSearch : _openSearch,
+                  onPressed: timelineLocked && !_searchExpanded
+                      ? null
+                      : (_searchExpanded ? _closeSearch : _openSearch),
                 ),
               ),
             ],
       // The tabs ride inside the header (only at the top level) so they hide and
       // reveal as a single unit with it — one animation, not two. Dropped
-      // entirely when the catalog is disabled (only "My Characters" remains).
-      below: (catalogVisible && !inFolder) ? _buildTabBar() : null,
+      // entirely when the catalog is disabled (only "My Characters" remains) —
+      // except on desktop, where the same row also carries the Add button and
+      // so outlives a hidden catalog.
+      below: searchStrip
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _buildSearchStrip(context, locked: timelineLocked),
+                if (!inFolder) _buildTabBar(),
+              ],
+            )
+          : (!inFolder && (catalogVisible || isDesktopLayout(context)))
+          ? _buildTabBar()
+          : null,
     );
   }
 
   void _openSearch() {
+    // Timeline ignores the query, so don't open the field for it.
+    if (_tabIndex == 1 && ref.read(catalogProvider).chubTimelineActive) return;
     setState(() => _searchExpanded = true);
     refreshShellHeader();
     WidgetsBinding.instance.addPostFrameCallback(
@@ -230,6 +276,8 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
 
   void _onSearchChanged(String value) {
     if (_tabIndex == 1) {
+      // Timeline ignores the query — the field is locked out while it's active.
+      if (ref.read(catalogProvider).chubTimelineActive) return;
       // Discover: debounce the provider query (same 400ms as the Vue header).
       _catalogDebounce?.cancel();
       _catalogDebounce = Timer(const Duration(milliseconds: 400), () {
@@ -248,6 +296,8 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
   void _applySearchForActiveTab() {
     final text = _searchCtrl.text;
     if (_tabIndex == 1) {
+      // Timeline ignores the query — leave its results untouched.
+      if (ref.read(catalogProvider).chubTimelineActive) return;
       _catalogDebounce?.cancel();
       final notifier = ref.read(catalogProvider.notifier);
       notifier.setQuery(text.trim());
@@ -269,6 +319,15 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    // The window crossing between the desktop and mobile layouts moves this
+    // screen in or out of the title bar with its state kept; the published
+    // header has to follow, or the mobile header comes up without its loupe.
+    final inStrip = TitleBarHeaderScope.of(context);
+    if (inStrip != _searchInStrip) {
+      _searchInStrip = inStrip;
+      // Deferred: the registry cannot change while the tree is building.
+      WidgetsBinding.instance.addPostFrameCallback((_) => refreshShellHeader());
+    }
     _maybeOpenInitialCharacter();
   }
 
@@ -296,7 +355,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
       if (_tabIndex != 0 || _searchExpanded) {
         _catalogDebounce?.cancel();
         setState(() {
-          _tabIndex = 0;
+          _switchTab(0);
           _searchExpanded = false;
         });
         refreshShellHeader();
@@ -308,7 +367,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
       if (!mounted) return;
       _lastOpenedInitialCharacterId = charId;
 
-      final result = await showModalBottomSheet<String>(
+      final result = await showGlazeSheet<String>(
         context: context,
         isScrollControlled: true,
         useRootNavigator: true,
@@ -342,10 +401,11 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
       return;
     }
 
+    final controller = _activeScrollController;
     final atTop =
-        !_listScrollController.hasClients ||
-        _listScrollController.positions.length != 1 ||
-        _listScrollController.position.pixels <= 0.5;
+        !controller.hasClients ||
+        controller.positions.length != 1 ||
+        controller.position.pixels <= 0.5;
 
     if (!atTop) {
       _scrollToTop();
@@ -358,7 +418,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     if (_tabIndex == 1) {
       ref.read(characterSelectionProvider.notifier).clear();
       setState(() {
-        _tabIndex = 0;
+        _switchTab(0);
         if (_searchExpanded) _applySearchForActiveTab();
       });
       refreshShellHeader();
@@ -376,6 +436,20 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
       if (next.branchIndex == kCharactersBranchIndex) _onCharactersTabReTap();
     });
 
+    // Cards dropped onto the desktop window (see [DesktopFileDrop]) land here
+    // so they go through the same bulk importer as the file picker.
+    ref.listen(droppedCharacterFilesProvider, (_, paths) {
+      if (paths.isEmpty) return;
+      ref.read(droppedCharacterFilesProvider.notifier).state = const [];
+      _runBulkImport(context, ref, [
+        for (final path in paths)
+          CharacterImportSource(
+            name: path.split(Platform.pathSeparator).last,
+            path: path,
+          ),
+      ]);
+    });
+
     // The shell reveals the header when this branch is re-entered (see
     // [ShellScreen]). Re-baseline the hider so it agrees, instead of holding a
     // stale `hidden` that would swallow the next hide.
@@ -389,9 +463,23 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     ref.listen(catalogVisibleProvider, (_, visible) {
       if (!visible && _tabIndex != 0) {
         ref.read(characterSelectionProvider.notifier).clear();
-        setState(() => _tabIndex = 0);
+        setState(() => _switchTab(0));
       }
       refreshShellHeader();
+    });
+
+    // Selecting Chub's Timeline feed locks the query out. If it lands while the
+    // Discover search is open, close it; either way republish the header so the
+    // loupe disables in step.
+    ref.listen(catalogProvider.select((s) => s.chubTimelineActive), (
+      _,
+      active,
+    ) {
+      if (active && _tabIndex == 1 && _searchExpanded) {
+        _closeSearch();
+      } else {
+        refreshShellHeader();
+      }
     });
 
     // With the catalog hidden the Discover tab can't be reached, so the body
@@ -404,7 +492,15 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     // extra room for the tabs row when it's present so content clears it.
     final inFolder = effectiveTab == 0 && _currentFolderId != null;
     final showTabBar = catalogVisible && !inFolder;
-    final contentTopPad = showTabBar ? topPad + _kTabBarBlock : topPad;
+    // The desktop row survives a hidden catalog because Add lives in it, so
+    // the content below still has to clear it.
+    final showHeaderRow =
+        !inFolder && (catalogVisible || isDesktopLayout(context));
+    final searchStrip =
+        _searchInStrip && !(inFolder && _currentFolderId == kPicksFolderId);
+    final contentTopPad =
+        (showHeaderRow ? topPad + _kTabBarBlock : topPad) +
+        (searchStrip ? _kSearchStripBlock : 0);
 
     // While inside a folder, intercept the system/gesture back so it pops out to
     // the top-level grid instead of bubbling up to the shell (which would exit
@@ -419,12 +515,10 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
       child: Scaffold(
         backgroundColor: Colors.transparent,
         body: Stack(
-        children: [
-          Positioned.fill(
-            child: NotificationListener<ScrollNotification>(
-              onNotification: _onScrollNotification,
-              child: PrimaryScrollController(
-                controller: _listScrollController,
+          children: [
+            Positioned.fill(
+              child: NotificationListener<ScrollNotification>(
+                onNotification: _onScrollNotification,
                 child: SwipeTabSwitcher(
                   // Only the top-level My/Catalog split is swipeable; inside a
                   // folder the strip is hidden and horizontal drags belong to
@@ -434,73 +528,88 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
                   length: 2,
                   onChanged: _onTabSwipe,
                   child: TabSlideSwitcher(
-                  index: effectiveTab,
-                  child: effectiveTab == 1
-                      ? CatalogGrid(
-                          key: const ValueKey('catalog_grid'),
-                          topPadding: contentTopPad,
-                          bottomPadding: navHeight + 20,
+                    index: effectiveTab,
+                    // Each body carries its own scroll controller instead of
+                    // sharing one above the switcher, so the tab sliding away
+                    // keeps scrolling with the controller it was built with and
+                    // every tab comes back at the offset it was left at.
+                    child: effectiveTab == 1
+                        ? _tabScrollScope(
+                            tab: 1,
+                            child: CatalogGrid(
+                              key: const ValueKey('catalog_grid'),
+                              topPadding: contentTopPad,
+                              bottomPadding: navHeight + 20,
+                            ),
+                          )
+                        : _tabScrollScope(
+                            tab: 0,
+                            child: KeyedSubtree(
+                              key: const ValueKey('my_characters'),
+                              child: _buildMyCharacters(
+                                context,
+                                contentTopPad,
+                                navHeight,
+                              ),
+                            ),
+                          ),
+                  ),
+                ),
+              ),
+            ),
+            // The selection bar and the add button share the same bottom slot and
+            // cross-fade/slide between each other so the panel glides in and out
+            // instead of popping.
+            if (effectiveTab == 0 && _currentFolderId != kPicksFolderId)
+              Positioned(
+                left: 16,
+                right: 16,
+                bottom: navHeight + 16,
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 280),
+                  switchInCurve: Curves.easeOut,
+                  switchOutCurve: Curves.easeIn,
+                  transitionBuilder: (child, animation) {
+                    final slide =
+                        Tween<Offset>(
+                          begin: const Offset(0, 0.5),
+                          end: Offset.zero,
+                        ).animate(
+                          CurvedAnimation(
+                            parent: animation,
+                            curve: Curves.easeOutBack,
+                          ),
+                        );
+                    return FadeTransition(
+                      opacity: animation,
+                      child: SlideTransition(position: slide, child: child),
+                    );
+                  },
+                  child: selection.active
+                      ? _SelectionBar(
+                          key: const ValueKey('selection_bar'),
+                          count: selection.count,
+                          onCancel: () => ref
+                              .read(characterSelectionProvider.notifier)
+                              .clear(),
+                          onMore: () =>
+                              _showSelectionActions(context, selection),
                         )
-                      : KeyedSubtree(
-                          key: const ValueKey('my_characters'),
-                          child: _buildMyCharacters(
-                            context,
-                            contentTopPad,
-                            navHeight,
+                      // Desktop moves Add into the tabs row, so the slot
+                      // there holds nothing but the selection bar.
+                      : isDesktopLayout(context)
+                      ? const SizedBox.shrink(
+                          key: ValueKey('add_button_hidden'),
+                        )
+                      : Align(
+                          key: const ValueKey('add_button'),
+                          alignment: Alignment.centerRight,
+                          child: _AddButton(
+                            onTap: () => _showAddSheet(context, ref),
                           ),
                         ),
                 ),
-                ),
               ),
-            ),
-          ),
-          // The selection bar and the add button share the same bottom slot and
-          // cross-fade/slide between each other so the panel glides in and out
-          // instead of popping.
-          if (effectiveTab == 0 && _currentFolderId != kPicksFolderId)
-            Positioned(
-              left: 16,
-              right: 16,
-              bottom: navHeight + 16,
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 280),
-                switchInCurve: Curves.easeOut,
-                switchOutCurve: Curves.easeIn,
-                transitionBuilder: (child, animation) {
-                  final slide =
-                      Tween<Offset>(
-                        begin: const Offset(0, 0.5),
-                        end: Offset.zero,
-                      ).animate(
-                        CurvedAnimation(
-                          parent: animation,
-                          curve: Curves.easeOutBack,
-                        ),
-                      );
-                  return FadeTransition(
-                    opacity: animation,
-                    child: SlideTransition(position: slide, child: child),
-                  );
-                },
-                child: selection.active
-                    ? _SelectionBar(
-                        key: const ValueKey('selection_bar'),
-                        count: selection.count,
-                        onCancel: () => ref
-                            .read(characterSelectionProvider.notifier)
-                            .clear(),
-                        onMore: () =>
-                            _showSelectionActions(context, selection),
-                      )
-                    : Align(
-                        key: const ValueKey('add_button'),
-                        alignment: Alignment.centerRight,
-                        child: _AddButton(
-                          onTap: () => _showAddSheet(context, ref),
-                        ),
-                      ),
-              ),
-            ),
           ],
         ),
       ),
@@ -568,8 +677,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     final infinite = ref.watch(infiniteCharactersProvider(key));
 
     return infinite.when(
-      loading: () =>
-          Center(child: CircularProgressIndicator(color: context.cs.primary)),
+      loading: () => Center(child: GlazeSpinner(color: context.cs.primary)),
       error: (e, _) => Center(
         child: Text(
           '${'title_error'.tr()}: $e',
@@ -677,8 +785,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
   ) {
     final chars = ref.watch(charactersProvider);
     return chars.when(
-      loading: () =>
-          Center(child: CircularProgressIndicator(color: context.cs.primary)),
+      loading: () => Center(child: GlazeSpinner(color: context.cs.primary)),
       error: (e, _) => Center(
         child: Text(
           '${'title_error'.tr()}: $e',
@@ -703,14 +810,13 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
                         style: TextStyle(color: context.cs.onSurfaceVariant),
                       ),
                       if (_filters.isActive)
-                        TextButton(
-                          onPressed: () => setState(
-                            () => _filters = const CharacterListFilters(),
+                        GlazeActionButton(
+                          icon: Icons.filter_alt_off_rounded,
+                          label: 'catalog_clear_tags'.tr(
+                            namedArgs: {'count': '${_filters.activeCount}'},
                           ),
-                          child: Text(
-                            'catalog_clear_tags'.tr(
-                              namedArgs: {'count': '${_filters.activeCount}'},
-                            ),
+                          onTap: () => setState(
+                            () => _filters = const CharacterListFilters(),
                           ),
                         ),
                     ],
@@ -762,8 +868,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     final isFavorites = folderId == kFavoritesFolderId;
     final chars = ref.watch(charactersProvider);
     return chars.when(
-      loading: () =>
-          Center(child: CircularProgressIndicator(color: context.cs.primary)),
+      loading: () => Center(child: GlazeSpinner(color: context.cs.primary)),
       error: (e, _) => Center(
         child: Text(
           '${'title_error'.tr()}: $e',
@@ -825,7 +930,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     }
     final allTags = tagSet.toList()..sort();
 
-    showModalBottomSheet<void>(
+    showGlazeSheet<void>(
       context: context,
       isScrollControlled: true,
       useRootNavigator: true,
@@ -859,6 +964,113 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     );
   }
 
+  /// The search strip leading the column under the app's title bar: the same
+  /// field as the left sidebar's dialog search, run edge to edge with a line
+  /// under it. Disabled while Chub's Timeline (which ignores the query) is on.
+  Widget _buildSearchStrip(BuildContext context, {required bool locked}) {
+    final textStyle = Theme.of(context).textTheme.bodyMedium;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // The field's own fill only spans its line of text, leaving a darker
+        // band under it; the strip carries the fill edge to edge instead.
+        ColoredBox(
+          color:
+              Theme.of(context).inputDecorationTheme.fillColor ??
+              context.cs.surfaceContainerHighest,
+          child: SizedBox(
+            height: _kSearchStripBlock - 1,
+            child: ValueListenableBuilder<TextEditingValue>(
+              valueListenable: _searchCtrl,
+              // Sized by its own even padding, like the sidebar's dialog
+              // search, and centred as a whole: stretched to the strip, the
+              // field left its text sitting high.
+              builder: (context, value, _) => Center(
+                child: TextField(
+                  controller: _searchCtrl,
+                  focusNode: _searchFocus,
+                  enabled: !locked,
+                  onChanged: _onSearchStripChanged,
+                  textInputAction: TextInputAction.search,
+                  cursorColor: context.cs.primary,
+                  style: textStyle,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    filled: false,
+                    hintText: _tabIndex == 1
+                        ? 'catalog_search_placeholder'.tr()
+                        : 'search_characters'.tr(),
+                    hintStyle: textStyle?.copyWith(
+                      color: context.cs.onSurfaceVariant,
+                    ),
+                    // Lines the loupe up with the grid's 16px gutter.
+                    prefixIcon: Padding(
+                      padding: const EdgeInsets.only(left: 16, right: 10),
+                      child: Icon(
+                        Icons.search_rounded,
+                        size: 18,
+                        color: context.cs.primary,
+                      ),
+                    ),
+                    prefixIconConstraints: const BoxConstraints(),
+                    suffixIcon: value.text.isEmpty
+                        ? null
+                        : IconButton(
+                            icon: const Icon(Icons.close_rounded, size: 16),
+                            padding: EdgeInsets.zero,
+                            onPressed: _closeSearch,
+                          ),
+                    // Kept within the strip, so clearing never resizes it.
+                    suffixIconConstraints: const BoxConstraints.tightFor(
+                      width: 40,
+                      height: 32,
+                    ),
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    disabledBorder: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        Divider(height: 1, color: context.cs.outlineVariant),
+      ],
+    );
+  }
+
+  void _onSearchStripChanged(String value) {
+    final active = value.isNotEmpty;
+    if (active != _searchExpanded) setState(() => _searchExpanded = active);
+    _onSearchChanged(value);
+  }
+
+  /// Hands [child] the scroll controller that belongs to [tab].
+  ///
+  /// The grids scroll with the inherited primary controller; the default
+  /// mobile-only inheritance is widened to every platform so the desktop builds
+  /// attach too (otherwise scroll-to-top and the remembered offsets would be
+  /// silent no-ops there).
+  Widget _tabScrollScope({required int tab, required Widget child}) {
+    return PrimaryScrollController(
+      controller: _tabScroll.controllerFor(tab),
+      automaticallyInheritForPlatforms: TargetPlatform.values.toSet(),
+      child: child,
+    );
+  }
+
+  /// Moves the active sub-tab, handing its scroll position over: the tab being
+  /// left remembers where it sits and the one being entered re-attaches at the
+  /// offset it was left at. Callers run it inside their own [setState].
+  void _switchTab(int index) {
+    if (index == _tabIndex) return;
+    _tabScroll.switchTab(from: _tabIndex, to: index);
+    _tabIndex = index;
+  }
+
   /// Switches the active tab in response to a body swipe. Mirrors the tab
   /// strip's `onChanged`, minus the "tap the active tab" branch (a swipe always
   /// resolves to a different tab).
@@ -867,42 +1079,81 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     ref.read(characterSelectionProvider.notifier).clear();
     _showHeader();
     setState(() {
-      _tabIndex = i;
+      _switchTab(i);
       if (_searchExpanded) _applySearchForActiveTab();
     });
     refreshShellHeader();
   }
 
   Widget _buildTabBar() {
-    // Rendered in the shell header's `below` slot, which already supplies the
-    // horizontal padding — only the gap under the app bar is needed here.
+    // Rendered in the shell header's `below` slot. The phone header already
+    // supplies the horizontal padding there; the desktop column runs edge to
+    // edge, so the row takes the grid's 16px gutters itself and lines up with
+    // the sort/filter buttons below.
+    final desktop = isDesktopLayout(context);
     return Padding(
-      padding: const EdgeInsets.only(top: 10),
-      child: GlazeTabBar(
-        tabs: [
-          GlazeTabItem(
-            label: 'tab_my_characters'.tr(),
-            icon: Icons.person_rounded,
+      padding: desktop
+          ? const EdgeInsets.fromLTRB(16, 10, 16, 0)
+          : const EdgeInsets.only(top: 10),
+      child: desktop ? _buildDesktopTabsRow() : _buildTabStrip(),
+    );
+  }
+
+  /// Vue's `.tabs-row`: the strip keeps its natural width on the left and the
+  /// Add button sits at the far right, instead of the strip spanning the whole
+  /// window with Add floating over the grid.
+  Widget _buildDesktopTabsRow() {
+    final catalogVisible = ref.watch(catalogVisibleProvider);
+    return Row(
+      children: [
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: catalogVisible
+                ? ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      maxWidth: _kTabStripWidth,
+                    ),
+                    child: _buildTabStrip(),
+                  )
+                : const SizedBox.shrink(),
           ),
-          GlazeTabItem(label: 'tab_catalog'.tr(), icon: Icons.public_rounded),
+        ),
+        // Mirrors `v-if="activeTab === 'characters'"` — Discover holds nothing
+        // of the user's to add to.
+        if (_tabIndex == 0 || !catalogVisible) ...[
+          const SizedBox(width: 12),
+          _AddButton(height: 42, onTap: () => _showAddSheet(context, ref)),
         ],
-        activeIndex: _tabIndex,
-        onChanged: (i) {
-          // Tapping the already-active tab scrolls its list back to the top.
-          if (i == _tabIndex) {
-            _scrollToTop();
-            _showHeader();
-            return;
-          }
-          ref.read(characterSelectionProvider.notifier).clear();
+      ],
+    );
+  }
+
+  Widget _buildTabStrip() {
+    return GlazeTabBar(
+      tabs: [
+        GlazeTabItem(
+          label: 'tab_my_characters'.tr(),
+          icon: Icons.person_rounded,
+        ),
+        GlazeTabItem(label: 'tab_catalog'.tr(), icon: Icons.public_rounded),
+      ],
+      activeIndex: _tabIndex,
+      onChanged: (i) {
+        // Tapping the already-active tab scrolls its list back to the top.
+        if (i == _tabIndex) {
+          _scrollToTop();
           _showHeader();
-          setState(() {
-            _tabIndex = i;
-            if (_searchExpanded) _applySearchForActiveTab();
-          });
-          refreshShellHeader();
-        },
-      ),
+          return;
+        }
+        ref.read(characterSelectionProvider.notifier).clear();
+        _showHeader();
+        setState(() {
+          _switchTab(i);
+          if (_searchExpanded) _applySearchForActiveTab();
+        });
+        refreshShellHeader();
+      },
     );
   }
 
@@ -916,7 +1167,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
           label: 'action_create_new'.tr(),
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
-            context.push('/character/create');
+            openCharacterCreator(context);
           },
         ),
         BottomSheetItem(
@@ -1063,7 +1314,14 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     String? lastError;
     for (final c in chars) {
       try {
-        await exportCharacterToFile(ref: ref, character: c, format: format);
+        final path = await exportCharacterToFile(
+          ref: ref,
+          character: c,
+          format: format,
+        );
+        // Empty path = the user cancelled the save dialog — stop the loop
+        // instead of counting the file as exported (or re-prompting).
+        if (path.isEmpty) break;
         exported++;
       } catch (e) {
         lastError = '$e';
@@ -1116,7 +1374,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     CharacterSelectionState selection,
   ) {
     final ids = {...selection.ids};
-    showModalBottomSheet<void>(
+    showGlazeSheet<void>(
       context: context,
       isScrollControlled: true,
       useRootNavigator: true,
@@ -1124,8 +1382,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
       backgroundColor: Colors.transparent,
       builder: (_) => AddCharactersToFolderSheet(
         characterIds: ids,
-        onDone: () =>
-            ref.read(characterSelectionProvider.notifier).clear(),
+        onDone: () => ref.read(characterSelectionProvider.notifier).clear(),
       ),
     );
   }
@@ -1210,7 +1467,11 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
       }
     } catch (e) {
       if (!context.mounted) return;
-      GlazeErrorDialog.show(context, e, prefix: 'Import failed: ');
+      GlazeErrorDialog.show(
+        context,
+        e,
+        prefix: 'error_import_failed_prefix'.tr(),
+      );
     }
   }
 
@@ -1241,41 +1502,30 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     if (!context.mounted) return;
     if (assets == null || assets.isEmpty) return;
 
-    final importer = await ref.read(characterImporterProvider.future);
-    final persistence = ref.read(characterImportPersistenceCoordinatorProvider);
-    int imported = 0;
-    String? lastError;
-
+    // Names are resolved up front (a cheap metadata read); the pixels of each
+    // asset are only fetched when its turn comes, one asset at a time.
+    final sources = <CharacterImportSource>[];
     for (final asset in assets) {
       var name = await asset.titleAsync;
       if (name.isEmpty) name = '${asset.id}.png';
-      try {
-        final bytes = await _loadOriginalBytes(asset);
-        if (bytes == null) {
-          lastError =
-              'Failed to import $name: could not load the original (not downloaded from iCloud?)';
-          continue;
-        }
-        final r = await importer.importFromBytes(bytes, name);
-        final persisted = await persistence.persist(r);
-        if (persisted case CharacterImportPersistenceFailure()) {
-          persisted.rethrowError();
-        }
-        imported++;
-      } catch (e) {
-        lastError = 'Failed to import $name: $e';
-      }
+      sources.add(
+        CharacterImportSource(
+          name: name,
+          openBytes: () async {
+            final bytes = await _loadOriginalBytes(asset);
+            if (bytes == null) {
+              throw StateError(
+                'could not load the original (not downloaded from iCloud?)',
+              );
+            }
+            return bytes;
+          },
+        ),
+      );
     }
 
     if (!context.mounted) return;
-    if (imported > 0) {
-      GlazeToast.show(
-        context,
-        '${'import_success'.tr()}: $imported ${'count_characters'.plural(imported)}',
-      );
-    } else if (lastError != null) {
-      GlazeToast.show(context, lastError);
-    }
+    await _runBulkImport(context, ref, sources);
   }
 
   /// Reads the untouched original bytes of a gallery [asset] so embedded PNG
@@ -1295,62 +1545,135 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
           ? null
           : ['png', 'json', 'charx', 'zip'],
       allowMultiple: true,
-      withData: true,
+      // Deliberately NOT `withData: true`: the picker would load every selected
+      // file into memory before returning, and a few hundred cards blow the
+      // heap before a single one is parsed. The runner reads them one at a time
+      // from disk instead (bytes remain the fallback for a pathless pick).
+      withData: false,
     );
     if (!context.mounted) return;
     if (result == null || result.files.isEmpty) return;
 
-    final importer = await ref.read(characterImporterProvider.future);
-    final persistence = ref.read(characterImportPersistenceCoordinatorProvider);
-    int imported = 0;
-    String? lastError;
-
+    final sources = <CharacterImportSource>[];
     for (final file in result.files) {
-      try {
-        CharacterImportResult r;
-        if (file.bytes != null) {
-          r = await importer.importFromBytes(file.bytes!, file.name);
-        } else if (file.path != null) {
-          r = await importer.importFromFile(file.path!);
-        } else {
-          continue;
-        }
-        final persisted = await persistence.persist(r);
-        if (persisted case CharacterImportPersistenceFailure()) {
-          persisted.rethrowError();
-        }
-        imported++;
-      } catch (e) {
-        lastError = 'Failed to import ${file.name}: $e';
+      final path = file.path;
+      final bytes = file.bytes;
+      if (path != null && path.isNotEmpty) {
+        sources.add(CharacterImportSource(name: file.name, path: path));
+      } else if (bytes != null) {
+        sources.add(
+          CharacterImportSource(name: file.name, openBytes: () async => bytes),
+        );
       }
+    }
+    if (sources.isEmpty) return;
+
+    await _runBulkImport(context, ref, sources);
+  }
+
+  /// Runs a mass import serially behind a progress dialog.
+  ///
+  /// One card at a time: read, parse, persist, release — the runner yields to
+  /// the event loop between cards, so the dialog keeps repainting and Cancel
+  /// keeps responding no matter how many files were picked.
+  Future<void> _runBulkImport(
+    BuildContext context,
+    WidgetRef ref,
+    List<CharacterImportSource> sources,
+  ) async {
+    if (sources.isEmpty) return;
+
+    final service = await ref.read(characterBulkImportServiceFactoryProvider)();
+    if (!context.mounted) return;
+
+    final progress = ValueNotifier<CharacterBulkImportProgress>(
+      CharacterBulkImportProgress(
+        completed: 0,
+        total: sources.length,
+        imported: 0,
+        failed: 0,
+        currentName: sources.first.name,
+      ),
+    );
+    var cancelled = false;
+    var dialogOpen = false;
+    var dialogClosed = false;
+    final navigator = Navigator.of(context, rootNavigator: true);
+
+    // A couple of cards import faster than a dialog can animate in; only put one
+    // up for runs long enough to be worth showing.
+    if (sources.length > 1) {
+      dialogOpen = true;
+      unawaited(
+        showImportProgressDialog(
+          context,
+          progress: progress,
+          onCancel: () => cancelled = true,
+        ).whenComplete(() => dialogClosed = true),
+      );
+    }
+
+    CharacterBulkImportReport report;
+    try {
+      report = await service.run(
+        sources,
+        onProgress: (value) => progress.value = value,
+        isCancelled: () => cancelled,
+      );
+    } finally {
+      // Guarded: popping a dialog that is already gone would take the screen
+      // underneath it with it.
+      if (dialogOpen && !dialogClosed) navigator.pop();
+      // The dialog is still animating out with a listener attached, so let it
+      // finish before the notifier goes away.
+      unawaited(
+        Future<void>.delayed(
+          const Duration(milliseconds: 400),
+          progress.dispose,
+        ),
+      );
     }
 
     if (!context.mounted) return;
-    if (imported > 0) {
-      GlazeToast.show(
-        context,
-        '${'import_success'.tr()}: $imported ${'count_characters'.plural(imported)}',
+    if (report.imported > 0) {
+      final summary = StringBuffer(
+        '${'import_success'.tr()}: ${report.imported} '
+        '${'count_characters'.plural(report.imported)}',
       );
-    } else if (lastError != null) {
-      GlazeToast.show(context, lastError);
+      if (report.failed > 0) {
+        final failed = 'import_failed_count'.tr(args: ['${report.failed}']);
+        summary.write(' — $failed');
+      }
+      if (report.cancelled) summary.write(' (${'import_cancelled'.tr()})');
+      GlazeToast.show(context, summary.toString());
+    } else if (report.cancelled) {
+      GlazeToast.show(context, 'import_cancelled'.tr());
+    } else if (report.lastError != null) {
+      GlazeToast.show(context, report.lastError!);
     }
   }
 }
 
 class _AddButton extends StatelessWidget {
   final VoidCallback onTap;
-  const _AddButton({required this.onTap});
+
+  /// 48 as the button floating over the grid on mobile; 42 inline in the
+  /// desktop tabs row, where it lines up with the tab strip beside it.
+  final double height;
+
+  const _AddButton({required this.onTap, this.height = 48});
 
   @override
   Widget build(BuildContext context) {
+    final compact = height < 48;
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        height: 48,
-        padding: const EdgeInsets.symmetric(horizontal: 20),
+        height: height,
+        padding: EdgeInsets.symmetric(horizontal: compact ? 16 : 20),
         decoration: BoxDecoration(
           color: context.cs.primary,
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(height / 2),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.3),
@@ -1362,13 +1685,17 @@ class _AddButton extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.add_rounded, color: Colors.white, size: 24),
-            const SizedBox(width: 8),
+            Icon(
+              Icons.add_rounded,
+              color: Colors.white,
+              size: compact ? 20 : 24,
+            ),
+            SizedBox(width: compact ? 6 : 8),
             Text(
               'btn_add'.tr(),
               style: TextStyle(
                 color: Colors.white,
-                fontSize: 16,
+                fontSize: compact ? 14 : 16,
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -1452,9 +1779,7 @@ class _CircleIconBtn extends StatelessWidget {
         child: GlassSurface(
           borderRadius: BorderRadius.circular(20),
           tint: context.cs.surface,
-          border: Border.all(
-            color: context.cs.primary.withValues(alpha: 0.18),
-          ),
+          border: Border.all(color: context.cs.primary.withValues(alpha: 0.18)),
           child: Center(
             child: Icon(
               icon,

@@ -45,15 +45,19 @@ class ClaudeConversionResult {
 ClaudeConversionResult convertClaudeMessages(
   List<Map<String, dynamic>> input, {
   bool extractPrefill = true,
+  bool useSystemInstruction = true,
 }) {
   // Defensive deep-ish copy so we don't mutate the caller's list / maps.
   final messages = input
       .map((m) => Map<String, dynamic>.from(m))
       .toList(growable: true);
 
-  // 1. Leading system run → `system` parts.
+  // 1. Leading system run → `system` parts. When the caller opts out, the run
+  // stays in `messages` and step 2 turns it into user turns instead.
   final system = <Map<String, dynamic>>[];
-  while (messages.isNotEmpty && messages.first['role'] == 'system') {
+  while (useSystemInstruction &&
+      messages.isNotEmpty &&
+      messages.first['role'] == 'system') {
     final m = messages.removeAt(0);
     final text = _stringifyContent(m['content']);
     if (text.isNotEmpty) {

@@ -5,6 +5,24 @@ import 'package:glaze_flutter/core/llm/prompt_builder.dart';
 import 'package:glaze_flutter/core/models/preset.dart';
 
 void main() {
+  test('PresetBlock JSON preserves independent stash state', () {
+    final block = PresetBlock.fromJson({
+      'id': 'b',
+      'name': 'Block',
+      'role': 'system',
+      'content': 'Text',
+      'enabled': 1,
+      'isStashed': 1,
+    });
+
+    expect(block.enabled, isTrue);
+    expect(block.isStashed, isTrue);
+    expect(
+      PresetBlock.fromJson({...block.toJson()}..remove('isStashed')).isStashed,
+      isFalse,
+    );
+  });
+
   group('PresetBlock.appendToLastMessage', () {
     test('defaults to false on a freshly built block', () {
       final block = PresetBlock(
@@ -44,29 +62,24 @@ void main() {
 
   group('applyAppendToLastMessage', () {
     List<PromptMessage> sampleHistory() => [
-          const PromptMessage(
-            role: 'user',
-            content: 'hi',
-            isHistory: true,
-          ),
-          const PromptMessage(
-            role: 'assistant',
-            content: 'hello there',
-            isHistory: true,
-          ),
-          const PromptMessage(
-            role: 'user',
-            content: 'how are you?',
-            isHistory: true,
-          ),
-        ];
+      const PromptMessage(role: 'user', content: 'hi', isHistory: true),
+      const PromptMessage(
+        role: 'assistant',
+        content: 'hello there',
+        isHistory: true,
+      ),
+      const PromptMessage(
+        role: 'user',
+        content: 'how are you?',
+        isHistory: true,
+      ),
+    ];
 
     test('appends a single block to the last user message', () {
       final history = sampleHistory();
-      applyAppendToLastMessage(
-        history,
-        [(name: 'Lore Jacket', content: '<lore>something</lore>')],
-      );
+      applyAppendToLastMessage(history, [
+        (name: 'Lore Jacket', content: '<lore>something</lore>'),
+      ]);
 
       final lastUser = history.lastWhere((m) => m.role == 'user');
       expect(lastUser.content, contains('how are you?'));
@@ -97,10 +110,7 @@ void main() {
           blockName: 'Original',
         ),
       ];
-      applyAppendToLastMessage(
-        history,
-        [(name: 'Lore', content: 'XX')],
-      );
+      applyAppendToLastMessage(history, [(name: 'Lore', content: 'XX')]);
       expect(history.first.blockName, 'Original + Lore');
     });
 
@@ -110,10 +120,9 @@ void main() {
         const PromptMessage(role: 'system', content: 'b', isHistory: true),
       ];
       final before = history.map((m) => m.content).toList();
-      applyAppendToLastMessage(
-        history,
-        [(name: 'X', content: 'should not appear')],
-      );
+      applyAppendToLastMessage(history, [
+        (name: 'X', content: 'should not appear'),
+      ]);
       final after = history.map((m) => m.content).toList();
       expect(after, equals(before));
     });
@@ -141,93 +150,113 @@ void main() {
       final history = [
         const PromptMessage(role: 'user', content: 'only', isHistory: true),
       ];
-      applyAppendToLastMessage(
-        history,
-        [(name: 'X', content: 'appended')],
-      );
+      applyAppendToLastMessage(history, [(name: 'X', content: 'appended')]);
       expect(history.single.content, 'only\n\nappended');
       expect(history.single.role, 'user');
     });
   });
 
-  group('Memory injection with appendToLastMessage block containing {{summary}}', () {
-    // Regression: previously when an appendToLastMessage block contained a
-    // {{summary}} macro with summary_macro injection target, the
-    // _injectMemoryBlock fallback also fired (because appendToLastMessage
-    // blocks are stripped from the messages list and their isSummary flag
-    // became invisible to the lookup). The result was the same memory
-    // content sent twice — once inline via {{summary}} and once as a
-    // separate "Memory Book" system message.
-    test('summary_macro with appendToLastMessage block does not double-inject', () {
-      // Simulate the buildPrompt state: messages list (without the
-      // appendToLast block) and the appendedEntries list. The fix in
-      // prompt_builder.dart checks BOTH before deciding to inject a
+  group(
+    'Memory injection with appendToLastMessage block containing {{summary}}',
+    () {
+      // Regression: previously when an appendToLastMessage block contained a
+      // {{summary}} macro with summary_macro injection target, the
+      // _injectMemoryBlock fallback also fired (because appendToLastMessage
+      // blocks are stripped from the messages list and their isSummary flag
+      // became invisible to the lookup). The result was the same memory
+      // content sent twice — once inline via {{summary}} and once as a
       // separate "Memory Book" system message.
-      final messages = <PromptMessage>[
-        const PromptMessage(
-          role: 'system',
-          content: 'reasoning system prompt',
-          blockId: 'cot',
-        ),
-        const PromptMessage(
-          role: 'assistant',
-          content: 'hello there',
-          isHistory: true,
-        ),
-        const PromptMessage(
-          role: 'user',
-          content: 'how are you?',
-          isHistory: true,
-        ),
-      ];
+      test(
+        'summary_macro with appendToLastMessage block does not double-inject',
+        () {
+          // Simulate the buildPrompt state: messages list (without the
+          // appendToLast block) and the appendedEntries list. The fix in
+          // prompt_builder.dart checks BOTH before deciding to inject a
+          // separate "Memory Book" system message.
+          final messages = <PromptMessage>[
+            const PromptMessage(
+              role: 'system',
+              content: 'reasoning system prompt',
+              blockId: 'cot',
+            ),
+            const PromptMessage(
+              role: 'assistant',
+              content: 'hello there',
+              isHistory: true,
+            ),
+            const PromptMessage(
+              role: 'user',
+              content: 'how are you?',
+              isHistory: true,
+            ),
+          ];
 
-      // Track whether any appendToLastMessage block carries the {{summary}}
-      // macro marker (isSummary=true set by the resolver in buildPrompt).
-      final appendedHasSummary = true;
+          // Track whether any appendToLastMessage block carries the {{summary}}
+          // macro marker (isSummary=true set by the resolver in buildPrompt).
+          final appendedHasSummary = true;
 
-      // Replicate the lookup contract added in prompt_builder.dart.
-      final hasSummaryBlock =
-          messages.any((m) => m.isSummary) || appendedHasSummary;
+          // Replicate the lookup contract added in prompt_builder.dart.
+          final hasSummaryBlock =
+              messages.any((m) => m.isSummary) || appendedHasSummary;
 
-      expect(hasSummaryBlock, isTrue,
-          reason: 'A {{summary}}-bearing block must be detected even if it '
-              'is only present in the appendToLastMessage list');
-    });
-  });
+          expect(
+            hasSummaryBlock,
+            isTrue,
+            reason:
+                'A {{summary}}-bearing block must be detected even if it '
+                'is only present in the appendToLastMessage list',
+          );
+        },
+      );
+    },
+  );
 
   group('INV-PS9: appendToLastMessage blocks must not leak into messages', () {
     // Regression: previously the block was added to messages in addition to
     // being merged into the last user message, causing the same content to
     // be sent twice in the prompt.
-    test('appended block is not added as a separate message in buildPrompt', () {
-      // We can't easily construct a full buildPrompt call here, but the
-      // invariant is enforced by the same code path that builds messages.
-      // This test asserts the contract: given a list of preset blocks, a
-      // block with appendToLastMessage=true should NOT be passed through
-      // as a top-level messages entry — its content is consumed by
-      // applyAppendToLastMessage.
-      final history = [
-        const PromptMessage(role: 'user', content: 'hi', isHistory: true),
-        const PromptMessage(role: 'assistant', content: 'hello', isHistory: true),
-        const PromptMessage(role: 'user', content: 'how are you?', isHistory: true),
-      ];
-      const blockContent = '<lore>jacket</lore>';
+    test(
+      'appended block is not added as a separate message in buildPrompt',
+      () {
+        // We can't easily construct a full buildPrompt call here, but the
+        // invariant is enforced by the same code path that builds messages.
+        // This test asserts the contract: given a list of preset blocks, a
+        // block with appendToLastMessage=true should NOT be passed through
+        // as a top-level messages entry — its content is consumed by
+        // applyAppendToLastMessage.
+        final history = [
+          const PromptMessage(role: 'user', content: 'hi', isHistory: true),
+          const PromptMessage(
+            role: 'assistant',
+            content: 'hello',
+            isHistory: true,
+          ),
+          const PromptMessage(
+            role: 'user',
+            content: 'how are you?',
+            isHistory: true,
+          ),
+        ];
+        const blockContent = '<lore>jacket</lore>';
 
-      applyAppendToLastMessage(
-        history,
-        [(name: 'Lore Jacket', content: blockContent)],
-      );
+        applyAppendToLastMessage(history, [
+          (name: 'Lore Jacket', content: blockContent),
+        ]);
 
-      // The last user message now contains the merged content.
-      final lastUser = history.lastWhere((m) => m.role == 'user');
-      expect(lastUser.content, contains(blockContent));
+        // The last user message now contains the merged content.
+        final lastUser = history.lastWhere((m) => m.role == 'user');
+        expect(lastUser.content, contains(blockContent));
 
-      // No other message in history contains the block content.
-      for (final m in history) {
-        if (identical(m, lastUser)) continue;
-        expect(m.content, isNot(contains(blockContent)),
-            reason: 'block content leaked into ${m.role} message');
-      }
-    });
+        // No other message in history contains the block content.
+        for (final m in history) {
+          if (identical(m, lastUser)) continue;
+          expect(
+            m.content,
+            isNot(contains(blockContent)),
+            reason: 'block content leaked into ${m.role} message',
+          );
+        }
+      },
+    );
   });
 }

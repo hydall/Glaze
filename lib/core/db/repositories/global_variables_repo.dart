@@ -15,9 +15,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// would push the payload past the cap are rejected with
 /// [ArgumentError] so the caller can surface a JS error.
 class GlobalVariablesRepo {
-  GlobalVariablesRepo._({
-    required this._prefsLoader,
-  });
+  GlobalVariablesRepo._({required this._prefsLoader});
 
   static const _defaultStorageKey = 'glaze.global_variables';
   static const _defaultMaxJsonBytes = 64 * 1024;
@@ -32,8 +30,7 @@ class GlobalVariablesRepo {
   /// (e.g. `SharedPreferences.setMockInitialValues({})`).
   factory GlobalVariablesRepo.withPrefsLoader(
     Future<SharedPreferences> Function() loader,
-  ) =>
-      GlobalVariablesRepo._(prefsLoader: loader());
+  ) => GlobalVariablesRepo._(prefsLoader: loader());
 
   final Future<SharedPreferences> _prefsLoader;
   final String _storageKey = _defaultStorageKey;

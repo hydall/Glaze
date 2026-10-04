@@ -6,9 +6,23 @@
 class LlmProtocol {
   LlmProtocol._();
 
-  /// OpenAI Chat Completions API and any OpenAI-compatible custom endpoint.
+  /// Official OpenAI Chat Completions API.
   /// Auth: `Authorization: Bearer`. URL: `{endpoint}/v1/chat/completions`.
   static const String openai = 'openai';
+
+  /// Custom endpoint implementing the Chat Completions wire format.
+  /// Custom providers may accept `reasoning_effort` values beyond the
+  /// official provider scale, including `max`.
+  static const String customChatCompletion = 'custom_chat_completion';
+
+  /// OpenAI Responses API and any endpoint implementing it. Same auth and
+  /// endpoint shape as [openai], different body (`input` instead of
+  /// `messages`, `max_output_tokens`, `reasoning: {effort, summary}`) and a
+  /// typed SSE event stream. URL: `{endpoint}/v1/responses`.
+  ///
+  /// Was a boolean opt-in (`ApiConfig.useResponsesApi`) before it became a
+  /// protocol of its own; that field is now derived from this value.
+  static const String openaiResponses = 'openai_responses';
 
   /// Anthropic Messages API (`/v1/messages`). Auth: `x-api-key`.
   /// Supports prefill (last assistant message), prompt caching, extended
@@ -25,10 +39,19 @@ class LlmProtocol {
   /// signatures.
   static const String openrouter = 'openrouter';
 
-  static const List<String> all = [openai, anthropic, gemini, openrouter];
+  static const List<String> all = [
+    openai,
+    customChatCompletion,
+    openaiResponses,
+    anthropic,
+    gemini,
+    openrouter,
+  ];
 
   static const Map<String, String> labels = {
-    openai: 'Custom (OpenAI Compatible)',
+    openai: 'OpenAI (Chat Completions)',
+    customChatCompletion: 'Custom Chat Completion',
+    openaiResponses: 'OpenAI (Responses)',
     anthropic: 'Anthropic',
     gemini: 'Google Gemini',
     openrouter: 'OpenRouter',

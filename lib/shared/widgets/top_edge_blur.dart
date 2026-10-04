@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/rendering.dart';
@@ -33,6 +34,48 @@ class TopEdgeBlur extends StatelessWidget {
   /// Fraction of [height] that stays fully blurred before the effect fades
   /// to transparent at the strip's bottom edge.
   final double fadeStart;
+
+  /// Logical height of the region captured for the edge blur in the most recent
+  /// resample. Test-only hook asserting the capture stays bounded to the strip
+  /// instead of spanning the whole child subtree.
+  @visibleForTesting
+  static double? debugLastSampleHeight;
+
+  /// Forces the capture resolution instead of deriving it from the sigma.
+  /// Test-only: it is what lets a test render the same strip at the device's
+  /// full resolution and compare.
+  @visibleForTesting
+  static double? debugSampleRatioOverride;
+
+  /// Texels kept per sigma when capturing the strip. A Gaussian leaves
+  /// essentially nothing below a wavelength of 2σ — a component there comes out
+  /// at under 1% of its amplitude — so three samples per sigma is already past
+  /// what the blur can carry. Capturing at that rather than at the device's own
+  /// resolution shrinks both the offscreen and the blur over it by the square
+  /// of the ratio, every frame the strip is resampled.
+  static const double _texelsPerSigma = 3;
+
+  /// Floor for the capture resolution. What the sigma rule does not account for
+  /// is the strip's edges — the gradient's start and the unblurred content just
+  /// past the margin — which are where a too-coarse capture shows its grid.
+  static const double _minSampleRatio = 0.5;
+
+  /// Pixels per logical unit the strip is captured at.
+  ///
+  /// [sigma] is in the captured image's own pixels at the device's resolution
+  /// — the width this fork inherited from `soft_edge_blur` — so the radius in
+  /// logical units is `sigma / devicePixelRatio`, and that is what decides how
+  /// many samples the capture needs.
+  static double sampleRatioFor(double sigma, double devicePixelRatio) {
+    final override = debugSampleRatioOverride;
+    if (override != null) return override;
+    if (sigma <= 0 || devicePixelRatio <= 0) return devicePixelRatio;
+    final sigmaLogical = sigma / devicePixelRatio;
+    return math.min(
+      devicePixelRatio,
+      math.max(_minSampleRatio, _texelsPerSigma / sigmaLogical),
+    );
+  }
 
   const TopEdgeBlur({
     super.key,
@@ -292,12 +335,37 @@ class _TopEdgeBlurLayer extends OffsetLayer {
       offset.dy,
       oldLayer: engineLayer as ui.OffsetEngineLayer?,
     );
-    builder.addPicture(Offset.zero, _picture!);
+    // Paint the child's own layers normally (the scroll body repaints
+    // independently of the edge effect) and overlay only the sample of the
+    // top strip. Previously this layer replaced the whole child with a
+    // full-body capture, so every body repaint re-rasterised the entire
+    // subtree at device resolution — expensive on a sheet whose body
+    // relayouts on every drag/animation tick.
+    addChildrenToScene(builder);
+    if (_picture != null) {
+      builder.addPicture(Offset.zero, _picture!);
+    }
     builder.pop();
   }
 
+  /// Pixels per logical unit this layer captures at — well under the device's
+  /// own, since a blur this wide carries no detail that finer sampling could
+  /// preserve. See [TopEdgeBlur.sampleRatioFor].
+  double get _sampleRatio =>
+      TopEdgeBlur.sampleRatioFor(_sigma, _devicePixelRatio);
+
   void _resample() {
-    final image = _buildChildScene(_contentSize, _devicePixelRatio);
+    // Only the strip along the top edge is ever blurred, so capture that
+    // region (plus a blur-radius margin) rather than the full child. The
+    // offscreen cost then scales with the (small) strip instead of the whole
+    // (potentially screen-tall) body.
+    final margin = _sigma * 2 + 4;
+    final sampleHeight = math.min(_contentSize.height, _stripHeight + margin);
+    TopEdgeBlur.debugLastSampleHeight = sampleHeight;
+    final image = _buildChildScene(
+      Size(_contentSize.width, sampleHeight),
+      _sampleRatio,
+    );
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
     try {
@@ -321,20 +389,20 @@ class _TopEdgeBlurLayer extends OffsetLayer {
     );
   }
 
-  /// Paints the sampled child plus the blurred/tinted/gradient-masked strip.
-  /// The drawing math mirrors soft_edge_blur 0.1.3 exactly for visual parity.
+  /// Paints the blurred/tinted/gradient-masked strip sampled by
+  /// [_buildChildScene]. The child's own layers are painted separately in
+  /// [addToScene], so only the strip overlay is recorded here. The drawing math
+  /// mirrors soft_edge_blur 0.1.3 exactly for visual parity.
   void _draw(ui.Image image, Canvas canvas) {
-    canvas.scale(1 / _devicePixelRatio);
-    canvas.drawImage(image, Offset.zero, Paint());
+    // The sample's own resolution, not the device's: the picture is recorded in
+    // those units and scaled back out, so it still rasterises at full device
+    // resolution — only the captured pixels underneath are coarser.
+    final ratio = _sampleRatio;
+    canvas.scale(1 / ratio);
 
     final strip = _stripHeight.clamp(0.0, _contentSize.height);
     if (strip <= 0) return;
-    final rect = Rect.fromLTRB(
-      0,
-      0,
-      _contentSize.width * _devicePixelRatio,
-      strip * _devicePixelRatio,
-    );
+    final rect = Rect.fromLTRB(0, 0, _contentSize.width * ratio, strip * ratio);
 
     final gradient = ui.Gradient.linear(
       rect.topCenter,
@@ -344,13 +412,18 @@ class _TopEdgeBlurLayer extends OffsetLayer {
     );
 
     canvas.saveLayer(rect, Paint());
+    // The radius has to be restated in the sample's pixels: the sigma is
+    // quoted at the device's resolution, and the capture is coarser than that.
+    // At `ratio == _devicePixelRatio` this is the sigma unchanged, so the
+    // effect is the same width on screen either way.
+    final sampleSigma = _sigma * ratio / _devicePixelRatio;
     canvas.drawImage(
       image,
       Offset.zero,
       Paint()
         ..imageFilter = ui.ImageFilter.blur(
-          sigmaX: _sigma,
-          sigmaY: _sigma,
+          sigmaX: sampleSigma,
+          sigmaY: sampleSigma,
           tileMode: TileMode.clamp,
         ),
     );

@@ -1,14 +1,14 @@
 // Tests for the `ConnectionProfileResolver`.
 //
-// The resolver maps `glaze.generateText({ preset })`'s `big` / `medium` /
-// `small` request to an [ApiConfig] from the user's list. The mapping
-// comes from the active extension preset's [ConnectionProfiles]:
+// The resolver answers `glaze.generateText({ preset })` with the connection
+// the active extension preset runs on. A preset has one, so `big` / `medium` /
+// `small` all resolve to it:
 //
-//   * When a profile slot is configured, the matching [ApiConfig] is
+//   * When the preset names a connection, the matching [ApiConfig] is
 //     returned (or the resolver falls through to the active fallback
 //     when the id no longer exists in the config list).
-//   * When the slot is empty, the resolver falls through to the
-//     active API config (this is the legacy single-config behaviour).
+//   * When it names none, the resolver falls through to the active API
+//     config (this is the legacy single-config behaviour).
 //   * When the active fallback is also `null`, the resolver returns
 //     `null` and the bridge surfaces a `StateError`.
 
@@ -20,12 +20,12 @@ import 'package:glaze_flutter/features/extensions/models/extension_preset.dart';
 import 'package:glaze_flutter/features/extensions/services/connection_profile_resolver.dart';
 
 ApiConfig _config(String id, String name) => ApiConfig(
-      id: id,
-      name: name,
-      endpoint: 'https://example.com/v1',
-      apiKey: 'k-$id',
-      model: 'm-$id',
-    );
+  id: id,
+  name: name,
+  endpoint: 'https://example.com/v1',
+  apiKey: 'k-$id',
+  model: 'm-$id',
+);
 
 void main() {
   group('ConnectionProfileX.parse', () {
@@ -67,10 +67,10 @@ void main() {
       expect(got, same(activeFallback));
     });
 
-    test('empty profile slot falls back to active config', () {
+    test('a preset naming no connection falls back to active config', () {
       final preset = ExtensionPreset(
         id: 'p1',
-        name: 'No profiles',
+        name: 'No connection',
         blocks: const [],
       );
       final got = resolver.resolve(
@@ -82,26 +82,38 @@ void main() {
       expect(got, same(activeFallback));
     });
 
-    test('configured big slot resolves to the matching config', () {
+    test('every profile resolves to the preset\'s one connection', () {
       final preset = ExtensionPreset(
         id: 'p1',
-        name: 'Has big',
+        name: 'Has a connection',
         blocks: const [],
-        connectionProfiles:
-            const ConnectionProfiles(big: 'b', medium: 'a', small: 'c'),
+        apiConfigId: 'b',
       );
-      expect(
-        resolver.resolve(preset, ConnectionProfile.big, activeFallback, configs),
-        same(configs[1]),
-      );
+      for (final profile in ConnectionProfile.values) {
+        expect(
+          resolver.resolve(preset, profile, activeFallback, configs),
+          same(configs[1]),
+          reason: 'the requested profile does not change the connection',
+        );
+      }
+    });
+
+    test('a preset stored with connection profiles keeps its connection', () {
+      // Written before the three profiles collapsed into one.
+      final preset = ExtensionPreset.fromJson(const {
+        'id': 'p1',
+        'name': 'Legacy',
+        'blocks': <Map<String, dynamic>>[],
+        'connectionProfiles': {'big': '', 'medium': 'c', 'small': 'a'},
+      });
+      expect(preset.apiConfigId, 'c');
       expect(
         resolver.resolve(
-            preset, ConnectionProfile.medium, activeFallback, configs),
-        same(configs[0]),
-      );
-      expect(
-        resolver.resolve(
-            preset, ConnectionProfile.small, activeFallback, configs),
+          preset,
+          ConnectionProfile.big,
+          activeFallback,
+          configs,
+        ),
         same(configs[2]),
       );
     });
@@ -111,7 +123,7 @@ void main() {
         id: 'p1',
         name: 'Stale id',
         blocks: const [],
-        connectionProfiles: const ConnectionProfiles(big: 'deleted-id'),
+        apiConfigId: 'deleted-id',
       );
       final got = resolver.resolve(
         preset,
@@ -119,8 +131,11 @@ void main() {
         activeFallback,
         configs,
       );
-      expect(got, same(activeFallback),
-          reason: 'fall-through when the configured id no longer exists');
+      expect(
+        got,
+        same(activeFallback),
+        reason: 'fall-through when the configured id no longer exists',
+      );
     });
 
     test('returns null when no config and no fallback', () {
@@ -128,7 +143,7 @@ void main() {
         id: 'p1',
         name: 'Empty',
         blocks: const [],
-        connectionProfiles: const ConnectionProfiles(big: 'missing'),
+        apiConfigId: 'missing',
       );
       final got = resolver.resolve(
         preset,

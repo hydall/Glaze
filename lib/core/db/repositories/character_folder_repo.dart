@@ -12,22 +12,21 @@ class CharacterFolderRepo {
   // ── Folders ────────────────────────────────────────────────────────────
 
   Stream<List<CharacterFolder>> watchFolders() {
-    return (_db.select(_db.characterFolders)
-          ..orderBy([
-            (t) => OrderingTerm.asc(t.sortOrder),
-            (t) => OrderingTerm.asc(t.createdAt),
-          ]))
+    return (_db.select(_db.characterFolders)..orderBy([
+          (t) => OrderingTerm.asc(t.sortOrder),
+          (t) => OrderingTerm.asc(t.createdAt),
+        ]))
         .watch()
         .map((rows) => rows.map(_toModel).toList());
   }
 
   Future<List<CharacterFolder>> getFolders() async {
-    final rows = await (_db.select(_db.characterFolders)
-          ..orderBy([
-            (t) => OrderingTerm.asc(t.sortOrder),
-            (t) => OrderingTerm.asc(t.createdAt),
-          ]))
-        .get();
+    final rows =
+        await (_db.select(_db.characterFolders)..orderBy([
+              (t) => OrderingTerm.asc(t.sortOrder),
+              (t) => OrderingTerm.asc(t.createdAt),
+            ]))
+            .get();
     return rows.map(_toModel).toList();
   }
 
@@ -41,7 +40,9 @@ class CharacterFolderRepo {
       createdAt: now,
       updatedAt: now,
     );
-    await _db.into(_db.characterFolders).insert(
+    await _db
+        .into(_db.characterFolders)
+        .insert(
           CharacterFoldersCompanion(
             folderId: Value(folder.id),
             name: Value(folder.name),
@@ -55,9 +56,9 @@ class CharacterFolderRepo {
   }
 
   Future<void> rename(String folderId, String name) async {
-    await (_db.update(_db.characterFolders)
-          ..where((t) => t.folderId.equals(folderId)))
-        .write(
+    await (_db.update(
+      _db.characterFolders,
+    )..where((t) => t.folderId.equals(folderId))).write(
       CharacterFoldersCompanion(
         name: Value(name),
         updatedAt: Value(currentTimestampSeconds()),
@@ -66,9 +67,9 @@ class CharacterFolderRepo {
   }
 
   Future<void> setColor(String folderId, String? color) async {
-    await (_db.update(_db.characterFolders)
-          ..where((t) => t.folderId.equals(folderId)))
-        .write(
+    await (_db.update(
+      _db.characterFolders,
+    )..where((t) => t.folderId.equals(folderId))).write(
       CharacterFoldersCompanion(
         color: Value(color),
         updatedAt: Value(currentTimestampSeconds()),
@@ -79,12 +80,12 @@ class CharacterFolderRepo {
   /// Deletes the folder and its membership rows (characters are untouched).
   Future<void> delete(String folderId) async {
     await _db.transaction(() async {
-      await (_db.delete(_db.characterFolderMembers)
-            ..where((t) => t.folderId.equals(folderId)))
-          .go();
-      await (_db.delete(_db.characterFolders)
-            ..where((t) => t.folderId.equals(folderId)))
-          .go();
+      await (_db.delete(
+        _db.characterFolderMembers,
+      )..where((t) => t.folderId.equals(folderId))).go();
+      await (_db.delete(
+        _db.characterFolders,
+      )..where((t) => t.folderId.equals(folderId))).go();
     });
   }
 
@@ -95,16 +96,18 @@ class CharacterFolderRepo {
   }
 
   Future<Set<String>> getFolderIdsForChar(String charId) async {
-    final rows = await (_db.select(_db.characterFolderMembers)
-          ..where((t) => t.charId.equals(charId)))
-        .get();
+    final rows = await (_db.select(
+      _db.characterFolderMembers,
+    )..where((t) => t.charId.equals(charId))).get();
     return rows.map((r) => r.folderId).toSet();
   }
 
   /// Idempotent: re-adding a character already in the folder is a no-op, which
   /// enforces the "no duplicates within a folder" rule (composite PK).
   Future<void> addMember(String folderId, String charId) async {
-    await _db.into(_db.characterFolderMembers).insertOnConflictUpdate(
+    await _db
+        .into(_db.characterFolderMembers)
+        .insertOnConflictUpdate(
           CharacterFolderMembersCompanion(
             folderId: Value(folderId),
             charId: Value(charId),
@@ -120,9 +123,9 @@ class CharacterFolderRepo {
   }
 
   Future<void> deleteMembersForChar(String charId) async {
-    await (_db.delete(_db.characterFolderMembers)
-          ..where((t) => t.charId.equals(charId)))
-        .go();
+    await (_db.delete(
+      _db.characterFolderMembers,
+    )..where((t) => t.charId.equals(charId))).go();
   }
 
   Future<List<CharacterFolderMemberRow>> getAllMembers() async {
@@ -145,11 +148,11 @@ class CharacterFolderRepo {
   }
 
   CharacterFolder _toModel(CharacterFolderRow r) => CharacterFolder(
-        id: r.folderId,
-        name: r.name,
-        color: r.color,
-        sortOrder: r.sortOrder,
-        createdAt: r.createdAt,
-        updatedAt: r.updatedAt,
-      );
+    id: r.folderId,
+    name: r.name,
+    color: r.color,
+    sortOrder: r.sortOrder,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  );
 }

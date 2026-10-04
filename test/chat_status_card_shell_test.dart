@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:glaze_flutter/features/chat/widgets/chat_status_card_shell.dart';
+import 'package:glaze_flutter/shared/widgets/glaze_spinner.dart';
 
 void main() {
   testWidgets('renders the shared decoration and spinner/action slots', (
@@ -26,11 +27,11 @@ void main() {
     );
 
     expect(find.text('Working'), findsOneWidget);
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(find.byType(GlazeSpinner), findsOneWidget);
     expect(find.byIcon(Icons.sync), findsNothing);
     expect(find.byTooltip('Stop work'), findsOneWidget);
     expect(
-      tester.getSize(find.byType(CircularProgressIndicator)),
+      tester.getSize(find.byType(GlazeSpinner)),
       const Size.square(18),
     );
 
@@ -68,7 +69,7 @@ void main() {
 
     expect(find.text('Complete'), findsOneWidget);
     expect(find.byIcon(Icons.check_circle_outline), findsOneWidget);
-    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(find.byType(GlazeSpinner), findsNothing);
 
     final text = tester.widget<Text>(find.text('Complete'));
     expect(text.maxLines, 1);

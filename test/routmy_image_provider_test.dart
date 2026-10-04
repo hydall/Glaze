@@ -26,62 +26,69 @@ void main() {
     );
   }
 
-  group('RoutmyImageProvider Seedream references', () {
-    for (final referenceCount in [0, 1, 2]) {
-      test('uses generations with $referenceCount reference(s)', () async {
-        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-        addTearDown(server.close);
-
-        late Uri requestUri;
-        late String requestMethod;
-        late Map<String, dynamic> requestBody;
-        final requestHandled = server.first.then((request) async {
-          requestUri = request.uri;
-          requestMethod = request.method;
-          requestBody =
-              jsonDecode(await utf8.decoder.bind(request).join())
-                  as Map<String, dynamic>;
-          request.response.headers.contentType = ContentType.json;
-          request.response.write(
-            jsonEncode({
-              'data': [
-                {'b64_json': 'AQ=='},
-              ],
-            }),
-          );
-          await request.response.close();
-        });
-
-        final provider = RoutmyImageProvider(
-          baseUrl: 'http://${server.address.host}:${server.port}',
-        );
-        final references = List.generate(referenceCount, (_) => 'iVBORw0KGgo=');
-
-        final bytes = await provider.generate(
-          apiKey: 'test-key',
-          model: 'bytedance/seedream-5.0-pro',
-          prompt: 'test prompt',
-          aspectRatio: '1:1',
-          imageSize: '1K',
-          quality: 'auto',
-          referenceImages: references,
-        );
-        await requestHandled;
-
-        expect(requestUri.path, '/v1/images/generations');
-        expect(requestMethod, 'POST');
-        expect(bytes, [1]);
-        if (referenceCount == 0) {
-          expect(requestBody, isNot(contains('image')));
-        } else if (referenceCount == 1) {
-          final expectedRef = 'data:image/png;base64,${references.first}';
-          expect(requestBody['image'], expectedRef);
-        } else {
-          final expectedRef = 'data:image/png;base64,${references.first}';
-          expect(requestBody['image'], [expectedRef, expectedRef]);
-        }
+  group('RoutmyImageProvider routing', () {
+    test('generation-only models drop references', () async {
+      final fixture = await createProvider({
+        'data': [
+          {'b64_json': 'AQ=='},
+        ],
       });
-    }
+
+      final bytes = await fixture.provider.generate(
+        apiKey: 'test-key',
+        model: 'google/gemini-3.1-flash-image-preview',
+        prompt: 'test prompt',
+        aspectRatio: '1:1',
+        imageSize: '1K',
+        quality: 'standard',
+        referenceImages: const ['aW1n'],
+      );
+      final request = await fixture.request;
+
+      expect(bytes, [1]);
+      expect(request, isNot(contains('image')));
+    });
+
+    test('edit-capable models send references to /v1/images/edits', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      final requests = <HttpRequest>[];
+      final bodies = <String>[];
+      server.listen((request) async {
+        requests.add(request);
+        bodies.add(await utf8.decoder.bind(request).join());
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'data': [
+              {'b64_json': 'AQ=='},
+            ],
+          }),
+        );
+        await request.response.close();
+      });
+
+      final provider = RoutmyImageProvider(
+        baseUrl: 'http://${server.address.host}:${server.port}',
+      );
+      final bytes = await provider.generate(
+        apiKey: 'test-key',
+        model: 'openai/gpt-image-2',
+        prompt: 'test prompt',
+        aspectRatio: '1:1',
+        imageSize: '1K',
+        quality: 'standard',
+        referenceImages: const ['aW1n'],
+      );
+
+      expect(requests.single.uri.path, '/v1/images/edits');
+      expect(
+        requests.single.headers.contentType?.mimeType,
+        'multipart/form-data',
+      );
+      expect(bodies.single, contains('name="image"'));
+      expect(bytes, [1]);
+    });
   });
 
   group('RoutmyImageProvider Seedream contract', () {

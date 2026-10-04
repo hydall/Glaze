@@ -1,12 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/platform/desktop_window.dart';
 import '../theme/app_colors.dart';
+import '../shell/desktop/sidebar_sheet_provider.dart';
 import '../shell/nav_height_provider.dart';
 import '../shell/shell_header_provider.dart';
+import '../shell/title_bar_header.dart';
 import '../../features/settings/app_settings_provider.dart';
+import 'card_backdrop.dart';
+import 'glass_surface.dart';
 import 'glaze_background.dart';
 import 'glaze_scaffold.dart';
+import 'glaze_sheet.dart';
 import 'top_edge_blur.dart';
 
 /// Corner radius of a modal sheet's top edge, kept constant at every height so
@@ -46,6 +52,11 @@ class SheetView extends ConsumerStatefulWidget {
   final Widget? titleWidget;
   final bool showBack;
   final VoidCallback? onBack;
+
+  /// A step back within this sheet's own content — an entry's editor back to
+  /// its list — while it has one to take. A desktop window's title bar shows
+  /// it as its back button (see [ShellHeaderConfig.innerBack]).
+  final VoidCallback? innerBack;
   final List<SheetViewAction> actions;
   final List<SheetViewTab> tabs;
   final String? activeTabId;
@@ -67,12 +78,25 @@ class SheetView extends ConsumerStatefulWidget {
   final int? shellBranchIndex;
   final bool enableHeaderBlur;
 
+  /// Whether a system/gesture back may dismiss the sheet outright.
+  ///
+  /// Set it to false while the body is showing an inner state of its own — a
+  /// folder, a multi-selection, an inline editor — and the back event is handed
+  /// to [onBack] instead, exactly like the header's back button, so the body
+  /// unwinds one level per press before the sheet closes. Only consulted when
+  /// the sheet is presented as a modal bottom sheet; as a fullscreen route back
+  /// already goes through [onBack].
+  ///
+  /// Dragging the sheet down stays an outright dismissal either way.
+  final bool canPop;
+
   const SheetView({
     super.key,
     this.title,
     this.titleWidget,
     this.showBack = false,
     this.onBack,
+    this.innerBack,
     this.actions = const [],
     this.tabs = const [],
     this.activeTabId,
@@ -90,6 +114,7 @@ class SheetView extends ConsumerStatefulWidget {
     this.showRouteBackground = true,
     this.shellBranchIndex,
     this.enableHeaderBlur = true,
+    this.canPop = true,
   });
 
   @override
@@ -122,11 +147,78 @@ class _SheetViewState extends ConsumerState<SheetView>
   /// (only when presented as a fullscreen route, not a modal bottom sheet).
   int? _suppressedBranch;
 
+  /// Whether the host already draws a title bar around this sheet — the
+  /// desktop floating window. Then the sheet's own app-bar row (back button,
+  /// title, actions) would be a second header inside the frame, so it is
+  /// handed to the window's title bar instead of being drawn here.
+  bool _hostDrawsChrome = false;
+
+  /// A page in the desktop middle column under the app's own title bar, which
+  /// draws this sheet's title row (see [TitleBarHeaderScope]).
+  bool _inTitleBar = false;
+
+  /// Inside a desktop window with a title bar — a floating window or a sheet
+  /// window. Its glass is then this sheet's background, as it is behind
+  /// Settings, instead of a fill or the app background of its own.
+  bool _inWindow = false;
+
+  /// Whether the header is drawn edge to edge with square corners, as the
+  /// desktop shell draws a tab's. True for a sheet hosted in the right
+  /// sidebar, where the inset pill of the phone layout left a floating bar
+  /// adrift in a fixed column.
+  bool _flushHeader = false;
+
+  /// Whether the app-bar row belongs to this sheet's own header.
+  bool get _ownsAppBar => !_hostDrawsChrome;
+
+  /// The back step of the desktop sidebar panel this sheet is open in, which
+  /// it has claimed (see [SidebarPanelBack]); null outside a panel.
+  SidebarPanelBack? _panelBack;
+
+  /// Signature of the header content last published to a chrome-drawing host,
+  /// so a rebuild only republishes when something visible actually changed —
+  /// republishing unconditionally would rebuild the host, which rebuilds this
+  /// sheet, which would republish again.
+  String? _publishedChromeSignature;
+
   /// Cached so it can be used safely in [dispose].
   ShellHeaderRegistry? _headerRegistry;
 
   bool _keyboardOpen = false;
-  bool _wasExpandedBeforeKeyboard = false;
+
+  /// Height the on-screen keyboard adds on top of [_heightN], capped at
+  /// fullscreen.
+  ///
+  /// The sheet used to answer a keyboard by tweening its own height to
+  /// fullscreen (and back on hide) over 350 ms. That tween ran *alongside* the
+  /// keyboard's inset animation, which has its own duration and curve, so the
+  /// body was resized twice per toggle by two desynchronised motions: content
+  /// slid up with the inset, then again with the sheet, and any list that was
+  /// scrolled to its end re-clamped its offset on every frame in between. It
+  /// read as a flicker — most visibly in the Memory sheet's Summary tab, the
+  /// one place in that sheet with text fields.
+  ///
+  /// Tracking the inset instead keeps the two in lockstep: the sheet grows by
+  /// exactly what the keyboard covers, so the visible body neither shrinks nor
+  /// is animated a second time, and it returns to its previous height as the
+  /// keyboard retracts.
+  double _kbLift = 0;
+
+  /// Whether [_kbLift] is currently following the inset. Cleared by
+  /// [_commitKeyboardLift] once the user takes the height over by hand.
+  bool _kbAnchored = false;
+
+  /// Sub-pixel slack for the measured header base. Subtracting the animated
+  /// top pad back out of a measured height cannot be exact in binary floating
+  /// point, and a base that wobbles in the last bits would republish the body's
+  /// inset — and rebuild every body that reads it — on every frame of a resize.
+  static const double _kHeaderBaseEpsilon = 0.01;
+
+  /// Top padding the header was last built with, so [_measureHeader] can
+  /// subtract exactly what that frame added instead of re-deriving it from a
+  /// height that may already have ticked on — which made the padding-free base
+  /// oscillate by a few pixels per frame during any resize.
+  double _headerTopPad = 0;
 
   late AnimationController _ctrl;
   Animation<double>? _anim;
@@ -178,6 +270,98 @@ class _SheetViewState extends ConsumerState<SheetView>
   double _topPad(double height) =>
       MediaQueryData.fromView(View.of(context)).padding.top * _t(height);
 
+  /// Lets the route below stop painting while this sheet covers the screen.
+  ///
+  /// A modal sheet's route is not opaque — it cannot be, since a half-height
+  /// sheet shows the screen behind it through the barrier — so Flutter keeps
+  /// painting that screen on every frame, blurs and all, even when the sheet is
+  /// expanded over it and none of it can be seen. That is why a modal sheet can
+  /// cost *more* than a full-screen route, which occludes and stops the work.
+  ///
+  /// Marking the route's barrier entry opaque takes everything below it off
+  /// stage. It is only true while the sheet genuinely covers the screen, and it
+  /// is re-checked on every height change, so a drag that opens a gap puts the
+  /// screen back before it can be seen through one.
+  ///
+  /// The entrance animation is not at risk: [TransitionRoute] forces this entry
+  /// non-opaque for as long as its animation is running and only writes the
+  /// route's own value when it completes, which is why this re-applies after
+  /// that and never during.
+  void _syncRouteOcclusion() {
+    if (!_inModalSheet || !mounted) return;
+    final route = ModalRoute.of(context);
+    if (route == null || route.overlayEntries.isEmpty) return;
+    final animation = route.animation;
+    final box = context.findRenderObject() as RenderBox?;
+    // Measure what this sheet actually covers rather than reasoning about it:
+    // a bottom sheet is capped at 640 logical pixels wide, so on a tablet or a
+    // desktop window it leaves the barrier showing down both sides however tall
+    // it is, and a `fitContent` sheet never reaches the top at all.
+    final covers =
+        animation != null &&
+        animation.isCompleted &&
+        box != null &&
+        box.hasSize &&
+        _coversScreen(box);
+    final entry = route.overlayEntries.first;
+    if (entry.opaque != covers) entry.opaque = covers;
+    _occluded = covers ? entry : null;
+  }
+
+  bool _coversScreen(RenderBox box) {
+    final screen = MediaQuery.sizeOf(context);
+    final origin = box.localToGlobal(Offset.zero);
+    const slack = 0.5;
+    return origin.dx <= slack &&
+        origin.dy <= slack &&
+        origin.dx + box.size.width >= screen.width - slack &&
+        origin.dy + box.size.height >= screen.height - slack;
+  }
+
+  /// Schedules [_syncRouteOcclusion] for after this frame: it changes the
+  /// overlay's state, which cannot be done while the overlay is building.
+  void _scheduleOcclusionSync() {
+    if (!_inModalSheet || _occlusionSyncScheduled) return;
+    _occlusionSyncScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _occlusionSyncScheduled = false;
+      _syncRouteOcclusion();
+    });
+  }
+
+  bool _occlusionSyncScheduled = false;
+  Animation<double>? _routeAnimation;
+
+  /// The barrier entry this sheet marked opaque, so it can be handed back.
+  OverlayEntry? _occluded;
+
+  void _onRouteAnimationStatus(AnimationStatus status) =>
+      _scheduleOcclusionSync();
+
+  /// [base] plus the keyboard lift, never past fullscreen.
+  double _lifted(double base) {
+    if (_kbLift <= 0) return base;
+    final full = _full(context);
+    final lifted = base + _kbLift;
+    return lifted > full ? full : lifted;
+  }
+
+  /// Folds the keyboard's share of the current height into [_heightN] and stops
+  /// tracking the inset, so a drag or a snap started while the keyboard is up
+  /// moves the sheet 1:1 instead of fighting the lift. The lift re-arms on the
+  /// next time the keyboard comes up.
+  void _commitKeyboardLift() {
+    if (!_kbAnchored) return;
+    final lifted = _lifted(_currentHeight);
+    _kbAnchored = false;
+    _kbLift = 0;
+    _currentHeight = lifted;
+    final expanded = lifted >= _full(context);
+    if (expanded != _expanded) {
+      setState(() => _expanded = expanded);
+    }
+  }
+
   double _estimateHeaderHeight() {
     if (!_hasHeader) {
       return 0;
@@ -186,10 +370,7 @@ class _SheetViewState extends ConsumerState<SheetView>
     if (_effectiveShowHandle) {
       h += 24;
     }
-    if (widget.title != null ||
-        widget.titleWidget != null ||
-        widget.showBack ||
-        widget.actions.isNotEmpty) {
+    if (_hasAppBarRow) {
       h += _inModalSheet ? 52 : 56;
     }
     if (widget.tabs.isNotEmpty) {
@@ -213,21 +394,47 @@ class _SheetViewState extends ConsumerState<SheetView>
       final h = box.size.height;
       // The measured box includes the animated top padding; keep the raw
       // value for the blur strip and the padding-free base for the body inset.
-      final base = h - _topPad(_heightN.value);
-      if (h != _headerH || base != _headerBaseH) {
-        setState(() {
-          _headerH = h;
-          _headerBaseH = base;
-        });
-      }
+      final base = h - _headerTopPad;
+      final baseMoved = (base - _headerBaseH).abs() > _kHeaderBaseEpsilon;
+      if (h == _headerH && !baseMoved) return;
+      setState(() {
+        _headerH = h;
+        // Only when the header's own content actually changed height: this is
+        // the value the body's inset is published from.
+        if (baseMoved) _headerBaseH = base;
+      });
     });
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _inModalSheet = ModalRoute.of(context) is ModalBottomSheetRoute;
+    final route = ModalRoute.of(context);
+    _inModalSheet = route is ModalBottomSheetRoute;
+    // [TransitionRoute] rewrites the barrier entry's opacity on every status
+    // change, so the occlusion below has to be re-applied after it settles.
+    final routeAnimation = route?.animation;
+    if (!identical(routeAnimation, _routeAnimation)) {
+      _routeAnimation?.removeStatusListener(_onRouteAnimationStatus);
+      _routeAnimation = routeAnimation;
+      _routeAnimation?.addStatusListener(_onRouteAnimationStatus);
+    }
+    // A modal bottom sheet is mounted on the root navigator, above any host,
+    // so it always keeps its own header.
+    _inTitleBar =
+        !_inModalSheet &&
+        !DetachedShellHost.of(context) &&
+        TitleBarHeaderScope.of(context);
+    _inWindow = !_inModalSheet && DetachedShellHost.drawsChrome(context);
+    _hostDrawsChrome = _inWindow || _inTitleBar;
+    // Hosted in the desktop right sidebar: a panel filling a fixed column, not
+    // a sheet floating over a phone screen. Its header runs edge to edge with
+    // square corners there, the way the desktop shell paints a tab's header —
+    // the inset pill was left over from the phone layout.
+    _flushHeader =
+        !_inModalSheet && DetachedShellHost.of(context) && !_hostDrawsChrome;
     _syncHeaderSuppression();
+    _publishChromeHeader();
     if (!_heightInit) {
       _currentHeight = (widget.startExpanded || !_inModalSheet)
           ? _full(context)
@@ -242,7 +449,10 @@ class _SheetViewState extends ConsumerState<SheetView>
   /// for the branch it lives in. A modal bottom sheet leaves the host screen's
   /// header visible behind it and must not suppress.
   void _syncHeaderSuppression() {
-    final branch = _inModalSheet
+    // A sheet hosted in the desktop sidebar or floating window belongs to no
+    // branch — suppressing "the current route's" branch there would hide the
+    // header of the unrelated screen in the middle column.
+    final branch = _inModalSheet || DetachedShellHost.of(context) || _inTitleBar
         ? null
         : widget.shellBranchIndex ?? _branchForCurrentRoute();
     if (branch == _suppressedBranch) return;
@@ -258,6 +468,108 @@ class _SheetViewState extends ConsumerState<SheetView>
         notifier.publish(this, branch, const ShellHeaderConfig(hidden: true));
       }
     });
+  }
+
+  /// Hands the header to a host that draws its own title bar (the desktop
+  /// floating window), so the window shows this sheet's title and actions
+  /// while the sheet itself draws no app-bar row.
+  ///
+  /// The claim goes under the host's pseudo-branch rather than a real shell
+  /// branch: the sheet is mounted outside the branch navigators, and the
+  /// window resolves that pseudo-branch for exactly this purpose.
+  void _publishChromeHeader() {
+    // Cached for [dispose], where reading `ref` is unsafe.
+    final ShellHeaderRegistry registry = ref.read(shellHeaderProvider.notifier);
+    _headerRegistry = registry;
+    if (!_hostDrawsChrome) {
+      if (_publishedChromeSignature == null) return;
+      _publishedChromeSignature = null;
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => registry.remove(this),
+      );
+      return;
+    }
+    // Each floating window hands its own pseudo-branch down; a sheet window
+    // uses the shared one.
+    // The title bar reads the branch of the route it is at.
+    final branch =
+        DetachedShellHost.chromeBranchOf(context) ??
+        (_inTitleBar
+            ? widget.shellBranchIndex ?? titleBarHeaderBranchFor(context)
+            : kDetachedChromeBranch);
+    final signature = '$branch|${_chromeSignature()}';
+    if (signature == _publishedChromeSignature) return;
+    _publishedChromeSignature = signature;
+    // Deferred: this runs during the build phase, where modifying a provider
+    // is forbidden — and the host rebuilds on the claim, so it must not be
+    // touched while it is building.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _publishedChromeSignature != signature) return;
+      registry.publish(
+        this,
+        branch,
+        ShellHeaderConfig(
+          title: widget.title,
+          titleWidget: widget.titleWidget,
+          // Offered to hosts that walk the sheet's own navigation from their
+          // title bar (the glossary window); read live, like the actions.
+          showBack: widget.showBack,
+          onBack: widget.showBack ? _onChromeBack : null,
+          innerBack: widget.innerBack == null ? null : _onChromeInnerBack,
+          actions: [
+            for (var i = 0; i < widget.actions.length; i++)
+              _ChromeHeaderAction(owner: this, index: i),
+          ],
+        ),
+      );
+    });
+  }
+
+  /// What the host's title bar shows, flattened. Only a change here is worth a
+  /// republish; the callbacks themselves are read live by
+  /// [_ChromeHeaderAction], so they never go stale between publishes.
+  String _chromeSignature() {
+    final buffer = StringBuffer(widget.title ?? '')
+      ..write(
+        '|${widget.titleWidget?.runtimeType}|${widget.showBack}'
+        '|${widget.innerBack != null}',
+      );
+    for (final action in widget.actions) {
+      final icon = action.icon;
+      buffer.write(
+        '|${action.tooltip}|${action.color?.toARGB32()}'
+        '|${icon is Icon ? icon.icon?.codePoint : icon.runtimeType}',
+      );
+    }
+    return buffer.toString();
+  }
+
+  /// The back button of a host's title bar: the sheet's current [onBack], or
+  /// popping its route, exactly like its own header's back button.
+  void _onChromeInnerBack() {
+    if (mounted) widget.innerBack?.call();
+  }
+
+  /// Back from the strip beside the sidebar panel this sheet is open in: the
+  /// sheet's own back step, or closing the panel.
+  void _onPanelBack() {
+    if (!mounted) return;
+    final onBack = widget.onBack;
+    if (onBack != null) {
+      onBack();
+    } else {
+      SidebarPanelScope.maybeOf(context)?.onClose();
+    }
+  }
+
+  void _onChromeBack() {
+    if (!mounted) return;
+    final onBack = widget.onBack;
+    if (onBack != null) {
+      onBack();
+    } else {
+      Navigator.of(context).pop();
+    }
   }
 
   /// Branch index of the shell this sheet currently lives in, or null when the
@@ -279,14 +591,27 @@ class _SheetViewState extends ConsumerState<SheetView>
   }
 
   @override
+  void didUpdateWidget(covariant SheetView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _publishChromeHeader();
+  }
+
+  @override
   void dispose() {
     final registry = _headerRegistry;
-    if (registry != null && _suppressedBranch != null) {
+    if (registry != null &&
+        (_suppressedBranch != null || _publishedChromeSignature != null)) {
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => registry.remove(this),
       );
     }
+    _panelBack?.release(this);
     _anim?.removeListener(_onTick);
+    _routeAnimation?.removeStatusListener(_onRouteAnimationStatus);
+    // Hand the screen below back before going away. The route's own reverse
+    // transition does this too; this covers a sheet torn down without one.
+    _occluded?.opaque = false;
+    _occluded = null;
     _ctrl.dispose();
     _fallbackScrollController.dispose();
     _heightN.dispose();
@@ -295,11 +620,16 @@ class _SheetViewState extends ConsumerState<SheetView>
 
   void _toggle() {
     if (widget.fitContent) return;
+    // Commit first, so "expanded" means what the user sees when they tap the
+    // handle: a sheet the keyboard has lifted to fullscreen collapses on the
+    // first tap instead of swallowing it.
+    _commitKeyboardLift();
     final target = _expanded ? _collapsed(context) : _full(context);
     _animateTo(target, expanding: !_expanded);
   }
 
   void _animateTo(double target, {required bool expanding}) {
+    _commitKeyboardLift();
     final start = _currentHeight;
     _anim?.removeListener(_onTick);
     _anim = Tween(begin: start, end: target).animate(
@@ -314,6 +644,7 @@ class _SheetViewState extends ConsumerState<SheetView>
   void _onTick() => _currentHeight = _anim!.value;
 
   void _onDragStart(DragStartDetails d) {
+    _commitKeyboardLift();
     _ctrl.stop();
     _anim?.removeListener(_onTick);
     _dragStartY = d.globalPosition.dy;
@@ -329,6 +660,12 @@ class _SheetViewState extends ConsumerState<SheetView>
     );
   }
 
+  /// Closes the sheet after a drag-down. pop(), not maybePop(): flinging the
+  /// sheet away is an explicit dismissal, so it closes the whole sheet even
+  /// when [SheetView.canPop] is false because the body has an inner state a
+  /// *back* press would step out of first.
+  void _dismiss() => Navigator.of(context).pop();
+
   void _onDragEnd(DragEndDetails d) {
     final vy = d.velocity.pixelsPerSecond.dy;
     final collapsed = _collapsed(context);
@@ -337,7 +674,7 @@ class _SheetViewState extends ConsumerState<SheetView>
 
     if (widget.fitContent) {
       if (vy > 600 || _currentHeight < collapsed * 0.6) {
-        Navigator.of(context).maybePop();
+        _dismiss();
       } else {
         _animateTo(collapsed, expanding: false);
       }
@@ -347,7 +684,7 @@ class _SheetViewState extends ConsumerState<SheetView>
     if (vy < -600 || (_currentHeight > mid && vy <= 600)) {
       _animateTo(full, expanding: true);
     } else if (vy > 600 || _currentHeight < collapsed * 0.6) {
-      Navigator.of(context).maybePop();
+      _dismiss();
     } else {
       _animateTo(
         _currentHeight >= mid ? full : collapsed,
@@ -356,11 +693,23 @@ class _SheetViewState extends ConsumerState<SheetView>
     }
   }
 
+  /// Whether this sheet draws the title/back/actions row itself. False when a
+  /// chrome-drawing host renders it in its own title bar instead.
+  bool get _hasAppBarRow =>
+      _ownsAppBar &&
+      (widget.title != null ||
+          widget.titleWidget != null ||
+          widget.showBack ||
+          widget.actions.isNotEmpty);
+
+  /// Colour of the scrim the body fades under the pinned header. In a window
+  /// it is the glass's own, so the strip reads as part of the window rather
+  /// than as a band of the app surface across it.
+  Color _headerScrimColor(BuildContext context) =>
+      _inWindow ? context.cs.surfaceContainerHighest : context.cs.surface;
+
   bool get _hasHeader =>
-      widget.title != null ||
-      widget.titleWidget != null ||
-      widget.showBack ||
-      widget.actions.isNotEmpty ||
+      _hasAppBarRow ||
       widget.tabs.isNotEmpty ||
       widget.headerBottom != null ||
       _effectiveShowHandle;
@@ -375,26 +724,20 @@ class _SheetViewState extends ConsumerState<SheetView>
 
     if (isKeyboardOpen != _keyboardOpen) {
       _keyboardOpen = isKeyboardOpen;
-      if (isKeyboardOpen) {
-        if (!_expanded && !widget.fitContent) {
-          _wasExpandedBeforeKeyboard = false;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted && !_expanded) {
-              _animateTo(_full(context), expanding: true);
-            }
-          });
-        } else {
-          _wasExpandedBeforeKeyboard = true;
-        }
-      } else {
-        if (!_wasExpandedBeforeKeyboard) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted && _expanded) {
-              _animateTo(_collapsed(context), expanding: false);
-            }
-          });
-        }
-      }
+      // A keyboard on its way up re-arms the lift; one that is gone drops it.
+      // A fitContent sheet is sized by its body, and a fullscreen route has no
+      // room to grow, so neither ever lifts.
+      _kbAnchored = isKeyboardOpen && _inModalSheet && !widget.fitContent;
+    }
+    // Read every frame, not just on the open/close edge: the inset animates,
+    // and the sheet has to follow it the whole way up and back down.
+    _kbLift = _kbAnchored ? bottomInset : 0;
+
+    // Desktop sheet window: fill the frame the host gives us, with no drag
+    // handle (there is nowhere to drag it to), the corner radius owned by the
+    // window and the title bar handed to the host via [DetachedShellHost].
+    if (GlazeSheetWindowScope.of(context)) {
+      return _buildWindow(context, bottomInset, batterySaver);
     }
 
     if (!_inModalSheet) {
@@ -405,7 +748,16 @@ class _SheetViewState extends ConsumerState<SheetView>
       // pop(), not maybePop(): this runs inside the PopScope below whose
       // canPop is false whenever showBack is true. maybePop() would re-enter
       // onPopInvokedWithResult and spin an unbounded microtask loop (freeze).
-      final backHandler = widget.onBack ?? () => Navigator.of(context).pop();
+      // In a sidebar panel back closes the panel: there is no route of this
+      // sheet's own to pop, and popping would take the app's page with it.
+      final panel = SidebarPanelScope.maybeOf(context);
+      final backHandler =
+          widget.onBack ?? panel?.onClose ?? () => Navigator.of(context).pop();
+      // In a panel the back button is the strip's, beside it; it runs this
+      // sheet's back step. Claimed on every build, so it is never stale.
+      if (!identical(panel?.back, _panelBack)) _panelBack?.release(this);
+      _panelBack = panel?.back;
+      _panelBack?.claim(this, _onPanelBack);
       // When the sheet is rendered as a page route inside the Shell, the
       // GlassNavBar overlaps the body (Shell uses extendBody: true). Inject
       // its measured height into MediaQuery.padding.bottom so the body's
@@ -446,9 +798,14 @@ class _SheetViewState extends ConsumerState<SheetView>
 
                   return TopEdgeBlur(
                     enabled: _hasHeader && !batterySaver,
-                    height: extraTop + 8,
+                    height: _hasHeader ? extraTop + 8 : 0,
                     sigma: 24,
-                    tintColor: context.cs.surface.withValues(alpha: 0.88),
+                    // A chrome-drawing host (a floating window) renders the
+                    // title row in its own title bar, leaving this sheet with no
+                    // header to back — so it must not paint the scrim band.
+                    tintColor: _hasHeader
+                        ? _headerScrimColor(context).withValues(alpha: 0.88)
+                        : null,
                     child: MediaQuery(
                       data: mediaQuery.copyWith(padding: newPadding),
                       child: _MaybeScrollbar(
@@ -470,30 +827,54 @@ class _SheetViewState extends ConsumerState<SheetView>
                 child: SafeArea(
                   bottom: false,
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                    padding: _flushHeader
+                        ? EdgeInsets.zero
+                        : const EdgeInsets.fromLTRB(16, 10, 16, 0),
                     child: KeyedSubtree(
                       key: _headerKey,
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          GlazeAppBar(
-                            title: widget.title,
-                            titleWidget: widget.titleWidget,
-                            showBack: widget.showBack,
-                            onBack: widget.onBack,
-                            actions: widget.actions.map((action) {
-                              return _HeaderIconButton(
-                                onPressed: action.onPressed,
-                                tooltip: action.tooltip,
-                                foregroundColor:
-                                    action.color ?? context.cs.primary,
-                                child: action.icon,
-                              );
-                            }).toList(),
-                          ),
+                          if (_hasAppBarRow)
+                            GlazeAppBar(
+                              title: widget.title,
+                              titleWidget: widget.titleWidget,
+                              // A panel's back button is the strip's.
+                              showBack: widget.showBack && panel == null,
+                              showLeading: panel == null,
+                              onBack: widget.onBack,
+                              borderRadius: _flushHeader
+                                  ? BorderRadius.zero
+                                  : const BorderRadius.all(Radius.circular(20)),
+                              // Flush in a sidebar under the app's title bar,
+                              // the bar's edge, the sidebar's divider and the
+                              // window's edge already frame three sides.
+                              border: _flushHeader && usesCustomAppTitleBar
+                                  ? Border(
+                                      bottom: BorderSide(
+                                        color: context.cs.outlineVariant,
+                                      ),
+                                    )
+                                  : null,
+                              actions: widget.actions.map((action) {
+                                return _HeaderIconButton(
+                                  onPressed: action.onPressed,
+                                  tooltip: action.tooltip,
+                                  foregroundColor:
+                                      action.color ?? context.cs.primary,
+                                  child: action.icon,
+                                );
+                              }).toList(),
+                            ),
                           if (widget.tabs.isNotEmpty)
                             Padding(
-                              padding: const EdgeInsets.only(top: 12),
+                              // The outer gutter is dropped when flush, so the
+                              // rows below the app bar carry their own.
+                              padding: EdgeInsets.only(
+                                top: 12,
+                                left: _flushHeader ? 16 : 0,
+                                right: _flushHeader ? 16 : 0,
+                              ),
                               child: Row(
                                 children: widget.tabs
                                     .map(
@@ -520,7 +901,11 @@ class _SheetViewState extends ConsumerState<SheetView>
                             ),
                           if (widget.headerBottom != null)
                             Padding(
-                              padding: const EdgeInsets.only(top: 12),
+                              padding: EdgeInsets.only(
+                                top: 12,
+                                left: _flushHeader ? 16 : 0,
+                                right: _flushHeader ? 16 : 0,
+                              ),
                               child: widget.headerBottom!,
                             ),
                         ],
@@ -542,15 +927,24 @@ class _SheetViewState extends ConsumerState<SheetView>
         ),
       );
 
+      // Under the title bar the column hides the strip a title row would
+      // take, and this sheet draws none: start below that strip.
+      final page = _inTitleBar
+          ? Padding(
+              padding: const EdgeInsets.only(top: kTitleBarHiddenHeaderHeight),
+              child: routeScaffold,
+            )
+          : routeScaffold;
       return PopScope(
         canPop: !widget.showBack,
         onPopInvokedWithResult: (didPop, _) {
           if (didPop) return;
           backHandler();
         },
-        child: widget.showRouteBackground
-            ? GlazeBackground(child: routeScaffold)
-            : routeScaffold,
+        // A window or a sidebar panel shows its own glass instead.
+        child: widget.showRouteBackground && !_inWindow && panel == null
+            ? GlazeBackground(child: page)
+            : page,
       );
     }
 
@@ -569,28 +963,77 @@ class _SheetViewState extends ConsumerState<SheetView>
       opaque: true,
     );
 
-    return ConstrainedBox(
-      constraints: BoxConstraints(
-        maxHeight: widget.fitContent ? _full(context) * 0.95 : double.infinity,
-      ),
-      child: ValueListenableBuilder<double>(
-        valueListenable: _heightN,
-        child: content,
-        builder: (context, height, child) {
-          return SizedBox(
-            height: widget.fitContent ? null : height,
-            child: ClipRRect(
-              // Constant, so the sheet keeps its rounded top edge when expanded
-              // to full height. It used to taper to 0 on the way up, which made
-              // a sheet opened by tapping the handle end as a square-cornered
-              // slab flush against the status bar.
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(_kSheetCornerRadius),
+    // pop(), not maybePop(): a body that blocks the pop (canPop false) handles
+    // the back event in onBack, and maybePop() would re-enter this callback.
+    final sheetBackHandler = widget.onBack ?? () => Navigator.of(context).pop();
+
+    return PopScope(
+      canPop: widget.canPop,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        sheetBackHandler();
+      },
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: widget.fitContent
+              ? _full(context) * 0.95
+              : double.infinity,
+        ),
+        child: ValueListenableBuilder<double>(
+          valueListenable: _heightN,
+          child: content,
+          builder: (context, height, child) {
+            // Every height change can open or close the gap the screen below
+            // would show through.
+            _scheduleOcclusionSync();
+            return SizedBox(
+              height: widget.fitContent ? null : _lifted(height),
+              child: ClipRRect(
+                // Constant, so the sheet keeps its rounded top edge when
+                // expanded to full height. It used to taper to 0 on the way up,
+                // which made a sheet opened by tapping the handle end as a
+                // square-cornered slab flush against the status bar.
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(_kSheetCornerRadius),
+                ),
+                child: child,
               ),
-              child: child,
-            ),
-          );
-        },
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  /// Body for a sheet hosted inside a desktop window. The window owns the size
+  /// and corner radius, so this fills the slot and lets the chrome-drawing host
+  /// render the title/actions row; only the tabs / [headerBottom] / body remain.
+  Widget _buildWindow(
+    BuildContext context,
+    double bottomInset,
+    bool batterySaver,
+  ) {
+    if (_hasHeader) {
+      _measureHeader();
+    }
+    // pop(), not maybePop(): matches the route branch — a body that blocks the
+    // pop handles the back event in [onBack] itself.
+    final backHandler = widget.onBack ?? () => Navigator.of(context).pop();
+    return PopScope(
+      canPop: widget.canPop,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        backHandler();
+      },
+      child: SizedBox.expand(
+        // With a title bar, on the window's glass (see [_inWindow]); a
+        // chrome-less window has nothing behind it and keeps its fill.
+        child: _sheetContent(
+          context,
+          bottomInset,
+          batterySaver,
+          opaque: !_inWindow,
+        ),
       ),
     );
   }
@@ -602,69 +1045,98 @@ class _SheetViewState extends ConsumerState<SheetView>
     bool opaque = false,
   }) {
     final isKeyboardOpen = _keyboardOpen;
-    return Container(
-      color: context.cs.surface.withValues(alpha: opaque ? 1.0 : 0.8),
-      child: Stack(
-        children: [
-          widget.fitContent
-              ? _buildBodyChild(
-                  context,
-                  bottomInset,
-                  isKeyboardOpen,
-                  batterySaver,
-                )
-              : Positioned.fill(
-                  child: _buildBodyChild(
-                    context,
-                    bottomInset,
-                    isKeyboardOpen,
-                    batterySaver,
-                  ),
-                ),
+    // Everything in the body sits on the fill below and nothing in it overlaps
+    // anything else, so while that fill is opaque a glass surface in here has
+    // one flat colour behind it: its blur would hand back the colour already
+    // there, for a backdrop read and a render target per card. The header is
+    // deliberately left out — it is painted over the scrolling body, and its
+    // blur is real (and is [TopEdgeBlur]'s, not a surface's).
+    final body = FlatBackdrop(
+      color: opaque ? context.cs.surface : null,
+      child: _buildBodyChild(
+        context,
+        bottomInset,
+        isKeyboardOpen,
+        batterySaver,
+      ),
+    );
+    return ColoredBox(
+      color: _inWindow
+          ? Colors.transparent
+          : context.cs.surface.withValues(alpha: opaque ? 1.0 : 0.8),
+      // This fill is what the sheet's content sits on, not the app background,
+      // so nothing inside may sample a baked app backdrop — it would paint the
+      // background straight over this surface. See [CardBackdrop].
+      child: CardBackdrop.closed(
+        child: Stack(
+          children: [
+            widget.fitContent ? body : Positioned.fill(child: body),
 
-          // Interactive header — rendered above the gradient so buttons
-          // and drag handle are unobscured and fully hittable.
-          if (_hasHeader)
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: KeyedSubtree(
-                key: _headerKey,
-                child: ValueListenableBuilder<double>(
-                  valueListenable: _heightN,
-                  child: _SheetViewHeader(
-                    title: widget.title,
-                    titleWidget: widget.titleWidget,
-                    showBack: widget.showBack,
-                    onBack: widget.onBack,
-                    actions: widget.actions,
-                    tabs: widget.tabs,
-                    activeTabId: widget.activeTabId,
-                    onTabSelected: widget.onTabSelected,
-                    headerBottom: widget.headerBottom,
-                    showHandle: _effectiveShowHandle,
-                    expanded: _expanded,
-                    onHandleTap: _toggle,
-                    onDragStart: widget.fitContent ? null : _onDragStart,
-                    onDragUpdate: widget.fitContent ? null : _onDragUpdate,
-                    onDragEnd: widget.fitContent ? null : _onDragEnd,
-                  ),
-                  builder: (context, height, header) => Padding(
-                    padding: EdgeInsets.only(top: _topPad(height)),
-                    child: header,
+            // Interactive header — rendered above the gradient so buttons
+            // and drag handle are unobscured and fully hittable.
+            if (_hasHeader)
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                // Glass in the header (the segmented control) composites
+                // against the header's own scrim instead of blurring what is
+                // behind it. Its blur was redundant where [TopEdgeBlur] is at
+                // full strength — over content already blurred at sigma 24,
+                // dropping it moves 1-2/255 — but the strip's gradient fades
+                // that out over its lower half, which is exactly where the
+                // control sits, so the blur was doing real work on sharp
+                // content there and cost two backdrop passes a frame for it.
+                // Solid is the trade: the control reads as a panel on the
+                // header rather than as a window onto the list.
+                child: FlatBackdrop(
+                  color: opaque ? context.cs.surface : null,
+                  child: KeyedSubtree(
+                    key: _headerKey,
+                    child: ValueListenableBuilder<double>(
+                      valueListenable: _heightN,
+                      child: _SheetViewHeader(
+                        showAppBar: _hasAppBarRow,
+                        title: widget.title,
+                        titleWidget: widget.titleWidget,
+                        showBack: widget.showBack,
+                        onBack: widget.onBack,
+                        actions: widget.actions,
+                        tabs: widget.tabs,
+                        activeTabId: widget.activeTabId,
+                        onTabSelected: widget.onTabSelected,
+                        headerBottom: widget.headerBottom,
+                        showHandle: _effectiveShowHandle,
+                        expanded: _expanded,
+                        onHandleTap: _toggle,
+                        onDragStart: widget.fitContent ? null : _onDragStart,
+                        onDragUpdate: widget.fitContent ? null : _onDragUpdate,
+                        onDragEnd: widget.fitContent ? null : _onDragEnd,
+                      ),
+                      builder: (context, height, header) {
+                        // Recorded so _measureHeader subtracts exactly what this
+                        // frame added.
+                        _headerTopPad = _topPad(_lifted(height));
+                        return Padding(
+                          padding: EdgeInsets.only(top: _headerTopPad),
+                          child: header,
+                        );
+                      },
+                    ),
                   ),
                 ),
               ),
-            ),
-          if (widget.floating != null) Positioned.fill(child: widget.floating!),
-          if (widget.floatingActionButton != null)
-            Positioned(
-              right: 16,
-              bottom: 16 + MediaQuery.of(context).padding.bottom + bottomInset,
-              child: widget.floatingActionButton!,
-            ),
-        ],
+            if (widget.floating != null)
+              Positioned.fill(child: widget.floating!),
+            if (widget.floatingActionButton != null)
+              Positioned(
+                right: 16,
+                bottom:
+                    16 + MediaQuery.of(context).padding.bottom + bottomInset,
+                child: widget.floatingActionButton!,
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -679,11 +1151,19 @@ class _SheetViewState extends ConsumerState<SheetView>
     // `enabled`, so the scroll body's Element (and any focused TextField's
     // FocusNode) survives interaction/battery-saver transitions without
     // GlobalKey tricks.
+    // The scrim only backs chrome this sheet pins over the body. A
+    // chrome-drawing host (a desktop sheet window) renders the title row in its
+    // own title bar, so the sheet has no header of its own — yet its cached
+    // `_headerH` is still the estimate made before the host was known, which
+    // painted a stale tint band across the top of the window. No pinned header,
+    // no tint.
     return TopEdgeBlur(
       enabled: widget.enableHeaderBlur && _hasHeader && !batterySaver,
-      height: _headerH + 8,
+      height: _hasHeader ? _headerH + 8 : 0,
       sigma: 24,
-      tintColor: context.cs.surface.withValues(alpha: 0.88),
+      tintColor: _hasHeader
+          ? _headerScrimColor(context).withValues(alpha: 0.88)
+          : null,
       child: _buildScrollConfig(context, bottomInset, isKeyboardOpen),
     );
   }
@@ -738,23 +1218,35 @@ class _SheetViewState extends ConsumerState<SheetView>
             child: innerChild,
           );
 
+          // The header inset the body reads stays put; the status-bar pad
+          // that grows as the sheet approaches fullscreen is applied around it
+          // as an outer inset instead of being folded into it.
+          //
+          // Folded in, it changed the MediaQuery on every frame of a resize,
+          // and every body that reads the inset rebuilt with it — for a big
+          // form whose list is built eagerly (the API sheet) that is a full
+          // widget-tree rebuild per frame of the keyboard animation, which is
+          // what dropped frames there. As an outer inset it costs the relayout
+          // the body pays anyway, and nothing rebuilds. The body still starts
+          // at the same place: the header carries the same pad above its own
+          // content.
+          final insetBody = MediaQuery(
+            data: mediaQuery.copyWith(
+              padding: mediaQuery.padding.copyWith(
+                top: _hasHeader ? _headerBaseH : 0.0,
+                bottom: navInset,
+              ),
+            ),
+            child: scrollChild,
+          );
+
           return ValueListenableBuilder<double>(
             valueListenable: _heightN,
-            child: scrollChild,
-            builder: (context, height, child) {
-              final extraTop = _hasHeader
-                  ? _headerBaseH + _topPad(height)
-                  : _topPad(height);
-              return MediaQuery(
-                data: mediaQuery.copyWith(
-                  padding: mediaQuery.padding.copyWith(
-                    top: extraTop,
-                    bottom: navInset,
-                  ),
-                ),
-                child: child!,
-              );
-            },
+            child: insetBody,
+            builder: (context, height, child) => Padding(
+              padding: EdgeInsets.only(top: _topPad(_lifted(height))),
+              child: child!,
+            ),
           );
         },
       ),
@@ -763,6 +1255,9 @@ class _SheetViewState extends ConsumerState<SheetView>
 }
 
 class _SheetViewHeader extends StatelessWidget {
+  /// False when the host draws the title/back/actions row itself, leaving this
+  /// header with only the handle, tabs and [headerBottom].
+  final bool showAppBar;
   final String? title;
   final Widget? titleWidget;
   final bool showBack;
@@ -780,6 +1275,7 @@ class _SheetViewHeader extends StatelessWidget {
   final GestureDragEndCallback? onDragEnd;
 
   const _SheetViewHeader({
+    required this.showAppBar,
     this.title,
     this.titleWidget,
     required this.showBack,
@@ -830,15 +1326,15 @@ class _SheetViewHeader extends StatelessWidget {
               ),
             ),
           ),
-        if (title != null ||
-            titleWidget != null ||
-            showBack ||
-            actions.isNotEmpty)
+        if (showAppBar)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
             child: Row(
               children: [
-                if (showBack)
+                // No reserved slot when there is no back button: the title is
+                // left-aligned anyway, so an empty 40pt gap in front of it only
+                // reads as a misalignment.
+                if (showBack) ...[
                   _HeaderIconButton(
                     onPressed: onBack ?? () => Navigator.of(context).maybePop(),
                     child: Icon(
@@ -846,10 +1342,9 @@ class _SheetViewHeader extends StatelessWidget {
                       size: 20,
                       color: context.cs.primary,
                     ),
-                  )
-                else
-                  const SizedBox(width: 40),
-                const SizedBox(width: 8),
+                  ),
+                  const SizedBox(width: 8),
+                ],
                 Expanded(
                   child:
                       titleWidget ??
@@ -914,6 +1409,35 @@ class _SheetViewHeader extends StatelessWidget {
             child: headerBottom!,
           ),
       ],
+    );
+  }
+}
+
+/// One of the sheet's actions, rendered in a chrome-drawing host's title bar.
+///
+/// It keeps the owning state rather than the action itself, and reads the
+/// action back on every build: the published claim is only refreshed when the
+/// header's visible signature changes, so a captured callback could otherwise
+/// outlive the build that created it.
+class _ChromeHeaderAction extends StatelessWidget {
+  final _SheetViewState owner;
+  final int index;
+
+  const _ChromeHeaderAction({required this.owner, required this.index});
+
+  @override
+  Widget build(BuildContext context) {
+    final actions = owner.widget.actions;
+    if (index >= actions.length) return const SizedBox.shrink();
+    final action = actions[index];
+    return _HeaderIconButton(
+      tooltip: action.tooltip,
+      onPressed: () {
+        final current = owner.widget.actions;
+        if (index < current.length) current[index].onPressed();
+      },
+      foregroundColor: action.color ?? context.cs.primary,
+      child: action.icon,
     );
   }
 }

@@ -18,15 +18,7 @@ class StudioBriefParser {
   StudioBriefParser(this._log);
 
   /// True if [agent] is the meta-weaver / OOC policy controller.
-  bool isMetaPolicyAgent(StudioAgent agent) {
-    final text = '${agent.id}\n${agent.name}\n${agent.sourceBlockNames}'
-        .toLowerCase();
-    return text.contains('meta-weaver') ||
-        text.contains('meta weaver') ||
-        text.contains('ooc policy') ||
-        text.contains('lumia') ||
-        text.contains('ghost in the machine');
-  }
+  bool isMetaPolicyAgent(StudioAgent agent) => agent.controllerId == 'meta';
 
   /// The canonical silent meta-policy brief.
   String metaPolicyBrief(StudioAgent agent) {
@@ -49,7 +41,7 @@ class StudioBriefParser {
   String sanitizeIntermediateAgentOutput(StudioAgent agent, String text) {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return trimmed;
-    if (isMetaBriefName(agent.name)) return sanitizeMetaBrief(trimmed);
+    if (isMetaPolicyAgent(agent)) return sanitizeMetaBrief(trimmed);
     final typed = _typedStudioBrief(agent, trimmed);
     if (typed != null) return typed;
     final sectioned = sectionStudioBrief(trimmed);
@@ -77,7 +69,10 @@ class StudioBriefParser {
     final constraints = <String>[];
     final avoid = <String>[];
 
-    final fieldRegex = RegExp(r'^[-\s]*([a-z_]+)\s*:\s*(.+)$', caseSensitive: false);
+    final fieldRegex = RegExp(
+      r'^[-\s]*([a-z_]+)\s*:\s*(.+)$',
+      caseSensitive: false,
+    );
     int recognized = 0;
 
     for (final rawLine in text.split('\n')) {
@@ -112,7 +107,9 @@ class StudioBriefParser {
         case 'who_should_not_speak':
         case 'voice_constraints':
         case 'low_speech_reason':
-          if (!constraints.any((e) => e.toLowerCase() == cleaned.toLowerCase())) {
+          if (!constraints.any(
+            (e) => e.toLowerCase() == cleaned.toLowerCase(),
+          )) {
             constraints.add(cleaned);
           }
           recognized++;
@@ -123,7 +120,9 @@ class StudioBriefParser {
           recognized++;
         default:
           // Unknown field — put in constraints as a generic item.
-          if (!constraints.any((e) => e.toLowerCase() == cleaned.toLowerCase())) {
+          if (!constraints.any(
+            (e) => e.toLowerCase() == cleaned.toLowerCase(),
+          )) {
             constraints.add(cleaned);
           }
           recognized++;
@@ -173,17 +172,23 @@ class StudioBriefParser {
     //    Values are prefixed with the key name ("key: value") so downstream
     //    consumers see the same format as field-based briefs.
     const focusKeys = {
-      'beat_type', 'tempo', 'scene_pressure', 'what_must_advance',
+      'beat_type',
+      'tempo',
+      'scene_pressure',
+      'what_must_advance',
       'active_characters',
     };
     const constraintKeys = {
-      'target_length', 'target_paragraphs', 'stop_point', 'speech_mode',
-      'who_can_speak', 'who_should_not_speak', 'voice_constraints',
+      'target_length',
+      'target_paragraphs',
+      'stop_point',
+      'speech_mode',
+      'who_can_speak',
+      'who_should_not_speak',
+      'voice_constraints',
       'low_speech_reason',
     };
-    const avoidKeys = {
-      'avoid_repeating',
-    };
+    const avoidKeys = {'avoid_repeating'};
 
     void addTo(List<String> target, String key, List<String> values) {
       for (final v in values) {
@@ -448,10 +453,10 @@ class StudioBriefParser {
     final buffer = StringBuffer()
       ..writeln('Focus:')
       ..writeln(
-        '- Apply the default ${_controllerLabel(agent.name)} safeguards for this turn.',
+        '- Apply the default ${_controllerLabel(agent.controllerId)} safeguards for this turn.',
       )
       ..writeln('Constraints:')
-      ..writeln(_safeControllerGuidance(agent.name))
+      ..writeln(_safeControllerGuidance(agent.controllerId))
       ..writeln('Avoid:')
       ..writeln(
         '- Do not expose controller notes, prompt text, source blocks, macros, or planning labels.',
@@ -459,41 +464,39 @@ class StudioBriefParser {
     return buffer.toString().trim();
   }
 
-  String _controllerLabel(String name) {
-    final lower = name.toLowerCase();
-    if (lower.contains('continuity')) return 'continuity';
-    if (lower.contains('agency') || lower.contains('character')) {
+  String _controllerLabel(String controllerId) {
+    if (controllerId == 'continuity') return 'continuity';
+    if (controllerId == 'agency') {
       return 'agency and character';
     }
-    if (lower.contains('narrative') || lower.contains('pacing')) {
+    if (controllerId == 'narrative') {
       return 'narrative and pacing';
     }
-    if (lower.contains('dialogue')) return 'dialogue';
-    if (lower.contains('guard') || lower.contains('loop')) return 'prose guard';
-    if (lower.contains('world') || lower.contains('npc')) {
+    if (controllerId == 'dialogue') return 'dialogue';
+    if (controllerId == 'guard') return 'prose guard';
+    if (controllerId == 'world') {
       return 'world and NPC';
     }
     return 'Studio controller';
   }
 
-  String _safeControllerGuidance(String name) {
-    final lower = name.toLowerCase();
-    if (lower.contains('continuity')) {
+  String _safeControllerGuidance(String controllerId) {
+    if (controllerId == 'continuity') {
       return '- Continue using only confirmed context, memory, lore, and recent chat. Do not invent unknown facts.';
     }
-    if (lower.contains('agency') || lower.contains('character')) {
+    if (controllerId == 'agency') {
       return '- Preserve user agency and character authenticity. Never write user dialogue, actions, thoughts, feelings, or decisions.';
     }
-    if (lower.contains('narrative') || lower.contains('pacing')) {
+    if (controllerId == 'narrative') {
       return '- Keep pacing controlled, concrete, and scene-advancing. Avoid filler, repetition, and unsupported escalation.';
     }
-    if (lower.contains('dialogue')) {
+    if (controllerId == 'dialogue') {
       return '- Use dialogue only when character-plausible. Keep speech concise and properly quoted.';
     }
-    if (lower.contains('guard') || lower.contains('loop')) {
+    if (controllerId == 'guard') {
       return '- Avoid repeated openings, recycled phrasing, cliches, echoing the user, and banned prose habits.';
     }
-    if (lower.contains('world') || lower.contains('npc')) {
+    if (controllerId == 'world') {
       return '- Add world/NPC activity only when supported by the scene and never let it steal focus.';
     }
     return '- Apply this controller only as hidden operational guidance.';
@@ -514,7 +517,11 @@ class StudioBriefParser {
       return brief;
     }
     return metaPolicyBrief(
-      const StudioAgent(id: 'meta_sanitized', name: _studioMetaPolicyAgentName),
+      const StudioAgent(
+        id: 'meta_sanitized',
+        controllerId: 'meta',
+        name: _studioMetaPolicyAgentName,
+      ),
     );
   }
 }

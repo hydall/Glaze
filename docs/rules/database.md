@@ -75,11 +75,22 @@ Never cache an optimistic, generated, restoration, or pre-write snapshot.
 
 ## Schema migrations
 
-All schema changes go in `AppDatabase.migration` in `app_db.dart`.
-Bump the schema version and add a `from → to` migration step.
-Never modify existing column types without a migration.
+`lib/core/db/app_db.dart` is the schema registration point: its
+`@DriftDatabase` annotation lists every registered table and its
+`AppDatabase.migration` delegates versioned upgrades. Table declarations are
+parts under `lib/core/db/tables/`, collected by `tables.dart`. Migration and
+integrity helpers are split into these `app_db.dart` parts:
 
-Current version: **81**
+- `migrations/upgrade_v2_v50.dart`
+- `migrations/upgrade_v51_v100.dart`
+- `migrations/upgrade_v101_v131.dart`
+- `migrations/database_integrity.dart`
+- `migrations/studio_legacy.dart`
+
+All schema changes must update the registration/migration path in
+`app_db.dart`. Bump the schema version and add a guarded `from -> to` migration
+step; never modify existing column types without a migration. The current
+schema is **v131** with **56 registered tables**.
 
 Migration history:
 - v18: added `characters.picksHash`
@@ -106,16 +117,16 @@ Migration history:
 - v39: added Studio `finalPresetId`
 - v40: added Studio request preset ids
 - v41: added Studio preset overrides JSON
-- v42: added Studio `profileId` / `profileName` for reusable session-bound profiles
+- v42: added Studio `profileId` / `profileName` for reusable session-bound profiles (removed in v101 — profiles retired, `studio_config_rows` is now session-only activation)
 - v43: added Studio `builderPromptTemplate` override for editable Studio rebuild prompts
-- v44: added Studio `maxFinalHistoryMessages` INTEGER DEFAULT 15 (raised to 30 in v64) — caps trailing chat messages sent to the final Studio generator (0 = unlimited); a 60K token budget is also enforced (whichever limit is hit first); Studio trackers receive their own `StudioAgent.contextSize` (default 5, hard-cap 200) instead — see INV-ST1/INV-ST2 in `docs/INVARIANTS.md`
+- v44: added Studio `maxFinalHistoryMessages` INTEGER DEFAULT 15 (raised to 30 in v64 and 50 in v123). It is now a high-water mark: after a completed assistant turn crosses the message limit or the 70K history-token limit, the stable final-generator window rotates forward by roughly half on a complete chunk boundary. Studio trackers retain their own `StudioAgent.contextSize` (default 5, hard-cap 200) — see INV-ST1/INV-ST2 in `docs/INVARIANTS.md`.
 - v45: added `tracker_rows` table — lightweight key-value session state. Composite PK `{sessionId, name}`; indexed on `{sessionId, scope}`. Studio Ledger is the sole automatic model writer for canonical tracker state; manual canon overrides/locks use the same infrastructure. Rows are deleted in `chatRepo.deleteByCharacterId` and `characterRepo.delete` cascades and are shown in the Agentic Ops “Tracker values” tab.
-- v46: added `studio_config_rows.routing_mode` TEXT DEFAULT `'verbatim'` — controls how preset blocks become agent instructions (`verbatim` = blocks concatenated дословно, no LLM call; `compiled` = legacy LLM digest). The decomposition service (`studio_decomposition_service.dart`) was restored after Phase 2: `decompose()` produces `StudioAgent`s (trackers + one final generator) that slot into `runTrackerCycle`; `routing_mode = 'compiled'` triggers the LLM builder, `'verbatim'` concatenates blocks directly.
+- v46: added `studio_config_rows.routing_mode` TEXT DEFAULT `'verbatim'` — controls how preset blocks become agent instructions (`verbatim` = blocks concatenated дословно, no LLM call; `compiled` = legacy LLM digest). The decomposition service (`studio_decomposition_service.dart`) was later deleted during the user-preset unbind; agents are now defined directly in `StudioPreset.agents` with explicit `controllerId` routing. `routing_mode` itself was dropped in v55.
 - v50: added `tracker_snapshots` table — per-agent-swipe immutable snapshots of all trackers (mirrors Marinara-Engine's `game_state_snapshots`). Composite PK `{sessionId, messageId, swipeId, agentSwipeId}`; columns `trackersJson` (JSON array of `Tracker.toJson`), `committed` (0/1), `createdAt` (epoch seconds). Three indexes on `(sessionId, committed, createdAt)` support fast `getLatestCommitted` reads. `TrackerSnapshotRepo` owns all access; snapshots preserve Ledger state for deletion, regeneration, swipe, and branch rollback.
 - v51: data migration — aggregates `tracker_rows` per session into a baseline snapshot at the sentinel anchor `(messageId='', committed=1)`. Legacy sessions that had `tracker_rows` but no snapshots get a one-time baseline so the snapshot-first read path (Phase 3) finds data immediately. The sentinel anchor is never dropped by `deleteForMessage` (only by `deleteBySessionId` / `deleteByCharacterId`).
 - v52: dropped `pipeline_settings_rows` — pipeline settings moved to a singleton in SharedPreferences (key `pipelineSettings`), per-session overrides abandoned. SharedPreferences payload unaffected.
 - v53: added `info_blocks.agentSwipeId` INTEGER DEFAULT -1 — binds ext blocks to the blue cleaned sub-swipe so blocks launched after the POST-cleaner target the cleaned text. -1 = "no agent swipe" (legacy blocks, match by `(messageId, swipeId)` only).
-- v54: added `studio_preset_rows` table — Studio prompts (controller ontology, runtime envelope, final brief, cleaner and Ledger prompts, beauty shard, extractors, block router, brief parser, shard synthesizers) migrated to a DB table so the user can edit them without code changes. Seeded with the then-current hardcoded values via a single INSERT. See `docs/PLAN_STUDIO_PRESET_DB.md`.
+- v54: added `studio_preset_rows` table — Studio prompts (controller ontology, runtime envelope, final brief, cleaner and Ledger prompts, beauty shard, extractors, block router, brief parser, shard synthesizers) migrated to a DB table so the user can edit them without code changes. Seeded with the then-current hardcoded values via a single INSERT.
 - v55: Studio config overhaul — added `studio_preset_id`, `expensive_api_config_id`, `cheap_api_config_id`, `cleaner_api_config_id`; dropped `source_preset_id`, `source_preset_hash`, `routing_mode`, `agent_studio_preset_id`, `final_studio_preset_id`, `studio_preset_overrides_json`, `builder_prompt_template`, `selected_block_ids_json`, `selected_block_ids_initialized`, `build_api_config_id`, `build_model_override`. Unbinds Studio from user presets, switches to 3 API config slots + `studioPresetId`.
 - v56: historical data migration — originally added `cleaner_beauty` and refreshed the then-active `writeloop_system` block. The generic write-loop is retired; current migration code adds current missing seed blocks but preserves existing user `writeloop` JSON as inert data.
 - v57: data migration — moves `cleaner_beauty` to the end of the cleaner section (`order` 99) so the LLM sees styling instructions last among preset blocks (recency effect).
@@ -132,6 +143,100 @@ Migration history:
 - v80: added `api_configs.useResponsesApi`.
 - v81: added composite index `idx_embeddings_source_type_id` on
   `(source_type, source_id)`.
+- v82: added durable card-rewriter revisions, jobs, operations, evidence,
+  transitions, references, and numeric revision provenance columns.
+- v83: rebuilt the unreleased v82 TEXT revision columns as INTEGER columns,
+  preserving rows, uniqueness, and indexes while normalizing numeric lineage.
+- v85: added durable rewrite job/operation CAS, decision/validation, and applied
+  character revision fields; rebuilt `rewrite_operations` after adding neutral
+  defaults so upgraded databases retain rows/indexes and enforce the fresh-schema
+  decision, validation-status, and revision CHECK constraints.
+- v86: added the durable Phase-4 rewrite job lifecycle columns
+  (`rewrite_jobs.status_reason` TEXT NULL, `canon_stamp` TEXT NOT NULL
+  DEFAULT '', `request_key` TEXT NULL with the unique
+  `idx_rewrite_job_request_key` index — NULL keys stay distinct) and rebuilt
+  both `rewrite_jobs` (status CHECK: generating/pending/failed/cancelled/
+  applied) and `rewrite_operations` (status CHECK: pending/reviewable/applied,
+  with the four v85 CHECKs and the apply-CAS index retained). Out-of-domain
+  legacy statuses are normalized fail-closed before the rebuild (jobs →
+  'cancelled', operations → 'pending'); rows are preserved.
+- v99: moved Studio agents, the three API slots, and final-history limit from
+  `studio_config_rows` to dedicated `studio_preset_rows` columns. Distinct
+  canonical profile payloads are retained as deterministic migrated presets;
+  config rows now retain only activation, identity, and timestamps.
+- v100: added `studio_preset_rows.runtime_settings_json` TEXT NOT NULL DEFAULT
+  `'{}'` for canonical nested Studio runtime settings storage.
+- v101: retired the old Studio profile system. `studio_config_rows` rebuilt to
+  session-only columns (`session_id`, `enabled`, `created_at`, `updated_at`);
+  `profile_id`, `profile_name`, `broadcast_blocks_json`, and all other profile
+  columns dropped. Legacy `broadcast_blocks_json` is merged into each preset's
+  `runtime_settings_json.broadcastBlocks` during migration. Only rows whose
+  `session_id` exists in `chat_sessions` are retained; canonical profile-only
+  rows are dropped (their runtime payloads were already preserved as migrated
+  presets in v99).
+- v103: added `preset_folders` + `preset_folder_members` tables (folders for the
+  Presets list, mirroring the character folders). Membership PK is
+  `{folderId, presetId, kind}` — `kind` is `normal` for rows in `presets` and
+  `agentic` for rows in `studio_preset_rows`, whose id spaces are independent,
+  so it must be part of the key. Deleting a preset must also drop its member
+  rows (`PresetFolderRepo.deleteMembersForPreset`).
+- v105: removes the retired default Studio write-loop block (`writeloop_system`)
+  from stored presets. Idempotent — presets without the block are skipped.
+- v106: repairs the `injectionPoint` field of stored preset blocks whose routing
+  was corrupted by the canonical codec shipped in nightly #197 (which did not
+  read `injectionPoint` from JSON, defaulting every block to `pregen`). Runs
+  `migrateStudioPresetBlocksToV2` on each preset's blocks and writes the
+  repaired JSON back. Idempotent — presets that were never affected are skipped.
+- v107: added `api_configs.exclude_reasoning_from_context_budget` BOOLEAN
+  DEFAULT 0.
+- v108: added `card_evolution_observations`.
+- v109: rewrites `protocol = 'openai'` rows with `use_responses_api = 1` to
+  `protocol = 'openai_responses'`. The Responses API is now a protocol of its
+  own instead of a boolean opt-in, and `use_responses_api` is derived from it.
+- v110: added `api_configs.use_system_instruction` BOOLEAN NOT NULL DEFAULT 1 —
+  whether the leading system run is lifted into the provider's own field.
+  Defaults on, which is the behaviour that shipped before the toggle existed.
+- v111: collapses `api_configs.session_id_mode` to a two-state toggle. The
+  retired default `'openrouter'` meant "send only to openrouter.ai", so rows
+  still holding it become `'always'` when the preset is an OpenRouter one (by
+  protocol or by endpoint) and `'off'` otherwise. Explicit `'always'`/`'off'`
+  rows are untouched.
+- v112: renames `api_configs.gemini_use_system_instruction` to
+  `use_system_instruction` — the toggle covers Anthropic's `system` as well as
+  Gemini's `system_instruction`. Guarded: runs only on databases that still
+  carry the prefixed name (v110/v111 builds of the branch that introduced it).
+- v113: added independent evidence clusters to card evolution observations and
+  migrated legacy evidence into one canonical cluster.
+- v114: rebuilt `character_revision_rows` so revision hashes are non-unique.
+  Returning to earlier card content now appends a valid lineage entry; a
+  non-unique `(character_id, revision_hash)` index retains lookup performance.
+- v121: added append-only `session_canon_checkpoint_rows`, append-only
+  `session_lorebook_revision_rows`, and durable
+  `session_lorebook_embedding_job_rows` for branch-scoped Card Rewriter state.
+  Message deletion rolls invalidated canon forward by appending a rollback
+  checkpoint and restoration history; it never updates immutable rows. Because
+  v121 has no lore tombstone, an overlay target absent at the selected
+  checkpoint is restored to its recorded source/base content.
+- v122: added `api_configs.embedding_requests_per_minute` INTEGER NOT NULL
+  DEFAULT 50 for the process-wide embedding request rate limit.
+- v123: raised the default Studio final history limit from 30 to 50
+- v124: added bounded local `llm_request_capture_rows` diagnostics
+- v125: added stable call IDs to request captures and append-only
+  `llm_call_event_rows` for transport outcomes and parser verdicts
+- v126: added append-only `ledger_reconciliation_effects` with exact Ledger and
+  knowledge before/after state, actual state diff, and integrity hashes
+- v127: Collector runs retain local `failed` status, call linkage, and failure
+  metadata for safe recovery instead of deleting failed attempts.
+- v128: automatic Card Rewriter claims retain exact selected input and failure
+  state; `card_evolution_writer_calls` checkpoints each restartable model stage.
+- v129: enforces one active rewrite job per session/character and makes rewrite
+  operation revisions, rewrite evidence, and LLM request captures update-immutable.
+- v130: added local-only `ledger_reconciliation_leases` for durable per-session
+  reconciliation mutual exclusion across processes.
+- v131: normalized saved LLM and embedding endpoints to their concrete request
+  URLs.
+- v137: added `api_configs.tokenizer` TEXT DEFAULT 'auto' (per-connection
+  tokenizer choice). The v136 table rebuild adds it first on older databases.
 
 ---
 
@@ -211,9 +316,21 @@ The session cascade removes MemoryBook state, Memory Catalog/Graph rows, live
 trackers and snapshots, reconciliation checkpoints/journals, character
 knowledge, summaries, InfoBlocks, chat/message-memory embeddings, session
 baseline, Studio config, chat-scoped lorebooks and their embeddings, and the
-chat row. Character deletion additionally removes character-scoped lorebooks
-and embeddings, folder memberships, character rows, and promotes a remaining
-variation representative when required.
+chat row. Character deletion additionally removes folder memberships, character
+rows, and promotes a remaining variation representative when required.
+
+**A lorebook outlives the character it was connected to.** Deleting a character
+never deletes the books connected to it: every `activation_scope = 'character'`
+book whose target no longer exists is rewritten to `activation_scope = 'global'`
+with a NULL `activation_target_id` and a fresh `updated_at`, keeping its
+entries, settings, and `lorebook_entry` embeddings. `CharacterDeletionResult`
+reports these as `detachedLorebookIds`, and `CharactersNotifier.removeMany`
+re-points a detached book at another character that is still linked to it
+through the `lorebookActivations` map (the scope/target columns are only a
+denormalised mirror of that map). A book whose target group still has a
+surviving variation is left attached and is not reported as detached. Because
+the books survive, character deletion writes **no** `lorebooks` sync tombstone;
+the detach travels to the cloud as a normal lorebook-collection update.
 
 `CharactersNotifier.removeMany` performs sync tombstones, preference cleanup,
 and filesystem cleanup only after the DB transaction commits. Remote sync
@@ -241,6 +358,41 @@ provider-level deletion list.
 
 For other tables that need reactive updates, add a `watch*` method to the repo.
 Do not poll; use Drift streams.
+
+---
+
+## Bulk writes: one transaction, one emission
+
+Never write a batch of rows one `put` at a time. Every write wakes the reactive
+queries behind it, and a notifier that answers with `invalidateSelf()` then
+re-reads (and re-decodes) the whole table — so N rows cost O(N²) work on the UI
+isolate. That is what made a mass character import freeze and then run out of
+memory.
+
+Write batches through the repo's batch method (`CharacterRepo.putAll`,
+`LorebookRepo.putAll`, `CharacterRepo.setHiddenMany`) and refresh once:
+
+```dart
+// NEVER (a loop over an import selection):
+for (final character in imported) {
+  await charactersNotifier.add(character); // put + invalidateSelf, per row
+}
+
+// ALWAYS:
+await charactersNotifier.addAll(imported); // one batch, one refresh
+```
+
+Long-running loops that produce those batches must also stay serial and yield
+(`await Future<void>.delayed(Duration.zero)`) between items, and must
+materialise one item's bytes at a time — see
+`CharacterBulkImportService` / `CharacterImportWriteBuffer`.
+
+The same applies to a restore: never queue a whole table into one `db.batch`.
+`FlutterBackupImporter` streams `tables/*.jsonl` line by line (spilling an entry
+past 8 MB to a temp file first) and writes 500 rows per batch, so peak memory
+does not scale with table size. The trade-off is deliberate: a table is no
+longer written atomically, which is fine because the restore truncates it first
+and a cancelled restore is re-run from scratch.
 
 ---
 
@@ -301,9 +453,11 @@ and upserts an immutable snapshot at that anchor via
 generation starts. Committed snapshots are surfaced by the read path;
 uncommitted snapshots are tentative state from the most recent Ledger pass.
 
-`post_cleaner_service.applyCleanedText` (Phase 2) clones the parent
-message's snapshot into the new `'cleaned'` agent-swipe anchor so the
-cleaned sub-swipe inherits the parent's tracker state.
+`CleanerStage` normally pre-creates the `'cleaned'` agent swipe and immediately
+clones the parent agent-swipe snapshot into its new anchor, before cleaner
+streaming begins. `PostCleanerService.applyCleanedText` retains the same clone
+as a fallback for the append-after-cleaning path when no pre-created swipe is
+available.
 
 ### Read path (snapshot-first)
 
@@ -325,7 +479,7 @@ fall back to `trackerRepoProvider.getBySessionId` when no snapshot exists
 ### Cloud sync coverage (Phase 9)
 
 `tracker_snapshots` entered the backup format at v5 and remains in the current
-backup whitelist (`backup_exporter.dart`, backup schema v10). It has full cloud
+backup whitelist (`backup_exporter.dart`, backup schema v12). It has full cloud
 sync coverage via
 `SyncTrackerSnapshotStore` + `TrackerSnapshotSyncStore` adapter. Sync
 follows the InfoBlock per-session collection pattern: one entry per
@@ -353,7 +507,25 @@ tracked via `SyncDeletionTracker.record('tracker_snapshot', sessionId)`.
 
 `ChatSessionService.branchSession` creates the branch, copies DB state,
 reconstructs live tracker rows, and updates the character's current session in
-one Drift transaction. Session baseline and
+one Drift transaction.
+
+The branch gets a **card of its own only when the session's card can already
+differ from the character it points at** — `ChatSessionBranchRepo`
+`requiresCardForkInTransaction`: a canon checkpoint past the root (a Card
+Rewriter apply or a rollback), a session lorebook overlay, or a source card
+that is itself a session-owned variant (`variantOrder != 0`), which a rewrite
+would edit in place and so must not be shared by two sessions. Then the branch
+forks the card at the latest surviving checkpoint, roots its own canon
+timeline, and lands on `${newCharacterId}_0`.
+
+With no rewrite behind it the branch keeps the source card and is a plain extra
+session on that character (`${charId}_$nextIndex`, the character's current
+session index moved onto it), with no character row, no revision row and no
+canon checkpoint: the first rewrite in either session forks the root card by
+itself (`ManualRewriteApplyRepo._forkSessionCharacter`). Branching a chat that
+never ran the Card Rewriter must not leave a variant behind.
+
+Session baseline and
 Studio configuration are copied as settings. Provenance-backed state is copied
 only when its complete source range is retained: tracker snapshots, character
 knowledge facts, reconciliation checkpoints, cleanup journals (copied with the

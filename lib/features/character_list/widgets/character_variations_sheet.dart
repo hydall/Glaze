@@ -8,6 +8,7 @@ import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/sheet_view.dart';
 import 'character_card.dart';
+import '../../../shared/widgets/glaze_sheet.dart';
 
 /// Opens the variations grid for [groupId] as a modal sheet.
 ///
@@ -19,7 +20,7 @@ void showCharacterVariationsSheet(
   required String groupId,
   required String sourceId,
 }) {
-  showModalBottomSheet<void>(
+  showGlazeSheet<void>(
     context: context,
     isScrollControlled: true,
     useRootNavigator: true,

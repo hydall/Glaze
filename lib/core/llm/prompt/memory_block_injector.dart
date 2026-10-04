@@ -1,12 +1,13 @@
 import '../../models/chat_message.dart';
 import '../context_calculator.dart';
+import '../game_time.dart';
 import '../history_assembler.dart';
 import '../memory_budget.dart';
 import '../memory_diagnostics.dart';
 import '../memory_excerpt_selector.dart';
-import '../memory_formatting.dart';
 import '../memory_selector.dart';
 import '../tokenizer.dart';
+import 'memory_context_resolver.dart';
 import 'prompt_payload.dart';
 import 'resolved_block.dart';
 
@@ -24,12 +25,6 @@ class DeferredMemoryResult {
     required this.finalExcerptSelection,
     required this.memoryMacroMissing,
   });
-}
-
-class RebuiltMemoryContent {
-  final String content;
-  final String macroContent;
-  const RebuiltMemoryContent(this.content, this.macroContent);
 }
 
 bool shouldInjectFactualContinuityGuard(PromptPayload payload) {
@@ -167,61 +162,6 @@ void orderContinuityContextBlocks(List<PromptMessage> messages) {
   );
 }
 
-/// Refilter a [MemorySelection] against the visible-window message ids
-/// returned by [TokenBreakdown]. Re-runs the selector with the new
-/// exclusion set so anything whose `messageIds` overlaps the visible
-/// history is dropped. Preserves the existing budget/cap unless the
-/// selection carried them via [MemorySelection.budgetTokens]/entryCap.
-MemorySelection refilterMemorySelection(
-  MemorySelection previous, {
-  required Set<String> visibleMessageIds,
-  bool chunkBudgeting = false,
-  bool disableSourceWindowExclusion = false,
-}) {
-  if (previous.selectionMode == 'legacy') return previous;
-  if (visibleMessageIds.isEmpty) return previous;
-  final needsRefilter = previous.allScores.any(
-    (s) =>
-        !s.excludedBySourceWindow &&
-        s.entry.messageIds.isNotEmpty &&
-        s.entry.messageIds.any(visibleMessageIds.contains),
-  );
-  if (!needsRefilter) return previous;
-  return MemorySelector.select(
-    MemorySelectionInput(
-      selectionMode: previous.selectionMode,
-      entries: previous.allScores.map((s) => s.entry).toList(),
-      keywordMatchedTerms: {
-        for (final score in previous.allScores)
-          if (score.matchedKeys.isNotEmpty) score.entry.id: score.matchedKeys,
-      },
-      visibleMessageIds: visibleMessageIds,
-      maxInjectionTokens: previous.budgetTokens,
-      maxInjectedEntries: previous.entryCap > 0
-          ? previous.entryCap
-          : previous.entries.length,
-      sourceWindowExclusion: !disableSourceWindowExclusion,
-      diversityAware: false,
-      chunkBudgeting: chunkBudgeting,
-    ),
-  );
-}
-
-RebuiltMemoryContent buildMemoryContentFromSelection(
-  MemorySelection selection, {
-  MemoryExcerptSelection? excerptSelection,
-  String? summaryExcerpt,
-}) {
-  final injected = excerptSelection ?? MemoryExcerptSelector.select(selection);
-  final macro = formatMemoryItems(injected.items, includeContextHeader: false);
-  final parts = <String>[];
-  if (summaryExcerpt != null && summaryExcerpt.isNotEmpty) {
-    parts.add('Summary excerpt:\n$summaryExcerpt');
-  }
-  parts.add(formatMemoryItems(injected.items, includeContextHeader: true));
-  return RebuiltMemoryContent(parts.join('\n\n'), macro);
-}
-
 bool replaceDeferredMemoryPlaceholders(
   List<PromptMessage> messages,
   String memoryContent,
@@ -245,7 +185,7 @@ bool replaceDeferredMemoryPlaceholders(
       blockName: message.blockName,
       sourceMessageId: message.sourceMessageId,
       reasoningContent: message.reasoningContent,
-      imagePath: message.imagePath,
+      imagePaths: message.imagePaths,
     );
     replaced = true;
   }
@@ -297,6 +237,8 @@ Map<String, dynamic> finalizeMemoryCoverage(
     'excerptTokensPerChunk': tokensPerChunk,
     'excerptChunksPerEntry': chunksPerEntry,
     'entryIds': excerpted.entries.map((e) => e.id).toList(growable: false),
+    'candidatesTotal': selection.allScores.length,
+    'excludedBySourceWindow': selection.excludedBySourceWindow,
     'budgetTrimmed': excerpted.budgetTrimmed,
     'memoryMacroMissing': memoryMacroMissing,
     'diagnostics': diagnostics,
@@ -379,6 +321,7 @@ DeferredMemoryResult finalizeDeferredMemory({
   required ContextCalculator calculator,
   required int lorebookReserve,
   required int vectorLoreTokens,
+  required GameTimeState gameTime,
 }) {
   var breakdown = baseBreakdown;
   final selection = payload.memorySelection!;
@@ -390,40 +333,30 @@ DeferredMemoryResult finalizeDeferredMemory({
   final visibleMessageIds = sourceWindowVisibleMessageIds.isNotEmpty
       ? sourceWindowVisibleMessageIds
       : breakdown.visibleMessageIds;
-  final refiltered = refilterMemorySelection(
-    selection,
+  final resolved = const MemoryContextResolver().resolve(
+    selection: selection,
     visibleMessageIds: visibleMessageIds,
-    chunkBudgeting: payload.memoryPackingMode == 'chunk_first',
     disableSourceWindowExclusion: payload.disableSourceWindowExclusion,
+    excerptingEnabled: payload.memoryExcerptingEnabled,
+    packingMode: payload.memoryPackingMode,
+    excerptTokensPerChunk: payload.memoryExcerptTokensPerChunk,
+    excerptChunksPerEntry: payload.memoryExcerptChunksPerEntry,
+    chunkFirstTopEntries: payload.chunkFirstTopEntries,
+    chunkFirstTopChunks: payload.chunkFirstTopChunks,
+    summaryExcerpt: payload.summaryContent,
+    gameTime: gameTime,
   );
+  final refiltered = resolved.selection;
   MemorySelection? finalMemorySelection = refiltered;
-  MemoryExcerptSelection? finalExcerptSelection;
+  MemoryExcerptSelection? finalExcerptSelection = resolved.excerptSelection;
   var memoryMacroMissing = false;
-
-  final useExcerptPacking =
-      payload.memoryExcerptingEnabled ||
-      payload.memoryPackingMode == 'chunk_first';
-  final excerpted = !useExcerptPacking
-      ? MemoryExcerptSelector.fullEntries(refiltered)
-      : MemoryExcerptSelector.select(
-          refiltered,
-          packingMode: payload.memoryPackingMode,
-          maxExcerptTokensPerEntry: payload.memoryExcerptTokensPerChunk,
-          maxExcerptChunksPerEntry: payload.memoryExcerptChunksPerEntry,
-          chunkFirstTopEntries: payload.chunkFirstTopEntries,
-          chunkFirstTopChunks: payload.chunkFirstTopChunks,
-        );
-  finalExcerptSelection = excerpted;
+  final excerpted = resolved.excerptSelection;
 
   var historyMsgs = historyOnly;
 
   if (excerpted.items.isNotEmpty) {
-    final rebuilt = buildMemoryContentFromSelection(
-      refiltered,
-      excerptSelection: excerpted,
-      summaryExcerpt: payload.summaryContent,
-    );
-    var memoryContent = rebuilt.content;
+    final rebuilt = resolved.content!;
+    var memoryContent = rebuilt.hardBlockContent;
     var memoryMacroContent = rebuilt.macroContent;
     final replacedMacro = replaceDeferredMemoryPlaceholders(
       messages,
@@ -435,12 +368,16 @@ DeferredMemoryResult finalizeDeferredMemory({
       historyMsgs = messages.where((m) => m.isHistory).toList(growable: false);
       macroTokens['memory'] = estimateTokens(memoryMacroContent);
     } else if (payload.memoryInjectionTarget == 'hard_block') {
-      memoryContent = rebuilt.content;
+      memoryContent = rebuilt.hardBlockContent;
       final hasMemoryBlock =
           messages.any((m) => m.blockId == 'memory') ||
           appendedEntries.any((b) => b.id == 'memory');
       if (!hasMemoryBlock) {
-        injectMemoryBlock(messages, attributionBlocks, rebuilt.content);
+        injectMemoryBlock(
+          messages,
+          attributionBlocks,
+          rebuilt.hardBlockContent,
+        );
       }
     } else {
       // injectionTarget == 'macro' but the preset has no {{memory}}
@@ -464,8 +401,23 @@ DeferredMemoryResult finalizeDeferredMemory({
       memoryMacroContent: memoryMacroContent,
       visibleMessageIds: sourceWindowVisibleMessageIds,
     );
-  } else if (refiltered.entries.isEmpty &&
-      shouldInjectFactualContinuityGuard(payload)) {
+  } else {
+    replaceDeferredMemoryPlaceholders(messages, '');
+    macroTokens.remove('memory');
+    breakdown = recomputeBreakdownWithMemory(
+      calculator: calculator,
+      baseBreakdown: breakdown,
+      attributionBlocks: attributionBlocks,
+      historyMessages: messages.where((m) => m.isHistory).toList(),
+      lorebookReserveTokens: lorebookReserve,
+      macroTokens: macroTokens,
+      vectorLoreTokens: vectorLoreTokens,
+      memoryContent: '',
+      memoryMacroContent: '',
+      visibleMessageIds: sourceWindowVisibleMessageIds,
+    );
+  }
+  if (excerpted.items.isEmpty && shouldInjectFactualContinuityGuard(payload)) {
     const guard =
         'Factual continuity note: The latest user message may refer to older context, but no reliable Memory Book entry was selected. Do not invent specific past events; ask for clarification or answer only from visible chat context.';
     final hasMemoryBlock =

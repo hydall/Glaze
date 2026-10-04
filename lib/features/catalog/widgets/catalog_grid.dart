@@ -6,142 +6,25 @@ import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../shared/theme/app_colors.dart';
-import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../chat/bridge/chat_webview_environment.dart';
 import '../../settings/app_settings_provider.dart';
 import '../catalog_models.dart';
 import '../catalog_provider.dart';
 import '../services/cf_challenge_service.dart';
+import '../services/janitor_session.dart';
 import '../services/janitor_webview_proxy.dart';
 import '../services/chub_provider.dart';
-import '../services/datacat_provider.dart';
+import '../services/datacat/datacat_discovery.dart';
 import '../services/janitor_provider.dart';
 import 'catalog_card_grid.dart';
 import 'catalog_controls.dart';
 import 'catalog_detail_launcher.dart';
-import 'janitor_login_sheet.dart';
-
-/// Persisted flag so the JanitorAI login info sheet is shown at most once ever.
-const _janitorInfoShownKey = 'janitor_login_info_shown';
-
-/// In-memory guard so the (async) check fires at most once per app session,
-/// regardless of how many times the catalog state updates.
-bool _janitorInfoCheckStarted = false;
-
-/// On the first successful JanitorAI catalog load, offer the user to sign in so
-/// the full (authenticated) character set is available. Shown once per install,
-/// and skipped entirely for users who are already logged in.
-Future<void> _maybeShowJanitorLoginInfo(
-  BuildContext context,
-  WidgetRef ref,
-) async {
-  if (_janitorInfoCheckStarted) return;
-  _janitorInfoCheckStarted = true;
-
-  final prefs = await SharedPreferences.getInstance();
-  if (prefs.getBool(_janitorInfoShownKey) ?? false) return;
-
-  final loggedIn = await JanitorWebViewProxy.instance.isLoggedIn();
-  // Mark as shown regardless so it never reappears.
-  await prefs.setBool(_janitorInfoShownKey, true);
-  if (loggedIn || !context.mounted) return;
-
-  await GlazeBottomSheet.show<void>(
-    context,
-    // Cannot be dragged or tapped-out to dismiss; the content widget also blocks
-    // the back button for the first 5s so it isn't closed by accident.
-    locked: true,
-    isDismissible: false,
-    child: _JanitorLoginInfoContent(
-      onLogin: () async {
-        Navigator.of(context, rootNavigator: true).pop();
-        // The login sheet itself refreshes the catalog on a successful sign-in.
-        await showJanitorLoginSheet(context);
-      },
-    ),
-  );
-}
-
-/// Body of the JanitorAI login info sheet. Stays locked (back button blocked,
-/// login button disabled with a countdown) for [_lockSeconds] so it can't be
-/// dismissed accidentally right as it appears.
-class _JanitorLoginInfoContent extends StatefulWidget {
-  final Future<void> Function() onLogin;
-
-  const _JanitorLoginInfoContent({required this.onLogin});
-
-  @override
-  State<_JanitorLoginInfoContent> createState() =>
-      _JanitorLoginInfoContentState();
-}
-
-class _JanitorLoginInfoContentState extends State<_JanitorLoginInfoContent> {
-  static const _lockSeconds = 5;
-  int _remaining = _lockSeconds;
-  Timer? _timer;
-
-  bool get _locked => _remaining > 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _timer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (!mounted) return;
-      setState(() {
-        _remaining--;
-        if (_remaining <= 0) t.cancel();
-      });
-    });
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final label = 'janitor_login_button'.tr();
-    return PopScope(
-      canPop: !_locked,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-        child: Column(
-          children: [
-            Icon(
-              Icons.person_outline_rounded,
-              size: 64,
-              color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'janitor_login_info_desc'.tr(),
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 16,
-                color: context.cs.onSurface,
-                height: 1.5,
-              ),
-            ),
-            const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _locked ? null : () => widget.onLogin(),
-                child: Text(_locked ? '$label ($_remaining)' : label),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
+import 'catalog_onboarding_sheet.dart';
+import '../../../shared/widgets/glaze_sheet.dart';
 
 class CatalogGrid extends ConsumerWidget {
   final double topPadding;
@@ -158,13 +41,10 @@ class CatalogGrid extends ConsumerWidget {
     final state = ref.watch(catalogProvider);
     final notifier = ref.read(catalogProvider.notifier);
 
-    ref.listen<CatalogState>(catalogProvider, (prev, next) {
-      if (next.activeProvider == CatalogProvider.janitor &&
-          !next.loading &&
-          next.error == null &&
-          next.results.isNotEmpty) {
-        _maybeShowJanitorLoginInfo(context, ref);
-      }
+    // The Discover tab is now on screen: offer the one-time catalog explainer.
+    // The service guards itself, so scheduling on every build is safe.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (context.mounted) maybeShowCatalogOnboarding(context);
     });
 
     return NotificationListener<ScrollNotification>(
@@ -226,7 +106,12 @@ class CatalogGrid extends ConsumerWidget {
                 ),
               ),
             ),
-          if (state.activeProvider != CatalogProvider.janny && state.activeProvider != CatalogProvider.chub)
+          // DataCat's listings carry no total at all — only `hasMore` and a
+          // cursor — so a count row here would read "0 results" over a full
+          // grid. Janny and Chub opt out for their own reasons.
+          if (state.activeProvider != CatalogProvider.janny &&
+              state.activeProvider != CatalogProvider.chub &&
+              state.activeProvider != CatalogProvider.datacat)
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
@@ -273,10 +158,7 @@ class CatalogGrid extends ConsumerWidget {
                   child: SizedBox(
                     width: 28,
                     height: 28,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2.5,
-                      color: context.cs.primary,
-                    ),
+                    child: GlazeSpinner(color: context.cs.primary),
                   ),
                 ),
               ),
@@ -308,7 +190,7 @@ class CatalogGrid extends ConsumerWidget {
     CatalogItem item,
     CatalogProvider provider,
   ) async {
-    final importedCharId = await showModalBottomSheet<String>(
+    final importedCharId = await showGlazeSheet<String>(
       context: context,
       isScrollControlled: true,
       useRootNavigator: true,
@@ -371,26 +253,32 @@ class _CfChallengeWebViewState extends State<_CfChallengeWebView> {
     // time CF re-challenges (the "creds lost after a while" bug). Capture those
     // cookies first and restore them after the wipe so only CF's cookies are
     // actually reset.
+    //
+    // The restore deliberately does NOT re-use the attributes read back with the
+    // cookie: Android's WebView returns none at all on older versions, and a
+    // mangled `Max-Age` on newer ones, so re-setting what was read downgrades a
+    // 400-day login to a session cookie (or to a few hours) and the account is
+    // gone by the next launch. Supabase's own attributes are restated instead —
+    // host-only, site-wide, secure, lax — with the expiry [janitorAuthCookieExpiry]
+    // picks.
     try {
       final origin = WebUri('https://janitorai.com');
       final before = await CookieManager.instance().getCookies(url: origin);
       debugPrint('[CF] Cookies before wipe: ${before.map((c) => c.name).join(', ')}');
-      final authCookies = before
-          .where((c) => c.name.startsWith('sb-') && c.name.contains('-auth-token'))
-          .toList();
+      final authCookies =
+          before.where((c) => isJanitorAuthCookie(c.name)).toList();
       await CookieManager.instance().deleteAllCookies();
+      final nowMs = DateTime.now().millisecondsSinceEpoch;
       for (final c in authCookies) {
         try {
           await CookieManager.instance().setCookie(
             url: origin,
             name: c.name,
             value: c.value.toString(),
-            domain: c.domain,
-            path: c.path ?? '/',
-            expiresDate: c.expiresDate,
-            isSecure: c.isSecure,
-            isHttpOnly: c.isHttpOnly,
-            sameSite: c.sameSite,
+            path: '/',
+            expiresDate: janitorAuthCookieExpiry(c.expiresDate, nowMs: nowMs),
+            isSecure: true,
+            sameSite: HTTPCookieSameSitePolicy.LAX,
           );
         } catch (e) {
           debugPrint('[CF] auth cookie restore error (${c.name}): $e');

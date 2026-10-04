@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../widgets/glass_surface.dart';
+
 /// Animates the header's `below` slot (e.g. the character list's segmented tab
 /// bar) in and out when a screen switch — or a same-screen claim like the
 /// character list toggling in and out of a folder — adds or removes it.
@@ -26,7 +28,14 @@ class AnimatedHeaderBelow extends StatelessWidget {
         switchOutCurve: Curves.easeOutCubic,
         layoutBuilder: (currentChild, previousChildren) => Stack(
           alignment: Alignment.topCenter,
-          children: [...previousChildren, ?currentChild],
+          children: [
+            // The outgoing slot overlaps the incoming one while they swap, so
+            // it must not share the header's backdrop capture — see
+            // [GlassBackdropGroup].
+            for (final child in previousChildren)
+              GlassBackdropGroup.none(child: child),
+            ?currentChild,
+          ],
         ),
         transitionBuilder: (child, animation) => ClipRect(
           child: SlideTransition(

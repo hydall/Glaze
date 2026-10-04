@@ -13,6 +13,11 @@ const kDefaultGuidedImpersonationPrompt =
     '[Instead of replying for {{char}}, impersonate {{user}} according to '
     'these instructions: {{guidance}}]';
 
+/// Continue mode: the system turn injected immediately after the assistant
+/// reply being extended, ahead of every preset block that follows
+/// `chat_history`. See `docs/INVARIANTS.md` INV-CM3.
+const kContinueInstruction = 'Expand your latest message, continue.';
+
 /// Legacy default the `guided_generation` block shipped with before parity with
 /// Glaze. Presets still carrying it verbatim are upgraded on load so guided
 /// generation/swipe reads exactly like Glaze.

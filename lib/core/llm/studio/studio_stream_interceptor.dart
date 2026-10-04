@@ -1,8 +1,9 @@
 import '../../models/chat_message.dart';
-import '../prompt_builder.dart' show PromptPayload;
 import '../studio_stage_brief.dart';
 import '../../models/agent_operation_record.dart';
-import '../tokenizer.dart';
+import '../history_assembler.dart';
+import '../../models/studio_config.dart';
+import 'studio_history_limiter.dart';
 
 /// Pure static helpers for Studio stream interception.
 ///
@@ -11,97 +12,126 @@ import '../tokenizer.dart';
 class StudioStreamInterceptor {
   StudioStreamInterceptor._();
 
-  /// Token budget mirroring [StudioHistoryLimiter.finalHistoryTokenBudget].
-  /// The source-window ID set must match the messages that actually reach the
-  /// final generator — if token trimming drops messages that the message-count
-  /// slice would have kept, memory injection must know about it so it doesn't
-  /// suppress entries for messages that are no longer visible.
-  static const finalHistoryTokenBudget = 60000;
-
   /// Compute the set of visible message IDs that form the Studio final
-  /// generator's source window. Takes the last [finalContextSize] non-hidden
-  /// messages from [history], but also enforces a [finalHistoryTokenBudget]
-  /// cap: messages are accumulated from the end until either the count or the
-  /// token budget is reached, whichever comes first.
+  /// generator's stable source window. When a persisted boundary exists, only
+  /// messages from that boundary onward are visible. Without one, an initial
+  /// safe window is derived from completed chunks while any trailing user turn
+  /// remains visible.
   ///
   /// This mirrors [StudioHistoryLimiter.limitFinalHistory] so that memory
   /// source-window exclusion stays in sync with what the final generator
   /// actually sees.
   static Set<String> computeStudioFinalVisibleMessageIds(
     List<ChatMessage> history,
-    int finalContextSize,
-  ) {
-    if (finalContextSize <= 0) return const <String>{};
-    final nonHidden = history.where((m) => !m.isHidden).toList();
-    if (nonHidden.isEmpty) return const <String>{};
-
-    final selected = <String>[];
-    var totalTokens = 0;
-    for (var i = nonHidden.length - 1; i >= 0; i--) {
-      final m = nonHidden[i];
-      final tokens = estimateTokens(m.content);
-      if (selected.isNotEmpty &&
-          totalTokens + tokens > finalHistoryTokenBudget) {
-        break;
-      }
-      selected.insert(0, m.id);
-      totalTokens += tokens;
-      if (selected.length >= finalContextSize) break;
-    }
-    return selected.toSet();
+    int finalContextSize, {
+    int reasoningHistoryCount = 0,
+    bool excludeReasoningFromContextBudget = false,
+    String? historyWindowStartMessageId,
+  }) {
+    final limited = StudioHistoryLimiter.limitFinalHistory(
+      _asPromptHistory(history),
+      StudioPreset(
+        id: 'visible-window',
+        maxFinalHistoryMessages: finalContextSize,
+      ),
+      reasoningHistoryCount: reasoningHistoryCount,
+      excludeReasoningFromContextBudget: excludeReasoningFromContextBudget,
+      historyWindowStartMessageId: historyWindowStartMessageId,
+    );
+    return limited
+        .map((message) => message.sourceMessageId)
+        .whereType<String>()
+        .toSet();
   }
 
-  /// Clone a [PromptPayload] with a different `sourceWindowVisibleMessageIds`.
-  static PromptPayload payloadWithSourceWindow(
-    PromptPayload payload,
-    Set<String> sourceWindowVisibleMessageIds,
-  ) {
-    return PromptPayload(
-      character: payload.character,
-      persona: payload.persona,
-      preset: payload.preset,
-      history: payload.history,
-      sessionId: payload.sessionId,
-      apiConfig: payload.apiConfig,
-      sessionVars: payload.sessionVars,
-      globalVars: payload.globalVars,
-      summaryContent: payload.summaryContent,
-      summaryPrefix: payload.summaryPrefix,
-      memoryContent: payload.memoryContent,
-      memoryMacroContent: payload.memoryMacroContent,
-      memoryInjectionTarget: payload.memoryInjectionTarget,
-      guidanceText: payload.guidanceText,
-      lorebooks: payload.lorebooks,
-      lorebookSettings: payload.lorebookSettings,
-      lorebookActivations: payload.lorebookActivations,
-      vectorEntries: payload.vectorEntries,
-      authorsNote: payload.authorsNote,
-      characterDepthPrompt: payload.characterDepthPrompt,
-      characterDepthPromptDepth: payload.characterDepthPromptDepth,
-      characterDepthPromptRole: payload.characterDepthPromptRole,
-      memoryCoverage: payload.memoryCoverage,
-      globalRegexes: payload.globalRegexes,
-      preScannedEntries: payload.preScannedEntries,
-      triggeredMemories: payload.triggeredMemories,
-      runtimePromptBlocks: payload.runtimePromptBlocks,
-      memorySelection: payload.memorySelection,
-      memoryExcerptingEnabled: payload.memoryExcerptingEnabled,
-      memoryPackingMode: payload.memoryPackingMode,
-      memoryExcerptTokensPerChunk: payload.memoryExcerptTokensPerChunk,
-      memoryExcerptChunksPerEntry: payload.memoryExcerptChunksPerEntry,
-      chunkFirstTopEntries: payload.chunkFirstTopEntries,
-      chunkFirstTopChunks: payload.chunkFirstTopChunks,
-      arcContent: payload.arcContent,
-      entitiesContent: payload.entitiesContent,
-      studioSessionStateContent: payload.studioSessionStateContent,
-      characterKnowledgeContent: payload.characterKnowledgeContent,
-      recalledMessagesContent: payload.recalledMessagesContent,
-      recalledMessageChunks: payload.recalledMessageChunks,
-      disableSourceWindowExclusion: payload.disableSourceWindowExclusion,
-      sourceWindowVisibleMessageIds: sourceWindowVisibleMessageIds,
-      memoryInjectionFingerprint: payload.memoryInjectionFingerprint,
+  /// Plans a boundary advance after an assistant reply has been committed.
+  static StudioHistoryWindowPlan planCompletedHistoryWindow(
+    List<ChatMessage> history, {
+    required int finalContextSize,
+    String? historyWindowStartMessageId,
+    int reasoningHistoryCount = 0,
+    bool excludeReasoningFromContextBudget = false,
+  }) {
+    final promptHistory = _asPromptHistory(history);
+    final currentStart = promptHistory.indexWhere(
+      (message) => message.sourceMessageId == historyWindowStartMessageId,
+    );
+    final bootstrap = currentStart >= 0
+        ? (window: promptHistory.sublist(currentStart), dropped: 0)
+        : _bootstrapCompletedTurnWindow(
+            promptHistory,
+            finalContextSize: finalContextSize,
+            reasoningHistoryCount: reasoningHistoryCount,
+            excludeReasoningFromContextBudget:
+                excludeReasoningFromContextBudget,
+          );
+    final plan = StudioHistoryLimiter.planCompletedWindow(
+      bootstrap.window,
+      maxMessages: finalContextSize,
+      reasoningHistoryCount: reasoningHistoryCount,
+      excludeReasoningFromContextBudget: excludeReasoningFromContextBudget,
+    );
+    if (bootstrap.dropped == 0) return plan;
+    return StudioHistoryWindowPlan(
+      messages: plan.messages,
+      droppedMessageCount: bootstrap.dropped + plan.droppedMessageCount,
+      didRotate: true,
     );
   }
+
+  static ({List<PromptMessage> window, int dropped})
+  _bootstrapCompletedTurnWindow(
+    List<PromptMessage> history, {
+    required int finalContextSize,
+    required int reasoningHistoryCount,
+    required bool excludeReasoningFromContextBudget,
+  }) {
+    if (history.isEmpty || history.last.role != 'assistant') {
+      return (window: history, dropped: 0);
+    }
+    final requestWindow = StudioHistoryLimiter.limitFinalHistory(
+      history.sublist(0, history.length - 1),
+      StudioPreset(
+        id: 'completed-window-bootstrap',
+        maxFinalHistoryMessages: finalContextSize,
+      ),
+      reasoningHistoryCount: reasoningHistoryCount,
+      excludeReasoningFromContextBudget: excludeReasoningFromContextBudget,
+    );
+    return (
+      window: [...requestWindow, history.last],
+      dropped: history.length - 1 - requestWindow.length,
+    );
+  }
+
+  /// Uses the tracker limiter exactly, including its 1..200 count clamp.
+  static Set<String> computeStudioVisibleMessageIds(
+    List<ChatMessage> history,
+    int contextSize,
+  ) {
+    final limited = StudioHistoryLimiter.limitTrackerHistory(
+      _asPromptHistory(history),
+      contextSize,
+    );
+    return limited
+        .map((message) => message.sourceMessageId)
+        .whereType<String>()
+        .toSet();
+  }
+
+  static List<PromptMessage> _asPromptHistory(List<ChatMessage> history) =>
+      history
+          .where((message) => !message.isHidden && !message.isTyping)
+          .map(
+            (message) => PromptMessage(
+              role: message.role,
+              content: message.content,
+              reasoningContent: message.reasoning,
+              sourceMessageId: message.id,
+              imagePaths: message.imageHidden ? const [] : message.attachments,
+            ),
+          )
+          .toList(growable: false);
 
   /// Convert Studio stage briefs into the compact JSON format stored on
   /// `ChatMessage.studioOutputs` / `AgentSwipe.studioOutputs` and read by the

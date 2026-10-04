@@ -5,6 +5,7 @@ import '../converters/openrouter_messages.dart';
 import '../converters/cache_breakpoint_marker.dart';
 import 'chat_transport.dart';
 import 'chat_transport_request.dart';
+import 'llm_protocol.dart';
 import 'openai_chat_transport.dart';
 
 /// OpenRouter transport. Hardcodes the OR base URL and layers OR-specific
@@ -20,7 +21,7 @@ import 'openai_chat_transport.dart';
 /// Streaming/parsing reuses [OpenAiChatTransport] verbatim — OR's SSE chunks
 /// are OpenAI-compatible.
 class OpenRouterChatTransport implements ChatTransport {
-  static const String baseUrl = 'https://openrouter.ai/api/v1';
+  static const String baseUrl = 'https://openrouter.ai/api/v1/chat/completions';
   static const String referer = 'https://github.com/hydall/Glaze';
   static const String title = 'Glaze';
 
@@ -34,6 +35,7 @@ class OpenRouterChatTransport implements ChatTransport {
           inner ??
           OpenAiChatTransport(
             dio: dio,
+            protocol: LlmProtocol.openrouter,
             extraHeaders: const {'HTTP-Referer': referer, 'X-Title': title},
           );
 
@@ -106,7 +108,12 @@ class OpenRouterChatTransport implements ChatTransport {
       // top-level `cache_control` field. Cache markers are now on the
       // message parts via the helpers above.
       cacheControlTtl: 'off',
+      charName: input.charName,
+      userName: input.userName,
+      stop: input.stop,
+      responseJsonSchema: input.responseJsonSchema,
       extraRequestParameters: input.extraRequestParameters,
+      captureContext: input.captureContext,
     );
   }
 

@@ -13,6 +13,18 @@ class ShellHeaderConfig {
   final bool showBack;
   final VoidCallback? onBack;
 
+  /// A step back inside the screen itself — a lorebook entry's editor back to
+  /// the entry list — which a desktop window's title bar offers as its back
+  /// button, ahead of stepping the window back. Null when the screen is at its
+  /// own top level.
+  final VoidCallback? innerBack;
+
+  /// Replaces the header's leading slot — the Glaze logo by default. Screens
+  /// that temporarily stop being "a tab" set it (the dialogs list swaps in a
+  /// close button while a multi-selection is running); ignored when
+  /// [showBack] draws a back button there instead.
+  final Widget? leading;
+
   /// Optional extra row rendered directly under the app bar (e.g. the Chats
   /// "Filter: …" chip).
   final Widget? below;
@@ -28,6 +40,8 @@ class ShellHeaderConfig {
     this.actions,
     this.showBack = false,
     this.onBack,
+    this.innerBack,
+    this.leading,
     this.below,
     this.hidden = false,
   });
@@ -154,6 +168,73 @@ ShellHeaderEntry? resolveShellHeader(
   return best;
 }
 
+/// Marks a subtree that is hosted *outside* the shell's branch navigators —
+/// the desktop right sidebar's tool panel and the desktop floating window.
+///
+/// Screens there are the same widgets the router mounts in the middle column,
+/// and a [SheetView] among them would otherwise suppress the header of
+/// whichever branch the middle column happens to be showing: opening API
+/// settings in the sidebar blanked the character list's header behind it.
+class DetachedShellHost extends InheritedWidget {
+  /// Whether the host draws header chrome of its own — the desktop floating
+  /// window's title bar, with the window's back/close buttons in it.
+  ///
+  /// A screen that would otherwise draw its own header (a [SheetView] mounted
+  /// as a page, say) hands its title and actions to that title bar via
+  /// [kDetachedChromeBranch] instead of drawing a second header inside the
+  /// frame. The right sidebar has no title bar, so it leaves this false and its
+  /// panels keep their own headers.
+  final bool hasChrome;
+
+  /// Pseudo-branch the hosted screens publish their header under when
+  /// [hasChrome] is set, and the one the host's title bar resolves. Each
+  /// desktop floating window passes its own, so windows open side by side do
+  /// not show each other's titles.
+  final int headerBranch;
+
+  const DetachedShellHost({
+    super.key,
+    this.hasChrome = false,
+    this.headerBranch = kDetachedChromeBranch,
+    required super.child,
+  });
+
+  static DetachedShellHost? _of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<DetachedShellHost>();
+
+  static bool of(BuildContext context) => _of(context) != null;
+
+  /// True when the nearest detached host draws its own header chrome.
+  static bool drawsChrome(BuildContext context) =>
+      _of(context)?.hasChrome ?? false;
+
+  /// The branch a chrome-drawing host's title bar reads, or null outside one.
+  static int? chromeBranchOf(BuildContext context) {
+    final host = _of(context);
+    return host != null && host.hasChrome ? host.headerBranch : null;
+  }
+
+  @override
+  bool updateShouldNotify(DetachedShellHost oldWidget) =>
+      oldWidget.hasChrome != hasChrome ||
+      oldWidget.headerBranch != headerBranch;
+}
+
+/// The branch a screen at [context] should publish its header claim under:
+/// [branch] normally, or the host's pseudo-branch when the screen is hosted by
+/// a chrome-drawing [DetachedShellHost] — there the host's title bar is the
+/// header, and the shell branch the screen belongs to on phones is not on
+/// screen at all.
+int shellHeaderBranchFor(BuildContext context, int branch) {
+  final host = context.getInheritedWidgetOfExactType<DetachedShellHost>();
+  return host != null && host.hasChrome ? host.headerBranch : branch;
+}
+
+/// Pseudo-branch under which a screen hosted by a chrome-drawing
+/// [DetachedShellHost] publishes its header, so the host's title bar can render
+/// it. Negative so it can never collide with a real shell branch index.
+const int kDetachedChromeBranch = -1;
+
 /// Mix into a shell screen's [ConsumerState] to publish a header into
 /// [shellHeaderProvider]. Implement [headerBranchIndex] and [buildShellHeader],
 /// and call [refreshShellHeader] whenever local state affecting the header
@@ -163,16 +244,26 @@ mixin ShellHeaderMixin<T extends ConsumerStatefulWidget> on ConsumerState<T> {
 
   ShellHeaderConfig buildShellHeader();
 
+  /// Set false by a screen mounted somewhere that has no shell header to fill
+  /// — the desktop right sidebar hosts a second [ToolsScreen] instance, and a
+  /// duplicate claim on the same branch would fight the routed one.
+  bool get publishesShellHeader => true;
+
   // Cached so it can be used safely in [dispose], where reading `ref` is unsafe.
   ShellHeaderRegistry? _registry;
 
   @override
   void initState() {
     super.initState();
+    if (!publishesShellHeader) return;
     _registry = ref.read(shellHeaderProvider.notifier);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _registry?.publish(this, headerBranchIndex, buildShellHeader());
+      _registry?.publish(
+        this,
+        shellHeaderBranchFor(context, headerBranchIndex),
+        buildShellHeader(),
+      );
     });
   }
 
@@ -180,7 +271,11 @@ mixin ShellHeaderMixin<T extends ConsumerStatefulWidget> on ConsumerState<T> {
   /// no-ops before the first post-frame publish if the widget is unmounted.
   void refreshShellHeader() {
     if (!mounted) return;
-    _registry?.publish(this, headerBranchIndex, buildShellHeader());
+    _registry?.publish(
+      this,
+      shellHeaderBranchFor(context, headerBranchIndex),
+      buildShellHeader(),
+    );
   }
 
   @override

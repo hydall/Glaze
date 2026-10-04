@@ -2,12 +2,16 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../../core/utils/id_generator.dart';
 import '../../../../../shared/theme/app_colors.dart';
+import '../../../../../shared/widgets/glaze_action_button.dart';
+import '../../../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../../../shared/widgets/menu_group.dart';
 import '../../../models/block_config.dart';
 import '../../../models/extension_preset.dart';
 import '../../../providers/extension_presets_provider.dart';
 import '../block_edit_dialog.dart';
+import '../../../../../shared/widgets/glaze_sheet.dart';
 
 class BlocksSection extends ConsumerWidget {
   const BlocksSection({required this.preset, super.key});
@@ -56,10 +60,12 @@ class BlocksSection extends ConsumerWidget {
         ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: OutlinedButton.icon(
-            onPressed: () => _addBlock(context, ref, preset),
-            icon: const Icon(Icons.add),
-            label: Text('add_block'.tr()),
+          child: GlazeActionButton(
+            icon: Icons.add,
+            label: 'add_block'.tr(),
+            onTap: () => _addBlock(context, ref, preset),
+            tone: GlazeActionTone.neutral,
+            expand: true,
           ),
         ),
       ],
@@ -88,16 +94,15 @@ class BlocksSection extends ConsumerWidget {
     WidgetRef ref,
     ExtensionPreset preset,
   ) async {
-    final id = 'block_${DateTime.now().millisecondsSinceEpoch}';
     final block = BlockConfig(
-      id: id,
+      id: generateId(),
       name: 'new_block'.tr(),
-      type: BlockType.infoblock,
+      type: BlockType.generated,
       enabled: true,
     );
     final updated = preset.copyWith(blocks: [...preset.blocks, block]);
     await ref.read(extensionPresetsProvider.notifier).update(updated);
-    if (context.mounted) _editBlock(context, ref, updated, block);
+    if (context.mounted) editBlockSheet(context, ref, updated, block);
   }
 }
 
@@ -122,7 +127,7 @@ class _BlockTile extends ConsumerWidget {
           subtitle: blockSubtitle(block),
           enabled: block.enabled,
           onToggle: (v) => _toggleBlock(ref, preset, block, v),
-          onTap: () => _editBlock(context, ref, preset, block),
+          onTap: () => editBlockSheet(context, ref, preset, block),
           onMore: () => _showBlockActions(context, ref, preset, block),
         ),
         Positioned(
@@ -162,27 +167,19 @@ class _BlockTile extends ConsumerWidget {
     ExtensionPreset preset,
     BlockConfig block,
   ) {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: context.cs.surfaceContainerHigh,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.delete_outline, color: Colors.red),
-              title: Text('blocks_delete_block'.tr()),
-              onTap: () {
-                Navigator.pop(ctx);
-                _deleteBlock(ref, preset, block);
-              },
-            ),
-          ],
+    GlazeBottomSheet.show<void>(
+      context,
+      items: [
+        BottomSheetItem(
+          label: 'blocks_delete_block'.tr(),
+          icon: Icons.delete_outline,
+          isDestructive: true,
+          onTap: () {
+            Navigator.pop(context);
+            _deleteBlock(ref, preset, block);
+          },
         ),
-      ),
+      ],
     );
   }
 
@@ -196,26 +193,48 @@ class _BlockTile extends ConsumerWidget {
 
 String blockSubtitle(BlockConfig block) {
   final type = switch (block.type) {
-    BlockType.infoblock => 'block_type_infoblock'.tr(),
-    BlockType.imageGen => 'block_type_image'.tr(),
-    BlockType.jsRunner => 'block_type_js'.tr(),
-    BlockType.interactive => 'block_type_interactive'.tr(),
+    BlockType.generated => 'block_type_generated'.tr(),
+    BlockType.script => 'block_type_script'.tr(),
+    BlockType.rewrite => 'block_type_rewrite'.tr(),
+    BlockType.accumulation => 'block_type_accumulation'.tr(),
   };
-  final trigger = switch (block.trigger) {
-    BlockTrigger.afterUser => 'block_trigger_after_user'.tr(),
-    BlockTrigger.afterAssistant => 'block_trigger_after_assistant'.tr(),
-    BlockTrigger.periodic => 'block_trigger_periodic'.tr(),
-  };
-  return '$type • $trigger';
+  return '$type • ${blockTriggerSummary(block)}';
 }
 
-void _editBlock(
+/// Human-readable trigger line for a block.
+///
+/// A block can answer to both sides at once, so the two flags are reported
+/// together rather than collapsed into [BlockConfig.trigger] — a block that
+/// runs after every message would otherwise read as running after only one.
+String blockTriggerSummary(BlockConfig block) {
+  if (block.trigger == BlockTrigger.periodic) {
+    return 'block_trigger_periodic'.tr();
+  }
+
+  final sides = [
+    if (block.triggerOnUser) 'block_trigger_after_user'.tr(),
+    if (block.triggerOnChar) 'block_trigger_after_assistant'.tr(),
+  ];
+
+  if (sides.isEmpty) {
+    return block.trigger == BlockTrigger.afterUser
+        ? 'block_trigger_after_user'.tr()
+        : 'block_trigger_after_assistant'.tr();
+  }
+
+  return sides.join(' + ');
+}
+
+/// Opens one block's settings as a sheet and writes the result back into
+/// [preset]. Shared with the External Blocks panel, so tapping a block goes straight
+/// to its settings wherever the list is shown.
+void editBlockSheet(
   BuildContext context,
   WidgetRef ref,
   ExtensionPreset preset,
   BlockConfig block,
 ) {
-  showModalBottomSheet<void>(
+  showGlazeSheet<void>(
     context: context,
     isScrollControlled: true,
     useRootNavigator: true,

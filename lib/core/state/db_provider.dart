@@ -1,13 +1,22 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../db/app_db.dart';
 import '../db/repositories/character_repo.dart';
 import '../db/repositories/chat_repo.dart';
+import '../db/repositories/chat_session_branch_repo.dart';
 import '../db/repositories/preset_repo.dart';
 import '../models/preset.dart';
 import '../db/repositories/api_config_repo.dart';
 import '../db/repositories/persona_repo.dart';
 import '../db/repositories/lorebook_repo.dart';
+import '../db/repositories/session_lorebook_evolution_repo.dart';
+import '../db/repositories/session_canon_checkpoint_repo.dart';
+import '../db/repositories/session_canon_rollback_repo.dart';
+import '../db/repositories/session_lorebook_revision_repo.dart';
+import '../db/repositories/session_lorebook_embedding_job_repo.dart';
+import '../db/repositories/lorebook_use_manifest_repo.dart';
 import '../db/repositories/embedding_repo.dart';
 import '../db/repositories/summary_repo.dart';
 import '../db/repositories/memory_book_repo.dart';
@@ -20,17 +29,36 @@ import '../db/repositories/studio_preset_repo.dart';
 import '../models/studio_config.dart';
 import '../db/repositories/tracker_repo.dart';
 import '../db/repositories/tracker_snapshot_repo.dart';
+import '../db/repositories/ledger_raw_tracker_state_reader.dart';
 import '../db/repositories/ledger_reconciliation_checkpoint_repo.dart';
+import '../db/repositories/ledger_reconciliation_run_repo.dart';
+import '../db/repositories/ledger_reconciliation_lease_repo.dart';
+import '../db/repositories/ledger_debug_run_repo.dart';
+import '../db/repositories/llm_request_capture_repo.dart';
+import '../db/repositories/card_evolution_repo.dart';
+import '../db/repositories/card_evolution_proposal_run_repo.dart';
+import '../db/repositories/card_evolution_collector_run_repo.dart';
+import '../db/repositories/card_evolution_writer_call_repo.dart';
+import '../db/repositories/card_evolution_observation_repo.dart';
 import '../db/repositories/character_knowledge_fact_repo.dart';
 import '../db/repositories/character_session_baseline_repo.dart';
+import '../db/repositories/character_revision_repo.dart';
+import '../db/repositories/applied_canon_transition_repo.dart';
+import '../db/repositories/canon_transition_fact_ref_repo.dart';
+import '../db/repositories/manual_rewrite_apply_repo.dart';
+import '../db/repositories/manual_rewrite_job_repo.dart';
 import '../db/repositories/extension_presets_repository.dart';
 import '../db/repositories/info_blocks_repository.dart';
 import '../db/repositories/session_deletion_repo.dart';
 import '../db/repositories/character_deletion_repo.dart';
 import '../models/memory_book.dart';
+import '../llm/transport/llm_request_capture.dart';
+import '../llm/transport/llm_call_event.dart';
 import '../services/character_importer.dart';
 import '../services/image_storage_service.dart';
 import '../services/migration_service.dart';
+import '../services/card_rewriter/effective_canon_context_loader.dart';
+import '../services/card_rewriter/effective_canon_read_repository.dart';
 import 'studio_feature_provider.dart';
 
 // Re-export so existing call sites that `import db_provider.dart` can still
@@ -42,10 +70,41 @@ export 'pipeline_settings_provider.dart' show pipelineSettingsProvider;
 // (which already import db_provider) can gate Studio without extra imports.
 export 'studio_feature_provider.dart' show studioFeatureEnabledProvider;
 
+final _captureRepos = Expando<LlmRequestCaptureRepo>();
+
 final appDbProvider = Provider<AppDatabase>((ref) {
   final db = AppDatabase();
-  ref.onDispose(db.close);
+  ref.onDispose(() {
+    final repo = _captureRepos[db];
+    if (repo != null && identical(LlmRequestCapture.sink, repo)) {
+      LlmRequestCapture.sink = null;
+    }
+    if (repo != null && identical(LlmCallEventCapture.sink, repo)) {
+      LlmCallEventCapture.sink = null;
+    }
+    unawaited((repo?.close() ?? Future<void>.value()).whenComplete(db.close));
+  });
   return db;
+});
+
+final llmRequestCaptureRepoProvider = Provider<LlmRequestCaptureRepo>((ref) {
+  return LlmRequestCaptureRepo(ref.watch(appDbProvider));
+});
+
+/// Installs the database-backed request sink for the lifetime of the app scope.
+final llmRequestCaptureInstallationProvider = Provider<void>((ref) {
+  final repo = ref.watch(llmRequestCaptureRepoProvider);
+  _captureRepos[repo.db] = repo;
+  LlmRequestCapture.sink = repo;
+  LlmCallEventCapture.sink = repo;
+  ref.onDispose(() {
+    if (identical(LlmRequestCapture.sink, repo)) {
+      LlmRequestCapture.sink = null;
+    }
+    if (identical(LlmCallEventCapture.sink, repo)) {
+      LlmCallEventCapture.sink = null;
+    }
+  });
 });
 
 final imageStorageProvider = FutureProvider<ImageStorageService>((ref) async {
@@ -79,6 +138,15 @@ final chatRepoProvider = Provider<ChatRepo>((ref) {
   return ChatRepo(ref.watch(appDbProvider));
 });
 
+final ledgerReconciliationLeaseRepoProvider =
+    Provider<LedgerReconciliationLeaseRepo>((ref) {
+      return LedgerReconciliationLeaseRepo(ref.watch(appDbProvider));
+    });
+
+final chatSessionBranchRepoProvider = Provider<ChatSessionBranchRepo>((ref) {
+  return ChatSessionBranchRepo(ref.watch(appDbProvider));
+});
+
 final sessionDeletionRepoProvider = Provider<SessionDeletionRepo>((ref) {
   return SessionDeletionRepo(ref.watch(appDbProvider));
 });
@@ -106,6 +174,68 @@ final personaRepoProvider = Provider<PersonaRepo>((ref) {
 final lorebookRepoProvider = Provider<LorebookRepo>((ref) {
   return LorebookRepo(ref.watch(appDbProvider));
 });
+
+final sessionLorebookEvolutionRepoProvider =
+    Provider<SessionLorebookEvolutionRepo>((ref) {
+      return SessionLorebookEvolutionRepo(ref.watch(appDbProvider));
+    });
+
+final sessionCanonCheckpointRepoProvider = Provider<SessionCanonCheckpointRepo>(
+  (ref) {
+    return SessionCanonCheckpointRepo(ref.watch(appDbProvider));
+  },
+);
+
+final sessionCanonRollbackRepoProvider = Provider<SessionCanonRollbackRepo>((
+  ref,
+) {
+  return SessionCanonRollbackRepo(ref.watch(appDbProvider));
+});
+
+final sessionLorebookRevisionRepoProvider =
+    Provider<SessionLorebookRevisionRepo>((ref) {
+      return SessionLorebookRevisionRepo(ref.watch(appDbProvider));
+    });
+
+final sessionLorebookEmbeddingJobRepoProvider =
+    Provider<SessionLorebookEmbeddingJobRepo>((ref) {
+      return SessionLorebookEmbeddingJobRepo(ref.watch(appDbProvider));
+    });
+
+final lorebookUseManifestRepoProvider = Provider<LorebookUseManifestRepo>((
+  ref,
+) {
+  return LorebookUseManifestRepo(ref.watch(appDbProvider));
+});
+
+final ledgerReconciliationRunRepoProvider =
+    Provider<LedgerReconciliationRunRepo>(
+      (ref) => LedgerReconciliationRunRepo(ref.watch(appDbProvider)),
+    );
+
+final ledgerDebugRunRepoProvider = Provider<LedgerDebugRunRepo>(
+  (ref) => LedgerDebugRunRepo(ref.watch(appDbProvider)),
+);
+
+final cardEvolutionCollectorRunRepoProvider =
+    Provider<CardEvolutionCollectorRunRepo>(
+      (ref) => CardEvolutionCollectorRunRepo(ref.watch(appDbProvider)),
+    );
+
+final cardEvolutionWriterCallRepoProvider =
+    Provider<CardEvolutionWriterCallRepo>(
+      (ref) => CardEvolutionWriterCallRepo(ref.watch(appDbProvider)),
+    );
+
+final cardEvolutionObservationRepoProvider =
+    Provider<CardEvolutionObservationRepo>(
+      (ref) => CardEvolutionObservationRepo(ref.watch(appDbProvider)),
+    );
+
+final cardEvolutionProposalRunRepoProvider =
+    Provider<CardEvolutionProposalRunRepo>(
+      (ref) => CardEvolutionProposalRunRepo(ref.watch(appDbProvider)),
+    );
 
 final embeddingRepoProvider = Provider<EmbeddingRepo>((ref) {
   return EmbeddingRepo(ref.watch(appDbProvider));
@@ -143,26 +273,24 @@ final studioPresetRepoProvider = Provider<StudioPresetRepo>((ref) {
   return StudioPresetRepo(ref.watch(appDbProvider));
 });
 
-final studioPresetProvider = FutureProvider<StudioPreset?>((ref) async {
-  return ref.watch(studioPresetRepoProvider).getDefault();
+// `studioPresetProvider` — the preset a turn actually runs — lives in
+// `active_studio_preset_provider.dart`: it needs the active-preset id, and that
+// provider already imports this file.
+
+final studioPresetListProvider = FutureProvider<List<StudioPreset>>((
+  ref,
+) async {
+  return ref.watch(studioPresetRepoProvider).getAll();
 });
 
-/// Whether Studio is enabled for a given session. Drives Studio-only chat UI
-/// affordances (e.g. the per-message "Re-run cleaner" button, which is a no-op
-/// when Studio is off). Invalidated by the Studio settings sheet on save so the
-/// UI reflects a toggle immediately. Returns `false` for a null/absent config.
+/// Whether Studio is enabled globally. The session id remains part of the
+/// provider API for its chat UI consumers, but no longer controls activation.
 final sessionStudioEnabledProvider = FutureProvider.family<bool, String>((
   ref,
   sessionId,
 ) async {
   if (sessionId.isEmpty) return false;
-  // Respect the global Experimental Features master switch: Studio is off
-  // everywhere when the feature is disabled, regardless of per-session config.
-  if (!ref.watch(studioFeatureEnabledProvider)) return false;
-  final config = await ref.watch(studioConfigRepoProvider).getBySessionId(
-    sessionId,
-  );
-  return config?.enabled == true;
+  return ref.watch(studioFeatureEnabledProvider);
 });
 
 final trackerRepoProvider = Provider<TrackerRepo>((ref) {
@@ -172,6 +300,12 @@ final trackerRepoProvider = Provider<TrackerRepo>((ref) {
 final trackerSnapshotRepoProvider = Provider<TrackerSnapshotRepo>((ref) {
   return TrackerSnapshotRepo(ref.watch(appDbProvider));
 });
+
+/// Ref-free raw Ledger read boundary for transaction-fenced canon operations.
+final ledgerRawTrackerStateReaderProvider =
+    Provider<LedgerRawTrackerStateReader>((ref) {
+      return LedgerRawTrackerStateReader(ref.watch(appDbProvider));
+    });
 
 final ledgerReconciliationCheckpointRepoProvider =
     Provider<LedgerReconciliationCheckpointRepo>((ref) {
@@ -189,12 +323,93 @@ final characterSessionBaselineRepoProvider =
       return CharacterSessionBaselineRepo(ref.watch(appDbProvider));
     });
 
+final characterRevisionRepoProvider = Provider<CharacterRevisionRepo>((ref) {
+  return CharacterRevisionRepo(ref.watch(appDbProvider));
+});
+
+final appliedCanonTransitionRepoProvider = Provider<AppliedCanonTransitionRepo>(
+  (ref) {
+    return AppliedCanonTransitionRepo(ref.watch(appDbProvider));
+  },
+);
+
+final canonTransitionFactRefRepoProvider = Provider<CanonTransitionFactRefRepo>(
+  (ref) {
+    return CanonTransitionFactRefRepo(ref.watch(appDbProvider));
+  },
+);
+
+/// Construction only: [EffectiveCanonContextLoader] stays Ref-free.
+final effectiveCanonContextLoaderProvider =
+    Provider<EffectiveCanonContextLoader>((ref) {
+      return EffectiveCanonContextLoader(
+        db: ref.watch(appDbProvider),
+        characterRepo: ref.watch(characterRepoProvider),
+        characterRevisionRepo: ref.watch(characterRevisionRepoProvider),
+        baselineRepo: ref.watch(characterSessionBaselineRepoProvider),
+        factRepo: ref.watch(characterKnowledgeFactRepoProvider),
+        transitionRepo: ref.watch(appliedCanonTransitionRepoProvider),
+        transitionFactRefRepo: ref.watch(canonTransitionFactRefRepoProvider),
+        loadRawTrackerState: ref
+            .watch(ledgerRawTrackerStateReaderProvider)
+            .read,
+      );
+    });
+
 final memoryBookProvider = FutureProvider.family<MemoryBook?, String>((
   ref,
   sessionId,
 ) async {
   final repo = ref.watch(memoryBookRepoProvider);
   return repo.getBySessionId(sessionId);
+});
+
+final manualRewriteApplyRepoProvider = Provider<ManualRewriteApplyRepo>((ref) {
+  return ManualRewriteApplyRepo(
+    db: ref.watch(appDbProvider),
+    lorebookEvolutionRepo: ref.watch(sessionLorebookEvolutionRepoProvider),
+    checkpointRepo: ref.watch(sessionCanonCheckpointRepoProvider),
+    lorebookRevisionRepo: ref.watch(sessionLorebookRevisionRepoProvider),
+    embeddingJobRepo: ref.watch(sessionLorebookEmbeddingJobRepoProvider),
+    canonReader: EffectiveCanonReadRepository(
+      db: ref.watch(appDbProvider),
+      characterRepo: ref.watch(characterRepoProvider),
+      revisionRepo: ref.watch(characterRevisionRepoProvider),
+      baselineRepo: ref.watch(characterSessionBaselineRepoProvider),
+      factRepo: ref.watch(characterKnowledgeFactRepoProvider),
+      transitionRepo: ref.watch(appliedCanonTransitionRepoProvider),
+      transitionFactRefRepo: ref.watch(canonTransitionFactRefRepoProvider),
+      rawTrackerStateReader: ref.watch(ledgerRawTrackerStateReaderProvider),
+    ),
+  );
+});
+
+/// Owns the durable Phase-4 job/review lifecycle. Advisory validation reads
+/// through the same-DB raw Ledger reader; it never writes canon or characters.
+final manualRewriteJobRepoProvider = Provider<ManualRewriteJobRepo>((ref) {
+  return ManualRewriteJobRepo(
+    db: ref.watch(appDbProvider),
+    rawTrackerStateReader: ref.watch(ledgerRawTrackerStateReaderProvider),
+  );
+});
+
+final cardEvolutionRepoProvider = Provider<CardEvolutionRepo>((ref) {
+  final db = ref.watch(appDbProvider);
+  return CardEvolutionRepo(
+    db: db,
+    canonReader: EffectiveCanonReadRepository(
+      db: db,
+      characterRepo: ref.watch(characterRepoProvider),
+      revisionRepo: ref.watch(characterRevisionRepoProvider),
+      baselineRepo: ref.watch(characterSessionBaselineRepoProvider),
+      factRepo: ref.watch(characterKnowledgeFactRepoProvider),
+      transitionRepo: ref.watch(appliedCanonTransitionRepoProvider),
+      transitionFactRefRepo: ref.watch(canonTransitionFactRefRepoProvider),
+      rawTrackerStateReader: ref.watch(ledgerRawTrackerStateReaderProvider),
+    ),
+    jobRepo: ref.watch(manualRewriteJobRepoProvider),
+    lorebookEvolutionRepo: ref.watch(sessionLorebookEvolutionRepoProvider),
+  );
 });
 
 final extensionPresetsRepoProvider = Provider<ExtensionPresetsRepository>((

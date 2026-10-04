@@ -27,6 +27,15 @@ class MacroContext {
   /// disabled or no state has been written yet.
   final String? studioSessionState;
 
+  /// In-game clock from the ledger (`world:time`, `HH:MM`). `{{gametime}}`.
+  final String? gameTime;
+
+  /// In-game date from the ledger (`world:date`, `DD.MM.YYYY`). `{{gamedate}}`.
+  final String? gameDate;
+
+  /// Zero-based in-game day number from the ledger (`world:day`). `{{gameday}}`.
+  final String? gameDay;
+
   const MacroContext({
     required this.charName,
     this.charDescription,
@@ -49,6 +58,9 @@ class MacroContext {
     this.arcContent,
     this.entitiesContent,
     this.studioSessionState,
+    this.gameTime,
+    this.gameDate,
+    this.gameDay,
   });
 
   /// Context for preset-only token accounting: external injections (character,
@@ -75,6 +87,9 @@ class MacroContext {
       guidanceText: null,
       macroName: null,
       studioSessionState: null,
+      gameTime: null,
+      gameDate: null,
+      gameDay: null,
     );
   }
 
@@ -91,6 +106,9 @@ class MacroContext {
     Object? arcContent = _sentinel,
     Object? entitiesContent = _sentinel,
     Object? studioSessionState = _sentinel,
+    Object? gameTime = _sentinel,
+    Object? gameDate = _sentinel,
+    Object? gameDay = _sentinel,
   }) {
     return MacroContext(
       charName: charName,
@@ -128,6 +146,15 @@ class MacroContext {
       studioSessionState: identical(studioSessionState, _sentinel)
           ? this.studioSessionState
           : studioSessionState as String?,
+      gameTime: identical(gameTime, _sentinel)
+          ? this.gameTime
+          : gameTime as String?,
+      gameDate: identical(gameDate, _sentinel)
+          ? this.gameDate
+          : gameDate as String?,
+      gameDay: identical(gameDay, _sentinel)
+          ? this.gameDay
+          : gameDay as String?,
     );
   }
 
@@ -155,6 +182,9 @@ class MacroContext {
     'arcContent': arcContent,
     'entitiesContent': entitiesContent,
     'studioSessionState': studioSessionState,
+    'gameTime': gameTime,
+    'gameDate': gameDate,
+    'gameDay': gameDay,
   };
 
   factory MacroContext.fromJson(Map<String, dynamic> json) => MacroContext(
@@ -179,6 +209,9 @@ class MacroContext {
     arcContent: json['arcContent'] as String?,
     entitiesContent: json['entitiesContent'] as String?,
     studioSessionState: json['studioSessionState'] as String?,
+    gameTime: json['gameTime'] as String?,
+    gameDate: json['gameDate'] as String?,
+    gameDay: json['gameDay'] as String?,
   );
 }
 
@@ -453,6 +486,24 @@ MacroResult replaceMacros(String text, MacroContext ctx) {
       final now = DateTime.now();
       return '${now.year.toString().padLeft(4, '0')}-${_pad2(now.month)}-${_pad2(now.day)}';
     },
+  );
+
+  // {{gametime}} / {{gamedate}} / {{gameday}} — in-game clock from the Studio
+  // Ledger (world:time / world:date / world:day). Expand to an empty string
+  // when the ledger has not established the clock yet.
+  result = result.replaceAllMapped(
+    RegExp(r'\{\{gametime\}\}', caseSensitive: false),
+    (_) => ctx.gameTime ?? '',
+  );
+
+  result = result.replaceAllMapped(
+    RegExp(r'\{\{gamedate\}\}', caseSensitive: false),
+    (_) => ctx.gameDate ?? '',
+  );
+
+  result = result.replaceAllMapped(
+    RegExp(r'\{\{gameday\}\}', caseSensitive: false),
+    (_) => ctx.gameDay ?? '',
   );
 
   // {{time::UTC±offset}} — current time shifted to the given UTC offset (in

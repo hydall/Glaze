@@ -66,7 +66,7 @@ review:
 | God-file service mixes multiple domains | Extract cohesive domain clusters into `subdir/` specialists; keep the original file as a thin orchestrator + re-export barrel | `prompt_builder.dart` delegates to `prompt/lorebook_classifier.dart`, `prompt/memory_block_injector.dart`, etc.; `post_cleaner_service.dart` delegates to `cleaner/cleaner_prompt_builder.dart`, `cleaner/audit_prompt_builder.dart` |
 | Duplicate Result classes with identical shapes | Merge into the canonical class; delete the duplicate | `StudioFinalRunResult` (3 fields: text/reasoning/rawResponseJson) merged into the identical `AgentRunResult` |
 | Duplicate utility logic across services | Extract to a shared static helper in `shared/` or a `ModelFetcher`-style class | `message_range_formatter.dart` unifies `_formatMessageRange`; `ModelFetcher.fetchModelIds()` deduplicates `fetchModels` + sort + fallback logic |
-| UI file mixes business logic with widget code | Extract business logic to controller/service; extract distinct sub-screens/dialogs to separate files; keep private widgets inline | `agentic_operations_log_dialog.dart` delegates tabs to `agentic_operations_tab.dart` etc.; `MemoryBookController.runDedup()` encapsulates dedup logic from `memory_books_sheet.dart` |
+| UI file mixes business logic with widget code | Extract business logic to controller/service; extract distinct sub-screens/dialogs to separate files; keep private widgets inline | `agentic_operations_log_dialog.dart` delegates tabs to `agentic_operations_tab.dart` etc.; `MemoryBookController.runDedup()` encapsulates dedup logic from `memory_books_tab.dart` |
 
 Avoid creating one class per tiny function. Prefer a few domain files with clear
 ownership over many shallow wrappers.

@@ -63,14 +63,36 @@ class LedgerParseResult {
   /// Human-readable rejection reason, for diagnostics.
   final String? rejectionReason;
 
+  /// Machine-readable failure class used by the service to decide whether a
+  /// single formatting repair is safe. Semantic rejections are never retried.
+  final LedgerParseFailure failure;
+
+  /// Operations dropped by validation, as `key: reason` entries. Populated
+  /// even when the surviving export is returned, so a partially discarded
+  /// response can be diagnosed after the fact.
+  final List<String> rejectedOps;
+
   const LedgerParseResult({
     this.export,
     required this.visibleLedger,
     this.rejectionReason,
+    this.failure = LedgerParseFailure.none,
+    this.rejectedOps = const [],
   });
 
   bool get hasExport => export != null;
   bool get wasRejected => rejectionReason != null;
+}
+
+enum LedgerParseFailure {
+  none,
+  missingExport,
+  incompleteJson,
+  malformedJson,
+  semanticSchema,
+  emptyExport;
+
+  bool get isRepairable => this == incompleteJson || this == malformedJson;
 }
 
 /// Parses and validates the Studio Ledger LLM output.
@@ -85,14 +107,30 @@ class StudioLedgerExportParser {
   /// - Extracts the `<glaze_memory_export>…</glaze_memory_export>` JSON block.
   /// - Validates the export (see class-level docs).
   /// - Returns null export + rejectionReason when invalid.
-  LedgerParseResult parse(String rawOutput) {
+  LedgerParseResult parse(String rawOutput, {String focalUserName = ''}) {
     final visibleLedger = _extractBlock(rawOutput, 'studio_ledger');
-    final exportRaw = _extractBlock(rawOutput, 'glaze_memory_export');
+    final exportBlock = _findBlock(rawOutput, 'glaze_memory_export');
+    final exportRaw = exportBlock.content;
 
-    if (exportRaw.isEmpty) {
+    if (!exportBlock.hasOpeningTag) {
       return LedgerParseResult(
         visibleLedger: visibleLedger,
         rejectionReason: 'no <glaze_memory_export> block found',
+        failure: LedgerParseFailure.missingExport,
+      );
+    }
+    if (!exportBlock.hasClosingTag) {
+      return LedgerParseResult(
+        visibleLedger: visibleLedger,
+        rejectionReason: 'incomplete <glaze_memory_export> block',
+        failure: LedgerParseFailure.incompleteJson,
+      );
+    }
+    if (exportRaw.isEmpty) {
+      return LedgerParseResult(
+        visibleLedger: visibleLedger,
+        rejectionReason: 'export block does not contain a JSON object',
+        failure: LedgerParseFailure.malformedJson,
       );
     }
 
@@ -103,6 +141,9 @@ class StudioLedgerExportParser {
         return LedgerParseResult(
           visibleLedger: visibleLedger,
           rejectionReason: 'export block does not contain a JSON object',
+          failure: _looksIncompleteJson(exportRaw)
+              ? LedgerParseFailure.incompleteJson
+              : LedgerParseFailure.malformedJson,
         );
       }
       final decoded = jsonDecode(repairJson(jsonRaw));
@@ -110,6 +151,7 @@ class StudioLedgerExportParser {
         return LedgerParseResult(
           visibleLedger: visibleLedger,
           rejectionReason: 'export root is not a JSON object',
+          failure: LedgerParseFailure.malformedJson,
         );
       }
       export = StudioLedgerExport.fromJson(_normalizeExportJson(decoded));
@@ -118,6 +160,9 @@ class StudioLedgerExportParser {
       return LedgerParseResult(
         visibleLedger: visibleLedger,
         rejectionReason: 'malformed JSON: $e',
+        failure: _looksIncompleteJson(exportRaw)
+            ? LedgerParseFailure.incompleteJson
+            : LedgerParseFailure.malformedJson,
       );
     }
 
@@ -126,9 +171,11 @@ class StudioLedgerExportParser {
     final rejectedOps = <String>[];
 
     for (final op in export.ops) {
-      final reason = _validateOp(op);
+      final reason = _validateOp(op, focalUserName: focalUserName);
       if (reason != null) {
-        rejectedOps.add('${op.key}: $reason');
+        // Keep the verb: the same key can be legal for `set` and illegal for
+        // `append_unique`, so the key alone does not identify the mistake.
+        rejectedOps.add('${op.op} ${op.key}: $reason');
         debugPrint('[StudioLedger] rejected op ${op.op} ${op.key}: $reason');
       } else {
         validatedOps.add(op);
@@ -142,7 +189,10 @@ class StudioLedgerExportParser {
       );
     }
 
-    final validatedFacts = _validateKnowledgeFacts(export.knowledgeFacts);
+    final validatedFacts = _validateKnowledgeFacts(
+      export.knowledgeFacts,
+      focalUserName: focalUserName,
+    );
 
     // Ignore completely empty exports.
     final isEmpty = validatedOps.isEmpty && validatedFacts.isEmpty;
@@ -152,6 +202,10 @@ class StudioLedgerExportParser {
         rejectionReason: rejectedOps.isNotEmpty
             ? 'all ops rejected, no knowledge facts'
             : 'empty export (no ops or knowledge facts)',
+        failure: rejectedOps.isNotEmpty
+            ? LedgerParseFailure.semanticSchema
+            : LedgerParseFailure.emptyExport,
+        rejectedOps: rejectedOps,
       );
     }
 
@@ -162,6 +216,7 @@ class StudioLedgerExportParser {
     return LedgerParseResult(
       export: validatedExport,
       visibleLedger: visibleLedger,
+      rejectedOps: rejectedOps,
     );
   }
 
@@ -175,17 +230,60 @@ class StudioLedgerExportParser {
   /// the opening tag to the end of the source — the downstream JSON repair +
   /// brace extraction can still recover a partial export.
   String _extractBlock(String source, String tag) {
+    return _findBlock(source, tag).content;
+  }
+
+  ({String content, bool hasOpeningTag, bool hasClosingTag}) _findBlock(
+    String source,
+    String tag,
+  ) {
     final open = '<$tag>';
     final close = '</$tag>';
     final start = source.indexOf(open);
-    if (start < 0) return '';
+    if (start < 0) {
+      return (content: '', hasOpeningTag: false, hasClosingTag: false);
+    }
     final contentStart = start + open.length;
     final end = source.indexOf(close, contentStart);
     if (end < 0) {
-      // Truncated response — return everything after the opening tag.
-      return source.substring(contentStart).trim();
+      return (
+        content: source.substring(contentStart).trim(),
+        hasOpeningTag: true,
+        hasClosingTag: false,
+      );
     }
-    return source.substring(contentStart, end).trim();
+    return (
+      content: source.substring(contentStart, end).trim(),
+      hasOpeningTag: true,
+      hasClosingTag: true,
+    );
+  }
+
+  bool _looksIncompleteJson(String source) {
+    final start = source.indexOf('{');
+    if (start < 0) return false;
+    var depth = 0;
+    var inString = false;
+    var escaped = false;
+    for (var i = start; i < source.length; i++) {
+      final char = source[i];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (char == r'\') {
+          escaped = true;
+        } else if (char == '"') {
+          inString = false;
+        }
+      } else if (char == '"') {
+        inString = true;
+      } else if (char == '{' || char == '[') {
+        depth++;
+      } else if (char == '}' || char == ']') {
+        depth--;
+      }
+    }
+    return inString || depth > 0;
   }
 
   // ── LLM JSON normalization ────────────────────────────────────────────────
@@ -400,8 +498,9 @@ class StudioLedgerExportParser {
   // ── Validation ──────────────────────────────────────────────────────────────
 
   List<LedgerKnowledgeFact> _validateKnowledgeFacts(
-    List<LedgerKnowledgeFact> facts,
-  ) {
+    List<LedgerKnowledgeFact> facts, {
+    String focalUserName = '',
+  }) {
     final accepted = <LedgerKnowledgeFact>[];
     final seen = <String>{};
     for (final fact in facts) {
@@ -409,7 +508,10 @@ class StudioLedgerExportParser {
         confidence: fact.confidence.clamp(0, 1).toDouble(),
         importance: fact.importance.clamp(0, 1).toDouble(),
       );
-      final reason = _validateKnowledgeFact(normalized);
+      final reason = _validateKnowledgeFact(
+        normalized,
+        focalUserName: focalUserName,
+      );
       if (reason != null) {
         debugPrint('[StudioLedger] rejected knowledge fact: $reason');
         continue;
@@ -428,7 +530,10 @@ class StudioLedgerExportParser {
     return accepted;
   }
 
-  String? _validateKnowledgeFact(LedgerKnowledgeFact fact) {
+  String? _validateKnowledgeFact(
+    LedgerKnowledgeFact fact, {
+    String focalUserName = '',
+  }) {
     if (fact.knowerKey.isEmpty || fact.subjectKey.isEmpty) {
       return 'missing knowerKey or subjectKey';
     }
@@ -448,11 +553,20 @@ class StudioLedgerExportParser {
     )) {
       return 'unknown epistemicState "${fact.epistemicState}"';
     }
+    if (_isFocalUserIdentity(fact.knowerKey, focalUserName) &&
+        (fact.factClass != CharacterKnowledgeFactClass.knowledge.wireName ||
+            !const {
+              'observed',
+              'heard_claim',
+              'confirmed',
+            }.contains(fact.epistemicState))) {
+      return 'focal-user knowledge must be explicit observed/heard/confirmed access';
+    }
     return null;
   }
 
   /// Returns a rejection reason string, or null when the op is valid.
-  String? _validateOp(LedgerOp op) {
+  String? _validateOp(LedgerOp op, {String focalUserName = ''}) {
     // Unknown op code.
     if (!kAllowedOpCodes.contains(op.op)) {
       return 'unknown op code "${op.op}"';
@@ -473,6 +587,9 @@ class StudioLedgerExportParser {
 
     final keyReason = _validateCurrentStateKey(op.key);
     if (keyReason != null) return keyReason;
+    if (_isFocalUserStateKey(op.key, focalUserName)) {
+      return 'model-owned focal-user state is not allowed';
+    }
 
     // For set: value must not be empty and must remain a compact current value.
     if (op.op != 'delete' && op.value.trim().isEmpty) {
@@ -488,6 +605,34 @@ class StudioLedgerExportParser {
     }
 
     return null;
+  }
+
+  bool _isFocalUserStateKey(String key, String focalUserName) {
+    if (key.startsWith('npc:')) {
+      final match = RegExp(r'^npc:([^.:][^.]*?)\.').firstMatch(key);
+      return match != null &&
+          _isFocalUserIdentity(match.group(1)!, focalUserName);
+    }
+    if (key.startsWith('arc:')) {
+      final match = RegExp(r'^arc:([^.:][^.]*?)\.').firstMatch(key);
+      return match != null &&
+          _isFocalUserIdentity(match.group(1)!, focalUserName);
+    }
+    return false;
+  }
+
+  bool _isFocalUserIdentity(String value, String focalUserName) {
+    final normalized = _normalizedIdentity(value);
+    final focal = _normalizedIdentity(focalUserName);
+    return normalized.isNotEmpty &&
+        (normalized == focal || normalized == '{{user}}');
+  }
+
+  String _normalizedIdentity(String value) {
+    final normalized = value.trim().toLowerCase();
+    return normalized.startsWith('entity:')
+        ? normalized.substring('entity:'.length)
+        : normalized;
   }
 
   String? _validateCurrentStateKey(String key) {
@@ -532,7 +677,7 @@ class StudioLedgerExportParser {
       }
     } else if (key.startsWith('world:')) {
       if (!RegExp(
-        r'^world:(location|time|date|active_threats|current_conditions)$',
+        r'^world:(location|time|date|day|active_threats|current_conditions)$',
       ).hasMatch(key)) {
         return 'unknown world key "$key"';
       }

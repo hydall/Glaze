@@ -1,4 +1,7 @@
+import '../../features/image_gen/services/image_tag_markup.dart';
 import '../models/chat_message.dart';
+import 'converters/no_assistant.dart';
+import 'inline_media.dart';
 import 'macro_engine.dart';
 
 class HistoryAssembler {
@@ -14,7 +17,15 @@ class HistoryAssembler {
     for (int i = 0; i < history.length; i++) {
       final msg = history[i];
       if (msg.isHidden || msg.isTyping) continue;
-      final macroResult = replaceMacros(msg.content, macroCtx);
+      // A finished image block is stored as an `<img data-iig-…>` element
+      // carrying paths into this device's data root. The model has no use for
+      // them, and a model that reads one writes one back — a block pointing at
+      // files that were never generated (INV-IG12). It reads the tag that asked
+      // for the picture instead.
+      final withoutImagePaths = ImageTagMarkup.reduceBlocksToInstructions(
+        msg.content,
+      );
+      final macroResult = replaceMacros(withoutImagePaths, macroCtx);
       final normalized = _normalizeUnderscoreEmphasis(macroResult.text);
       messages.add(
         PromptMessage(
@@ -25,7 +36,7 @@ class HistoryAssembler {
           sourceMessageId: msg.id,
           // The eye toggle on an attachment hides it from the model only —
           // the bubble keeps rendering it. Default is visible.
-          imagePath: msg.imageHidden ? null : msg.imagePath,
+          imagePaths: msg.imageHidden ? const [] : msg.attachments,
         ),
       );
     }
@@ -62,6 +73,41 @@ List<PromptMessage> interleaveDepthWithHistory(
   return result;
 }
 
+/// Continue mode: drop a system turn immediately after the assistant reply
+/// being extended, ahead of every preset block that follows `chat_history`.
+/// Returns [assembledHistory] unchanged when no instruction is set (every
+/// non-continue path) or when the window carries no history message.
+///
+/// The instruction lands after the last `isHistory` message rather than at the
+/// end of the assembled window so depth-0 injections stay *after* it — the
+/// model must read "extend the reply above" while that reply is still the
+/// nearest turn. See `docs/INVARIANTS.md` INV-CM3.
+List<PromptMessage> insertContinueInstruction(
+  List<PromptMessage> assembledHistory,
+  String? continueInstruction,
+) {
+  final instruction = continueInstruction?.trim();
+  if (instruction == null || instruction.isEmpty) return assembledHistory;
+  // `sourceMessageId` is the second half of the anchor: Studio's history
+  // limiter rebuilds each message and drops `isHistory`, but every assembled
+  // chat message keeps the id it came from, while depth-anchored preset blocks
+  // never carry one.
+  final lastHistoryIndex = assembledHistory.lastIndexWhere(
+    (message) => message.isHistory || message.sourceMessageId != null,
+  );
+  if (lastHistoryIndex < 0) return assembledHistory;
+  return [
+    ...assembledHistory.sublist(0, lastHistoryIndex + 1),
+    PromptMessage(
+      role: 'system',
+      content: instruction,
+      blockId: 'continue_instruction',
+      blockName: 'Continue',
+    ),
+    ...assembledHistory.sublist(lastHistoryIndex + 1),
+  ];
+}
+
 class PromptMessage {
   final String role;
   final String content;
@@ -74,7 +120,13 @@ class PromptMessage {
   final String? blockName;
   final String? sourceMessageId;
   final String? reasoningContent;
-  final String? imagePath;
+
+  /// Every attachment carried by the message, in the order they were
+  /// attached. A message can hold several (the composer takes up to
+  /// [maxMessageAttachments]), and each becomes its own `image_url` content
+  /// part.
+  final List<String> imagePaths;
+  final bool sendEmptyBlock;
 
   const PromptMessage({
     required this.role,
@@ -88,21 +140,36 @@ class PromptMessage {
     this.blockName,
     this.sourceMessageId,
     this.reasoningContent,
-    this.imagePath,
+    this.imagePaths = const [],
+    this.sendEmptyBlock = false,
   });
 
-  bool get hasImage => imagePath?.isNotEmpty == true;
+  bool get hasImage => imagePaths.any((path) => path.isNotEmpty);
 
+  /// The first attachment, for the callers that only ever show one.
+  String? get imagePath {
+    for (final path in imagePaths) {
+      if (path.isNotEmpty) return path;
+    }
+    return null;
+  }
+
+  /// The request shape. Base64 media inlined in the text is replaced by a
+  /// placeholder: the model cannot see it, and `estimateTokens` — which the
+  /// context budget trims by — does not count it either.
   Map<String, dynamic> toApiMap() {
-    if (!hasImage) return {'role': role, 'content': content};
+    final text = stripInlineMedia(content);
+    if (!hasImage) return {'role': role, 'content': text};
     return {
       'role': role,
       'content': [
-        if (content.trim().isNotEmpty) {'type': 'text', 'text': content},
-        {
-          'type': 'image_url',
-          'image_url': {'url': imagePath},
-        },
+        if (text.isNotEmpty) {'type': 'text', 'text': text},
+        for (final path in imagePaths)
+          if (path.isNotEmpty)
+            {
+              'type': 'image_url',
+              'image_url': {'url': path},
+            },
       ],
     };
   }
@@ -119,7 +186,8 @@ class PromptMessage {
     'blockName': blockName,
     'sourceMessageId': sourceMessageId,
     'reasoningContent': reasoningContent,
-    'imagePath': imagePath,
+    'imagePaths': imagePaths,
+    'sendEmptyBlock': sendEmptyBlock,
   };
 
   factory PromptMessage.fromJson(Map<String, dynamic> json) => PromptMessage(
@@ -134,16 +202,43 @@ class PromptMessage {
     blockName: json['blockName'] as String?,
     sourceMessageId: json['sourceMessageId'] as String?,
     reasoningContent: json['reasoningContent'] as String?,
-    imagePath: json['imagePath'] as String?,
+    imagePaths: _imagePathsFromJson(json),
+    sendEmptyBlock: json['sendEmptyBlock'] as bool? ?? false,
   );
 }
 
+/// Reads the attachment list off a prompt-isolate payload.
+///
+/// `imagePath` is what a pre-multi-attach payload carries. Payloads are built
+/// and read in the same run, so that shape only matters while a build straddles
+/// the change — but a dropped attachment there is a request sent without the
+/// picture the user attached, so it is read anyway.
+List<String> _imagePathsFromJson(Map<String, dynamic> json) {
+  final paths = json['imagePaths'];
+  if (paths is List) return paths.whereType<String>().toList();
+  final single = json['imagePath'];
+  return single is String && single.isNotEmpty ? [single] : const [];
+}
+
+/// The provider-bound message list for a built prompt.
+///
+/// [noAssistant] — `NoAssistantOptions.of(apiConfig)` — reshapes the prompt
+/// for NoAssistant mode first, so every caller that turns a chat prompt into
+/// a request (and the hash the lorebook manifest records of it) agrees on the
+/// same messages.
 List<Map<String, dynamic>> buildApiMessages(
   List<PromptMessage> messages, {
   int reasoningHistoryCount = 0,
+  NoAssistantOptions? noAssistant,
 }) {
+  if (noAssistant != null) messages = applyNoAssistant(messages, noAssistant);
   final included = messages
-      .where((message) => message.content.trim().isNotEmpty || message.hasImage)
+      .where(
+        (message) =>
+            message.content.trim().isNotEmpty ||
+            message.hasImage ||
+            message.sendEmptyBlock,
+      )
       .toList();
   final result = included.map((message) => message.toApiMap()).toList();
   if (reasoningHistoryCount == 0 || reasoningHistoryCount < -1) return result;

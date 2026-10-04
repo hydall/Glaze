@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:easy_localization/easy_localization.dart';
 import '../theme/app_colors.dart';
@@ -57,7 +59,29 @@ class FilterRangeSection extends FilterSection {
   });
 }
 
+/// A titled row with a single integer field.
+class FilterNumberSection extends FilterSection {
+  final String title;
+  final String label;
+  final int value;
+  final String? hint;
+  final ValueChanged<int> onChanged;
+
+  const FilterNumberSection({
+    required this.title,
+    required this.label,
+    required this.value,
+    required this.onChanged,
+    this.hint,
+  });
+}
+
 /// A titled, searchable, multi-select tag picker row.
+///
+/// [tags] is the curated list rendered as a chip grid and filtered locally.
+/// Sources that also accept free-text tags (JanitorAI custom tags, chub topics)
+/// can supply [fetchSuggestions] and/or [allowCustomTags] so the query can
+/// resolve to a name-based [FilterTag] that isn't in [tags].
 class FilterTagsSection extends FilterSection {
   final String title;
   final String searchHint;
@@ -67,6 +91,15 @@ class FilterTagsSection extends FilterSection {
   final ValueChanged<FilterTag> onToggle;
   final VoidCallback onClear;
 
+  /// Remote autocomplete for tags [tags] doesn't cover. Called with the trimmed
+  /// query after a short debounce; implementations must resolve to an empty
+  /// list on error rather than throwing.
+  final Future<List<String>> Function(String query)? fetchSuggestions;
+
+  /// When true the raw query can be selected verbatim as a name-based tag,
+  /// even when neither [tags] nor the suggestions contain it.
+  final bool allowCustomTags;
+
   const FilterTagsSection({
     required this.title,
     required this.searchHint,
@@ -75,6 +108,8 @@ class FilterTagsSection extends FilterSection {
     required this.selectedNames,
     required this.onToggle,
     required this.onClear,
+    this.fetchSuggestions,
+    this.allowCustomTags = false,
   });
 }
 
@@ -95,19 +130,34 @@ class FilterSheet extends StatelessWidget {
   final String title;
   final List<FilterSection> sections;
 
-  const FilterSheet({super.key, required this.title, required this.sections});
+  /// Sizes the sheet to its sections instead of opening at the standard sheet
+  /// height. Use it for short filter sets (a single range row, say), where the
+  /// default height is mostly empty space.
+  final bool fitContent;
+
+  const FilterSheet({
+    super.key,
+    required this.title,
+    required this.sections,
+    this.fitContent = false,
+  });
 
   @override
   Widget build(BuildContext context) {
     return SheetView(
       title: title,
       showHandle: true,
+      fitContent: fitContent,
       bodyPadding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+      // A fitted sheet gives its body unbounded height, so the list has to
+      // shrink-wrap; the trailing spacer only exists to keep the last section
+      // clear of the sheet's bottom edge on the scrollable variant.
       body: ListView(
+        shrinkWrap: fitContent,
         children: [
           const SizedBox(height: 16),
           for (final section in sections) ..._buildSection(section),
-          const SizedBox(height: 40),
+          SizedBox(height: fitContent ? 8 : 40),
         ],
       ),
     );
@@ -119,6 +169,10 @@ class FilterSheet extends StatelessWidget {
       FilterRangeSection() => [
         const SizedBox(height: 20),
         _FilterRange(section: section),
+      ],
+      FilterNumberSection() => [
+        const SizedBox(height: 20),
+        _FilterNumber(section: section),
       ],
       FilterTagsSection() => [
         const SizedBox(height: 20),
@@ -223,45 +277,74 @@ class _FilterRange extends StatelessWidget {
       ],
     );
   }
+}
 
-  Widget _numberField(String label, int value, ValueChanged<int> onChanged) {
+/// A section with a single labelled integer field, for one-dimensional numeric
+/// filters (e.g. Chub's minimum AI rating) that a min/max range doesn't fit.
+class _FilterNumber extends StatelessWidget {
+  final FilterNumberSection section;
+  const _FilterNumber({required this.section});
+
+  @override
+  Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label.toUpperCase(),
-          style: TextStyle(
-            color: Colors.white.withValues(alpha: 0.4),
-            fontSize: 11,
-            letterSpacing: 0.5,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Container(
-          height: 38,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.07),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-          ),
-          child: TextField(
-            controller: TextEditingController(text: '$value'),
-            keyboardType: TextInputType.number,
-            style: const TextStyle(fontSize: 14, color: Colors.white),
-            decoration: const InputDecoration(
-              border: InputBorder.none,
-              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              isDense: true,
+        _SectionLabel(section.title),
+        const SizedBox(height: 10),
+        _numberField(section.label, section.value, section.onChanged),
+        if (section.hint != null) ...[
+          const SizedBox(height: 6),
+          Text(
+            section.hint!,
+            style: TextStyle(
+              fontSize: 11,
+              color: context.cs.onSurfaceVariant,
             ),
-            onSubmitted: (v) {
-              final p = int.tryParse(v);
-              if (p != null) onChanged(p);
-            },
           ),
-        ),
+        ],
       ],
     );
   }
+}
+
+Widget _numberField(String label, int value, ValueChanged<int> onChanged) {
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        label.toUpperCase(),
+        style: TextStyle(
+          color: Colors.white.withValues(alpha: 0.4),
+          fontSize: 11,
+          letterSpacing: 0.5,
+        ),
+      ),
+      const SizedBox(height: 4),
+      Container(
+        height: 38,
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.07),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+        ),
+        child: TextField(
+          controller: TextEditingController(text: '$value'),
+          keyboardType: TextInputType.number,
+          style: const TextStyle(fontSize: 14, color: Colors.white),
+          decoration: const InputDecoration(
+            border: InputBorder.none,
+            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            isDense: true,
+          ),
+          onSubmitted: (v) {
+            final p = int.tryParse(v);
+            if (p != null) onChanged(p);
+          },
+        ),
+      ),
+    ],
+  );
 }
 
 class _FilterTags extends StatefulWidget {
@@ -273,13 +356,71 @@ class _FilterTags extends StatefulWidget {
 }
 
 class _FilterTagsState extends State<_FilterTags> {
+  final _controller = TextEditingController();
+  Timer? _debounce;
+
+  /// Trimmed query. Doubles as the guard for [_fetch] so an out-of-order
+  /// response can't overwrite results for a newer query.
   String _search = '';
 
+  /// Free-text suggestions for [_search], from [FilterTagsSection.fetchSuggestions].
+  List<String> _suggestions = [];
+  bool _loading = false;
+
   FilterTagsSection get _s => widget.section;
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
 
   bool _isSelected(FilterTag tag) {
     if (tag.id != null) return _s.selectedIds.contains(tag.id);
     return _s.selectedNames.contains(tag.name);
+  }
+
+  void _onSearchChanged(String value) {
+    final q = value.trim();
+    setState(() => _search = q);
+    _debounce?.cancel();
+    if (_s.fetchSuggestions == null) return;
+    if (q.isEmpty) {
+      setState(() {
+        _suggestions = [];
+        _loading = false;
+      });
+      return;
+    }
+    setState(() => _loading = true);
+    _debounce = Timer(const Duration(milliseconds: 250), () => _fetch(q));
+  }
+
+  Future<void> _fetch(String q) async {
+    final results = await _s.fetchSuggestions!(q);
+    if (!mounted || q != _search) return;
+    setState(() {
+      _suggestions = results;
+      _loading = false;
+    });
+  }
+
+  /// Selects [name] as a name-based tag (no id) and clears the query.
+  void _addCustomTag(String name) {
+    final n = name.trim();
+    if (n.isEmpty || _s.selectedNames.contains(n)) return;
+    _s.onToggle(FilterTag(name: n));
+    _reset();
+  }
+
+  void _reset() {
+    _controller.clear();
+    setState(() {
+      _search = '';
+      _suggestions = [];
+      _loading = false;
+    });
   }
 
   List<FilterTag> get _filtered {
@@ -288,8 +429,53 @@ class _FilterTagsState extends State<_FilterTags> {
     return _s.tags.where((t) => t.name.toLowerCase().contains(q)).toList();
   }
 
-  List<FilterTag> get _selectedList =>
-      _s.tags.where(_isSelected).toList();
+  /// Names already offered by the curated grid — suggestions that duplicate one
+  /// would just be a second way to pick the same chip.
+  Set<String> get _knownNames =>
+      {for (final t in _s.tags) t.name.toLowerCase()};
+
+  /// Suggested custom tags for the current query, minus curated and already
+  /// selected ones.
+  List<String> get _customMatches {
+    if (_search.isEmpty || _suggestions.isEmpty) return const [];
+    final known = _knownNames;
+    final seen = <String>{};
+    final out = <String>[];
+    for (final s in _suggestions) {
+      final name = s.trim();
+      if (name.isEmpty) continue;
+      if (known.contains(name.toLowerCase())) continue;
+      if (_s.selectedNames.contains(name)) continue;
+      if (!seen.add(name.toLowerCase())) continue;
+      out.add(name);
+      if (out.length == 8) break;
+    }
+    return out;
+  }
+
+  /// Whether to offer the raw query as a custom tag — only when it isn't
+  /// already reachable as a curated chip, a suggestion or a selected tag.
+  bool get _canAddRaw {
+    if (!_s.allowCustomTags || _search.isEmpty) return false;
+    final q = _search.toLowerCase();
+    if (_knownNames.contains(q)) return false;
+    if (_s.selectedNames.any((n) => n.toLowerCase() == q)) return false;
+    return !_customMatches.any((s) => s.toLowerCase() == q);
+  }
+
+  /// Selected curated chips plus selected custom tags, which have no entry in
+  /// [FilterTagsSection.tags] and would otherwise be invisible.
+  List<FilterTag> get _selectedList {
+    final list = _s.tags.where(_isSelected).toList();
+    final shown = {
+      for (final t in _s.tags)
+        if (t.id == null) t.name,
+    };
+    for (final name in _s.selectedNames) {
+      if (!shown.contains(name)) list.add(FilterTag(name: name));
+    }
+    return list;
+  }
 
   int get _selectedCount => _s.selectedIds.length + _s.selectedNames.length;
 
@@ -353,7 +539,9 @@ class _FilterTagsState extends State<_FilterTags> {
             border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
           ),
           child: TextField(
+            controller: _controller,
             style: const TextStyle(fontSize: 14, color: Colors.white),
+            textInputAction: _s.allowCustomTags ? TextInputAction.done : null,
             decoration: InputDecoration(
               hintText: _s.searchHint,
               hintStyle: TextStyle(color: context.cs.onSurfaceVariant),
@@ -363,10 +551,41 @@ class _FilterTagsState extends State<_FilterTags> {
                 vertical: 10,
               ),
               isDense: true,
+              suffixIcon: _loading
+                  ? const Padding(
+                      padding: EdgeInsets.all(11),
+                      child: SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    )
+                  : null,
             ),
-            onChanged: (v) => setState(() => _search = v),
+            onChanged: _onSearchChanged,
+            onSubmitted: _s.allowCustomTags ? _addCustomTag : null,
           ),
         ),
+
+        // Custom (name-based) tag suggestions — sources without a curated id.
+        if (_customMatches.isNotEmpty || _canAddRaw) ...[
+          const SizedBox(height: 6),
+          ..._customMatches.map(
+            (name) => _suggestionRow(
+              icon: Icons.sell_outlined,
+              label: name,
+              onTap: () => _addCustomTag(name),
+            ),
+          ),
+          if (_canAddRaw)
+            _suggestionRow(
+              icon: Icons.add,
+              label: 'catalog_add_custom_tag'.tr(
+                namedArgs: {'tag': _search},
+              ),
+              onTap: () => _addCustomTag(_search),
+            ),
+        ],
         const SizedBox(height: 12),
 
         // Grid
@@ -378,6 +597,37 @@ class _FilterTagsState extends State<_FilterTags> {
               .toList(),
         ),
       ],
+    );
+  }
+
+  Widget _suggestionRow({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+        child: Row(
+          children: [
+            Icon(icon, size: 16, color: context.cs.onSurfaceVariant),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Colors.white.withValues(alpha: 0.85),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

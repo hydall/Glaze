@@ -1,5 +1,6 @@
 import '../db/repositories/memory_cadence_repo.dart';
 import '../models/memory_book.dart';
+import 'memory_retrieval_mode.dart';
 
 /// Cadence gating service (Phase G4).
 ///
@@ -7,7 +8,8 @@ import '../models/memory_book.dart';
 /// consolidation) should run based on the number of assistant messages since
 /// the last run and the configured [MemoryBookSettings.cadenceInterval].
 ///
-/// Disabled entirely in `fast` mode (decision D).
+/// Enabled only for enriched modern modes. Fast and the separate Legacy
+/// rollback path do not run enrichment cadence work.
 class MemoryCadenceService {
   final MemoryCadenceRepo _cadenceRepo;
 
@@ -19,7 +21,11 @@ class MemoryCadenceService {
     required String memoryMode,
     required int cadenceInterval,
   }) async {
-    if (memoryMode == 'fast') return false;
+    if (!MemoryRetrievalMode.fromValue(
+      memoryMode,
+    ).supports(MemoryRetrievalCapability.salienceEnrichment)) {
+      return false;
+    }
     if (cadenceInterval <= 0) return false;
     return _cadenceRepo.shouldRun(sessionId, kind, cadenceInterval);
   }

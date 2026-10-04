@@ -10,8 +10,10 @@
 ///   `'model'` and parts can be `{text}` or `{inlineData: {mimeType, data}}`.
 /// - Consecutive same-role messages are merged.
 ///
-/// Recommended: call `mergeNonAssistant(messages)` from `message_merger.dart`
-/// before this converter (the Gemini transport does this unconditionally).
+/// The Gemini transport calls [convertGoogleMessages] directly, matching
+/// SillyTavern: no pre-merge pass, so a leading user turn is never swallowed
+/// into `systemInstruction`. [convertGoogleMessagesMerged] keeps the older
+/// collapse-everything behaviour for callers that want it.
 library;
 
 import 'message_merger.dart' show mergeNonAssistant;
@@ -122,9 +124,9 @@ GeminiConversionResult convertGoogleMessages(
 }
 
 /// Same as [convertGoogleMessages] but first collapses all non-assistant
-/// runs into a single block per [mergeNonAssistant]. Gemini transports call
-/// this — it lets the user keep authoring multi-block system chrome in the
-/// preset while still getting a clean single `systemInstruction`.
+/// runs into a single block per [mergeNonAssistant], which also relabels a
+/// leading user turn as `system`. No transport uses this today — the Gemini
+/// path deliberately keeps SillyTavern's shaping instead.
 GeminiConversionResult convertGoogleMessagesMerged(
   List<Map<String, dynamic>> input, {
   String mergeRole = 'system',

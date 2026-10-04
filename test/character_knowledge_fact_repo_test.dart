@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
@@ -55,6 +57,54 @@ void main() {
     );
 
     expect((await repo.getActiveForSession('session-1')).single.id, 'fact-1');
+  });
+
+  test('round-trips basis revision metadata', () async {
+    await repo.insertTentative(
+      fact().copyWith(basisRevisionNumber: 12, basisRevisionHash: 'card-hash'),
+    );
+
+    final stored = await repo.getById('fact-1');
+    expect(stored!.basisRevisionNumber, 12);
+    expect(stored.basisRevisionHash, 'card-hash');
+  });
+
+  test('restores exact session rows and rejects foreign snapshots', () async {
+    await repo.insertTentative(fact());
+    final captured = await (db.select(
+      db.characterKnowledgeFactRows,
+    )..where((row) => row.chatSessionId.equals('session-1'))).get();
+    final rowsJson = jsonEncode(captured.map((row) => row.toJson()).toList());
+
+    await repo.insertTentative(fact(id: 'fact-2', messageId: 'message-2'));
+    await repo.restoreSessionRowsExact('session-1', rowsJson);
+
+    final restored = await repo.getById('fact-1');
+    expect(restored!.id, captured.single.id);
+    expect(restored.object, captured.single.object);
+    expect(restored.lifecycle.name, captured.single.lifecycle);
+    expect(await repo.getById('fact-2'), isNull);
+
+    final foreign = CharacterKnowledgeFactRow.fromJson({
+      ...captured.single.toJson(),
+      'id': 'foreign',
+      'chatSessionId': 'session-2',
+    });
+    expect(
+      () => repo.restoreSessionRowsExact(
+        'session-1',
+        jsonEncode([foreign.toJson()]),
+      ),
+      throwsArgumentError,
+    );
+    expect(await repo.getById('fact-1'), isNotNull);
+  });
+
+  test('legacy facts default basis revision metadata', () {
+    final legacy = fact();
+
+    expect(legacy.basisRevisionNumber, 0);
+    expect(legacy.basisRevisionHash, isEmpty);
   });
 
   test('activating an anchor retracts rejected sibling swipe facts', () async {
@@ -264,6 +314,25 @@ void main() {
       (await repo.getById('fact-1'))!.lifecycle,
       CharacterKnowledgeFactLifecycle.active,
     );
+  });
+
+  test('deletes cleanup journal only for the exact ordered range', () async {
+    await db.customStatement(
+      'INSERT INTO ledger_reconciliation_cleanup_journals '
+      '(session_id, endpoint_message_id, message_ids_json, before_images_json, created_at) '
+      "VALUES ('session-1', 'end', '[\"a\",\"end\"]', '[]', 1), "
+      "('session-1', 'end', '[\"other\",\"end\"]', '[]', 2)",
+    );
+
+    await repo.deleteCleanupJournalsForExactRange(
+      sessionId: 'session-1',
+      endpointMessageId: 'end',
+      messageIds: const ['a', 'end'],
+    );
+
+    final rows = await db.select(db.ledgerReconciliationCleanupJournals).get();
+    expect(rows, hasLength(1));
+    expect(rows.single.messageIdsJson, '["other","end"]');
   });
 
   test(

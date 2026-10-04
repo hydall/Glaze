@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -38,7 +40,9 @@ void main() {
 
   group('TrackerRepo.upsert', () {
     test('creates a new tracker', () async {
-      await repo.upsert(_tracker(sessionId: 's1', name: 'mood', value: 'happy'));
+      await repo.upsert(
+        _tracker(sessionId: 's1', name: 'mood', value: 'happy'),
+      );
 
       final got = await repo.get('s1', 'mood');
       expect(got, isNotNull);
@@ -46,16 +50,35 @@ void main() {
       expect(got.scope, 'chat');
     });
 
+    test('round-trips basis revision metadata', () async {
+      await repo.upsert(
+        _tracker(
+          sessionId: 's1',
+          name: 'mood',
+        ).copyWith(basisRevisionNumber: 12, basisRevisionHash: 'card-hash'),
+      );
+
+      final got = await repo.get('s1', 'mood');
+      expect(got!.basisRevisionNumber, 12);
+      expect(got.basisRevisionHash, 'card-hash');
+    });
+
     test('overwrites existing tracker with same name', () async {
-      await repo.upsert(_tracker(sessionId: 's1', name: 'mood', value: 'happy'));
-      await repo.upsert(_tracker(sessionId: 's1', name: 'mood', value: 'angry'));
+      await repo.upsert(
+        _tracker(sessionId: 's1', name: 'mood', value: 'happy'),
+      );
+      await repo.upsert(
+        _tracker(sessionId: 's1', name: 'mood', value: 'angry'),
+      );
 
       final got = await repo.get('s1', 'mood');
       expect(got!.value, 'angry');
     });
 
     test('preserves different trackers with different names', () async {
-      await repo.upsert(_tracker(sessionId: 's1', name: 'mood', value: 'happy'));
+      await repo.upsert(
+        _tracker(sessionId: 's1', name: 'mood', value: 'happy'),
+      );
       await repo.upsert(
         _tracker(sessionId: 's1', name: 'location', value: 'tavern'),
       );
@@ -131,6 +154,113 @@ void main() {
     });
   });
 
+  group('TrackerRepo initial game-time seed', () {
+    test('keeps immutable seed after live clock advances', () async {
+      await repo.seedInitialGameTime(
+        sessionId: 's1',
+        time: '08:00',
+        date: '21.04.2026',
+      );
+      await repo.upsertValue(
+        's1',
+        'world:time',
+        '08:27',
+        scope: 'ledger',
+        provenance: 'studio_ledger',
+      );
+
+      final live = {
+        for (final t in await repo.getCompleteGameTime('s1')) t.name: t.value,
+      };
+      final seed = {
+        for (final t in await repo.getInitialGameTimeSeed('s1'))
+          t.name: t.value,
+      };
+      expect(live['world:time'], '08:27');
+      expect(seed, {
+        'world:time': '08:00',
+        'world:date': '21.04.2026',
+        'world:day': '0',
+      });
+    });
+
+    test('repeated seeding cannot overwrite stored initial seed', () async {
+      await repo.seedInitialGameTime(
+        sessionId: 's1',
+        time: '08:00',
+        date: '21.04.2026',
+      );
+      await repo.seedInitialGameTime(
+        sessionId: 's1',
+        time: '08:27',
+        date: '22.04.2026',
+        day: '1',
+      );
+
+      final seed = {
+        for (final t in await repo.getInitialGameTimeSeed('s1'))
+          t.name: t.value,
+      };
+      expect(seed, {
+        'world:time': '08:00',
+        'world:date': '21.04.2026',
+        'world:day': '0',
+      });
+    });
+
+    test('reads legacy provenance-only seed', () async {
+      for (final entry in {
+        'world:time': '09:00',
+        'world:date': '01.05.2026',
+        'world:day': '2',
+      }.entries) {
+        await repo.upsertValue(
+          's1',
+          entry.key,
+          entry.value,
+          scope: 'ledger',
+          provenance: 'game_time_seed',
+        );
+      }
+
+      final seed = {
+        for (final t in await repo.getInitialGameTimeSeed('s1'))
+          t.name: t.value,
+      };
+      expect(seed['world:time'], '09:00');
+      expect(await repo.get('s1', TrackerRepo.initialGameTimeSeedName), isNull);
+    });
+
+    test('replaceLedgerState preserves immutable seed metadata', () async {
+      await repo.seedInitialGameTime(
+        sessionId: 's1',
+        time: '08:00',
+        date: '21.04.2026',
+      );
+
+      await repo.replaceLedgerState('s1', [
+        _tracker(
+          sessionId: 's1',
+          name: 'world:time',
+          value: '08:27',
+          scope: 'ledger',
+          provenance: 'studio_ledger',
+        ),
+      ]);
+
+      expect(
+        (await repo.getInitialGameTimeSeed(
+          's1',
+        )).firstWhere((t) => t.name == 'world:time').value,
+        '08:00',
+      );
+      expect(
+        await repo.get('s1', TrackerRepo.initialGameTimeSeedName),
+        isNotNull,
+      );
+    });
+  });
+
   group('TrackerRepo.delete', () {
     test('removes a single tracker', () async {
       await repo.upsert(_tracker(sessionId: 's1', name: 'a', value: '1'));
@@ -190,6 +320,78 @@ void main() {
     });
   });
 
+  group('TrackerRepo.restoreLedgerRowsExact', () {
+    test('restores exact Ledger rows and preserves other scopes', () async {
+      await repo.upsert(
+        _tracker(
+          sessionId: 's1',
+          name: 'world:time',
+          value: 'before',
+          scope: 'ledger',
+        ),
+      );
+      await repo.upsert(
+        _tracker(sessionId: 's1', name: 'diagnostic', value: 'keep'),
+      );
+      final captured =
+          await (db.select(db.trackerRows)
+                ..where((row) => row.sessionId.equals('s1'))
+                ..where((row) => row.scope.equals('ledger')))
+              .get();
+      final rowsJson = jsonEncode(captured.map((row) => row.toJson()).toList());
+
+      await repo.upsert(
+        _tracker(
+          sessionId: 's1',
+          name: 'world:time',
+          value: 'after',
+          scope: 'ledger',
+        ),
+      );
+      await repo.upsert(
+        _tracker(
+          sessionId: 's1',
+          name: 'stale',
+          value: 'remove',
+          scope: 'ledger',
+        ),
+      );
+
+      await repo.restoreLedgerRowsExact('s1', rowsJson);
+
+      expect((await repo.get('s1', 'world:time'))!.value, 'before');
+      expect(await repo.get('s1', 'stale'), isNull);
+      expect((await repo.get('s1', 'diagnostic'))!.value, 'keep');
+    });
+
+    test('rejects foreign rows before changing current state', () async {
+      await repo.upsert(
+        _tracker(
+          sessionId: 's1',
+          name: 'world:time',
+          value: 'current',
+          scope: 'ledger',
+        ),
+      );
+      final foreign = TrackerRow(
+        sessionId: 's2',
+        name: 'world:time',
+        value: 'foreign',
+        scope: 'ledger',
+        provenance: '',
+        basisRevision: 0,
+        basisRevisionHash: '',
+        updatedAt: 1,
+      );
+
+      expect(
+        () => repo.restoreLedgerRowsExact('s1', jsonEncode([foreign.toJson()])),
+        throwsArgumentError,
+      );
+      expect((await repo.get('s1', 'world:time'))!.value, 'current');
+    });
+  });
+
   group('TrackerRepo.watchBySessionId', () {
     test('emits initial state and updates on change', () async {
       await repo.upsert(_tracker(sessionId: 's1', name: 'a', value: '1'));
@@ -203,5 +405,12 @@ void main() {
       final second = await stream.first;
       expect(second.map((t) => t.name).toList(), ['a', 'b']);
     });
+  });
+
+  test('legacy tracker JSON defaults basis revision metadata', () {
+    final tracker = Tracker.fromJson(const {'sessionId': 's1', 'name': 'mood'});
+
+    expect(tracker.basisRevisionNumber, 0);
+    expect(tracker.basisRevisionHash, isEmpty);
   });
 }

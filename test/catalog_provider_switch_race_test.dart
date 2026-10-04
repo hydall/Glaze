@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:glaze_flutter/features/catalog/catalog_models.dart';
 import 'package:glaze_flutter/features/catalog/catalog_provider.dart';
+import 'package:glaze_flutter/features/catalog/chub_account_provider.dart';
 import 'package:glaze_flutter/features/catalog/third_party_providers_provider.dart';
 
 /// Regression tests for the catalog provider switch race: picking a second
@@ -203,5 +204,17 @@ void main() {
 
     final state = container.read(testCatalogProvider);
     expect(state.results.map((c) => c.id), ['chub-1', 'chub-2']);
+  });
+
+  test('a Chub account key arriving triggers a fresh anonymous-then-keyed fetch', () async {
+    await startedNotifier();
+
+    // The stored key loads from prefs after the first search went out
+    // anonymously; the catalog must reload with it instead of staying anonymous.
+    await container.read(chubAccountProvider.notifier).setApiKey('abc');
+    await pumpEventQueue();
+
+    expect(pending.length, 2);
+    expect(pending[1].$1, CatalogProvider.chub);
   });
 }

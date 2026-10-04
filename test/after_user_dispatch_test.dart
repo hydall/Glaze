@@ -36,7 +36,6 @@ import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart' show ChatMessage, ChatSession;
 import 'package:glaze_flutter/features/extensions/models/block_config.dart';
 import 'package:glaze_flutter/features/extensions/models/extension_preset.dart';
-import 'package:glaze_flutter/features/extensions/models/extensions_settings.dart';
 import 'package:glaze_flutter/features/extensions/services/extension_post_gen_service.dart';
 
 AppDatabase _testDb() => AppDatabase.forTesting(NativeDatabase.memory());
@@ -97,28 +96,28 @@ void main() {
           BlockConfig(
             id: 'a-user',
             name: 'A user',
-            type: BlockType.infoblock,
+            type: BlockType.generated,
             enabled: true,
             trigger: BlockTrigger.afterUser,
           ),
           BlockConfig(
             id: 'b-asst',
             name: 'B asst',
-            type: BlockType.infoblock,
+            type: BlockType.generated,
             enabled: true,
             trigger: BlockTrigger.afterAssistant,
           ),
           BlockConfig(
             id: 'c-per',
             name: 'C periodic',
-            type: BlockType.jsRunner,
+            type: BlockType.script,
             enabled: true,
             trigger: BlockTrigger.periodic,
           ),
           BlockConfig(
             id: 'd-user',
             name: 'D user',
-            type: BlockType.infoblock,
+            type: BlockType.generated,
             enabled: true,
             trigger: BlockTrigger.afterUser,
           ),
@@ -139,7 +138,7 @@ void main() {
           BlockConfig(
             id: 'disabled',
             name: 'Disabled',
-            type: BlockType.infoblock,
+            type: BlockType.generated,
             enabled: false,
             trigger: BlockTrigger.afterUser,
             order: 0,
@@ -147,7 +146,7 @@ void main() {
           BlockConfig(
             id: 'second',
             name: 'Second',
-            type: BlockType.infoblock,
+            type: BlockType.generated,
             enabled: true,
             trigger: BlockTrigger.afterUser,
             order: 5,
@@ -155,7 +154,7 @@ void main() {
           BlockConfig(
             id: 'first',
             name: 'First',
-            type: BlockType.infoblock,
+            type: BlockType.generated,
             enabled: true,
             trigger: BlockTrigger.afterUser,
             order: 2,
@@ -207,12 +206,9 @@ void main() {
     });
 
     test('afterUser filter runs as long as the active preset matches', () {
-      // The dispatch in `ChatNotifier._dispatchAfterUserBlocks` reads
-      // `extensionsSettingsProvider` *inside* the dispatch — toggling
-      // `enabled` between calls affects only the next call, not any
-      // in-flight chain. We pin the filter-level invariant: as long
-      // as the preset is active and the trigger matches, the block
-      // is selected, regardless of when the user enabled extensions.
+      // External Blocks is not gated behind an experimental switch, so the
+      // filter-level invariant is simply: an active preset plus a matching
+      // trigger selects the block.
       final preset = ExtensionPreset(
         id: 'p1',
         name: 'Mix',
@@ -220,7 +216,7 @@ void main() {
           BlockConfig(
             id: 'a',
             name: 'A',
-            type: BlockType.infoblock,
+            type: BlockType.generated,
             enabled: true,
             trigger: BlockTrigger.afterUser,
           ),
@@ -229,11 +225,6 @@ void main() {
 
       final chain = _chainFilter(preset, BlockTrigger.afterUser);
       expect(chain, hasLength(1));
-      expect(
-        const ExtensionsSettings(enabled: true, activePresetId: 'p1')
-            .enabled,
-        isTrue,
-      );
     });
   });
 }

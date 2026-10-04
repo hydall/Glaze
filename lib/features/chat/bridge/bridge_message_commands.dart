@@ -13,6 +13,25 @@ class MessageBridgeCommands {
 
   MessageBridgeCommands(this._host);
 
+  /// Names the stage the running generation is actually in, so the typing
+  /// bubble stops claiming the model is writing while the prompt is still
+  /// being assembled. The page keeps the last label and cross-fades to the
+  /// new one; an empty string restores the default "Generating…" text.
+  Future<void> setGenerationPhase(String label) {
+    return _host.callJs('setGenerationPhase', label);
+  }
+
+  /// Marks where the prompt's history begins: the page draws a CONTEXT LIMIT
+  /// rule inside [messageId] and retires the one it drew before. Everything
+  /// above that rule is chat the model no longer sees.
+  ///
+  /// A null id (sent as an empty string) clears the rule — which is what a
+  /// chat that fits its window whole, and a chat with no calculated prompt yet,
+  /// both look like.
+  Future<void> setContextWindowStart(String? messageId) {
+    return _host.callJs('setContextWindowStart', messageId ?? '');
+  }
+
   Future<void> setMessages(
     List<ChatMessage> messages, {
     int visibleStartIndex = 0,
@@ -29,6 +48,8 @@ class MessageBridgeCommands {
         displayRegexes: _host.displayRegexes,
         character: _host.regexCharacter,
         persona: _host.regexPersona,
+        sessionVars: _host.regexSessionVars,
+        globalVars: _host.regexGlobalVars,
       );
       _resolveMappedFileUrls(map);
       _host.cacheMappedTriggeredRegexes(map);
@@ -47,7 +68,11 @@ class MessageBridgeCommands {
     // the image-resolve pass above so the synthetic (text-less) entry is not
     // fed through resolveImgResults.
     final origin = _host.chatOrigin;
-    if (visibleStartIndex == 0 && origin != null) {
+    // Nothing left to head: an emptied chat gets no origin marker, the same
+    // rule the page applies when the last message under one is deleted
+    // (`_pruneOrphanSeparators` retires `__date_origin` once no real message
+    // remains).
+    if (visibleStartIndex == 0 && origin != null && mapped.isNotEmpty) {
       mapped.insert(0, {...origin, '__separator': true});
     }
     final json = jsonEncode(mapped);
@@ -69,6 +94,8 @@ class MessageBridgeCommands {
       displayRegexes: _host.displayRegexes,
       character: _host.regexCharacter,
       persona: _host.regexPersona,
+      sessionVars: _host.regexSessionVars,
+      globalVars: _host.regexGlobalVars,
     );
     _resolveMappedFileUrls(map);
     _host.cacheMappedTriggeredRegexes(map);
@@ -91,6 +118,8 @@ class MessageBridgeCommands {
         displayRegexes: _host.displayRegexes,
         character: _host.regexCharacter,
         persona: _host.regexPersona,
+        sessionVars: _host.regexSessionVars,
+        globalVars: _host.regexGlobalVars,
       );
       _resolveMappedFileUrls(map);
       _host.cacheMappedTriggeredRegexes(map);
@@ -119,6 +148,8 @@ class MessageBridgeCommands {
         displayRegexes: _host.displayRegexes,
         character: _host.regexCharacter,
         persona: _host.regexPersona,
+        sessionVars: _host.regexSessionVars,
+        globalVars: _host.regexGlobalVars,
       );
       _resolveMappedFileUrls(map);
       _host.cacheMappedTriggeredRegexes(map);
@@ -147,6 +178,8 @@ class MessageBridgeCommands {
       displayRegexes: _host.displayRegexes,
       character: _host.regexCharacter,
       persona: _host.regexPersona,
+      sessionVars: _host.regexSessionVars,
+      globalVars: _host.regexGlobalVars,
     );
     _resolveMappedFileUrls(map);
     _host.cacheMappedTriggeredRegexes(map);
@@ -174,7 +207,47 @@ class MessageBridgeCommands {
     return _host.callJs('removeMessage', messageId);
   }
 
+  /// Retires a typing bubble the page is still holding for a run that is over,
+  /// without the exit animation [removeMessage] plays.
+  ///
+  /// The page is kept alive across chats, and its `setMessages` carries a
+  /// typing bubble across a re-render on purpose — a live run streams into
+  /// that node. A run that ended while its chat was closed never got the
+  /// falling edge that would have removed it, so the bubble is still there and
+  /// the carry hands it to the reopened chat: the reply, standing a second
+  /// time under itself, in a chat where nothing is running.
+  ///
+  /// The page no-ops unless it still believes the bubble is live, so this is
+  /// safe to call whenever nothing is in flight and never cuts short an exit
+  /// animation Flutter has already started.
+  Future<void> retireTypingPlaceholder() {
+    return _host.evalJs(
+      // Guarded: a page from before this method existed (a cached asset, the
+      // legacy bridge snapshot) must not throw here.
+      'if (window.bridge?.retireTypingPlaceholder) '
+      'window.bridge.retireTypingPlaceholder();',
+    );
+  }
+
   void _resolveMappedFileUrls(Map<String, dynamic> map) {
+    final paths = map['imagePaths'];
+    if (paths is List) {
+      // A path the WebView cannot reach (the file is gone, or it lives outside
+      // the served root) is dropped rather than rendered as a broken tile.
+      final resolved = <String>[
+        for (final path in paths.whereType<String>())
+          ?_host.resolveLocalFileUrl(path),
+      ];
+      if (resolved.isEmpty) {
+        map.remove('imagePath');
+        map.remove('imagePaths');
+        map.remove('imageHidden');
+      } else {
+        map['imagePaths'] = resolved;
+        map['imagePath'] = resolved.first;
+      }
+      return;
+    }
     final imagePath = map['imagePath'];
     if (imagePath is String) {
       final resolved = _host.resolveLocalFileUrl(imagePath);
@@ -197,14 +270,24 @@ class MessageBridgeCommands {
     }
   }
 
-  Future<void> clearAll() {
+  /// Wipes the message list.
+  ///
+  /// [keepPlaceholder] is false when the *chat* is being replaced rather than
+  /// re-rendered: the page parks the typing bubble across a `clearAll` +
+  /// `setMessages` pair, and a session switch must not hand it to the chat
+  /// being opened — nothing is generating there.
+  Future<void> clearAll({bool keepPlaceholder = true}) {
     _host.clearCachedTriggeredRegexes();
-    return _host.evalJs('window.bridge?.clearAll()');
+    return _host.evalJs('window.bridge?.clearAll($keepPlaceholder)');
   }
 
   Future<void> scrollToBottom({bool smooth = false}) {
     final behavior = smooth ? "'smooth'" : "'auto'";
     return _host.evalJs('window.bridge?.scrollToBottom($behavior)');
+  }
+
+  Future<void> scrollToTop() {
+    return _host.evalJs('window.bridge?.scrollToTop()');
   }
 
   Future<void> requestScrollToBottomOnAppend() {

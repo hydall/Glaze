@@ -21,6 +21,8 @@ class LedgerOpApplier {
     required int swipeId,
     required int agentSwipeId,
     required TrackerRepo trackerRepo,
+    required int basisRevisionNumber,
+    required String basisRevisionHash,
   }) async {
     // Plan §Manual Overrides and Locks: if canon_lock:<key> = 'true',
     // Studio Ledger must not update that state key.
@@ -46,6 +48,8 @@ class LedgerOpApplier {
           op.value,
           scope: 'ledger',
           provenance: provenance,
+          basisRevisionNumber: basisRevisionNumber,
+          basisRevisionHash: basisRevisionHash,
         );
       case 'delete':
         await trackerRepo.delete(sessionId, op.key);

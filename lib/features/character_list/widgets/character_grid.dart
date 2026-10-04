@@ -4,15 +4,19 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../../shared/widgets/responsive_grid.dart';
 import '../../../core/models/character.dart';
+import '../../../shared/shell/desktop/desktop_layout_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glass_surface.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import '../../settings/app_settings_provider.dart';
 import '../character_detail_screen.dart';
 import '../character_sort.dart';
 import 'character_card.dart';
 import 'randomizing_card_overlay.dart';
+import '../../../shared/widgets/glaze_sheet.dart';
 
 class CharacterGrid extends StatelessWidget {
   final List<Character> characters;
@@ -84,7 +88,7 @@ class CharacterGrid extends StatelessWidget {
     final pool = _randomPool();
     if (pool.isEmpty) return;
     final picked = pool[Random().nextInt(pool.length)];
-    final result = await showModalBottomSheet<String>(
+    final result = await showGlazeSheet<String>(
       context: context,
       isScrollControlled: true,
       useRootNavigator: true,
@@ -94,6 +98,69 @@ class CharacterGrid extends StatelessWidget {
     if (result != null && result.isNotEmpty && context.mounted) {
       context.go(result);
     }
+  }
+
+  /// The dice / filter / sort row.
+  ///
+  /// Desktop mirrors Vue's `.desktop-mode .sort-controls`: the row starts at
+  /// the left edge and the sort-type pill leads the direction toggle (CSS
+  /// `justify-content: flex-start` with `order: 1 / 2`). Elsewhere it stays
+  /// right-aligned with the toggle first, as the phone build has it.
+  ///
+  /// Wrap, not Row: the sort pill carries a translated label, so in a narrow
+  /// column (a small desktop window, where the middle column gives up width to
+  /// the sidebars) a Row overflowed instead of moving the controls onto a
+  /// second line.
+  Widget _buildControls(BuildContext context) {
+    final isDesktop = isDesktopLayout(context);
+
+    final sortDirButton = _SortDirButton(
+      isAsc: sortDir == SortDir.asc,
+      onTap: onSortDirToggle,
+    );
+    final sortTypePill = _SortTypePill(
+      sortBy: sortBy,
+      onChanged: onSortTypeChanged,
+    );
+
+    final row = Wrap(
+      alignment: isDesktop ? WrapAlignment.start : WrapAlignment.end,
+      spacing: 10,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        if (characters.isNotEmpty)
+          Consumer(
+            builder: (context, ref, _) {
+              final standard = ref.watch(
+                appSettingsProvider.select(
+                  (s) => s.value?.useStandardRandomizer ?? false,
+                ),
+              );
+              return _DiceButton(
+                standard: standard,
+                onTap: () => standard
+                    ? _openStandardRandom(context)
+                    : _openRandomizing(context),
+              );
+            },
+          ),
+        if (onFilterTap != null)
+          _FilterButton(count: filterCount, onTap: onFilterTap!),
+        if (isDesktop) ...[
+          sortTypePill,
+          sortDirButton,
+        ] else ...[
+          sortDirButton,
+          sortTypePill,
+        ],
+      ],
+    );
+
+    // One backdrop capture for the whole row instead of one per chip: these
+    // are plain siblings that never overlap, which is what makes sharing
+    // correct. See [GlassBackdropGroup].
+    return GlassBackdropGroup(child: row);
   }
 
   @override
@@ -106,39 +173,7 @@ class CharacterGrid extends StatelessWidget {
         SliverToBoxAdapter(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                if (characters.isNotEmpty) ...[
-                  Consumer(
-                    builder: (context, ref, _) {
-                      final standard = ref.watch(
-                        appSettingsProvider.select(
-                          (s) => s.value?.useStandardRandomizer ?? false,
-                        ),
-                      );
-                      return _DiceButton(
-                        standard: standard,
-                        onTap: () => standard
-                            ? _openStandardRandom(context)
-                            : _openRandomizing(context),
-                      );
-                    },
-                  ),
-                  const SizedBox(width: 10),
-                ],
-                if (onFilterTap != null) ...[
-                  _FilterButton(count: filterCount, onTap: onFilterTap!),
-                  const SizedBox(width: 10),
-                ],
-                _SortDirButton(
-                  isAsc: sortDir == SortDir.asc,
-                  onTap: onSortDirToggle,
-                ),
-                const SizedBox(width: 10),
-                _SortTypePill(sortBy: sortBy, onChanged: onSortTypeChanged),
-              ],
-            ),
+            child: _buildControls(context),
           ),
         ),
         SliverToBoxAdapter(
@@ -155,28 +190,31 @@ class CharacterGrid extends StatelessWidget {
         ),
         SliverPadding(
           padding: EdgeInsets.fromLTRB(16, 0, 16, 0),
-          sliver: SliverGrid(
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              mainAxisSpacing: 10,
-              crossAxisSpacing: 10,
-              childAspectRatio: 2 / 3,
-            ),
-            delegate: SliverChildBuilderDelegate(
-              // No explicit RepaintBoundary: SliverChildBuilderDelegate already
-              // wraps each child in one (addRepaintBoundaries: true by default).
-              //
-              // Keyed by character id so Flutter matches each card's State to its
-              // character across list changes. Without this, deleting a card mid-
-              // list left its slot's State (which still holds the finished dust
-              // cloud) attached to the character that shifted up into that slot —
-              // showing an empty slot instead of the next card.
-              (ctx, i) => CharacterCard(
-                key: ValueKey(characters[i].id),
-                character: characters[i],
-                folderId: folderId,
+          sliver: SliverLayoutBuilder(
+            builder: (context, constraints) => SliverGrid(
+              // Two fixed columns turned into two poster-sized cards on a
+              // desktop window; Vue used `minmax(220px, 1fr)` here.
+              gridDelegate: ResponsiveGridDelegate(
+                availableWidth: constraints.crossAxisExtent,
+                minCellExtent: 180,
+                childAspectRatio: 2 / 3,
               ),
-              childCount: characters.length,
+              delegate: SliverChildBuilderDelegate(
+                // No explicit RepaintBoundary: SliverChildBuilderDelegate already
+                // wraps each child in one (addRepaintBoundaries: true by default).
+                //
+                // Keyed by character id so Flutter matches each card's State to its
+                // character across list changes. Without this, deleting a card mid-
+                // list left its slot's State (which still holds the finished dust
+                // cloud) attached to the character that shifted up into that slot —
+                // showing an empty slot instead of the next card.
+                (ctx, i) => CharacterCard(
+                  key: ValueKey(characters[i].id),
+                  character: characters[i],
+                  folderId: folderId,
+                ),
+                childCount: characters.length,
+              ),
             ),
           ),
         ),
@@ -188,10 +226,7 @@ class CharacterGrid extends StatelessWidget {
                     child: SizedBox(
                       width: 22,
                       height: 22,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: context.cs.primary,
-                      ),
+                      child: GlazeSpinner(color: context.cs.primary),
                     ),
                   )
                 : null,

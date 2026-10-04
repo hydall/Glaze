@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../shared/widgets/glaze_spinner.dart';
+
 class ChatStatusCardShell extends StatelessWidget {
   const ChatStatusCardShell({
     super.key,
@@ -42,7 +44,7 @@ class ChatStatusCardShell extends StatelessWidget {
               SizedBox(
                 width: 18,
                 height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2, color: accent),
+                child: GlazeSpinner(color: accent),
               )
             else
               Icon(icon, size: 18, color: accent),

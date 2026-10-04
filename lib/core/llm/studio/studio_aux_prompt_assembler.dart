@@ -1,5 +1,6 @@
 import '../macro_engine.dart';
 import '../../models/studio_config.dart';
+import '../../models/studio_preset_block_groups.dart';
 
 /// Assembles an auxiliary-stage prompt (cleaner or ledger) from preset blocks
 /// preset blocks instead of hardcoded text.
@@ -24,8 +25,8 @@ class StudioAuxPromptAssembler {
 
   /// Build the full aux-stage prompt from preset blocks.
   ///
-  /// [blocks] — all blocks from the StudioPreset (will be filtered by section).
-  /// [section] — the preset section to use ('cleaner' or 'ledger').
+  /// [blocks] — all blocks from the StudioPreset (filtered by injection point).
+  /// [injectionPoint] — the target injection point ('cleaner' or 'ledger').
   /// [macroCtx] — macro context for resolving `{{char}}`, `{{user}}`,
   ///   `{{getvar::...}}`, etc.
   /// [customReplacements] — stage-specific placeholder replacements applied
@@ -38,18 +39,19 @@ class StudioAuxPromptAssembler {
   ///   runtime condition makes a block irrelevant).
   String assemble({
     required List<StudioPresetBlock> blocks,
-    required String section,
+    required String injectionPoint,
     required MacroContext macroCtx,
     Map<String, String> customReplacements = const {},
     String runtimeSuffix = '',
     Set<String> skipBlockIds = const {},
   }) {
-    final sectionBlocks =
+    final routedBlocks =
         blocks
-            .where((b) => b.enabled && b.section == section)
+            .where((b) => b.injectionPoint == injectionPoint)
             .where((b) => !skipBlockIds.contains(b.id))
             .toList()
           ..sort((a, b) => a.order.compareTo(b.order));
+    final sectionBlocks = resolveEnabledStudioPresetBlocks(routedBlocks);
 
     final parts = <String>[];
     for (final block in sectionBlocks) {

@@ -1,6 +1,7 @@
 import '../../models/chat_message.dart' show TriggeredEntry;
 import '../history_assembler.dart' show PromptMessage;
 import '../context_calculator.dart' show TokenBreakdown;
+import 'exact_lorebook_manifest.dart';
 
 class PromptResult {
   final List<PromptMessage> messages;
@@ -10,6 +11,7 @@ class PromptResult {
   final List<TriggeredEntry> triggeredLorebooks;
   final List<TriggeredEntry> triggeredMemories;
   final Map<String, dynamic> memoryCoverage;
+  final ExactLorebookManifest? exactLorebookManifest;
 
   const PromptResult({
     required this.messages,
@@ -19,6 +21,7 @@ class PromptResult {
     this.triggeredLorebooks = const [],
     this.triggeredMemories = const [],
     this.memoryCoverage = const {},
+    this.exactLorebookManifest,
   });
 
   Map<String, dynamic> toJson() => {
@@ -29,6 +32,7 @@ class PromptResult {
     'triggeredLorebooks': triggeredLorebooks.map((t) => t.toJson()).toList(),
     'triggeredMemories': triggeredMemories.map((t) => t.toJson()).toList(),
     'memoryCoverage': memoryCoverage,
+    'exactLorebookManifest': exactLorebookManifest?.toJson(),
   };
 
   factory PromptResult.fromJson(Map<String, dynamic> json) => PromptResult(
@@ -49,5 +53,10 @@ class PromptResult {
     memoryCoverage: Map<String, dynamic>.from(
       json['memoryCoverage'] as Map? ?? {},
     ),
+    exactLorebookManifest: json['exactLorebookManifest'] is Map
+        ? ExactLorebookManifest.fromJson(
+            Map<String, dynamic>.from(json['exactLorebookManifest'] as Map),
+          )
+        : null,
   );
 }

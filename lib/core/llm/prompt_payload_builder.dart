@@ -1,16 +1,20 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';
 
 import '../models/api_config.dart';
+import '../db/repositories/session_lorebook_evolution_repo.dart';
 import '../models/character.dart';
 import '../models/chat_message.dart';
+import '../models/historical_message_window.dart';
+import '../db/repositories/ledger_raw_tracker_state_reader.dart';
+import 'memory_draft_transcript_builder.dart';
 import '../utils/cast_helpers.dart';
 import '../models/lorebook.dart';
 import '../models/memory_book.dart';
 import '../models/persona.dart';
 import '../models/preset.dart';
 import '../models/tracker.dart';
+import '../models/ledger_prompt_injection_policy.dart';
 import '../state/active_selection_provider.dart';
 import '../state/db_provider.dart';
 import '../state/global_regex_provider.dart';
@@ -18,17 +22,24 @@ import '../state/lorebook_embedding_provider.dart';
 import '../state/lorebook_provider.dart';
 import '../state/memory_settings_provider.dart';
 import '../state/summary_providers.dart';
+import 'generation_phase.dart';
 import 'memory_injection_service.dart';
+import 'memory_retrieval_mode.dart';
+import 'game_time.dart';
 import 'message_recall_service.dart';
 import 'memory_selector.dart';
+import 'generation_context_inputs.dart';
 import 'prompt_builder.dart';
 import 'prompt/arc_state_builder.dart';
 import 'prompt/ledger_tracker_loader.dart';
 import 'prompt/lorebook_vector_searcher.dart';
-import 'prompt/studio_session_state_compiler.dart';
-import 'knowledge/character_knowledge_projection.dart';
 import 'prompt_inputs.dart';
 import 'prompt_inputs_collector.dart';
+import 'prompt/effective_canon_prompt_formatter.dart';
+import 'prompt/effective_canon_prompt_materializer.dart';
+import 'prompt/selective_ledger_projection_filter.dart';
+import '../services/card_rewriter/effective_canon_context_loader.dart';
+import 'prompt/prompt_build_stale_exception.dart';
 
 // Re-export for backward compat — tests import this from here.
 export 'prompt/studio_session_state_compiler.dart'
@@ -36,8 +47,6 @@ export 'prompt/studio_session_state_compiler.dart'
 
 class PromptPayloadBuilder {
   final Ref _ref;
-  final Future<List<Tracker>> Function(String sessionId)
-  _loadEffectiveLedgerTrackers;
   final PromptInputsCollector _inputsCollector;
   final ApiConfigInitializer _initializeApiConfigs;
   final ActiveApiConfigReader _readActiveApiConfig;
@@ -81,7 +90,7 @@ class PromptPayloadBuilder {
     this._readActiveApiConfig,
     this._injectHistory,
     this._readRuntimePromptBlocks,
-    this._loadEffectiveLedgerTrackers,
+    Future<List<Tracker>> Function(String sessionId) _,
     this.onLorebookVectorSearchDiagnostic,
   );
 
@@ -107,6 +116,52 @@ class PromptPayloadBuilder {
     bool Function()? shouldAbort,
     CancelToken? cancelToken,
   }) async {
+    final inputs = await collectGenerationContext(
+      charId: charId,
+      session: session,
+      apiConfigOverride: apiConfigOverride,
+      guidanceText: guidanceText,
+      skipVectorSearch: skipVectorSearch,
+      shouldAbort: shouldAbort,
+      cancelToken: cancelToken,
+    );
+    final preset = await _resolveOrdinaryPreset(shouldAbort: shouldAbort);
+    return PromptPayload.fromGenerationContext(
+      inputs,
+      preset: preset,
+      ledgerPromptInjectionPolicy: disabledLedgerPromptInjectionPolicy,
+    );
+  }
+
+  Future<PromptPayload> buildOrdinaryFromGenerationContext(
+    GenerationContextInputs inputs, {
+    bool Function()? shouldAbort,
+  }) async {
+    final preset = await _resolveOrdinaryPreset(shouldAbort: shouldAbort);
+    return PromptPayload.fromGenerationContext(
+      inputs,
+      preset: preset,
+      ledgerPromptInjectionPolicy: disabledLedgerPromptInjectionPolicy,
+    );
+  }
+
+  /// Collects all live generation source data without selecting or reading an
+  /// ordinary preset. Request compilers attach their own typed configuration.
+  Future<GenerationContextInputs> collectGenerationContext({
+    required String charId,
+    required ChatSession? session,
+    ApiConfig? apiConfigOverride,
+    String? guidanceText,
+    String? continueInstruction,
+    bool skipVectorSearch = false,
+    bool includeEffectiveCanon = false,
+    bool readOnlyEffectiveCanon = false,
+    String? excludeSnapshotMessageId,
+    bool allowRemoteRetrieval = true,
+    bool Function()? shouldAbort,
+    CancelToken? cancelToken,
+    void Function(GenerationPhase)? onPhase,
+  }) async {
     void throwIfAborted() {
       if (shouldAbort?.call() == true) {
         throw const _GenerationAbortedException();
@@ -114,14 +169,52 @@ class PromptPayloadBuilder {
     }
 
     throwIfAborted();
+    onPhase?.call(GenerationPhase.preparing);
     final charRepo = _ref.read(characterRepoProvider);
-    final presetRepo = _ref.read(presetRepoProvider);
     final personaRepo = _ref.read(personaRepoProvider);
     final lorebookRepo = _ref.read(lorebookRepoProvider);
 
-    final character = await charRepo.getById(charId);
+    final effectiveCharId = session?.characterId ?? charId;
+    final sourceCharacter = await charRepo.getById(effectiveCharId);
     throwIfAborted();
-    if (character == null) throw StateError('Character not found: $charId');
+    if (sourceCharacter == null) {
+      throw StateError('Character not found: $effectiveCharId');
+    }
+    HistoricalMessageWindow? historicalWindow;
+    if (session != null && excludeSnapshotMessageId != null) {
+      final durable = await _ref.read(chatRepoProvider).getById(session.id);
+      throwIfAborted();
+      if (durable == null) throw StateError('Historical session is missing.');
+      historicalWindow = HistoricalMessageWindow.before(
+        durable.messages,
+        excludeSnapshotMessageId,
+      );
+      session = session.copyWith(messages: historicalWindow.messages);
+    }
+    final effectiveContext =
+        session == null || (!includeEffectiveCanon && historicalWindow == null)
+        ? null
+        : readOnlyEffectiveCanon
+        ? await _ref
+              .read(effectiveCanonContextLoaderProvider)
+              .loadReadOnly(
+                sessionId: session.id,
+                sourceCharacter: sourceCharacter,
+                excludeSnapshotMessageId: excludeSnapshotMessageId,
+              )
+        : await _ref
+              .read(effectiveCanonContextLoaderProvider)
+              .load(
+                sessionId: session.id,
+                sourceCharacter: sourceCharacter,
+                excludeSnapshotMessageId: excludeSnapshotMessageId,
+              );
+    final character = effectiveContext?.character ?? sourceCharacter;
+    throwIfAborted();
+    final effectiveProjection =
+        effectiveContext == null || !includeEffectiveCanon
+        ? null
+        : EffectiveCanonPromptProjection.fromContext(effectiveContext);
 
     await _initializeApiConfigs();
     throwIfAborted();
@@ -129,13 +222,6 @@ class PromptPayloadBuilder {
     if (chatApi == null || chatApi.mode == 'embedding') {
       throw StateError('No chat API config available');
     }
-
-    final activePresetId = _ref.read(activePresetIdProvider);
-    final presets = await presetRepo.getAll();
-    throwIfAborted();
-    final preset = activePresetId != null
-        ? presets.where((p) => p.id == activePresetId).firstOrNull
-        : (presets.isNotEmpty ? presets.first : null);
 
     final personas = await personaRepo.getAll();
     throwIfAborted();
@@ -145,13 +231,26 @@ class PromptPayloadBuilder {
 
     final persona = getEffectivePersona(
       personas,
-      charId,
+      effectiveCharId,
       sessionId,
       activePersonaId,
       connections,
     );
 
-    final lorebooks = await lorebookRepo.getAll();
+    final sourceLorebooks = await lorebookRepo.getAll();
+    final effectiveLorebooks = session == null
+        ? EffectiveSessionLorebooks(
+            lorebooks: sourceLorebooks,
+            overlayTargets: const {},
+          )
+        : await _ref
+              .read(sessionLorebookEvolutionRepoProvider)
+              .resolveEffectiveLorebooks(
+                sessionId: session.id,
+                lorebooks: sourceLorebooks,
+                historicalWindow: historicalWindow,
+              );
+    final lorebooks = effectiveLorebooks.lorebooks;
     throwIfAborted();
     final lorebookSettings = _ref.read(lorebookSettingsProvider);
     final lorebookActivations = _ref.read(lorebookActivationsProvider);
@@ -194,7 +293,9 @@ class PromptPayloadBuilder {
       runtimePromptBlocks = _readRuntimePromptBlocks(session.id);
 
       final summaryService = _ref.read(summaryServiceProvider);
-      summaryContent = await summaryService.getSummary(session.id);
+      summaryContent = historicalWindow == null
+          ? await summaryService.getSummary(session.id)
+          : null;
       throwIfAborted();
 
       final memoryService = _ref.read(memoryInjectionServiceProvider);
@@ -207,20 +308,23 @@ class PromptPayloadBuilder {
       // endpoint is slow. The final memory refilter against the visible
       // window happens later inside buildPrompt (see
       // docs/INVARIANTS.md §5.5).
-      final lorebookFuture = (!skipVectorSearch)
+      final lorebookFuture = (!skipVectorSearch && allowRemoteRetrieval)
           ? _vectorSearcher
                 .search(
                   session.messages,
                   currentText,
                   character.world,
                   character,
+                  lorebooks: lorebooks,
+                  sessionOverlayTargets: effectiveLorebooks.overlayTargets,
                   chatId: session.id,
                   cancelToken: cancelToken,
                 )
                 .timeout(const Duration(seconds: 30), onTimeout: () => const [])
           : Future<List<LorebookEntry>>.value(const []);
 
-      final memoryFuture = memoryGraphEnabled && memoryBook != null
+      final memoryFuture =
+          allowRemoteRetrieval && memoryGraphEnabled && memoryBook != null
           ? memoryService.buildCandidatesWithDiagnostics(
               sessionId: session.id,
               history: session.messages,
@@ -229,6 +333,7 @@ class PromptPayloadBuilder {
               shouldAbort: shouldAbort,
               cancelToken: cancelToken,
               contextBudgetTokens: chatApi.contextSize,
+              allowedSourceMessageIds: historicalWindow?.byId.keys.toSet(),
             )
           : Future.value(
               MemoryCandidateBuildResult(
@@ -246,21 +351,28 @@ class PromptPayloadBuilder {
       // Rationale (patch #3): raw-message recall is a lossless backstop for
       // the lossy MemoryBook compression — chunk=5 messages → cosine search →
       // `<recalled_messages>` injection (Marinara memory-recall analog).
-      final recallFuture = _ref
-          .read(messageRecallServiceProvider)
-          .recall(
-            sessionId: session.id,
-            currentText: currentText,
-            config: embeddingConfig,
-            cancelToken: cancelToken,
-            shouldAbort: shouldAbort,
-          )
-          .timeout(
-            const Duration(seconds: 30),
-            onTimeout: () => const MessageRecallResult(),
-          );
+      final recallFuture = allowRemoteRetrieval
+          ? _ref
+                .read(messageRecallServiceProvider)
+                .recall(
+                  sessionId: session.id,
+                  currentText: currentText,
+                  config: embeddingConfig,
+                  cancelToken: cancelToken,
+                  shouldAbort: shouldAbort,
+                  allowedSourceMessageIds: historicalWindow?.byId.keys.toSet(),
+                  sourceMessages: {
+                    for (final message in session.messages) message.id: message,
+                  },
+                )
+                .timeout(
+                  const Duration(seconds: 30),
+                  onTimeout: () => const MessageRecallResult(),
+                )
+          : Future.value(const MessageRecallResult());
 
       throwIfAborted();
+      onPhase?.call(GenerationPhase.retrieving);
       final results = await Future.wait([
         memoryFuture,
         lorebookFuture,
@@ -276,23 +388,17 @@ class PromptPayloadBuilder {
       vectorEntries = results[1] as List<LorebookEntry>;
       final recallResult = results[2] as MessageRecallResult;
       if (recallResult.matches.isNotEmpty) {
-        final block = StringBuffer();
-        block.writeln('<recalled_messages>');
-        block.writeln(
-          'Semantically relevant raw message chunks from earlier in this chat. '
-          'Do not explicitly reference "remembering" these — use them as ground '
-          'truth context.',
-        );
-        for (final match in recallResult.matches) {
-          block.writeln('---');
-          block.writeln(match.text);
-        }
-        block.writeln('</recalled_messages>');
-        recalledMessagesContent = block.toString();
         recalledMessageChunks = recallResult.matches
             .map(
-              (m) =>
-                  RecalledMessageChunk(text: m.text, messageIds: m.messageIds),
+              (m) => RecalledMessageChunk(
+                text: m.text,
+                messageIds: m.messageIds,
+                ledgerRange: MemoryDraftTranscriptBuilder.ledgerRange(
+                  session!.messages
+                      .where((message) => m.messageIds.contains(message.id))
+                      .toList(),
+                ),
+              ),
             )
             .toList(growable: false);
       }
@@ -363,41 +469,16 @@ class PromptPayloadBuilder {
     String? studioSessionStateContent;
     String? characterKnowledgeContent;
     List<Tracker>? ledgerTrackers;
-    if (memoryGraphEnabled && sessionId != null) {
-      try {
-        final facts = await _ref
-            .read(characterKnowledgeFactRepoProvider)
-            .getActiveForSession(sessionId);
-        characterKnowledgeContent = compileCharacterKnowledgeProjection(
-          facts,
-          latestUserText: latestUserTextFromHistory(history),
-          latestAssistantText: latestAssistantTextFromHistory(history),
-        );
-      } catch (e) {
-        debugPrint('[PromptBuilder] character knowledge load failed: $e');
-      }
-    }
-    if (memoryGraphEnabled && sessionId != null) {
-      try {
-        ledgerTrackers = List.unmodifiable(
-          await _loadEffectiveLedgerTrackers(sessionId),
-        );
-      } catch (e) {
-        debugPrint('[PromptBuilder] studio_session_state load failed: $e');
-      }
-      try {
-        if (ledgerTrackers case final ledgerTrackers?
-            when ledgerTrackers.isNotEmpty) {
-          studioSessionStateContent = compileStudioSessionState(
-            ledgerTrackers,
-            sessionId,
-            latestUserText: latestUserTextFromHistory(history),
-            latestAssistantText: latestAssistantTextFromHistory(history),
-          );
-        }
-      } catch (e) {
-        debugPrint('[PromptBuilder] studio_session_state load failed: $e');
-      }
+    if (effectiveProjection != null && sessionId != null) {
+      final canon = EffectiveCanonPromptFormatter.format(
+        effectiveProjection,
+        sessionId: sessionId,
+        latestUserText: latestUserTextFromHistory(history),
+        latestAssistantText: latestAssistantTextFromHistory(history),
+      );
+      characterKnowledgeContent = canon.characterKnowledge;
+      studioSessionStateContent = canon.sessionState;
+      ledgerTrackers = effectiveProjection.trackers;
     }
 
     // Load {{arc}} macro content from Studio Canon arc:* tracker rows.
@@ -412,7 +493,9 @@ class PromptPayloadBuilder {
     String? arcContent;
     String? entitiesContent;
     if (memoryGraphEnabled &&
-        memorySettings.memoryMode != 'fast' &&
+        MemoryRetrievalMode.fromValue(
+          memorySettings.memoryMode,
+        ).supports(MemoryRetrievalCapability.extendedPromptContext) &&
         sessionId != null) {
       try {
         if (ledgerTrackers != null) {
@@ -423,27 +506,49 @@ class PromptPayloadBuilder {
           );
         }
       } catch (_) {}
-      try {
-        final entities = await _ref
-            .read(memoryEntityRepoProvider)
-            .getBySessionId(sessionId);
-        if (entities.isNotEmpty) {
-          final active = entities.where((e) => e.status == 'active').take(20);
-          entitiesContent = active
-              .map(
-                (e) =>
-                    '- ${e.name} (${e.entityType})'
-                    '${e.facts.isNotEmpty ? ": ${e.facts.join("; ")}" : ""}',
-              )
-              .join('\n');
-        }
-      } catch (_) {}
+      if (historicalWindow == null) {
+        try {
+          final entities = await _ref
+              .read(memoryEntityRepoProvider)
+              .getBySessionId(sessionId);
+          if (entities.isNotEmpty) {
+            final active = entities.where((e) => e.status == 'active').take(20);
+            entitiesContent = active
+                .map(
+                  (e) =>
+                      '- ${e.name} (${e.entityType})'
+                      '${e.facts.isNotEmpty ? ": ${e.facts.join("; ")}" : ""}',
+                )
+                .join('\n');
+          }
+        } catch (_) {}
+      }
     }
 
-    return PromptPayload(
+    final clockTrackers =
+        effectiveContext?.committedTrackers ??
+        (sessionId == null
+            ? const <Tracker>[]
+            : (await LedgerRawTrackerStateReader(_ref.read(appDbProvider)).read(
+                sessionId,
+                historicalWindow: historicalWindow,
+              )).committedTrackers);
+    await _ensureEffectiveCanonCurrent(
+      charId: effectiveCharId,
+      session: session,
+      context: effectiveContext,
+      excludeSnapshotMessageId: excludeSnapshotMessageId,
+    );
+    throwIfAborted();
+    final gameTimeState = GameTimeState.fromTrackers(clockTrackers);
+    recalledMessagesContent = const RecalledMessagesResolver().resolve(
+      chunks: recalledMessageChunks,
+      visibleMessageIds: const {},
+      gameTime: gameTimeState,
+    );
+    return GenerationContextInputs(
       character: character,
       persona: persona,
-      preset: preset,
       history: history,
       sessionId: sessionId,
       apiConfig: chatApi,
@@ -459,6 +564,7 @@ class PromptPayloadBuilder {
       memoryInjectionTarget: memoryInjectionTarget,
       memoryCoverage: memoryCoverage,
       guidanceText: guidanceText,
+      continueInstruction: continueInstruction,
       authorsNote: session?.authorsNote,
       characterDepthPrompt: character.depthPrompt,
       characterDepthPromptDepth: character.depthPromptDepth,
@@ -476,16 +582,40 @@ class PromptPayloadBuilder {
       arcContent: arcContent,
       entitiesContent: entitiesContent,
       studioSessionStateContent: studioSessionStateContent,
+      gameTime: gameTimeState.time,
+      gameDate: gameTimeState.date,
+      gameDay: gameTimeState.day?.toString(),
       characterKnowledgeContent: characterKnowledgeContent,
       recalledMessagesContent: recalledMessagesContent,
       recalledMessageChunks: recalledMessageChunks,
+      effectiveCanonProjection: effectiveProjection,
+      effectiveCanonRevisionNumber: effectiveProjection?.revisionNumber,
+      effectiveCanonRevisionHash: effectiveProjection?.revisionHash,
+      effectiveCanonCacheIdentity: effectiveProjection?.cacheIdentity ?? '',
+      // The projection was loaded from one effective-canon snapshot and
+      // revalidated immediately above. Exact message/swipe provenance may now
+      // be compared with the frozen final source window by each compiler.
+      ledgerProjectionFreshnessProvenCurrent: effectiveContext != null,
     );
+  }
+
+  Future<Preset?> _resolveOrdinaryPreset({bool Function()? shouldAbort}) async {
+    final activePresetId = _ref.read(activePresetIdProvider);
+    final presets = await _ref.read(presetRepoProvider).getAll();
+    if (shouldAbort?.call() == true) {
+      throw const _GenerationAbortedException();
+    }
+    return activePresetId != null
+        ? presets.where((p) => p.id == activePresetId).firstOrNull
+        : presets.firstOrNull;
   }
 
   Future<PromptPayload> buildFromPreFetched({
     required String charId,
     required ChatSession? session,
     required Character character,
+    EffectiveCanonContext? effectiveCanonContext,
+    bool includeEffectiveCanon = false,
     required ApiConfig chatApi,
     required Preset? preset,
     required Persona? persona,
@@ -501,8 +631,33 @@ class PromptPayloadBuilder {
     List<RuntimePromptBlock> runtimePromptBlocks = const [],
     String? recalledMessagesContent,
   }) async {
+    final resolvedContext = !includeEffectiveCanon
+        ? null
+        : effectiveCanonContext ??
+              (session != null
+                  ? await _ref
+                        .read(effectiveCanonContextLoaderProvider)
+                        .load(sessionId: session.id, sourceCharacter: character)
+                  : null);
+    final projection = resolvedContext == null
+        ? null
+        : EffectiveCanonPromptProjection.fromContext(resolvedContext);
+    // Never trust the caller's raw character for a session-scoped prompt.
+    final effectiveCharacter = resolvedContext?.character ?? character;
     final lorebookSettings = _ref.read(lorebookSettingsProvider);
     final lorebookActivations = _ref.read(lorebookActivationsProvider);
+    final effectiveLorebookSet = session == null
+        ? EffectiveSessionLorebooks(
+            lorebooks: lorebooks,
+            overlayTargets: const {},
+          )
+        : await _ref
+              .read(sessionLorebookEvolutionRepoProvider)
+              .resolveEffectiveLorebooks(
+                sessionId: session.id,
+                lorebooks: lorebooks,
+              );
+    final effectiveLorebooks = effectiveLorebookSet.lorebooks;
 
     List<LorebookEntry> vectorEntries = [];
     List<ChatMessage> history = session?.messages ?? [];
@@ -513,8 +668,10 @@ class PromptPayloadBuilder {
       vectorEntries = await _vectorSearcher.search(
         history,
         history.lastOrNull?.content ?? '',
-        character.world,
-        character,
+        effectiveCharacter.world,
+        effectiveCharacter,
+        lorebooks: effectiveLorebooks,
+        sessionOverlayTargets: effectiveLorebookSet.overlayTargets,
         chatId: session.id,
       );
     }
@@ -528,44 +685,38 @@ class PromptPayloadBuilder {
           .getBySessionId(session.id);
       memoryGraphEnabled = memoryBook?.settings.enabled ?? true;
     }
-    String? studioSessionStateContent;
-    List<Tracker>? ledgerTrackers;
-    if (memoryGraphEnabled && session != null) {
-      try {
-        ledgerTrackers = List.unmodifiable(
-          await _loadEffectiveLedgerTrackers(session.id),
-        );
-      } catch (e) {
-        debugPrint('[PromptBuilder] studio_session_state load failed: $e');
-      }
-      try {
-        if (ledgerTrackers case final ledgerTrackers?
-            when ledgerTrackers.isNotEmpty) {
-          studioSessionStateContent = compileStudioSessionState(
-            ledgerTrackers,
-            session.id,
+    const policy = disabledLedgerPromptInjectionPolicy;
+    final materialized = projection == null || session == null
+        ? null
+        : EffectiveCanonPromptMaterializer.materializeSafely(
+            SelectiveLedgerProjectionInput(
+              policy: policy,
+              consumerPath: 'prefetched',
+              projection: projection,
+              visibleMessages: history,
+              selectedSwipeByMessageId: {
+                for (final message in history) message.id: message.swipeId,
+              },
+              focalUserName:
+                  session.messages.reversed
+                      .map((message) => message.personaName?.trim())
+                      .firstWhere(
+                        (name) => name != null && name.isNotEmpty,
+                        orElse: () => null,
+                      ) ??
+                  '',
+            ),
+            sessionId: session.id,
             latestUserText: latestUserTextFromHistory(history),
             latestAssistantText: latestAssistantTextFromHistory(history),
           );
-        }
-      } catch (e) {
-        debugPrint('[PromptBuilder] studio_session_state load failed: $e');
-      }
-    }
-    String? arcContent;
+    String? arcContent = materialized?.arcContent;
     String? entitiesContent;
     if (memoryGraphEnabled &&
-        (memoryBook?.settings.memoryMode ?? memSettings.memoryMode) != 'fast' &&
+        MemoryRetrievalMode.fromValue(
+          memoryBook?.settings.memoryMode ?? memSettings.memoryMode,
+        ).supports(MemoryRetrievalCapability.extendedPromptContext) &&
         session != null) {
-      try {
-        if (ledgerTrackers != null) {
-          arcContent = buildArcContent(
-            ledgerTrackers,
-            latestUserText: latestUserTextFromHistory(history),
-            latestAssistantText: latestAssistantTextFromHistory(history),
-          );
-        }
-      } catch (_) {}
       try {
         final entities = await _ref
             .read(memoryEntityRepoProvider)
@@ -583,8 +734,16 @@ class PromptPayloadBuilder {
       } catch (_) {}
     }
 
+    await _ensureEffectiveCanonCurrent(
+      charId: charId,
+      session: session,
+      context: resolvedContext,
+    );
+    final gameTimeState = GameTimeState.fromTrackers(
+      projection?.trackers ?? const <Tracker>[],
+    );
     return PromptPayload(
-      character: character,
+      character: effectiveCharacter,
       persona: persona,
       preset: preset,
       history: history,
@@ -592,7 +751,7 @@ class PromptPayloadBuilder {
       apiConfig: chatApi,
       sessionVars: session?.sessionVars ?? {},
       globalVars: _ref.read(globalVarsProvider),
-      lorebooks: lorebooks,
+      lorebooks: effectiveLorebooks,
       lorebookSettings: lorebookSettings,
       lorebookActivations: lorebookActivations,
       vectorEntries: vectorEntries,
@@ -603,9 +762,9 @@ class PromptPayloadBuilder {
       memoryCoverage: memoryCoverage,
       guidanceText: guidanceText,
       authorsNote: session?.authorsNote,
-      characterDepthPrompt: character.depthPrompt,
-      characterDepthPromptDepth: character.depthPromptDepth,
-      characterDepthPromptRole: character.depthPromptRole,
+      characterDepthPrompt: effectiveCharacter.depthPrompt,
+      characterDepthPromptDepth: effectiveCharacter.depthPromptDepth,
+      characterDepthPromptRole: effectiveCharacter.depthPromptRole,
       globalRegexes: _ref.read(globalRegexProvider).value ?? [],
       triggeredMemories: triggeredMemories,
       runtimePromptBlocks: runtimePromptBlocks,
@@ -617,10 +776,70 @@ class PromptPayloadBuilder {
       chunkFirstTopChunks: memSettings.chunkFirstTopChunks,
       arcContent: arcContent,
       entitiesContent: entitiesContent,
-      studioSessionStateContent: studioSessionStateContent,
+      studioSessionStateContent: materialized?.studioSessionStateContent,
+      gameTime: gameTimeState.time,
+      gameDate: gameTimeState.date,
+      gameDay: gameTimeState.day?.toString(),
+      characterKnowledgeContent: materialized?.characterKnowledgeContent,
       recalledMessagesContent: recalledMessagesContent,
       recalledMessageChunks: const [],
+      effectiveCanonProjection: projection,
+      effectiveCanonRevisionNumber: projection?.revisionNumber,
+      effectiveCanonRevisionHash: projection?.revisionHash,
+      effectiveCanonCacheIdentity: projection?.cacheIdentity ?? '',
+      ledgerPromptInjectionPolicy: policy,
+      ledgerInjectionCacheIdentity: materialized?.injectionCacheIdentity ?? '',
+      ledgerProjectionFreshnessProvenCurrent: resolvedContext != null,
     );
+  }
+
+  /// Revalidate the exact entries that reached a prepared request after async
+  /// retrieval and prompt assembly. Unselected candidates do not block sending.
+  Future<void> ensureMemoryEntriesCurrent({
+    required String sessionId,
+    required MemorySelection? selection,
+    required Iterable<TriggeredEntry> triggered,
+  }) async {
+    if (selection == null) return;
+    final ids = triggered.map((entry) => entry.id).toSet();
+    final used = selection.allScores
+        .map((score) => score.entry)
+        .followedBy(selection.entries)
+        .where((entry) => ids.contains(entry.id))
+        .toList();
+    if (used.isEmpty) return;
+    if (!await _ref
+        .read(memoryBookRepoProvider)
+        .areEntriesCurrent(sessionId, used)) {
+      throw const PromptBuildStaleException(
+        'Memory changed while preparing the request.',
+      );
+    }
+  }
+
+  Future<void> _ensureEffectiveCanonCurrent({
+    required String charId,
+    required ChatSession? session,
+    required EffectiveCanonContext? context,
+    String? excludeSnapshotMessageId,
+  }) async {
+    if (session == null || context == null) return;
+    final current = await _ref.read(characterRepoProvider).getById(charId);
+    final isCurrent =
+        current != null &&
+        await _ref
+            .read(effectiveCanonContextLoaderProvider)
+            .isStillCurrentReadOnly(
+              sessionId: session.id,
+              sourceCharacter: current,
+              stamp: context.stamp,
+              excludeSnapshotMessageId: excludeSnapshotMessageId,
+            );
+    if (!isCurrent) {
+      throw const PromptBuildStaleException(
+        'Effective canon changed while building the prompt payload.',
+      );
+    }
   }
 }
 

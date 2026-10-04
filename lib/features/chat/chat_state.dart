@@ -13,6 +13,18 @@ class ChatState {
   /// settle the persisted assistant message into the DOM while the Stop
   /// button stays pressable through the post-gen window.
   final bool isPostGenRunning;
+
+  /// True from the moment a send is painted optimistically until the run it
+  /// starts publishes [isGenerating] (or the send is rolled back).
+  ///
+  /// The user's bubble is on screen during that window but nothing is
+  /// generating yet, so the WebView would otherwise stamp a Regenerate button
+  /// under a message whose reply is already on its way. Every consumer treats
+  /// this as "busy" exactly the way it treats [isGenerating]; nothing in the
+  /// generation path branches on it, so a leaked `true` can only withhold that
+  /// one button, never block a run.
+  final bool isSendPending;
+
   final String? error;
   final String? lastRawResponse;
   final DateTime? generationStartTime;
@@ -44,6 +56,7 @@ class ChatState {
     this.isGenerating = false,
     this.isGeneratingImage = false,
     this.isPostGenRunning = false,
+    this.isSendPending = false,
     this.error,
     this.lastRawResponse,
     this.generationStartTime,
@@ -72,6 +85,7 @@ class ChatState {
     bool? isGenerating,
     bool? isGeneratingImage,
     bool? isPostGenRunning,
+    bool? isSendPending,
     Object? error = _unset,
     String? lastRawResponse,
     DateTime? generationStartTime,
@@ -87,6 +101,7 @@ class ChatState {
       isGenerating: isGenerating ?? this.isGenerating,
       isGeneratingImage: isGeneratingImage ?? this.isGeneratingImage,
       isPostGenRunning: isPostGenRunning ?? this.isPostGenRunning,
+      isSendPending: isSendPending ?? this.isSendPending,
       error: error == _unset ? this.error : error as String?,
       lastRawResponse: lastRawResponse ?? this.lastRawResponse,
       generationStartTime: generationStartTime ?? this.generationStartTime,

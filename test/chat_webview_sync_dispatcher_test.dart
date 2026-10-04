@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/features/chat/bridge/chat_bridge_controller.dart';
 import 'package:glaze_flutter/features/chat/bridge/chat_overlay_blur_region.dart';
+import 'package:glaze_flutter/features/chat/chat_state.dart';
 import 'package:glaze_flutter/features/chat/widgets/chat_message_sync.dart';
 import 'package:glaze_flutter/features/chat/widgets/chat_streaming_bridge_sync.dart';
 import 'package:glaze_flutter/features/chat/widgets/chat_webview_sync_dispatcher.dart';
@@ -24,7 +25,7 @@ void main() {
           oldMsgs: [greeting],
           newMsgs: [greeting, user],
           visibleStartIndex: 0,
-          isGenerating: true,
+          busy: true,
           sessionSwitching: false,
         );
 
@@ -45,7 +46,7 @@ void main() {
             oldMsgs: [greeting],
             newMsgs: [greeting, user],
             visibleStartIndex: 0,
-            isGenerating: true,
+            busy: true,
             sessionSwitching: false,
           )
           .then((_) => completed = true);
@@ -57,6 +58,68 @@ void main() {
       appendCompleter.complete();
       await sync;
       expect(completed, isTrue);
+    });
+
+    test(
+      'withholds Regenerate while the send is still being persisted',
+      () async {
+        // The optimistic user bubble is a tail append and the durable append can
+        // take a while on a long chat. Stamping the Regenerate button there put
+        // it under the message for that whole window, then took it away again
+        // the moment `isGenerating` went up — a visible flash on every send.
+        final bridge = _FakeBridge();
+        final greeting = _assistant('a1');
+        final user = _user('u1');
+
+        await const ChatMessageSync().sync(
+          bridge: bridge,
+          oldMsgs: [greeting],
+          newMsgs: [greeting, user],
+          visibleStartIndex: 0,
+          busy: true,
+          sessionSwitching: false,
+        );
+
+        expect(bridge.appendedMessages, [user]);
+        expect(bridge.lastMessageIds, isEmpty);
+      },
+    );
+
+    test('stamps Regenerate on a trailing user message once idle', () async {
+      final bridge = _FakeBridge();
+      final greeting = _assistant('a1');
+      final user = _user('u1');
+
+      await const ChatMessageSync().sync(
+        bridge: bridge,
+        oldMsgs: [greeting],
+        newMsgs: [greeting, user],
+        visibleStartIndex: 0,
+        busy: false,
+        sessionSwitching: false,
+      );
+
+      expect(bridge.lastMessageIds, ['u1']);
+    });
+
+    test('sends a time-only metadata update to the WebView', () async {
+      final bridge = _FakeBridge();
+      final oldMessage = _assistant('a1');
+      final updated = oldMessage.copyWith(
+        time: '12.05.2027 · RP_Day 2 · 14:15',
+      );
+
+      await const ChatMessageSync().sync(
+        bridge: bridge,
+        oldMsgs: [oldMessage],
+        newMsgs: [updated],
+        visibleStartIndex: 0,
+        busy: false,
+        sessionSwitching: false,
+      );
+
+      expect(bridge.updatedMessages, [updated]);
+      expect(bridge.appendedMessages, isEmpty);
     });
 
     test('appends streaming placeholder after persisted user append', () async {
@@ -123,6 +186,178 @@ void main() {
   });
 
   group('ChatWebViewSyncDispatcher', () {
+    test(
+      'restores an already-active normal generation after DOM reset',
+      () async {
+        final bridge = _FakeBridge();
+        final state = ChatWebViewSyncState()..wasBusy = true;
+
+        await reconcileActiveGenerationBridge(
+          bridge: bridge,
+          syncState: state,
+          isBusy: true,
+          isImpersonating: false,
+          regenTargetId: null,
+          continuationTargetId: null,
+          streaming: const StreamingState(text: 'partial reply'),
+          messages: [_user('u1')],
+          streamingId: '__streaming__',
+          isCurrent: () => true,
+        );
+
+        expect(bridge.appendedMessages, hasLength(1));
+        expect(bridge.appendedMessages.single.id, '__streaming__');
+        expect(bridge.appendedMessages.single.content, 'partial reply');
+        expect(bridge.appendedMessages.single.isTyping, isTrue);
+        expect(state.streamingSent, isTrue);
+      },
+    );
+
+    test('restores continuation in place without a virtual message', () async {
+      final bridge = _FakeBridge();
+      final state = ChatWebViewSyncState();
+      final original = _assistant('a1').copyWith(content: 'First');
+
+      await reconcileActiveGenerationBridge(
+        bridge: bridge,
+        syncState: state,
+        isBusy: true,
+        isImpersonating: false,
+        regenTargetId: null,
+        continuationTargetId: 'a1',
+        streaming: const StreamingState(text: 'second'),
+        messages: [original],
+        streamingId: '__streaming__',
+        isCurrent: () => true,
+      );
+
+      expect(bridge.appendedMessages, isEmpty);
+      expect(bridge.updatedMessages, hasLength(1));
+      expect(bridge.updatedMessages.single.content, contains('second'));
+      expect(bridge.continuationTargetId, 'a1');
+      expect(state.regenStreamingSent, isTrue);
+    });
+
+    test('does not restore a chat bubble for impersonation', () async {
+      final bridge = _FakeBridge();
+      final state = ChatWebViewSyncState();
+
+      await reconcileActiveGenerationBridge(
+        bridge: bridge,
+        syncState: state,
+        isBusy: true,
+        isImpersonating: true,
+        regenTargetId: null,
+        continuationTargetId: null,
+        streaming: const StreamingState(text: 'composer text'),
+        messages: const [],
+        streamingId: '__streaming__',
+        isCurrent: () => true,
+      );
+
+      expect(bridge.appendedMessages, isEmpty);
+      expect(bridge.updatedMessages, isEmpty);
+      expect(state.streamingSent, isFalse);
+    });
+
+    test('an idle reconcile retires a bubble left over from a run', () async {
+      // The page is kept alive across chats, so leaving one mid-run and coming
+      // back after the reply landed finds the bubble still in its DOM: the
+      // widget that would have dispatched the falling edge was disposed before
+      // the run ended. These flags belong to the widget and a fresh one starts
+      // with them false, so clearing them is not enough — the node outlives
+      // them, and `setMessages` carries it into the reopened chat.
+      final bridge = _FakeBridge();
+      final state = ChatWebViewSyncState()
+        ..wasBusy = true
+        ..streamingSent = true;
+
+      await reconcileActiveGenerationBridge(
+        bridge: bridge,
+        syncState: state,
+        isBusy: false,
+        isImpersonating: false,
+        regenTargetId: null,
+        continuationTargetId: null,
+        streaming: const StreamingState(),
+        messages: [_user('u1'), _assistant('a1')],
+        streamingId: '__streaming__',
+        isCurrent: () => true,
+      );
+
+      expect(bridge.retireTypingPlaceholderCalls, 1);
+      expect(state.streamingSent, isFalse);
+      expect(state.wasBusy, isFalse);
+    });
+
+    test('a live run keeps its bubble through a reconcile', () async {
+      final bridge = _FakeBridge();
+      final state = ChatWebViewSyncState()..wasBusy = true;
+
+      await reconcileActiveGenerationBridge(
+        bridge: bridge,
+        syncState: state,
+        isBusy: true,
+        isImpersonating: false,
+        regenTargetId: null,
+        continuationTargetId: null,
+        streaming: const StreamingState(text: 'partial reply'),
+        messages: [_user('u1')],
+        streamingId: '__streaming__',
+        isCurrent: () => true,
+      );
+
+      expect(bridge.retireTypingPlaceholderCalls, 0);
+    });
+
+    test('a reconcile overtaken by a new run retires nothing', () async {
+      // Captured idle, ran after a send started. Retiring here would take away
+      // the bubble the newer dispatch has just put up, which is why the busy
+      // state is re-read through `isCurrent` instead of trusted as captured.
+      final bridge = _FakeBridge();
+      final state = ChatWebViewSyncState();
+
+      await reconcileActiveGenerationBridge(
+        bridge: bridge,
+        syncState: state,
+        isBusy: false,
+        isImpersonating: false,
+        regenTargetId: null,
+        continuationTargetId: null,
+        streaming: const StreamingState(),
+        messages: [_user('u1')],
+        streamingId: '__streaming__',
+        isCurrent: () => false,
+      );
+
+      expect(bridge.retireTypingPlaceholderCalls, 0);
+    });
+
+    test(
+      'impersonation streams into the composer and retires nothing',
+      () async {
+        // Impersonation reuses the generating flag, so it reaches the reconcile
+        // as busy — and it never had a chat bubble to retire.
+        final bridge = _FakeBridge();
+        final state = ChatWebViewSyncState()..wasBusy = true;
+
+        await reconcileActiveGenerationBridge(
+          bridge: bridge,
+          syncState: state,
+          isBusy: true,
+          isImpersonating: true,
+          regenTargetId: null,
+          continuationTargetId: null,
+          streaming: const StreamingState(text: 'composer text'),
+          messages: const [],
+          streamingId: '__streaming__',
+          isCurrent: () => true,
+        );
+
+        expect(bridge.retireTypingPlaceholderCalls, 0);
+      },
+    );
+
     test('serializes persisted and streaming message mutations', () async {
       final state = ChatWebViewSyncState();
       final firstMutation = Completer<void>();
@@ -164,11 +399,100 @@ void main() {
       expect(state.messageMutationPending, isNull);
     });
 
+    test('resetMutations drops a hung mutation so later ops are not parked '
+        'behind it', () async {
+      final state = ChatWebViewSyncState();
+      final hung = Completer<void>();
+      final calls = <String>[];
+
+      // The dead-page case: a mutation aimed at a page that no longer answers.
+      unawaited(
+        state.enqueueMessageMutation(() async {
+          calls.add('hung');
+          await hung.future;
+        }),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(state.messageMutationPending, isNotNull);
+
+      // The page is torn down and rebuilt: the queue must not outlive it.
+      state.resetMutations();
+      expect(state.messageMutationPending, isNull);
+
+      // The rebuilt page's first mutation runs immediately, not behind the
+      // hung one.
+      await state.enqueueMessageMutation(() async {
+        calls.add('rebuild');
+      });
+      expect(calls, ['hung', 'rebuild']);
+      expect(state.messageMutationPending, isNull);
+    });
+
+    test('resetMutations also clears pending streaming snapshots', () async {
+      final state = ChatWebViewSyncState();
+      final gate = Completer<void>();
+      final calls = <String>[];
+
+      unawaited(
+        state.enqueueLatestStreamingMutation('a1', () async {
+          calls.add('first');
+          await gate.future;
+        }),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      unawaited(
+        state.enqueueLatestStreamingMutation('a1', () async {
+          calls.add('later');
+        }),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      // The page died while a delta was still queued. Dropping the queue must
+      // drop the superseding snapshot too, or the rebuilt page replays a stale
+      // streamed chunk over the fresh `setMessages`.
+      state.resetMutations();
+      gate.complete();
+      await state.messageMutationPending;
+      await Future<void>.delayed(Duration.zero);
+
+      // The superseded snapshot never ran: the page it targeted is gone.
+      expect(calls, ['first']);
+    });
+
+    test('streaming queue keeps only the latest waiting snapshot', () async {
+      final state = ChatWebViewSyncState();
+      final firstMutation = Completer<void>();
+      final calls = <String>[];
+
+      final first = state.enqueueLatestStreamingMutation('a1', () async {
+        calls.add('first:start');
+        await firstMutation.future;
+        calls.add('first:done');
+      });
+      await Future<void>.delayed(Duration.zero);
+
+      final superseded = state.enqueueLatestStreamingMutation('a1', () async {
+        calls.add('superseded');
+      });
+      final latest = state.enqueueLatestStreamingMutation('a1', () async {
+        calls.add('latest');
+      });
+
+      await superseded;
+      expect(calls, ['first:start']);
+
+      firstMutation.complete();
+      await Future.wait([first, latest]);
+      expect(calls, ['first:start', 'first:done', 'latest']);
+      expect(state.messageMutationPending, isNull);
+    });
+
     test(
       'does not skip just-sent user message after stale streaming flag',
       () async {
         final syncState = ChatWebViewSyncState()
-          ..wasGenerating = false
+          ..wasBusy = false
           ..streamingSent = true;
         final dispatcher = ChatWebViewSyncDispatcher(state: syncState);
 
@@ -193,11 +517,123 @@ void main() {
       },
     );
 
+    test('pushes the search as soon as the query changes', () {
+      final bridge = _FakeBridge();
+      final dispatcher = ChatWebViewSyncDispatcher(
+        state: ChatWebViewSyncState(),
+      );
+
+      final result = dispatcher.dispatch(
+        bridge: bridge,
+        old: _fields(isGenerating: false, messages: const []),
+        current: _fields(
+          isGenerating: false,
+          messages: const [],
+          searchQuery: 'foo',
+          searchCurrentIndex: 0,
+        ),
+        oldMessages: const [],
+        newMessages: const [],
+        streamingId: '__streaming__',
+        onSyncExtBlockPanels: () async {},
+        appendMessage: (_) async {},
+        buildStreamingPlaceholder: () => _assistant('__streaming__'),
+      );
+
+      expect(bridge.searchCalls, [('foo', 0, true)]);
+      expect(result.rehighlightSearch, isFalse);
+    });
+
+    test('defers the highlight pass when the messages changed under a '
+        'search', () {
+      final bridge = _FakeBridge();
+      final dispatcher = ChatWebViewSyncDispatcher(
+        state: ChatWebViewSyncState(),
+      );
+      final edited = _assistant('a1').copyWith(content: 'edited');
+
+      final result = dispatcher.dispatch(
+        bridge: bridge,
+        old: _fields(
+          isGenerating: false,
+          messages: [_assistant('a1')],
+          searchQuery: 'foo',
+          searchCurrentIndex: 0,
+        ),
+        current: _fields(
+          isGenerating: false,
+          messages: [edited],
+          searchQuery: 'foo',
+          searchCurrentIndex: 0,
+          searchRevision: 1,
+        ),
+        oldMessages: [_assistant('a1')],
+        newMessages: [edited],
+        streamingId: '__streaming__',
+        onSyncExtBlockPanels: () async {},
+        appendMessage: (_) async {},
+        buildStreamingPlaceholder: () => _assistant('__streaming__'),
+      );
+
+      // Highlighting now would number the matches over the pre-edit text: the
+      // message sync that carries the new text is queued after this dispatch.
+      expect(bridge.searchCalls, isEmpty);
+      expect(result.rehighlightSearch, isTrue);
+      expect(result.runMessageSync, isTrue);
+    });
+
+    test('re-numbers without scrolling on the deferred pass', () {
+      final bridge = _FakeBridge();
+      final dispatcher = ChatWebViewSyncDispatcher(
+        state: ChatWebViewSyncState(),
+      );
+
+      dispatcher.applySearch(
+        bridge: bridge,
+        fields: _fields(
+          isGenerating: false,
+          messages: const [],
+          searchQuery: 'foo',
+          searchCurrentIndex: 2,
+        ),
+        scroll: false,
+      );
+
+      expect(bridge.searchCalls, [('foo', 2, false)]);
+    });
+
+    test(
+      'a delta that settles after the run does not re-append the bubble',
+      () async {
+        // The shared mutation queue can hold a delta that was still crossing the
+        // channel when the run settled: the falling edge removes the placeholder
+        // synchronously, so this lands after it. Appending there stood the
+        // finished reply a second time under itself, in a bubble nothing takes
+        // away again — it survived leaving and re-opening the chat.
+        final bridge = _FakeBridge();
+        final syncState = ChatWebViewSyncState()
+          ..wasBusy = false
+          ..streamingSent = false;
+
+        await pushStreamingMessageOwned(
+          bridge: bridge,
+          message: _assistant('__streaming__'),
+          syncState: syncState,
+          epoch: syncState.streamEpoch,
+          isCurrent: () => true,
+        );
+
+        expect(bridge.appendedMessages, isEmpty);
+        expect(bridge.updatedMessages, isEmpty);
+        expect(syncState.streamingSent, isFalse);
+      },
+    );
+
     test('session switch invalidates a delayed streaming delta', () async {
       final bridge = _FakeBridge();
       final delayedAppend = Completer<void>();
       bridge.appendMessageCompleter = delayedAppend;
-      final syncState = ChatWebViewSyncState()..wasGenerating = true;
+      final syncState = ChatWebViewSyncState()..wasBusy = true;
       final dispatcher = ChatWebViewSyncDispatcher(state: syncState);
       final capturedEpoch = syncState.streamEpoch;
 
@@ -241,7 +677,7 @@ void main() {
         final bridge = _FakeBridge()..isGenerating = true;
         final message = _assistant('a1');
         final dispatcher = ChatWebViewSyncDispatcher(
-          state: ChatWebViewSyncState()..wasGenerating = true,
+          state: ChatWebViewSyncState()..wasBusy = true,
         );
 
         dispatcher.dispatch(
@@ -267,6 +703,10 @@ void main() {
         expect(bridge.lastMessageIds, ['a1']);
         expect(bridge.evalCalls.single, contains('setGenerating(false)'));
         expect(bridge.evalCalls.single, contains('setPostGenRunning(true)'));
+        // The image stage flag goes through a setter, not a bare assignment:
+        // it is what tells a pending block apart from a running one, and the
+        // WebView has to restamp its placeholders when it flips (INV-IG1).
+        expect(bridge.evalCalls.single, contains('setImageGenerating(false)'));
       },
     );
 
@@ -312,7 +752,7 @@ void main() {
       final greeting = _assistant('greeting');
       final user = _user('u1');
       final dispatcher = ChatWebViewSyncDispatcher(
-        state: ChatWebViewSyncState()..wasGenerating = true,
+        state: ChatWebViewSyncState()..wasBusy = true,
       );
 
       dispatcher.dispatch(
@@ -335,6 +775,191 @@ void main() {
       // owns the sole data-is-last / Regenerate button).
       expect(bridge.lastMessageIds, ['u1']);
       expect(bridge.evalCalls.single, contains('setGenerating(false)'));
+    });
+
+    test('a send puts the typing bubble up before its message is persisted', () {
+      // The placeholder used to wait for `isGenerating`, which only lands once
+      // the durable append finishes — seconds of an empty chat on a long
+      // history, with no sign the reply was coming.
+      final bridge = _FakeBridge();
+      final greeting = _assistant('a1');
+      final user = _user('u1');
+      final syncState = ChatWebViewSyncState();
+      final dispatcher = ChatWebViewSyncDispatcher(state: syncState);
+
+      final result = dispatcher.dispatch(
+        bridge: bridge,
+        old: _fields(isGenerating: false, messages: [greeting]),
+        current: _fields(
+          isGenerating: false,
+          isSendPending: true,
+          messages: [greeting, user],
+        ),
+        oldMessages: [greeting],
+        newMessages: [greeting, user],
+        streamingId: '__streaming__',
+        onSyncExtBlockPanels: () async {},
+        appendMessage: (_) async {},
+        buildStreamingPlaceholder: () => _assistant('__streaming__'),
+      );
+
+      expect(result.appendPlaceholder, isTrue);
+      expect(result.placeholder?.id, '__streaming__');
+      // The follow has to be armed in this same dispatch: it is the one that
+      // enqueues the append carrying the user's bubble.
+      expect(bridge.scrollToBottomOnAppendCalls, 1);
+      expect(syncState.wasBusy, isTrue);
+    });
+
+    test('the send window reaches the page so the clock can start', () {
+      // The elapsed clock under the typing bubble runs on this flag: without
+      // it the bubble sits there timerless for the whole durable append.
+      final bridge = _FakeBridge();
+      final greeting = _assistant('a1');
+      final user = _user('u1');
+      final dispatcher = ChatWebViewSyncDispatcher(
+        state: ChatWebViewSyncState(),
+      );
+
+      dispatcher.dispatch(
+        bridge: bridge,
+        old: _fields(isGenerating: false, messages: [greeting]),
+        current: _fields(
+          isGenerating: false,
+          isSendPending: true,
+          messages: [greeting, user],
+        ),
+        oldMessages: [greeting],
+        newMessages: [greeting, user],
+        streamingId: '__streaming__',
+        onSyncExtBlockPanels: () async {},
+        appendMessage: (_) async {},
+        buildStreamingPlaceholder: () => _assistant('__streaming__'),
+      );
+
+      expect(bridge.isSendPendingInPage, isTrue);
+      expect(bridge.evalCalls.single, contains('setSendPending(true)'));
+      expect(bridge.evalCalls.single, contains('setGenerating(false)'));
+      // Still not idle: the Regenerate button belongs to a chat with no reply
+      // on its way, and this send already has one.
+      expect(bridge.lastMessageIds, [null]);
+    });
+
+    test('the bubble is not re-injected when the send hands off to a run', () {
+      final bridge = _FakeBridge();
+      final greeting = _assistant('a1');
+      final user = _user('u1');
+      final syncState = ChatWebViewSyncState()
+        ..wasBusy = true
+        ..streamingSent = true;
+      final dispatcher = ChatWebViewSyncDispatcher(state: syncState);
+
+      final result = dispatcher.dispatch(
+        bridge: bridge,
+        old: _fields(
+          isGenerating: false,
+          isSendPending: true,
+          messages: [greeting, user],
+        ),
+        current: _fields(isGenerating: true, messages: [greeting, user]),
+        oldMessages: [greeting, user],
+        newMessages: [greeting, user],
+        streamingId: '__streaming__',
+        onSyncExtBlockPanels: () async {},
+        appendMessage: (_) async {},
+        buildStreamingPlaceholder: () => _assistant('__streaming__'),
+      );
+
+      expect(result.appendPlaceholder, isFalse);
+      expect(bridge.removedMessages, isEmpty);
+      expect(bridge.scrollToBottomOnAppendCalls, 0);
+      expect(syncState.streamingSent, isTrue);
+    });
+
+    test('a rolled-back send takes its typing bubble away', () {
+      final bridge = _FakeBridge();
+      final greeting = _assistant('a1');
+      final syncState = ChatWebViewSyncState()
+        ..wasBusy = true
+        ..streamingSent = true;
+      final dispatcher = ChatWebViewSyncDispatcher(state: syncState);
+
+      dispatcher.dispatch(
+        bridge: bridge,
+        old: _fields(
+          isGenerating: false,
+          isSendPending: true,
+          messages: [greeting],
+        ),
+        current: _fields(isGenerating: false, messages: [greeting]),
+        oldMessages: [greeting],
+        newMessages: [greeting],
+        streamingId: '__streaming__',
+        onSyncExtBlockPanels: () async {},
+        appendMessage: (_) async {},
+        buildStreamingPlaceholder: () => _assistant('__streaming__'),
+      );
+
+      expect(bridge.removedMessages, ['__streaming__']);
+      expect(syncState.streamingSent, isFalse);
+    });
+
+    test('restores Regenerate when a send ends without generating', () {
+      // A send that loses ownership after the durable append (session changed,
+      // or another run started meanwhile) clears isSendPending without
+      // touching the message list, so the diff pass never re-issues
+      // setLastMessage. Without this edge the button stays missing.
+      final bridge = _FakeBridge();
+      final greeting = _assistant('a1');
+      final user = _user('u1');
+      final dispatcher = ChatWebViewSyncDispatcher(
+        state: ChatWebViewSyncState(),
+      );
+
+      dispatcher.dispatch(
+        bridge: bridge,
+        old: _fields(
+          isGenerating: false,
+          isSendPending: true,
+          messages: [greeting, user],
+        ),
+        current: _fields(isGenerating: false, messages: [greeting, user]),
+        oldMessages: [greeting, user],
+        newMessages: [greeting, user],
+        streamingId: '__streaming__',
+        onSyncExtBlockPanels: () async {},
+        appendMessage: (_) async {},
+        buildStreamingPlaceholder: () => _assistant('__streaming__'),
+      );
+
+      expect(bridge.lastMessageIds, ['u1']);
+    });
+
+    test('does not restore Regenerate when the send hands off to a run', () {
+      final bridge = _FakeBridge();
+      final greeting = _assistant('a1');
+      final user = _user('u1');
+      final dispatcher = ChatWebViewSyncDispatcher(
+        state: ChatWebViewSyncState(),
+      );
+
+      dispatcher.dispatch(
+        bridge: bridge,
+        old: _fields(
+          isGenerating: false,
+          isSendPending: true,
+          messages: [greeting, user],
+        ),
+        current: _fields(isGenerating: true, messages: [greeting, user]),
+        oldMessages: [greeting, user],
+        newMessages: [greeting, user],
+        streamingId: '__streaming__',
+        onSyncExtBlockPanels: () async {},
+        appendMessage: (_) async {},
+        buildStreamingPlaceholder: () => _assistant('__streaming__'),
+      );
+
+      expect(bridge.lastMessageIds, [null]);
     });
 
     test('continuation flags its target instead of adding a placeholder', () {
@@ -420,6 +1045,36 @@ void main() {
       expect(bridge.overlayBlurCalls, hasLength(1));
       expect(bridge.overlayBlurCalls.single, moved);
     });
+
+    test('patches memory status without requesting message-list sync', () {
+      final dispatcher = ChatWebViewSyncDispatcher(
+        state: ChatWebViewSyncState(),
+      );
+      final bridge = _FakeBridge();
+      final message = _assistant('a1');
+
+      final result = dispatcher.dispatch(
+        bridge: bridge,
+        old: _fields(isGenerating: false, messages: [message]),
+        current: _fields(
+          isGenerating: false,
+          messages: [message],
+          memoryDrafts: const [
+            _MemoryDraft(['a1']),
+          ],
+        ),
+        oldMessages: [message],
+        newMessages: [message],
+        streamingId: '__streaming__',
+        onSyncExtBlockPanels: () async {},
+        appendMessage: (_) async {},
+        buildStreamingPlaceholder: () => _assistant('__streaming__'),
+      );
+
+      expect(result.runMessageSync, isFalse);
+      expect(bridge.memoryUpdates, hasLength(1));
+      expect(bridge.memoryUpdates.single.$2, hasLength(1));
+    });
   });
 }
 
@@ -435,10 +1090,16 @@ ChatWebViewWidgetFields _fields({
   String charId = 'c1',
   String? sessionId = 's1',
   bool isPostGenRunning = false,
+  bool isSendPending = false,
   String? continuationTargetId,
   List<ChatOverlayBlurRegion> blurRegions = const [],
+  List<dynamic> memoryDrafts = const [],
+  String? searchQuery,
+  int searchCurrentIndex = -1,
+  int searchRevision = 0,
 }) => ChatWebViewWidgetFields(
   continuationTargetId: continuationTargetId,
+  isSendPending: isSendPending,
   blurRegions: blurRegions,
   charId: charId,
   charName: 'Character',
@@ -448,14 +1109,14 @@ ChatWebViewWidgetFields _fields({
   personaAvatarPath: null,
   bgImagePath: null,
   bgBlur: 0,
-  bgOpacity: 1,
   bgDim: 0,
   bgNoiseOpacity: 0,
   bgNoiseIntensity: 0,
   bottomInset: 0,
   topInset: 0,
-  searchQuery: null,
-  searchCurrentIndex: -1,
+  searchQuery: searchQuery,
+  searchCurrentIndex: searchCurrentIndex,
+  searchRevision: searchRevision,
   chatLayout: 'default',
   themeSyncKey: 'theme',
   elementOpacity: 1,
@@ -473,6 +1134,7 @@ ChatWebViewWidgetFields _fields({
   chatFontDataUrl: null,
   chatFontSize: 16,
   chatLetterSpacing: 0,
+  chatColumnWidth: 0,
   isSelectionMode: false,
   batterySaver: false,
   hideMessageId: false,
@@ -481,7 +1143,7 @@ ChatWebViewWidgetFields _fields({
   disableSwipeRegeneration: false,
   studioEnabled: false,
   memoryEntries: const [],
-  memoryDrafts: const [],
+  memoryDrafts: memoryDrafts,
   sessionId: sessionId,
   isGenerating: isGenerating,
   isGeneratingImage: false,
@@ -502,12 +1164,27 @@ class _FakeBridge implements ChatBridgeController {
   @override
   bool isPostGenRunning = false;
 
+  @override
+  bool isSendPending = false;
+
+  @override
+  bool isSendPendingInPage = false;
+
+  @override
+  String? continuationTargetId;
+
   final List<List<ChatOverlayBlurRegion>> overlayBlurCalls = [];
   final List<String> evalCalls = [];
+  final List<(String, int, bool)> searchCalls = [];
   final List<ChatMessage> updatedMessages = [];
   final List<ChatMessage> appendedMessages = [];
   final List<bool> updatedIsLast = [];
   final List<String?> lastMessageIds = [];
+  final List<String> removedMessages = [];
+  int retireTypingPlaceholderCalls = 0;
+  int scrollToBottomOnAppendCalls = 0;
+  final List<(List<Map<String, dynamic>>, List<Map<String, dynamic>>, bool)>
+  memoryUpdates = [];
   Completer<void>? appendMessagesCompleter;
   Completer<void>? appendMessageCompleter;
 
@@ -524,7 +1201,13 @@ class _FakeBridge implements ChatBridgeController {
   }
 
   @override
-  Future<void> removeMessage(String _) async {}
+  Future<void> setSearch({
+    required String query,
+    int activeIndex = -1,
+    bool scroll = true,
+  }) async {
+    searchCalls.add((query, activeIndex, scroll));
+  }
 
   @override
   Future<void> appendMessages(
@@ -557,6 +1240,30 @@ class _FakeBridge implements ChatBridgeController {
   }
 
   @override
+  Future<void> updateMemoryBookData({
+    required List<Map<String, dynamic>> entries,
+    required List<Map<String, dynamic>> pendingDrafts,
+    bool patchMessages = true,
+  }) async {
+    memoryUpdates.add((entries, pendingDrafts, patchMessages));
+  }
+
+  @override
+  Future<void> removeMessage(String id) async {
+    removedMessages.add(id);
+  }
+
+  @override
+  Future<void> retireTypingPlaceholder() async {
+    retireTypingPlaceholderCalls++;
+  }
+
+  @override
+  Future<void> requestScrollToBottomOnAppend() async {
+    scrollToBottomOnAppendCalls++;
+  }
+
+  @override
   Future<void> setIdentity({
     String? charName,
     String? charColor,
@@ -569,4 +1276,10 @@ class _FakeBridge implements ChatBridgeController {
 
   @override
   dynamic noSuchMethod(Invocation invocation) => null;
+}
+
+class _MemoryDraft {
+  const _MemoryDraft(this.messageIds);
+
+  final List<String> messageIds;
 }

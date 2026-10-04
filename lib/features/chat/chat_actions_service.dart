@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
@@ -5,19 +6,18 @@ import 'package:path/path.dart' as p;
 // ignore: depend_on_referenced_packages
 import 'package:path_provider/path_provider.dart';
 
-import '../settings/api_list_provider.dart';
-
 import '../../core/models/chat_message.dart';
 import '../../core/services/chat_import_export.dart';
 import '../../core/services/file_export_service.dart';
 import '../../core/state/db_provider.dart';
-import '../../core/state/summary_providers.dart';
+import '../../core/state/persona_resolution.dart';
 import '../../core/utils/time_helpers.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../chat_history/chat_history_provider.dart';
 import 'chat_session_service.dart';
 import 'chat_provider.dart';
+import 'services/summary_generation_service.dart';
 
 final chatActionsServiceProvider = Provider<ChatActionsService>((ref) {
   return ChatActionsService(ref);
@@ -46,18 +46,9 @@ class ChatActionsService {
       throw StateError('No active chat session');
     }
 
-    await _ref.read(apiListProvider.future);
-    final apiConfig = _ref.read(activeApiConfigProvider);
-    if (apiConfig == null) {
-      throw StateError('No API config found');
-    }
-
-    final summaryService = _ref.read(summaryServiceProvider);
-    return summaryService.generateSummary(
-      sessionId: chatState.session!.id,
-      history: chatState.session!.messages,
-      apiConfig: apiConfig,
-    );
+    return _ref
+        .read(summaryGenerationServiceProvider)
+        .generate(charId: charId, session: chatState.session!);
   }
 
   Future<String> exportChat(String charId) async {
@@ -74,10 +65,22 @@ class ChatActionsService {
 
     final outputDir = await getTemporaryDirectory();
 
+    // The fallback name for user messages that carry no persona of their own.
+    // The active persona is the closest thing to who sent them; without it the
+    // export named every one of them the literal "User".
+    final persona = _ref.read(
+      effectivePersonaForChatProvider((
+        charId: charId,
+        sessionId: chatState.session!.id,
+      )),
+    );
+    final personaName = persona?.name.trim() ?? '';
+
     final result = await exportChatAsJsonl(
       session: chatState.session!,
       character: character,
       outputDir: outputDir.path,
+      userName: personaName.isEmpty ? 'User' : personaName,
     );
 
     final filename = p.basename(result.filePath);
@@ -107,16 +110,28 @@ class ChatActionsService {
 
     try {
       final filePath = await exportChat(charId);
+      if (filePath.isEmpty) return; // user cancelled the save dialog
       if (context.mounted) {
         GlazeToast.show(context, 'Chat exported to $filePath');
       }
     } on StateError catch (e) {
       if (context.mounted) GlazeToast.show(context, e.message);
     } on Exception catch (e) {
-      if (e.toString().contains('Save cancelled')) return;
-      if (context.mounted) GlazeErrorDialog.show(context, e, prefix: 'Export failed: ');
+      if (context.mounted) {
+        GlazeErrorDialog.show(
+          context,
+          e,
+          prefix: 'error_export_failed_prefix'.tr(),
+        );
+      }
     } catch (e) {
-      if (context.mounted) GlazeErrorDialog.show(context, e, prefix: 'Export failed: ');
+      if (context.mounted) {
+        GlazeErrorDialog.show(
+          context,
+          e,
+          prefix: 'error_export_failed_prefix'.tr(),
+        );
+      }
     }
   }
 

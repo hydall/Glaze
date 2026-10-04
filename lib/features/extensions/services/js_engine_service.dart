@@ -111,7 +111,7 @@ class JsEngineBridgeHost {
 }
 
 /// Singleton headless JS engine for JS extension background scripts and
-/// offline `jsRunner` block execution.
+/// offline `script` block execution.
 ///
 /// Lifetime:
 ///   - Lives for the duration of the running app (per design — see plan).
@@ -423,7 +423,7 @@ class _InAppWebViewEngineController implements JsEngineController {
   }) async {
     _controller.addJavaScriptHandler(
       handlerName: handlerName,
-      callback: callback,
+      callback: (JavaScriptHandlerFunctionData data) => callback(data.args),
     );
   }
 

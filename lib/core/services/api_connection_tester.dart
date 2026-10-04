@@ -1,6 +1,7 @@
 import '../llm/embedding_service.dart';
 import '../llm/transport/chat_transport.dart';
 import '../llm/transport/chat_transport_request.dart';
+import '../llm/transport/endpoint_normalizer.dart';
 import '../llm/transport/llm_protocol.dart';
 import '../llm/transport/transport_factory.dart';
 
@@ -21,29 +22,35 @@ class ApiTestFailure extends ApiTestResult {
 class ApiConnectionTester {
   final ChatTransport Function(String protocol) _pickTransport;
 
-  ApiConnectionTester({
-    ChatTransport Function(String protocol)? pickTransport,
-  }) : _pickTransport = pickTransport ?? pickChatTransport;
+  ApiConnectionTester({ChatTransport Function(String protocol)? pickTransport})
+    : _pickTransport = pickTransport ?? pickChatTransport;
 
   Future<ApiTestResult> testLlm({
     required String endpoint,
     required String apiKey,
     required String model,
-    String protocol = LlmProtocol.openai,
+    String protocol = LlmProtocol.customChatCompletion,
     bool useResponsesApi = false,
   }) async {
     try {
       final effectiveProtocol = _normalizedProtocol(protocol);
       final transport = _pickTransport(effectiveProtocol);
+      final requestEndpoint = EndpointNormalizer.persistedLlmEndpoint(
+        raw: endpoint,
+        protocol: effectiveProtocol,
+        model: model,
+        stream: false,
+        useResponsesApi: useResponsesApi,
+      );
       final models = await transport.fetchModels(
-        endpoint: endpoint,
+        endpoint: requestEndpoint,
         apiKey: apiKey,
       );
       if (models.isEmpty) {
         String? responseText;
         await transport.stream(
           request: ChatTransportRequest(
-            endpoint: endpoint,
+            endpoint: requestEndpoint,
             apiKey: apiKey,
             model: model,
             messages: const [
@@ -55,6 +62,15 @@ class ApiConnectionTester {
             topK: 0,
             frequencyPenalty: 0.0,
             presencePenalty: 0.0,
+            // This is a reachability probe, not a generation. Send the
+            // smallest legal body: any sampling parameter here is one more
+            // thing a strict endpoint can reject, which would read as a
+            // connection failure.
+            omitTemperature: true,
+            omitTopP: true,
+            omitTopK: true,
+            omitFrequencyPenalty: true,
+            omitPresencePenalty: true,
             stream: false,
             useResponsesApi: useResponsesApi,
           ),
@@ -79,7 +95,9 @@ class ApiConnectionTester {
   }
 
   String _normalizedProtocol(String protocol) {
-    return LlmProtocol.isValid(protocol) ? protocol : LlmProtocol.openai;
+    return LlmProtocol.isValid(protocol)
+        ? protocol
+        : LlmProtocol.customChatCompletion;
   }
 
   Future<ApiTestResult> testEmbedding({

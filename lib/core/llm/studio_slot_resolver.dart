@@ -18,7 +18,7 @@ import 'transport/extra_request_parameters.dart';
 /// final apiConfigs = ref.read(apiListProvider).value ?? const <ApiConfig>[];
 /// final config = StudioSlotResolver.resolve(
 ///   apiConfigs: apiConfigs,
-///   apiConfigId: studioConfig.cleanerApiConfigId,
+///   apiConfigId: studioPreset.cleanerApiConfigId,
 ///   errorLabel: 'post-cleaner',
 ///   modelOverride: pipeline.cleaner.postCleanerModel,
 /// );
@@ -53,7 +53,9 @@ class StudioSlotResolver {
           apiKey: fallback.apiKey,
           model: model,
           protocol: fallback.protocol,
+          maxTokens: fallback.maxTokens,
           useResponsesApi: useResponsesApi ?? fallback.useResponsesApi,
+          omitTemperature: fallback.omitTemperature,
           extraRequestParameters: mergeExtraRequestParameters(
             fallback.extraRequestParameters,
             extraRequestParameterOverrides,
@@ -91,7 +93,9 @@ class StudioSlotResolver {
       apiKey: selected.apiKey,
       model: model,
       protocol: selected.protocol,
+      maxTokens: selected.maxTokens,
       useResponsesApi: useResponsesApi ?? selected.useResponsesApi,
+      omitTemperature: selected.omitTemperature,
       extraRequestParameters: mergeExtraRequestParameters(
         selected.extraRequestParameters,
         extraRequestParameterOverrides,

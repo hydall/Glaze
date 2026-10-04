@@ -1,16 +1,33 @@
 import 'dart:math';
 
+import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'greeting_normalizer.dart';
 import 'catalog_http.dart';
 import '../catalog_models.dart';
+import 'extraction_status.dart';
+
+/// URL extraction: asking DataCat to go and index a character it has never
+/// seen, then reading what came out.
+///
+/// Everything else DataCat is used for — browsing, search, tags, creators,
+/// community, and the card/image transfer — now runs on the official Client
+/// API under `services/datacat/`. This file is what could not move: the Client
+/// API is read-mostly over DataCat's existing index, and has no endpoint that
+/// takes a URL and produces a new row. So the undocumented site endpoints, the
+/// anonymous session token they need, and the source-shaped row reader below
+/// stay, scoped to the one job that still requires them.
+///
+/// Two features depend on it: importing a character by pasting its URL, and
+/// recovering a JanitorAI card whose definition its creator closed (DataCat
+/// scrapes those, and the public endpoint does not serve them).
 
 const _base = 'https://datacat.run';
 const _keyDevice = 'gz_dc_device';
 const _keyToken = 'gz_dc_token';
 const _saucepanCdnBase = 'https://cdn.saucepan.ai';
 const _imageBase = 'https://ella.janitorai.com/bot-avatars/';
-const _minTokens = 889;
 
 String _uuid() {
   final r = Random();
@@ -71,29 +88,43 @@ Future<String> _getToken() async {
   return token;
 }
 
-Future<bool> datacatValidate() async {
-  final token = await _getSessionToken();
-  if (token == null) return false;
+/// Runs an authenticated DataCat call, re-establishing the session once when
+/// the server rejects the token it was made with.
+///
+/// The anonymous session token comes from `/api/liberator/identify` and is kept
+/// in SharedPreferences with no expiry, so it outlives whatever the server is
+/// still willing to honour. A token DataCat has forgotten answers 401/403 to
+/// every call carrying it, and the browse path used to be the only one that
+/// knew how to replace one — it ran a throwaway probe request before each
+/// search purely to find out. Every other endpoint dead-ended: the card detail
+/// showed `HTTP 403: Forbidden` behind a Retry button that re-sent the same
+/// dead token, which is why retrying never helped.
+///
+/// A 403 can also be DataCat's bot protection, which no amount of fresh
+/// sessions will cure. One retry is what tells the two apart — and the wasted
+/// request only happens on a failure that was already fatal.
+Future<T> _datacatAuthed<T>(Future<T> Function(String token) call) async {
+  final token = await _getToken();
   try {
-    await catalogGet(
-      '$_base/api/characters/recent-public?limit=1&summary=1',
-      _authHeaders(token),
-    );
-    return true;
-  } catch (e) {
-    if (e.toString().contains('401') || e.toString().contains('403')) {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove(_keyToken);
-      return false;
-    }
-    return true;
+    return await call(token);
+  } on DioException catch (e) {
+    final status = catalogErrorStatus(e);
+    if (status != 401 && status != 403) rethrow;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_keyToken);
+    return await call(await datacatInit());
   }
 }
 
-Future<void> datacatEnsureSession() async {
-  final valid = await datacatValidate();
-  if (!valid) await datacatInit();
-}
+Future<Map<String, dynamic>> _datacatGet(String path) =>
+    _datacatAuthed((token) => catalogGet('$_base$path', _authHeaders(token)));
+
+Future<Map<String, dynamic>> _datacatPost(
+  String path,
+  Map<String, dynamic> body,
+) => _datacatAuthed(
+  (token) => catalogPost('$_base$path', body, _authHeaders(token)),
+);
 
 String? _pickAvatarSource(Map<String, dynamic> raw, Map<String, dynamic> meta) {
   return (raw['avatar'] ?? raw['image'] ?? raw['image_url'] ??
@@ -115,169 +146,146 @@ String? _resolveAvatarUrl(String? url) {
   return 'https://ella.janitorai.com/$url';
 }
 
-String _stripEmoji(String str) {
-  return str.replaceAll(
-    RegExp(r'[\u{1F300}-\u{1FFFF}\u{2600}-\u{27BF}\s\uFE0F\u200D]+',
-        unicode: true),
-    '',
-  ).trim();
-}
-
-CatalogItem _normalizeListItem(Map<String, dynamic> c) {
-  final stdTags = (c['tags'] as List?)
-          ?.map((t) => _stripEmoji(t is String ? t : (t['name'] ?? '') as String))
-          .where((t) => t.isNotEmpty)
-          .toList() ??
-      [];
-  final isNsfw = (c['is_nsfw'] ?? c['isNsfw']) as bool? ?? false;
-  final tags = [isNsfw ? 'NSFW' : 'SFW', ...stdTags];
-
-  return CatalogItem(
-    id: (c['character_id'] ?? c['characterId'] ?? c['uuid'] ?? c['id'] ?? '') as String,
-    name: (c['name'] ?? c['chat_name'] ?? c['chatName'] ?? 'Unknown') as String,
-    avatarUrl: _resolveAvatarUrl(_pickAvatarSource(c, {})),
-    tags: tags.toSet().toList(),
-    tokens: (c['total_tokens'] ?? c['totalTokens'] ?? 0) as int,
-    chatCount: (c['chat_count'] ?? 0) as int,
-    messageCount: (c['message_count'] ?? 0) as int,
-    creator: (c['creator_name'] ?? c['creatorName'] ?? '') as String,
-    creatorId: (c['creator_id'] ?? c['creatorId'] ?? '') as String?,
-    nsfw: isNsfw,
-    source: 'datacat',
-  );
-}
-
-Future<CatalogSearchResult> datacatBrowse({
-  int page = 1,
-  int limit = 24,
-  CatalogFilters filters = const CatalogFilters(),
-}) async {
-  final sort = filters.sort;
-
-  if (sort != 'recent') {
-    final sortMap = <String, _FreshParams>{
-      'fresh': _FreshParams(sortBy: 'fresh', window: 'all'),
-      'score_week': _FreshParams(sortBy: 'score', window: 'thisWeek'),
-      'score_24h': _FreshParams(sortBy: 'score', window: 'last24h'),
-      'chat_count_week': _FreshParams(sortBy: 'chat_count', window: 'thisWeek'),
-      'chat_count_24h': _FreshParams(sortBy: 'chat_count', window: 'last24h'),
-    };
-    final mapped = sortMap[sort] ?? const _FreshParams(sortBy: 'fresh', window: 'all');
-    final res = await _datacatFresh(
-      sortBy: mapped.sortBy,
-      window: mapped.window,
-      nsfw: filters.nsfw,
-    );
-    return CatalogSearchResult(characters: res, total: res.length, hasMore: false);
-  }
-
-  final token = await _getToken();
-  final offset = (page - 1) * limit;
-  final minTok = filters.minTokens > 0 ? filters.minTokens : _minTokens;
-
-  final params = StringBuffer('limit=$limit&offset=$offset&summary=1&minTotalTokens=$minTok');
-  if (filters.maxTokens < 100000) params.write('&maxTotalTokens=${filters.maxTokens}');
-  if (filters.tagIds.isNotEmpty) params.write('&tagIds=${filters.tagIds.join(',')}');
-  if (!filters.nsfw) params.write('&blockedTagIds=2');
-
-  final data = await catalogGet(
-    '$_base/api/characters/recent-public?$params',
-    _authHeaders(token),
-  );
-  final chars = ((data['characters'] as List?) ?? []).cast<Map<String, dynamic>>();
-  return CatalogSearchResult(
-    characters: chars.map(_normalizeListItem).toList(),
-    total: (data['totalCount'] as int?) ?? 0,
-  );
-}
-
-Future<List<CatalogItem>> _datacatFresh({
-  String sortBy = 'score',
-  String window = 'all',
-  int limit24 = 80,
-  int limitWeek = 40,
-  bool nsfw = true,
-}) async {
-  final token = await _getToken();
-  var url = '$_base/api/characters/fresh?summary=1&sortBy=$sortBy&limit24=$limit24&limitWeek=$limitWeek';
-  if (!nsfw) url += '&blockedTagIds=2';
-
-  final data = await catalogGet(url, _authHeaders(token));
-  final windows = data['windows'] as Map<String, dynamic>? ?? {};
-  final last24h = ((windows['last24h']?['characters'] as List?) ?? []).cast<Map<String, dynamic>>();
-  final thisWeek = ((windows['thisWeek']?['characters'] as List?) ?? []).cast<Map<String, dynamic>>();
-
-  List<CatalogItem> result;
-  if (window == 'last24h') {
-    result = last24h.map(_normalizeListItem).toList();
-  } else if (window == 'thisWeek') {
-    result = thisWeek.map(_normalizeListItem).toList();
-  } else {
-    final seen = <String>{};
-    result = [];
-    for (final c in [...thisWeek.map(_normalizeListItem), ...last24h.map(_normalizeListItem)]) {
-      if (seen.add(c.id)) result.add(c);
+/// The active, non-placeholder primary content variant of a DataCat row. For
+/// Saucepan cards with a hidden definition, DataCat's "Character Repair" job
+/// exposes the recovered body here (with `description` overloaded to carry it).
+Map<String, dynamic>? _pickRecoveryVariant(Map<String, dynamic> char) {
+  final variants = char['content_variants'];
+  if (variants is! List) return null;
+  for (final v in variants) {
+    if (v is Map && v['isPrimary'] == true && v['isRecoveryPlaceholder'] != true) {
+      final content = v['content'];
+      if (content is Map) return content.cast<String, dynamic>();
     }
   }
-  return result;
+  return null;
 }
 
-Future<CatalogSearchResult> datacatSearch({
-  String query = '',
-  int page = 1,
-  int limit = 24,
-  CatalogFilters filters = const CatalogFilters(),
-}) async {
-  final token = await _getToken();
-  final offset = (page - 1) * limit;
-  final minTok = filters.minTokens > 0 ? filters.minTokens : _minTokens;
+/// Recovery-sourced `chara_card_v2_json` bodies carry edge
+/// `##DESCRIPTION START##`-style delimiter lines; strip them.
+String _stripDatacatMarkers(String text) {
+  if (text.isEmpty) return text;
+  return text
+      .replaceFirst(RegExp(r'^\s*##[A-Z _]*(?:START|END)##[ \t]*\r?\n?'), '')
+      .replaceFirst(RegExp(r'\r?\n?[ \t]*##[A-Z _]*(?:START|END)##\s*$'), '')
+      .trim();
+}
 
-  final params = StringBuffer('limit=$limit&offset=$offset&summary=1&minTotalTokens=$minTok');
-  if (filters.maxTokens < 100000) params.write('&maxTotalTokens=${filters.maxTokens}');
-  if (!filters.nsfw) params.write('&blockedTagIds=2');
-  if (filters.tagIds.isNotEmpty) params.write('&tagIds=${filters.tagIds.join(',')}');
-  if (query.isNotEmpty) params.write('&search=${Uri.encodeComponent(query)}');
+/// Maps a DataCat `/api/characters/{id}` row into a [CharacterData].
+///
+/// Field placement is source-dependent, ported from `buildV2FromDatacat` in the
+/// SillyTavern-CharacterLibrary reference. For JanitorAI-source rows the real
+/// definition is in `personality` and the website blurb (often HTML) is in
+/// `description`; Saucepan rows overload `description` / recovery variants. We
+/// keep the definition in [CharacterData.description] and the blurb in
+/// [CharacterData.creatorNotes] — the same placement `buildV2FromDatacat` uses
+/// (definition into `data.description`, `data.personality` left empty), so
+/// `{{description}}` resolves to the prompt body and the blurb never lands in
+/// it.
+///
+/// Only extraction results go through this. A character the Client API can
+/// serve arrives as a standard Character Card V2 and is read by
+/// `datacat/datacat_cards.dart`, which needs none of this guesswork.
+///
+/// Public so the field mapping can be tested against a row rather than
+/// only through a live request: which greeting field a row carries is
+/// exactly what #98 turned on.
+CharacterData datacatCharacterData(Map<String, dynamic> char) {
+  String s(dynamic v) => v == null ? '' : v.toString();
+  String pick(List<String> xs) =>
+      xs.firstWhere((e) => e.trim().isNotEmpty, orElse: () => '');
 
-  final data = await catalogGet(
-    '$_base/api/characters/recent-public?$params',
-    _authHeaders(token),
+  final isSaucepan = char['primary_content_source_kind'] == 'saucepan';
+  final recovered = _pickRecoveryVariant(char);
+  final v2Data = (char['chara_card_v2_json'] is Map &&
+          (char['chara_card_v2_json'] as Map)['data'] is Map)
+      ? ((char['chara_card_v2_json'] as Map)['data'] as Map).cast<String, dynamic>()
+      : const <String, dynamic>{};
+  final companion = (char['companion_snapshot'] is Map)
+      ? (char['companion_snapshot'] as Map).cast<String, dynamic>()
+      : const <String, dynamic>{};
+
+  final definition = isSaucepan
+      ? pick([
+          s(recovered?['description']), s(recovered?['personality']),
+          s(v2Data['description']), s(char['description']),
+        ])
+      : pick([
+          s(char['personality']), s(recovered?['personality']),
+          _stripDatacatMarkers(s(v2Data['description'])),
+        ]);
+  final scenario =
+      pick([s(char['scenario']), s(recovered?['scenario']), s(v2Data['scenario'])]);
+  final creatorNotes = isSaucepan
+      ? pick([s(companion['full_description']), s(v2Data['creator_notes'])])
+      : pick([s(char['description']), s(v2Data['creator_notes'])]);
+
+  // Multiple first messages ("alternate greetings"). The top-level field is
+  // often an empty [] while the real list lives in chara_card_v2_json; pick the
+  // first NON-EMPTY list rather than the first non-null (mirrors the reference).
+  final altG = [
+    char['alternate_greetings'],
+    recovered?['alternate_greetings'],
+    v2Data['alternate_greetings'],
+  ].firstWhere(
+    (a) => a is List && a.isNotEmpty,
+    orElse: () => const <dynamic>[],
   );
-  final chars = ((data['characters'] as List?) ?? []).cast<Map<String, dynamic>>();
-  return CatalogSearchResult(
-    characters: chars.map(_normalizeListItem).toList(),
-    total: (data['totalCount'] as int?) ?? 0,
+  // Every greeting the row carries, folded into an opening line plus
+  // alternates. `first_messages` is Janitor's plural field and DataCat mirrors
+  // Janitor rows, so a card can arrive with its whole set there and nothing in
+  // the singular field; reading only the singular one left slot one blank and
+  // shifted every greeting down by one, which is the "datacat skips the 1st
+  // greeting" in the report.
+  final greetings = normalizeGreetings(
+    primary: pick([
+      s(char['first_message']),
+      s(recovered?['first_message']),
+      s(v2Data['first_mes']),
+    ]),
+    others: [
+      ...greetingList(char['first_messages']),
+      ...greetingList(recovered?['first_messages']),
+      ...greetingList(v2Data['first_messages']),
+      ...greetingList(altG),
+    ],
+  );
+
+  final name = pick([s(char['chat_name']), s(char['chatName']), s(char['name'])]);
+
+  return CharacterData(
+    name: name.isEmpty ? 'Unknown' : name,
+    description: definition,
+    personality: '',
+    scenario: scenario,
+    firstMes: greetings.firstMes,
+    mesExample:
+        pick([s(char['example_dialogs']), s(char['mes_example']), s(v2Data['mes_example'])]),
+    creatorNotes: creatorNotes,
+    systemPrompt: s(v2Data['system_prompt']),
+    postHistoryInstructions: s(v2Data['post_history_instructions']),
+    alternateGreetings: greetings.alternates,
+    tags: const [],
+    creator: pick([s(char['creator_name']), s(char['creatorName'])]),
+    creatorId: pick([s(char['creator_id']), s(char['creatorId'])]),
+    characterBook: v2Data['character_book'],
   );
 }
 
+/// Reads the row an extraction produced.
+///
+/// Deliberately the plain character endpoint, NOT `/download`: `/download` is
+/// gated behind a Cloudflare Turnstile lease and answers 403. The Client API
+/// makes that lease obtainable and is the supported path for a character it
+/// already knows — but a row this session just created is read here, in the
+/// same session that created it.
 Future<DownloadedCharacter> datacatGetCharacter(String uuid) async {
-  final token = await _getToken();
   final ts = DateTime.now().millisecondsSinceEpoch;
-  final data = await catalogGet(
-    '$_base/api/characters/$uuid/download?t=$ts&variant=janitor_core',
-    _authHeaders(token),
-  );
-  final raw = (data['data'] ?? data) as Map<String, dynamic>;
-  final meta = (data['metadata'] ?? <String, dynamic>{}) as Map<String, dynamic>;
+  final data = await _datacatGet('/api/characters/$uuid?t=$ts&sourceKind=janitor');
+  final char = (data['character'] ?? data) as Map<String, dynamic>;
   return DownloadedCharacter(
-    charData: CharacterData(
-      name: (raw['name'] ?? raw['chatName'] ?? raw['chat_name'] ?? 'Unknown') as String,
-      description: (raw['description'] ?? '') as String,
-      personality: (raw['personality'] ?? '') as String,
-      scenario: (raw['scenario'] ?? '') as String,
-      firstMes: (raw['first_mes'] ?? raw['first_message'] ?? '') as String,
-      mesExample: (raw['mes_example'] ?? '') as String,
-      creatorNotes: (raw['creator_notes'] ?? meta['raw_description_html'] ?? '') as String,
-      systemPrompt: (raw['system_prompt'] ?? '') as String,
-      postHistoryInstructions: (raw['post_history_instructions'] ?? '') as String,
-      alternateGreetings: raw['alternate_greetings'] is List
-          ? (raw['alternate_greetings'] as List).whereType<String>().toList()
-          : <String>[],
-      tags: [],
-      creator: (meta['janitor_creator_name'] ?? raw['creator'] ?? '') as String,
-      creatorId: (meta['janitor_creator_id'] ?? raw['creator_id'] ?? raw['creatorId'] ?? '') as String,
-      characterBook: raw['character_book'],
-    ),
-    avatarUrl: _resolveAvatarUrl(_pickAvatarSource(raw, meta)),
+    charData: datacatCharacterData(char),
+    avatarUrl: _resolveAvatarUrl(_pickAvatarSource(char, {})),
   );
 }
 
@@ -289,13 +297,12 @@ String _detectExtractionSource(String url) {
 }
 
 Future<Map<String, dynamic>> _datacatExtract(String url, {bool publicFeed = true}) async {
-  final token = await _getToken();
   final idempotencyKey = _uuid();
   final source = _detectExtractionSource(url);
 
   if (source == 'saucepan') {
-    return catalogPost(
-      '$_base/api/saucepan-extract/run',
+    return _datacatPost(
+      '/api/saucepan-extract/run',
       {
         'companion': url,
         'extractHidden': false,
@@ -307,12 +314,11 @@ Future<Map<String, dynamic>> _datacatExtract(String url, {bool publicFeed = true
         'vpnNamespace': 'general_scraper',
         'idempotencyKey': idempotencyKey,
       },
-      _authHeaders(token),
     );
   }
 
-  return catalogPost(
-    '$_base/api/character/smart-extract-v2',
+  return _datacatPost(
+    '/api/character/smart-extract-v2',
     {
       'url': url,
       'appearOnPublicFeed': publicFeed,
@@ -320,25 +326,15 @@ Future<Map<String, dynamic>> _datacatExtract(String url, {bool publicFeed = true
       'inlinePostExtractCreatorProfile': true,
       'idempotencyKey': idempotencyKey,
     },
-    _authHeaders(token),
   );
 }
 
-Future<Map<String, dynamic>> _datacatExtractionStatus() async {
-  final token = await _getToken();
-  return catalogGet(
-    '$_base/api/extraction/status?t=${DateTime.now().millisecondsSinceEpoch}',
-    _authHeaders(token),
-  );
-}
+Future<Map<String, dynamic>> _datacatExtractionStatus() =>
+    _datacatGet('/api/extraction/status?t=${DateTime.now().millisecondsSinceEpoch}');
 
 Future<String?> datacatGetCharacterAvatar(String uuid) async {
-  final token = await _getToken();
   final ts = DateTime.now().millisecondsSinceEpoch;
-  final data = await catalogGet(
-    '$_base/api/characters/$uuid?t=$ts',
-    _authHeaders(token),
-  );
+  final data = await _datacatGet('/api/characters/$uuid?t=$ts');
   final char = (data['character'] ?? data) as Map<String, dynamic>;
   final meta = (data['metadata'] ?? <String, dynamic>{}) as Map<String, dynamic>;
   return _resolveAvatarUrl(_pickAvatarSource(char, meta));
@@ -379,56 +375,27 @@ Future<ExtractionResult> datacatExtractAndPoll(
     final targetUuid = uuidMatch?.group(0);
 
     const maxAttempts = 60;
+    // A run reported as finished-but-empty has to be seen twice before the
+    // import gives up on it. The status endpoint composes the run and the
+    // character it produced from different places, so a single poll can catch
+    // the moment in between; three more seconds is a cheap price for not
+    // calling a successful import a failure.
+    var emptyReadings = 0;
+
     for (var attempt = 0; attempt < maxAttempts; attempt++) {
       await Future<void>.delayed(const Duration(seconds: 3));
 
       try {
         final status = await _datacatExtractionStatus();
-        final run = status['run'] as Map<String, dynamic>?;
-        onPhaseChange?.call((status['inProgress']?['phase'] ?? run?['phase'] ?? '') as String);
+        final reading = readExtractionStatus(
+          status,
+          requestId: myRequestId,
+          previousRunId: prevRunId,
+          targetUuid: targetUuid,
+        );
+        onPhaseChange?.call(reading.phase);
 
-        String? characterId;
-
-        if (myRequestId != null) {
-          if (run?['requestId'] == myRequestId && run?['lifecycle'] == 'terminal') {
-            characterId = (run?['characterId'] ?? run?['targetId']) as String?;
-          }
-          if (characterId == null) {
-            final taskHistory = (status['taskHistory'] as List?) ?? [];
-            for (final h in taskHistory) {
-              if (h['id'] == myRequestId && h['status'] == 'terminal') {
-                characterId = h['target']?['id'] as String?;
-                break;
-              }
-            }
-          }
-          if (characterId == null) {
-            final history = (status['history'] as List?) ?? [];
-            for (final h in history) {
-              if (h['requestId'] == myRequestId) {
-                characterId = h['characterId'] as String?;
-                break;
-              }
-            }
-          }
-        }
-
-        if (characterId == null && run?['lifecycle'] == 'terminal' && run?['requestId'] != prevRunId) {
-          if (targetUuid == null || run?['targetId'] == targetUuid) {
-            characterId = (run?['characterId'] ?? run?['targetId']) as String?;
-          }
-        }
-
-        if (characterId == null && targetUuid != null) {
-          final history = (status['history'] as List?) ?? [];
-          for (final h in history) {
-            if ((h['url'] as String?)?.contains(targetUuid) == true && h['characterId'] != null) {
-              characterId = h['characterId'] as String;
-              break;
-            }
-          }
-        }
-
+        final characterId = reading.characterId;
         if (characterId != null) {
           final result = await datacatGetCharacter(characterId);
           String? avatarUrl = result.avatarUrl;
@@ -441,6 +408,18 @@ Future<ExtractionResult> datacatExtractAndPoll(
             characterId: characterId,
           );
         }
+
+        if (reading.state == ExtractionRunState.finishedEmpty) {
+          if (++emptyReadings >= 2) {
+            return ExtractionResult(
+              error: extractionFinishedEmptyMessage(
+                isSaucepan: _detectExtractionSource(url) == 'saucepan',
+              ),
+            );
+          }
+        } else {
+          emptyReadings = 0;
+        }
       } catch (_) {}
     }
 
@@ -448,35 +427,4 @@ Future<ExtractionResult> datacatExtractAndPoll(
   } catch (e) {
     return ExtractionResult(error: e.toString());
   }
-}
-
-List<CatalogTag> _cachedDatacatTags = [];
-bool _datacatTagsFetched = false;
-List<CatalogTag> getCachedDatacatTags() => _cachedDatacatTags;
-
-Future<List<CatalogTag>> fetchDatacatTags() async {
-  if (_datacatTagsFetched) return _cachedDatacatTags;
-  try {
-    final token = await _getToken();
-    final data = await catalogGet(
-      '$_base/api/tags/faceted?mode=recent&blockedTagIds=2&limit=250&offset=0&sort=count&includeTagIds=2',
-      _authHeaders(token),
-    );
-    final tags = (data['tags'] as List?) ?? [];
-    _cachedDatacatTags = tags
-        .map((t) => CatalogTag(
-              id: t['id'] as int?,
-              name: (t['name'] ?? '') as String,
-              slug: (t['slug'] ?? '') as String?,
-            ))
-        .toList();
-    _datacatTagsFetched = true;
-  } catch (_) {}
-  return _cachedDatacatTags;
-}
-
-class _FreshParams {
-  final String sortBy;
-  final String window;
-  const _FreshParams({required this.sortBy, required this.window});
 }

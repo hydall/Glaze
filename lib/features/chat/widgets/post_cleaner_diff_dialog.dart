@@ -1,9 +1,11 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/chat_message.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import 'post_cleaner_line_diff.dart';
 
 /// Side-by-side diff viewer for POST-cleaner results.
@@ -75,7 +77,7 @@ class _PostCleanerDiffDialogState extends ConsumerState<PostCleanerDiffDialog> {
         if (!mounted) return;
         setState(() {
           _loading = false;
-          _error = 'Session not found';
+          _error = 'error_session_not_found'.tr();
         });
         return;
       }
@@ -86,7 +88,7 @@ class _PostCleanerDiffDialogState extends ConsumerState<PostCleanerDiffDialog> {
         if (!mounted) return;
         setState(() {
           _loading = false;
-          _error = 'Message not found';
+          _error = 'error_message_not_found'.tr();
         });
         return;
       }
@@ -208,7 +210,7 @@ class _PostCleanerDiffDialogState extends ConsumerState<PostCleanerDiffDialog> {
 
   Widget _buildBody(BuildContext context) {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: GlazeSpinner());
     }
     if (_error != null) {
       return Center(

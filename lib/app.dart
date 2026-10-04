@@ -11,16 +11,22 @@ import 'package:go_router/go_router.dart';
 import 'package:glaze_flutter/core/llm/prompt_worker.dart';
 import 'package:glaze_flutter/core/llm/tokenizer.dart';
 import 'core/navigation/router.dart';
+import 'core/navigation/rewrite_review_navigation.dart';
 import 'core/services/deep_link_service.dart';
 import 'core/services/generation_notification_service.dart';
 import 'features/chat/bridge/chat_webview_environment.dart';
 import 'core/state/active_selection_provider.dart';
 import 'core/state/character_provider.dart';
+import 'core/state/db_provider.dart';
 import 'core/state/lorebook_provider.dart';
+import 'core/state/lorebook_embedding_provider.dart';
 import 'core/services/preset_seeder.dart';
 import 'features/chat_history/chat_history_provider.dart';
 import 'features/settings/api_list_provider.dart';
 import 'features/settings/app_settings_provider.dart';
+import 'features/settings/tokenizer_provider.dart';
+import 'features/chat/state/cached_token_breakdown.dart';
+import 'shared/widgets/desktop_popup.dart';
 import 'shared/theme/theme_font_provider.dart';
 import 'core/services/onboarding_service.dart';
 import 'core/services/update_check_coordinator.dart';
@@ -32,10 +38,14 @@ import 'shared/theme/theme_preset.dart';
 import 'shared/theme/theme_provider.dart';
 
 import 'features/chat/widgets/chat_webview_preload.dart';
+import 'features/chat/widgets/continue_failure_listener.dart';
 import 'features/chat/widgets/lorebook_vector_search_diagnostic_listener.dart';
 import 'shared/widgets/app_launch_splash.dart';
+import 'shared/shell/desktop/app_title_bar.dart';
+import 'shared/shell/desktop/desktop_glossary_popup.dart';
 import 'shared/widgets/build_watermark.dart';
 import 'shared/widgets/glaze_toast.dart' show toastOverlayKey;
+import 'shared/widgets/root_overlay.dart';
 import 'shared/widgets/stretch_overscroll.dart';
 
 class GlazeApp extends ConsumerStatefulWidget {
@@ -47,7 +57,15 @@ class GlazeApp extends ConsumerStatefulWidget {
   /// without waiting for network-bound initialization.
   final bool skipStartup;
 
-  const GlazeApp({super.key, this.restart, this.skipStartup = false});
+  @visibleForTesting
+  final NotificationNavigationData? notificationForTesting;
+
+  const GlazeApp({
+    super.key,
+    this.restart,
+    this.skipStartup = false,
+    this.notificationForTesting,
+  });
 
   static VoidCallback? _restart;
 
@@ -63,6 +81,7 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
   final List<ProviderSubscription> _warmSubs = [];
   late bool _startupReady;
   bool _startupHooksAttached = false;
+  AutomaticUpdateCheckController? _updateChecks;
 
   @override
   void initState() {
@@ -71,11 +90,19 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
         widget.skipStartup || const bool.fromEnvironment('FLUTTER_TEST');
     GlazeApp._restart = widget.restart;
     WidgetsBinding.instance.addObserver(this);
+    ref.read(llmRequestCaptureInstallationProvider);
     _initInBackground(loadActiveSelections(ref), 'active selections');
     _initInBackground(loadLorebookActivations(ref), 'lorebook activations');
     _initInBackground(loadLorebookSettings(ref), 'lorebook settings');
-    _initInBackground(seedDefaultPresets(ref), 'default preset seeding');
     _initInBackground(seedFeaturedPresets(ref), 'featured preset seeding');
+    final notificationForTesting = widget.notificationForTesting;
+    if (notificationForTesting != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          unawaited(_openChatFromNotification(notificationForTesting));
+        }
+      });
+    }
     if (!widget.skipStartup) {
       _warmInitialListProviders();
     }
@@ -95,9 +122,11 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
   /// that the UI already renders empty — so a failure is logged and dropped
   /// rather than escalated.
   void _initInBackground(Future<void> work, String what) {
-    unawaited(work.catchError((Object e) {
-      debugPrint('Glaze init: $what failed — $e');
-    }));
+    unawaited(
+      work.catchError((Object e) {
+        debugPrint('Glaze init: $what failed — $e');
+      }),
+    );
   }
 
   /// Starts the DB-backed providers behind the initial routes now, concurrently
@@ -126,6 +155,7 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _navSub?.cancel();
+    _updateChecks?.dispose();
     for (final sub in _warmSubs) {
       sub.close();
     }
@@ -137,17 +167,28 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
     if (!_startupReady) return;
     GenerationNotificationService.instance.updateLifecycleState(state);
     if (state == AppLifecycleState.resumed) {
+      _updateChecks?.resume();
+      unawaited(ref.read(sessionLorebookEmbeddingWorkerProvider).drain());
       final service = ref.read(syncServiceProvider).value;
       if (service != null && service.status != SyncStatus.syncing) {
         ref.read(syncStatusProvider.notifier).state = service.status;
       }
+    } else {
+      _updateChecks?.pause();
     }
   }
 
   Future<void> _initializeStartup() async {
     try {
+      await _runStartupStep(
+        'orphaned reconciliation leases',
+        ref.read(ledgerReconciliationLeaseRepoProvider).clearProcessOrphans,
+      );
       await _runStartupStep('dotenv', () => dotenv.load(fileName: '.env'));
-      await _runStartupStep('tokenizer', preloadO200kBase);
+      await _runStartupStep(
+        'tokenizer',
+        ref.read(tokenizerStatusProvider.notifier).restore,
+      );
       await _runStartupStep('prompt worker', PromptWorker.ensureInitialized);
       await _runStartupStep(
         'chat webview environment',
@@ -200,14 +241,41 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
     checkAndShowOnboarding(context);
     _listenNotificationNavigation();
     _handleColdStartNotification();
-    unawaited(checkAndShowUpdateOnStartup());
+    unawaited(
+      ref.read(sessionLorebookEmbeddingWorkerProvider).recoverAndDrain(),
+    );
+    _syncTokenizerWithConnection();
+    _updateChecks = AutomaticUpdateCheckController(
+      check: (presentedUpdateIds) =>
+          checkAndShowUpdateOnStartup(presentedUpdateIds: presentedUpdateIds),
+    )..start();
+  }
+
+  /// Follows the active connection's tokenizer (downloading it on first use),
+  /// and drops token breakdowns counted with the previous one.
+  void _syncTokenizerWithConnection() {
+    _warmSubs.add(
+      ref.listenManual<TokenizerKind?>(requestedTokenizerProvider, (_, next) {
+        if (next == null) return;
+        unawaited(ref.read(tokenizerStatusProvider.notifier).activate(next));
+      }, fireImmediately: true),
+    );
+    _warmSubs.add(
+      ref.listenManual<TokenizerKind>(
+        tokenizerStatusProvider.select((status) => status.active),
+        (previous, next) {
+          if (previous == null || previous == next) return;
+          ref.invalidate(cachedTokenBreakdownProvider);
+        },
+      ),
+    );
   }
 
   void _listenNotificationNavigation() {
     _navSub = GenerationNotificationService.instance.navigationStream.listen((
       data,
     ) {
-      if (mounted) _openChatFromNotification(data);
+      if (mounted) unawaited(_openChatFromNotification(data));
     });
   }
 
@@ -215,21 +283,45 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
     final data = GenerationNotificationService.instance
         .consumePendingNotificationData();
     if (data != null && mounted) {
-      _openChatFromNotification(data);
+      unawaited(_openChatFromNotification(data));
     }
   }
 
-  /// Opens the chat for a tapped notification, carrying the target message id
-  /// so the chat can scroll to and flash it (mirrors Vue's openChat msgId).
-  void _openChatFromNotification(NotificationNavigationData data) {
+  /// Opens the chat for a tapped notification: the *session* the message landed
+  /// in, scrolled to and flashing that message (mirrors Vue's openChat msgId).
+  ///
+  /// The payload carries a session id, while the route selects a session by its
+  /// index, so the id is resolved through the repo first. Without it the tap
+  /// opened whichever session that character last had active — for a reply that
+  /// arrived in another session, the wrong chat with no message to scroll to.
+  Future<void> _openChatFromNotification(
+    NotificationNavigationData data,
+  ) async {
     final msgId = data.msgId;
+    final sessionId = data.sessionId;
+
+    int? sessionIndex;
+    if (sessionId != null && sessionId.isNotEmpty) {
+      try {
+        final session = await ref.read(chatRepoProvider).getById(sessionId);
+        sessionIndex = session?.sessionIndex;
+      } catch (error, stackTrace) {
+        debugPrint(
+          'NOTIF: could not resolve session $sessionId — $error\n$stackTrace',
+        );
+      }
+      if (!mounted) return;
+    }
+
+    final query = <String, String>{
+      if (sessionIndex != null) 'session': '$sessionIndex',
+      if (msgId != null && msgId.isNotEmpty) 'msg': msgId,
+    };
     final uri = Uri(
       path: '/chat/${data.charId}',
-      queryParameters: (msgId != null && msgId.isNotEmpty)
-          ? {'msg': msgId}
-          : null,
+      queryParameters: query.isEmpty ? null : query,
     );
-    context.push(uri.toString());
+    unawaited(ref.read(routerProvider).push(uri.toString()));
   }
 
   @override
@@ -242,6 +334,21 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
         );
       }
     });
+
+    ref.listen<RewriteReviewNavigationIntent?>(
+      rewriteReviewNavigationIntentProvider,
+      (previous, next) {
+        if (next == null || next.sequence == previous?.sequence) return;
+        final authority =
+            GenerationNotificationService.instance.activeChatContext;
+        if (authority?.charId != next.charId ||
+            authority?.sessionId != next.sessionId ||
+            authority?.revision != next.authorityRevision) {
+          return;
+        }
+        ref.read(routerProvider).push(next.location);
+      },
+    );
 
     final router = ref.watch(routerProvider);
     final themeSettings = ref.watch(themeProvider);
@@ -290,8 +397,16 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
       // Stretch overscroll without an offscreen layer, so glass surfaces
       // inside scroll views keep their backdrop blur during the stretch.
       scrollBehavior: const GlazeScrollBehavior(),
-      theme: AppTheme.light(preset, fontFamily: uiFont, dynamicScheme: lightScheme),
-      darkTheme: AppTheme.dark(preset, fontFamily: uiFont, dynamicScheme: darkScheme),
+      theme: AppTheme.light(
+        preset,
+        fontFamily: uiFont,
+        dynamicScheme: lightScheme,
+      ),
+      darkTheme: AppTheme.dark(
+        preset,
+        fontFamily: uiFont,
+        dynamicScheme: darkScheme,
+      ),
       themeMode: mode,
       routerConfig: router,
       debugShowCheckedModeBanner: false,
@@ -301,21 +416,38 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
       builder: (context, child) {
         final appChild = _startupReady
             ? LorebookVectorSearchDiagnosticListener(
-                child: ChatWebViewPreloader(
-                  child: Overlay(
-                    key: toastOverlayKey,
-                    initialEntries: [OverlayEntry(builder: (_) => child!)],
+                child: ContinueFailureListener(
+                  child: ChatWebViewPreloader(
+                    child: Overlay(
+                      key: toastOverlayKey,
+                      initialEntries: [OverlayEntry(builder: (_) => child!)],
+                    ),
                   ),
                 ),
               )
             : const SizedBox.expand();
-        return AppLaunchSplash(
-          isReady: _startupReady,
-          child: Stack(
-            children: [
-              Positioned.fill(child: appChild),
-              const BuildWatermark(),
-            ],
+        // Records where the pointer last went down so desktop dropdowns can
+        // anchor themselves at the cursor without every call site passing an
+        // anchor (see [showDesktopPopup]).
+        return PointerPositionTracker(
+          // The title bar and the glossary window sit outside the navigator;
+          // this gives their tooltips and text fields an overlay to open in.
+          child: RootOverlay(
+            child: AppWindowFrame(
+              child: AppLaunchSplash(
+                isReady: _startupReady,
+                child: Stack(
+                  children: [
+                    Positioned.fill(child: appChild),
+                    // Above the router, so the glossary window a help tip opens
+                    // floats over every route, sheet and dialog rather than
+                    // being buried by the one it was opened from.
+                    const DesktopGlossaryPopup(),
+                    const BuildWatermark(),
+                  ],
+                ),
+              ),
+            ),
           ),
         );
       },

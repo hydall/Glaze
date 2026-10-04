@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:easy_localization/easy_localization.dart';
@@ -9,10 +10,20 @@ import '../../../core/state/active_studio_preset_provider.dart';
 import '../../../core/state/chat_session_ops_provider.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/state/lorebook_provider.dart';
+import '../../../core/state/lorebook_embedding_provider.dart';
+import '../../../core/state/global_regex_provider.dart';
 import '../../../core/state/shared_prefs_provider.dart';
+import '../../../core/state/studio_regex_provider.dart';
 import '../../../shared/theme/theme_provider.dart';
 import '../../personas/persona_list_provider.dart';
+import '../../presets/preset_list_provider.dart';
 import '../../settings/api_list_provider.dart';
+import '../../settings/app_settings_provider.dart';
+import '../../card_rewrite/card_rewriter_recovery_view_service.dart';
+import '../../chat/chat_provider.dart';
+import '../../chat/chat_session_service.dart';
+import '../../chat/services/collector_view_service.dart';
+import '../../chat/services/reconciler_view_service.dart';
 import '../../chat_history/chat_history_provider.dart';
 import '../sync_provider.dart';
 import '../sync_models.dart';
@@ -29,6 +40,7 @@ class SyncController {
   bool _isConnectingGdrive = false;
   bool _isDisconnecting = false;
   bool _isWiping = false;
+  bool _isResolvingConflicts = false;
   Map<String, dynamic>? _syncResult;
   bool _syncIncludeApiKeys = false;
   String? _gdriveFolderId;
@@ -39,6 +51,7 @@ class SyncController {
   bool get isConnectingGdrive => _isConnectingGdrive;
   bool get isDisconnecting => _isDisconnecting;
   bool get isWiping => _isWiping;
+  bool get isResolvingConflicts => _isResolvingConflicts;
   Map<String, dynamic>? get syncResult => _syncResult;
   bool get syncIncludeApiKeys => _syncIncludeApiKeys;
   String? get gdriveFolderId => _gdriveFolderId;
@@ -210,7 +223,7 @@ class SyncController {
             'pulled': itemsCount,
             'conflictsCount': service.conflicts.length,
           };
-          invalidateDataProviders();
+          await refreshDataProvidersAfterPull();
           statusNotifier.state = service.status;
           conflictsNotifier.state = service.conflicts;
           if (service.conflicts.isNotEmpty) {
@@ -227,7 +240,7 @@ class SyncController {
             },
           );
           _syncResult = {'type': 'full'};
-          invalidateDataProviders();
+          await refreshDataProvidersAfterPull();
           statusNotifier.state = service.status;
           conflictsNotifier.state = service.conflicts;
           return 'sync_full_done'.tr();
@@ -258,6 +271,7 @@ class SyncController {
         .where((c) => c.key != conflict.key)
         .toList();
     conflictsNotifier.state = optimistic;
+    statusNotifier.state = SyncStatus.syncing;
 
     try {
       await service.resolveConflict(conflict, choice);
@@ -272,6 +286,7 @@ class SyncController {
           setError: (value) => errorNotifier.state = value,
         );
       }
+      statusNotifier.state = SyncStatus.conflict;
       return null;
     } catch (e) {
       // Roll back optimistic removal on error.
@@ -283,28 +298,34 @@ class SyncController {
   }
 
   Future<String?> resolveAllConflicts(String choice) async {
+    if (_isResolvingConflicts) return null;
     final service = _ref.read(syncServiceProvider).value;
     if (service == null) return null;
     final conflictsNotifier = _ref.read(syncConflictsProvider.notifier);
     final errorNotifier = _ref.read(syncLastErrorProvider.notifier);
     final statusNotifier = _ref.read(syncStatusProvider.notifier);
     final progressNotifier = _ref.read(syncProgressProvider.notifier);
+    _isResolvingConflicts = true;
     // Optimistically clear all conflict rows immediately.
     conflictsNotifier.state = [];
+    statusNotifier.state = SyncStatus.syncing;
     try {
-      await service.resolveAllConflicts(choice);
-      conflictsNotifier.state = List.from(service.conflicts);
-      return await _applyPendingPullAndFinalize(
-        service,
-        setStatus: (value) => statusNotifier.state = value,
-        setProgress: (value) => progressNotifier.state = value,
-        setError: (value) => errorNotifier.state = value,
+      await service.resolveAllConflictsAndApply(
+        choice,
+        onProgress: (value) => progressNotifier.state = value,
       );
+      conflictsNotifier.state = List.from(service.conflicts);
+      if (isMounted()) await refreshDataProvidersAfterPull();
+      return 'Sync complete';
     } catch (e) {
       errorNotifier.state = e.toString();
       conflictsNotifier.state = List.from(service.conflicts);
       statusNotifier.state = service.status;
       return 'Could not resolve conflicts: $e';
+    } finally {
+      _isResolvingConflicts = false;
+      statusNotifier.state = service.status;
+      progressNotifier.state = null;
     }
   }
 
@@ -323,7 +344,7 @@ class SyncController {
           setProgress(p);
         },
       );
-      if (isMounted()) invalidateDataProviders();
+      if (isMounted()) await refreshDataProvidersAfterPull();
       return 'Sync complete';
     } catch (e) {
       setError(e.toString());
@@ -334,10 +355,25 @@ class SyncController {
     }
   }
 
-  void invalidateDataProviders() {
+  Future<void> refreshDataProvidersAfterPull() async {
+    final prefs = await _ref.read(sharedPreferencesProvider.future);
+    await prefs.reload();
+    _ref.invalidate(appSettingsProvider);
+    await _ref.read(appSettingsProvider.future);
+    await _ref.read(pipelineSettingsProvider.notifier).load();
+
     // Evict all cached avatar images so that Image.file widgets re-read the
     // updated files from disk immediately (without a full app restart).
     _evictAvatarImageCache();
+
+    // Chat sessions are replaced directly in the database during pull. Drop
+    // both in-memory layers before rebuilding providers so ownership changes
+    // (for example a Card Rewriter variant fork) become visible immediately.
+    ChatSessionService.clearCache();
+    _ref.invalidate(chatProvider, asReload: true);
+    _ref.invalidate(reconcilerViewProvider, asReload: true);
+    _ref.invalidate(collectorViewProvider, asReload: true);
+    _ref.invalidate(cardRewriterRecoveryViewsProvider, asReload: true);
 
     _ref.invalidate(charactersProvider);
     _ref.invalidate(personaListProvider);
@@ -347,7 +383,18 @@ class SyncController {
     _ref.invalidate(chatHistoryProvider);
     _ref.invalidate(activeStudioPresetProvider);
     _ref.invalidate(studioPresetProvider);
-    _ref.read(themeProvider.notifier).reload();
+    // Both preset libraries are read once and cached — neither is a Drift
+    // stream — and the pull writes straight through their repositories. Without
+    // these two the Presets screen kept showing the list it had read at
+    // startup: a preset synced from another device was invisible until the app
+    // was restarted, and so was a cover image, whose file the pull drops next
+    // to the path the preset already points at.
+    _ref.invalidate(presetListProvider);
+    _ref.invalidate(studioPresetListProvider);
+    _ref.invalidate(globalRegexProvider);
+    _ref.invalidate(studioRegexProvider);
+    unawaited(_ref.read(sessionLorebookEmbeddingWorkerProvider).drain());
+    await _ref.read(themeProvider.notifier).reload();
 
     // Bump the version counter so widgets that watch avatarVersionProvider
     // (chat_header, character_list) rebuild and pick up the new paths.

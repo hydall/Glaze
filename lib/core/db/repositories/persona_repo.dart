@@ -11,7 +11,9 @@ class PersonaRepo implements SyncPersonaStore {
 
   Future<void> _ensureDisplayNameColumn() {
     return _ensureDisplayNameColumnFuture ??= () async {
-      final cols = await _db.customSelect('PRAGMA table_info("personas")').get();
+      final cols = await _db
+          .customSelect('PRAGMA table_info("personas")')
+          .get();
       final colNames = cols.map((r) => r.read<String>('name')).toSet();
       if (!colNames.contains('display_name')) {
         await _db.customStatement(
@@ -24,28 +26,28 @@ class PersonaRepo implements SyncPersonaStore {
   @override
   Future<List<Persona>> getAll() async {
     await _ensureDisplayNameColumn();
-    final rows = await _db.customSelect(
-      '''
+    final rows = await _db.customSelect('''
       SELECT persona_id, name, display_name, prompt, avatar_path, created_at
       FROM personas
       ORDER BY created_at DESC
-      ''',
-    ).get();
+      ''').get();
     return rows.map(_toModel).toList();
   }
 
   @override
   Future<Persona?> getById(String id) async {
     await _ensureDisplayNameColumn();
-    final row = await _db.customSelect(
-      '''
+    final row = await _db
+        .customSelect(
+          '''
       SELECT persona_id, name, display_name, prompt, avatar_path, created_at
       FROM personas
       WHERE persona_id = ?
       LIMIT 1
       ''',
-      variables: [Variable.withString(id)],
-    ).getSingleOrNull();
+          variables: [Variable.withString(id)],
+        )
+        .getSingleOrNull();
     return row != null ? _toModel(row) : null;
   }
 
@@ -80,11 +82,11 @@ class PersonaRepo implements SyncPersonaStore {
   }
 
   Persona _toModel(QueryRow row) => Persona(
-        id: row.read<String>('persona_id'),
-        name: row.read<String>('name'),
-        displayName: row.readNullable<String>('display_name'),
-        prompt: row.readNullable<String>('prompt'),
-        avatarPath: row.readNullable<String>('avatar_path'),
-        createdAt: row.read<int>('created_at'),
-      );
+    id: row.read<String>('persona_id'),
+    name: row.read<String>('name'),
+    displayName: row.readNullable<String>('display_name'),
+    prompt: row.readNullable<String>('prompt'),
+    avatarPath: row.readNullable<String>('avatar_path'),
+    createdAt: row.read<int>('created_at'),
+  );
 }

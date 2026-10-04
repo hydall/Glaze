@@ -2,11 +2,15 @@ import '../models/character.dart';
 import '../models/lorebook.dart';
 import '../db/app_db.dart';
 import '../db/repositories/embedding_repo.dart';
+import '../db/repositories/session_lorebook_evolution_repo.dart';
 import '../utils/cast_helpers.dart';
 import 'package:dio/dio.dart';
 import 'embedding_service.dart';
+import 'transport/llm_capture_context.dart';
 import 'embedding_types.dart';
+import 'lorebook_activation.dart';
 import 'lorebook_embedding_service.dart';
+import 'lorebook_embedding_text.dart';
 import 'vector_math.dart';
 
 class VectorSearchResult {
@@ -37,37 +41,20 @@ class LorebookVectorSearch {
     Character? character,
     LorebookActivations? activations,
     String? chatId,
+    Set<SessionLorebookTarget> sessionOverlayTargets = const {},
     int? overrideTopK,
     CancelToken? cancelToken,
   }) async {
     if (settings.searchType == 'keyword') return [];
 
-    final charId = character?.id;
-    final activeLorebooks = lorebooks.where((lb) {
-      if (lb.enabled) return true;
-      if (charId != null &&
-          activations?.character[charId]?.contains(lb.id) == true) {
-        return true;
-      }
-      if (chatId != null &&
-          activations?.chat[chatId]?.contains(lb.id) == true) {
-        return true;
-      }
-      if (charId != null &&
-          lb.activationScope == 'character' &&
-          lb.activationTargetId == charId) {
-        return true;
-      }
-      if (chatId != null &&
-          lb.activationScope == 'chat' &&
-          lb.activationTargetId == chatId) {
-        return true;
-      }
-      if (charWorld != null && charWorld.isNotEmpty && lb.name == charWorld) {
-        return true;
-      }
-      return false;
-    }).toList();
+    final activeLorebooks = activeLorebooksFor(
+      lorebooks: lorebooks,
+      charId: character?.id,
+      charGroupId: character?.variantGroupId,
+      charWorld: charWorld,
+      chatId: chatId,
+      activations: activations,
+    );
 
     activeLorebooks.removeWhere((lb) {
       final lbSettings = lb.settings;
@@ -95,27 +82,25 @@ class LorebookVectorSearch {
     final effectiveScanDepth = configuredScanDepth ?? 5;
 
     final vectorEntries = <(LorebookEntry, String)>[];
-    // NEW (patch #4 follow-up — Marinara analog): semantic fallback pool
-    // for keyless entries. Entries with no keys AND no secondaryKeys cannot
-    // activate via keyword scan; this fallback activates them via cosine
-    // similarity against the current chat text. Threshold is lower (default
-    // 0.3) and topK is smaller (default 3) to avoid flooding the prompt.
-    // Rationale: keyless entries cannot activate via keyword scan; this
-    // semantic fallback activates them via cosine similarity (Marinara
-    // supplementary system 4 analog).
+    // Semantic fallback pool for keyless entries (Marinara analog). Entries
+    // with no keys AND no secondaryKeys cannot activate via keyword scan; this
+    // fallback activates them via cosine similarity against the current chat
+    // text, with a lower threshold (default 0.3) and a smaller topK (default
+    // 3) so they cannot flood the prompt. lorebookVectorPoolFor splits the
+    // two pools — the indexer asks the same function, so an entry the search
+    // expects a vector for is one the indexer actually embedded.
     final fallbackEntries = <(LorebookEntry, String)>[];
     for (final lb in activeLorebooks) {
+      final vectorizeAll = lb.settings?.vectorizeAllEntries ?? false;
       for (final entry in lb.entries) {
-        if (!entry.enabled || entry.constant) continue;
-        if (entry.excludeFromVectorization) continue;
         if (_isFilteredByCharacter(entry, character)) continue;
-        if (entry.vectorSearch) {
-          vectorEntries.add((entry, lb.id));
-        } else if (entry.keys.isEmpty && entry.secondaryKeys.isEmpty) {
-          // Keyless + vectorSearch=false → eligible for semantic fallback.
-          // These are indexed by LorebookEmbeddingService (which now
-          // extends its indexable pool to include keyless entries).
-          fallbackEntries.add((entry, lb.id));
+        switch (lorebookVectorPoolFor(entry, vectorizeAll: vectorizeAll)) {
+          case LorebookVectorPool.main:
+            vectorEntries.add((entry, lb.id));
+          case LorebookVectorPool.fallback:
+            fallbackEntries.add((entry, lb.id));
+          case LorebookVectorPool.none:
+            break;
         }
       }
     }
@@ -126,19 +111,27 @@ class LorebookVectorSearch {
       for (final (_, lorebookId) in vectorEntries) lorebookId,
       for (final (_, lorebookId) in fallbackEntries) lorebookId,
     };
-    final embeddingRows = await _repo.getBySourceIds(
-      'lorebook_entry',
-      relevantLorebookIds,
-    );
+    final rowGroups = await Future.wait([
+      _repo.getBySourceIds('lorebook_entry', relevantLorebookIds),
+      if (chatId != null && sessionOverlayTargets.isNotEmpty)
+        _repo.getBySource('session_lorebook_entry', chatId)
+      else
+        Future.value(const <EmbeddingRow>[]),
+    ]);
 
     final embeddingMap = <String, EmbeddingRow>{};
-    for (final row in embeddingRows) {
+    for (final row in rowGroups.expand((rows) => rows)) {
       embeddingMap[row.entryId] = row;
     }
 
     final candidates = <VectorCandidate>[];
     for (final (entry, lbId) in vectorEntries) {
-      final namespacedId = '${lbId}_${entry.id}';
+      final namespacedId = _embeddingId(
+        chatId: chatId,
+        lorebookId: lbId,
+        entryId: entry.id,
+        sessionOverlayTargets: sessionOverlayTargets,
+      );
       final row = embeddingMap[namespacedId];
       if (row == null || row.vectorsBlob == null) continue;
 
@@ -149,6 +142,10 @@ class LorebookVectorSearch {
       );
       final currentHash = computeHash(fingerprint);
       if (row.textHash != currentHash) continue;
+      if (_repo.decodeMetadata(row)?['embeddingSignature'] !=
+          embeddingModelSignature(config)) {
+        continue;
+      }
 
       final vectors = _repo.decodeVectors(row);
       if (vectors == null || vectors.isEmpty) continue;
@@ -171,7 +168,12 @@ class LorebookVectorSearch {
     // Separate candidate pool for fallback (keyless) entries.
     final fallbackCandidates = <VectorCandidate>[];
     for (final (entry, lbId) in fallbackEntries) {
-      final namespacedId = '${lbId}_${entry.id}';
+      final namespacedId = _embeddingId(
+        chatId: chatId,
+        lorebookId: lbId,
+        entryId: entry.id,
+        sessionOverlayTargets: sessionOverlayTargets,
+      );
       final row = embeddingMap[namespacedId];
       if (row == null || row.vectorsBlob == null) continue;
 
@@ -182,6 +184,10 @@ class LorebookVectorSearch {
       );
       final currentHash = computeHash(fingerprint);
       if (row.textHash != currentHash) continue;
+      if (_repo.decodeMetadata(row)?['embeddingSignature'] !=
+          embeddingModelSignature(config)) {
+        continue;
+      }
 
       final vectors = _repo.decodeVectors(row);
       if (vectors == null || vectors.isEmpty) continue;
@@ -229,6 +235,10 @@ class LorebookVectorSearch {
         [query],
         config,
         cancelToken: cancelToken,
+        captureContext: LlmCaptureContext(
+          stage: 'embedding.lorebook',
+          sessionId: chatId,
+        ),
       );
       return chunks
           .map((c) => VectorChunk(text: c.text, vector: c.vector))
@@ -454,17 +464,31 @@ class LorebookVectorSearch {
         .toList();
   }
 
+  /// The text the indexer would have embedded for [entry], rebuilt so the
+  /// stored fingerprint can be checked against the entry as it stands now.
   String _getEmbeddingText(
     LorebookEntry entry,
     List<Lorebook> lorebooks,
     String lbId,
   ) {
     final lb = lorebooks.where((l) => l.id == lbId).firstOrNull;
-    final target = lb?.settings?.embeddingTarget ?? 'content';
-    if (target == 'keys') {
-      return entry.keys.join(', ');
+    return lorebookEmbeddingText(entry, lb?.settings?.embeddingTarget);
+  }
+
+  String _embeddingId({
+    required String? chatId,
+    required String lorebookId,
+    required String entryId,
+    required Set<SessionLorebookTarget> sessionOverlayTargets,
+  }) {
+    final isOverlay = sessionOverlayTargets.contains((
+      lorebookId: lorebookId,
+      entryId: entryId,
+    ));
+    if (isOverlay) {
+      return '$chatId:$lorebookId:$entryId';
     }
-    return entry.content;
+    return '${lorebookId}_$entryId';
   }
 
   bool _isFilteredByCharacter(LorebookEntry entry, Character? character) {

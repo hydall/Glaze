@@ -3,18 +3,22 @@ import 'package:flutter/material.dart';
 import '../../../core/models/api_config.dart';
 import '../../../core/models/character.dart';
 import '../../../core/models/chat_message.dart';
-import '../../../core/models/lorebook.dart';
 import '../../../core/models/persona.dart';
 import '../../../core/models/preset.dart';
 
 /// Logical grouping of drawer items. Used only for sectioning the
-/// "Add Action" sheet - the grid itself stays freely orderable.
+/// "Add Tool" sheet - the grid itself stays freely orderable.
 enum MagicDrawerCategory { session, library, config, tools }
 
 class MagicDrawerItemDef {
   final String id;
   final String label;
   final IconData icon;
+
+  /// A short text token to draw in place of [icon] — the `**` on the insert
+  /// action, which types characters rather than opening a feature. Null on
+  /// every ordinary card.
+  final String? glyph;
   final MagicDrawerCategory category;
 
   const MagicDrawerItemDef({
@@ -22,6 +26,7 @@ class MagicDrawerItemDef {
     required this.label,
     required this.icon,
     required this.category,
+    this.glyph,
   });
 }
 
@@ -40,6 +45,7 @@ class MagicDrawerCardItem {
 class MagicDrawerStats {
   final Character? character;
   final Preset? activePreset;
+  final String? activePresetDisplayName;
   final Persona? activePersona;
   final ApiConfig? apiConfig;
   final ChatSession? session;
@@ -59,19 +65,18 @@ class MagicDrawerStats {
   final int vectorLoreTokens;
   final int keywordLoreTokens;
   final bool imageGenEnabled;
-  final List<Lorebook> lorebooks;
   final String? summaryContent;
   final String? memoryContent;
   final String? memoryMacroContent;
   final String memoryInjectionTarget;
   final Map<String, dynamic> memoryCoverage;
   final List<dynamic> triggeredMemories;
-  final bool extBlocksEnabled;
   final String? extBlocksActivePresetName;
 
   const MagicDrawerStats({
     this.character,
     this.activePreset,
+    this.activePresetDisplayName,
     this.activePersona,
     this.apiConfig,
     this.session,
@@ -91,14 +96,12 @@ class MagicDrawerStats {
     this.vectorLoreTokens = 0,
     this.keywordLoreTokens = 0,
     this.imageGenEnabled = false,
-    this.lorebooks = const [],
     this.summaryContent,
     this.memoryContent,
     this.memoryMacroContent,
     this.memoryInjectionTarget = 'hard_block',
     this.memoryCoverage = const {},
     this.triggeredMemories = const [],
-    this.extBlocksEnabled = false,
     this.extBlocksActivePresetName,
   });
 
@@ -116,6 +119,7 @@ class MagicDrawerStats {
     return MagicDrawerStats(
       character: character,
       activePreset: activePreset,
+      activePresetDisplayName: activePresetDisplayName,
       activePersona: activePersona,
       apiConfig: apiConfig,
       session: session,
@@ -135,13 +139,13 @@ class MagicDrawerStats {
       vectorLoreTokens: vectorLoreTokens ?? this.vectorLoreTokens,
       keywordLoreTokens: keywordLoreTokens ?? this.keywordLoreTokens,
       imageGenEnabled: imageGenEnabled,
-      lorebooks: lorebooks,
       summaryContent: summaryContent,
       memoryContent: memoryContent,
       memoryMacroContent: memoryMacroContent,
       memoryInjectionTarget: memoryInjectionTarget,
       memoryCoverage: memoryCoverage,
       triggeredMemories: triggeredMemories,
+      extBlocksActivePresetName: extBlocksActivePresetName,
     );
   }
 }

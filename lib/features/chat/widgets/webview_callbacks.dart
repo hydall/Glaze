@@ -17,12 +17,24 @@ typedef GuidedSwipeCallback = void Function(String id, String guidanceText);
 typedef EditSaveCallback = void Function(String id, String text);
 typedef EditCancelCallback = void Function(String id);
 typedef EditFocusCallback = void Function(String id, bool focused);
-typedef ImgActionCallback = void Function(String instruction, String messageId);
+/// [blockIndex] is the position of the tapped image inside its message, or
+/// null when the element carries no image-gen block (markdown images) — the
+/// handler then falls back to acting on the whole message.
+typedef ImgActionCallback =
+    void Function(String instruction, String messageId, int? blockIndex);
+typedef ImgVariantCallback =
+    void Function(String messageId, int blockIndex, int variantIndex);
 typedef ImgOptionsCallback =
-    void Function(String src, String instruction, String messageId);
+    void Function(
+      String src,
+      String instruction,
+      String messageId,
+      int? blockIndex,
+    );
 typedef ImgVoidCallback = void Function();
 typedef HeaderScrollCallback = void Function(bool hidden);
 typedef ScrollToBottomVisibilityCallback = void Function(bool visible);
+typedef ScrollToTopVisibilityCallback = void Function(bool visible);
 typedef SelectionActionCallback = void Function(String action, String text);
 typedef ImageClickCallback = void Function(String imageUrl);
 typedef SelectionChangeCallback = void Function(List<String> ids);
@@ -69,17 +81,21 @@ class EditActionsCallbacks {
 
 class ImageGenCallbacks {
   final ImgActionCallback? onImgRetry;
+  final ImgActionCallback? onImgEnableRetry;
   final ImgActionCallback? onImgFind;
   final ImgActionCallback? onImgRegen;
   final ImgOptionsCallback? onImgOptions;
+  final ImgVariantCallback? onImgVariant;
   final ImgVoidCallback? onImgCancel;
   final ImageClickCallback? onImgDownload;
 
   const ImageGenCallbacks({
     this.onImgRetry,
+    this.onImgEnableRetry,
     this.onImgFind,
     this.onImgRegen,
     this.onImgOptions,
+    this.onImgVariant,
     this.onImgCancel,
     this.onImgDownload,
   });
@@ -88,8 +104,13 @@ class ImageGenCallbacks {
 class ScrollCallbacks {
   final HeaderScrollCallback? onHeaderScroll;
   final ScrollToBottomVisibilityCallback? onScrollToBottomVisibility;
+  final ScrollToTopVisibilityCallback? onScrollToTopVisibility;
 
-  const ScrollCallbacks({this.onHeaderScroll, this.onScrollToBottomVisibility});
+  const ScrollCallbacks({
+    this.onHeaderScroll,
+    this.onScrollToBottomVisibility,
+    this.onScrollToTopVisibility,
+  });
 }
 
 class MiscCallbacks {

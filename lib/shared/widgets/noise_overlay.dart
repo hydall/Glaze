@@ -7,9 +7,9 @@ import 'package:flutter/widgets.dart';
 /// painted area, 1..10 logical px) each filled with [tint] at a random alpha
 /// scaled by `intensity * opacity`.
 ///
-/// The grain is baked once per (cell size, tint, alpha scale) into a small
-/// repeating tile shared by every [NoiseOverlay] in the app; painting is a
-/// single shader-filled drawRect. The previous implementation cached a
+/// The grain is baked once per (tint, alpha scale) into a small repeating tile
+/// shared by every [NoiseOverlay] in the app, whatever their cell size; painting
+/// is a single shader-filled drawRect. The previous implementation cached a
 /// full-size image per instance keyed by its exact size, so any surface whose
 /// size animates (bottom sheets mid-drag/open) missed the cache and fell back
 /// to drawing up to 50k rects plus scheduling a screen-sized `toImage` every
@@ -25,6 +25,15 @@ class NoiseOverlay extends StatefulWidget {
     required this.intensity,
     this.tint = const Color(0xFF000000),
   });
+
+  /// Tile bakes started since the app (or [debugResetBakeCount]) began.
+  /// Test-only: pins that a different cell size reuses the one shared tile
+  /// instead of baking another.
+  @visibleForTesting
+  static int debugBakeCount = 0;
+
+  @visibleForTesting
+  static void debugResetBakeCount() => debugBakeCount = 0;
 
   @override
   State<NoiseOverlay> createState() => _NoiseOverlayState();
@@ -45,7 +54,6 @@ class _NoiseOverlayState extends State<NoiseOverlay> {
         if (size.isEmpty || !size.isFinite) return const SizedBox.shrink();
         final step = _NoiseTileCache.stepFor(size);
         final tile = _NoiseTileCache.get(
-          step: step,
           tint: widget.tint,
           alphaScale: alphaScale,
           onReady: _onTileReady,
@@ -95,9 +103,12 @@ class _NoiseTilePainter extends CustomPainter {
 ///
 /// A tile is [cells]×[cells] grain cells rendered at 1px each; the shader
 /// matrix in [_NoiseTilePainter] scales it so one texel spans one `step`-sized
-/// cell, and [TileMode.repeated] extends it over any surface. Tiles are tiny
-/// (64 KiB) and keyed by everything that affects their pixels, so they are
-/// kept for the lifetime of the app.
+/// cell, and [TileMode.repeated] extends it over any surface. The grain itself
+/// is the same random pattern whatever the cell size — `step` only ever enters
+/// the shader matrix — so a single tile serves every size and is keyed only by
+/// what actually changes its pixels (tint and alpha). Keying by `step` as well
+/// used to bake up to ten byte-identical tiles; on a form that builds many
+/// surfaces at once that was ~0.5 s of grain bakes in a single frame.
 abstract final class _NoiseTileCache {
   static const int cells = 128;
 
@@ -112,13 +123,11 @@ abstract final class _NoiseTileCache {
   }
 
   static ui.Image? get({
-    required int step,
     required Color tint,
     required double alphaScale,
     required VoidCallback onReady,
   }) {
-    final base = '${tint.toARGB32()}|${(alphaScale * 1000).round()}';
-    final key = '$step|$base';
+    final key = '${tint.toARGB32()}|${(alphaScale * 1000).round()}';
     final image = _ready[key];
     if (image != null) return image;
 
@@ -129,25 +138,11 @@ abstract final class _NoiseTileCache {
       _waiters[key] = {onReady};
       _bake(key, tint, alphaScale);
     }
-
-    // While the exact cell size bakes, fall back to an existing tile of the
-    // same tint/alpha with the nearest cell size so grain doesn't blink out
-    // mid-animation when a resizing surface crosses a step threshold.
-    ui.Image? nearest;
-    var nearestDelta = 1 << 30;
-    for (final entry in _ready.entries) {
-      final parts = entry.key.split('|');
-      if ('${parts[1]}|${parts[2]}' != base) continue;
-      final delta = (int.parse(parts[0]) - step).abs();
-      if (delta < nearestDelta) {
-        nearestDelta = delta;
-        nearest = entry.value;
-      }
-    }
-    return nearest;
+    return null;
   }
 
   static Future<void> _bake(String key, Color tint, double alphaScale) async {
+    NoiseOverlay.debugBakeCount++;
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
     final random = Random(42);

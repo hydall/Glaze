@@ -1,8 +1,28 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/llm/regex_service.dart';
+import 'package:glaze_flutter/core/models/character.dart';
+import 'package:glaze_flutter/core/models/persona.dart';
 import 'package:glaze_flutter/core/models/preset.dart';
 
 void main() {
+  test('Memory Book retrieval flag defaults false and round-trips aliases', () {
+    final legacy = PresetRegex.fromJson({
+      'id': 'legacy',
+      'scriptName': 'Legacy',
+      'findRegex': '/x/g',
+    });
+    final optedIn = PresetRegex.fromJson({
+      'id': 'opted-in',
+      'scriptName': 'Opted in',
+      'findRegex': '/x/g',
+      'memory_book_retrieval': 1,
+    });
+
+    expect(legacy.memoryBookRetrieval, isFalse);
+    expect(optedIn.memoryBookRetrieval, isTrue);
+    expect(PresetRegex.fromJson(optedIn.toJson()).memoryBookRetrieval, isTrue);
+  });
+
   group('RegexService — ST compatibility (backrefs, flags, substituteRegex)', () {
     RegexApplyContext ctx() => const RegexApplyContext();
 
@@ -17,7 +37,8 @@ void main() {
         'isEnabled': true,
       });
 
-      const input = 'See <div class="x">hello <b>world</b></div> and <br/> and <img src="a.png">';
+      const input =
+          'See <div class="x">hello <b>world</b></div> and <br/> and <img src="a.png">';
       final out = applyRegexes(input, 2, 2, [script], ctx());
 
       expect(out, equals('See  and  and '));
@@ -53,21 +74,24 @@ void main() {
       expect(out, equals('hello world'));
     });
 
-    test('ReplaceSpace with substituteRegex:1 — U+3164 (hangul filler) -> space', () {
-      final script = PresetRegex.fromJson({
-        'id': 'replace-space',
-        'scriptName': 'ReplaceSpace',
-        'findRegex': r'/ㅤ/g',
-        'replaceString': ' ',
-        'substituteRegex': 1,
-        'placement': [1, 2, 5],
-        'isEnabled': true,
-      });
+    test(
+      'ReplaceSpace with substituteRegex:1 — U+3164 (hangul filler) -> space',
+      () {
+        final script = PresetRegex.fromJson({
+          'id': 'replace-space',
+          'scriptName': 'ReplaceSpace',
+          'findRegex': r'/ㅤ/g',
+          'replaceString': ' ',
+          'substituteRegex': 1,
+          'placement': [1, 2, 5],
+          'isEnabled': true,
+        });
 
-      const input = 'helloㅤworld';
-      final out = applyRegexes(input, 2, 2, [script], ctx());
-      expect(out, equals('hello world'));
-    });
+        const input = 'helloㅤworld';
+        final out = applyRegexes(input, 2, 2, [script], ctx());
+        expect(out, equals('hello world'));
+      },
+    );
 
     test('markdownOnly applies only when isMarkdown is true', () {
       final script = PresetRegex.fromJson({
@@ -105,6 +129,61 @@ void main() {
       expect(prompt, equals('aYb'));
     });
 
+    test(
+      'markdownOnly + promptOnly runs in both passes, never on stored text',
+      () {
+        // The pair a user imports to swap spaces for U+2007 on the way out and
+        // back on the way in: the "return" half ticks both "Only Format
+        // Display" and "Only Format Prompt". ST ORs the two flags, so it must
+        // fire in the display pass and in the prompt pass alike.
+        final script = PresetRegex.fromJson({
+          'id': 'both-only',
+          'name': 'Return Normal Spaces',
+          'regex': '/\u2007/g',
+          'replacement': ' ',
+          'markdownOnly': true,
+          'promptOnly': true,
+          'placement': [1, 2],
+          'ephemerality': [1, 2],
+        });
+
+        const input = 'a\u2007b';
+
+        expect(
+          applyRegexes(input, 2, 2, [script], ctx(), isPrompt: true),
+          equals('a b'),
+        );
+        expect(
+          applyRegexes(input, 2, 1, [script], ctx(), isMarkdown: true),
+          equals('a b'),
+        );
+        // Storage pass (run-on-edit): neither flag is set, so the rewrite must
+        // not be baked into the message.
+        expect(applyRegexes(input, 2, 1, [script], ctx()), equals(input));
+      },
+    );
+
+    test('promptOnly script rewrites spaces to figure spaces in the prompt', () {
+      final script = PresetRegex.fromJson({
+        'id': 'figure-spaces',
+        'name': 'Use Figure Spaces',
+        'regex': '/ /g',
+        'replacement': '\u2007',
+        'promptOnly': true,
+        'placement': [1, 2],
+        'ephemerality': [1, 2],
+      });
+
+      expect(
+        applyRegexes('a b', 2, 2, [script], ctx(), isPrompt: true),
+        equals('a\u2007b'),
+      );
+      expect(
+        applyRegexes('a b', 2, 1, [script], ctx(), isMarkdown: true),
+        equals('a b'),
+      );
+    });
+
     test('World Info placement 5 applies to lorebook blocks', () {
       final script = PresetRegex.fromJson({
         'id': 'wi-only',
@@ -115,8 +194,14 @@ void main() {
       });
 
       const input = 'foo';
-      expect(applyRegexes(input, 4, 2, [script], ctx(), isPrompt: true), equals('foo'));
-      expect(applyRegexes(input, 5, 2, [script], ctx(), isPrompt: true), equals('bar'));
+      expect(
+        applyRegexes(input, 4, 2, [script], ctx(), isPrompt: true),
+        equals('foo'),
+      );
+      expect(
+        applyRegexes(input, 5, 2, [script], ctx(), isPrompt: true),
+        equals('bar'),
+      );
     });
 
     test('{{match}} in replacement', () {
@@ -144,7 +229,10 @@ void main() {
 
       expect(script.placement, contains(5));
       const input = 'x';
-      expect(applyRegexes(input, 5, 2, [script], ctx(), isPrompt: true), equals('Z'));
+      expect(
+        applyRegexes(input, 5, 2, [script], ctx(), isPrompt: true),
+        equals('Z'),
+      );
     });
 
     test('HEADER-style: multiline capture groups are resolved', () {
@@ -152,12 +240,14 @@ void main() {
       final script = PresetRegex.fromJson({
         'id': 'header-test',
         'name': 'HEADER',
-        'regex': r'/\[HEADER\]\s*name:\s*([^\n]+?)\s*status:\s*([^\n]+?)\s*\[\/HEADER\]/g',
+        'regex':
+            r'/\[HEADER\]\s*name:\s*([^\n]+?)\s*status:\s*([^\n]+?)\s*\[\/HEADER\]/g',
         'replacement': r'<div>Name=$1 Status=$2</div>',
         'placement': [2],
       });
 
-      const input = '[HEADER]\nname: Элай Марш\nstatus: idle\n[/HEADER]\nSome text.';
+      const input =
+          '[HEADER]\nname: Элай Марш\nstatus: idle\n[/HEADER]\nSome text.';
       final out = applyRegexes(input, 2, 2, [script], ctx());
       expect(out, equals('<div>Name=Элай Марш Status=idle</div>\nSome text.'));
     });
@@ -171,9 +261,15 @@ void main() {
         'placement': [2],
       });
 
-      const input = '[BOOTS]\ntitle: My Title\nreflection: deep thoughts\n[/BOOTS]';
+      const input =
+          '[BOOTS]\ntitle: My Title\nreflection: deep thoughts\n[/BOOTS]';
       final out = applyRegexes(input, 2, 2, [script], ctx());
-      expect(out, equals('<div class="boots">\ntitle: My Title\nreflection: deep thoughts\n</div>'));
+      expect(
+        out,
+        equals(
+          '<div class="boots">\ntitle: My Title\nreflection: deep thoughts\n</div>',
+        ),
+      );
     });
 
     test('backrefs work even with substituteRegex != 0', () {
@@ -219,6 +315,159 @@ void main() {
       final out = applyRegexes(input, 2, 2, [script], ctx());
       // $10 = 'j', $11 = 'k'
       expect(out, equals('j-k'));
+    });
+  });
+
+  group('RegexService — macros in the replacement (ST parity)', () {
+    // ST's runRegexScript ends with `return substituteParams(replaceWithGroups)`
+    // on every match, regardless of `substituteRegex` — that flag governs the
+    // *find* field only. These tests pin that behavior.
+    RegexApplyContext charCtx({
+      Map<String, String> sessionVars = const {},
+      Map<String, String> globalVars = const {},
+    }) => RegexApplyContext(
+      char: Character(id: 'char_1', name: 'Alise', createdAt: 0, updatedAt: 0),
+      persona: Persona(id: 'persona_1', name: 'Иван'),
+      sessionVars: sessionVars,
+      globalVars: globalVars,
+    );
+
+    PresetRegex cardScript() => PresetRegex.fromJson({
+      'id': 'status-card',
+      'name': 'status card',
+      'regex': r'/\{TRK\|(.*?)\}/g',
+      'replacement':
+          '<div><b>{{user}}</b>: \$1</div><div><b>{{char}}</b>: \$1</div>',
+      'placement': [2],
+    });
+
+    test(
+      '{{user}} / {{char}} in the replacement expand without macroRules',
+      () {
+        final out = applyRegexes(
+          '{TRK|jacket}',
+          2,
+          1,
+          [cardScript()],
+          charCtx(),
+          isMarkdown: true,
+        );
+
+        expect(
+          out,
+          equals(
+            '<div><b>Иван</b>: jacket</div><div><b>Alise</b>: jacket</div>',
+          ),
+        );
+      },
+    );
+
+    test(
+      'macros stay literal when no character/macro context is available',
+      () {
+        final out = applyRegexes(
+          '{TRK|jacket}',
+          2,
+          1,
+          [cardScript()],
+          const RegexApplyContext(),
+          isMarkdown: true,
+        );
+
+        expect(out, contains('{{user}}'));
+        expect(out, contains('{{char}}'));
+      },
+    );
+
+    test('macros are substituted after capture groups, like ST', () {
+      // A macro carried in by a capture group is expanded too: ST runs
+      // substituteParams on the group-resolved string.
+      final script = PresetRegex.fromJson({
+        'id': 'match-macro',
+        'name': 'match macro',
+        'regex': r'/\[(.*?)\]/g',
+        'replacement': r'$1',
+        'placement': [2],
+      });
+
+      final out = applyRegexes('[{{char}} waves]', 2, 1, [script], charCtx());
+      expect(out, equals('Alise waves'));
+    });
+
+    test('variable macros in the replacement read the context vars', () {
+      final script = PresetRegex.fromJson({
+        'id': 'var-card',
+        'name': 'var card',
+        'regex': r'/\{LOC\}/g',
+        'replacement': '{{getvar::location}}',
+        'placement': [2],
+      });
+
+      final out = applyRegexes('{LOC}', 2, 1, [
+        script,
+      ], charCtx(sessionVars: {'location': 'Квартира бабы Нели'}));
+      expect(out, equals('Квартира бабы Нели'));
+    });
+
+    test('trim strings are stripped from the spliced-in match, ST-style', () {
+      // ST's filterString runs on the captured text that lands in the
+      // replacement — never on parts of the message the script did not match.
+      final script = PresetRegex.fromJson({
+        'id': 'trim-card',
+        'name': 'trim card',
+        'regex': r'/\{TRK\|(.*?)\}/g',
+        'replacement': r'<b>$1</b>',
+        'trimStrings': ['noise'],
+        'placement': [2],
+      });
+
+      final out = applyRegexes('noise {TRK|noise jacket} noise', 2, 1, [
+        script,
+      ], charCtx());
+
+      expect(out, equals('noise <b> jacket</b> noise'));
+    });
+
+    test('trim strings themselves are macro-substituted', () {
+      final script = PresetRegex.fromJson({
+        'id': 'trim-macro',
+        'name': 'trim macro',
+        'regex': r'/\[(.*?)\]/g',
+        'replacement': r'$1',
+        'trimStrings': ['{{char}}: '],
+        'placement': [2],
+      });
+
+      final out = applyRegexes('[Alise: hello]', 2, 1, [script], charCtx());
+      expect(out, equals('hello'));
+    });
+
+    test('{{match}} is trimmed like ST\'s \$0', () {
+      final script = PresetRegex.fromJson({
+        'id': 'trim-match',
+        'name': 'trim match',
+        'regex': r'/<tag>.*?<\/tag>/g',
+        'replacement': '[{{match}}]',
+        'trimStrings': ['<tag>', '</tag>'],
+        'placement': [2],
+      });
+
+      final out = applyRegexes('<tag>body</tag>', 2, 1, [script], charCtx());
+      expect(out, equals('[body]'));
+    });
+
+    test('macroRules still drives macros in the find field', () {
+      final script = PresetRegex.fromJson({
+        'id': 'find-macro',
+        'name': 'find macro',
+        'regex': '/{{char}}/g',
+        'replacement': 'CHAR',
+        'macroRules': '1',
+        'placement': [2],
+      });
+
+      final out = applyRegexes('Alise waves', 2, 1, [script], charCtx());
+      expect(out, equals('CHAR waves'));
     });
   });
 }

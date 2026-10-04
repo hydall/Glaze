@@ -1,6 +1,7 @@
 import '../../../core/models/chat_message.dart';
 import '../../../core/utils/id_generator.dart';
 import '../../../core/utils/time_helpers.dart';
+import '../../image_gen/services/image_tag_markup.dart';
 import '../chat_state.dart';
 
 /// Pure-function helpers for building the final [ChatState] after one
@@ -30,6 +31,7 @@ class SavedMessageWriter {
     String? genTime,
     int? tokens,
     String? rawResponse,
+    String? time,
     List<String>? previousSwipes,
     int previousSwipeId = 0,
     String? previousReasoning,
@@ -37,6 +39,7 @@ class SavedMessageWriter {
     int? previousTokens,
     List<Map<String, dynamic>>? previousSwipesMeta,
     String? guidanceText,
+    String guidanceType = 'GENERATION',
     Map<String, dynamic> memoryCoverage = const {},
     bool isAllReasoning = false,
     List<TriggeredEntry> triggeredLorebooks = const [],
@@ -45,6 +48,14 @@ class SavedMessageWriter {
     int visibleStartIndex = 0,
     List<Map<String, dynamic>> studioOutputs = const [],
   }) {
+    // A reply can only *ask* for a picture. Glaze is the sole writer of a
+    // finished image block — it writes the `<img data-iig-…>` element the
+    // moment it has saved the file — so one arriving in model output names
+    // files that do not exist: the message would render a broken picture with
+    // a variant switcher counting images that were never generated. Reduced to
+    // the pending tag it should have been, the post-gen image stage picks it up
+    // and produces a real image (INV-IG12).
+    text = ImageTagMarkup.reduceBlocksToInstructions(text);
     final persistedMemoryCoverage = stripEphemeralMemoryCoverage(
       memoryCoverage,
     );
@@ -63,6 +74,10 @@ class SavedMessageWriter {
       'genTime': genTime,
       'reasoning': reasoning,
       'tokens': tokens,
+      // Opening game clock (Studio only): stamped at creation so the badge
+      // renders with the initial append instead of waiting for the
+      // post-turn Ledger update.
+      'time': ?time,
       if (studioOutputs.isNotEmpty) 'studioOutputs': studioOutputs,
       // Persist triggered entries per swipe so each variation shows its own
       // lorebook/memory activations (restored on swipe in ChatMessageService).
@@ -75,7 +90,7 @@ class SavedMessageWriter {
     };
     if (guidanceText != null && guidanceText.isNotEmpty) {
       currentSwipeMeta['guidanceText'] = guidanceText;
-      currentSwipeMeta['guidanceType'] = 'GENERATION';
+      currentSwipeMeta['guidanceType'] = guidanceType;
     }
 
     List<Map<String, dynamic>> swipesMeta;
@@ -120,6 +135,7 @@ class SavedMessageWriter {
             reasoning: reasoning,
             genTime: genTime,
             tokens: tokens,
+            time: time,
             studioOutputs: studioOutputs,
           ),
         ];
@@ -140,6 +156,13 @@ class SavedMessageWriter {
           content: text,
           reasoning: reasoning,
           isAllReasoning: isAllReasoning,
+          // A guided swipe's instruction belongs to the variation it produced:
+          // the message shows it while that variation is the visible one, and
+          // `ChatMessageService.setSwipe` restores it from the swipe's meta.
+          // A reply steered from the composer is described by the user message
+          // that carries it, so it leaves no block on this one.
+          guidanceText: guidanceType == 'SWIPE' ? guidanceText : null,
+          guidanceType: guidanceType,
           // A full regen is a fresh event: restamp the message so the chat
           // list (sorted on the last message's timestamp) surfaces the
           // session again. The message keeps its position in the chat — only
@@ -159,6 +182,9 @@ class SavedMessageWriter {
           agentSwipes: agentSwipes,
           agentSwipeId: agentSwipeId,
           studioOutputs: studioOutputs,
+          // Fresh variation carries the opening clock (may be null when no
+          // complete game-time tuple exists); Ledger restamps after the turn.
+          time: time,
         );
         final updatedMessages = [...currentSession.messages];
         updatedMessages[idx] = updated;
@@ -193,6 +219,7 @@ class SavedMessageWriter {
         reasoning: reasoning,
         genTime: genTime,
         tokens: tokens,
+        time: time,
         studioOutputs: studioOutputs,
       ),
     ];
@@ -205,6 +232,7 @@ class SavedMessageWriter {
       genTime: genTime,
       tokens: tokens,
       timestamp: DateTime.now().millisecondsSinceEpoch,
+      time: time,
       swipes: swipes,
       swipeId: swipeId,
       swipesMeta: swipesMeta,
@@ -311,6 +339,7 @@ class SavedMessageWriter {
           'genTime': original.genTime,
           'reasoning': original.reasoning,
           'tokens': original.tokens,
+          'time': original.time,
         });
       } else {
         priorMeta.add(<String, dynamic>{});
@@ -330,6 +359,7 @@ class SavedMessageWriter {
       reasoning: null,
       genTime: null,
       tokens: null,
+      time: null,
     );
     final finalMessages = [...saveSession.messages];
     finalMessages[idx] = updated;

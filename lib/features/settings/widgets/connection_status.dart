@@ -1,10 +1,13 @@
 import 'dart:ui';
 
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../shared/theme/app_colors.dart';
 
+/// State of a connection check. Nothing is probed until the user taps the
+/// badge, so [idle] is a neutral prompt ("Tap to Check") rather than a verdict.
 enum ApiConnectionStatus { idle, connecting, connected, failed }
 
 class ConnectionStatus extends StatefulWidget {
@@ -29,13 +32,13 @@ class _ConnectionStatusState extends State<ConnectionStatus> {
   String get _statusText {
     switch (widget.status) {
       case ApiConnectionStatus.idle:
-        return 'Idle';
+        return 'conn_status_tap_to_check'.tr();
       case ApiConnectionStatus.connecting:
-        return 'Connecting...';
+        return 'conn_status_connecting'.tr();
       case ApiConnectionStatus.connected:
-        return 'Connected';
+        return 'conn_status_connected'.tr();
       case ApiConnectionStatus.failed:
-        return 'Failed';
+        return 'conn_status_failed'.tr();
     }
   }
 

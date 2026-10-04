@@ -1,11 +1,13 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/llm/generation_phase.dart';
 import '../../core/models/chat_message.dart';
-import '../../core/services/generation_notification_service.dart';
+import '../../core/state/card_rewriter_providers.dart';
 import '../../core/utils/id_generator.dart';
 import '../extensions/services/extension_post_gen_service.dart';
 import 'chat_provider.dart' show streamingStateProvider;
+import 'state/generation_phase_provider.dart';
 import 'state/post_cleaner_state_provider.dart'
     show PostCleanerState, cleanerCancelTokenProvider, postCleanerStateProvider;
 import 'state/studio_cycle_state_provider.dart';
@@ -117,10 +119,15 @@ class AbortHandler {
     }
     _ref.read(cleanerCancelTokenProvider.notifier).state = null;
     _ref.read(extensionPostGenServiceProvider).cancelBlocks();
+    final sessionId = _getState().value?.session?.id;
+    if (sessionId != null) {
+      _ref.read(automatedCardEvolutionServiceProvider).cancelSession(sessionId);
+    }
     _ref.read(postCleanerStateProvider.notifier).state =
         const PostCleanerState.idle();
     clearStreaming();
     clearStudioCycle();
+    setGenerationPhase(_ref, _charId, GenerationPhase.idle);
 
     final current = _getState().value;
     if (current != null && (current.isGenerating || current.isPostGenRunning)) {
@@ -176,8 +183,6 @@ class AbortHandler {
       _setState(AsyncData(current.copyWith(isGeneratingImage: false)));
     }
     _restorationMessage = null;
-
-    await GenerationNotificationService.instance.onGenerationAborted();
   }
 
   /// Stop pressed while `continueMessage()` was streaming. The partial text
@@ -266,11 +271,20 @@ class AbortHandler {
                     'genTime': restoration.genTime,
                     'reasoning': restoration.reasoning,
                     'tokens': restoration.tokens,
+                    'time': restoration.time,
                   },
                 ],
         );
         keptSwipes.add(partialText);
-        keptSwipesMeta.add(<String, dynamic>{});
+        final partialAgentSwipe = AgentSwipe(
+          content: partialText,
+          reasoning: partialStreaming.reasoning,
+          parentSwipeId: keptSwipes.length - 1,
+        );
+        keptSwipesMeta.add(<String, dynamic>{
+          'agentSwipes': [partialAgentSwipe.toJson()],
+          'agentSwipeId': 0,
+        });
         final newSwipeId = keptSwipes.length - 1;
         final updated = target.copyWith(
           content: partialText,
@@ -280,6 +294,9 @@ class AbortHandler {
           reasoning: partialStreaming.reasoning,
           genTime: null,
           tokens: null,
+          time: null,
+          agentSwipes: [partialAgentSwipe],
+          agentSwipeId: 0,
           isTyping: false,
           // Partial text becomes a fresh (healthy) swipe; with nothing
           // streamed we put the pre-regen variation back untouched — an

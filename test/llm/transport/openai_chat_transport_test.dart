@@ -4,30 +4,37 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/llm/transport/chat_transport_request.dart';
+import 'package:glaze_flutter/core/llm/transport/llm_protocol.dart';
 import 'package:glaze_flutter/core/llm/transport/openai_chat_transport.dart';
 import 'package:glaze_flutter/core/models/extra_request_parameter.dart';
+
+import '_sse_adapter.dart';
 
 ChatTransportRequest _req({
   String endpoint = 'https://api.openai.com',
   String sessionIdMode = 'openrouter',
   int? receiveTimeoutMs,
+  int maxTokens = 100,
   int topK = 0,
   double frequencyPenalty = 0,
   double presencePenalty = 0,
   bool omitTopK = false,
   bool omitFrequencyPenalty = false,
   bool omitPresencePenalty = false,
+  bool requestReasoning = false,
+  String reasoningEffort = 'medium',
   List<Map<String, dynamic>> messages = const [
     {'role': 'user', 'content': 'hi'},
   ],
   List<ExtraRequestParameter> extraRequestParameters = const [],
+  Map<String, dynamic>? responseJsonSchema,
 }) {
   return ChatTransportRequest(
     endpoint: endpoint,
     apiKey: 'sk-test',
     model: 'gpt-test',
     messages: messages,
-    maxTokens: 100,
+    maxTokens: maxTokens,
     temperature: 0.7,
     topP: 0.9,
     topK: topK,
@@ -36,9 +43,12 @@ ChatTransportRequest _req({
     omitTopK: omitTopK,
     omitFrequencyPenalty: omitFrequencyPenalty,
     omitPresencePenalty: omitPresencePenalty,
+    requestReasoning: requestReasoning,
+    reasoningEffort: reasoningEffort,
     sessionId: 'sess-1',
     sessionIdMode: sessionIdMode,
     receiveTimeoutMs: receiveTimeoutMs,
+    responseJsonSchema: responseJsonSchema,
     extraRequestParameters: extraRequestParameters,
   );
 }
@@ -67,6 +77,20 @@ class _RecordingAdapter implements HttpClientAdapter {
 }
 
 void main() {
+  test('zero max tokens leaves only an explicit completion limit', () {
+    final body = OpenAiChatTransport.buildBody(
+      _req(
+        maxTokens: 0,
+        extraRequestParameters: const [
+          ExtraRequestParameter(key: 'max_completion_tokens', value: '8000'),
+        ],
+      ),
+    );
+
+    expect(body.containsKey('max_tokens'), isFalse);
+    expect(body['max_completion_tokens'], 8000);
+  });
+
   test('per-request zero disables the default receive timeout', () async {
     final adapter = _RecordingAdapter();
     final dio = Dio(BaseOptions(receiveTimeout: const Duration(seconds: 120)))
@@ -150,6 +174,23 @@ void main() {
     expect(messages[1]['content'], 'answer');
   });
 
+  test('official OpenAI caps maximum reasoning effort at high', () {
+    final body = OpenAiChatTransport.buildBody(
+      _req(requestReasoning: true, reasoningEffort: 'max'),
+    );
+
+    expect(body['reasoning_effort'], 'high');
+  });
+
+  test('Custom Chat Completion sends maximum reasoning effort as max', () {
+    final body = OpenAiChatTransport.buildBody(
+      _req(requestReasoning: true, reasoningEffort: 'max'),
+      protocol: LlmProtocol.customChatCompletion,
+    );
+
+    expect(body['reasoning_effort'], 'max');
+  });
+
   group('extra request parameters', () {
     test('adds enabled values and parses valid JSON', () {
       final body = OpenAiChatTransport.buildBody(
@@ -188,5 +229,106 @@ void main() {
       expect(body['stream'], isTrue);
       expect(body['messages'], isNotEmpty);
     });
+  });
+
+  test('preserves newlines split across SSE network chunks', () async {
+    const body = '''data:{"choices":[{"delta":{"content":"first\\n"}}]}
+
+data: {"choices":[{"delta":{"content":"\\nsecond"}}]}
+
+data: [DONE]
+
+''';
+    final bodyBytes = utf8.encode(body);
+    final firstNewline = bodyBytes.indexOf(0x0a);
+    final dio = Dio()
+      ..httpClientAdapter = SseAdapter(
+        body,
+        chunkSizes: [firstNewline + 1, 1, 2],
+      );
+    final updates = <String>[];
+    String? completed;
+
+    await OpenAiChatTransport(dio: dio).stream(
+      request: _req(),
+      onUpdate: (delta, _) => updates.add(delta),
+      onComplete: (text, _, {rawResponseJson}) => completed = text,
+    );
+
+    expect(updates, ['first\n', '\nsecond']);
+    expect(completed, 'first\n\nsecond');
+  });
+
+  test(
+    'preserves UTF-8 text and newlines split across network chunks',
+    () async {
+      const body = '''data: {"choices":[{"delta":{"content":"Привет\\n"}}]}
+
+data: {"choices":[{"delta":{"content":"\\nмир"}}]}
+
+data: [DONE]
+
+''';
+      final bytes = utf8.encode(body);
+      final splitInsideFirstRussianCharacter =
+          bytes.indexOf(utf8.encode('П').first) + 1;
+      final dio = Dio()
+        ..httpClientAdapter = SseAdapter(
+          body,
+          chunkSizes: [splitInsideFirstRussianCharacter, 1, 2, 3],
+        );
+      String? completed;
+
+      await OpenAiChatTransport(dio: dio).stream(
+        request: _req(),
+        onComplete: (text, _, {rawResponseJson}) => completed = text,
+      );
+
+      expect(completed, 'Привет\n\nмир');
+    },
+  );
+
+  test('responseJsonSchema emits a strict json_schema response_format', () {
+    final body = OpenAiChatTransport.buildBody(
+      _req(
+        responseJsonSchema: const {
+          'type': 'object',
+          'properties': {
+            'prefix': {
+              'type': 'string',
+              'enum': ['<thinking>'],
+            },
+            'content': {'type': 'string'},
+          },
+          'required': ['prefix', 'content'],
+          'additionalProperties': false,
+        },
+      ),
+    );
+
+    expect(body['response_format'], {
+      'type': 'json_schema',
+      'json_schema': {
+        'name': 'glaze_prefill_response',
+        'strict': true,
+        'schema': {
+          'type': 'object',
+          'properties': {
+            'prefix': {
+              'type': 'string',
+              'enum': ['<thinking>'],
+            },
+            'content': {'type': 'string'},
+          },
+          'required': ['prefix', 'content'],
+          'additionalProperties': false,
+        },
+      },
+    });
+  });
+
+  test('no response_format is emitted without responseJsonSchema', () {
+    final body = OpenAiChatTransport.buildBody(_req());
+    expect(body.containsKey('response_format'), isFalse);
   });
 }

@@ -9,6 +9,8 @@ import 'reasoning_stripper.dart';
 import 'stream_accumulator.dart';
 import 'transport/chat_transport.dart';
 import 'transport/chat_transport_request.dart';
+import 'transport/llm_capture_context.dart';
+import 'studio_controller_ontology.dart';
 
 /// The streaming state machine for a single Studio agent run, extracted
 /// from `AgentRunner._runAgentInner` (plan §7.1). Given an already-resolved
@@ -44,15 +46,13 @@ class AgentStreamRunner {
     String? tagEnd,
     String? headerModel,
     String? headerInline,
+    String? charName,
+    String? userName,
+    Map<String, dynamic>? responseJsonSchema,
     void Function(String text, String? reasoning)? onFinalResponseUpdate,
     void Function(String text)? onIntermediateUpdate,
   }) async {
     final completer = Completer<AgentRunResult>();
-    final requestMessages =
-        isFinalResponse &&
-            (!resolved.requestReasoning || resolved.omitReasoning)
-        ? ReasoningStripper.stripMessageReasoning(messages)
-        : messages;
     final shouldStream = resolved.stream;
 
     const defaultTagStart = '<think>';
@@ -74,35 +74,17 @@ class AgentStreamRunner {
       headerInline: headerInline,
     );
 
-    final request = ChatTransportRequest(
-      endpoint: resolved.endpoint,
-      apiKey: resolved.apiKey,
-      model: resolved.model,
-      messages: requestMessages,
-      maxTokens: maxTokensOverride ?? agent.maxTokens,
-      temperature: temperatureOverride ?? agent.temperature,
-      topP: resolved.topP,
-      topK: resolved.topK,
-      frequencyPenalty: resolved.frequencyPenalty,
-      presencePenalty: resolved.presencePenalty,
-      stream: shouldStream,
-      requestReasoning: resolved.requestReasoning,
-      useResponsesApi: resolved.useResponsesApi,
-      reasoningEffort: resolved.requestReasoning
-          ? resolved.reasoningEffort
-          : null,
-      omitTemperature: resolved.omitTemperature,
-      omitTopP: resolved.omitTopP,
-      omitReasoning: resolved.omitReasoning,
-      omitReasoningEffort: resolved.omitReasoningEffort,
-      // The Studio timer owns first-chunk timeout semantics. A Dio receive
-      // timeout would incorrectly become a second total/idle timeout.
-      receiveTimeoutMs: 0,
+    final request = buildRequest(
+      agent: agent,
+      messages: messages,
+      resolved: resolved,
       sessionId: sessionId,
-      cacheControlTtl: resolved.cacheControlTtl,
-      cacheBreakpointMode: resolved.cacheBreakpointMode,
-      sessionIdMode: resolved.sessionIdMode,
-      extraRequestParameters: resolved.extraRequestParameters,
+      isFinalResponse: isFinalResponse,
+      maxTokensOverride: maxTokensOverride,
+      temperatureOverride: temperatureOverride,
+      charName: charName,
+      userName: userName,
+      responseJsonSchema: responseJsonSchema,
     );
     final transport = _pickTransport(resolved.protocol);
     final startedAt = DateTime.now();
@@ -169,7 +151,7 @@ class AgentStreamRunner {
         },
         onComplete: (text, finalReasoning, {rawResponseJson}) {
           idleTimer?.cancel();
-          if (shouldStream && accumulator.text.isEmpty && text.isNotEmpty) {
+          if (accumulator.text.isEmpty && text.isNotEmpty) {
             accumulator.consumeDelta(text, reasoningDelta: finalReasoning);
           }
           final effectiveText = accumulator.text.trimLeft();
@@ -197,7 +179,7 @@ class AgentStreamRunner {
             final accumulatedText = effectiveText.isEmpty && text.isNotEmpty
                 ? text.trim()
                 : effectiveText;
-            final finalText = shouldStream && accumulatedText.isNotEmpty
+            final finalText = accumulatedText.isNotEmpty
                 ? accumulatedText
                 : text.trim();
             final reasoningText = isFinalResponse
@@ -235,6 +217,79 @@ class AgentStreamRunner {
     return completer.future.whenComplete(() {
       idleTimer?.cancel();
     });
+  }
+
+  /// Builds the exact provider-neutral request used by [run] without invoking
+  /// a transport. Prompt Inspector uses this pure seam for current previews.
+  static ChatTransportRequest buildRequest({
+    required StudioAgent agent,
+    required List<Map<String, dynamic>> messages,
+    required ResolvedAgentConfig resolved,
+    required String sessionId,
+    required bool isFinalResponse,
+    int? maxTokensOverride,
+    double? temperatureOverride,
+    String? charName,
+    String? userName,
+    Map<String, dynamic>? responseJsonSchema,
+  }) {
+    final hasInlineReasoningTags =
+        resolved.reasoningTagStart?.isNotEmpty == true &&
+        resolved.reasoningTagEnd?.isNotEmpty == true;
+    final requestMessages =
+        isFinalResponse &&
+            (!resolved.requestReasoning || resolved.omitReasoning) &&
+            !hasInlineReasoningTags
+        ? ReasoningStripper.stripMessageReasoning(messages)
+        : messages;
+    final spec = StudioControllerOntology.specForAgent(agent);
+    return ChatTransportRequest(
+      endpoint: resolved.endpoint,
+      apiKey: resolved.apiKey,
+      model: resolved.model,
+      messages: requestMessages,
+      maxTokens: maxTokensOverride ?? (spec?.maxTokens ?? 8000),
+      temperature: temperatureOverride ?? (spec?.temperature ?? 0.3),
+      topP: resolved.topP,
+      topK: resolved.topK,
+      frequencyPenalty: resolved.frequencyPenalty,
+      presencePenalty: resolved.presencePenalty,
+      stream: resolved.stream,
+      requestReasoning: resolved.requestReasoning,
+      useResponsesApi: resolved.useResponsesApi,
+      reasoningEffort: resolved.requestReasoning
+          ? resolved.reasoningEffort
+          : null,
+      omitTemperature: resolved.omitTemperature,
+      omitTopP: resolved.omitTopP,
+      omitTopK: resolved.omitTopK,
+      omitFrequencyPenalty: resolved.omitFrequencyPenalty,
+      omitPresencePenalty: resolved.omitPresencePenalty,
+      omitReasoning: resolved.omitReasoning,
+      omitReasoningEffort: resolved.omitReasoningEffort,
+      showNativeReasoning: resolved.showNativeReasoning,
+      // The Studio timer owns first-chunk timeout semantics. A Dio receive
+      // timeout would incorrectly become a second total/idle timeout.
+      receiveTimeoutMs: 0,
+      sessionId: sessionId,
+      cacheControlTtl: resolved.cacheControlTtl,
+      cacheBreakpointMode: resolved.cacheBreakpointMode,
+      sessionIdMode: resolved.sessionIdMode,
+      promptPostProcessing: resolved.promptPostProcessing,
+      charName: charName,
+      userName: userName,
+      responseJsonSchema: responseJsonSchema,
+      extraRequestParameters: resolved.extraRequestParameters,
+      captureContext: LlmCaptureContext(
+        stage: isFinalResponse
+            ? 'studio.final'
+            : agent.phase == 'post_processing'
+            ? 'studio.post_processing'
+            : 'studio.controller',
+        sessionId: sessionId,
+        agentId: agent.id,
+      ),
+    );
   }
 }
 

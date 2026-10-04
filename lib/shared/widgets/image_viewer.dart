@@ -4,6 +4,8 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import 'glaze_spinner.dart';
+
 class ImageViewer extends StatefulWidget {
   final ImageProvider imageProvider;
   final String? description;
@@ -152,10 +154,7 @@ class _ImageViewerState extends State<ImageViewer> with SingleTickerProviderStat
                       child: SizedBox(
                         width: 32,
                         height: 32,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white70,
-                        ),
+                        child: GlazeSpinner(color: Colors.white70),
                       ),
                     );
                   },

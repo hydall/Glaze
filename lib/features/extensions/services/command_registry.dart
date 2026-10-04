@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../../../core/utils/error_format.dart';
 import '../models/trigger_mode.dart';
 
 /// One executable glaze slash-command. Commands are the audit-friendly
@@ -116,7 +117,7 @@ class CommandRegistry {
       return await cmd.handler(args, context);
     } catch (e) {
       if (kDebugMode) debugPrint('[CommandRegistry] $name failed: $e');
-      return CommandResult.error(e.toString());
+      return CommandResult.error(formatError(e));
     }
   }
 

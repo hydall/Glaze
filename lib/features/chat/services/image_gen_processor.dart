@@ -36,14 +36,6 @@ class ImageGenProcessor {
     final session = currentState.session;
     if (session == null) return;
 
-    final imgGenSettingsAsync = _ref.read(imageGenSettingsProvider);
-    if (imgGenSettingsAsync.isLoading) {
-      final imgGenSettings = await _ref.read(imageGenSettingsProvider.future);
-      if (!imgGenSettings.enabled) return;
-    } else {
-      final imgGenSettings = imgGenSettingsAsync.value;
-      if (imgGenSettings == null || !imgGenSettings.enabled) return;
-    }
     final imgGenSettings = await _ref.read(imageGenSettingsProvider.future);
 
     final targetIdx = targetMessageId == null
@@ -58,9 +50,41 @@ class ImageGenProcessor {
     final targetAgentSwipeId = targetMsg.agentSwipeId;
     if (targetMsg.role != 'assistant') return;
 
+    if (!ImageTagMarkup.hasImageGenTags(targetMsg.content)) return;
+
+    var latestSession = session;
+    if (!imgGenSettings.enabled) {
+      final disabledContent = ImageTagMarkup.replaceAllImageGenTagsWithDisabled(
+        targetMsg.content,
+      );
+      if (disabledContent == targetMsg.content || !_ownsOperation) return;
+
+      latestSession = _replaceMessage(
+        latestSession,
+        stableTargetMessageId,
+        targetSwipeId,
+        targetAgentSwipeId,
+        disabledContent,
+      );
+      _onStateUpdate(currentState.copyWith(session: latestSession));
+      final durable = await _persistMessageContent(
+        session.id,
+        stableTargetMessageId,
+        targetSwipeId,
+        targetAgentSwipeId,
+        disabledContent,
+      );
+      if (durable != null) {
+        ChatSessionService.updateCache(durable);
+        if (_ownsOperation) {
+          _onStateUpdate(currentState.copyWith(session: durable));
+        }
+      }
+      return;
+    }
+
     final notifier = _ref.read(imageGenSettingsProvider.notifier);
     final service = await notifier.getServiceAsync();
-    if (!ImageTagMarkup.hasImageGenTags(targetMsg.content)) return;
 
     final apiConfigSync = _ref.read(activeApiConfigProvider);
     final ApiConfig apiConfig;
@@ -94,7 +118,6 @@ class ImageGenProcessor {
     );
 
     final recentContexts = _collectRecentImageContexts(session.messages);
-    var latestSession = session;
     if (!_ownsOperation) return;
 
     debugPrint('[IMGGEN] → setting isGeneratingImage=true');
@@ -292,64 +315,26 @@ class ImageGenProcessor {
         );
   }
 
-  static ChatMessage appendImageRegenerationSwipe(
+  /// Rewrites the image blocks of the swipe the user is looking at.
+  ///
+  /// Regenerating a picture used to append a message swipe, so "regenerate
+  /// this image" read as a whole new reply: the swipe counter grew and the
+  /// text around the image was duplicated into the new variant. The retried
+  /// blocks are reset inside the active swipe instead, which leaves the reply
+  /// itself — and its swipe count — alone. An error flag left over from the
+  /// failed block is cleared with them, the way the appending path did.
+  static ChatMessage resetImageContentInPlace(
     ChatMessage message,
     String pendingContent,
   ) {
-    final swipes = message.swipes.isEmpty
-        ? <String>[message.content]
-        : List<String>.from(message.swipes);
-    final activeSwipeId = message.swipeId.clamp(0, swipes.length - 1);
-    final meta = List<Map<String, dynamic>>.generate(
-      swipes.length,
-      (index) => index < message.swipesMeta.length
-          ? Map<String, dynamic>.from(message.swipesMeta[index])
-          : <String, dynamic>{},
-    );
-    final activeAgentSwipes = message.agentSwipes.isEmpty
-        ? <AgentSwipe>[
-            AgentSwipe(
-              content: message.content,
-              reasoning: message.reasoning,
-              genTime: message.genTime,
-              tokens: message.tokens,
-              studioOutputs: message.studioOutputs,
-            ),
-          ]
-        : List<AgentSwipe>.from(message.agentSwipes);
-    final activeAgentSwipeId = message.agentSwipeId.clamp(
-      0,
-      activeAgentSwipes.length - 1,
-    );
-    meta[activeSwipeId] = {
-      ...meta[activeSwipeId],
-      'agentSwipes': activeAgentSwipes.map((swipe) => swipe.toJson()).toList(),
-      'agentSwipeId': activeAgentSwipeId,
-    };
-
-    final candidateAgentSwipes = List<AgentSwipe>.from(activeAgentSwipes);
-    candidateAgentSwipes[activeAgentSwipeId] =
-        candidateAgentSwipes[activeAgentSwipeId].copyWith(
-          content: pendingContent,
-        );
-    final candidateMeta = Map<String, dynamic>.from(meta[activeSwipeId])
-      ..remove('isError')
-      ..['agentSwipes'] = candidateAgentSwipes
-          .map((swipe) => swipe.toJson())
-          .toList()
-      ..['agentSwipeId'] = activeAgentSwipeId;
-    swipes.add(pendingContent);
-    meta.add(candidateMeta);
-
-    return message.copyWith(
-      content: pendingContent,
-      swipes: swipes,
-      swipeId: swipes.length - 1,
-      swipesMeta: meta,
-      agentSwipes: candidateAgentSwipes,
-      agentSwipeId: activeAgentSwipeId,
-      isError: false,
-    );
+    final updated = replaceActiveImageContent(message, pendingContent);
+    final meta = List<Map<String, dynamic>>.from(updated.swipesMeta);
+    final swipeId = updated.swipeId;
+    if (swipeId >= 0 && swipeId < meta.length) {
+      meta[swipeId] = Map<String, dynamic>.from(meta[swipeId])
+        ..remove('isError');
+    }
+    return updated.copyWith(swipesMeta: meta, isError: false);
   }
 
   static ChatMessage replaceActiveImageContent(
@@ -395,12 +380,16 @@ class ImageGenProcessor {
       }
     }
     if (agentSwipes.isEmpty && swipes.isNotEmpty) {
+      final storedTime = swipeId >= 0 && swipeId < meta.length
+          ? meta[swipeId]['time'] as String?
+          : null;
       agentSwipes = [
         AgentSwipe(
           content: content,
           reasoning: message.reasoning,
           genTime: message.genTime,
           tokens: message.tokens,
+          time: isActiveSwipe ? message.time : storedTime,
           studioOutputs: message.studioOutputs,
         ),
       ];

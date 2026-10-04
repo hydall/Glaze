@@ -20,7 +20,10 @@ import 'cleaner/cleaner_text_guard.dart';
 import 'macro_engine.dart';
 import 'shared/message_range_formatter.dart';
 import 'studio/studio_aux_prompt_assembler.dart';
+import 'transport/llm_capture_context.dart';
 import '../models/studio_config.dart';
+import '../models/studio_regex.dart';
+import 'studio_regex_applicator.dart';
 
 // Re-export extracted specialists for backward compat (tests import these
 // symbols from post_cleaner_service.dart).
@@ -45,6 +48,7 @@ class PostCleanerService {
   final TrackerSnapshotRepo _snapshotRepo;
   final void Function(ChatSession) onSessionUpdated;
   final void Function() _invalidateChatHistory;
+  final List<StudioRegex> Function() _readStudioRegexes;
 
   PostCleanerService({
     required this._llm,
@@ -52,7 +56,10 @@ class PostCleanerService {
     required this._snapshotRepo,
     required this.onSessionUpdated,
     required this._invalidateChatHistory,
-  });
+    List<StudioRegex> Function()? readStudioRegexes,
+  }) : _readStudioRegexes = readStudioRegexes ?? _emptyStudioRegexes;
+
+  static List<StudioRegex> _emptyStudioRegexes() => const [];
 
   /// Run the POST-cleaner on the last assistant message.
   ///
@@ -71,6 +78,7 @@ class PostCleanerService {
     required PipelineSettings settings,
     required AuxApiConfig config,
     required String assistantText,
+    String? messageId,
     List<String> broadcastBlocks = const [],
     List<ChatMessage> recentMessages = const [],
     List<String>? auditIssues,
@@ -94,22 +102,33 @@ class PostCleanerService {
 
     final token = cancelToken ?? CancelToken();
     if (token.isCancelled) {
-      return PostCleanerResult(status: 'aborted', cleanedText: wrapLumiaOocColors(assistantText));
+      return PostCleanerResult(
+        status: 'aborted',
+        cleanedText: wrapLumiaOocColors(assistantText),
+      );
     }
 
     if (assistantText.trim().isEmpty) {
-      return PostCleanerResult(status: 'ok', cleanedText: wrapLumiaOocColors(assistantText));
+      return PostCleanerResult(
+        status: 'ok',
+        cleanedText: wrapLumiaOocColors(assistantText),
+      );
     }
 
     try {
       if (token.isCancelled) {
-        return PostCleanerResult(status: 'aborted', cleanedText: wrapLumiaOocColors(assistantText));
+        return PostCleanerResult(
+          status: 'aborted',
+          cleanedText: wrapLumiaOocColors(assistantText),
+        );
       }
 
       final outcome = await _askLlmForCleanedText(
         config: config,
         settings: settings,
         assistantText: assistantText,
+        sessionId: sessionId,
+        messageId: messageId,
         broadcastBlocks: broadcastBlocks,
         recentMessages: recentMessages,
         auditIssues: auditIssues,
@@ -180,7 +199,7 @@ class PostCleanerService {
       // longer has any, the cleaner stripped formatting it was told to
       // preserve — keep the original. Also protects meta-OOC blocks
       // (e.g. `<lumiaooc>`, `<oocnote>`, any `<*ooc*>` — meta-commentary
-      // emitted by the Main Responder under the Studio meta-weaver
+      // emitted by the Main Writer under the Studio meta-weaver
       // architecture) — if the original had one and the cleaned version
       // dropped it, keep the original. This guards against the common
       // LLM failure mode of flattening formatting when asked to "rewrite for
@@ -226,10 +245,16 @@ class PostCleanerService {
         beautyMarkerFound: beautyParsed.markerFound,
       );
     } on TimeoutException {
-      return PostCleanerResult(status: 'timeout', cleanedText: wrapLumiaOocColors(assistantText));
+      return PostCleanerResult(
+        status: 'timeout',
+        cleanedText: wrapLumiaOocColors(assistantText),
+      );
     } catch (e) {
       if (token.isCancelled || (e is DioException && CancelToken.isCancel(e))) {
-        return PostCleanerResult(status: 'aborted', cleanedText: wrapLumiaOocColors(assistantText));
+        return PostCleanerResult(
+          status: 'aborted',
+          cleanedText: wrapLumiaOocColors(assistantText),
+        );
       }
       debugPrint('[PostCleaner] error: $e');
       return PostCleanerResult(
@@ -270,6 +295,8 @@ class PostCleanerService {
     required AuxApiConfig config,
     required PipelineSettings settings,
     required String assistantText,
+    required String sessionId,
+    String? messageId,
     List<String> broadcastBlocks = const [],
     List<ChatMessage> recentMessages = const [],
     List<String>? auditIssues,
@@ -280,7 +307,7 @@ class PostCleanerService {
     List<StudioPresetBlock> cleanerBlocks = const [],
     MacroContext? macroCtx,
   }) async {
-    final prompt = buildStudioCleanerPrompt(
+    final rawPrompt = buildStudioCleanerPrompt(
       assistantText: assistantText,
       broadcastBlocks: broadcastBlocks,
       recentMessages: recentMessages,
@@ -294,6 +321,14 @@ class PostCleanerService {
       cleanerBlocks: cleanerBlocks,
       macroCtx: macroCtx,
     );
+    final prompt = macroCtx == null
+        ? rawPrompt
+        : applyStudioRegexesToText(
+            text: rawPrompt,
+            stage: 'cleaner',
+            entries: _readStudioRegexes(),
+            macroContext: macroCtx,
+          );
 
     final effectiveMaxTokens = settings.cleaner.postCleanerMaxTokens > 0
         ? settings.cleaner.postCleanerMaxTokens
@@ -318,6 +353,13 @@ class PostCleanerService {
             ? true
             : settings.cleaner.postCleanerOmitReasoning,
         omitReasoningEffort: settings.cleaner.postCleanerOmitReasoningEffort,
+        captureContext: LlmCaptureContext(
+          stage: 'cleaner.rewrite',
+          sessionId: sessionId,
+          messageId: messageId,
+          logicalCallId: messageId == null ? null : 'cleaner:$messageId',
+          relatedArtifactId: messageId,
+        ),
       );
     }
 
@@ -335,6 +377,13 @@ class PostCleanerService {
           ? true
           : settings.cleaner.postCleanerOmitReasoning,
       omitReasoningEffort: settings.cleaner.postCleanerOmitReasoningEffort,
+      captureContext: LlmCaptureContext(
+        stage: 'cleaner.rewrite',
+        sessionId: sessionId,
+        messageId: messageId,
+        logicalCallId: messageId == null ? null : 'cleaner:$messageId',
+        relatedArtifactId: messageId,
+      ),
     );
   }
 
@@ -352,19 +401,18 @@ class PostCleanerService {
     String styleInstructions = '',
     String beautyBrief = '',
     String? beautyState,
-  }) =>
-      CleanerPromptBuilder.buildCleanerPrompt(
-        assistantText: assistantText,
-        broadcastBlocks: broadcastBlocks,
-        recentMessages: recentMessages,
-        auditIssues: auditIssues,
-        maxCharsPerMessage: maxCharsPerMessage,
-        bannedWords: bannedWords,
-        avoidInstructions: avoidInstructions,
-        styleInstructions: styleInstructions,
-        beautyBrief: beautyBrief,
-        beautyState: beautyState,
-      );
+  }) => CleanerPromptBuilder.buildCleanerPrompt(
+    assistantText: assistantText,
+    broadcastBlocks: broadcastBlocks,
+    recentMessages: recentMessages,
+    auditIssues: auditIssues,
+    maxCharsPerMessage: maxCharsPerMessage,
+    bannedWords: bannedWords,
+    avoidInstructions: avoidInstructions,
+    styleInstructions: styleInstructions,
+    beautyBrief: beautyBrief,
+    beautyState: beautyState,
+  );
 
   /// Builds the cleaner prompt from preset blocks when available, falling
   /// back to [CleanerPromptBuilder] when no preset blocks are supplied.
@@ -425,7 +473,7 @@ class PostCleanerService {
         suffix
           ..writeln()
           ..writeln(
-            'AUTHORITATIVE RULES (from the active preset — follow these exactly; '
+            'AUTHORITATIVE RULES (from the active Studio preset — follow these exactly; '
             'they OVERRIDE the generic guidance above, especially for output '
             'language and formatting):',
           )
@@ -530,7 +578,7 @@ class PostCleanerService {
 
     return const StudioAuxPromptAssembler().assemble(
       blocks: cleanerBlocks,
-      section: 'cleaner',
+      injectionPoint: 'cleaner',
       macroCtx: macroCtx,
       customReplacements: customReplacements,
       runtimeSuffix: suffix.toString(),
@@ -619,6 +667,8 @@ class PostCleanerService {
   /// - `null` — audit call failed, JSON unparseable, or was aborted. Caller
   ///   should skip audit notes and run the cleaner as Phase 1.
   Future<AuditResult> runCharacterAudit({
+    required String sessionId,
+    String? messageId,
     required String assistantText,
     required Character character,
     Persona? persona,
@@ -678,6 +728,13 @@ class PostCleanerService {
         temperature: 0.0,
         timeoutMs: _llm.resolveCleanerTimeout(settings),
         cancelToken: token,
+        captureContext: LlmCaptureContext(
+          stage: 'cleaner.audit',
+          sessionId: sessionId,
+          messageId: messageId,
+          logicalCallId: messageId == null ? null : 'cleaner-audit:$messageId',
+          relatedArtifactId: messageId,
+        ),
       );
 
       if (token.isCancelled) return const AuditResult(issues: null);
@@ -714,19 +771,18 @@ class PostCleanerService {
     String? entitiesContent,
     List<ChatMessage> recentMessages = const [],
     int maxCharsPerMessage = 3000,
-  }) =>
-      AuditPromptBuilder.buildAuditPrompt(
-        assistantText: assistantText,
-        character: character,
-        persona: persona,
-        lorebooksContent: lorebooksContent,
-        memoryContent: memoryContent,
-        summaryContent: summaryContent,
-        arcContent: arcContent,
-        entitiesContent: entitiesContent,
-        recentMessages: recentMessages,
-        maxCharsPerMessage: maxCharsPerMessage,
-      );
+  }) => AuditPromptBuilder.buildAuditPrompt(
+    assistantText: assistantText,
+    character: character,
+    persona: persona,
+    lorebooksContent: lorebooksContent,
+    memoryContent: memoryContent,
+    summaryContent: summaryContent,
+    arcContent: arcContent,
+    entitiesContent: entitiesContent,
+    recentMessages: recentMessages,
+    maxCharsPerMessage: maxCharsPerMessage,
+  );
 
   /// Backward-compat facade — delegates to [AuditPromptBuilder].
   /// Tests call `PostCleanerService.parseAuditJson` directly.

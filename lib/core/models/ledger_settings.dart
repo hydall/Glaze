@@ -8,11 +8,17 @@ part 'ledger_settings.g.dart';
 ///
 /// Nested inside [PipelineSettings] under the `ledger` field. The ledger is
 /// always-on when Studio is enabled — there is no enabled toggle.
-/// Model/endpoint/apiKey overrides are removed — the ledger uses the Studio
-/// cleaner slot (semi-expensive) via `StudioSlotResolver` (Phase 3).
+///
+/// The ledger has its own API slot (`StudioConfig.ledgerApiConfigId`) and its
+/// own model override ([studioLedgerModel]). Both default to empty, in which
+/// case it falls back to the post-processing (cleaner) slot, which is where it
+/// ran before the slot existed.
 @freezed
 abstract class LedgerSettings with _$LedgerSettings {
   const factory LedgerSettings({
+    // Model id override for the ledger. Empty = use the ledger API slot's
+    // model, or the post-processing slot when no ledger slot is selected.
+    @Default('') String studioLedgerModel,
     @Default(0) int studioLedgerTimeoutMs,
     // Max tokens for the ledger LLM call. 0 = use default (2000).
     @Default(0) int studioLedgerMaxTokens,

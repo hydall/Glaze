@@ -4,13 +4,19 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app.dart';
+import 'core/app_runtime.dart';
 import 'core/debug/perf_debug.dart';
+import 'core/platform/desktop_window.dart';
+import 'core/services/dev_mode_flag_migration.dart';
+import 'core/services/preset_seeder.dart';
 import 'core/services/windows_preferences_migration.dart';
+import 'shared/shell/desktop/desktop_layout_provider.dart';
 
 final appRestartKey = GlobalKey();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  AppRuntime.markStarted();
   PerfDebug.installFrameLoggerIfEnabled();
   try {
     await migrateLegacyWindowsPreferences();
@@ -24,12 +30,71 @@ Future<void> main() async {
       ),
     );
   }
+  // After the Windows migration: that one rewrites the preferences file on
+  // disk, so it has to land before SharedPreferences is first opened here.
+  try {
+    await resetLegacyDevModeFlag();
+  } catch (error, stackTrace) {
+    FlutterError.reportError(
+      FlutterErrorDetails(
+        exception: error,
+        stack: stackTrace,
+        library: 'startup',
+        context: ErrorDescription('dev mode flag reset failed'),
+      ),
+    );
+  }
+  // Before the app opens: it reads `activePresetId` during startup, and a
+  // first run has to find the choice already made rather than watch it change
+  // underneath the first frames.
+  try {
+    await applyFirstRunPresetChoice();
+  } catch (error, stackTrace) {
+    FlutterError.reportError(
+      FlutterErrorDetails(
+        exception: error,
+        stack: stackTrace,
+        library: 'startup',
+        context: ErrorDescription('first-run preset choice failed'),
+      ),
+    );
+  }
   await EasyLocalization.ensureInitialized();
   try {
-    await SystemChrome.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-      DeviceOrientation.portraitDown,
-    ]);
+    await initDesktopWindow();
+  } catch (error, stackTrace) {
+    FlutterError.reportError(
+      FlutterErrorDetails(
+        exception: error,
+        stack: stackTrace,
+        library: 'startup',
+        context: ErrorDescription('desktop window setup failed'),
+      ),
+    );
+  }
+  // Phones are locked to portrait; tablets may rotate, and it is the landscape
+  // width that then turns on the desktop layout. No widget exists yet, so read
+  // the first view's physical size and divide by its density to tell the two
+  // apart. An unreadable size keeps the phone lock.
+  try {
+    final views = WidgetsBinding.instance.platformDispatcher.views;
+    var isTablet = false;
+    if (views.isNotEmpty) {
+      final view = views.first;
+      final dpr = view.devicePixelRatio;
+      if (dpr > 0) {
+        final logical = view.physicalSize / dpr;
+        isTablet = logical.shortestSide >= kTabletShortestSideBreakpoint;
+      }
+    }
+    await SystemChrome.setPreferredOrientations(
+      isTablet
+          ? DeviceOrientation.values
+          : const [
+              DeviceOrientation.portraitUp,
+              DeviceOrientation.portraitDown,
+            ],
+    );
   } catch (error, stackTrace) {
     FlutterError.reportError(
       FlutterErrorDetails(

@@ -153,6 +153,35 @@ void main() {
     await tester.pumpAndSettle(const Duration(milliseconds: 400));
   });
 
+  testWidgets('GlazeToast.warning renders an amber chip', (tester) async {
+    await tester.pumpWidget(buildTestApp(
+      child: Builder(
+        builder: (context) {
+          return ElevatedButton(
+            onPressed: () => GlazeToast.warning(context, 'History trimmed'),
+            child: const Text('Show Warning'),
+          );
+        },
+      ),
+    ));
+
+    await tester.tap(find.text('Show Warning'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 400));
+
+    expect(find.text('History trimmed'), findsOneWidget);
+
+    final amber = tester
+        .widgetList<Container>(find.byType(Container))
+        .where((c) =>
+            (c.decoration as BoxDecoration?)?.color ==
+            const Color(0xC2F5B301));
+    expect(amber, isNotEmpty,
+        reason: 'A warning toast should carry the amber fill, not error red');
+
+    GlazeToast.hide();
+    await tester.pumpAndSettle(const Duration(milliseconds: 400));
+  });
+
   testWidgets('New toast replaces previous toast', (tester) async {
     await tester.pumpWidget(buildTestApp(
       child: Builder(

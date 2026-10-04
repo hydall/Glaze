@@ -6,6 +6,9 @@ import '../bridge/chat_overlay_blur_region.dart';
 /// WebView (input pill, circle buttons, ...) so `_ChatBody` can sync them
 /// to the WebView as [ChatOverlayBlurRegion]s.
 ///
+/// Only alive on the platforms that cannot blur the WebView from Flutter —
+/// elsewhere the chrome blurs it directly and nothing registers here.
+///
 /// Registration only stores the element's [BuildContext]; the actual
 /// measurement happens in [measure], driven by the owner in a post-frame
 /// callback (the owner rebuilds on every layout-moving change: keyboard,

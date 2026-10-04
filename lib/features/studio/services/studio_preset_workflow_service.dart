@@ -1,5 +1,7 @@
 import '../../../core/application/sync_repo_interfaces.dart';
 import '../../../core/models/studio_config.dart';
+import '../../../core/models/studio_preset_validation.dart';
+import '../../../core/utils/sync_deletion_tracker.dart';
 
 typedef ActiveStudioPresetReader = Future<String> Function();
 typedef ActiveStudioPresetWriter = Future<void> Function(String presetId);
@@ -8,10 +10,12 @@ typedef StudioPresetClock = int Function();
 class StudioPresetMutationResult {
   final StudioPreset preset;
   final List<StudioPreset> presets;
+  final List<StudioPresetValidationIssue> validationIssues;
 
   const StudioPresetMutationResult({
     required this.preset,
     required this.presets,
+    this.validationIssues = const [],
   });
 }
 
@@ -54,7 +58,7 @@ class StudioPresetWorkflowService {
 
     final now = _clock();
     final preset = source.copyWith(
-      id: 'studio_$now',
+      id: await _freeId(now),
       name: trimmedName,
       blocks: [...source.blocks],
       agentEnabled: {...source.agentEnabled},
@@ -72,15 +76,29 @@ class StudioPresetWorkflowService {
 
     final now = _clock();
     final preset = imported.copyWith(
-      id: 'studio_$now',
+      id: await _freeId(now),
       name: trimmedName,
       updatedAt: now,
     );
     return _persistAndSelect(preset);
   }
 
+  /// Id for a new preset, derived from the clock but guaranteed not to collide
+  /// with an existing one. The clock ticks in seconds, so importing several
+  /// files in one go used to hand every preset the same id — each `put`
+  /// overwrote the previous one and only the last import survived.
+  Future<String> _freeId(int seconds) async {
+    final taken = {for (final preset in await _store.getAll()) preset.id};
+    var stamp = seconds;
+    while (taken.contains('studio_$stamp')) {
+      stamp++;
+    }
+    return 'studio_$stamp';
+  }
+
   Future<List<StudioPreset>> deletePreset(String presetId) async {
     await _store.delete(presetId);
+    await SyncDeletionTracker.record('studio_preset', presetId);
     final presets = await loadPresets();
     if (await _readActivePresetId() == presetId) {
       await _writeActivePresetId('default');
@@ -91,9 +109,23 @@ class StudioPresetWorkflowService {
   Future<StudioPresetMutationResult> _persistAndSelect(
     StudioPreset preset,
   ) async {
+    final validationIssues = StudioPresetValidator.validate(preset);
+    if (StudioPresetValidator.hasErrors(validationIssues)) {
+      final messages = validationIssues
+          .where(
+            (issue) => issue.severity == StudioPresetValidationSeverity.error,
+          )
+          .map((issue) => issue.message)
+          .join(' ');
+      throw FormatException('Invalid Studio preset: $messages');
+    }
     await _store.put(preset);
     final presets = await loadPresets();
     await _writeActivePresetId(preset.id);
-    return StudioPresetMutationResult(preset: preset, presets: presets);
+    return StudioPresetMutationResult(
+      preset: preset,
+      presets: presets,
+      validationIssues: validationIssues,
+    );
   }
 }

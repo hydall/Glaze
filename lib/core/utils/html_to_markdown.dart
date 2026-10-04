@@ -630,9 +630,13 @@ String _extractStyledImageFrames(String html) {
   final imgRegex = ImgGenPatterns.htmlIigTagRegex;
   final imgRegexDouble = ImgGenPatterns.htmlIigTagDoubleRegex;
 
-  final matches = <RegExpMatch>[];
-  matches.addAll(imgRegex.allMatches(html));
-  matches.addAll(imgRegexDouble.allMatches(html));
+  // Only elements still waiting for a picture: the same element with an image
+  // in its `src` is the stored form of a finished block, and folding one back
+  // into `[IMG:GEN:…]` would drop the picture it already holds.
+  final matches = <RegExpMatch>[
+    ...imgRegex.allMatches(html),
+    ...imgRegexDouble.allMatches(html),
+  ].where((m) => ImgGenPatterns.isPendingIigElement(m.group(0)!)).toList();
   matches.sort((a, b) => a.start.compareTo(b.start));
 
   if (matches.isEmpty) return html;

@@ -1,10 +1,13 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/llm/game_time.dart';
+import '../../../core/state/db_provider.dart';
+import '../../../core/state/studio_turn_config_resolver.dart';
+import '../../../core/utils/error_format.dart';
 import '../../chat/chat_provider.dart';
 import '../../chat/chat_state.dart';
 import '../../chat/editing_message_provider.dart';
-import '../../memory/state/memory_active_drafts_provider.dart';
 import '../models/trigger_mode.dart';
 import '../models/trigger_result.dart';
 
@@ -16,8 +19,6 @@ import '../models/trigger_result.dart';
 /// - INV-C1: at most one active generation per `charId`. The call is
 ///   rejected (not auto-aborted) when `isGenerating == true` so the JS
 ///   script can decide whether to retry / await.
-/// - INV-M3 / INV-M4: memory draft mutex. The call is rejected when a
-///   memory draft is currently being generated for the same session id.
 /// - INV-CM1 / INV-CM2 / INV-A3: `continue` and `regenerate` delegate to
 ///   the regular [ChatNotifier.continueMessage] /
 ///   [ChatNotifier.regenerateLastAssistant] entry points so the same
@@ -60,13 +61,6 @@ class GenerationDispatcher {
       return TriggerBusy(busyKind: 'message_edit', mode: mode);
     }
 
-    final memoryActive = ref
-        .read(memoryActiveDraftsProvider)
-        .contains(current.session!.id);
-    if (memoryActive) {
-      return TriggerBusy(busyKind: 'memory_draft', mode: mode);
-    }
-
     if (current.isGenerating || current.isPostGenRunning) {
       return TriggerBusy(busyKind: 'chat', mode: mode);
     }
@@ -74,6 +68,36 @@ class GenerationDispatcher {
     final resolved = _resolveAuto(current, mode);
 
     try {
+      final checkedSessionId = current.session!.id;
+      if (!current.session!.messages.any((message) => message.role == 'user')) {
+        final turnConfig = await ref
+            .read(studioTurnConfigResolverProvider)
+            .resolve(checkedSessionId);
+        if (turnConfig.enabled && turnConfig.ledgerEnabled) {
+          final trackerRepo = ref.read(trackerRepoProvider);
+          final trackers = await Future.wait([
+            trackerRepo.get(checkedSessionId, GameTimeState.timeKey),
+            trackerRepo.get(checkedSessionId, GameTimeState.dateKey),
+            trackerRepo.get(checkedSessionId, GameTimeState.dayKey),
+          ]);
+          if (GameTimeState.fromTrackers(trackers.nonNulls).format() == null) {
+            return TriggerError(
+              message:
+                  'Studio Ledger requires a complete game date and time before generation.',
+              mode: resolved,
+            );
+          }
+        }
+      }
+
+      final latest = ref.read(chatProvider(charId)).value;
+      if (latest?.session?.id != checkedSessionId) {
+        return TriggerNoSession(mode: resolved);
+      }
+      if (latest!.isGenerating || latest.isPostGenRunning) {
+        return TriggerBusy(busyKind: 'chat', mode: resolved);
+      }
+
       switch (resolved) {
         case TriggerMode.continueGeneration:
           await notifier.continueMessage();
@@ -83,7 +107,7 @@ class GenerationDispatcher {
           break;
       }
     } catch (e) {
-      return TriggerError(message: e.toString(), mode: resolved);
+      return TriggerError(message: formatError(e), mode: resolved);
     }
 
     return TriggerAccepted(mode: resolved, reason: reason);
@@ -98,9 +122,6 @@ class GenerationDispatcher {
     if (current == null || current.session == null) return null;
     if (ref.read(editingMessageIdProvider(charId)) != null) return null;
     if (current.isGenerating || current.isPostGenRunning) return null;
-    if (ref.read(memoryActiveDraftsProvider).contains(current.session!.id)) {
-      return null;
-    }
     return _resolveAuto(current, TriggerMode.parse(rawMode));
   }
 

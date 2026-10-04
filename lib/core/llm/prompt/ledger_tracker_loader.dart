@@ -1,7 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../state/db_provider.dart';
+import '../../models/ledger_raw_tracker_state.dart';
 import '../../models/tracker.dart';
+
+export '../../models/ledger_raw_tracker_state.dart';
 
 /// Loads effective Studio Ledger tracker rows for a session.
 ///
@@ -17,7 +20,10 @@ class LedgerTrackerLoader {
 
   LedgerTrackerLoader(this._ref);
 
-  Future<List<Tracker>> loadEffectiveLedgerTrackers(String sessionId) async {
+  /// Snapshot-first raw state for fencing. Manual controls intentionally remain
+  /// separate so the pure resolver, rather than this compatibility adapter,
+  /// decides their precedence.
+  Future<LedgerRawTrackerState> loadRawLedgerState(String sessionId) async {
     final trackerRepo = _ref.read(trackerRepoProvider);
     final snapshot = await _ref
         .read(trackerSnapshotRepoProvider)
@@ -26,11 +32,27 @@ class LedgerTrackerLoader {
       sessionId,
       'ledger',
     );
+    return LedgerRawTrackerState(
+      committedTrackers:
+          snapshot?.trackers
+              .where((tracker) => tracker.scope == 'ledger')
+              .toList(growable: false) ??
+          const [],
+      manualControls: liveLedger
+          .where(
+            (tracker) =>
+                tracker.name.startsWith('canon_override:') ||
+                tracker.name.startsWith('canon_lock:'),
+          )
+          .toList(growable: false),
+    );
+  }
+
+  Future<List<Tracker>> loadEffectiveLedgerTrackers(String sessionId) async {
+    final state = await loadRawLedgerState(sessionId);
 
     final byName = <String, Tracker>{
-      if (snapshot != null)
-        for (final tracker in snapshot.trackers)
-          if (tracker.scope == 'ledger') tracker.name: tracker,
+      for (final tracker in state.committedTrackers) tracker.name: tracker,
     };
 
     // Manual overrides/locks are user-owned and can be newer than the latest
@@ -39,7 +61,7 @@ class LedgerTrackerLoader {
     // at their canonical key as well: the Studio Ledger prompt only consumes
     // canonical ledger keys, while the session-state compiler also recognizes
     // the original override row.
-    for (final tracker in liveLedger) {
+    for (final tracker in state.manualControls) {
       if (tracker.name.startsWith('canon_override:')) {
         final overriddenName = tracker.name.substring('canon_override:'.length);
         byName[tracker.name] = tracker;

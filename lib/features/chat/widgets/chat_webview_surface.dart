@@ -1,13 +1,15 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+
+import 'chat_background.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/debug/perf_debug.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import '../bridge/chat_bridge_controller.dart';
 import '../bridge/chat_bridge_registry.dart';
 import '../bridge/chat_webview_bridge_host.dart';
@@ -17,22 +19,17 @@ import '../bridge/chat_webview_settings.dart';
 import '../../settings/app_settings_provider.dart';
 import 'chat_webview_callbacks.dart';
 import 'chat_webview_ext_block_callbacks.dart';
+import 'chat_webview_trackpad_scroll.dart';
+import 'message_scripts_prompt_sheet.dart';
 import 'webview_callbacks.dart';
 
-/// `InAppWebView` widget with the chat-specific settings, the
-/// `onWebViewCreated` bridge-wiring sequence, the `onLoadStop`
-/// init kick, and bridge callback wiring.
+/// `InAppWebView` with chat-specific settings and bridge wiring.
 ///
-/// Extracted from `chat_webview_widget.dart` so the widget's
-/// `build` method does not have to inline the ~120 lines of
-/// `InAppWebViewSettings` + `onWebViewCreated` callback wiring.
-/// The widget still owns lifecycle: the surface is given hooks
-/// (`onBridgeReady`, `onInitWebView`) and the
-/// [ChatWebViewBridgeHost] via constructor injection.
-///
-/// The surface is a thin widget — it does not own any state and
-/// rebuilds when its parent does.
-class ChatWebViewSurface extends ConsumerWidget {
+/// On Windows, native view creation is asynchronous and the upstream platform
+/// widget is unsafe if disposed before creation returns. Delay mounting it for
+/// one Flutter frame, so a route dismissed immediately never starts a native
+/// creation that could later callback into a disposed widget.
+class ChatWebViewSurface extends ConsumerStatefulWidget {
   const ChatWebViewSurface({
     super.key,
     required this.bridgeHost,
@@ -43,11 +40,12 @@ class ChatWebViewSurface extends ConsumerWidget {
     required this.imageGenActions,
     required this.scrollActions,
     required this.miscActions,
-    required this.isMounted,
+    required this.isCurrentSession,
+    required this.lifecycleEpoch,
+    required this.isActive,
     required this.sessionSwitching,
     required this.refreshPanel,
     required this.bgImageBytes,
-    required this.bgOpacity,
     required this.bgBlur,
     required this.bgDim,
     required this.chatBgMode,
@@ -56,6 +54,8 @@ class ChatWebViewSurface extends ConsumerWidget {
     required this.bottomInset,
     required this.onBridgeReady,
     required this.onInitWebView,
+    required this.onPageProcessGone,
+    this.rebuildGeneration = 0,
   });
 
   final ChatWebViewBridgeHost bridgeHost;
@@ -66,240 +66,275 @@ class ChatWebViewSurface extends ConsumerWidget {
   final ImageGenCallbacks imageGenActions;
   final ScrollCallbacks scrollActions;
   final MiscCallbacks miscActions;
-  final bool Function() isMounted;
+
+  /// Prevents an async native callback from installing bridge handlers for a
+  /// session that has since been replaced.
+  final bool Function(String? sessionId) isCurrentSession;
+  final int lifecycleEpoch;
+  final bool Function(int epoch) isActive;
   final bool sessionSwitching;
   final Future<void> Function(String sessionId, String messageId) refreshPanel;
   final Uint8List? bgImageBytes;
-  final double bgOpacity;
   final double bgBlur;
   final double bgDim;
 
-  /// Chat-area background source: 'inherit' | 'color' | 'avatar' | 'custom'.
-  /// For 'inherit' and 'custom', [bgImageBytes] already carries the right
-  /// decoded image (global or chat-custom); 'color' uses [chatBgColor];
-  /// 'avatar' loads [chatBgAvatarPath] from disk.
+  /// Chat-area background source: inherit, color, avatar, or custom.
   final String chatBgMode;
   final Color? chatBgColor;
   final String? chatBgAvatarPath;
   final double bottomInset;
 
-  /// Called by the surface after the bridge is created and
-  /// registered in [chatBridgeRegistryProvider]. The parent widget
-  /// assigns the bridge to its own `_bridge` field.
+  /// Called after the surface has safely wired the JavaScript bridge.
   final void Function(ChatBridgeController bridge) onBridgeReady;
 
-  /// Called by the surface when the WebView reports it is alive
-  /// (`onWebViewCreated`) or when `onLoadStop` fires and the bridge
-  /// has not run init yet.
+  /// Starts the parent's idempotent WebView initialization.
   final Future<void> Function() onInitWebView;
 
-  /// The chat's own background — surface color, optional bg image, and dim.
-  /// Rendered both *behind* the transparent WebView (so there's no white flash
-  /// and `backdrop-filter` has something to sample) and, during a session
-  /// switch, *over* the WebView as an opaque cover so the kept-alive native
-  /// surface can't flash the previous session's content while the new one is
-  /// being pushed in.
-  Widget _background(BuildContext context) {
-    // In 'color' mode the base layer is the chosen solid color; otherwise the
-    // theme surface shows behind/around any image.
-    final Color base = chatBgMode == 'color' && chatBgColor != null
-        ? chatBgColor!
-        : Theme.of(context).colorScheme.surface;
+  /// The page behind this surface died — Android killed the render process,
+  /// or iOS terminated the web content process. The parent owns what happens
+  /// next; the surface only reports it.
+  final VoidCallback onPageProcessGone;
 
-    // The image layer: 'avatar' loads from a file path, 'inherit'/'custom'
-    // use the pre-decoded [bgImageBytes]. 'color' has no image layer.
-    Widget? image;
-    if (chatBgMode == 'avatar') {
-      final path = chatBgAvatarPath;
-      if (path != null && path.isNotEmpty) {
-        image = Image.file(
-          File(path),
-          fit: BoxFit.cover,
-          gaplessPlayback: true,
-        );
-      }
-    } else if (chatBgMode != 'color' && bgImageBytes != null) {
-      // Decoded bytes (same as GlazeBackground) because the data is a base64
-      // data URI, not a file path.
-      image = Image.memory(
-        bgImageBytes!,
-        fit: BoxFit.cover,
-        gaplessPlayback: true,
-      );
+  /// Bumped by the parent to demand a brand new native WebView. The keep-alive
+  /// instance is shared by every chat, so a dead one has to be disposed before
+  /// the replacement is attached — otherwise the new widget re-attaches the
+  /// same corpse.
+  final int rebuildGeneration;
+
+  @override
+  ConsumerState<ChatWebViewSurface> createState() => _ChatWebViewSurfaceState();
+}
+
+class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
+  bool _mountNativeView = !Platform.isWindows;
+
+  /// Built once per surface. [InAppWebViewSettings] is only read when the
+  /// platform view is first created, but every rebuild used to allocate a
+  /// fresh one — along with the WebViewAssetLoader/AssetsPathHandler it
+  /// carries, which register with the plugin and are never released.
+  late final InAppWebViewSettings _webViewSettings = chatWebViewInAppSettings();
+
+  @override
+  void initState() {
+    super.initState();
+    if (Platform.isWindows) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _mountNativeView = true);
+      });
     }
-
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        ColoredBox(color: base),
-        if (image != null) ...[
-          Opacity(
-            opacity: bgOpacity,
-            child: bgBlur > 0
-                ? ImageFiltered(
-                    imageFilter: ui.ImageFilter.blur(
-                      sigmaX: bgBlur,
-                      sigmaY: bgBlur,
-                      tileMode: TileMode.clamp,
-                    ),
-                    child: image,
-                  )
-                : image,
-          ),
-          if (bgDim > 0)
-            Container(color: Colors.black.withValues(alpha: bgDim)),
-        ],
-      ],
-    );
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final webViewEnvironment = chatWebViewEnvironment;
+  void didUpdateWidget(ChatWebViewSurface oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.rebuildGeneration != oldWidget.rebuildGeneration) {
+      unawaited(_rebuildNativeView());
+    }
+  }
+
+  /// Replaces the native WebView after its page died.
+  ///
+  /// The view is unmounted for a frame first, and the keep-alive instance
+  /// disposed while nothing is attached to it: on mobile every chat shares one
+  /// preloaded WebView, so remounting without disposing hands the replacement
+  /// widget the same dead native view and nothing changes. Disposing frees the
+  /// keep-alive id, and the remount below creates a fresh WebView under it.
+  Future<void> _rebuildNativeView() async {
+    if (!mounted) return;
+    setState(() => _mountNativeView = false);
+    final keepAlive = chatWebViewKeepAliveForPlatform();
+    if (keepAlive != null) {
+      try {
+        await InAppWebViewController.disposeKeepAlive(keepAlive);
+      } catch (e) {
+        debugPrint('[ChatWebView] disposing the keep-alive failed: $e');
+      }
+    }
+    // One frame with nothing attached, so the platform view is really gone
+    // before its replacement asks to be created.
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted) return;
+    setState(() => _mountNativeView = true);
+  }
+
+  Widget _background(BuildContext context) {
+    return ChatBackground(
+      mode: widget.chatBgMode,
+      color: widget.chatBgColor,
+      avatarPath: widget.chatBgAvatarPath,
+      imageBytes: widget.bgImageBytes,
+      blur: widget.bgBlur,
+      dim: widget.bgDim,
+    );
+  }
+
+  bool _callbackIsActive(int epoch) {
+    return widget.isActive(epoch) && widget.isCurrentSession(widget.sessionId);
+  }
+
+  Future<void> _onWebViewCreated(InAppWebViewController controller) async {
+    final epoch = widget.lifecycleEpoch;
+    if (!_callbackIsActive(epoch)) return;
+    PerfDebug.chatWebViewSurfaceCreated();
+    final jsBridgeService = await widget.bridgeHost.buildJsBridgeService();
+    if (!_callbackIsActive(epoch) || jsBridgeService == null) return;
+    final bridge = ChatBridgeController(controller, jsBridgeService);
+    final allowMessageScripts =
+        ref.read(appSettingsProvider).value?.allowMessageScripts ?? false;
+    await bridge.evalJs(
+      'window.bridge?.setAllowMessageScripts($allowMessageScripts)',
+    );
+    if (!_callbackIsActive(epoch)) return;
+    widget.onBridgeReady(bridge);
+    PerfDebug.chatWebViewBridgeReady();
+
+    final callbacks = ChatWebViewCallbacks(
+      ref: ref,
+      charId: widget.charId,
+      messageActions: widget.messageActions,
+      editActions: widget.editActions,
+      imageGenActions: widget.imageGenActions,
+      scrollActions: widget.scrollActions,
+      miscActions: widget.miscActions,
+    );
+    bridge.onMessageContext = callbacks.onMessageContext;
+    bridge.onSwipe = callbacks.onSwipe;
+    bridge.onChangeGreeting = callbacks.onChangeGreeting;
+    bridge.onHeaderScroll = callbacks.onHeaderScroll;
+    bridge.onScrollToBottomVisibility = callbacks.onScrollToBottomVisibility;
+    bridge.onScrollToTopVisibility = callbacks.onScrollToTopVisibility;
+    bridge.onRegenerate = callbacks.onRegenerate;
+    bridge.onSelectionAction = callbacks.onSelectionAction;
+    bridge.onSelectionChange = callbacks.onSelectionChange;
+    bridge.onEditSave = callbacks.onEditSave;
+    bridge.onEditCancel = callbacks.onEditCancel;
+    bridge.onEditFocusChange = callbacks.onEditFocusChange;
+    bridge.onImageClick = callbacks.onImageClick;
+    bridge.onImgDownload = callbacks.onImgDownload;
+    bridge.onGuidedSwipe = callbacks.onGuidedSwipe;
+    bridge.onMemoryClick = callbacks.onMemoryClick;
+    bridge.onToggleHidden = callbacks.onToggleHidden;
+    bridge.onToggleImageHidden = callbacks.onToggleImageHidden;
+    bridge.onInjectClick = callbacks.onInjectClick;
+    bridge.onImgRetry = callbacks.onImgRetry;
+    bridge.onImgEnableRetry = callbacks.onImgEnableRetry;
+    bridge.onImgFind = callbacks.onImgFind;
+    bridge.onImgRegen = callbacks.onImgRegen;
+    bridge.onImgOptions = callbacks.onImgOptions;
+    bridge.onImgVariant = callbacks.onImgVariant;
+    bridge.onImgCancel = callbacks.onImgCancel;
+    bridge.onStop = callbacks.onStop;
+    bridge.onLinkClick = callbacks.onLinkClick;
+    bridge.onLoadMore = callbacks.onLoadMore;
+    bridge.onMessageScriptBlocked = () {
+      if (_callbackIsActive(epoch)) {
+        // The callback owns the bridge lifecycle guard above.
+        // ignore: use_build_context_synchronously
+        unawaited(maybeShowMessageScriptsPrompt(context, ref));
+      }
+    };
+
+    if (!_callbackIsActive(epoch) || !mounted) return;
+    final extBlocks = ChatWebViewExtBlockCallbacks(
+      ref: ref,
+      charId: widget.charId,
+      sessionId: widget.sessionId,
+      // The mounted guard above protects this long-lived callback context.
+      // ignore: use_build_context_synchronously
+      context: context,
+      isMounted: () => _callbackIsActive(epoch),
+      refreshPanel: widget.refreshPanel,
+    );
+    bridge.onExtBlocksRunAll = extBlocks.onRunAll();
+    bridge.onExtBlockStop = extBlocks.onStop();
+    bridge.onExtBlockRegen = extBlocks.onRegen();
+    bridge.onExtBlockRegenImage = extBlocks.onRegenImage();
+    bridge.onExtBlockEdit = extBlocks.onEdit();
+    bridge.onExtBlockDelete = extBlocks.onDelete();
+
+    final isAlive = await controller.isLoading() == false;
+    if (isAlive && _callbackIsActive(epoch)) {
+      await widget.onInitWebView();
+    }
+  }
+
+  Future<void> _onLoadStop(InAppWebViewController controller, Uri? url) async {
+    final epoch = widget.lifecycleEpoch;
+    if (!_callbackIsActive(epoch)) return;
+    PerfDebug.chatWebViewLoadStopped();
+    await ref
+        .read(chatBridgeRegistryProvider(widget.charId))
+        ?.evalJs(
+          'window.bridge?.setAllowMessageScripts('
+          '${ref.read(appSettingsProvider).value?.allowMessageScripts ?? false})',
+        );
+    if (_callbackIsActive(epoch)) {
+      await widget.onInitWebView();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     ref.listen<AsyncValue<AppSettings>>(appSettingsProvider, (previous, next) {
       final oldValue = previous?.value?.allowMessageScripts ?? false;
       final newValue = next.value?.allowMessageScripts ?? false;
-      if (oldValue == newValue) return;
-      ref
-          .read(chatBridgeRegistryProvider(charId))
-          ?.evalJs('window.bridge?.setAllowMessageScripts($newValue)');
+      if (oldValue != newValue) {
+        ref
+            .read(chatBridgeRegistryProvider(widget.charId))
+            ?.evalJs('window.bridge?.setAllowMessageScripts($newValue)');
+      }
     });
     return Stack(
       children: [
-        // Background behind the transparent WebView.
         Positioned.fill(child: _background(context)),
-        // NOTE: the glass overlays (header, input pill, buttons) are NOT
-        // blurred here on the Flutter side. Their blur is reproduced entirely
-        // by CSS `backdrop-filter` strips *inside* the WebView (mirrored via
-        // setOverlayBlurRegions), which sample the WebView's own background
-        // copy (#bg-layer, with baked bg-blur + dim + noise) AND the messages
-        // in a single pass — the one source of truth for anything blurred.
-        // This removes the old Flutter BackdropFilter "sandwich" that could
-        // not reconcile with the in-WebView bg blur/dim and re-blurred every
-        // keyboard frame.
         Positioned.fill(
           child: IgnorePointer(
-            ignoring: sessionSwitching,
-            child: InAppWebView(
-              webViewEnvironment: webViewEnvironment,
-              keepAlive: chatWebViewKeepAliveForPlatform(),
-              initialFile: chatWebViewInitialFile(),
-              initialUrlRequest: chatWebViewInitialUrlRequest(),
-              initialSettings: chatWebViewInAppSettings(),
-              onWebViewCreated: (controller) async {
-                PerfDebug.chatWebViewSurfaceCreated();
-                final jsBridgeService = await bridgeHost.buildJsBridgeService();
-                if (!isMounted()) return;
-                final bridge = ChatBridgeController(
-                  controller,
-                  jsBridgeService,
-                );
-                final allowMessageScripts =
-                    ref.read(appSettingsProvider).value?.allowMessageScripts ??
-                    false;
-                await bridge.evalJs(
-                  'window.bridge?.setAllowMessageScripts('
-                  '$allowMessageScripts)',
-                );
-                // Register bridge in the registry so services can access it.
-                ref.read(chatBridgeRegistryProvider(charId).notifier).state =
-                    bridge;
-                onBridgeReady(bridge);
-                PerfDebug.chatWebViewBridgeReady();
-
-                // Do not call clearAll() here — it races with _initWebViewOnce
-                // (shows #loading-screen via JS) and broke UseVirtualScroll on
-                // keep-alive re-attach. Initializer.setMessages resets the DOM.
-
-                final callbacks = ChatWebViewCallbacks(
-                  ref: ref,
-                  charId: charId,
-                  messageActions: messageActions,
-                  editActions: editActions,
-                  imageGenActions: imageGenActions,
-                  scrollActions: scrollActions,
-                  miscActions: miscActions,
-                );
-                bridge.onMessageContext = callbacks.onMessageContext;
-                bridge.onSwipe = callbacks.onSwipe;
-                bridge.onChangeGreeting = callbacks.onChangeGreeting;
-                bridge.onHeaderScroll = callbacks.onHeaderScroll;
-                bridge.onScrollToBottomVisibility =
-                    callbacks.onScrollToBottomVisibility;
-                bridge.onRegenerate = callbacks.onRegenerate;
-                bridge.onSelectionAction = callbacks.onSelectionAction;
-                bridge.onSelectionChange = callbacks.onSelectionChange;
-                bridge.onEditSave = callbacks.onEditSave;
-                bridge.onEditCancel = callbacks.onEditCancel;
-                bridge.onEditFocusChange = callbacks.onEditFocusChange;
-                bridge.onImageClick = callbacks.onImageClick;
-                bridge.onImgDownload = callbacks.onImgDownload;
-                bridge.onGuidedSwipe = callbacks.onGuidedSwipe;
-                bridge.onMemoryClick = callbacks.onMemoryClick;
-                bridge.onToggleHidden = callbacks.onToggleHidden;
-                bridge.onToggleImageHidden = callbacks.onToggleImageHidden;
-                bridge.onInjectClick = callbacks.onInjectClick;
-                bridge.onImgRetry = callbacks.onImgRetry;
-                bridge.onImgFind = callbacks.onImgFind;
-                bridge.onImgRegen = callbacks.onImgRegen;
-                bridge.onImgOptions = callbacks.onImgOptions;
-                bridge.onImgCancel = callbacks.onImgCancel;
-                bridge.onStop = callbacks.onStop;
-                bridge.onLinkClick = callbacks.onLinkClick;
-                bridge.onLoadMore = callbacks.onLoadMore;
-                if (!isMounted()) return;
-
-                // The ext-block callbacks run after `await` paths. The
-                // controller is created once per WebView lifetime so
-                // the context capture is safe.
-                final extBlocks = ChatWebViewExtBlockCallbacks(
-                  ref: ref,
-                  charId: charId,
-                  sessionId: sessionId,
-                  // ignore: use_build_context_synchronously
-                  context: context,
-                  isMounted: isMounted,
-                  refreshPanel: refreshPanel,
-                );
-                bridge.onExtBlocksRunAll = extBlocks.onRunAll();
-                bridge.onExtBlockStop = extBlocks.onStop();
-                bridge.onExtBlockRegen = extBlocks.onRegen();
-                bridge.onExtBlockRegenImage = extBlocks.onRegenImage();
-                bridge.onExtBlockEdit = extBlocks.onEdit();
-                bridge.onExtBlockDelete = extBlocks.onDelete();
-
-                final isAlive = await controller.isLoading() == false;
-                if (isAlive) {
-                  await onInitWebView();
-                }
-              },
-              onLoadStop: (controller, url) async {
-                PerfDebug.chatWebViewLoadStopped();
-                // The init path is also wired through onWebViewCreated. When
-                // load stop wins the race, run init here.
-                await ref
-                    .read(chatBridgeRegistryProvider(charId))
-                    ?.evalJs(
-                      'window.bridge?.setAllowMessageScripts('
-                      '${ref.read(appSettingsProvider).value?.allowMessageScripts ?? false})',
-                    );
-                await onInitWebView();
-              },
-              shouldOverrideUrlLoading: (controller, request) async {
-                return chatWebViewNavigationPolicy(request.request.url);
-              },
-            ),
+            ignoring: widget.sessionSwitching,
+            // Windows touchpad panning is forwarded by this wrapper. Keeping it
+            // below IgnorePointer freezes native interaction during a switch.
+            child: _mountNativeView
+                ? ChatWebViewTrackpadScroll(
+                    charId: widget.charId,
+                    child: InAppWebView(
+                      key: ValueKey<int>(widget.rebuildGeneration),
+                      webViewEnvironment: chatWebViewEnvironment,
+                      keepAlive: chatWebViewKeepAliveForPlatform(),
+                      initialFile: chatWebViewInitialFile(),
+                      initialUrlRequest: chatWebViewInitialUrlRequest(),
+                      initialSettings: _webViewSettings,
+                      onWebViewCreated: _onWebViewCreated,
+                      onLoadStop: _onLoadStop,
+                      // Android 26+. Until this was handled, a killed render
+                      // process left a blank page the app kept talking to.
+                      onRenderProcessGone: (controller, detail) {
+                        debugPrint(
+                          '[ChatWebView] render process gone '
+                          '(didCrash: ${detail.didCrash})',
+                        );
+                        if (_callbackIsActive(widget.lifecycleEpoch)) {
+                          widget.onPageProcessGone();
+                        }
+                      },
+                      onWebContentProcessDidTerminate: (controller) {
+                        debugPrint(
+                          '[ChatWebView] web content process terminated',
+                        );
+                        if (_callbackIsActive(widget.lifecycleEpoch)) {
+                          widget.onPageProcessGone();
+                        }
+                      },
+                      shouldOverrideUrlLoading: (controller, request) async {
+                        return chatWebViewNavigationPolicy(request.request.url);
+                      },
+                    ),
+                  )
+                : const SizedBox.expand(),
           ),
         ),
-        // Opaque cover over the WebView while a new session is being pushed in.
-        // Hides the kept-alive native surface's previous-session content (which
-        // it composites for a frame on re-attach) behind the chat's own
-        // background, so switching shows an empty chat rather than a stale flash.
-        if (sessionSwitching)
+        if (widget.sessionSwitching)
           Positioned.fill(child: IgnorePointer(child: _background(context))),
-        if (sessionSwitching)
-          const Center(child: CircularProgressIndicator(strokeWidth: 3)),
-        if (bottomInset > 0)
+        if (widget.sessionSwitching) const Center(child: GlazeSpinner()),
+        if (widget.bottomInset > 0)
           Positioned.fill(
             child: IgnorePointer(
               child: Container(

@@ -8,6 +8,23 @@ String formatTimeAgo(int epochMs) {
   return '${dt.day}/${dt.month}';
 }
 
+/// Compact "time since" for a session row: `now` / `12m` / `5h` / `3d` / `2w`.
+///
+/// Shared by the chat list and the session pickers — they show the same rows,
+/// so the age column has to read the same in all of them. Differs from
+/// [formatTimeAgo] past a week: a session that old is better described as
+/// "5w" than as a bare date with no year.
+String formatSessionTimeAgo(int epochMs) {
+  final diff = DateTime.now().difference(
+    DateTime.fromMillisecondsSinceEpoch(epochMs),
+  );
+  if (diff.inMinutes < 1) return 'now';
+  if (diff.inHours < 1) return '${diff.inMinutes}m';
+  if (diff.inDays < 1) return '${diff.inHours}h';
+  if (diff.inDays < 7) return '${diff.inDays}d';
+  return '${diff.inDays ~/ 7}w';
+}
+
 String formatRelativeTimeFromSeconds(int updatedAtSeconds) {
   final updated = DateTime.fromMillisecondsSinceEpoch(updatedAtSeconds * 1000);
   final diff = DateTime.now().difference(updated);

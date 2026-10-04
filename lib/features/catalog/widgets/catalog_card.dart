@@ -1,20 +1,23 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/card_tag_chips.dart';
+import '../../../shared/widgets/nsfw_blur.dart';
 import '../catalog_models.dart';
+import '../third_party_providers_provider.dart';
 
-class CatalogCard extends StatefulWidget {
+class CatalogCard extends ConsumerStatefulWidget {
   final CatalogItem item;
   final VoidCallback onTap;
 
   const CatalogCard({super.key, required this.item, required this.onTap});
 
   @override
-  State<CatalogCard> createState() => _CatalogCardState();
+  ConsumerState<CatalogCard> createState() => _CatalogCardState();
 }
 
-class _CatalogCardState extends State<CatalogCard> {
+class _CatalogCardState extends ConsumerState<CatalogCard> {
   bool _pressed = false;
   bool _hovered = false;
 
@@ -87,11 +90,18 @@ class _CatalogCardState extends State<CatalogCard> {
 
   Widget _buildImage() {
     if (item.avatarUrl != null && item.avatarUrl!.isNotEmpty) {
-      return CachedNetworkImage(
-        imageUrl: item.avatarUrl!,
-        fit: BoxFit.cover,
-        placeholder: (_, _) => _buildPlaceholder(),
-        errorWidget: (_, _, _) => _buildPlaceholder(),
+      // The blur is a display choice only: an adult row stays in the grid, its
+      // image is just drawn through [NsfwBlur] when the setting is on.
+      final blur =
+          ref.watch(blurNsfwImagesProvider) && shouldBlurNsfwItem(item);
+      return NsfwBlur(
+        enabled: blur,
+        child: CachedNetworkImage(
+          imageUrl: item.avatarUrl!,
+          fit: BoxFit.cover,
+          placeholder: (_, _) => _buildPlaceholder(),
+          errorWidget: (_, _, _) => _buildPlaceholder(),
+        ),
       );
     }
     return _buildPlaceholder();

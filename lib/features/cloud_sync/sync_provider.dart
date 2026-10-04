@@ -1,13 +1,19 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 
 import '../../../core/state/db_provider.dart';
+import '../../../core/db/repositories/sync_session_consistency_repo.dart';
 import '../../../core/state/character_folder_provider.dart'
     show characterFolderRepoProvider;
+import '../../../core/state/folder_provider.dart';
 import '../../../core/state/lorebook_provider.dart'
     show saveLorebookActivations;
+import '../../../core/state/preset_folder_provider.dart';
 import '../../../shared/theme/theme_preset_storage.dart';
 import 'adapters/ext_blocks_sync_stores.dart';
+import 'adapters/folder_sync_store.dart';
 import 'services/sync_conflict.dart';
 import 'services/sync_engine.dart';
 import 'services/sync_service.dart';
@@ -46,13 +52,27 @@ final syncServiceProvider = FutureProvider<SyncService>((ref) async {
     characterFolderStore: CharacterFolderSyncStore(
       ref.watch(characterFolderRepoProvider),
     ),
+    folderStore: FolderSyncStore(
+      ref.watch(appDbProvider),
+      ref.watch(folderRepoProvider),
+      ref.watch(presetFolderRepoProvider),
+    ),
     memoryGraphStore: MemoryGraphSyncStore(ref.watch(appDbProvider)),
     characterKnowledgeStore: CharacterKnowledgeSyncStore(
+      ref.watch(appDbProvider),
+    ),
+    sessionLorebookOverlayStore: SessionLorebookOverlaySyncStore(
+      ref.watch(appDbProvider),
+    ),
+    reconciliationStateStore: ReconciliationStateSyncStore(
       ref.watch(appDbProvider),
     ),
     sessionDeletionStore: ref.watch(sessionDeletionRepoProvider),
     characterDeletionStore: ref.watch(characterDeletionRepoProvider),
     saveLorebookActivations: saveLorebookActivations,
+    reconcilePulledSessions: SyncSessionConsistencyRepo(
+      ref.watch(appDbProvider),
+    ).reconcile,
   );
   await service.init();
 
@@ -87,9 +107,7 @@ void notifySyncMessageGenerated(Ref ref) {
     ref.read(autoSyncMessageCounterProvider.notifier).state = 0;
     final syncAsync = ref.read(syncServiceProvider);
     syncAsync.whenData((service) {
-      if (service.isConnected()) {
-        service.fullPush();
-      }
+      unawaited(service.tryAutoPush().catchError((_) => false));
     });
   }
 }

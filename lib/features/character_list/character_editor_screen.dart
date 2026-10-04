@@ -13,17 +13,47 @@ import '../../core/state/db_provider.dart';
 import '../../core/utils/id_generator.dart';
 import '../../core/utils/time_helpers.dart';
 import '../../core/state/lorebook_provider.dart';
+import '../../shared/shell/desktop/desktop_floating_provider.dart';
 import '../../shared/theme/app_colors.dart';
+import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/sheet_view.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/generic_editor.dart';
 import '../../shared/widgets/help_tip.dart';
 
+/// Opens the editor for character [charId]: on desktop in a floating window of
+/// its own, which leaves the rest of the app usable and can sit beside other
+/// editors (opening one already open brings it to the front); on phones as the
+/// editor's route.
+Future<void> openCharacterEditor(BuildContext context, String charId) async {
+  final view = Uri(
+    path: 'character-editor',
+    queryParameters: {'id': charId},
+  ).toString();
+  if (floatOnDesktop(context, view)) return;
+  await context.push<void>('/character/$charId/edit');
+}
+
+/// Opens a blank editor for a new character, the way [openCharacterEditor]
+/// opens an existing one.
+Future<void> openCharacterCreator(BuildContext context) async {
+  final view = Uri(
+    path: 'character-editor',
+    queryParameters: {'new': generateId()},
+  ).toString();
+  if (floatOnDesktop(context, view)) return;
+  await context.push<void>('/character/create');
+}
+
 class CharacterEditorScreen extends ConsumerStatefulWidget {
   final String charId;
   final bool isNew;
-  const CharacterEditorScreen({super.key, required this.charId, this.isNew = false});
+  const CharacterEditorScreen({
+    super.key,
+    required this.charId,
+    this.isNew = false,
+  });
 
   @override
   ConsumerState<CharacterEditorScreen> createState() =>
@@ -111,6 +141,8 @@ class _CharacterEditorScreenState extends ConsumerState<CharacterEditorScreen> {
   }
 
   void _goBack() {
+    // A desktop window: close it.
+    if (popDesktopWindow(context)) return;
     if (context.canPop()) {
       context.pop();
     } else {
@@ -128,25 +160,44 @@ class _CharacterEditorScreenState extends ConsumerState<CharacterEditorScreen> {
   }
 
   Future<void> _pickAvatar() async {
-    final result = await FilePicker.pickFiles(type: FileType.image, withData: true);
-    if (result == null || result.files.isEmpty) return;
+    try {
+      final result = await FilePicker.pickFiles(
+        type: FileType.image,
+        withData: Platform.isAndroid || Platform.isIOS,
+      );
+      if (result == null || result.files.isEmpty) return;
 
-    final filePath = result.files.first.path;
-    if (filePath == null) return;
+      final selected = result.files.first;
+      final bytes =
+          selected.bytes ??
+          (selected.path == null
+              ? null
+              : await File(selected.path!).readAsBytes());
+      if (bytes == null) {
+        throw const FormatException('The selected image could not be read');
+      }
 
-    final bytes = await File(filePath).readAsBytes();
-    final storage = await ref.read(imageStorageProvider.future);
-    final savedPath = await storage.saveAvatar(_effectiveId, bytes);
-    await FileImage(File(savedPath)).evict();
-    final thumbPath = storage.thumbnailPath(savedPath);
-    if (thumbPath != null) await FileImage(File(thumbPath)).evict();
-    bumpAvatarVersion(ref);
-    if (mounted) {
-      setState(() {
-        _item['avatarPath'] = savedPath;
-        _item = Map.from(_item); // Force update
-      });
-      unawaited(_save(_item));
+      final storage = await ref.read(imageStorageProvider.future);
+      final savedPath = await storage.saveAvatar(_effectiveId, bytes);
+      await FileImage(File(savedPath)).evict();
+      final thumbPath = storage.thumbnailPath(savedPath);
+      if (thumbPath != null) await FileImage(File(thumbPath)).evict();
+      bumpAvatarVersion(ref);
+      if (mounted) {
+        setState(() {
+          _item['avatarPath'] = savedPath;
+          _item = Map.from(_item); // Force update
+        });
+        unawaited(_save(_item));
+      }
+    } catch (e) {
+      if (mounted) {
+        GlazeErrorDialog.show(
+          context,
+          e,
+          prefix: 'error_avatar_import_failed_prefix'.tr(),
+        );
+      }
     }
   }
 
@@ -156,108 +207,130 @@ class _CharacterEditorScreenState extends ConsumerState<CharacterEditorScreen> {
     }
 
     try {
-      final tags = (item['tags'] as List<dynamic>?)
-              ?.map((t) => t.toString())
-              .toList() ??
+      final tags =
+          (item['tags'] as List<dynamic>?)?.map((t) => t.toString()).toList() ??
           [];
-      final alternateGreetings = (item['alternate_greetings'] as List<dynamic>?)
+      final alternateGreetings =
+          (item['alternate_greetings'] as List<dynamic>?)
               ?.map((t) => t.toString())
               .toList() ??
           [];
 
-      final updated = _original?.copyWith(
-        name: (item['name'] as String).trim(),
-        displayName: (item['display_name'] as String?)?.trim().isEmpty ?? true
-            ? null
-            : (item['display_name'] as String).trim(),
-        avatarPath: item['avatarPath'] as String?,
-        description: (item['description'] as String?)?.trim().isEmpty ?? true
-            ? null
-            : (item['description'] as String).trim(),
-        personality: (item['personality'] as String?)?.trim().isEmpty ?? true
-            ? null
-            : (item['personality'] as String).trim(),
-        scenario: (item['scenario'] as String?)?.trim().isEmpty ?? true
-            ? null
-            : (item['scenario'] as String).trim(),
-        firstMes: (item['first_mes'] as String?)?.trim().isEmpty ?? true
-            ? null
-            : (item['first_mes'] as String).trim(),
-        mesExample: (item['mes_example'] as String?)?.trim().isEmpty ?? true
-            ? null
-            : (item['mes_example'] as String).trim(),
-        systemPrompt: (item['system_prompt'] as String?)?.trim().isEmpty ?? true
-            ? null
-            : (item['system_prompt'] as String).trim(),
-        postHistoryInstructions:
-            (item['post_history_instructions'] as String?)?.trim().isEmpty ?? true
+      final updated =
+          _original?.copyWith(
+            name: (item['name'] as String).trim(),
+            displayName:
+                (item['display_name'] as String?)?.trim().isEmpty ?? true
+                ? null
+                : (item['display_name'] as String).trim(),
+            avatarPath: item['avatarPath'] as String?,
+            description:
+                (item['description'] as String?)?.trim().isEmpty ?? true
+                ? null
+                : (item['description'] as String).trim(),
+            personality:
+                (item['personality'] as String?)?.trim().isEmpty ?? true
+                ? null
+                : (item['personality'] as String).trim(),
+            scenario: (item['scenario'] as String?)?.trim().isEmpty ?? true
+                ? null
+                : (item['scenario'] as String).trim(),
+            firstMes: (item['first_mes'] as String?)?.trim().isEmpty ?? true
+                ? null
+                : (item['first_mes'] as String).trim(),
+            mesExample: (item['mes_example'] as String?)?.trim().isEmpty ?? true
+                ? null
+                : (item['mes_example'] as String).trim(),
+            systemPrompt:
+                (item['system_prompt'] as String?)?.trim().isEmpty ?? true
+                ? null
+                : (item['system_prompt'] as String).trim(),
+            postHistoryInstructions:
+                (item['post_history_instructions'] as String?)
+                        ?.trim()
+                        .isEmpty ??
+                    true
                 ? null
                 : (item['post_history_instructions'] as String).trim(),
-        creator: (item['creator'] as String?)?.trim().isEmpty ?? true
-            ? null
-            : (item['creator'] as String).trim(),
-        creatorNotes: (item['creator_notes'] as String?)?.trim().isEmpty ?? true
-            ? null
-            : (item['creator_notes'] as String).trim(),
-        tags: tags,
-        alternateGreetings: alternateGreetings,
-        updatedAt: currentTimestampSeconds(),
-        createdAt: _original?.createdAt ?? currentTimestampSeconds(),
-        extensions: {
-          ...?_original?.extensions,
-          'talkativeness': item['talkativeness'] is num ? (item['talkativeness'] as num).toDouble() : 1.0,
-        },
-        depthPrompt: (item['depth_prompt'] as String?)?.trim() ?? '',
-        depthPromptDepth: item['depth_prompt_depth'] as int? ?? 4,
-        depthPromptRole: item['depth_prompt_role'] as String? ?? 'system',
-        world: item['world'] as String?,
-      ) ?? Character(
-        id: _effectiveId,
-        name: (item['name'] as String).trim(),
-        displayName: (item['display_name'] as String?)?.trim().isEmpty ?? true
-            ? null
-            : (item['display_name'] as String).trim(),
-        avatarPath: item['avatarPath'] as String?,
-        description: (item['description'] as String?)?.trim().isEmpty ?? true
-            ? null
-            : (item['description'] as String).trim(),
-        personality: (item['personality'] as String?)?.trim().isEmpty ?? true
-            ? null
-            : (item['personality'] as String).trim(),
-        scenario: (item['scenario'] as String?)?.trim().isEmpty ?? true
-            ? null
-            : (item['scenario'] as String).trim(),
-        firstMes: (item['first_mes'] as String?)?.trim().isEmpty ?? true
-            ? null
-            : (item['first_mes'] as String).trim(),
-        mesExample: (item['mes_example'] as String?)?.trim().isEmpty ?? true
-            ? null
-            : (item['mes_example'] as String).trim(),
-        systemPrompt: (item['system_prompt'] as String?)?.trim().isEmpty ?? true
-            ? null
-            : (item['system_prompt'] as String).trim(),
-        postHistoryInstructions:
-            (item['post_history_instructions'] as String?)?.trim().isEmpty ?? true
+            creator: (item['creator'] as String?)?.trim().isEmpty ?? true
+                ? null
+                : (item['creator'] as String).trim(),
+            creatorNotes:
+                (item['creator_notes'] as String?)?.trim().isEmpty ?? true
+                ? null
+                : (item['creator_notes'] as String).trim(),
+            tags: tags,
+            alternateGreetings: alternateGreetings,
+            updatedAt: currentTimestampSeconds(),
+            createdAt: _original?.createdAt ?? currentTimestampSeconds(),
+            extensions: {
+              ...?_original?.extensions,
+              'talkativeness': item['talkativeness'] is num
+                  ? (item['talkativeness'] as num).toDouble()
+                  : 1.0,
+            },
+            depthPrompt: (item['depth_prompt'] as String?)?.trim() ?? '',
+            depthPromptDepth: item['depth_prompt_depth'] as int? ?? 4,
+            depthPromptRole: item['depth_prompt_role'] as String? ?? 'system',
+            world: item['world'] as String?,
+          ) ??
+          Character(
+            id: _effectiveId,
+            name: (item['name'] as String).trim(),
+            displayName:
+                (item['display_name'] as String?)?.trim().isEmpty ?? true
+                ? null
+                : (item['display_name'] as String).trim(),
+            avatarPath: item['avatarPath'] as String?,
+            description:
+                (item['description'] as String?)?.trim().isEmpty ?? true
+                ? null
+                : (item['description'] as String).trim(),
+            personality:
+                (item['personality'] as String?)?.trim().isEmpty ?? true
+                ? null
+                : (item['personality'] as String).trim(),
+            scenario: (item['scenario'] as String?)?.trim().isEmpty ?? true
+                ? null
+                : (item['scenario'] as String).trim(),
+            firstMes: (item['first_mes'] as String?)?.trim().isEmpty ?? true
+                ? null
+                : (item['first_mes'] as String).trim(),
+            mesExample: (item['mes_example'] as String?)?.trim().isEmpty ?? true
+                ? null
+                : (item['mes_example'] as String).trim(),
+            systemPrompt:
+                (item['system_prompt'] as String?)?.trim().isEmpty ?? true
+                ? null
+                : (item['system_prompt'] as String).trim(),
+            postHistoryInstructions:
+                (item['post_history_instructions'] as String?)
+                        ?.trim()
+                        .isEmpty ??
+                    true
                 ? null
                 : (item['post_history_instructions'] as String).trim(),
-        creator: (item['creator'] as String?)?.trim().isEmpty ?? true
-            ? null
-            : (item['creator'] as String).trim(),
-        creatorNotes: (item['creator_notes'] as String?)?.trim().isEmpty ?? true
-            ? null
-            : (item['creator_notes'] as String).trim(),
-        tags: tags,
-        alternateGreetings: alternateGreetings,
-        updatedAt: currentTimestampSeconds(),
-        createdAt: currentTimestampSeconds(),
-        extensions: {
-          'talkativeness': item['talkativeness'] is num ? (item['talkativeness'] as num).toDouble() : 1.0,
-        },
-        depthPrompt: (item['depth_prompt'] as String?)?.trim() ?? '',
-        depthPromptDepth: item['depth_prompt_depth'] as int? ?? 4,
-        depthPromptRole: item['depth_prompt_role'] as String? ?? 'system',
-        world: item['world'] as String?,
-      );
+            creator: (item['creator'] as String?)?.trim().isEmpty ?? true
+                ? null
+                : (item['creator'] as String).trim(),
+            creatorNotes:
+                (item['creator_notes'] as String?)?.trim().isEmpty ?? true
+                ? null
+                : (item['creator_notes'] as String).trim(),
+            tags: tags,
+            alternateGreetings: alternateGreetings,
+            updatedAt: currentTimestampSeconds(),
+            createdAt: currentTimestampSeconds(),
+            extensions: {
+              'talkativeness': item['talkativeness'] is num
+                  ? (item['talkativeness'] as num).toDouble()
+                  : 1.0,
+            },
+            depthPrompt: (item['depth_prompt'] as String?)?.trim() ?? '',
+            depthPromptDepth: item['depth_prompt_depth'] as int? ?? 4,
+            depthPromptRole: item['depth_prompt_role'] as String? ?? 'system',
+            world: item['world'] as String?,
+          );
 
       await ref.read(charactersProvider.notifier).save(updated);
       final avatarPath = item['avatarPath'] as String?;
@@ -266,33 +339,47 @@ class _CharacterEditorScreenState extends ConsumerState<CharacterEditorScreen> {
       }
     } catch (e) {
       if (mounted) {
-        GlazeErrorDialog.show(context, e, prefix: 'Save failed: ');
+        GlazeErrorDialog.show(
+          context,
+          e,
+          prefix: 'error_save_failed_prefix'.tr(),
+        );
       }
     }
   }
 
   String _getFieldLabel(String field) => switch (field) {
-        'name' => 'label_name'.tr(),
-        'creator' => 'placeholder_author_name'.tr(),
-        'tags' => 'label_tags'.tr(),
-        'description' => 'label_description'.tr(),
-        'personality' => 'label_personality'.tr(),
-        'scenario' => 'label_scenario'.tr(),
-        'first_mes' => 'label_first_mes'.tr(),
-        'mes_example' => 'label_mes_example'.tr(),
-        'system_prompt' => 'label_char_prompt'.tr().replaceAll(RegExp(r'Character|персонажа', caseSensitive: false), 'role_system'.tr()),
-        'post_history_instructions' => "${'block_chat_history'.tr()} ${'guidance_placeholder'.tr().replaceAll('...', '')}",
-        'creator_notes' => '${'onboarding_placeholder_desc'.tr().split(' ')[0]} ${'label_description'.tr()}',
-        'depth_prompt' => '${'label_depth'.tr()} ${'placeholder_prompt_text'.tr().replaceAll('...', '')}',
-        _ => field.replaceAll('_', ' ').replaceFirstMapped(RegExp(r'[a-z]'), (m) => m.group(0)!.toUpperCase()),
-      };
+    'name' => 'label_name'.tr(),
+    'creator' => 'placeholder_author_name'.tr(),
+    'tags' => 'label_tags'.tr(),
+    'description' => 'label_description'.tr(),
+    'personality' => 'label_personality'.tr(),
+    'scenario' => 'label_scenario'.tr(),
+    'first_mes' => 'label_first_mes'.tr(),
+    'mes_example' => 'label_mes_example'.tr(),
+    'system_prompt' => 'label_char_prompt'.tr().replaceAll(
+      RegExp(r'Character|персонажа', caseSensitive: false),
+      'role_system'.tr(),
+    ),
+    'post_history_instructions' =>
+      "${'block_chat_history'.tr()} ${'guidance_placeholder'.tr().replaceAll('...', '')}",
+    'creator_notes' =>
+      '${'onboarding_placeholder_desc'.tr().split(' ')[0]} ${'label_description'.tr()}',
+    _ =>
+      field
+          .replaceAll('_', ' ')
+          .replaceFirstMapped(
+            RegExp(r'[a-z]'),
+            (m) => m.group(0)!.toUpperCase(),
+          ),
+  };
 
   @override
   Widget build(BuildContext context) {
     if (_loading) {
       return SheetView(
         title: "${'action_edit'.tr()} ${'sheet_title_char_options'.tr()}",
-        body: const Center(child: CircularProgressIndicator()),
+        body: const Center(child: GlazeSpinner()),
       );
     }
 
@@ -300,55 +387,106 @@ class _CharacterEditorScreenState extends ConsumerState<CharacterEditorScreen> {
       GenericEditorSection(
         title: null,
         fields: [
-          GenericEditorField(key: 'name', label: 'label_name'.tr(), type: 'text'),
-          GenericEditorField(key: 'display_name', label: 'Display Name', type: 'text'),
-          GenericEditorField(key: 'creator', label: 'placeholder_author_name'.tr(), type: 'text'),
-          GenericEditorField(key: 'tags', label: 'label_tags'.tr(), type: 'tags', placeholder: 'tag1, tag2, tag3'),
+          GenericEditorField(
+            key: 'name',
+            label: 'label_name'.tr(),
+            type: 'text',
+          ),
+          GenericEditorField(
+            key: 'display_name',
+            label: 'Display Name',
+            type: 'text',
+          ),
+          GenericEditorField(
+            key: 'creator',
+            label: 'placeholder_author_name'.tr(),
+            type: 'text',
+          ),
+          GenericEditorField(
+            key: 'tags',
+            label: 'label_tags'.tr(),
+            type: 'tags',
+            placeholder: 'tag1, tag2, tag3',
+          ),
         ],
       ),
       GenericEditorSection(
         title: 'sheet_title_char_options'.tr(),
         fields: [
-          GenericEditorField(key: 'description', label: 'label_description'.tr(), type: 'textarea', rows: 4, expandable: true),
-          GenericEditorField(key: 'personality', label: 'label_personality'.tr(), type: 'textarea', rows: 4, expandable: true),
-          GenericEditorField(key: 'scenario', label: 'label_scenario'.tr(), type: 'textarea', rows: 4, expandable: true),
+          GenericEditorField(
+            key: 'description',
+            label: 'label_description'.tr(),
+            type: 'textarea',
+            rows: 4,
+            expandable: true,
+          ),
+          GenericEditorField(
+            key: 'personality',
+            label: 'label_personality'.tr(),
+            type: 'textarea',
+            rows: 4,
+            expandable: true,
+          ),
+          GenericEditorField(
+            key: 'scenario',
+            label: 'label_scenario'.tr(),
+            type: 'textarea',
+            rows: 4,
+            expandable: true,
+          ),
         ],
       ),
       GenericEditorSection(
         title: "${'label_first_mes'.tr()} & ${'block_example_dialogue'.tr()}",
         fields: [
-          GenericEditorField(key: 'first_mes', label: 'label_first_mes'.tr(), type: 'greeting_list'),
-          GenericEditorField(key: 'mes_example', label: 'label_mes_example'.tr(), type: 'textarea', rows: 6, expandable: true),
+          GenericEditorField(
+            key: 'first_mes',
+            label: 'label_first_mes'.tr(),
+            type: 'greeting_list',
+          ),
+          GenericEditorField(
+            key: 'mes_example',
+            label: 'label_mes_example'.tr(),
+            type: 'textarea',
+            rows: 6,
+            expandable: true,
+          ),
         ],
       ),
       GenericEditorSection(
         title: 'section_prompt_blocks'.tr(),
         fields: [
-          GenericEditorField(key: 'system_prompt', label: _getFieldLabel('system_prompt'), type: 'textarea', rows: 6, expandable: true),
-          GenericEditorField(key: 'post_history_instructions', label: _getFieldLabel('post_history_instructions'), type: 'textarea', rows: 4, expandable: true),
-          GenericEditorField(key: 'creator_notes', label: _getFieldLabel('creator_notes'), type: 'textarea', rows: 3),
+          GenericEditorField(
+            key: 'system_prompt',
+            label: _getFieldLabel('system_prompt'),
+            type: 'textarea',
+            rows: 6,
+            expandable: true,
+          ),
+          GenericEditorField(
+            key: 'post_history_instructions',
+            label: _getFieldLabel('post_history_instructions'),
+            type: 'textarea',
+            rows: 4,
+            expandable: true,
+          ),
+          GenericEditorField(
+            key: 'creator_notes',
+            label: _getFieldLabel('creator_notes'),
+            type: 'textarea',
+            rows: 3,
+          ),
         ],
       ),
       GenericEditorSection(
+        // No depth-prompt fields here: a character-scoped prompt at a fixed
+        // depth is what the preset's own blocks are for, and the three controls
+        // only ever sat in the way. The character still carries the values —
+        // they are part of the SillyTavern V2 card and are seeded, saved and
+        // exported untouched — so an imported card keeps its depth prompt and
+        // survives a round trip through this editor.
         title: 'section_advanced_settings'.tr(),
         fields: [
-          GenericEditorField(key: 'depth_prompt', label: _getFieldLabel('depth_prompt'), type: 'textarea', rows: 4, placeholder: 'Injected at a specific depth in the prompt'),
-          GenericEditorField(
-            key: 'depth_prompt_role',
-            label: "${'label_depth'.tr()} ${'label_role'.tr()}",
-            type: 'select',
-            options: [
-              {'label': 'role_system'.tr(), 'value': 'system'},
-              {'label': 'role_user'.tr(), 'value': 'user'},
-              {'label': 'role_assistant'.tr(), 'value': 'assistant'},
-            ],
-          ),
-          GenericEditorField(
-            key: 'depth_prompt_depth',
-            label: 'label_depth'.tr(),
-            type: 'select',
-            options: List.generate(20, (i) => {'label': '${i + 1}', 'value': i + 1}),
-          ),
           GenericEditorField(
             key: 'world',
             label: 'menu_lorebooks'.tr(),
@@ -358,7 +496,12 @@ class _CharacterEditorScreenState extends ConsumerState<CharacterEditorScreen> {
               ..._lorebookNames.map((name) => {'label': name, 'value': name}),
             ],
           ),
-          GenericEditorField(key: 'talkativeness', label: "${'tab_chat'.tr()} ${'label_probability'.tr().replaceAll(' (%)', '')} (0.0 - 1.0)", type: 'number'),
+          GenericEditorField(
+            key: 'talkativeness',
+            label:
+                "${'tab_chat'.tr()} ${'label_probability'.tr().replaceAll(' (%)', '')} (0.0 - 1.0)",
+            type: 'number',
+          ),
         ],
       ),
     ];
@@ -368,7 +511,9 @@ class _CharacterEditorScreenState extends ConsumerState<CharacterEditorScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            widget.isNew ? "${'create_new'.tr()} ${'sheet_title_char_options'.tr()}" : "${'action_edit'.tr()} ${'sheet_title_char_options'.tr()}",
+            widget.isNew
+                ? "${'create_new'.tr()} ${'sheet_title_char_options'.tr()}"
+                : "${'action_edit'.tr()} ${'sheet_title_char_options'.tr()}",
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w700,
@@ -395,7 +540,9 @@ class _CharacterEditorScreenState extends ConsumerState<CharacterEditorScreen> {
         showAvatar: true,
         avatarField: 'avatarPath',
         avatarHint: 'hint_change_avatar'.tr(),
-        avatarPlaceholder: (_item['name']?.toString().isNotEmpty ?? false) ? _item['name'].toString()[0].toUpperCase() : '?',
+        avatarPlaceholder: (_item['name']?.toString().isNotEmpty ?? false)
+            ? _item['name'].toString()[0].toUpperCase()
+            : '?',
         onAvatarTap: _pickAvatar,
         onChanged: (values) {
           _item = values;
@@ -405,4 +552,3 @@ class _CharacterEditorScreenState extends ConsumerState<CharacterEditorScreen> {
     );
   }
 }
-

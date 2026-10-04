@@ -10,6 +10,7 @@ import '../state/memory_settings_provider.dart';
 import '../state/summary_providers.dart';
 import 'prompt_builder.dart';
 import 'prompt_inputs.dart';
+import '../models/ledger_prompt_injection_policy.dart';
 
 typedef ApiConfigInitializer = Future<void> Function();
 typedef ActiveApiConfigReader = ApiConfig? Function();
@@ -62,8 +63,11 @@ class PromptInputsCollector {
     final personaRepo = _ref.read(personaRepoProvider);
     final lorebookRepo = _ref.read(lorebookRepoProvider);
 
-    final character = await charRepo.getById(charId);
-    if (character == null) throw StateError('Character not found: $charId');
+    final sourceCharacter = await charRepo.getById(charId);
+    if (sourceCharacter == null) {
+      throw StateError('Character not found: $charId');
+    }
+    final character = sourceCharacter;
 
     await _initializeApiConfigs();
     final chatApi = _readActiveApiConfig();
@@ -95,7 +99,12 @@ class PromptInputsCollector {
       connections,
     );
 
-    final lorebooks = await lorebookRepo.getAll();
+    final sourceLorebooks = await lorebookRepo.getAll();
+    final lorebooks = session == null
+        ? sourceLorebooks
+        : await _ref
+              .read(sessionLorebookEvolutionRepoProvider)
+              .applyOverlays(sessionId: session.id, lorebooks: sourceLorebooks);
     final lorebookSettings = _ref.read(lorebookSettingsProvider);
     final lorebookActivations = _ref.read(lorebookActivationsProvider);
 
@@ -179,6 +188,12 @@ class PromptInputsCollector {
       memoryQueryMaxChars: memoryBook?.settings.queryMaxChars ?? 1500,
       memoryContextBudgetTokens: chatApi.contextSize,
       runtimePromptBlocks: runtimePromptBlocks,
+      effectiveCanonProjection: null,
+      ledgerPromptInjectionPolicy: disabledLedgerPromptInjectionPolicy,
+      // The read-only stamp comparison above proves that this projection did
+      // not change while its history snapshot was collected. buildPrompt will
+      // still suppress only against messages that survive final token trim.
+      ledgerProjectionFreshnessProvenCurrent: false,
     );
   }
 }

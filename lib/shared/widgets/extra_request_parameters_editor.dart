@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/models/extra_request_parameter.dart';
 import '../theme/app_colors.dart';
+import 'list_controls.dart';
 import 'menu_group.dart';
 
 class ExtraRequestParametersEditor extends StatefulWidget {
@@ -92,10 +93,11 @@ class _ExtraRequestParametersEditorState
           padding: const EdgeInsets.fromLTRB(8, 4, 16, 0),
           child: Align(
             alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: _add,
-              icon: const Icon(Icons.add_rounded),
-              label: Text(widget.addLabel),
+            child: GlazeActionChip(
+              icon: Icons.add_rounded,
+              label: widget.addLabel,
+              tooltip: widget.addLabel,
+              onTap: _add,
             ),
           ),
         ),

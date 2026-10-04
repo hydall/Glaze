@@ -2,8 +2,11 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:glaze_flutter/core/db/app_db.dart';
+import 'package:glaze_flutter/core/db/repositories/chat_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/ledger_reconciliation_run_repo.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
@@ -12,8 +15,11 @@ import 'package:glaze_flutter/core/models/memory_book.dart';
 import 'package:glaze_flutter/core/models/persona.dart';
 import 'package:glaze_flutter/core/models/preset.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
+import 'package:glaze_flutter/core/utils/cast_helpers.dart';
+import 'package:glaze_flutter/core/utils/sync_deletion_tracker.dart';
 import 'package:glaze_flutter/core/application/session_deletion_store.dart';
 import 'package:glaze_flutter/core/application/character_deletion_store.dart';
+import 'package:glaze_flutter/features/cloud_sync/adapters/ext_blocks_sync_stores.dart';
 import 'package:glaze_flutter/features/cloud_sync/sync_repo_interfaces.dart';
 import 'package:glaze_flutter/shared/theme/theme_preset.dart';
 import 'package:glaze_flutter/features/cloud_sync/cloud_adapter.dart';
@@ -26,6 +32,7 @@ import 'package:glaze_flutter/features/cloud_sync/sync_models.dart';
 import 'package:glaze_flutter/features/extensions/models/extension_preset.dart';
 import 'package:glaze_flutter/features/extensions/models/extensions_settings.dart';
 import 'package:glaze_flutter/features/extensions/models/info_block.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 // ─── In-memory fakes ────────────────────────────────────────────────
 
@@ -51,6 +58,7 @@ class FakeCharacterStore implements SyncCharacterStore {
 
 class FakeChatStore implements SyncChatStore {
   final Map<String, ChatSession> data = {};
+  Duration putDelay = Duration.zero;
 
   @override
   Future<List<SessionMetadata>> getAllSessionMetadata() async {
@@ -74,6 +82,7 @@ class FakeChatStore implements SyncChatStore {
 
   @override
   Future<void> put(ChatSession s) async {
+    if (putDelay > Duration.zero) await Future<void>.delayed(putDelay);
     data[s.id] = s;
   }
 
@@ -96,6 +105,13 @@ class FakeSessionDeletionStore implements SessionDeletionStore {
   }
 }
 
+class NoopSessionDeletionStore implements SessionDeletionStore {
+  const NoopSessionDeletionStore();
+
+  @override
+  Future<void> deleteSession(String sessionId) async {}
+}
+
 class FakeCharacterDeletionStore implements CharacterDeletionStore {
   final FakeCharacterStore characters;
   final List<Set<String>> deletedCharacterIds = [];
@@ -114,7 +130,7 @@ class FakeCharacterDeletionStore implements CharacterDeletionStore {
       characterIds: characterIds,
       sessionIds: const {},
       studioConfigSessionIds: const {},
-      lorebookIds: const {},
+      detachedLorebookIds: const {},
     );
   }
 }
@@ -203,6 +219,13 @@ class FakeLorebookStore implements SyncLorebookStore {
   @override
   Future<void> put(Lorebook l) async {
     data[l.id] = l;
+  }
+
+  @override
+  Future<void> putAll(List<Lorebook> lorebooks) async {
+    for (final lorebook in lorebooks) {
+      data[lorebook.id] = lorebook;
+    }
   }
 
   @override
@@ -330,8 +353,24 @@ class FakeStudioConfigStore implements SyncStudioConfigStore {
   Future<StudioConfig?> getById(String id) async => data[id];
   @override
   Future<void> put(StudioConfig config) async {
-    data[config.profileId.isNotEmpty ? config.profileId : config.sessionId] =
-        config;
+    data[config.sessionId] = config;
+  }
+
+  @override
+  Future<void> delete(String id) async {
+    data.remove(id);
+  }
+}
+
+class FakeStudioPresetStore implements SyncStudioPresetStore {
+  final Map<String, StudioPreset> data = {};
+  @override
+  Future<List<StudioPreset>> getAll() async => data.values.toList();
+  @override
+  Future<StudioPreset?> getById(String id) async => data[id];
+  @override
+  Future<void> put(StudioPreset preset) async {
+    data[preset.id] = preset;
   }
 
   @override
@@ -359,8 +398,71 @@ class FakeImageStore implements SyncImageStore {
   }
 }
 
+class FakeReconciliationStateStore implements SyncReconciliationStateStore {
+  final Map<String, Map<String, dynamic>> data = {};
+  bool discardCollectors = false;
+  bool discardAll = false;
+  Future<void> Function(String sessionId)? beforeMerge;
+
+  @override
+  Future<List<String>> getAllSessionIds() async => data.keys.toList();
+
+  @override
+  Future<Map<String, dynamic>?> getBySessionId(String sessionId) async =>
+      data[sessionId];
+
+  @override
+  Future<Map<String, dynamic>> mergeBySessionId(
+    String sessionId,
+    Map<String, dynamic> incoming,
+  ) async {
+    await beforeMerge?.call(sessionId);
+    if (discardAll) {
+      data.remove(sessionId);
+      return {};
+    }
+    final merged = {...?data[sessionId], ...incoming};
+    if (discardCollectors) merged['collectors'] = <dynamic>[];
+    data[sessionId] = merged;
+    return merged;
+  }
+
+  @override
+  Future<void> deleteBySessionId(String sessionId) async {
+    data.remove(sessionId);
+  }
+}
+
+class FakeSessionLorebookOverlayStore
+    implements SyncSessionLorebookOverlayStore {
+  final Map<String, Map<String, dynamic>> data = {};
+  Future<void> Function(String sessionId)? beforeApply;
+
+  @override
+  Future<List<String>> getAllSessionIds() async => data.keys.toList()..sort();
+
+  @override
+  Future<Map<String, dynamic>?> getBySessionId(String sessionId) async =>
+      data[sessionId];
+
+  @override
+  Future<void> applyBySessionId(
+    String sessionId,
+    Map<String, dynamic> incoming,
+  ) async {
+    await beforeApply?.call(sessionId);
+    data[sessionId] = Map<String, dynamic>.from(incoming);
+  }
+
+  @override
+  Future<void> deleteBySessionId(String sessionId) async {
+    data.remove(sessionId);
+  }
+}
+
 class FakeCloudAdapter implements CloudAdapter {
   final Map<String, String> files = {};
+  final List<String> downloadCalls = [];
   final List<String> listFolderCalls = [];
   final Set<String> ensuredFolders = {};
   final Set<String> downloadFailures = {};
@@ -408,6 +510,7 @@ class FakeCloudAdapter implements CloudAdapter {
 
   @override
   Future<String> download(String path) async {
+    downloadCalls.add(path);
     if (downloadFailures.contains(path)) {
       throw Exception('Download failed: $path');
     }
@@ -483,6 +586,9 @@ class InMemoryManifestProvider implements SyncManifestProvider {
     SyncTrackerSnapshotStore? trackerSnapshotStore,
     SyncTrackerValueStore? trackerValueStore,
     SyncStudioConfigStore? studioConfigStore,
+    SyncStudioPresetStore? studioPresetStore,
+    SyncSessionLorebookOverlayStore? sessionLorebookOverlayStore,
+    SyncReconciliationStateStore? reconciliationStateStore,
   }) : _builder = SyncManifestBuilder(
          characterRepo: characterRepo,
          chatRepo: chatRepo,
@@ -500,10 +606,16 @@ class InMemoryManifestProvider implements SyncManifestProvider {
              trackerSnapshotStore ?? FakeTrackerSnapshotStore(),
          trackerValueStore: trackerValueStore ?? FakeTrackerValueStore(),
          studioConfigStore: studioConfigStore ?? FakeStudioConfigStore(),
+         studioPresetStore: studioPresetStore,
+         sessionLorebookOverlayStore: sessionLorebookOverlayStore,
+         reconciliationStateStore: reconciliationStateStore,
        );
 
   @override
-  Future<SyncManifest> buildLocalManifest({SyncManifest? cloudManifest}) async {
+  Future<SyncManifest> buildLocalManifest({
+    SyncManifest? cloudManifest,
+    bool applyAcceptedHashes = true,
+  }) async {
     // Sync in-memory storage → SharedPreferences so the builder's
     // readLocalManifest() sees the same manifest the tests wrote.
     final raw = _storage['manifest'];
@@ -513,7 +625,10 @@ class InMemoryManifestProvider implements SyncManifestProvider {
     } else {
       await prefs.remove('gz_sync_manifest_v2');
     }
-    return _builder.buildLocalManifest(cloudManifest: cloudManifest);
+    return _builder.buildLocalManifest(
+      cloudManifest: cloudManifest,
+      applyAcceptedHashes: applyAcceptedHashes,
+    );
   }
 
   @override
@@ -539,6 +654,9 @@ class InMemoryManifestProvider implements SyncManifestProvider {
   Future<void> clearDeleted() async {}
 
   @override
+  Future<bool> isDeleted(String type, String id) async => false;
+
+  @override
   Future<String> getDeviceId() => _builder.getDeviceId();
 }
 
@@ -557,10 +675,18 @@ class SyncWorld {
   late final FakeCloudAdapter cloud;
   late final FakeThemePresetStore uiThemes;
   late final InMemoryManifestProvider manifestProvider;
+  late final FakeStudioConfigStore studioConfigs;
+  late final FakeStudioPresetStore studioPresets;
   late final FakeSessionDeletionStore sessionDeletions;
   late final FakeCharacterDeletionStore characterDeletions;
+  late final FakeReconciliationStateStore? reconciliationStates;
+  late final FakeSessionLorebookOverlayStore? sessionLorebookOverlays;
 
-  SyncWorld() {
+  SyncWorld({
+    FakeReconciliationStateStore? reconciliationStateStore,
+    FakeSessionLorebookOverlayStore? sessionLorebookOverlayStore,
+    Future<void> Function(Set<String>)? reconcilePulledSessions,
+  }) {
     characters = FakeCharacterStore();
     chats = FakeChatStore();
     personas = FakePersonaStore();
@@ -572,8 +698,13 @@ class SyncWorld {
     images = FakeImageStore();
     cloud = FakeCloudAdapter();
     uiThemes = FakeThemePresetStore();
+    studioConfigs = FakeStudioConfigStore();
+    studioPresets = FakeStudioPresetStore();
     sessionDeletions = FakeSessionDeletionStore(chats);
     characterDeletions = FakeCharacterDeletionStore(characters);
+    reconciliationStates = reconciliationStateStore;
+    sessionLorebookOverlays = sessionLorebookOverlayStore;
+    _reconcilePulledSessions = reconcilePulledSessions;
     manifestProvider = InMemoryManifestProvider(
       characterRepo: characters,
       chatRepo: chats,
@@ -583,8 +714,14 @@ class SyncWorld {
       memoryBookRepo: memoryBooks,
       lorebookRepo: lorebooks,
       themePresetRepo: uiThemes,
+      studioConfigStore: studioConfigs,
+      studioPresetStore: studioPresets,
+      sessionLorebookOverlayStore: sessionLorebookOverlays,
+      reconciliationStateStore: reconciliationStates,
     );
   }
+
+  Future<void> Function(Set<String>)? _reconcilePulledSessions;
 
   SyncEngine get engine => SyncEngine(
     cloud,
@@ -604,7 +741,8 @@ class SyncWorld {
     FakeInfoBlockStore(),
     FakeTrackerSnapshotStore(),
     FakeTrackerValueStore(),
-    FakeStudioConfigStore(),
+    studioConfigs,
+    studioPresets,
     null,
     null,
     null,
@@ -613,6 +751,74 @@ class SyncWorld {
     sessionDeletions,
     characterDeletions,
     (_) async {},
+    reconciliationStates,
+    sessionLorebookOverlays,
+    _reconcilePulledSessions,
+    0,
+    Duration.zero,
+  );
+}
+
+SyncEngine _realStoreEngine({
+  required SyncChatStore chatStore,
+  required SyncReconciliationStateStore reconciliationStore,
+  required FakeCloudAdapter cloud,
+}) {
+  final characters = FakeCharacterStore();
+  final personas = FakePersonaStore();
+  final presets = FakePresetStore();
+  final apiConfigs = FakeApiConfigStore();
+  final memoryBooks = FakeMemoryBookStore();
+  final lorebooks = FakeLorebookStore();
+  final uiThemes = FakeThemePresetStore();
+  final studioConfigs = FakeStudioConfigStore();
+  final studioPresets = FakeStudioPresetStore();
+  final manifestProvider = InMemoryManifestProvider(
+    characterRepo: characters,
+    chatRepo: chatStore,
+    personaRepo: personas,
+    presetRepo: presets,
+    apiRepo: apiConfigs,
+    memoryBookRepo: memoryBooks,
+    lorebookRepo: lorebooks,
+    themePresetRepo: uiThemes,
+    studioConfigStore: studioConfigs,
+    studioPresetStore: studioPresets,
+    reconciliationStateStore: reconciliationStore,
+  );
+  return SyncEngine(
+    cloud,
+    manifestProvider,
+    characters,
+    chatStore,
+    personas,
+    presets,
+    apiConfigs,
+    memoryBooks,
+    lorebooks,
+    FakeEmbeddingStore(),
+    FakeImageStore(),
+    uiThemes,
+    FakeExtensionPresetStore(),
+    FakeExtensionsSettingsStore(),
+    FakeInfoBlockStore(),
+    FakeTrackerSnapshotStore(),
+    FakeTrackerValueStore(),
+    studioConfigs,
+    studioPresets,
+    null,
+    null,
+    null,
+    null,
+    null,
+    const NoopSessionDeletionStore(),
+    FakeCharacterDeletionStore(characters),
+    (_) async {},
+    reconciliationStore,
+    null,
+    null,
+    0,
+    Duration.zero,
   );
 }
 
@@ -654,6 +860,592 @@ void main() {
       progressList.firstWhere(
         (p) => p.total > 0 || p.message?.contains('Nothing to push') == true,
       );
+
+  test('lorebook singleton hash is independent of repository order', () async {
+    final first = SyncWorld();
+    first.lorebooks.data['b'] = makeLorebook('b');
+    first.lorebooks.data['a'] = makeLorebook('a');
+    final second = SyncWorld();
+    second.lorebooks.data['a'] = makeLorebook('a');
+    second.lorebooks.data['b'] = makeLorebook('b');
+
+    final firstManifest = await first.manifestProvider.buildLocalManifest();
+    final secondManifest = await second.manifestProvider.buildLocalManifest();
+
+    expect(
+      firstManifest.entries[entryKey('lorebooks', 'lorebooks')]?.hash,
+      secondManifest.entries[entryKey('lorebooks', 'lorebooks')]?.hash,
+    );
+  });
+
+  test('legacy lorebook defaults do not repeat on the next pull', () async {
+    final source = SyncWorld();
+    source.lorebooks.data['book'] = makeLorebook(
+      'book',
+    ).copyWith(settings: const LorebookSettings());
+    await source.engine.pushEntities(onProgress: (_) {});
+
+    final lorebookPath = cloudPath('lorebooks', 'lorebooks');
+    final cloudData =
+        jsonDecode(source.cloud.files[lorebookPath]!) as Map<String, dynamic>;
+    final items = (cloudData['items'] as List).cast<Map<String, dynamic>>();
+    final settings = items.single['settings'] as Map<String, dynamic>;
+    settings.remove('vectorizeAllEntries');
+    final manifestPath = cloudPath('manifest', 'manifest');
+    final manifest = SyncManifest.fromJson(
+      jsonDecode(source.cloud.files[manifestPath]!) as Map<String, dynamic>,
+    );
+    final key = entryKey('lorebooks', 'lorebooks');
+    source.cloud.files[lorebookPath] = jsonEncode(cloudData);
+    source.cloud.files[manifestPath] = jsonEncode(
+      manifest
+          .copyWith(
+            entries: {
+              ...manifest.entries,
+              key: manifest.entries[key]!.copyWith(
+                hash: SyncSerialization.computeSyncHash(items),
+              ),
+            },
+          )
+          .toJson(includeLocalState: false),
+    );
+
+    final target = SyncWorld();
+    target.cloud.files.addAll(source.cloud.files);
+    await target.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+    target.cloud.downloadCalls.clear();
+    final conflicts = <SyncConflict>[];
+    final progress = <SyncProgress>[];
+    await target.engine.pullEntities(
+      onProgress: progress.add,
+      onConflict: conflicts.add,
+    );
+
+    expect(conflicts, isEmpty);
+    expect(progress.any((item) => item.message == 'Nothing to pull'), isTrue);
+    expect(target.cloud.downloadCalls, [manifestPath]);
+  });
+
+  test('pull applies chat before its reconciliation state', () async {
+    final reconciliationStates = FakeReconciliationStateStore();
+    final world = SyncWorld(reconciliationStateStore: reconciliationStates);
+    const sessionId = 'ordered-pull-session';
+    const oldChat = ChatSession(
+      id: sessionId,
+      characterId: 'character',
+      sessionIndex: 0,
+      updatedAt: 1000,
+      messages: [ChatMessage(id: 'a1', role: 'assistant', content: 'Opening')],
+    );
+    const cloudChat = ChatSession(
+      id: sessionId,
+      characterId: 'character',
+      sessionIndex: 0,
+      updatedAt: 2000,
+      messages: [
+        ChatMessage(id: 'a1', role: 'assistant', content: 'Opening'),
+        ChatMessage(id: 'u1', role: 'user', content: 'Question'),
+        ChatMessage(id: 'a2', role: 'assistant', content: 'Answer'),
+      ],
+    );
+    await world.chats.put(oldChat);
+    reconciliationStates.data[sessionId] = {
+      'runs': [
+        {'id': 'local-run', 'ordinal': 1},
+      ],
+      'collectors': <dynamic>[],
+    };
+    await world.engine.pushEntities(onProgress: (_) {});
+    world.chats.putDelay = const Duration(milliseconds: 50);
+    reconciliationStates.beforeMerge = (_) async {
+      if (world.chats.data[sessionId]?.messages.length != 3) {
+        throw StateError('Reconciliation saw a stale chat transcript');
+      }
+    };
+    final statePayload = <String, dynamic>{
+      'runs': [
+        {'id': 'cloud-run', 'ordinal': 1},
+      ],
+      'collectors': <dynamic>[],
+    };
+    final chatEntry = SyncManifestEntry(
+      type: 'chat',
+      id: sessionId,
+      path: cloudPath('chat', sessionId),
+      updatedAt: 2000,
+      hash: SyncSerialization.computeChatMetadataHash(
+        const SessionMetadata(
+          sessionId: sessionId,
+          characterId: 'character',
+          sessionIndex: 0,
+          updatedAt: 2000,
+          messageCount: 3,
+          lastMessageContent: 'Answer',
+          lastMessageTimestamp: 0,
+        ),
+      ),
+    );
+    final stateEntry = SyncManifestEntry(
+      type: 'reconciliation_state',
+      id: sessionId,
+      path: cloudPath('reconciliation_state', sessionId),
+      updatedAt: 2000,
+      hash: SyncSerialization.computeSyncHash(statePayload),
+    );
+    final cloudManifest = SyncManifest(
+      deviceId: 'cloud-device',
+      createdAt: 1,
+      lastSync: 2000,
+      entries: {stateEntry.key: stateEntry, chatEntry.key: chatEntry},
+    );
+    world.cloud.files[stateEntry.path] = jsonEncode(statePayload);
+    world.cloud.files[chatEntry.path] = jsonEncode(cloudChat.toJson());
+    world.cloud.files[cloudPath('manifest', 'manifest')] = jsonEncode(
+      cloudManifest.toJson(),
+    );
+
+    await world.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+
+    expect(world.chats.data[sessionId], cloudChat);
+    expect(reconciliationStates.data[sessionId], statePayload);
+  });
+
+  test('pull reconciles touched sessions after primary entities', () async {
+    final seen = <Set<String>>[];
+    late final SyncWorld world;
+    world = SyncWorld(
+      reconcilePulledSessions: (ids) async {
+        seen.add(Set.of(ids));
+        if (!world.chats.data.containsKey('session')) {
+          throw StateError('Reconciliation ran before chat apply');
+        }
+      },
+    );
+    const chat = ChatSession(
+      id: 'session',
+      characterId: 'character',
+      sessionIndex: 0,
+      updatedAt: 2000,
+    );
+    final entry = SyncManifestEntry(
+      type: 'chat',
+      id: chat.id,
+      path: cloudPath('chat', chat.id),
+      updatedAt: chat.updatedAt,
+      hash: SyncSerialization.computeChatMetadataHash(
+        const SessionMetadata(
+          sessionId: 'session',
+          characterId: 'character',
+          sessionIndex: 0,
+          updatedAt: 2000,
+          messageCount: 0,
+          lastMessageContent: '',
+          lastMessageTimestamp: 0,
+        ),
+      ),
+    );
+    final manifest = SyncManifest(
+      deviceId: 'cloud',
+      createdAt: 1,
+      entries: {entry.key: entry},
+    );
+    world.cloud.files[entry.path] = jsonEncode(chat.toJson());
+    world.cloud.files[cloudPath('manifest', 'manifest')] = jsonEncode(
+      manifest.toJson(),
+    );
+
+    await world.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+
+    expect(seen, [
+      {'session'},
+    ]);
+  });
+
+  test('pull applies chat before session lorebook overlays', () async {
+    final overlays = FakeSessionLorebookOverlayStore();
+    final world = SyncWorld(sessionLorebookOverlayStore: overlays);
+    const sessionId = 'overlay-pull-session';
+    const cloudChat = ChatSession(
+      id: sessionId,
+      characterId: 'character',
+      sessionIndex: 0,
+      updatedAt: 2000,
+    );
+    final overlayPayload = <String, dynamic>{
+      '__sessionLorebookOverlays': true,
+      'schemaVersion': 1,
+      'sessionId': sessionId,
+      'overlays': <dynamic>[],
+    };
+    overlays.beforeApply = (_) async {
+      if (world.chats.data[sessionId] != cloudChat) {
+        throw StateError('Lorebook overlay saw a stale owning chat');
+      }
+    };
+    final chatEntry = SyncManifestEntry(
+      type: 'chat',
+      id: sessionId,
+      path: cloudPath('chat', sessionId),
+      updatedAt: 2000,
+      hash: SyncSerialization.computeChatMetadataHash(
+        const SessionMetadata(
+          sessionId: sessionId,
+          characterId: 'character',
+          sessionIndex: 0,
+          updatedAt: 2000,
+          messageCount: 0,
+          lastMessageContent: '',
+          lastMessageTimestamp: 0,
+        ),
+      ),
+    );
+    final overlayEntry = SyncManifestEntry(
+      type: 'session_lorebook_overlays',
+      id: sessionId,
+      path: cloudPath('session_lorebook_overlays', sessionId),
+      updatedAt: 2000,
+      hash: SyncSerialization.computeSyncHash(overlayPayload),
+    );
+    final cloudManifest = SyncManifest(
+      deviceId: 'cloud-device',
+      createdAt: 1,
+      lastSync: 2000,
+      entries: {overlayEntry.key: overlayEntry, chatEntry.key: chatEntry},
+    );
+    world.cloud.files[overlayEntry.path] = jsonEncode(overlayPayload);
+    world.cloud.files[chatEntry.path] = jsonEncode(cloudChat.toJson());
+    world.cloud.files[cloudPath('manifest', 'manifest')] = jsonEncode(
+      cloudManifest.toJson(),
+    );
+
+    await world.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+
+    expect(overlays.data[sessionId], overlayPayload);
+  });
+
+  test(
+    'Push pre-merges cloud-only reconciliation state before rebuilding manifest',
+    () async {
+      final reconciliationStates = FakeReconciliationStateStore();
+      final world = SyncWorld(reconciliationStateStore: reconciliationStates);
+      const sessionId = 'cloud-only-session';
+      const chat = ChatSession(
+        id: sessionId,
+        characterId: 'cloud-character',
+        sessionIndex: 0,
+        updatedAt: 1000,
+      );
+      final payload = <String, dynamic>{
+        'runs': [
+          {'id': 'cloud-run', 'ordinal': 1},
+        ],
+        'collectors': <dynamic>[],
+      };
+      final entry = SyncManifestEntry(
+        type: 'reconciliation_state',
+        id: sessionId,
+        path: cloudPath('reconciliation_state', sessionId),
+        updatedAt: 1000,
+        hash: SyncSerialization.computeSyncHash(payload),
+      );
+      final chatEntry = SyncManifestEntry(
+        type: 'chat',
+        id: sessionId,
+        path: cloudPath('chat', sessionId),
+        updatedAt: 1000,
+        hash: SyncSerialization.computeChatMetadataHash(
+          const SessionMetadata(
+            sessionId: sessionId,
+            characterId: 'cloud-character',
+            sessionIndex: 0,
+            updatedAt: 1000,
+            messageCount: 0,
+            lastMessageContent: '',
+            lastMessageTimestamp: 0,
+          ),
+        ),
+      );
+      final cloudManifest = SyncManifest(
+        deviceId: 'cloud-device',
+        createdAt: 1,
+        lastSync: 1000,
+        entries: {chatEntry.key: chatEntry, entry.key: entry},
+      );
+      world.cloud.files[chatEntry.path] = jsonEncode(chat.toJson());
+      world.cloud.files[entry.path] = jsonEncode(payload);
+      world.cloud.files[cloudPath('manifest', 'manifest')] = jsonEncode(
+        cloudManifest.toJson(),
+      );
+
+      expect(await reconciliationStates.getAllSessionIds(), isEmpty);
+
+      await world.engine.pushEntities(onProgress: (_) {});
+
+      expect(
+        await reconciliationStates.getBySessionId(sessionId),
+        equals(payload),
+      );
+      expect(jsonDecode(world.cloud.files[entry.path]!), equals(payload));
+      final uploadedManifest = SyncManifest.fromJson(
+        jsonDecode(world.cloud.files[cloudPath('manifest', 'manifest')]!)
+            as Map<String, dynamic>,
+      );
+      expect(uploadedManifest.entries[entry.key]?.hash, entry.hash);
+    },
+  );
+
+  test(
+    'normalized reconciliation state does not repeat on the next pull',
+    () async {
+      final reconciliationStates = FakeReconciliationStateStore()
+        ..discardCollectors = true;
+      final world = SyncWorld(reconciliationStateStore: reconciliationStates);
+      const sessionId = 'normalized-session';
+      final payload = <String, dynamic>{
+        'runs': [
+          {'id': 'cloud-run', 'ordinal': 1},
+        ],
+        'collectors': [
+          {'id': 'stale-collector'},
+        ],
+      };
+      final entry = SyncManifestEntry(
+        type: 'reconciliation_state',
+        id: sessionId,
+        path: cloudPath('reconciliation_state', sessionId),
+        updatedAt: 1000,
+        hash: SyncSerialization.computeSyncHash(payload),
+      );
+      final cloudManifest = SyncManifest(
+        deviceId: 'cloud-device',
+        createdAt: 1,
+        lastSync: 1000,
+        entries: {entry.key: entry},
+      );
+      world.cloud.files[entry.path] = jsonEncode(payload);
+      world.cloud.files[cloudPath('manifest', 'manifest')] = jsonEncode(
+        cloudManifest.toJson(),
+      );
+
+      await world.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+      final acceptedManifest = await world.manifestProvider.readLocalManifest();
+      expect(acceptedManifest.entries[entry.key]?.hash, entry.hash);
+      final progress = <SyncProgress>[];
+      await world.engine.pullEntities(
+        onProgress: progress.add,
+        onConflict: (_) {},
+      );
+
+      expect(progress.any((item) => item.message == 'Nothing to pull'), isTrue);
+      expect(reconciliationStates.data[sessionId]!['collectors'], isEmpty);
+    },
+  );
+
+  test(
+    'reconciliation state normalized to empty does not repeat on next pull',
+    () async {
+      final reconciliationStates = FakeReconciliationStateStore()
+        ..discardAll = true;
+      final world = SyncWorld(reconciliationStateStore: reconciliationStates);
+      const sessionId = 'discarded-session';
+      const chat = ChatSession(
+        id: sessionId,
+        characterId: 'character',
+        sessionIndex: 0,
+        updatedAt: 1000,
+      );
+      await world.chats.put(chat);
+      final payload = <String, dynamic>{
+        'runs': [
+          {'id': 'malformed-cloud-run', 'ordinal': 1},
+        ],
+      };
+      final entry = SyncManifestEntry(
+        type: 'reconciliation_state',
+        id: sessionId,
+        path: cloudPath('reconciliation_state', sessionId),
+        updatedAt: 1000,
+        hash: SyncSerialization.computeSyncHash(payload),
+      );
+      final cloudManifest = SyncManifest(
+        deviceId: 'cloud-device',
+        createdAt: 1,
+        lastSync: 1000,
+        entries: {entry.key: entry},
+      );
+      world.cloud.files[entry.path] = jsonEncode(payload);
+      world.cloud.files[cloudPath('manifest', 'manifest')] = jsonEncode(
+        cloudManifest.toJson(),
+      );
+
+      await world.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+      final progress = <SyncProgress>[];
+      await world.engine.pullEntities(
+        onProgress: progress.add,
+        onConflict: (_) {},
+      );
+
+      expect(progress.any((item) => item.message == 'Nothing to pull'), isTrue);
+      expect(reconciliationStates.data[sessionId], isNull);
+    },
+  );
+
+  test(
+    'push-first premerge materializes cloud chat before real reconciliation state',
+    () async {
+      final sourceDb = AppDatabase.forTesting(NativeDatabase.memory());
+      final targetDb = AppDatabase.forTesting(NativeDatabase.memory());
+      try {
+        const sessionId = 'fresh-device-session';
+        const openingContent = 'Welcome to the fresh device.';
+        const chat = ChatSession(
+          id: sessionId,
+          characterId: 'character',
+          sessionIndex: 0,
+          updatedAt: 1000,
+          messages: [
+            ChatMessage(
+              id: 'opening-assistant',
+              role: 'assistant',
+              content: openingContent,
+              swipes: [openingContent],
+            ),
+          ],
+        );
+        final sourceChats = ChatRepo(sourceDb);
+        await sourceChats.put(chat);
+        final run = LedgerReconciliationRun(
+          id: 'source-run',
+          sessionId: sessionId,
+          ordinal: 1,
+          anchors: [
+            ReconciliationAnchor(
+              messageId: 'opening-assistant',
+              swipeId: 0,
+              agentSwipeId: 0,
+              role: 'assistant',
+              contentHash: computeHash(openingContent),
+            ),
+          ],
+          acceptedManifestRefs: const [],
+          effectiveCanonStamp: 'source-stamp',
+          effectiveCanonRevision: 1,
+          effectiveCanonHash: 'source-canon',
+          canonicalResult: const {
+            'facts': ['fresh-device-fact'],
+          },
+          predecessorChainHash: '',
+          contractVersion: 1,
+          opsApplied: const [],
+          createdAt: 1,
+        );
+        expect(
+          await LedgerReconciliationRunRepo(sourceDb).append(run),
+          isA<ReconciliationRunAppended>(),
+        );
+        final sourceStore = ReconciliationStateSyncStore(sourceDb);
+        final payload = (await sourceStore.getBySessionId(sessionId))!;
+        final sourceChat = (await sourceChats.getById(sessionId))!;
+        final sourceMetadata =
+            (await sourceChats.getAllSessionMetadata()).single;
+
+        final cloud = FakeCloudAdapter();
+        final chatEntry = SyncManifestEntry(
+          type: 'chat',
+          id: sessionId,
+          path: cloudPath('chat', sessionId),
+          updatedAt: 1000,
+          hash: SyncSerialization.computeChatMetadataHash(sourceMetadata),
+        );
+        final stateEntry = SyncManifestEntry(
+          type: 'reconciliation_state',
+          id: sessionId,
+          path: cloudPath('reconciliation_state', sessionId),
+          updatedAt: 1000,
+          hash: SyncSerialization.computeSyncHash(payload),
+        );
+        final cloudManifest = SyncManifest(
+          deviceId: 'source-device',
+          createdAt: 1,
+          lastSync: 1000,
+          entries: {chatEntry.key: chatEntry, stateEntry.key: stateEntry},
+        );
+        cloud.files[chatEntry.path] = jsonEncode(sourceChat.toJson());
+        cloud.files[stateEntry.path] = jsonEncode(payload);
+        cloud.files[cloudPath('manifest', 'manifest')] = jsonEncode(
+          cloudManifest.toJson(),
+        );
+
+        final targetChats = ChatRepo(targetDb);
+        final targetStore = ReconciliationStateSyncStore(targetDb);
+        expect(await targetChats.getById(sessionId), isNull);
+        expect(
+          await LedgerReconciliationRunRepo(targetDb).getHead(sessionId),
+          isNull,
+        );
+
+        final engine = _realStoreEngine(
+          chatStore: targetChats,
+          reconciliationStore: targetStore,
+          cloud: cloud,
+        );
+        await engine.pushEntities(onProgress: (_) {});
+
+        expect(await targetChats.getById(sessionId), equals(sourceChat));
+        final importedHead = await LedgerReconciliationRunRepo(
+          targetDb,
+        ).getHead(sessionId);
+        expect(importedHead?.id, run.id);
+        expect(importedHead?.chainHash, run.chainHash);
+        expect(jsonDecode(cloud.files[stateEntry.path]!), equals(payload));
+
+        final uploadedManifest = SyncManifest.fromJson(
+          jsonDecode(cloud.files[cloudPath('manifest', 'manifest')]!)
+              as Map<String, dynamic>,
+        );
+        expect(uploadedManifest.entries[chatEntry.key]?.hash, chatEntry.hash);
+        expect(uploadedManifest.entries[stateEntry.key]?.hash, stateEntry.hash);
+      } finally {
+        await sourceDb.close();
+        await targetDb.close();
+      }
+    },
+  );
+
+  test('push skips reconciliation state already accepted by hash', () async {
+    const sessionId = 'accepted-session';
+    final reconciliationStates = FakeReconciliationStateStore();
+    final world = SyncWorld(reconciliationStateStore: reconciliationStates);
+    final payload = <String, dynamic>{
+      '__reconciliationState': true,
+      'schemaVersion': 2,
+      'sessionId': sessionId,
+      'runs': const <Map<String, dynamic>>[],
+    };
+    final stateEntry = SyncManifestEntry(
+      type: 'reconciliation_state',
+      id: sessionId,
+      path: cloudPath('reconciliation_state', sessionId),
+      updatedAt: 1000,
+      hash: SyncSerialization.computeSyncHash(payload),
+    );
+    final cloudManifest = SyncManifest(
+      deviceId: 'cloud-device',
+      createdAt: 1,
+      lastSync: 1000,
+      entries: {stateEntry.key: stateEntry},
+    );
+    await world.manifestProvider.writeLocalManifest(cloudManifest);
+    world.cloud.files[stateEntry.path] = jsonEncode(payload);
+    world.cloud.files[cloudPath('manifest', 'manifest')] = jsonEncode(
+      cloudManifest.toJson(),
+    );
+
+    await world.engine.pushEntities(onProgress: (_) {});
+
+    expect(world.cloud.downloadCalls, [cloudPath('manifest', 'manifest')]);
+    expect(reconciliationStates.data[sessionId], isNull);
+  });
 
   test('Full sync lifecycle: push → pull → conflict → resolve', () async {
     // ── SCENE 1: Device A pushes to empty cloud ──
@@ -1023,7 +1815,7 @@ void main() {
 
   test('Push includes pipelineSettings in local_storage singleton', () async {
     final world = SyncWorld();
-    const settingsJson = '{"studioTrackerModelOverride":"gemini-pro"}';
+    const settingsJson = '{"studioControllerModelOverride":"gemini-pro"}';
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('pipelineSettings', settingsJson);
 
@@ -1075,6 +1867,160 @@ void main() {
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getString('pipelineSettings'), settingsJson);
   });
+
+  test('Cloud round-trip restores both global regex collections', () async {
+    const globalRegex = '[{"id":"global-regex","regex":"foo"}]';
+    const studioRegex =
+        '[{"script":{"id":"studio-regex","regex":"bar"},"stages":["final"]}]';
+    final source = SyncWorld();
+    final sourcePrefs = await SharedPreferences.getInstance();
+    await sourcePrefs.setString(
+      SyncSerialization.globalRegexScriptsKey,
+      globalRegex,
+    );
+    await sourcePrefs.setString(
+      SyncSerialization.studioRegexScriptsKey,
+      studioRegex,
+    );
+
+    await source.engine.pushEntities(onProgress: (_) {});
+
+    final cloudPayload =
+        jsonDecode(
+              source.cloud.files[cloudPath('local_storage', 'local_storage')]!,
+            )
+            as Map<String, dynamic>;
+    expect(cloudPayload[SyncSerialization.globalRegexScriptsKey], globalRegex);
+    expect(cloudPayload[SyncSerialization.studioRegexScriptsKey], studioRegex);
+
+    SharedPreferences.setMockInitialValues({});
+    final target = SyncWorld();
+    target.cloud.files.addAll(source.cloud.files);
+    await target.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+
+    final targetPrefs = await SharedPreferences.getInstance();
+    expect(
+      targetPrefs.getString(SyncSerialization.globalRegexScriptsKey),
+      globalRegex,
+    );
+    expect(
+      targetPrefs.getString(SyncSerialization.studioRegexScriptsKey),
+      studioRegex,
+    );
+  });
+
+  test('Cloud round-trip restores app settings', () async {
+    final source = SyncWorld();
+    final sourcePrefs = await SharedPreferences.getInstance();
+    await sourcePrefs.setBool('enterToSend', false);
+    await sourcePrefs.setBool('hideMessageId', true);
+    await sourcePrefs.setString('language', 'ru');
+
+    await source.engine.pushEntities(onProgress: (_) {});
+
+    final cloudPayload =
+        jsonDecode(
+              source.cloud.files[cloudPath('local_storage', 'local_storage')]!,
+            )
+            as Map<String, dynamic>;
+    expect(
+      (cloudPayload[SyncSerialization.appSettingsKey] as Map)['hideMessageId'],
+      isTrue,
+    );
+
+    SharedPreferences.setMockInitialValues({
+      'enterToSend': true,
+      'hideMessageId': false,
+      'language': 'en',
+    });
+    final target = SyncWorld();
+    target.cloud.files.addAll(source.cloud.files);
+    await target.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+
+    final targetPrefs = await SharedPreferences.getInstance();
+    expect(targetPrefs.getBool('enterToSend'), isFalse);
+    expect(targetPrefs.getBool('hideMessageId'), isTrue);
+    expect(targetPrefs.getString('language'), 'ru');
+  });
+
+  test('Legacy local_storage payload preserves local app settings', () async {
+    final world = SyncWorld();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('hideMessageId', true);
+    const payload = {
+      '__localStorage': true,
+      'pipelineSettings': '{"legacy":true}',
+    };
+    final entry = SyncManifestEntry(
+      type: 'local_storage',
+      id: 'local_storage',
+      path: cloudPath('local_storage', 'local_storage'),
+      updatedAt: 1000,
+      hash: SyncSerialization.computeSyncHash(payload),
+    );
+    world.cloud.files[entry.path] = jsonEncode(payload);
+    world.cloud.files[cloudPath('manifest', 'manifest')] = jsonEncode(
+      SyncManifest(
+        deviceId: 'cloud',
+        createdAt: 1,
+        lastSync: 1000,
+        entries: {entry.key: entry},
+      ).toJson(),
+    );
+
+    await world.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+
+    expect(prefs.getBool('hideMessageId'), isTrue);
+  });
+
+  test(
+    'Legacy local_storage payload preserves local regex collections',
+    () async {
+      const globalRegex = '[{"id":"local-global"}]';
+      const studioRegex = '[{"script":{"id":"local-studio"}}]';
+      final world = SyncWorld();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        SyncSerialization.globalRegexScriptsKey,
+        globalRegex,
+      );
+      await prefs.setString(
+        SyncSerialization.studioRegexScriptsKey,
+        studioRegex,
+      );
+      const payload = {
+        '__localStorage': true,
+        'pipelineSettings': '{"legacy":true}',
+      };
+      final entry = SyncManifestEntry(
+        type: 'local_storage',
+        id: 'local_storage',
+        path: cloudPath('local_storage', 'local_storage'),
+        updatedAt: 1000,
+        hash: SyncSerialization.computeSyncHash(payload),
+      );
+      world.cloud.files[entry.path] = jsonEncode(payload);
+      world.cloud.files[cloudPath('manifest', 'manifest')] = jsonEncode(
+        SyncManifest(
+          deviceId: 'cloud',
+          createdAt: 1,
+          lastSync: 1000,
+          entries: {entry.key: entry},
+        ).toJson(),
+      );
+
+      await world.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+
+      expect(
+        prefs.getString(SyncSerialization.globalRegexScriptsKey),
+        globalRegex,
+      );
+      expect(
+        prefs.getString(SyncSerialization.studioRegexScriptsKey),
+        studioRegex,
+      );
+    },
+  );
 
   test(
     'Empty device with no API presets should not conflict with cloud',
@@ -2287,7 +3233,9 @@ void main() {
 
   test('resolve all cloud pulls data and rebuilds manifest', () async {
     final deviceA = SyncWorld();
-    await deviceA.characters.put(makeChar('c1', name: 'Cloud'));
+    for (var i = 0; i < 27; i++) {
+      await deviceA.characters.put(makeChar('c$i', name: 'Cloud $i'));
+    }
     final aManifest = await deviceA.manifestProvider.buildLocalManifest();
     await deviceA.manifestProvider.writeLocalManifest(
       aManifest.copyWith(lastSync: 5000),
@@ -2296,13 +3244,18 @@ void main() {
 
     final deviceB = SyncWorld();
     deviceB.cloud.files.addAll(deviceA.cloud.files);
-    await deviceB.characters.put(makeChar('c1', name: 'Local'));
+    for (var i = 0; i < 27; i++) {
+      await deviceB.characters.put(makeChar('c$i', name: 'Local $i'));
+    }
 
     final yManifest = await deviceB.manifestProvider.buildLocalManifest();
     final patched = Map<String, SyncManifestEntry>.from(yManifest.entries);
-    patched['character:c1'] = patched['character:c1']!.copyWith(
-      updatedAt: DateTime.now().millisecondsSinceEpoch + 100000,
-    );
+    for (var i = 0; i < 27; i++) {
+      final key = 'character:c$i';
+      patched[key] = patched[key]!.copyWith(
+        updatedAt: DateTime.now().millisecondsSinceEpoch + 100000,
+      );
+    }
     await deviceB.manifestProvider.writeLocalManifest(
       yManifest.copyWith(lastSync: 8000, entries: patched),
     );
@@ -2312,19 +3265,17 @@ void main() {
       onProgress: (_) {},
       onConflict: (c) => conflicts.add(c),
     );
-    expect(conflicts, isNotEmpty);
+    expect(conflicts, hasLength(27));
 
-    final resolvedKeys = <String>[];
-    for (final conflict in conflicts) {
-      await deviceB.engine.resolveConflict(conflict, 'cloud');
-      resolvedKeys.add(conflict.key);
-    }
+    final resolvedKeys = conflicts.map((conflict) => conflict.key).toList();
     await deviceB.engine.applyPendingPull(
       onProgress: (_) {},
       resolvedAsCloud: resolvedKeys,
     );
 
-    expect(deviceB.characters.data['c1']?.name, equals('Cloud'));
+    for (var i = 0; i < 27; i++) {
+      expect(deviceB.characters.data['c$i']?.name, equals('Cloud $i'));
+    }
     final manifest = await deviceB.manifestProvider.readLocalManifest();
     expect(manifest.lastSync, greaterThan(0));
     final cloudManifest = SyncManifest.fromJson(
@@ -2380,6 +3331,49 @@ void main() {
     );
     expect(deviceB.memoryBooks.data['s1']?.sessionId, equals('s1'));
   });
+
+  test(
+    'session lorebook overlays push and pull as one session aggregate',
+    () async {
+      final sourceOverlays = FakeSessionLorebookOverlayStore();
+      final deviceA = SyncWorld(sessionLorebookOverlayStore: sourceOverlays);
+      const sessionId = 's1';
+      final payload = <String, dynamic>{
+        '__sessionLorebookOverlays': true,
+        'schemaVersion': 1,
+        'sessionId': sessionId,
+        'overlays': [
+          {
+            'chatSessionId': sessionId,
+            'lorebookId': 'book',
+            'entryId': 'entry',
+            'baseContent': 'base',
+            'baseContentHash': 'base-hash',
+            'content': 'evolved',
+            'contentHash': 'content-hash',
+          },
+        ],
+      };
+      sourceOverlays.data[sessionId] = payload;
+      await deviceA.chats.put(makeChat(sessionId, charId: 'char1'));
+
+      await deviceA.engine.pushEntities(onProgress: (_) {});
+
+      final path = cloudPath('session_lorebook_overlays', sessionId);
+      expect(deviceA.cloud.files[path], jsonEncode(payload));
+      expect(
+        deviceA.cloud.ensuredFolders,
+        contains('$cloudBase/session_lorebook_overlays'),
+      );
+
+      final targetOverlays = FakeSessionLorebookOverlayStore();
+      final deviceB = SyncWorld(sessionLorebookOverlayStore: targetOverlays);
+      deviceB.cloud.files.addAll(deviceA.cloud.files);
+      await deviceB.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+
+      expect(targetOverlays.data[sessionId], payload);
+    },
+  );
 
   test(
     'memory_book deletion tombstone propagates to cloud on next push',
@@ -2685,6 +3679,88 @@ void main() {
         jsonDecode(raw!) as Map<String, dynamic>,
       );
       expect(manifest.apiKeysIncluded, isFalse);
+    },
+  );
+
+  test(
+    'Studio preset deletion tombstone propagates to cloud on next push',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final world = SyncWorld();
+      const preset = StudioPreset(id: 'doomed', name: 'Doomed Preset');
+      await world.studioPresets.put(preset);
+
+      var manifest = await world.manifestProvider.buildLocalManifest();
+      await world.manifestProvider.writeLocalManifest(manifest);
+      await world.engine.pushEntities(onProgress: (_) {});
+
+      expect(
+        world.cloud.files.containsKey(cloudPath('studio_preset', 'doomed')),
+        isTrue,
+      );
+
+      await world.studioPresets.delete('doomed');
+      await SyncDeletionTracker.record('studio_preset', 'doomed');
+
+      manifest = await world.manifestProvider.buildLocalManifest();
+      await world.manifestProvider.writeLocalManifest(manifest);
+      await world.engine.pushEntities(onProgress: (_) {});
+
+      expect(
+        world.cloud.files.containsKey(cloudPath('studio_preset', 'doomed')),
+        isFalse,
+        reason: 'Cloud file should be deleted after tombstone push',
+      );
+
+      final cloudManifest = SyncManifest.fromJson(
+        jsonDecode(world.cloud.files[cloudPath('manifest', 'manifest')]!)
+            as Map<String, dynamic>,
+      );
+      expect(
+        cloudManifest.entries.containsKey(entryKey('studio_preset', 'doomed')),
+        isFalse,
+        reason: 'Cloud manifest should no longer list the deleted preset',
+      );
+    },
+  );
+
+  test(
+    'Studio config syncs by session id and does not resurrect on pull',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final source = SyncWorld();
+      await source.studioConfigs.put(
+        const StudioConfig(sessionId: 's1', enabled: true),
+      );
+
+      var manifest = await source.manifestProvider.buildLocalManifest();
+      await source.manifestProvider.writeLocalManifest(manifest);
+      await source.engine.pushEntities(onProgress: (_) {});
+
+      expect(
+        source.cloud.files.containsKey(cloudPath('studio_config', 's1')),
+        isTrue,
+      );
+
+      SharedPreferences.setMockInitialValues({});
+      final target = SyncWorld();
+      target.cloud.files.addAll(source.cloud.files);
+      await target.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+
+      final pulled = await target.studioConfigs.getById('s1');
+      expect(pulled, isNotNull);
+      expect(pulled!.sessionId, 's1');
+      expect(pulled.enabled, isTrue);
+
+      final repeatConflicts = <SyncConflict>[];
+      await target.engine.pullEntities(
+        onProgress: (_) {},
+        onConflict: repeatConflicts.add,
+      );
+      expect(
+        repeatConflicts.where((conflict) => conflict.type == 'studio_config'),
+        isEmpty,
+      );
     },
   );
 }

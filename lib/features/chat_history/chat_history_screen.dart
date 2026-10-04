@@ -10,7 +10,10 @@ import '../../shared/theme/app_colors.dart';
 
 import '../../shared/widgets/glow_ripple.dart';
 import '../settings/app_settings_provider.dart';
+import 'chat_history_actions.dart';
 import 'chat_history_list.dart';
+import 'chat_history_provider.dart';
+import 'chat_history_selection_provider.dart';
 
 class ChatHistoryScreen extends ConsumerStatefulWidget {
   /// When true, renders an inline search bar and skips shell-header integration.
@@ -33,11 +36,15 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
   final HeaderScrollHider _headerScrollHider = HeaderScrollHider();
   final ScrollController _scrollController = ScrollController();
 
+  // Cached so [dispose] can clear the selection without reading `ref`.
+  ChatHistorySelectionNotifier? _selectionNotifier;
+
   @override
   void initState() {
     super.initState();
     if (!widget.embedded) {
       _registry = ref.read(shellHeaderProvider.notifier);
+      _selectionNotifier = ref.read(chatHistorySelectionProvider.notifier);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         _registry?.publish(this, 0, _shellHeader());
@@ -87,6 +94,10 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
     _searchCtrl.dispose();
     _searchFocus.dispose();
     _scrollController.dispose();
+    // The selection bar lives in the header this screen publishes, so a
+    // selection that outlived the screen would have no way back out.
+    final selection = _selectionNotifier;
+    WidgetsBinding.instance.addPostFrameCallback((_) => selection?.clear());
     if (!widget.embedded) {
       final registry = _registry;
       WidgetsBinding.instance.addPostFrameCallback(
@@ -96,24 +107,66 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
     super.dispose();
   }
 
-  ShellHeaderConfig _shellHeader() => ShellHeaderConfig(
-    title: _searchExpanded ? null : 'tab_dialogs'.tr(),
-    titleWidget: _searchExpanded ? _buildSearchField() : null,
+  ShellHeaderConfig _shellHeader() {
+    final selection = ref.read(chatHistorySelectionProvider);
+    if (selection.active) return _selectionHeader(selection.count);
+    return ShellHeaderConfig(
+      title: _searchExpanded ? null : 'tab_dialogs'.tr(),
+      titleWidget: _searchExpanded ? _buildSearchField() : null,
+      actions: [
+        SizedBox(
+          width: 44,
+          height: 44,
+          child: IconButton(
+            icon: Icon(
+              _searchExpanded ? Icons.close_rounded : Icons.search_rounded,
+              size: 22,
+            ),
+            color: context.cs.primary,
+            onPressed: _searchExpanded ? _closeSearch : _openSearch,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// While rows are selected the header stops being the Chats tab: the logo
+  /// gives way to a close button, the title to the running count, and the
+  /// search button to the overflow menu that a long press used to open.
+  ShellHeaderConfig _selectionHeader(int count) => ShellHeaderConfig(
+    leading: IconButton(
+      icon: const Icon(Icons.close_rounded, size: 22),
+      color: context.cs.primary,
+      tooltip: 'btn_cancel'.tr(),
+      onPressed: () => ref.read(chatHistorySelectionProvider.notifier).clear(),
+    ),
+    title: '$count ${'selected_count'.tr()}',
     actions: [
       SizedBox(
         width: 44,
         height: 44,
         child: IconButton(
-          icon: Icon(
-            _searchExpanded ? Icons.close_rounded : Icons.search_rounded,
-            size: 22,
-          ),
+          icon: const Icon(Icons.more_vert_rounded, size: 22),
           color: context.cs.primary,
-          onPressed: _searchExpanded ? _closeSearch : _openSearch,
+          onPressed: _openSelectionActions,
         ),
       ),
     ],
   );
+
+  /// Opens the bulk action menu for the current selection, resolved against
+  /// the live list so a session deleted meanwhile simply drops out.
+  void _openSelectionActions() {
+    final selection = ref.read(chatHistorySelectionProvider);
+    final all =
+        ref.read(chatHistoryProvider).value ?? const <ChatSessionInfo>[];
+    final sessions = [
+      for (final info in all)
+        if (selection.contains(info.sessionId)) info,
+    ];
+    if (sessions.isEmpty) return;
+    showChatSessionActions(context, ref, sessions);
+  }
 
   void _openSearch() {
     _showHeader();
@@ -161,6 +214,13 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
     final topPad = MediaQuery.of(context).padding.top + 66.0 + 16.0;
     final bottomPad = ref.watch(navHeightProvider) + 20;
 
+    // The header *is* the selection bar, so it has to be on screen and current
+    // for as long as rows are selected.
+    ref.listen(chatHistorySelectionProvider, (_, next) {
+      if (next.active) _showHeader();
+      _refreshShellHeader();
+    });
+
     // Re-tap on the active Dialogs navbar tab → scroll the list to the top.
     ref.listen(navReTapProvider, (_, next) {
       if (next.branchIndex == kDialogsBranchIndex) {
@@ -181,6 +241,7 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
       searchQuery: _searchQuery,
       topPadding: topPad,
       bottomPadding: bottomPad,
+      selectable: true,
     );
     final body = settingsAsync.value?.batterySaver ?? false
         ? list

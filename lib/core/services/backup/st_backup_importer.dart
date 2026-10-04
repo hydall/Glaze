@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../db/app_db.dart';
 import '../../db/repositories/character_repo.dart';
@@ -12,7 +13,9 @@ import '../../db/repositories/persona_repo.dart';
 import '../../db/repositories/preset_repo.dart';
 import '../../import/silly_tavern_preset_parser.dart';
 import '../../import/st_lorebook_importer.dart';
+import '../../models/character.dart';
 import '../../models/chat_message.dart';
+import '../../models/lorebook.dart';
 import '../../models/persona.dart';
 import '../../utils/id_generator.dart';
 import '../../utils/time_helpers.dart';
@@ -33,6 +36,13 @@ class StImportResult {
 }
 
 class StBackupImporter {
+  /// Rows written per transaction while importing a backup.
+  ///
+  /// A per-row `put` wakes every reactive query watching that table — the
+  /// character library subscribes at app start — so a backup with hundreds of
+  /// cards re-read and re-decoded the whole table once per card.
+  static const int _writeChunkSize = 20;
+
   final AppDatabase _db;
   final ImageStorageService _imageStorage;
   final ImportCancellationToken _cancel;
@@ -96,7 +106,7 @@ class StBackupImporter {
     _cancel.check();
 
     onProgress?.call('Importing personas...');
-    await _importPersonas(zip, result);
+    await _importPersonas(zip, charNameToId, result);
     _cancel.check();
 
     onProgress?.call('Finalizing...');
@@ -141,6 +151,20 @@ class StBackupImporter {
             !f.name.substring('characters/'.length).contains('/'))
         .toList();
 
+    final pendingChars = <Character>[];
+    final pendingBooks = <Lorebook>[];
+
+    Future<void> flush() async {
+      if (pendingChars.isNotEmpty) {
+        await _charRepo.putAll(pendingChars);
+        pendingChars.clear();
+      }
+      if (pendingBooks.isNotEmpty) {
+        await _lorebookRepo.putAll(pendingBooks);
+        pendingBooks.clear();
+      }
+    }
+
     for (final f in paths) {
       _cancel.check();
       try {
@@ -148,20 +172,32 @@ class StBackupImporter {
         if (bytes == null) continue;
         final fileName = f.name.split('/').last;
         final imported = await _charImporter.importFromBytes(bytes, fileName);
-        await _charRepo.put(imported.character);
+        pendingChars.add(imported.character);
 
         if (imported.characterBookData != null) {
-          final lb = convertCharacterBook(
-              imported.characterBookData!, imported.character.id);
-          await _lorebookRepo.put(lb);
+          pendingBooks.add(convertCharacterBook(
+              imported.characterBookData!, imported.character.id));
         }
 
         final baseName = fileName.replaceAll(RegExp(r'\.png$', caseSensitive: false), '');
         charNameToId[baseName] = imported.character.id;
         result.characters++;
+        if (pendingChars.length >= _writeChunkSize) await flush();
       } catch (e) {
         result.errors.add('Character ${f.name}: $e');
+      } finally {
+        // Release the decompressed entry: ArchiveFile caches what it
+        // decompressed, so without this every card read stays in memory until
+        // the whole import is over.
+        f.clear();
       }
+    }
+
+    try {
+      await flush();
+    } catch (e) {
+      result.characters -= pendingChars.length;
+      result.errors.add('Character batch: $e');
     }
   }
 
@@ -171,6 +207,8 @@ class StBackupImporter {
         f.name.startsWith('worlds/') &&
         f.name.toLowerCase().endsWith('.json'));
 
+    final pending = <Lorebook>[];
+
     for (final f in paths) {
       _cancel.check();
       try {
@@ -178,11 +216,24 @@ class StBackupImporter {
         final json = jsonDecode(text) as Map<String, dynamic>;
         final fileName = f.name.split('/').last;
         final r = importSTLorebook(json, nameOverride: fileName);
-        await _lorebookRepo.put(r.lorebook);
+        pending.add(r.lorebook);
         result.lorebooks++;
+        if (pending.length >= _writeChunkSize) {
+          await _lorebookRepo.putAll(pending);
+          pending.clear();
+        }
       } catch (e) {
         result.errors.add('Lorebook ${f.name}: $e');
+      } finally {
+        f.clear();
       }
+    }
+
+    try {
+      await _lorebookRepo.putAll(pending);
+    } catch (e) {
+      result.lorebooks -= pending.length;
+      result.errors.add('Lorebook batch: $e');
     }
   }
 
@@ -206,6 +257,8 @@ class StBackupImporter {
         result.presets++;
       } catch (e) {
         result.errors.add('Preset ${f.name}: $e');
+      } finally {
+        f.clear();
       }
     }
   }
@@ -258,6 +311,10 @@ class StBackupImporter {
         result.chats++;
       } catch (e) {
         result.errors.add('Chat ${f.name}: $e');
+      } finally {
+        // Chat entries are the biggest ones in a tavern backup; the cached
+        // decompressed copy has to go before the next file is read.
+        f.clear();
       }
     }
 
@@ -298,7 +355,11 @@ class StBackupImporter {
     return ChatImportResult(messages: messages, userName: userName);
   }
 
-  Future<void> _importPersonas(Archive zip, StImportResult result) async {
+  Future<void> _importPersonas(
+    Archive zip,
+    Map<String, String> charNameToId,
+    StImportResult result,
+  ) async {
     final settingsFile = zip.files.firstWhere(
       (f) => f.isFile && f.name.toLowerCase().endsWith('settings.json'),
       orElse: () => ArchiveFile('', 0, <int>[]),
@@ -313,6 +374,8 @@ class StBackupImporter {
     } catch (e) {
       result.errors.add('Personas (settings.json): $e');
       return;
+    } finally {
+      settingsFile.clear();
     }
 
     final pu = settings['power_user'] is Map<String, dynamic>
@@ -326,6 +389,11 @@ class StBackupImporter {
         (pu['persona_descriptions'] as Map<String, dynamic>?) ??
             (settings['persona_descriptions'] as Map<String, dynamic>?) ??
             {};
+
+    // SillyTavern identifies a persona by its avatar filename; Glaze mints a
+    // new id, so remember the mapping to translate the selections below.
+    final avatarToPersonaId = <String, String>{};
+    final characterConnections = <String, String>{};
 
     for (final entry in personasMap.entries) {
       _cancel.check();
@@ -348,6 +416,7 @@ class StBackupImporter {
           final n = f.name.toLowerCase();
           if (n.contains('user avatars') && n.endsWith(avatarLower)) {
             final avatarBytes = f.readBytes();
+            f.clear();
             if (avatarBytes == null) break;
             avatarPath = await _imageStorage.saveAvatar(id, avatarBytes);
             break;
@@ -361,11 +430,85 @@ class StBackupImporter {
           avatarPath: avatarPath,
           createdAt: currentTimestampSeconds(),
         ));
+        avatarToPersonaId[avatarFilename] = id;
         result.personas++;
+
+        // A persona locks itself to characters through `connections`; carry
+        // those over so the same persona is selected for the same cards.
+        if (descData is Map<String, dynamic>) {
+          final connections = descData['connections'];
+          if (connections is List) {
+            for (final connection in connections) {
+              if (connection is! Map) continue;
+              final type = connection['type'];
+              if (type != null && type != 'character') continue;
+              final rawId = connection['id'];
+              if (rawId is! String || rawId.isEmpty) continue;
+              final charKey = rawId.replaceAll(
+                RegExp(r'\.png$', caseSensitive: false),
+                '',
+              );
+              final glazeCharId = charNameToId[charKey];
+              if (glazeCharId != null) {
+                characterConnections[glazeCharId] = id;
+              }
+            }
+          }
+        }
       } catch (e) {
         result.errors.add('Persona ${entry.key}: $e');
       }
     }
+
+    await _restoreActiveSelections(settings, pu, avatarToPersonaId,
+        characterConnections);
+  }
+
+  /// Applies the active persona saved by SillyTavern: the globally selected
+  /// one (`user_avatar`, or its fallback `default_persona`) plus the
+  /// per-character locks, so Glaze opens on the same persona the source did.
+  Future<void> _restoreActiveSelections(
+    Map<String, dynamic> settings,
+    Map<String, dynamic> powerUser,
+    Map<String, String> avatarToPersonaId,
+    Map<String, String> characterConnections,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+
+    final activeAvatar = _firstMappedAvatar(
+      [
+        settings['user_avatar'],
+        powerUser['default_persona'],
+      ],
+      avatarToPersonaId,
+    );
+    if (activeAvatar != null) {
+      await prefs.setString('activePersonaId', activeAvatar);
+    }
+
+    if (characterConnections.isNotEmpty) {
+      await prefs.setString(
+        'personaConnections',
+        jsonEncode({
+          'character': characterConnections,
+          'chat': <String, String>{},
+        }),
+      );
+    }
+  }
+
+  /// Returns the Glaze persona id for the first SillyTavern avatar filename in
+  /// [candidates] that maps to an imported persona.
+  String? _firstMappedAvatar(
+    List<Object?> candidates,
+    Map<String, String> avatarToPersonaId,
+  ) {
+    for (final candidate in candidates) {
+      if (candidate is! String || candidate.isEmpty) continue;
+      final id = avatarToPersonaId[candidate];
+      if (id != null) return id;
+    }
+    return null;
   }
 
   String _uniqueId() =>

@@ -14,6 +14,9 @@ String extractRecentHistoryText(
   /// If non-null, only messages up to AND INCLUDING the one with this id
   /// are considered. Messages after it are dropped.
   String? upToMessageId,
+
+  /// Excludes a message already supplied separately to the auxiliary prompt.
+  String? excludeMessageId,
 }) {
   // Truncate to the historical slice first if requested.
   List<ChatMessage> source = messages;
@@ -23,14 +26,19 @@ String extractRecentHistoryText(
       source = messages.sublist(0, idx + 1);
     }
   }
-  final start = source.length > maxMessages ? source.length - maxMessages : 0;
-  final recent = source.sublist(start);
+  final eligible = source.where((msg) {
+    if (msg.id == excludeMessageId) return false;
+    if (msg.role != 'user' && msg.role != 'assistant') return false;
+    if (msg.isHidden || msg.isError || msg.isTyping) return false;
+    return msg.content.trim().isNotEmpty;
+  }).toList();
+  final start = eligible.length > maxMessages
+      ? eligible.length - maxMessages
+      : 0;
   final lines = <String>[];
-  for (final msg in recent) {
-    if (msg.isError || msg.isTyping) continue;
+  for (final msg in eligible.sublist(start)) {
     final role = msg.role == 'assistant' ? 'Assistant' : 'User';
     final content = msg.content.trim();
-    if (content.isEmpty) continue;
     lines.add('$role: $content');
   }
   return lines.join('\n\n');

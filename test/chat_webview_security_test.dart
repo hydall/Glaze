@@ -172,10 +172,51 @@ void main() {
       );
     });
 
+    // INV-IG9: the port in a `/__glaze_file__` URL only exists for the launch
+    // that produced it, so a message that stored one is unwrapped on the way
+    // in rather than migrated — and the relative path a block is stored with
+    // has to resolve at all.
+    test('a stale local-file URL resolves as the file it used to serve', () {
+      expect(
+        source,
+        contains('final stored = glazeFilePathFromLoopbackUrl(source);'),
+      );
+      expect(
+        RegExp(
+          r'final stored = glazeFilePathFromLoopbackUrl\(source\);\s*'
+          r'if \(stored != null\) return chatWebViewResolveLocalFileUrl\(stored\);'
+          r"[\s\S]*?source\.startsWith\('http://'\)",
+        ).hasMatch(source),
+        isTrue,
+        reason: 'the unwrap must run before the remote-URL passthrough',
+      );
+    });
+
+    test('a path relative to the data root is a local-file candidate', () {
+      expect(
+        source,
+        contains('_allowedGlazeMediaDirectories.contains(segments.first)'),
+      );
+    });
+
     test('file responses allow only GET and HEAD', () {
       expect(source, contains("request.method != 'GET'"));
       expect(source, contains("request.method != 'HEAD'"));
       expect(source, contains("HttpHeaders.allowHeader, 'GET, HEAD'"));
+    });
+
+    test('every server dispatches its requests concurrently and guarded', () {
+      // Awaiting a handler inside the accept loop served the page one file at
+      // a time, and a failure after the headers were sent used to escape the
+      // loop and kill the server for the rest of the session.
+      expect(
+        RegExp(
+          r'await for \(final request in server\) \{\s*'
+          r'unawaited\(_handleServerRequest\(',
+        ).allMatches(source).length,
+        3,
+      );
+      expect(source, contains('Future<void> _handleServerRequest('));
     });
   });
 }

@@ -9,6 +9,7 @@ import '../../core/services/backup/backup_cancel.dart';
 import '../../core/services/onboarding_service.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
+import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/sheet_view.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
@@ -108,6 +109,7 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
       isExporting: _isExporting,
       onExport: _performExport,
       onImport: _triggerImport,
+      showExport: !widget.fromOnboarding,
     );
   }
 
@@ -117,6 +119,7 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
       final service = await ref.read(backupServiceProvider.future);
       final path = await service.exportBackup();
 
+      if (path.isEmpty) return; // user cancelled the save dialog
       if (mounted) {
         GlazeToast.show(context, '${'msg_saved_to'.tr()} $path');
       }
@@ -255,11 +258,17 @@ class _NormalView extends StatelessWidget {
   final VoidCallback onExport;
   final VoidCallback onImport;
 
+  /// False during onboarding: the sheet is reached from "Restore from backup"
+  /// on an install that has nothing in it yet, so offering to export is an
+  /// offer to write an empty file.
+  final bool showExport;
+
   const _NormalView({
     super.key,
     required this.isExporting,
     required this.onExport,
     required this.onImport,
+    required this.showExport,
   });
 
   @override
@@ -292,26 +301,32 @@ class _NormalView extends StatelessWidget {
               ),
             ],
           ),
-          const _Separator(),
-          _Section(
-            title: 'menu_export'.tr(),
-            children: [
-              _BsButton(
-                onPressed: isExporting ? null : onExport,
-                icon: Icons.file_download_outlined,
-                label: isExporting ? 'backup_progress_preparing'.tr() : 'menu_export'.tr(),
-                primary: false,
-                loading: isExporting,
-              ),
-              _Hint(
-                lines: [
-                  _HintLine(
-                    text: 'backup_hint_export'.tr(),
-                  ),
-                ],
-              ),
-            ],
-          ),
+          if (showExport) ...[
+            const _Separator(),
+            _Section(
+              title: 'menu_export'.tr(),
+              children: [
+                _BsButton(
+                  onPressed: isExporting ? null : onExport,
+                  icon: Icons.file_download_outlined,
+                  label: isExporting
+                      // Not `backup_progress_preparing`: that one says
+                      // "Preparing import...", and it was on this button too.
+                      ? 'backup_progress_preparing_export'.tr()
+                      : 'menu_export'.tr(),
+                  primary: false,
+                  loading: isExporting,
+                ),
+                _Hint(
+                  lines: [
+                    _HintLine(
+                      text: 'backup_hint_export'.tr(),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -387,10 +402,7 @@ class _BsButton extends StatelessWidget {
                   SizedBox(
                     width: 22,
                     height: 22,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2.4,
-                      valueColor: AlwaysStoppedAnimation<Color>(fg),
-                    ),
+                    child: GlazeSpinner(color: fg),
                   )
                 else
                   Icon(icon, size: 22, color: fg),
@@ -512,10 +524,7 @@ class _ProgressView extends StatelessWidget {
               child: SizedBox(
                 width: 48,
                 height: 48,
-                child: CircularProgressIndicator(
-                  strokeWidth: 3,
-                  valueColor: AlwaysStoppedAnimation<Color>(accent),
-                ),
+                child: GlazeSpinner(color: accent),
               ),
             ),
           ),

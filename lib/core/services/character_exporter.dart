@@ -8,20 +8,22 @@ import 'package:path/path.dart' as p;
 
 import '../models/character.dart';
 import '../models/gallery_entry.dart';
+import 'file_export_result.dart';
 
-class PngExportResult {
-  final String filePath;
-  PngExportResult({required this.filePath});
-}
+@Deprecated('Use FileExportResult instead.')
+typedef PngExportResult = FileExportResult;
 
-Future<PngExportResult> exportCharacterAsPng({
+Future<FileExportResult> exportCharacterAsPng({
   required Character character,
   required Uint8List avatarBytes,
   required String outputDir,
   bool includeCharacterBook = false,
   Map<String, dynamic>? characterBookData,
 }) async {
-  final cardData = _buildV2Data(character, characterBookData: includeCharacterBook ? characterBookData : null);
+  final cardData = _buildV2Data(
+    character,
+    characterBookData: includeCharacterBook ? characterBookData : null,
+  );
   final jsonStr = jsonEncode(cardData);
   final base64Text = base64Encode(utf8.encode(jsonStr));
 
@@ -50,8 +52,16 @@ Future<PngExportResult> exportCharacterAsPng({
   final insertPos = _findIhdrEnd(pngAvatar);
   final resultPng = Uint8List(pngAvatar.length + chunkFull.lengthInBytes);
   resultPng.setRange(0, insertPos, pngAvatar);
-  resultPng.setRange(insertPos, insertPos + chunkFull.lengthInBytes, chunkFull.buffer.asUint8List());
-  resultPng.setRange(insertPos + chunkFull.lengthInBytes, resultPng.length, pngAvatar.sublist(insertPos));
+  resultPng.setRange(
+    insertPos,
+    insertPos + chunkFull.lengthInBytes,
+    chunkFull.buffer.asUint8List(),
+  );
+  resultPng.setRange(
+    insertPos + chunkFull.lengthInBytes,
+    resultPng.length,
+    pngAvatar.sublist(insertPos),
+  );
 
   final safeName = (character.name.isEmpty ? 'character' : character.name)
       .replaceAll(RegExp(r'[/\\?%*:|"<>\.]'), '-')
@@ -59,16 +69,19 @@ Future<PngExportResult> exportCharacterAsPng({
   final filePath = p.join(outputDir, '$safeName.png');
   await File(filePath).writeAsBytes(resultPng);
 
-  return PngExportResult(filePath: filePath);
+  return FileExportResult(filePath: filePath);
 }
 
-Future<PngExportResult> exportCharacterAsJson({
+Future<FileExportResult> exportCharacterAsJson({
   required Character character,
   required String outputDir,
   bool includeCharacterBook = false,
   Map<String, dynamic>? characterBookData,
 }) async {
-  final cardData = _buildV2Data(character, characterBookData: includeCharacterBook ? characterBookData : null);
+  final cardData = _buildV2Data(
+    character,
+    characterBookData: includeCharacterBook ? characterBookData : null,
+  );
   final jsonStr = const JsonEncoder.withIndent('  ').convert(cardData);
 
   final safeName = (character.name.isEmpty ? 'character' : character.name)
@@ -77,10 +90,10 @@ Future<PngExportResult> exportCharacterAsJson({
   final filePath = p.join(outputDir, '$safeName.json');
   await File(filePath).writeAsString(jsonStr);
 
-  return PngExportResult(filePath: filePath);
+  return FileExportResult(filePath: filePath);
 }
 
-Future<PngExportResult> exportCharacterAsZip({
+Future<FileExportResult> exportCharacterAsZip({
   required Character character,
   required Uint8List avatarBytes,
   required String outputDir,
@@ -131,7 +144,9 @@ Future<PngExportResult> exportCharacterAsZip({
     final entry = gallery[i];
     final ext = p.extension(entry.imagePath).replaceFirst('.', '');
     final safeExt = ext.isEmpty ? 'png' : ext;
-    archive.addFile(ArchiveFile.bytes('gallery/gallery_$i.$safeExt', galleryBytes[i]));
+    archive.addFile(
+      ArchiveFile.bytes('gallery/gallery_$i.$safeExt', galleryBytes[i]),
+    );
   }
 
   final zipBytes = Uint8List.fromList(ZipEncoder().encode(archive));
@@ -142,10 +157,15 @@ Future<PngExportResult> exportCharacterAsZip({
   final filePath = p.join(outputDir, '$safeName.zip');
   await File(filePath).writeAsBytes(zipBytes);
 
-  return PngExportResult(filePath: filePath);
+  return FileExportResult(filePath: filePath);
 }
 
-Map<String, dynamic> _buildV2Data(Character character, {Map<String, dynamic>? characterBookData, List<Map<String, dynamic>>? assets, List<Map<String, dynamic>>? galleryMeta}) {
+Map<String, dynamic> _buildV2Data(
+  Character character, {
+  Map<String, dynamic>? characterBookData,
+  List<Map<String, dynamic>>? assets,
+  List<Map<String, dynamic>>? galleryMeta,
+}) {
   final data = <String, dynamic>{
     'name': character.name,
     'description': character.description ?? '',
@@ -175,7 +195,9 @@ Map<String, dynamic> _buildV2Data(Character character, {Map<String, dynamic>? ch
 
   if (character.extensions.isNotEmpty) {
     final extCopy = Map<String, dynamic>.from(character.extensions);
-    if (character.depthPrompt.isNotEmpty || character.depthPromptDepth != 4 || character.depthPromptRole != 'system') {
+    if (character.depthPrompt.isNotEmpty ||
+        character.depthPromptDepth != 4 ||
+        character.depthPromptRole != 'system') {
       extCopy['depth_prompt'] = {
         'prompt': character.depthPrompt,
         'depth': character.depthPromptDepth,
@@ -187,7 +209,9 @@ Map<String, dynamic> _buildV2Data(Character character, {Map<String, dynamic>? ch
     }
     data['extensions'] = extCopy;
   } else {
-    if (character.depthPrompt.isNotEmpty || character.depthPromptDepth != 4 || character.depthPromptRole != 'system') {
+    if (character.depthPrompt.isNotEmpty ||
+        character.depthPromptDepth != 4 ||
+        character.depthPromptRole != 'system') {
       data['extensions'] = {
         'depth_prompt': {
           'prompt': character.depthPrompt,
@@ -210,11 +234,7 @@ Map<String, dynamic> _buildV2Data(Character character, {Map<String, dynamic>? ch
     data['extensions'] = ext;
   }
 
-  return {
-    'spec': 'chara_card_v2',
-    'spec_version': '2.0',
-    'data': data,
-  };
+  return {'spec': 'chara_card_v2', 'spec_version': '2.0', 'data': data};
 }
 
 // IHDR data length is always 13 in valid PNG; guard against non-PNG bytes
@@ -229,13 +249,21 @@ int _findIhdrEnd(Uint8List pngBytes) {
 
 bool _isPng(Uint8List bytes) =>
     bytes.length >= 8 &&
-    bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47 &&
-    bytes[4] == 0x0D && bytes[5] == 0x0A && bytes[6] == 0x1A && bytes[7] == 0x0A;
+    bytes[0] == 0x89 &&
+    bytes[1] == 0x50 &&
+    bytes[2] == 0x4E &&
+    bytes[3] == 0x47 &&
+    bytes[4] == 0x0D &&
+    bytes[5] == 0x0A &&
+    bytes[6] == 0x1A &&
+    bytes[7] == 0x0A;
 
 Uint8List _ensurePng(Uint8List bytes) {
   if (_isPng(bytes)) return bytes;
   final decoded = img.decodeImage(bytes);
-  if (decoded == null) throw Exception('Could not decode avatar image for PNG export');
+  if (decoded == null) {
+    throw Exception('Could not decode avatar image for PNG export');
+  }
   return Uint8List.fromList(img.encodePng(decoded));
 }
 
@@ -320,4 +348,3 @@ extension on ByteData {
     }
   }
 }
-

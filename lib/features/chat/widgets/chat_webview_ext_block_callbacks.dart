@@ -53,12 +53,13 @@ class ChatWebViewExtBlockCallbacks {
       final character = ref.read(characterByIdProvider(charId));
       if (character == null) return;
       final persona = _effectivePersona();
+      final binding = _messageBinding(sessionId, messageId, chatState.messages);
       await ref.read(extensionPostGenServiceProvider).runBlocksForMessage(
             charId: charId,
             sessionId: sessionId,
             messageId: messageId,
-            swipeId: _swipeIdFor(chatState.messages, messageId),
-            agentSwipeId: _agentSwipeIdFor(chatState.messages, messageId),
+            swipeId: binding.swipeId,
+            agentSwipeId: binding.agentSwipeId,
             messages: chatState.messages,
             character: character,
             persona: persona,
@@ -87,11 +88,12 @@ class ChatWebViewExtBlockCallbacks {
       final character = ref.read(characterByIdProvider(charId));
       if (character == null) return;
       final persona = _effectivePersona();
+      final binding = _bindingFor(sessionId, messageId, blockId, chatState.messages);
       await ref.read(extensionPostGenServiceProvider).rerunBlock(
             blockId: blockId,
             messageId: messageId,
-            swipeId: _swipeIdFor(chatState.messages, messageId),
-            agentSwipeId: _agentSwipeIdFor(chatState.messages, messageId),
+            swipeId: binding.swipeId,
+            agentSwipeId: binding.agentSwipeId,
             sessionId: sessionId,
             charId: charId,
             messages: chatState.messages,
@@ -115,11 +117,12 @@ class ChatWebViewExtBlockCallbacks {
       final character = ref.read(characterByIdProvider(charId));
       if (character == null) return;
       final persona = _effectivePersona();
+      final binding = _bindingFor(sessionId, messageId, blockId, chatState.messages);
       await ref.read(extensionPostGenServiceProvider).rerunImageOnly(
             blockId: blockId,
             messageId: messageId,
-            swipeId: _swipeIdFor(chatState.messages, messageId),
-            agentSwipeId: _agentSwipeIdFor(chatState.messages, messageId),
+            swipeId: binding.swipeId,
+            agentSwipeId: binding.agentSwipeId,
             sessionId: sessionId,
             charId: charId,
             character: character,
@@ -225,5 +228,51 @@ class ChatWebViewExtBlockCallbacks {
       }
     }
     return -1;
+  }
+
+  /// The swipe / agentSwipe binding a block re-run must target: the block's own
+  /// stored binding when it has one, otherwise the binding its siblings under
+  /// the same message already use.
+  ///
+  /// A stored block keeps the binding it was written with — `agentSwipeId = -1`
+  /// when the post-cleaner was skipped — while the message carries the freezed
+  /// default `0`. Re-running with the message's value re-binds the block, and
+  /// the provider's `agentSwipeId` fallback then stops finding its siblings
+  /// (the re-bound block makes the exact match non-empty), so they re-render
+  /// as "pending".
+  ///
+  /// A block the user starts for the first time (a `pending` placeholder) has
+  /// no stored row of its own, so the same re-binding would happen through the
+  /// message's value alone — hence the sibling lookup in [_messageBinding].
+  ({int swipeId, int agentSwipeId}) _bindingFor(
+    String sessionId,
+    String messageId,
+    String blockId,
+    List<dynamic> messages,
+  ) {
+    final block = _blockForChat(sessionId, messageId, blockId);
+    if (block != null) {
+      return (swipeId: block.swipeId, agentSwipeId: block.agentSwipeId);
+    }
+    return _messageBinding(sessionId, messageId, messages);
+  }
+
+  /// The binding every block of [messageId] is stored under: the message's own
+  /// swipe, with the `agentSwipeId` resolved against the rows that are already
+  /// there, so a run never splits one message's blocks across two bindings.
+  ({int swipeId, int agentSwipeId}) _messageBinding(
+    String sessionId,
+    String messageId,
+    List<dynamic> messages,
+  ) {
+    final swipeId = _swipeIdFor(messages, messageId);
+    final agentSwipeId = ref
+        .read(infoBlocksProvider(sessionId).notifier)
+        .resolveAgentSwipeId(
+          messageId,
+          swipeId: swipeId,
+          agentSwipeId: _agentSwipeIdFor(messages, messageId),
+        );
+    return (swipeId: swipeId, agentSwipeId: agentSwipeId);
   }
 }
