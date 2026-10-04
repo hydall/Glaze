@@ -132,4 +132,39 @@ void main() {
     expect(find.byType(GlazeSheetWindow), findsOneWidget);
     expect(find.byType(BottomSheet), findsNothing);
   });
+
+  // A window drops the bottom sheet's drag handle, and the handle is what kept
+  // the title off the top edge on mobile. The window header must reserve that
+  // gap itself, or the title sits flush against the rounded corner.
+  testWidgets('a titled window sheet insets its header from the top edge', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1600, 1000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      _desktopApp(
+        builder: (context) => Center(
+          child: ElevatedButton(
+            key: const ValueKey('open'),
+            onPressed: () => GlazeBottomSheet.show<void>(
+              context,
+              title: 'Sheet',
+              child: const Text('rich content'),
+            ),
+            child: const Text('open'),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(_openButton());
+    await tester.pumpAndSettle();
+
+    final surface = tester.getRect(find.byType(GlassSurface));
+    final title = tester.getRect(find.text('Sheet'));
+    expect(title.top - surface.top, greaterThanOrEqualTo(16));
+  });
 }

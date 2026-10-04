@@ -745,6 +745,11 @@ class _GlazeBottomSheetContentState
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      // A window has no drag handle, so nothing pushes the
+                      // header off the top edge. Without this the title floats
+                      // flush against the rounded corner while the sides keep
+                      // their 20px gutter.
+                      if (inWindow) const SizedBox(height: 20),
                       if (!inWindow) _HandleBar(),
                       if (_hasHeader)
                         _Header(
