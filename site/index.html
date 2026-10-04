@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Glaze: AI roleplay chat client</title>
+  <meta name="description" content="Glaze это локальный клиент для ИИ ролевых чатов с открытым исходным кодом. Android, iOS, Windows, Linux. Любой OpenAI-совместимый API, совместимость с SillyTavern.">
+  <meta name="theme-color" content="#19191A">
+  <meta property="og:title" content="Glaze">
+  <meta property="og:description" content="AI roleplay chat client. Local, novice-friendly, open-source.">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="assets/img/glaze.svg" type="image/svg+xml">
+  <link rel="preload" href="assets/fonts/InterVariable.ttf" as="font" type="font/ttf" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0..1,0&display=block">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <header class="topbar" id="topbar">
+    <div class="container topbar-inner">
+      <a class="brand" href="#overview"><span class="logo" aria-hidden="true"></span>Glaze</a>
+      <nav class="tab-bar" id="tabBar" aria-label="Sections"></nav>
+      <div class="topbar-actions">
+        <a class="btn btn-primary btn-sm topbar-cta" href="#download" data-section="download"><span class="ms">download</span><span data-t="btn_download"></span></a>
+        <div class="lang-menu" id="langMenu"></div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="section hero" id="overview"></section>
+    <section class="section" id="articles"></section>
+    <section class="section" id="features"></section>
+    <section class="section" id="screenshots"></section>
+    <section class="section" id="download"></section>
+    <section class="section" id="roadmap"></section>
+    <section class="section" id="resources"></section>
+    <noscript>
+      <div class="container"><div class="group noscript">
+        <p>Для этой страницы нужен JavaScript. Сборки и описание проекта на GitHub.<br>
+        This page needs JavaScript. Builds and the project description are on GitHub.</p>
+        <p><a href="https://github.com/hydall/Glaze">github.com/hydall/Glaze</a></p>
+      </div></div>
+    </noscript>
+  </main>
+
+  <!-- Phones: the app's floating GlassNavBar. -->
+  <nav class="nav-bar" id="navBar" aria-label="Sections"></nav>
+
+  <!-- A screenshot opened full screen. -->
+  <div class="viewer" id="viewer" role="dialog" aria-modal="true" hidden></div>
+
+  <script src="assets/data.js"></script>
+  <script src="assets/app.js"></script>
+</body>
+</html>
