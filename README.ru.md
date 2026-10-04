@@ -67,33 +67,9 @@ Glaze включает изолированную систему расшире�
 
 ## 🛠️ Разработка
 
-Создано на Flutter с локальным SQLite-хранилищем, нативной поддержкой десктопа и изолированным окружением для расширений. Используется Riverpod, Drift/SQLite, Dio, GoRouter и WebView-рендеринг чата.
+Glaze построен на Flutter с локальным SQLite-хранилищем, нативной поддержкой десктопа и изолированным окружением для расширений. Используется Riverpod, Drift/SQLite, Dio, GoRouter и WebView-рендеринг чата.
 
-### 📋 Предварительные Требования
-
-- [Flutter](https://docs.flutter.dev/get-started/install) 3.44+ (или новее, совместимый с Dart 3.12+)
-- Инструментарий для целевой платформы — [Android Studio](https://developer.android.com/studio) для Android, Xcode для iOS/macOS, Visual Studio с нагрузкой C++ для десктопа для Windows
-- Git
-
-### 🏗️ Настройка
-
-```bash
-git clone https://github.com/hydall/Glaze.git
-cd Glaze
-flutter pub get
-```
-
-### 🚀 Запуск
-
-```bash
-flutter run
-```
-
-### 🧪 Тестирование
-
-```bash
-flutter test
-```
+Требования, настройка, команды сборки, кодогенерация, тесты и структура проекта — в [`CONTRIBUTING.md`](CONTRIBUTING.md). Правила работы с git, PR, CI и релизами — в [`docs/WORKFLOW.md`](docs/WORKFLOW.md).
 
 ## 🙏 Благодарности
 
