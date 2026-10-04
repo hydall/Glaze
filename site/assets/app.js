@@ -452,15 +452,18 @@
       : !body || body === 'loading'
       ? `<p class="article-status">${esc(t('article_loading'))}</p>`
       : `<div class="article-body">${body}</div>`;
-    $('#articles').innerHTML = `<div class="container article-page">
+    const aside = a.download ? articleDownload(a.download) : '';
+    $('#articles').innerHTML = `<div class="container article-page ${aside ? 'has-aside' : ''}">
       <div class="article-tools">${back}${share}</div>
+      <div class="article-layout">
       <article class="group article">
         ${articleMeta(a, { link: true })}
         <h1>${esc(pick(a.title))}</h1>
         ${articleLang(a) !== state.lang ? `<div class="article-note">${ms('translate')}${esc(t('article_only_ru'))}</div>` : ''}
         ${content}
-        ${a.download ? articleDownload(a.download) : ''}
       </article>
+      ${aside}
+      </div>
     </div>`;
   }
 
@@ -566,25 +569,26 @@
       { id: 'windows', icon: 'desktop_windows', color: '#4CA3F2' },
       { id: 'linux', icon: 'terminal', color: '#F2C14E' },
     ];
-    const cards = platforms.map((p) => {
+    const rows = platforms.map((p) => {
       const l = byPlatform[p.id] || [];
       if (!l.length) return '';
       const buttons = l.map((a, i) => `<a class="btn ${i === 0 ? 'btn-primary' : 'btn-glass'} btn-sm" href="${a.url}" download>
         ${i === 0 ? ms('download') : ''}${esc(kindLabel(a.kind))} <span class="size">${esc(fmtSize(a.size))}</span></a>`).join('');
-      return `<div class="install-card" data-glow>
+      return `<div class="dl-row">
         <div class="head">
           <span class="tile" style="background:${p.color}1f;color:${p.color}">${ms(p.icon)}</span>
-          <span class="row-text"><span class="tile-label">${esc(t('plat_' + p.id))}</span><span class="tile-sub">${esc(l.map((a) => a.kind).join(' · '))}</span></span>
+          <span class="tile-label">${esc(t('plat_' + p.id))}</span>
         </div>
         <div class="dl-actions">${buttons}</div>
       </div>`;
     }).join('');
     const version = tag.replace(/^v/, '');
-    return `<section class="article-download">
+    // Beside the article on desktop, under it on narrower screens.
+    return `<aside class="group article-download">
       <div class="group-header">${ms('download')}<h3>${esc(t('download_title'))} ${esc(version)}</h3></div>
-      <div class="install-grid">${cards}</div>
+      <div class="dl-rows">${rows}</div>
       <a class="text-link article-download-all" href="${G.links.releases}" ${ext}>${esc(t('dl_all'))}${ms('open_in_new')}</a>
-    </section>`;
+    </aside>`;
   }
 
   function renderDownload() {

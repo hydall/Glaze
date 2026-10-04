@@ -551,13 +551,32 @@ a.article-author:hover span { color: var(--accent-text); }
 .article-body blockquote p:last-child { margin-bottom: 0; }
 .article-body hr { margin: 28px 0; border: 0; border-top: 1px solid var(--line); }
 
-/* A release's files at the end of its article */
-.article-download { margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--line); }
-.article-download .group-header { padding: 0 0 14px; }
-.article-download .install-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.article-download .install-card { background: rgba(255, 255, 255, 0.03); border: 1px solid var(--line); border-radius: 16px; }
-.article-download-all { display: inline-flex; margin-top: 14px; }
-@media (max-width: 560px) { .article-download .install-grid { grid-template-columns: 1fr; } }
+/* A release's files next to its article: a sticky column on the right on
+   desktop, a card under the article below that. */
+.article-page.has-aside { max-width: var(--container); }
+.article-layout { display: grid; gap: 16px; align-items: start; }
+.has-aside .article-layout { grid-template-columns: minmax(0, 1fr) 300px; }
+.article-download {
+  position: sticky;
+  top: calc(var(--topbar-h) + 16px);
+  padding: 0 0 14px;
+}
+.article-download .group-header { padding: 16px 16px 6px; }
+.article-download .group-header h3 { font-size: 16px; }
+.dl-rows { display: flex; flex-direction: column; }
+.dl-row { padding: 10px 16px; }
+.dl-row + .dl-row { border-top: 1px solid var(--line); }
+.dl-row .head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.dl-row .tile { width: 30px; height: 30px; border-radius: 9px; }
+.dl-row .tile .ms { font-size: 18px; }
+.dl-row .dl-actions .btn { flex: 1 1 auto; justify-content: center; }
+.article-download-all { display: inline-flex; margin: 8px 16px 0; }
+
+@media (max-width: 1060px) {
+  .has-aside .article-layout { grid-template-columns: minmax(0, 1fr); }
+  .article-page.has-aside { max-width: 820px; }
+  .article-download { position: static; }
+}
 
 /* ── Screenshots ────────────────────────────────────────────────────────── */
 
