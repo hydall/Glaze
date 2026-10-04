@@ -697,7 +697,7 @@
   "onboarding_feature_st_title": "Совместимость с SillyTavern",
   "onboarding_feature_st_desc": "Полная поддержка форматов ST V2: карточки персонажей, лорбуки, регекс-скрипты и пресеты промптов.",
   "onboarding_slide_preset_title": "Импорт пресета",
-  "onboarding_slide_preset_desc": "В Glaze уже есть предустановленные пресеты (Shino, Fawnie, MicroCoT, Renri). Вы можете использовать их для лучшего опыта.",
+  "onboarding_slide_preset_desc": "В Glaze уже есть предустановленные пресеты (Shino, Fawnie, MicroCoT, Renri, NoriMyn). Вы можете использовать их для лучшего опыта.",
   "onboarding_preset_import_st_hint": "... или импортируйте собственный пресет в формате SillyTavern",
   "onboarding_btn_import_preset": "Выбрать файл",
   "onboarding_import_success": "Пресет успешно импортирован",

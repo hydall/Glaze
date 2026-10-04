@@ -6,7 +6,11 @@ import '../state/shared_prefs_provider.dart';
 import 'featured_presets.dart';
 
 const _seededKey = 'defaultPresetsSeeded';
-const _featuredSeededKey = 'featuredPresetsSeeded_v1';
+const _featuredSeededKey = 'featuredPresetsSeeded_v2';
+
+/// Per-preset revision last written by the seeder, so a shipped update to a
+/// bundled preset can be told apart from a preset the user has kept.
+String _featuredRevisionKey(String id) => 'featuredPresetRev_$id';
 
 /// The preset a first run lands on.
 ///
@@ -58,17 +62,37 @@ Future<void> applyFirstRunPresetChoice({SharedPreferences? preferences}) async {
 }
 
 /// Seeds the standard "featured" presets from hydall/Glaze (Shino, Fawnie,
-/// MicroCot, Renri) with their cover images. Runs once (own storage key) so
-/// existing installs pick them up too, and never clobbers a copy the user may
-/// already have under the same id.
+/// MicroCot, Renri, NoriMyn) with their cover images, and refreshes any whose
+/// bundled revision has moved on since it was last written.
+///
+/// The global flag marks the first run: a preset missing on an install that
+/// already had its first run is one the user deleted, so it is not put back.
+/// After that, a preset still in the library is refreshed when its bundled
+/// [FeaturedPreset.revision] is newer than the one the seeder last wrote — the
+/// way a shipped update to a bundled preset reaches existing installs.
 Future<void> seedFeaturedPresets(WidgetRef ref) async {
   final prefs = await ref.read(sharedPreferencesProvider.future);
-  if (prefs.getBool(_featuredSeededKey) == true) return;
-
+  final firstRun = prefs.getBool(_featuredSeededKey) != true;
   final repo = ref.read(presetRepoProvider);
+
   for (final f in featuredPresets) {
-    if (await repo.getById(f.id) != null) continue;
-    await repo.put(await loadFeaturedPreset(f));
+    final revisionKey = _featuredRevisionKey(f.id);
+    final existing = await repo.getById(f.id);
+    if (existing == null) {
+      // A first run seeds everything; a later run leaves a deleted preset
+      // deleted instead of resurrecting it.
+      if (firstRun) {
+        await repo.put(await loadFeaturedPreset(f));
+        await prefs.setInt(revisionKey, f.revision);
+      }
+      continue;
+    }
+    // An install seeded before revisions were tracked counts as revision 1.
+    final seededRevision = prefs.getInt(revisionKey) ?? 1;
+    if (f.revision > seededRevision) {
+      await repo.put(await loadFeaturedPreset(f));
+    }
+    await prefs.setInt(revisionKey, f.revision);
   }
 
   await prefs.setBool(_featuredSeededKey, true);
