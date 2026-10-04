@@ -359,7 +359,7 @@ window.GLAZE = {
       author: 'MicroCoT',
       url: 'https://t.me/sillytavern1',
     },
-    { name: 'Renri', author: 'nimda trashcan' },
+    { name: 'Renri', author: 'nimda trashcan', url: 'https://t.me/nimdatrashcan' },
   ],
 
   testers: ['nightsyr', 'Саша Белый', 'múrx', 'lina', 'ShikiN', 'N K', 'Сатаник1155'],
