@@ -22,6 +22,17 @@ extension _AppDatabaseIntegrityMigrations on AppDatabase {
       'reconciliation_run_invalidations',
       'ledger_reconciliation_cursors',
     ]) {
+      // `ledger_reconciliation_effects` only arrives at v126, but this helper
+      // is also called from the older v90/v91 steps, where a trigger on a table
+      // that is not there yet aborts the whole upgrade (a genuine 0.7.x
+      // database predates the reconciliation schema entirely). The trigger is
+      // put on it by the v126 step instead.
+      final exists =
+          await customSelect(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '$table'",
+          ).getSingleOrNull() !=
+          null;
+      if (!exists) continue;
       await customStatement(
         'CREATE TRIGGER IF NOT EXISTS ${table}_no_update '
         'BEFORE UPDATE ON $table BEGIN '
