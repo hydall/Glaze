@@ -1869,6 +1869,50 @@ void runDbMigrationTests() {
       },
     );
 
+    test(
+      'v89 install without ledger_reconciliation_effects upgrades cleanly',
+      () async {
+        // A database that predates v90 has none of the reconciliation tables,
+        // so `ledger_reconciliation_effects` (added at v126) is absent when the
+        // v90 step installs the immutability triggers. That step must not put a
+        // trigger on a table the schema has not reached yet, or the whole
+        // upgrade aborts with "no such table".
+        final file = File(
+          '${Directory.systemTemp.path}/glaze_mig_ledger_v89_${DateTime.now().microsecondsSinceEpoch}.db',
+        );
+        addTearDown(() async {
+          if (file.existsSync()) await file.delete();
+        });
+
+        final seeded = AppDatabase.forTesting(
+          NativeDatabase.createInBackground(file),
+        );
+        await seeded.customSelect('SELECT 1').get();
+        await seeded.customStatement(
+          'DROP TABLE ledger_reconciliation_effects',
+        );
+        await seeded.customStatement('PRAGMA user_version = 89');
+        await seeded.close();
+
+        final upgraded = AppDatabase.forTesting(
+          NativeDatabase.createInBackground(file),
+        );
+        addTearDown(() async => upgraded.close());
+        await upgraded.customSelect('SELECT 1').get();
+
+        final version = await upgraded
+            .customSelect('PRAGMA user_version')
+            .getSingle();
+        expect(version.read<int>('user_version'), 139);
+        // v126 rebuilds the effects table and re-arms its immutability trigger.
+        final trigger = await upgraded.customSelect(
+          "SELECT name FROM sqlite_master WHERE type = 'trigger' "
+          "AND name = 'ledger_reconciliation_effects_no_update'",
+        ).get();
+        expect(trigger, hasLength(1));
+      },
+    );
+
     test('memory catalog table exists in current schema', () async {
       final db = currentDatabase();
       final rows = await db
