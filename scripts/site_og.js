@@ -72,7 +72,8 @@ function siteCard() {
 const KIND = { changelog: { ru: 'Чейнджлог', en: 'Changelog' }, news: { ru: 'Новости', en: 'News' } };
 
 function articleCard(a) {
-  const lang = a.langs[0];
+  // Previews are in English, the language link previews reach the widest.
+  const lang = a.langs.includes('en') ? 'en' : a.langs[0];
   const title = a.title[lang] || a.title.en;
   const lead = a.lead[lang] || a.lead.en;
   const date = new Intl.DateTimeFormat(lang === 'ru' ? 'ru-RU' : 'en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
