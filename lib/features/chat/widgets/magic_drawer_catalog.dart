@@ -92,12 +92,6 @@ List<MagicDrawerItemDef> buildMagicDrawerItems() => [
     icon: Icons.extension_outlined,
     category: MagicDrawerCategory.config,
   ),
-  MagicDrawerItemDef(
-    id: 'agent-ops',
-    label: 'agent_ops_title'.tr(),
-    icon: Icons.smart_toy_outlined,
-    category: MagicDrawerCategory.tools,
-  ),
 ];
 
 /// The catalog entry for [id], or null when a stored layout or a pinned button
