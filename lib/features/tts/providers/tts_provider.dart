@@ -102,6 +102,23 @@ abstract class TtsProvider {
       TtsProviderConfig(values, fields);
 }
 
+/// Turns a voice listing that is a plain list of names (or an object whose
+/// keys are names) into voices. Local servers answer in this shape.
+List<TtsVoice> voicesFromNames(Object? json) {
+  if (json is List) {
+    return [
+      for (final v in json)
+        if (v is String) TtsVoice(name: v, voiceId: v),
+    ];
+  }
+  if (json is Map) {
+    return [
+      for (final k in json.keys) TtsVoice(name: k.toString(), voiceId: k.toString()),
+    ];
+  }
+  return const [];
+}
+
 /// Parses a "Name:id, Name2:id2" or "id1, id2" list typed into a settings
 /// field into voices. Used by every provider whose voices are user-entered.
 List<TtsVoice> parseVoiceList(String raw, {String? lang}) {

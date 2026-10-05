@@ -94,6 +94,7 @@ class TtsHttp {
     Object? body,
     Map<String, String>? headers,
     Map<String, dynamic>? query,
+    String? contentType = 'application/json',
     CancelToken? cancelToken,
   }) async {
     final response = await _dio.post<dynamic>(
@@ -102,7 +103,7 @@ class TtsHttp {
       queryParameters: query,
       options: Options(
         headers: headers,
-        contentType: body is FormData ? null : 'application/json',
+        contentType: body is FormData ? null : contentType,
         responseType: ResponseType.plain,
       ),
       cancelToken: cancelToken,
