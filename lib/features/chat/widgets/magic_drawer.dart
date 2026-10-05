@@ -29,6 +29,7 @@ import '../../extensions/models/extension_preset.dart';
 import '../../extensions/models/extensions_settings.dart';
 import '../../extensions/providers/extension_presets_provider.dart';
 import '../../extensions/providers/extensions_settings_provider.dart';
+import '../../tts/tts_provider.dart';
 
 class MagicDrawerPanel extends ConsumerStatefulWidget {
   final String charId;
@@ -288,6 +289,9 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
             : _stats.activePresetDisplayName,
       'personas' => _stats.activePersona?.name ?? 'label_default'.tr(),
       'image-gen' => _stats.imageGenEnabled ? 'on'.tr() : 'off'.tr(),
+      'tts' => ref.watch(ttsSettingsProvider).value?.enabled == true
+          ? 'on'.tr()
+          : 'off'.tr(),
       'authors-note' =>
         _stats.session?.authorsNote != null &&
                 _stats.session!.authorsNote!.content.isNotEmpty

@@ -75,6 +75,12 @@ List<MagicDrawerItemDef> buildMagicDrawerItems() => [
     category: MagicDrawerCategory.tools,
   ),
   MagicDrawerItemDef(
+    id: 'tts',
+    label: 'tts_title'.tr(),
+    icon: Icons.record_voice_over,
+    category: MagicDrawerCategory.tools,
+  ),
+  MagicDrawerItemDef(
     id: 'authors-note',
     label: 'magic_authors_notes'.tr(),
     icon: Icons.edit_note,

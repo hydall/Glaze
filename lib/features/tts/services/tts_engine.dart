@@ -16,6 +16,26 @@ import 'tts_planner.dart';
 import 'tts_player.dart';
 import 'tts_voice_resolver.dart';
 
+/// Sample sentence for voice previews, by language — SillyTavern's pangrams.
+String ttsPreviewText(String? lang) {
+  const samples = {
+    'en': 'The quick brown fox jumps over the lazy dog',
+    'ru': 'В чащах юга жил бы цитрус? Да, но фальшивый экземпляр!',
+    'uk': "Фабрикуймо гідність, лящім їжею, ґав хапаймо, з'єднавці чаш!",
+    'de': 'Victor jagt zwölf Boxkämpfer quer über den großen Sylter Deich',
+    'fr': 'Portez ce vieux whisky au juge blond qui fume',
+    'es': 'Quiere la boca exhausta vid, kiwi, piña y fugaz jamón',
+    'it': "Pranzo d'acqua fa volti sghembi",
+    'pt': 'Vejo xá gritando que fez show sem playback.',
+    'pl': 'Pchnąć w tę łódź jeża lub ośm skrzyń fig',
+    'ja': 'いろはにほへと　ちりぬるを　わかよたれそ　つねならむ',
+    'ko': '가나다라마바사아자차카타파하',
+    'zh': '我能吞下玻璃而不伤身体',
+  };
+  final code = (lang ?? 'en').toLowerCase().split(RegExp('[-_ ,]')).first;
+  return samples[code] ?? samples['en']!;
+}
+
 /// Decodes compressed audio (MP3, Ogg…) into duration and peaks. Provided by
 /// the chat WebView, whose audio decoder handles every format the platform
 /// can play.
@@ -39,6 +59,11 @@ class TtsProgressEvent extends TtsEngineEvent {
   final int positionMs;
   final int? durationMs;
   const TtsProgressEvent(this.messageId, this.positionMs, this.durationMs);
+}
+
+/// Every pill may be stale (cache cleared); redraw them all.
+class TtsInvalidatedEvent extends TtsEngineEvent {
+  const TtsInvalidatedEvent();
 }
 
 /// Generation or playback failed; [message] is user-readable.
@@ -138,7 +163,7 @@ class TtsEngine {
     if (p == null) return TtsPillState.none;
     TtsPillState state;
     try {
-      final plan = await _planner.plan(input, _settings, p);
+      final plan = await _plan(input, p);
       if (plan == null) {
         state = TtsPillState.none;
       } else if (!p.producesAudio) {
@@ -161,6 +186,17 @@ class TtsEngine {
     if (state.durationMs != null) _durations[input.messageId] = state.durationMs!;
     return state;
   }
+
+  /// Streamed replies are spoken paragraph by paragraph, so with streaming
+  /// narration on every message is planned that way — the finished reply
+  /// then finds the clips the stream already made.
+  Future<TtsMessagePlan?> _plan(TtsMessageInput input, TtsProvider p) =>
+      _planner.plan(
+        input,
+        _settings,
+        p,
+        forceParagraphs: _settings.narrateWhileStreaming,
+      );
 
   TtsPillState? _cachedState(TtsMessagePlan plan) {
     final persistent = _settings.cacheEnabled;
@@ -229,6 +265,43 @@ class TtsEngine {
     }
   }
 
+  /// Plays a voice sample: the provider's own clip when it publishes one,
+  /// otherwise a pangram in the voice's language. Errors reach the caller.
+  Future<void> preview(TtsVoice voice) async {
+    await stop();
+    final p = provider;
+    if (p == null) return;
+    const id = '__tts_preview';
+    final url = voice.previewUrl;
+    if (url != null && url.isNotEmpty) {
+      player.enqueue(TtsPlayItem.file(messageId: id, offsetMs: 0, path: url));
+      return;
+    }
+    final config = p.configFrom(_settings.settingsFor(p.id));
+    final text = ttsPreviewText(voice.lang);
+    if (!p.producesAudio) {
+      player.enqueue(
+        TtsPlayItem.direct(
+          messageId: id,
+          speak: () => p.speak(text, voice.voiceId, config),
+          stopSpeaking: p.stopSpeaking,
+        ),
+      );
+      return;
+    }
+    final audio = _normalize(
+      await p.generate(text, voice.voiceId, config, cancelToken: _cancel),
+    );
+    final key = ttsClipKey(
+      providerId: p.id,
+      voiceId: voice.voiceId,
+      settingsFingerprint: config.audioFingerprint(),
+      text: text,
+    );
+    final clip = await cache.put(key, audio, null, persistent: false);
+    player.enqueue(TtsPlayItem.file(messageId: id, offsetMs: 0, path: clip.path));
+  }
+
   // ── Streaming narration ────────────────────────────────────────────────
 
   /// Feeds the reply as it streams; every finished paragraph is queued
@@ -291,12 +364,7 @@ class TtsEngine {
     final p = provider;
     try {
       if (p == null) throw const TtsNotConfigured('No TTS provider selected');
-      final plan = await _planner.plan(
-        job.input,
-        _settings,
-        p,
-        forceParagraphs: _settings.narrateWhileStreaming,
-      );
+      final plan = await _plan(job.input, p);
       if (epoch != _epoch) return;
       if (plan == null) {
         if (!isStreamChunk) _setState(id, TtsPillState.none);
@@ -408,6 +476,7 @@ class TtsEngine {
   }
 
   void _onActiveChanged(String? messageId) {
+    if (messageId == '__tts_preview') return;
     for (final entry in _states.entries.toList()) {
       if (entry.value.status == TtsPillStatus.playing &&
           entry.key != messageId) {
@@ -422,7 +491,9 @@ class TtsEngine {
         );
       }
     }
-    if (messageId != null && !messageId.startsWith('__tts_stream_')) {
+    if (messageId != null &&
+        !messageId.startsWith('__tts_stream_') &&
+        messageId != '__tts_preview') {
       _setState(messageId, stateOf(messageId).withStatus(TtsPillStatus.playing));
     }
   }
@@ -433,12 +504,15 @@ class TtsEngine {
     _events.add(TtsStateEvent(id, state));
   }
 
-  /// Forgets per-message state (chat closed).
+  /// Forgets per-message state (cache cleared, chat closed) and tells
+  /// listeners to redraw.
   void forgetMessages() {
     _states.removeWhere(
       (id, s) =>
           s.status != TtsPillStatus.loading && s.status != TtsPillStatus.playing,
     );
+    _durations.clear();
+    _events.add(const TtsInvalidatedEvent());
   }
 
   Future<void> dispose() async {

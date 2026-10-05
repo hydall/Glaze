@@ -21,6 +21,7 @@ import 'bridge_theme_commands.dart';
 import 'bridge_identity_commands.dart';
 import 'bridge_layout_commands.dart';
 import 'bridge_memory_commands.dart';
+import 'bridge_tts_commands.dart';
 import 'chat_overlay_blur_region.dart';
 
 /// Bridge between the chat WebView (JS) and Flutter. Owns the shared
@@ -107,6 +108,7 @@ class ChatBridgeController {
   late final IdentityBridgeCommands identity = IdentityBridgeCommands(this);
   late final LayoutBridgeCommands layout = LayoutBridgeCommands(this);
   late final MemoryBridgeCommands memory = MemoryBridgeCommands(this);
+  late final TtsBridgeCommands tts = TtsBridgeCommands(this);
 
   ChatBridgeController(this._controller, this._jsBridgeService) {
     setupHandlers();
@@ -293,6 +295,20 @@ class ChatBridgeController {
     return evalJs('window.bridge?.$method(${escapeJsonStr(arg)})');
   }
 
+  /// Runs [functionBody] as an async function with [arguments] in scope and
+  /// returns its result.
+  Future<Object?> callAsyncJs(
+    String functionBody,
+    Map<String, dynamic> arguments,
+  ) async {
+    final result = await _controller.callAsyncJavaScript(
+      functionBody: functionBody,
+      arguments: arguments,
+    );
+    if (result == null || result.error != null) return null;
+    return result.value;
+  }
+
   Future<void> evalJs(String source) async {
     try {
       await _controller.evaluateJavascript(source: source);
@@ -360,6 +376,10 @@ class ChatBridgeController {
   void Function(String id, bool focused)? onEditFocusChange;
   void Function(String id, String guidanceText)? onGuidedSwipe;
   void Function(String id)? onMemoryClick;
+
+  /// Tap on a message's TTS voice pill. Wired by the chat's TTS binding,
+  /// not through the callback groups.
+  void Function(String id)? onTtsToggle;
   void Function(String id)? onToggleHidden;
 
   /// Eye button on a message's image attachment: hides/shows the image for
@@ -506,6 +526,8 @@ class ChatBridgeController {
         onEditCancel?.call(s);
       case 'onMemoryClick':
         onMemoryClick?.call(s);
+      case 'onTtsToggle':
+        onTtsToggle?.call(s);
       case 'onToggleHidden':
         onToggleHidden?.call(s);
       case 'onToggleImageHidden':

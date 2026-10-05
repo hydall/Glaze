@@ -12,6 +12,8 @@ class TtsPlayItem {
   /// Position of this clip's start within its message, for message-level
   /// progress.
   final int offsetMs;
+
+  /// File path, or an http(s) URL for a provider's sample clip.
   final String? path;
   final Future<void> Function()? speak;
   final Future<void> Function()? stopSpeaking;
@@ -102,7 +104,12 @@ class TtsPlayer {
     try {
       if (item.path != null) {
         await _player.setReleaseMode(ReleaseMode.stop);
-        await _player.play(DeviceFileSource(item.path!));
+        final path = item.path!;
+        await _player.play(
+          path.startsWith('http://') || path.startsWith('https://')
+              ? UrlSource(path)
+              : DeviceFileSource(path),
+        );
         if (_rate != 1) await _player.setPlaybackRate(_rate);
       } else {
         await item.speak!();

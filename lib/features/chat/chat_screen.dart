@@ -75,6 +75,7 @@ import 'widgets/post_cleaner_status_card.dart';
 import 'widgets/post_gen_status_card.dart';
 import 'widgets/studio_status_card.dart';
 import 'widgets/chat_webview_widget.dart';
+import '../tts/widgets/tts_chat_binding.dart';
 import 'widgets/triggered_items_sheet.dart';
 import 'widgets/webview_callbacks.dart';
 import '../../core/models/chat_message.dart';
@@ -425,6 +426,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                 blurIsFlutterSide: _blurIsFlutterSide,
                 chromeBackdropKey: _chromeBackdropKey,
               ),
+              TtsChatBinding(charId: charId),
               if (awaitingTargetSession)
                 const Positioned.fill(
                   child: AbsorbPointer(
@@ -1894,6 +1896,11 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                               .length >
                                           1,
                                   beforeRegenerate: _maybeSeedGameTime,
+                                  onReadAloud: () => speakMessageNow(
+                                    ref,
+                                    widget.charId,
+                                    messageId,
+                                  ),
                                 );
                               },
                           onSwipe: (id, direction) {
