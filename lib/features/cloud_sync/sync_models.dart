@@ -195,8 +195,8 @@ String entryKey(String type, String id) => '$type:$id';
 /// Name of the Glaze root folder in the cloud provider.
 ///
 /// Reuses [glazeDataFolderName] so the cloud tree is named exactly like the
-/// desktop data folder: `Glaze` on stable, `Glaze-staging` / `Glaze-nightly`
-/// elsewhere. Keeping the channels apart matters as soon as two of them are
+/// desktop data folder: `Glaze` on stable, `Glaze-nightly` on nightly. Keeping
+/// the channels apart matters as soon as two of them are
 /// installed side by side and pointed at the same cloud account — otherwise
 /// they overwrite each other's entities through a shared manifest.
 const String cloudRootFolderName = glazeDataFolderName;

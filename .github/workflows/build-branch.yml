@@ -88,11 +88,10 @@ jobs:
 
           # Release channel drives the in-app dev-tooling defaults (developer
           # mode + build watermark) via --dart-define=BUILD_CHANNEL. Only the
-          # two release branches get a non-nightly channel; every other branch
-          # builds as nightly, i.e. with dev tooling on.
+          # stable branch gets a non-nightly channel; every other branch builds
+          # as nightly, i.e. with dev tooling on.
           case "$BUILD_BRANCH" in
             stable)  BUILD_CHANNEL=stable  ;;
-            staging) BUILD_CHANNEL=staging ;;
             *)       BUILD_CHANNEL=nightly ;;
           esac
 
@@ -146,7 +145,6 @@ jobs:
         env:
           BUILD_CHANNEL: ${{ needs.metadata.outputs.build_channel }}
           DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
-          DROPBOX_APP_KEY_STAGING: ${{ secrets.DROPBOX_APP_KEY_STAGING }}
           DROPBOX_APP_KEY_NIGHTLY: ${{ secrets.DROPBOX_APP_KEY_NIGHTLY }}
           DROPBOX_REDIRECT_NATIVE: ${{ secrets.DROPBOX_REDIRECT_NATIVE }}
           GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
@@ -159,7 +157,6 @@ jobs:
           # _channelSubfolder in dropbox_adapter.dart. Both layouts work.
           case "$BUILD_CHANNEL" in
             stable)  CHANNEL_DROPBOX_KEY="" ;;
-            staging) CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_STAGING" ;;
             *)       CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_NIGHTLY" ;;
           esac
           {
@@ -352,7 +349,6 @@ jobs:
         env:
           BUILD_CHANNEL: ${{ needs.metadata.outputs.build_channel }}
           DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
-          DROPBOX_APP_KEY_STAGING: ${{ secrets.DROPBOX_APP_KEY_STAGING }}
           DROPBOX_APP_KEY_NIGHTLY: ${{ secrets.DROPBOX_APP_KEY_NIGHTLY }}
           DROPBOX_REDIRECT_NATIVE: ${{ secrets.DROPBOX_REDIRECT_NATIVE }}
           GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
@@ -365,7 +361,6 @@ jobs:
           # _channelSubfolder in dropbox_adapter.dart. Both layouts work.
           case "$BUILD_CHANNEL" in
             stable)  CHANNEL_DROPBOX_KEY="" ;;
-            staging) CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_STAGING" ;;
             *)       CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_NIGHTLY" ;;
           esac
           {
@@ -433,7 +428,6 @@ jobs:
         env:
           BUILD_CHANNEL: ${{ needs.metadata.outputs.build_channel }}
           DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
-          DROPBOX_APP_KEY_STAGING: ${{ secrets.DROPBOX_APP_KEY_STAGING }}
           DROPBOX_APP_KEY_NIGHTLY: ${{ secrets.DROPBOX_APP_KEY_NIGHTLY }}
           DROPBOX_REDIRECT_NATIVE: ${{ secrets.DROPBOX_REDIRECT_NATIVE }}
           GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
@@ -446,7 +440,6 @@ jobs:
           # _channelSubfolder in dropbox_adapter.dart. Both layouts work.
           case "$BUILD_CHANNEL" in
             stable)  CHANNEL_DROPBOX_KEY="" ;;
-            staging) CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_STAGING" ;;
             *)       CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_NIGHTLY" ;;
           esac
           {
@@ -496,7 +489,6 @@ jobs:
           set -euo pipefail
           case "$BUILD_CHANNEL" in
             stable)  SUFFIX="";         NAME="Glaze" ;;
-            staging) SUFFIX=".staging"; NAME="Glaze Staging" ;;
             *)       SUFFIX=".nightly"; NAME="Glaze Nightly" ;;
           esac
           printf 'BUNDLE_ID_SUFFIX = %s\nAPP_DISPLAY_NAME = %s\n' \
@@ -582,7 +574,6 @@ jobs:
         env:
           BUILD_CHANNEL: ${{ needs.metadata.outputs.build_channel }}
           DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
-          DROPBOX_APP_KEY_STAGING: ${{ secrets.DROPBOX_APP_KEY_STAGING }}
           DROPBOX_APP_KEY_NIGHTLY: ${{ secrets.DROPBOX_APP_KEY_NIGHTLY }}
           DROPBOX_REDIRECT_NATIVE: ${{ secrets.DROPBOX_REDIRECT_NATIVE }}
           GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
@@ -590,7 +581,6 @@ jobs:
           set -euo pipefail
           case "$BUILD_CHANNEL" in
             stable)  CHANNEL_DROPBOX_KEY="" ;;
-            staging) CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_STAGING" ;;
             *)       CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_NIGHTLY" ;;
           esac
           {

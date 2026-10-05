@@ -6,7 +6,6 @@
 /// | branch        | channel   |
 /// |---------------|-----------|
 /// | `stable`      | `stable`  |
-/// | `staging`     | `staging` |
 /// | `nightly`     | `nightly` |
 /// | anything else | `nightly` |
 ///

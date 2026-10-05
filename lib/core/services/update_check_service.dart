@@ -12,7 +12,7 @@ enum UpdateSource {
   /// A published GitHub Release (`stable` channel).
   release,
 
-  /// A successful GitHub Actions run (`staging` / `nightly` / feature branches).
+  /// A successful GitHub Actions run (`nightly` / feature branches).
   ciBuild,
 }
 
@@ -114,7 +114,7 @@ class UpdateCheckResult {
 /// - **`stable`** — the latest published release. `/releases/latest` already
 ///   excludes drafts and pre-releases, so a public build never offers an RC.
 ///   Compared by version, since release tags are the only ordering that exists.
-/// - **`staging` / `nightly` / feature branches** — the latest successful run of
+/// - **`nightly` / feature branches** — the latest successful run of
 ///   the release workflow *on the branch this build came from*. Compared by
 ///   commit SHA, because consecutive CI builds share a version number.
 ///
