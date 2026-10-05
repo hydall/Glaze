@@ -54,9 +54,9 @@ String? resolveGlazeFilePath(String? path) {
   // installed channel, whose source files may also continue to exist.
   final normalized = path.replaceAll('\\', '/');
   // Desktop channels use sibling roots. Match all of them so a copied DB can
-  // move in either direction: stable <-> staging <-> nightly.
+  // move in either direction: stable <-> nightly.
   final match = RegExp(
-    r'/(?:Glaze|Glaze-staging|Glaze-nightly)/',
+    r'/(?:Glaze|Glaze-nightly)/',
     caseSensitive: false,
   ).allMatches(normalized).lastOrNull;
   if (match != null) {
@@ -95,7 +95,7 @@ String relativeGlazeFilePath(String path) {
   // installed build channel: the data-root name still tells us where it sat,
   // and [resolveGlazeFilePath] rebases that suffix onto the current root.
   final match = RegExp(
-    r'/(?:Glaze|Glaze-staging|Glaze-nightly)/',
+    r'/(?:Glaze|Glaze-nightly)/',
     caseSensitive: false,
   ).allMatches(normalized).lastOrNull;
   if (match != null) {

@@ -7,8 +7,8 @@ import '../state/dev_mode_provider.dart';
 /// it across launches.
 const _markerKey = 'devModeDefaultResetV1';
 
-/// Clears a `devModeEnabled` left over from the builds where `nightly` and
-/// `staging` switched developer mode on by default.
+/// Clears a `devModeEnabled` left over from the builds where `nightly` switched
+/// developer mode on by default.
 ///
 /// Dev mode is now off on every channel and is only reachable through the
 /// 7-tap easter egg on the version badge in About. Without this those installs

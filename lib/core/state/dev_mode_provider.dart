@@ -11,7 +11,7 @@ import 'shared_prefs_provider.dart';
 /// developer builds. The only way in is the 7-tap easter egg on the version
 /// badge in About (`lib/features/menu/about_screen.dart`).
 ///
-/// Installs that ran a build from back when `nightly`/`staging` turned this on
+/// Installs that ran a build from back when `nightly` turned this on
 /// by default have the stale `true` cleared once at startup by
 /// `resetLegacyDevModeFlag` (`lib/core/services/dev_mode_flag_migration.dart`).
 final devModeProvider = NotifierProvider<DevModeNotifier, bool>(

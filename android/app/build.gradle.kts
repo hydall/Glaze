@@ -15,20 +15,18 @@ val buildChannel: String =
     System.getenv("BUILD_CHANNEL")?.takeIf { it.isNotBlank() }?.trim()?.lowercase()
         ?: "nightly"
 
-// Every channel gets its own applicationId so stable / staging / nightly can be
-// installed next to each other on one device. All three are still signed with
-// the same CI keystore — Android refuses to co-install packages that share an
+// Every channel gets its own applicationId so stable / nightly can be installed
+// next to each other on one device. Both are still signed with the same CI
+// keystore — Android refuses to co-install packages that share an
 // applicationId, not ones that share a signing certificate.
 val channelApplicationIdSuffix = when (buildChannel) {
     "stable" -> ""
-    "staging" -> ".staging"
     else -> ".nightly"
 }
 
-// Launcher label, so three icons on the home screen are told apart.
+// Launcher label, so the two icons on the home screen are told apart.
 val channelAppLabel = when (buildChannel) {
     "stable" -> "Glaze"
-    "staging" -> "Glaze Staging"
     else -> "Glaze Nightly"
 }
 
