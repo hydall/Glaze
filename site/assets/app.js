@@ -124,7 +124,10 @@
   // The unauthenticated GitHub API allows 60 requests an hour per IP, so the
   // answer is kept for an hour rather than fetched on every page view.
   const RELEASE_CACHE_KEY = 'glaze-site-release';
-  const RELEASE_CACHE_MS = 60 * 60 * 1000;
+  // Short enough that a republished release (a hotfix with the same tag) is
+  // picked up soon after it lands; long enough to stay far below GitHub's
+  // unauthenticated limit of 60 requests an hour per visitor.
+  const RELEASE_CACHE_MS = 10 * 60 * 1000;
 
   async function loadRelease() {
     try {
