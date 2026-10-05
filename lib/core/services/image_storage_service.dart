@@ -347,7 +347,7 @@ class ImageStorageService implements SyncImageStore {
   String? _rebaseOntoBaseDir(String absPath) {
     final normalized = absPath.replaceAll('\\', '/');
     final match = RegExp(
-      r'/(?:Glaze|Glaze-staging|Glaze-nightly)/',
+      r'/(?:Glaze|Glaze-nightly)/',
       caseSensitive: false,
     ).allMatches(normalized).lastOrNull;
     if (match != null) {

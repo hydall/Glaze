@@ -4,24 +4,23 @@ Git, branching, PR, and task-tracking conventions. Loaded on demand — `CLAUDE.
 
 ## Branching
 
-The repository has three long-lived release branches, one per build channel:
+The repository has two long-lived release branches, one per build channel:
 
 | Branch    | Channel   | Role                                    |
 |-----------|-----------|-----------------------------------------|
 | `nightly` | `nightly` | integration — where features land        |
-| `staging` | `staging` | release candidates / QA                  |
 | `stable`  | `stable`  | public releases (default branch)         |
 
-Work flows upward, `nightly → staging → stable`, by ordinary merges. The channel
-is derived from the branch name at build time, so a commit picks up the right
-build settings automatically as it is promoted — see `docs/RELEASE_CHANNELS.md`.
+Work flows upward, `nightly → stable`, by ordinary merges. The channel is
+derived from the branch name at build time, so a commit picks up the right build
+settings automatically as it is promoted — see `docs/RELEASE_CHANNELS.md`.
 
 Each feature = a branch off `nightly`, pushed to `origin`, then a PR into
 upstream `hydall/Glaze:nightly`.
 
-- **Always base a feature branch on `nightly`** — never on `stable` or `staging`, and never on whatever happened to be checked out. `stable` is the repository's *default* branch, so a fresh clone (and every agent session started from one) lands there: check the base before the first commit. If a branch was already cut from the wrong base, rebase it before opening the PR — `git fetch origin nightly && git rebase origin/nightly` — so the PR carries only its own commits.
-- **No direct commits to `nightly`, `staging` or `stable`** — always use a feature branch.
-- **Never PR straight into `staging` or `stable`** — features enter through `nightly` and are promoted.
+- **Always base a feature branch on `nightly`** — never on `stable`, and never on whatever happened to be checked out. `stable` is the repository's *default* branch, so a fresh clone (and every agent session started from one) lands there: check the base before the first commit. If a branch was already cut from the wrong base, rebase it before opening the PR — `git fetch origin nightly && git rebase origin/nightly` — so the PR carries only its own commits.
+- **No direct commits to `nightly` or `stable`** — always use a feature branch.
+- **Never PR straight into `stable`** — features enter through `nightly` and are promoted.
 - **Squash-merge every PR** — one feature = one commit on `nightly`, so a regression found later is a single `git revert <sha>` instead of untangling a range.
 - **CI must be green before merge** — see below.
 - **Stack while catching up** — if a feature depends on another not-yet-merged branch, branch off that branch instead of `nightly`.
@@ -59,8 +58,8 @@ Open the PR against `hydall/Glaze:nightly`, not a fork's branch. Use whatever is
 
 ## CI gate
 
-`.github/workflows/ci.yml` runs on every PR into `nightly`, `staging` or
-`stable`: `flutter analyze`, `flutter test`, and the WebView render suite
+`.github/workflows/ci.yml` runs on every PR into `nightly` or `stable`:
+`flutter analyze`, `flutter test`, and the WebView render suite
 (`test/webview_js` — Node + Playwright, no Flutter). A red check means the PR
 is not merged — no exceptions, no "it works on my machine".
 
@@ -94,26 +93,22 @@ skipped or forgotten.
 
 ## Promoting a release
 
-Promotion is a merge, not a PR. A `nightly → staging` diff is an aggregate of
-many features that nobody reads; opening a PR for it adds ceremony without
-adding a check.
+Promotion is a merge, not a PR. A `nightly → stable` diff is an aggregate of many
+features that nobody reads; opening a PR for it adds ceremony without adding a
+check.
 
-**`nightly → staging` is gated on a real device, not on the diff.** Promote only
+**`nightly → stable` is gated on a real device, not on the diff.** Promote only
 after a build of `nightly` (the *Build (Branch)* workflow) has been installed and
 actually used, and nothing obvious is broken. CI proves the code compiles and the
 tests pass; only a build on a phone or desktop proves the app still works.
-`staging` therefore means "someone held this in their hands", and `stable` means
-"that held up".
+`stable` means "that held up".
 
 When a promoted build turns out to be broken, revert the squashed commit of the
 offending feature on `nightly` and re-promote — that is what squash-merging buys.
 
 ```bash
-# nightly → staging (cut a release candidate)
-git checkout staging && git pull && git merge --no-ff nightly && git push
-
-# staging → stable (ship it)
-git checkout stable && git pull && git merge --no-ff staging && git push
+# nightly → stable (ship it)
+git checkout stable && git pull && git merge --no-ff nightly && git push
 ```
 
 ## Build distribution

@@ -157,12 +157,11 @@ flutter analyze 2>&1 | Tee-Object -FilePath analyze_full.txt -Encoding UTF8; Get
 - On Windows, use these canonical environment-relative paths directly. Agents
   should not search the codebase merely to rediscover them:
   - local development, feature branches, and nightly: `%APPDATA%\Glaze-nightly\glaze.db`
-  - staging: `%APPDATA%\Glaze-staging\glaze.db`
   - stable: `%APPDATA%\Glaze\glaze.db`
   In PowerShell, resolve `%APPDATA%` through `$env:APPDATA`; never hard-code a
   user's profile directory.
 - Desktop data roots are build-channel-specific: stable uses `Glaze`, while
-  staging/nightly use `Glaze-<channel>`. `buildChannel` defaults to `nightly`
+  nightly uses `Glaze-nightly`. `buildChannel` defaults to `nightly`
   when no `BUILD_CHANNEL` dart define is supplied, so local development and
   feature-branch runs normally use the nightly data root. See
   `lib/core/constants/build_channel.dart`.
@@ -222,7 +221,7 @@ When editing files matching a pattern below, READ the corresponding rule file FI
 - Open PRs only against upstream repository `hydall/Glaze` (base: `hydall/Glaze:nightly`), not against fork repos.
 - PR title and body are **in English**, and the body lists the changes as bullets (one bullet per change, `##` headings when a PR carries several independent fixes) plus how it was verified. Full rules: `docs/WORKFLOW.md` § PR title and body.
 - PRs are squash-merged and gated on CI (`.github/workflows/ci.yml` — `flutter analyze` + `flutter test` + the WebView render suite in `test/webview_js`); a red check blocks the merge.
-- Release branches are `nightly` → `staging` → `stable`, one per build channel; features enter at `nightly` and are promoted by merge. Channel semantics: `docs/RELEASE_CHANNELS.md`.
+- Release branches are `nightly` → `stable`, one per build channel; features enter at `nightly` and are promoted by merge. Channel semantics: `docs/RELEASE_CHANNELS.md`.
 - Run `dart run build_runner build` after changing any freezed/drift model.
 - Single responsibility: split a class before it grows past ~200-250 lines (thin orchestrators, fat specialists, constructor injection). Details: `docs/CODE_STYLE.md`.
 
@@ -235,7 +234,7 @@ When editing files matching a pattern below, READ the corresponding rule file FI
 - Mutate state directly — use immutable patterns with freezed
 - Forget `ref.watch` select for streaming UI (causes full rebuild per chunk)
 - Build a screen or sheet on bare Material (`TabBar`, `Card`, `OutlinedButton`, `Chip`, `SnackBar`, `AlertDialog`…) when `lib/shared/widgets/` has the Glaze equivalent — check `docs/UI_KIT.md` first
-- Commit directly to `nightly`, `staging` or `stable` — always use a feature branch
+- Commit directly to `nightly` or `stable` — always use a feature branch
 - Bypass `_requireCapability` in the JS bridge — every `glaze.*` method must enforce the matching capability (default-deny)
 - Run user JS in a same-origin iframe — panel/sandbox scripts go in `sandbox="allow-scripts"` (no `allow-same-origin`)
 - Read-modify-write a `ChatSession` / `Character` from outside the dedicated atomic repo methods (chat/character variable scopes)

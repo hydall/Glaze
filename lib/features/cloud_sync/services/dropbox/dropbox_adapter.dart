@@ -28,7 +28,7 @@ class DropboxAdapter implements CloudAdapter {
   // Sub-folder names reserved by the *other* channels. Only reachable from
   // stable, whose wipe is the one operation that touches the App folder root.
   static const _foreignChannelFolders = isStableChannel
-      ? {'staging', 'nightly'}
+      ? {'nightly'}
       : <String>{};
 
   final DropboxAuth _auth;

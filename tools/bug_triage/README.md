@@ -209,4 +209,4 @@ the Actions tab ("Run workflow"), optionally with **dry run** checked.
 > **Scheduled runs only fire from the repository's default branch** (`stable`).
 > On `nightly` or a feature branch the cron is inert — only `workflow_dispatch`
 > works there. The daily 18:00 UTC run starts once this file reaches `stable`
-> through the normal `nightly` → `staging` → `stable` promotion.
+> through the normal `nightly` → `stable` promotion.

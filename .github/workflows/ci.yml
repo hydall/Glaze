@@ -12,7 +12,6 @@ on:
   pull_request:
     branches:
       - nightly
-      - staging
       - stable
   workflow_dispatch:
 
