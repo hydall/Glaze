@@ -16,6 +16,7 @@ import '../../character_list/character_detail_screen.dart';
 import '../../extensions/widgets/ext_blocks_settings_sheet.dart';
 import '../../glossary/glossary_sheet.dart';
 import '../../image_gen/widgets/image_gen_sheet.dart';
+import '../../tts/widgets/tts_sheet.dart';
 import '../../lorebooks/lorebook_list_screen.dart';
 import '../../personas/persona_list_screen.dart';
 import '../../presets/preset_list_screen.dart';
@@ -136,6 +137,14 @@ class DrawerItemLauncher {
           backgroundColor: Colors.transparent,
           builder: (_) => ImageGenSheet(charId: charId),
         );
+      case 'tts':
+        await showGlazeSheet<void>(
+          context: context,
+          useRootNavigator: true,
+          isScrollControlled: true,
+          backgroundColor: Colors.transparent,
+          builder: (_) => TtsSheet(charId: charId),
+        );
       case 'authors-note':
         await showAuthorsNoteSheet(context, charId);
       case 'glossary':
@@ -173,6 +182,7 @@ class DrawerItemLauncher {
       'presets' => (_) => PresetListScreen(startExpanded: true, charId: charId),
       'personas' => (_) => const PersonaListScreen(startExpanded: true),
       'image-gen' => (_) => ImageGenSheet(charId: charId),
+      'tts' => (_) => TtsSheet(charId: charId),
       'authors-note' => (_) => AuthorsNoteSheet(charId: charId),
       'glossary' => (_) => const GlossarySheet(startExpanded: true),
       'ext-blocks' => (_) => const ExtBlocksSettingsSheet(),

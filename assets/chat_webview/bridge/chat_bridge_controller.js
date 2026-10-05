@@ -1,6 +1,7 @@
 ﻿/* Extracted from ../bridge.legacy.js. Keep public behavior stable. */
 
 import { GenTimer } from './gen_timer.js';
+import { decodeTtsPeaks, setTtsProgress } from '../renderer/tts_pill.js';
 import { ImgGenTimer } from './imggen_timer.js';
 import { refreshImgGenPlaceholderState } from '../renderer/imggen_placeholder.js';
 import { MessageUpdateBatcher } from './message_update_batcher.js';
@@ -927,6 +928,46 @@ export class Bridge {
         el.insertBefore(this.renderer.createContextLimitMarker(), el.firstChild);
       }
     }
+  }
+
+  // ── TTS voice pills ──────────────────────────────────────────────────
+  // State lives on the renderer (see Renderer.syncTtsPill) and rows are
+  // reached through itemMap, so pills stay right on virtualized rows and
+  // survive a full re-render.
+
+  /** Full state: `{ enabled, states: { id: {s, d?, p?, e?} } }`. */
+  ttsConfigure(json) {
+    const { enabled, states } = JSON.parse(json);
+    this.renderer.ttsEnabled = !!enabled;
+    this.renderer.ttsStates = new Map(Object.entries(states || {}));
+    for (const item of this.virtualList.items || []) {
+      const el = item && item.el;
+      if (el && el.classList && el.classList.contains('message-section')) {
+        this.renderer.syncTtsPill(el);
+      }
+    }
+  }
+
+  /** Changed pills only: `{ id: state }`. */
+  ttsPatch(json) {
+    const states = JSON.parse(json);
+    for (const [id, state] of Object.entries(states)) {
+      this.renderer.ttsStates.set(id, state);
+      const el = this.virtualList.itemMap?.get(id)?.el;
+      if (el) this.renderer.syncTtsPill(el);
+    }
+  }
+
+  /** Playback position: `{ id, pos, dur }`. */
+  ttsProgress(json) {
+    const { id, pos, dur } = JSON.parse(json);
+    const pill = this.virtualList.itemMap?.get(id)?.el?.querySelector(':scope > .msg-tts');
+    if (pill) setTtsProgress(pill, pos, dur);
+  }
+
+  /** Duration and peaks of compressed audio; called by Flutter. */
+  ttsDecodePeaks(base64, mime, buckets) {
+    return decodeTtsPeaks(base64, mime, buckets);
   }
 
   // Patch only memory badges when the async memory providers settle. This

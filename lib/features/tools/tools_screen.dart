@@ -22,6 +22,7 @@ import '../chat/widgets/chat_stats_sheet.dart';
 import '../chat/widgets/magic_drawer_widgets.dart' show MagicCardBadge;
 import '../extensions/widgets/ext_blocks_settings_sheet.dart';
 import '../image_gen/widgets/image_gen_sheet.dart';
+import '../tts/widgets/tts_sheet.dart';
 import '../personas/persona_list_provider.dart';
 import '../presets/preset_image.dart';
 import '../presets/preset_list_provider.dart';
@@ -287,6 +288,14 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
           useRootNavigator: true,
           backgroundColor: Colors.transparent,
           builder: (_) => const ImageGenSheet(),
+        );
+      case 'tts':
+        showGlazeSheet<void>(
+          context: context,
+          isScrollControlled: true,
+          useRootNavigator: true,
+          backgroundColor: Colors.transparent,
+          builder: (_) => const TtsSheet(),
         );
       case 'ext-blocks':
         _openExtBlocks();
