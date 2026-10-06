@@ -15,6 +15,7 @@ import 'package:gpt_markdown/gpt_markdown.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/models/character.dart';
+import '../../core/services/character_export_helper.dart';
 import '../../core/services/chat_import_export.dart';
 import '../../shared/widgets/glaze_spinner.dart';
 import '../catalog/catalog_models.dart';
@@ -428,6 +429,16 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
     GlazeBottomSheet.show<void>(
       context,
       items: [
+        if (char != null)
+          BottomSheetItem(
+            icon: Icons.share_rounded,
+            label: 'action_export'.tr(),
+            onTap: () {
+              rootNav.pop();
+              if (!mounted) return;
+              _showExportOptions(char);
+            },
+          ),
         BottomSheetItem(
           icon: Icons.edit_outlined,
           label: 'action_edit'.tr(),
@@ -493,6 +504,68 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
         ),
       ],
     );
+  }
+
+  void _showExportOptions(Character char) {
+    final name = char.displayName?.trim().isNotEmpty == true
+        ? char.displayName!.trim()
+        : char.name;
+    final rootNav = Navigator.of(context, rootNavigator: true);
+    GlazeBottomSheet.show<void>(
+      context,
+      title: 'Export $name',
+      items: [
+        BottomSheetItem(
+          icon: Icons.image_outlined,
+          label: 'label_export_png'.tr(),
+          onTap: () {
+            rootNav.pop();
+            _export(char, 'png');
+          },
+        ),
+        BottomSheetItem(
+          icon: Icons.code_rounded,
+          label: 'label_export_json'.tr(),
+          onTap: () {
+            rootNav.pop();
+            _export(char, 'json');
+          },
+        ),
+        BottomSheetItem(
+          icon: Icons.folder_zip_rounded,
+          label: 'label_export_zip'.tr(),
+          onTap: () {
+            rootNav.pop();
+            _export(char, 'zip');
+          },
+        ),
+      ],
+    );
+  }
+
+  Future<void> _export(Character char, String format) async {
+    try {
+      final savedPath = await exportCharacterToFile(
+        ref: ref,
+        character: char,
+        format: format,
+      );
+      if (savedPath.isEmpty) return; // user cancelled the save dialog
+      if (mounted) {
+        GlazeToast.show(
+          context,
+          'Exported ${format.toUpperCase()} to $savedPath',
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        GlazeErrorDialog.show(
+          context,
+          e,
+          prefix: 'error_export_failed_prefix'.tr(),
+        );
+      }
+    }
   }
 
   void _confirmDelete(BuildContext context) async {
