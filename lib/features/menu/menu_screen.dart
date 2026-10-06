@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:collection/collection.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
@@ -11,6 +13,9 @@ import '../../shared/shell/desktop/desktop_glossary_popup.dart';
 import '../../shared/shell/desktop/desktop_floating_provider.dart';
 import '../../core/models/chat_message.dart';
 import '../chat/widgets/triggered_items_sheet.dart';
+import '../diagnostics/crash_prompt.dart';
+import '../../core/diagnostics/app_log.dart';
+import '../../core/diagnostics/crash_detector.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../core/services/generation_notification_service.dart';
@@ -442,6 +447,32 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with ShellHeaderMixin {
                         ),
                       ),
                       MenuItem(
+                        icon: Icons.bug_report_outlined,
+                        label: 'Crash report prompt',
+                        onTap: () {
+                          final log = AppLog.sessionPath;
+                          if (log == null) return;
+                          showCrashReportSheet(
+                            context,
+                            DetectedCrash(
+                              reportPath: log,
+                              kind: 'CRASH_NATIVE',
+                            ),
+                          );
+                        },
+                      ),
+                      MenuItem(
+                        icon: Icons.dangerous_outlined,
+                        label: 'Simulate crash (kill process)',
+                        subtitle:
+                            'Release/profile builds report it on next launch',
+                        onTap: () {
+                          AppLog.warn('Simulated crash from the dev menu');
+                          AppLog.flush();
+                          Process.killPid(pid, ProcessSignal.sigkill);
+                        },
+                      ),
+                      MenuItem(
                         icon: Icons.system_update_alt_rounded,
                         label: 'menu_test_update_dialog'.tr(),
                         onTap: () => showUpdateDialog(
@@ -496,6 +527,12 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with ShellHeaderMixin {
                       label: 'menu_about'.tr(),
                       subtitle: 'menu_about_hint'.tr(),
                       onTap: () => goOrFloat(context, 'about', push: true),
+                    ),
+                    MenuItem(
+                      icon: Icons.receipt_long_outlined,
+                      label: 'logs_title'.tr(),
+                      subtitle: 'logs_menu_hint'.tr(),
+                      onTap: () => goOrFloat(context, 'logs', push: true),
                     ),
                     MenuItem(
                       icon: Icons.menu_book_rounded,

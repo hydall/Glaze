@@ -38,6 +38,7 @@ import 'shared/theme/theme_preset.dart';
 import 'shared/theme/theme_provider.dart';
 
 import 'features/chat/widgets/chat_webview_preload.dart';
+import 'features/diagnostics/crash_prompt.dart';
 import 'features/chat/widgets/continue_failure_listener.dart';
 import 'features/chat/widgets/lorebook_vector_search_diagnostic_listener.dart';
 import 'shared/widgets/app_launch_splash.dart';
@@ -245,6 +246,7 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
       ref.read(sessionLorebookEmbeddingWorkerProvider).recoverAndDrain(),
     );
     _syncTokenizerWithConnection();
+    unawaited(offerCrashReportOnStartup());
     _updateChecks = AutomaticUpdateCheckController(
       check: (presentedUpdateIds) =>
           checkAndShowUpdateOnStartup(presentedUpdateIds: presentedUpdateIds),

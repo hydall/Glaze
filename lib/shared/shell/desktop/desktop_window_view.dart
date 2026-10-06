@@ -6,6 +6,8 @@ import '../../../features/backup/backup_screen.dart';
 import '../../../features/catalog/widgets/third_party_providers_screen.dart';
 import '../../../features/character_list/character_editor_screen.dart';
 import '../../../features/cloud_sync/widgets/sync_sheet.dart';
+import '../../../features/diagnostics/log_viewer_screen.dart';
+import '../../../features/diagnostics/logs_screen.dart';
 import '../../../features/menu/about_screen.dart';
 import '../../../features/menu/hall_of_fame_screen.dart';
 import '../../../features/lorebooks/lorebook_editor_screen.dart';
@@ -359,6 +361,7 @@ String desktopWindowTitle(String viewId) => switch (desktopViewName(viewId)) {
   'regex-editor' => 'regex_editor'.tr(),
   'about' => 'menu_about'.tr(),
   'hall-of-fame' => 'about_hall_of_fame'.tr(),
+  'logs' || 'log-view' => 'logs_title'.tr(),
   'sync' => 'menu_cloud_sync'.tr(),
   'backup' => 'menu_backup'.tr(),
   _ => '',
@@ -377,6 +380,7 @@ IconData _windowIcon(String viewId) => switch (desktopViewName(viewId)) {
   'regex-editor' => Icons.code_rounded,
   'about' => Icons.info_outline_rounded,
   'hall-of-fame' => Icons.emoji_events_rounded,
+  'logs' || 'log-view' => Icons.receipt_long_rounded,
   'sync' => Icons.cloud_sync_rounded,
   'backup' => Icons.backup_rounded,
   _ => Icons.web_asset_rounded,
@@ -417,6 +421,8 @@ Widget desktopWindowContent(String viewId) {
     ),
     'about' => const AboutScreen(),
     'hall-of-fame' => const HallOfFameScreen(),
+    'logs' => const LogsScreen(),
+    'log-view' => LogViewerScreen(path: view.queryParameters['path'] ?? ''),
     'sync' => const SyncSheet(),
     'backup' => const BackupScreen(),
     _ => const SizedBox.shrink(),

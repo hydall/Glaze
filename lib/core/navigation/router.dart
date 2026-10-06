@@ -16,6 +16,8 @@ import '../../features/chat_history/chat_history_screen.dart';
 import '../../features/lorebooks/lorebook_list_screen.dart';
 import '../../features/lorebooks/lorebook_global_settings_screen.dart';
 import '../../features/lorebooks/embedding_settings_screen.dart';
+import '../../features/diagnostics/log_viewer_screen.dart';
+import '../../features/diagnostics/logs_screen.dart';
 import '../../features/menu/about_screen.dart';
 import '../../features/menu/hall_of_fame_screen.dart';
 import '../../features/menu/menu_screen.dart';
@@ -277,6 +279,22 @@ GoRouter buildRouter(
                           pageBuilder: (_, state) => _noTransitionPage(
                             state: state,
                             child: const HallOfFameScreen(),
+                          ),
+                        ),
+                      ],
+                    ),
+                    GoRoute(
+                      path: 'logs',
+                      pageBuilder: (_, state) =>
+                          _fadePage(state: state, child: const LogsScreen()),
+                      routes: [
+                        GoRoute(
+                          path: 'view',
+                          pageBuilder: (_, state) => _fadePage(
+                            state: state,
+                            child: LogViewerScreen(
+                              path: state.uri.queryParameters['path'] ?? '',
+                            ),
                           ),
                         ),
                       ],
