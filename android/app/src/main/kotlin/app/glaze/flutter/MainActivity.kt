@@ -60,6 +60,19 @@ class MainActivity : FlutterActivity() {
             }
         }
 
+        CrashDiagnostics.installJavaCrashHandler(applicationContext)
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "app.glaze.flutter/diagnostics"
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "lastExit" -> result.success(CrashDiagnostics.lastExit(this))
+                "takeJavaCrash" -> result.success(CrashDiagnostics.takeJavaCrash(this))
+                "deviceInfo" -> result.success(CrashDiagnostics.deviceInfo())
+                else -> result.notImplemented()
+            }
+        }
+
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "app.glaze.flutter/wallpaper"

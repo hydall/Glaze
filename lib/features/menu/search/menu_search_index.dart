@@ -323,6 +323,14 @@ List<MenuSearchEntry> _menuEntries() {
       open: (context) => goOrFloat(context, 'about', push: true),
     ),
     MenuSearchEntry(
+      title: 'logs_title'.tr(),
+      description: 'logs_menu_hint'.tr(),
+      breadcrumb: more,
+      icon: Icons.receipt_long_outlined,
+      keywords: const ['logs', 'crash', 'bug', 'журнал', 'логи', 'краш', 'сбой'],
+      open: (context) => goOrFloat(context, 'logs', push: true),
+    ),
+    MenuSearchEntry(
       title: 'update_section_header'.tr(),
       breadcrumb: [...more, 'menu_about'.tr()],
       icon: Icons.system_update_alt_rounded,
