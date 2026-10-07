@@ -82,6 +82,8 @@ window.GLAZE = {
       shots_prev: 'Предыдущий',
       shots_next: 'Следующий',
 
+      meta_title: 'Glaze: клиент для ИИ ролевых чатов',
+      meta_description: 'Glaze это локальный клиент для ИИ ролевых чатов с открытым исходным кодом. Android, iOS, Windows, Linux. Любой OpenAI-совместимый API, совместимость с SillyTavern.',
       tagline: 'Клиент для ИИ ролевых чатов.\nЛокальный, дружественный новичкам, с открытым исходным кодом.',
       btn_download: 'Скачать',
       btn_github: 'GitHub',
@@ -222,6 +224,8 @@ window.GLAZE = {
       shots_prev: 'Previous',
       shots_next: 'Next',
 
+      meta_title: 'Glaze: AI roleplay chat client',
+      meta_description: 'Glaze is a local, open-source client for AI roleplay chats. Android, iOS, Windows, Linux. Any OpenAI-compatible API, SillyTavern-compatible.',
       tagline: 'AI roleplay chat client.\nLocal, novice-friendly, open-source.',
       btn_download: 'Download',
       btn_github: 'GitHub',
