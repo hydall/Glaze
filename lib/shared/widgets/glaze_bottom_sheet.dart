@@ -371,7 +371,8 @@ class GlazeBottomSheetFrame extends ConsumerWidget {
               : const BorderRadius.vertical(top: Radius.circular(24)),
           border: inWindow
               ? Border.all(color: context.cs.outlineVariant)
-              : Border(top: BorderSide(color: context.cs.outlineVariant)),
+              : glazeSheetBorder(context),
+          borderOnTop: true,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -628,7 +629,9 @@ class _GlazeBottomSheetContentState
               : const BorderRadius.vertical(top: Radius.circular(24)),
           border: inWindow
               ? Border.all(color: context.cs.outlineVariant)
-              : Border(top: BorderSide(color: context.cs.outlineVariant)),
+              : glazeSheetBorder(context),
+          // Over the content: the header's blur strip would paint it away.
+          borderOnTop: true,
           child: Stack(
             children: [
               TopEdgeBlur(
