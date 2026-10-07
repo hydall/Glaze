@@ -24,13 +24,13 @@ import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/glaze_action_button.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../shared/widgets/glaze_fab.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_scaffold.dart';
 import '../../shared/widgets/glaze_sheet.dart';
 import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/glaze_text_field.dart';
 import '../../shared/widgets/glaze_toast.dart';
-import '../../shared/widgets/list_controls.dart';
 import '../../shared/widgets/menu_group.dart';
 import '../../shared/widgets/sheet_view.dart';
 import 'lorebook_connections_sheet.dart';
@@ -1110,8 +1110,8 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
               ),
             ],
       floatingActionButton: isEntries
-          ? GlazeActionChip(
-              icon: Icons.add,
+          ? GlazeFab(
+              label: 'lorebook_new_entry'.tr(),
               tooltip: 'lorebook_new_entry'.tr(),
               onTap: _addEntryMenu,
             )

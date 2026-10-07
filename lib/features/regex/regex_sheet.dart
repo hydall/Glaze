@@ -28,12 +28,12 @@ import '../studio/studio_injection_points.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/folder_section.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../shared/widgets/glaze_fab.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/glaze_text_field.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/glass_surface.dart';
-import '../../shared/widgets/list_controls.dart';
 import '../../shared/widgets/menu_group.dart';
 import '../../shared/widgets/sheet_view.dart';
 
@@ -701,8 +701,8 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
       ),
       floatingActionButton: isEdit || desktop
           ? null
-          : GlazeActionChip(
-              icon: Icons.add,
+          : GlazeFab(
+              label: 'action_add_script'.tr(),
               tooltip: 'action_add_script'.tr(),
               onTap: () => _showAddMenu(context),
             ),
