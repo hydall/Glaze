@@ -11,6 +11,7 @@ enum OnboardingSlideType {
   dataImport,
   api,
   persona,
+  preset,
   layout,
   notifications,
   allSet,
@@ -85,6 +86,12 @@ const _allOnboardingSlides = <OnboardingSlideData>[
     title: 'onboarding_persona_title',
     desc: 'onboarding_persona_slide_desc',
     icon: Icons.person_outline_rounded,
+  ),
+  OnboardingSlideData(
+    type: OnboardingSlideType.preset,
+    title: 'onboarding_slide_preset_title',
+    desc: 'onboarding_slide_preset_desc',
+    icon: Icons.tune_rounded,
   ),
   OnboardingSlideData(
     type: OnboardingSlideType.layout,

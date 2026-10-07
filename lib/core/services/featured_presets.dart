@@ -13,6 +13,10 @@ class FeaturedPreset {
   final String name;
   final String author;
 
+  /// Translation key of the one-line pitch shown where the preset is offered
+  /// (the onboarding preset step).
+  final String descriptionKey;
+
   /// Bundled ST-format preset JSON.
   final String jsonAsset;
 
@@ -33,6 +37,7 @@ class FeaturedPreset {
     required this.id,
     required this.name,
     required this.author,
+    required this.descriptionKey,
     required this.jsonAsset,
     required this.imageAsset,
     required this.createdAt,
@@ -47,6 +52,7 @@ class FeaturedPreset {
 const featuredPresets = <FeaturedPreset>[
   FeaturedPreset(
     id: 'default_shino',
+    descriptionKey: 'preset_shino_desc',
     name: 'Shino',
     author: 'Shino',
     jsonAsset: 'assets/presets/shino.json',
@@ -60,6 +66,7 @@ const featuredPresets = <FeaturedPreset>[
   ),
   FeaturedPreset(
     id: 'default_fawnie',
+    descriptionKey: 'preset_fawnie_desc',
     name: 'Fawnie v3',
     author: 'fawn1e',
     jsonAsset: 'assets/presets/fawnie.json',
@@ -68,6 +75,7 @@ const featuredPresets = <FeaturedPreset>[
   ),
   FeaturedPreset(
     id: 'default_microcot',
+    descriptionKey: 'preset_microcot_desc',
     name: 'MicroCot Talks Mini',
     author: 'MicroCoT',
     jsonAsset: 'assets/presets/microcot.json',
@@ -76,6 +84,7 @@ const featuredPresets = <FeaturedPreset>[
   ),
   FeaturedPreset(
     id: 'default_renri',
+    descriptionKey: 'preset_renri_desc',
     name: 'Renri',
     author: 'nimda trashcan',
     jsonAsset: 'assets/presets/renri.json',
@@ -84,6 +93,7 @@ const featuredPresets = <FeaturedPreset>[
   ),
   FeaturedPreset(
     id: 'default_norimyn',
+    descriptionKey: 'preset_norimyn_desc',
     name: 'NoriMyn',
     author: 'NoriMyn',
     jsonAsset: 'assets/presets/norimyn.json',

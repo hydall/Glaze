@@ -1,13 +1,19 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:easy_localization/easy_localization.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../shared/theme/app_colors.dart';
 import '../../shared/theme/theme_provider.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_scaffold.dart';
+import '../../core/import/silly_tavern_preset_parser.dart';
+import '../../core/services/featured_presets.dart';
 import '../../core/services/generation_notification_service.dart';
 import '../../core/services/onboarding_service.dart';
 import '../backup/backup_screen.dart';
@@ -16,6 +22,7 @@ import '../settings/api_list_provider.dart';
 import '../settings/api_settings_screen.dart';
 import '../settings/widgets/chat_layout_picker.dart';
 import '../personas/persona_list_screen.dart';
+import '../presets/preset_list_provider.dart';
 import '../../shared/shell/desktop/desktop_layout_provider.dart';
 import 'onboarding_models.dart';
 import 'widgets/onboarding_desktop_wizard.dart';
@@ -48,6 +55,10 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   /// they have answered — the button reads Skip until then, the way the API
   /// and Persona slides do.
   bool? _notificationsGranted;
+
+  /// Name of the preset loaded from a file on the preset step, so its card can
+  /// say what it loaded.
+  String? _importedPresetName;
 
   bool get _isLastSlide => _currentSlide == _slides.length - 1;
 
@@ -495,6 +506,12 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
           actionSub: action.sub,
           onAction: action.onTap,
         );
+      case OnboardingSlideType.preset:
+        return _buildCenteredSlide(
+          slide,
+          fallbackIcon: Icons.tune_rounded,
+          child: _buildPresetPicker(),
+        );
       case OnboardingSlideType.layout:
         return _buildLayoutSlide(slide);
       case OnboardingSlideType.allSet:
@@ -517,6 +534,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       );
     }
     if (slide.type == OnboardingSlideType.layout) return _buildLayoutPicker();
+    if (slide.type == OnboardingSlideType.preset) return _buildPresetPicker();
     return null;
   }
 
@@ -622,6 +640,73 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
         ),
       ],
     );
+  }
+
+  /// The built-in presets to pick from, then a way to load a SillyTavern one
+  /// instead. Shared by the phone slide and the desktop wizard's content pane.
+  Widget _buildPresetPicker() {
+    final activeId = ref.watch(activePresetIdProvider);
+    return Column(
+      children: [
+        for (final f in featuredPresets) ...[
+          OnboardingPresetCard(
+            name: f.name,
+            author: f.author,
+            description: f.descriptionKey.tr(),
+            imageAsset: f.imageAsset,
+            selected: activeId == f.id,
+            onTap: () => setActivePreset(ref, f.id),
+          ),
+          const SizedBox(height: 10),
+        ],
+        const SizedBox(height: 8),
+        Text(
+          'onboarding_preset_import_st_hint'.tr(),
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 14, color: context.cs.onSurfaceVariant),
+        ),
+        const SizedBox(height: 12),
+        OnboardingClickableBlock(
+          icon: Icons.upload_file_rounded,
+          title: 'onboarding_btn_import_preset'.tr(),
+          subtitle: _importedPresetName != null
+              ? 'onboarding_import_preset_done'.tr(args: [_importedPresetName!])
+              : 'onboarding_import_preset_sub'.tr(),
+          onTap: _importPreset,
+        ),
+      ],
+    );
+  }
+
+  /// Loads a SillyTavern preset from a file and makes it the active one.
+  Future<void> _importPreset() async {
+    FilePickerResult? result;
+    try {
+      result = await FilePicker.pickFiles(
+        type: Platform.isIOS ? FileType.any : FileType.custom,
+        allowedExtensions: Platform.isIOS ? null : ['json'],
+        withData: true,
+      );
+    } catch (_) {}
+    final picked = result?.files.firstOrNull;
+    if (picked == null || !mounted) return;
+    try {
+      final raw = picked.bytes != null && picked.bytes!.isNotEmpty
+          ? utf8.decode(picked.bytes!)
+          : await File(picked.path!).readAsString();
+      final json = jsonDecode(raw) as Map<String, dynamic>;
+      final preset = parseSillyTavernPreset(json, picked.name);
+      await ref.read(presetListProvider.notifier).add(preset);
+      await setActivePreset(ref, preset.id);
+      if (mounted) setState(() => _importedPresetName = preset.name);
+    } catch (e) {
+      if (!mounted) return;
+      GlazeErrorDialog.show(
+        context,
+        e,
+        prefix: 'error_import_failed_prefix'.tr(),
+      );
+    }
   }
 
   Future<void> _setChatLayout(String layout) async {

@@ -619,3 +619,113 @@ class _OnboardingPrimaryButtonState extends State<OnboardingPrimaryButton> {
     );
   }
 }
+
+/// A built-in preset on the preset step: its cover behind a dark scrim, the
+/// name, author and one-line pitch. The active one wears the accent outline
+/// and a check.
+class OnboardingPresetCard extends StatelessWidget {
+  final String name;
+  final String author;
+  final String description;
+  final String imageAsset;
+  final bool selected;
+  final VoidCallback onTap;
+  const OnboardingPresetCard({
+    super.key,
+    required this.name,
+    required this.author,
+    required this.description,
+    required this.imageAsset,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = context.cs;
+    return GestureDetector(
+      onTap: onTap,
+      // The border is painted over the clipped cover rather than around it, so
+      // no sliver of the image shows past the scrim at the rounded edges.
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        foregroundDecoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected ? cs.primary : const Color(0xFF2A2A2E),
+            width: 1.5,
+          ),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              image: DecorationImage(
+                image: AssetImage(imageAsset),
+                fit: BoxFit.cover,
+              ),
+            ),
+            child: DecoratedBox(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                  colors: [Color(0xE6000000), Color(0x99000000)],
+                ),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            name,
+                            style: const TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'by $author',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Color(0xB3FFFFFF),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            description,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              color: Color(0xE6FFFFFF),
+                              height: 1.35,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    AnimatedOpacity(
+                      opacity: selected ? 1 : 0,
+                      duration: const Duration(milliseconds: 180),
+                      child: Icon(
+                        Icons.check_circle_rounded,
+                        color: cs.primary,
+                        size: 26,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
