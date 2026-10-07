@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- flutter_local_notifications looks small icons up by name from Dart, which
+     the release resource shrinker cannot see. Without this the envelope is
+     stripped and notifications fall back to the launcher mark. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/new_message,@drawable/ic_launcher_monochrome" />
