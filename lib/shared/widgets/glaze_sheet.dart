@@ -15,6 +15,13 @@ const double kGlazeSheetWindowMaxWidth = 640;
 /// Fraction of the window height a desktop sheet window may occupy.
 const double _kGlazeSheetWindowHeightFactor = 0.85;
 
+/// Outline of a modal bottom sheet: the top edge only, thinning out along the
+/// rounded corners. Paint it over the content — the sheet's pinned header scrim
+/// would cover a background border.
+Border glazeSheetBorder(BuildContext context) => Border(
+  top: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+);
+
 /// Marks content hosted inside a [showGlazeSheet] desktop window.
 ///
 /// Unlike a modal bottom sheet, a window has rounded corners on every side and

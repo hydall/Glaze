@@ -996,7 +996,17 @@ class _SheetViewState extends ConsumerState<SheetView>
                 borderRadius: const BorderRadius.vertical(
                   top: Radius.circular(_kSheetCornerRadius),
                 ),
-                child: child,
+                child: DecoratedBox(
+                  // Foreground, so the pinned header's scrim cannot cover it.
+                  position: DecorationPosition.foreground,
+                  decoration: BoxDecoration(
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(_kSheetCornerRadius),
+                    ),
+                    border: glazeSheetBorder(context),
+                  ),
+                  child: child,
+                ),
               ),
             );
           },
