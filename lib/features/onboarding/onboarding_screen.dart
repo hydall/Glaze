@@ -51,6 +51,9 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
 
   bool get _isLastSlide => _currentSlide == _slides.length - 1;
 
+  bool get _isGreeter =>
+      _slides[_currentSlide].type == OnboardingSlideType.welcome;
+
   String get _buttonLabel {
     if (_isLastSlide) return 'onboarding_btn_start'.tr();
     switch (_slides[_currentSlide].type) {
@@ -179,132 +182,166 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       body: ColoredBox(
         color: const Color(0xFF0D0D0E),
         child: Stack(
-        children: [
-          // ── Scrollable content ──
-          Positioned.fill(
-            child: SingleChildScrollView(
-              padding: EdgeInsets.only(
-                top: topPad + 84,
-                bottom: 120 + bottomPad,
-                left: 24,
-                right: 24,
-              ),
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 320),
-                switchInCurve: Curves.easeOutCubic,
-                switchOutCurve: Curves.easeInCubic,
-                layoutBuilder: (currentChild, previousChildren) {
-                  return Stack(
-                    alignment: Alignment.topCenter,
-                    children: <Widget>[...previousChildren, ?currentChild],
-                  );
-                },
-                transitionBuilder: (child, anim) {
-                  final dir = (child.key == ValueKey(_currentSlide))
-                      ? _direction
-                      : -_direction;
-                  return FadeTransition(
-                    opacity: anim,
-                    child: SlideTransition(
-                      position: Tween(
-                        begin: Offset(0.06 * dir, 0),
-                        end: Offset.zero,
-                      ).animate(anim),
-                      child: child,
-                    ),
-                  );
-                },
-                child: KeyedSubtree(
-                  key: ValueKey(_currentSlide),
-                  child: _buildSlide(_slides[_currentSlide]),
+          children: [
+            // ── Scrollable content ──
+            Positioned.fill(
+              child: SingleChildScrollView(
+                padding: EdgeInsets.only(
+                  top: topPad + 92,
+                  bottom: 120 + bottomPad,
+                  left: 24,
+                  right: 24,
                 ),
-              ),
-            ),
-          ),
-
-          // ── Header gradient ──
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: IgnorePointer(
-              child: Container(
-                height: topPad + 84,
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Color(0x66000000), Colors.transparent],
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 320),
+                  switchInCurve: Curves.easeOutCubic,
+                  switchOutCurve: Curves.easeInCubic,
+                  layoutBuilder: (currentChild, previousChildren) {
+                    return Stack(
+                      alignment: Alignment.topCenter,
+                      children: <Widget>[...previousChildren, ?currentChild],
+                    );
+                  },
+                  transitionBuilder: (child, anim) {
+                    final dir = (child.key == ValueKey(_currentSlide))
+                        ? _direction
+                        : -_direction;
+                    return FadeTransition(
+                      opacity: anim,
+                      child: SlideTransition(
+                        position: Tween(
+                          begin: Offset(0.06 * dir, 0),
+                          end: Offset.zero,
+                        ).animate(anim),
+                        child: child,
+                      ),
+                    );
+                  },
+                  child: KeyedSubtree(
+                    key: ValueKey(_currentSlide),
+                    child: _buildSlide(_slides[_currentSlide]),
                   ),
                 ),
               ),
             ),
-          ),
 
-          // ── Stories progress bar ──
-          Positioned(
-            top: topPad + 16,
-            left: 20,
-            right: 20,
-            child: OnboardingStoriesBar(
-              total: _slides.length,
-              current: _currentSlide,
+            // ── Greeter (first slide) ──
+            // Kept mounted for the whole flow so coming back to it shows the
+            // settled greeting instead of replaying the splash hand-off.
+            Positioned.fill(
+              child: IgnorePointer(
+                ignoring: !_isGreeter,
+                child: AnimatedSlide(
+                  duration: const Duration(milliseconds: 320),
+                  curve: Curves.easeOutCubic,
+                  offset: _isGreeter ? Offset.zero : const Offset(-0.06, 0),
+                  child: AnimatedOpacity(
+                    duration: const Duration(milliseconds: 320),
+                    curve: Curves.easeOutCubic,
+                    opacity: _isGreeter ? 1 : 0,
+                    child: OnboardingGreeter(
+                      title: _slides.first.title.tr(),
+                      subtitle: _slides.first.desc?.tr(),
+                    ),
+                  ),
+                ),
+              ),
             ),
-          ),
 
-          // ── Back button ──
-          if (_currentSlide > 0)
+            // ── Header backdrop ──
+            // Opaque under the step title so scrolled content does not run
+            // through it, fading out below.
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: IgnorePointer(
+                child: Container(
+                  height: topPad + 96,
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      stops: [0, 0.8, 1],
+                      colors: [
+                        Color(0xFF0D0D0E),
+                        Color(0xF20D0D0E),
+                        Color(0x000D0D0E),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
+            // ── Stories progress bar ──
+            Positioned(
+              top: topPad + 16,
+              left: 20,
+              right: 20,
+              child: OnboardingStoriesBar(
+                total: _slides.length,
+                current: _currentSlide,
+              ),
+            ),
+
+            // ── Header: back, step title, skip onboarding ──
             Positioned(
               top: topPad + 36,
               left: 12,
-              child: OnboardingGlassBackButton(onTap: _prev),
-            ),
-
-          // ── Skip onboarding (top-right) ──
-          if (!_isLastSlide)
-            Positioned(
-              top: topPad + 36,
               right: 12,
-              child: OnboardingSkipButton(onTap: _confirmSkipOnboarding),
+              height: 40,
+              child: Row(
+                children: [
+                  if (_currentSlide > 0)
+                    OnboardingGlassBackButton(onTap: _prev),
+                  const SizedBox(width: 12),
+                  Expanded(child: _buildHeaderTitle()),
+                  if (!_isLastSlide) ...[
+                    const SizedBox(width: 12),
+                    OnboardingSkipButton(onTap: _confirmSkipOnboarding),
+                  ],
+                ],
+              ),
             ),
 
-          // ── Footer gradient ──
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: IgnorePointer(
-              child: Container(
-                height: 120 + bottomPad,
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.bottomCenter,
-                    end: Alignment.topCenter,
-                    colors: [Color(0x80000000), Colors.transparent],
+            // ── Footer gradient ──
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: IgnorePointer(
+                child: Container(
+                  height: 120 + bottomPad,
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.bottomCenter,
+                      end: Alignment.topCenter,
+                      colors: [Color(0x80000000), Colors.transparent],
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
 
-          // ── Footer button ──
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
-                child: OnboardingPrimaryButton(
-                  label: _buttonLabel,
-                  onTap: _next,
+            // ── Footer button ──
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: SafeArea(
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
+                  child: OnboardingPrimaryButton(
+                    label: _buttonLabel,
+                    onTap: _next,
+                  ),
                 ),
               ),
             ),
-          ),
-        ],
-      ),
+          ],
+        ),
       ),
     );
   }
@@ -320,40 +357,67 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       body: ColoredBox(
         color: const Color(0xFF0D0D0E),
         child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 320),
-        switchInCurve: Curves.easeOutCubic,
-        switchOutCurve: Curves.easeInCubic,
-        transitionBuilder: (child, anim) {
-          final dir = (child.key == ValueKey(_currentSlide))
-              ? _direction
-              : -_direction;
-          return FadeTransition(
-            opacity: anim,
-            child: SlideTransition(
-              position: Tween(
-                begin: Offset(0.04 * dir, 0),
-                end: Offset.zero,
-              ).animate(anim),
-              child: child,
+          duration: const Duration(milliseconds: 320),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          transitionBuilder: (child, anim) {
+            final dir = (child.key == ValueKey(_currentSlide))
+                ? _direction
+                : -_direction;
+            return FadeTransition(
+              opacity: anim,
+              child: SlideTransition(
+                position: Tween(
+                  begin: Offset(0.04 * dir, 0),
+                  end: Offset.zero,
+                ).animate(anim),
+                child: child,
+              ),
+            );
+          },
+          child: KeyedSubtree(
+            key: ValueKey(_currentSlide),
+            child: OnboardingDesktopWizard(
+              slideIndex: _currentSlide,
+              slideCount: _slides.length,
+              icon: _slideIcon(slide),
+              title: slide.title,
+              description: slide.desc,
+              body: _slideBody(slide),
+              buttonLabel: _buttonLabel,
+              onNext: _next,
+              onBack: _currentSlide > 0 ? _prev : null,
+              onSkip: _isLastSlide ? null : _confirmSkipOnboarding,
             ),
-          );
-        },
-        child: KeyedSubtree(
-          key: ValueKey(_currentSlide),
-          child: OnboardingDesktopWizard(
-            slideIndex: _currentSlide,
-            slideCount: _slides.length,
-            icon: _slideIcon(slide),
-            title: slide.title,
-            description: slide.desc,
-            body: _slideBody(slide),
-            buttonLabel: _buttonLabel,
-            onNext: _next,
-            onBack: _currentSlide > 0 ? _prev : null,
-            onSkip: _isLastSlide ? null : _confirmSkipOnboarding,
           ),
         ),
       ),
+    );
+  }
+
+  /// The current step's title, in the header next to the skip button. The
+  /// greeter carries its own big greeting, so the header stays empty there.
+  Widget _buildHeaderTitle() {
+    final slide = _slides[_currentSlide];
+    final title = slide.type == OnboardingSlideType.welcome
+        ? ''
+        : slide.title.tr().replaceAll('\n', ' ');
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 220),
+      layoutBuilder: (currentChild, previousChildren) => Stack(
+        alignment: Alignment.centerLeft,
+        children: <Widget>[...previousChildren, ?currentChild],
+      ),
+      child: Text(
+        title,
+        key: ValueKey(_currentSlide),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          fontSize: 20,
+          fontWeight: FontWeight.w800,
+          color: Colors.white,
+        ),
       ),
     );
   }
@@ -406,7 +470,6 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   /// The info blocks a slide lists, when it lists any.
   List<OnboardingInfoBlock>? _slideBlocks(OnboardingSlideData slide) {
     return switch (slide.type) {
-      OnboardingSlideType.welcome => onboardingIntroContent,
       OnboardingSlideType.features => onboardingFeaturesContent,
       _ => null,
     };
@@ -415,8 +478,11 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   Widget _buildSlide(OnboardingSlideData slide) {
     switch (slide.type) {
       case OnboardingSlideType.welcome:
+        // Drawn by the full-screen greeter layer, which needs the screen's
+        // centre rather than this scroll view's.
+        return const SizedBox.shrink();
       case OnboardingSlideType.features:
-        return _buildBlocksSlide(slide.title, _slideBlocks(slide)!);
+        return OnboardingFeatureGrid(blocks: _slideBlocks(slide)!);
       case OnboardingSlideType.dataImport:
       case OnboardingSlideType.api:
       case OnboardingSlideType.persona:
@@ -440,19 +506,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   /// offers below its title and description.
   Widget? _slideBody(OnboardingSlideData slide) {
     final blocks = _slideBlocks(slide);
-    if (blocks != null) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: blocks
-            .map(
-              (b) => Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: OnboardingIntroBlockCard(block: b),
-              ),
-            )
-            .toList(),
-      );
-    }
+    if (blocks != null) return OnboardingFeatureGrid(blocks: blocks);
     final action = _slideAction(slide);
     if (action != null) {
       return OnboardingClickableBlock(
@@ -467,57 +521,26 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   }
 
   /// Icon shown in the wizard's visual pane. Welcome and Features carry no
-  /// icon of their own, so they borrow their first block's — the same
-  /// fallback the Vue wizard used (`slides[i].icon || introContent[0].icon`).
+  /// icon of their own: Features borrows its first block's, Welcome falls
+  /// through to the same layers icon.
   IconData _slideIcon(OnboardingSlideData slide) =>
       slide.icon ?? _slideBlocks(slide)?.first.icon ?? Icons.layers_outlined;
 
-  /// Welcome / Features — title + list of info blocks
-  Widget _buildBlocksSlide(String title, List<OnboardingInfoBlock> blocks) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title.tr(),
-          style: const TextStyle(
-            fontSize: 32,
-            fontWeight: FontWeight.w800,
-            color: Colors.white,
-            height: 1.2,
-          ),
-        ),
-        const SizedBox(height: 16),
-        ...blocks.map(
-          (b) => Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: OnboardingIntroBlockCard(block: b),
-          ),
-        ),
-      ],
-    );
-  }
-
-  /// Standard centered slide — icon + title + description
-  Widget _buildStandardSlide(OnboardingSlideData slide) {
+  /// Centred slide — icon + description, then [child]. The title lives in
+  /// the header.
+  Widget _buildCenteredSlide(
+    OnboardingSlideData slide, {
+    required IconData fallbackIcon,
+    Widget? child,
+  }) {
     return SizedBox(
       width: double.infinity,
       child: Column(
         children: [
-          const SizedBox(height: 40),
-          OnboardingIconBubble(icon: slide.icon ?? Icons.check),
-          const SizedBox(height: 24),
-          Text(
-            slide.title.tr(),
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 28,
-              fontWeight: FontWeight.w800,
-              color: Colors.white,
-              height: 1.3,
-            ),
-          ),
+          const SizedBox(height: 32),
+          OnboardingIconBubble(icon: slide.icon ?? fallbackIcon),
           if (slide.desc != null) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: 24),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: Text(
@@ -531,10 +554,15 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
               ),
             ),
           ],
+          if (child != null) ...[const SizedBox(height: 24), child],
         ],
       ),
     );
   }
+
+  /// Standard slide — icon + description
+  Widget _buildStandardSlide(OnboardingSlideData slide) =>
+      _buildCenteredSlide(slide, fallbackIcon: Icons.check);
 
   /// Standard slide + clickable action card
   Widget _buildActionSlide({
@@ -544,91 +572,25 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     required String actionSub,
     required VoidCallback onAction,
   }) {
-    return SizedBox(
-      width: double.infinity,
-      child: Column(
-        children: [
-          const SizedBox(height: 40),
-          OnboardingIconBubble(icon: slide.icon ?? Icons.settings),
-          const SizedBox(height: 24),
-          Text(
-            slide.title.tr(),
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 28,
-              fontWeight: FontWeight.w800,
-              color: Colors.white,
-              height: 1.3,
-            ),
-          ),
-          if (slide.desc != null) ...[
-            const SizedBox(height: 12),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Text(
-                slide.desc!.tr(),
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 16,
-                  color: context.cs.onSurfaceVariant,
-                  height: 1.5,
-                ),
-              ),
-            ),
-          ],
-          const SizedBox(height: 24),
-          OnboardingClickableBlock(
-            icon: actionIcon,
-            title: actionTitle,
-            subtitle: actionSub,
-            onTap: onAction,
-          ),
-        ],
+    return _buildCenteredSlide(
+      slide,
+      fallbackIcon: Icons.settings,
+      child: OnboardingClickableBlock(
+        icon: actionIcon,
+        title: actionTitle,
+        subtitle: actionSub,
+        onTap: onAction,
       ),
     );
   }
 
   /// Chat layout picker slide — inline `default` / `bubble` thumbnails reused
   /// from the theme editor's layout picker.
-  Widget _buildLayoutSlide(OnboardingSlideData slide) {
-    return SizedBox(
-      width: double.infinity,
-      child: Column(
-        children: [
-          const SizedBox(height: 40),
-          OnboardingIconBubble(icon: slide.icon ?? Icons.view_quilt_outlined),
-          const SizedBox(height: 24),
-          Text(
-            slide.title.tr(),
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 28,
-              fontWeight: FontWeight.w800,
-              color: Colors.white,
-              height: 1.3,
-            ),
-          ),
-          if (slide.desc != null) ...[
-            const SizedBox(height: 12),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Text(
-                slide.desc!.tr(),
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 16,
-                  color: context.cs.onSurfaceVariant,
-                  height: 1.5,
-                ),
-              ),
-            ),
-          ],
-          const SizedBox(height: 24),
-          _buildLayoutPicker(),
-        ],
-      ),
-    );
-  }
+  Widget _buildLayoutSlide(OnboardingSlideData slide) => _buildCenteredSlide(
+    slide,
+    fallbackIcon: Icons.view_quilt_outlined,
+    child: _buildLayoutPicker(),
+  );
 
   /// The `default` / `bubble` thumbnails, shared by the phone slide and the
   /// desktop wizard's content pane.
