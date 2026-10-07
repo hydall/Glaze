@@ -554,6 +554,36 @@ void main() {
       expect(impersonateCalls, 1);
     });
 
+    testWidgets('the checkmark runs a guided impersonation', (tester) async {
+      final guidances = <String?>[];
+      await tester.pumpWidget(buildChatInputBar(onImpersonate: guidances.add));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(ComposerAction.guidance.icon));
+      await tester.pumpAndSettle();
+      // The guidance field sits above the message field.
+      await tester.enterText(
+        find.byType(TextField).first,
+        'She walked towards him, holding him close, crying out loud after '
+        'not seeing him for years.',
+      );
+      await tester.pump();
+
+      // The button follows the instruction as it is typed, without waiting
+      // for some unrelated rebuild.
+      expect(find.byIcon(Icons.check_rounded), findsOneWidget);
+      await tester.tap(find.byIcon(Icons.check_rounded));
+      await tester.pumpAndSettle();
+
+      expect(guidances, [
+        'She walked towards him, holding him close, crying out loud after '
+            'not seeing him for years.',
+      ]);
+      expect(sentMessages, isEmpty);
+      // The instruction went to the impersonation, so the field is closed.
+      expect(find.byType(TextField), findsOneWidget);
+    });
+
     testWidgets('an assigned action takes over the empty composer', (
       tester,
     ) async {

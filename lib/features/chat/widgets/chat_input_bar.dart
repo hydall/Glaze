@@ -214,6 +214,10 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     super.initState();
     _controller = TextEditingController(text: widget.initialDraft);
     _controller.addListener(_onTextChanged);
+    // The send button's glyph and tap depend on whether an instruction is
+    // typed, so the field has to rebuild the bar as it changes — otherwise the
+    // button only catches up on whatever unrelated rebuild comes next.
+    _guidanceController.addListener(_onGuidanceChanged);
     _updateFocusNodeHandler();
     // Attach / fullscreen / guidance act on the controllers this State owns, so
     // the drawer cannot run them itself once one of their cards is sitting in
@@ -258,6 +262,10 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
       }
     });
     setState(() {});
+  }
+
+  void _onGuidanceChanged() {
+    if (mounted) setState(() {});
   }
 
   /// Free attachment slots left on the next message.
@@ -840,14 +848,35 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     // The insert actions' text token only belongs on the empty branch: once
     // there is something to send the button is the send (or stop) glyph again.
     final idle = !isGenerating && !hasContent;
+    // Only the instruction is filled in: the checkmark, which confirms a
+    // guided impersonation. There is no message for [_handleSend] to send, so
+    // routing it there left the button dead.
+    final guidanceOnly =
+        hasContent &&
+        _guidanceMode &&
+        _controller.text.trim().isEmpty &&
+        _attachments.isEmpty;
+
+    void impersonate() {
+      final guidance =
+          _guidanceMode && _guidanceController.text.trim().isNotEmpty
+          ? _guidanceController.text.trim()
+          : null;
+      // The instruction is spent: it now belongs to the message
+      // impersonation is about to write, and the chat stamps it on
+      // that message when it is sent. Leaving it in the field would
+      // send it a second time, as a guided generation.
+      _closeGuidanceSilently();
+      widget.onImpersonate?.call(guidance);
+    }
 
     final button = _SendBtn(
       icon: isGenerating
           ? Icons.stop_rounded
+          : guidanceOnly
+          ? Icons.check_rounded
           : hasContent
-          ? (_guidanceMode && _controller.text.trim().isEmpty
-                ? Icons.check_rounded
-                : Icons.send_rounded)
+          ? Icons.send_rounded
           : (emptyAction?.icon ?? Icons.account_circle_rounded),
       glyph: idle ? emptyAction?.glyph : null,
       batterySaver: widget.batterySaver,
@@ -858,21 +887,14 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
                 widget.onStop?.call();
               } else if (widget.isEditingMessage) {
                 return;
+              } else if (guidanceOnly) {
+                impersonate();
               } else if (hasContent) {
                 _handleSend();
               } else if (emptyAction?.onTap != null) {
                 emptyAction!.onTap!();
               } else {
-                final guidance =
-                    _guidanceMode && _guidanceController.text.trim().isNotEmpty
-                    ? _guidanceController.text.trim()
-                    : null;
-                // The instruction is spent: it now belongs to the message
-                // impersonation is about to write, and the chat stamps it on
-                // that message when it is sent. Leaving it in the field would
-                // send it a second time, as a guided generation.
-                _closeGuidanceSilently();
-                widget.onImpersonate?.call(guidance);
+                impersonate();
               }
             },
     );
