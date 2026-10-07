@@ -105,7 +105,11 @@ class ChatWebViewPanelRefresher {
     final persona = ref.read(
       effectivePersonaForChatProvider((charId: charId, sessionId: sessionId)),
     );
-    final macroCtx = MacroContext(character: character, persona: persona?.name);
+    final macroCtx = MacroContext(
+      character: character,
+      persona: persona?.name,
+      personaDescription: persona?.prompt,
+    );
     final session = ref.read(chatProvider(charId)).value?.session;
     final displayRegexes = ref.read(displayRegexesProvider).value ?? const [];
     return [

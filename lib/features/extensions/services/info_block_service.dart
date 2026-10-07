@@ -112,16 +112,19 @@ class InfoBlockService {
     // block whose prompt already fixes the shape — has its whole reply stored,
     // which is what the image and JS types used to get from a type check.
     final resolvedTemplate = _resolveTemplate(blockConfig);
+    final personaDescription = personaModel?.prompt ?? personaPrompt;
     final systemContent = _buildSystemMessage(
       blockConfig: blockConfig,
       template: resolvedTemplate,
       character: character,
       persona: persona,
+      personaDescription: personaDescription,
     );
     final supplementalContent = _buildSupplementalMessage(
       blockConfig: blockConfig,
       character: character,
       persona: persona,
+      personaDescription: personaDescription,
       previousOutput: previousOutput,
       previousBlocks: previousBlocks,
     );
@@ -314,8 +317,16 @@ class InfoBlockService {
   /// arguments. Used to expand `{{char}}` / `{{user}}` / `{{description}}`
   /// / `{{personality}}` / `{{scenario}}` in the LLM-bound prompt and in
   /// the post-LLM content (via [MacroExpander.expand]).
-  MacroContext _macroContext({Character? character, String? persona}) {
-    return MacroContext(character: character, persona: persona);
+  MacroContext _macroContext({
+    Character? character,
+    String? persona,
+    String? personaDescription,
+  }) {
+    return MacroContext(
+      character: character,
+      persona: persona,
+      personaDescription: personaDescription,
+    );
   }
 
   /// Loads up to [BlockConfig.previousBlocksCount] of this block's own prior
@@ -469,10 +480,15 @@ class InfoBlockService {
     required String template,
     Character? character,
     String? persona,
+    String? personaDescription,
   }) {
     final instructions = expand(
       blockConfig.prompt.trim(),
-      _macroContext(character: character, persona: persona),
+      _macroContext(
+        character: character,
+        persona: persona,
+        personaDescription: personaDescription,
+      ),
     );
 
     // No template means the block's prompt is the whole instruction. An image
@@ -523,6 +539,7 @@ class InfoBlockService {
     required BlockConfig blockConfig,
     required Character? character,
     required String? persona,
+    String? personaDescription,
     required String? previousOutput,
     List<InfoBlock> previousBlocks = const [],
   }) {
@@ -531,7 +548,11 @@ class InfoBlockService {
     if (blockConfig.contextSystemPrompt.isNotEmpty) {
       final sysPrompt = expand(
         blockConfig.contextSystemPrompt,
-        _macroContext(character: character, persona: persona),
+        _macroContext(
+          character: character,
+          persona: persona,
+          personaDescription: personaDescription,
+        ),
       );
       buffer.writeln(sysPrompt);
       buffer.writeln();
@@ -578,7 +599,11 @@ class InfoBlockService {
         ..writeln(
           expand(
             blockConfig.contextSystemPrompt,
-            MacroContext(character: character, persona: persona),
+            MacroContext(
+              character: character,
+              persona: persona,
+              personaDescription: personaPrompt,
+            ),
           ),
         )
         ..writeln();

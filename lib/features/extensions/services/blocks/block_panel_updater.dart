@@ -180,7 +180,11 @@ class BlockPanelUpdater {
     );
     final expanded = expand(
       content,
-      MacroContext(character: character, persona: persona?.name),
+      MacroContext(
+        character: character,
+        persona: persona?.name,
+        personaDescription: persona?.prompt,
+      ),
     );
     final session = _ref.read(chatProvider(charId)).value?.session;
     return applyExtBlockDisplayRegexes(

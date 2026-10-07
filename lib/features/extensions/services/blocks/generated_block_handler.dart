@@ -187,6 +187,7 @@ class GeneratedBlockHandler implements BlockHandler {
       MacroContext(
         character: context.character,
         persona: context.persona?.name,
+        personaDescription: context.persona?.prompt,
       ),
     );
     final opened = await ref
