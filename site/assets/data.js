@@ -22,7 +22,7 @@ window.GLAZE = {
     ],
   },
 
-  devVersion: '0.8.0',
+  devVersion: '0.8.1',
 
   // Where the Download page's Nightly channel looks for builds.
   nightly: { workflow: 'build-branch.yml', branch: 'nightly' },
@@ -125,7 +125,7 @@ window.GLAZE = {
       },
       dl_all: 'Все релизы',
       dl_loading: 'Загружаем данные релиза…',
-      dl_api_failed: 'Не удалось связаться с GitHub. Показаны ссылки на v0.8.0.',
+      dl_api_failed: 'Не удалось связаться с GitHub. Показаны ссылки на v0.8.1.',
       dl_missing: 'В этом релизе нет',
       dl_how: {
         android: 'Скачайте APK и откройте его. Разрешите установку из этого источника, если система спросит. Есть универсальная сборка, а также отдельные под arm64 и arm32.',
@@ -267,7 +267,7 @@ window.GLAZE = {
       },
       dl_all: 'All releases',
       dl_loading: 'Loading release data…',
-      dl_api_failed: 'Could not reach GitHub. Showing links for v0.8.0.',
+      dl_api_failed: 'Could not reach GitHub. Showing links for v0.8.1.',
       dl_missing: 'Not in this release',
       dl_how: {
         android: 'Download the APK and open it. Allow installs from this source if the system asks. There is a universal build, plus separate arm64 and arm32 ones.',
@@ -465,6 +465,19 @@ window.GLAZE = {
   // languages it is written in; any other shows the first one with a notice.
   articles: [
     {
+      slug: '0.8.1',
+      kind: 'changelog',
+      date: '2026-10-07',
+      author: 'hydall',
+      langs: ['ru', 'en'],
+      download: 'v0.8.1',
+      title: { ru: 'Glaze beta 0.8.1', en: 'Glaze beta 0.8.1' },
+      lead: {
+        ru: 'Хотфикс: обновление с 0.7 больше не падает, снова работают направленная имперсонизация и JannyAI, экспорт из карточки персонажа и сборка на свежем Arch.',
+        en: 'A hotfix: upgrading from 0.7 no longer crashes, guided impersonation and JannyAI work again, export from the character sheet and a build for an up-to-date Arch.',
+      },
+    },
+    {
       slug: '0.8.0',
       kind: 'changelog',
       date: '2026-10-04',
@@ -546,9 +559,46 @@ window.GLAZE = {
       ],
     },
     {
+      version: '0.8.1',
+      date: '2026-10-07',
+      status: 'latest',
+      channel: 'beta',
+      tag: 'v0.8.1',
+      article: '0.8.1',
+      title: { ru: 'Хотфикс', en: 'Hotfix' },
+      groups: [
+        {
+          items: {
+            ru: [
+              'Обновление базы с 0.7.x больше не падает, потерянные индексы восстанавливаются',
+              'Работает галочка направленной имперсонизации',
+              'Экспорт из меню карточки персонажа',
+              'Кнопка «наверх» стоит над кнопкой «вниз»',
+              'Вкладка «Изображения» в карточке приведена в порядок',
+              'JannyAI открывается через WebView в обход проверки Cloudflare',
+              'Понятные ошибки загрузки моделей и проверки подключения в картинках',
+              'Блок языка в Shino просит английский',
+              'Сборка для Linux на WPE WebKit 2.54 без libwpe',
+            ],
+            en: [
+              'Upgrading a 0.7.x database no longer crashes, and lost indexes are restored',
+              'The guided impersonation checkmark works',
+              'Export from the character sheet menu',
+              'The back-to-top button sits above the scroll-down button',
+              'A tidied-up Images tab in the character sheet',
+              'JannyAI loads through a WebView past the Cloudflare check',
+              'Readable model-fetch and connection errors for image generation',
+              'The Shino language block asks for English',
+              'A Linux build on WPE WebKit 2.54 without libwpe',
+            ],
+          },
+        },
+      ],
+    },
+    {
       version: '0.8.0',
       date: '2026-10-04',
-      status: 'latest',
+      status: 'released',
       channel: 'beta',
       tag: 'v0.8.0',
       // Release notes link to this post instead of the GitHub release page.
