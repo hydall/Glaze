@@ -381,7 +381,7 @@
   "block_guided_generation": "Guided Generation",
   "guided_generation_block_hint": "This prompt is sent only when Guided Generation is active.\n{{guidance}} — user instruction.",
   "label_guided_generation_prompt": "Generation Prompt",
-  "label_guided_impersonation_prompt": "Impersonation Prompt",
+  "label_guided_impersonation_prompt": "Guided Impersonation Prompt",
   "btn_add": "Add",
   "hint_change_avatar": "Tap to change",
   "hint_change_avatar_mobile": "Tap to change",

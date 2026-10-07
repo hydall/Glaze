@@ -399,7 +399,7 @@
   "block_guided_generation": "Направленная генерация",
   "guided_generation_block_hint": "Этот промпт отправляется только при использовании Направленной Генерации.\n{{guidance}} — инструкция пользователя.",
   "label_guided_generation_prompt": "Промпт генерации",
-  "label_guided_impersonation_prompt": "Промпт имперсонизации",
+  "label_guided_impersonation_prompt": "Промпт направленной имперсонизации",
   "btn_add": "Добавить",
   "hint_change_avatar": "Нажмите для смены",
   "hint_change_avatar_mobile": "Нажмите для смены",
