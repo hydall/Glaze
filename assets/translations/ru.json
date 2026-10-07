@@ -1520,6 +1520,7 @@
   "catalog_imported_desc": "{name} добавлен в библиотеку.",
   "catalog_error_load": "Не удалось загрузить персонажа",
   "catalog_error_janitor_cloudflare": "JanitorAI поднял Cloudflare и не отдал персонажа. Попробуйте другого провайдера, например Janny, DataCat или Chub.",
+  "catalog_error_janny_cloudflare": "JannyAI поднял Cloudflare и не отдал персонажа. Попробуйте позже или выберите другого провайдера, например DataCat или Chub.",
   "catalog_error_import": "Не удалось импортировать персонажа",
   "catalog_error_extract": "Не удалось отправить на извлечение",
   "catalog_extracting": "Извлечение...",

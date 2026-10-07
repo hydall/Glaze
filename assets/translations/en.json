@@ -1461,6 +1461,7 @@
   "catalog_imported_desc": "{name} has been added to your library.",
   "catalog_error_load": "Failed to load character",
   "catalog_error_janitor_cloudflare": "JanitorAI is behind Cloudflare and did not return the character. Try another provider like Janny, DataCat, or Chub.",
+  "catalog_error_janny_cloudflare": "JannyAI is behind Cloudflare and did not return the character. Try again later or use another provider like DataCat or Chub.",
   "catalog_error_import": "Failed to import character",
   "catalog_error_extract": "Failed to submit for extraction",
   "catalog_extracting": "Extracting...",
