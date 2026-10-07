@@ -268,7 +268,6 @@ extension _AppDatabaseUpgradeV101ToV131 on AppDatabase {
       await m.createTable(sessionCanonCheckpointRows);
       await m.createTable(sessionLorebookRevisionRows);
       await m.createTable(sessionLorebookEmbeddingJobRows);
-      await _createSessionCanonIntegrity();
     }
     if (from < 122) {
       final columns = await customSelect(
@@ -289,8 +288,7 @@ extension _AppDatabaseUpgradeV101ToV131 on AppDatabase {
     }
     if (from < 124) {
       await m.createTable(llmRequestCaptureRows);
-      // Drift's createTable path creates indexes for a newly created table,
-      // but migration fixtures may already contain the table and indexes.
+      // Drift's createTable does not create a table's indexes.
       await customStatement(
         'CREATE INDEX IF NOT EXISTS '
         'idx_llm_request_capture_session_stage_created '
@@ -323,7 +321,6 @@ extension _AppDatabaseUpgradeV101ToV131 on AppDatabase {
         'CREATE INDEX IF NOT EXISTS idx_llm_call_event_call_attempt '
         'ON llm_call_event_rows (call_id, attempt)',
       );
-      await _createLlmCallEventImmutabilityTrigger();
     }
     if (from < 126) {
       await m.createTable(ledgerReconciliationEffects);
@@ -331,7 +328,6 @@ extension _AppDatabaseUpgradeV101ToV131 on AppDatabase {
         'CREATE INDEX IF NOT EXISTS idx_reconciliation_effect_session_created '
         'ON ledger_reconciliation_effects (session_id, created_at)',
       );
-      await _createLedgerReconciliationImmutabilityTriggers();
     }
     if (from < 127) {
       await customStatement(
@@ -392,11 +388,11 @@ extension _AppDatabaseUpgradeV101ToV131 on AppDatabase {
         'idx_card_evolution_writer_call_session_updated '
         'ON card_evolution_writer_calls (session_id, updated_at)',
       );
-      await _createCardEvolutionIntegrity();
     }
     if (from < 129) {
+      // Clears the duplicates the one-active-job unique index, installed by
+      // `_ensureSchemaIntegrity` after the last step, would reject.
       await _normalizeDuplicateActiveRewriteJobs();
-      await _createRewriteAuditIntegrity();
     }
     if (from < 130) {
       await m.createTable(ledgerReconciliationLeases);

@@ -19,6 +19,8 @@ analyzer:
     - windows/**
     - macos/**
     - linux/**
+    # Fixture generators compile against the release tag they describe.
+    - test/fixtures/**
   language:
     strict-casts: true
     strict-inference: true
