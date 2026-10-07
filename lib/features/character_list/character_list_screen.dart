@@ -669,6 +669,8 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
       return _buildFilteredResults(context, topPad, navHeight);
     }
 
+    final catalogVisible = ref.watch(catalogVisibleProvider);
+
     final key = InfiniteCharactersKey(
       sort: _sortField,
       dir: _sortDirEnum,
@@ -690,9 +692,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
             slivers: [
               SliverToBoxAdapter(child: SizedBox(height: topPad)),
               SliverFillRemaining(
-                child: EmptyCharacterState(
-                  onImport: () => _importCharacter(context, ref),
-                ),
+                child: _buildEmptyLibrary(context, catalogVisible),
               ),
             ],
           );
@@ -755,9 +755,19 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
             onSortTypeChanged: (t) => setState(() => _sortBy = t),
             isLoadingMore: state.isLoadingMore,
             hasMore: state.hasMore,
+            emptyState: state.totalCount == 0
+                ? _buildEmptyLibrary(context, catalogVisible)
+                : null,
           ),
         );
       },
+    );
+  }
+
+  Widget _buildEmptyLibrary(BuildContext context, bool catalogVisible) {
+    return EmptyCharacterState(
+      onAdd: () => _showAddSheet(context, ref),
+      onDiscover: catalogVisible ? () => _onTabSwipe(1) : null,
     );
   }
 
