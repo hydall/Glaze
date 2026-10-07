@@ -9,16 +9,16 @@ window.GLAZE = {
 
   // Shown until the GitHub API answers (or when it is rate-limited).
   fallbackRelease: {
-    tag: 'v0.8.0',
-    date: '2026-10-04',
+    tag: 'v0.8.1',
+    date: '2026-10-07',
     assets: [
-      { name: 'v0.8.0.apk', size: 100390841 },
-      { name: 'v0.8.0-arm64-v8a.apk', size: 54456248 },
-      { name: 'v0.8.0-armeabi-v7a.apk', size: 53435430 },
-      { name: 'v0.8.0.ipa', size: 24973418 },
-      { name: 'v0.8.0-windows.zip', size: 27830269 },
-      { name: 'v0.8.0-linux.pkg.tar.zst', size: 24933292 },
-      { name: 'v0.8.0-linux.tar.zst', size: 23819332 },
+      { name: 'v0.8.1.apk', size: 100391057 },
+      { name: 'v0.8.1-arm64-v8a.apk', size: 54456464 },
+      { name: 'v0.8.1-armeabi-v7a.apk', size: 53435642 },
+      { name: 'v0.8.1.ipa', size: 24985869 },
+      { name: 'v0.8.1-windows.zip', size: 27843202 },
+      { name: 'v0.8.1-linux.pkg.tar.zst', size: 24956579 },
+      { name: 'v0.8.1-linux.tar.zst', size: 23830636 },
     ],
   },
 
