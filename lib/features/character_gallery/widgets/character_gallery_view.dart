@@ -67,77 +67,115 @@ class CharacterGalleryView extends ConsumerWidget {
     WidgetRef ref,
     List<GalleryEntry> entries,
   ) {
-    // Import lives in a header row rather than a bottom bar: hosted in the
-    // character sheet, a bottom bar would sit under the sheet's chat FAB.
-    final header = Padding(
-      padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-      child: Row(
-        children: [
-          if (entries.isNotEmpty)
-            Text(
-              '${entries.length}',
-              style: TextStyle(
-                fontSize: 12,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-          const Spacer(),
-          GlazeActionChip(
-            icon: Icons.add_photo_alternate,
-            label: 'action_import'.tr(),
-            tooltip: 'action_import'.tr(),
-            onTap: () => _addImage(context, ref),
-          ),
-        ],
-      ),
-    );
+    // A preview card was never persisted, so there is nothing to import into.
+    final canImport = this.entries == null;
+    final cs = Theme.of(context).colorScheme;
 
     if (entries.isEmpty) {
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const SizedBox(height: 24),
-          Icon(
-            Icons.photo_library_outlined,
-            size: 64,
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
+      // Full width so the column centres itself: the character sheet lays its
+      // tabs out in a start-aligned Column, which pinned this to the left.
+      return SizedBox(
+        width: double.infinity,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(40, 32, 40, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.photo_library_outlined,
+                size: 64,
+                color: cs.onSurfaceVariant.withValues(alpha: 0.3),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'gallery_empty'.tr(),
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: cs.onSurface,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                canImport
+                    ? 'gallery_empty_desc'.tr()
+                    : 'gallery_empty_preview_desc'.tr(),
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 14, color: cs.onSurfaceVariant),
+              ),
+              if (canImport) ...[
+                const SizedBox(height: 24),
+                GlazeActionButton(
+                  icon: Icons.add_photo_alternate,
+                  label: 'action_import'.tr(),
+                  tone: GlazeActionTone.primary,
+                  onTap: () => _addImage(context, ref),
+                ),
+              ],
+            ],
           ),
-          const SizedBox(height: 16),
-          Text(
-            'no_results'.tr(),
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 16),
-          GlazeActionButton(
-            icon: Icons.add_photo_alternate,
-            label: 'action_import'.tr(),
-            tone: GlazeActionTone.primary,
-            onTap: () => _addImage(context, ref),
-          ),
-          const SizedBox(height: 24),
-        ],
+        ),
       );
     }
 
-    final grid = GridView.builder(
-      padding: const EdgeInsets.all(8),
-      shrinkWrap: shrinkWrap,
-      physics: shrinkWrap ? const NeverScrollableScrollPhysics() : null,
-      gridDelegate: ResponsiveGridDelegate(
-        availableWidth: MediaQuery.sizeOf(context).width,
-        minCellExtent: 140,
-        childAspectRatio: 1,
-        crossAxisSpacing: 4,
-        mainAxisSpacing: 4,
-        minColumns: 3,
+    // Import lives in a header row rather than a bottom bar: hosted in the
+    // character sheet, a bottom bar would sit under the sheet's chat FAB.
+    // Horizontal insets match the sheet's 16px tab bar so the edges line up.
+    final header = Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      child: SizedBox(
+        height: 32,
+        child: Row(
+          children: [
+            Icon(
+              Icons.photo_library_outlined,
+              size: 16,
+              color: cs.onSurfaceVariant,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              '${entries.length}',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: cs.onSurfaceVariant,
+              ),
+            ),
+            const Spacer(),
+            if (canImport)
+              GlazeActionChip(
+                icon: Icons.add_photo_alternate,
+                label: 'action_import'.tr(),
+                tooltip: 'action_import'.tr(),
+                onTap: () => _addImage(context, ref),
+              ),
+          ],
+        ),
       ),
-      itemCount: entries.length,
-      itemBuilder: (context, index) => GalleryTile(
-        entry: entries[index],
-        charId: charId,
-        onTap: () => _openViewer(context, ref, entries, index),
+    );
+
+    // Sized from the actual constraints, not the screen: on desktop the sheet
+    // is a narrow column and the screen width would cram in extra columns.
+    final grid = LayoutBuilder(
+      builder: (context, constraints) => GridView.builder(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        shrinkWrap: shrinkWrap,
+        physics: shrinkWrap ? const NeverScrollableScrollPhysics() : null,
+        gridDelegate: ResponsiveGridDelegate(
+          availableWidth: constraints.maxWidth - 32,
+          minCellExtent: 140,
+          childAspectRatio: 1,
+          crossAxisSpacing: 6,
+          mainAxisSpacing: 6,
+          minColumns: 3,
+        ),
+        itemCount: entries.length,
+        itemBuilder: (context, index) => GalleryTile(
+          entry: entries[index],
+          charId: charId,
+          onTap: () => _openViewer(context, ref, entries, index),
+        ),
       ),
     );
 
@@ -217,7 +255,7 @@ class GalleryTile extends ConsumerWidget {
       onTap: onTap,
       onLongPress: () => _showActions(context, ref),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.circular(10),
         child: Stack(
           fit: StackFit.expand,
           children: [
