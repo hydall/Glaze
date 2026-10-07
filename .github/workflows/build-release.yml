@@ -517,8 +517,8 @@ jobs:
     steps:
       - name: Install Arch build dependencies
         # base-devel brings makepkg/fakeroot for the pacman package. wpewebkit is
-        # the WebView engine; wpebackend-fdo is the plugin's fallback backend in
-        # case the distro build lacks the headless WPEPlatform. gstreamer and
+        # the WebView engine and ships the headless WPEPlatform the plugin uses
+        # (Arch dropped wpebackend-fdo, the plugin's legacy fallback). gstreamer and
         # gst-plugins-base-libs provide the pkg-config modules audioplayers_linux
         # requires. The rest is the Flutter Linux desktop toolchain.
         run: |
@@ -526,7 +526,7 @@ jobs:
             base-devel git curl unzip zip xz which zstd \
             clang cmake ninja pkgconf gtk3 libsecret wayland libepoxy \
             gstreamer gst-plugins-base-libs \
-            wpewebkit wpebackend-fdo
+            wpewebkit
           useradd -m builder
 
       - uses: actions/checkout@v4

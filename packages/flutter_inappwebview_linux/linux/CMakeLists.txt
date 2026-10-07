@@ -29,7 +29,7 @@ set(NLOHMANN_JSON_VERSION "3.11.3")
 # Required packages:
 #   - wpe-webkit-2.0 (or wpe-webkit-1.1 on older systems)
 #   - wpe-platform-2.0 (preferred) OR wpebackend-fdo-1.0 (fallback)
-#   - libwpe-1.0
+#   - libwpe-1.0 (legacy FDO path only)
 #
 # See WPE_BACKEND.md for installation instructions.
 
@@ -119,10 +119,14 @@ if(NOT HAVE_WPE_PLATFORM AND NOT HAVE_WPE_FDO)
                       "See WPE_BACKEND.md for installation instructions.")
 endif()
 
-# Check for libwpe
-pkg_check_modules(LIBWPE QUIET IMPORTED_TARGET wpe-1.0)
-if(NOT LIBWPE_FOUND)
-  message(FATAL_ERROR "libwpe (wpe-1.0) not found. Please install libwpe-1.0-dev.")
+# Check for libwpe. Only the legacy FDO path calls into it; WPEPlatform builds
+# (WPE WebKit 2.40+) neither need nor link it, and distros have started
+# dropping the package.
+if(HAVE_WPE_FDO)
+  pkg_check_modules(LIBWPE QUIET IMPORTED_TARGET wpe-1.0)
+  if(NOT LIBWPE_FOUND)
+    message(FATAL_ERROR "libwpe (wpe-1.0) not found. Please install libwpe-1.0-dev.")
+  endif()
 endif()
 
 # Check for libsecret for secure credential storage
@@ -277,7 +281,6 @@ target_link_libraries(${PLUGIN_NAME} PRIVATE PkgConfig::GTK)
 target_link_libraries(${PLUGIN_NAME} PRIVATE PkgConfig::EPOXY)
 target_link_libraries(${PLUGIN_NAME} PRIVATE nlohmann_json::nlohmann_json)
 target_link_libraries(${PLUGIN_NAME} PRIVATE PkgConfig::WPE_WEBKIT)
-target_link_libraries(${PLUGIN_NAME} PRIVATE PkgConfig::LIBWPE)
 target_link_libraries(${PLUGIN_NAME} PRIVATE PkgConfig::WAYLAND_SERVER)
 target_link_libraries(${PLUGIN_NAME} PRIVATE PkgConfig::LIBSECRET)
 
@@ -290,6 +293,7 @@ endif()
 # Link WPEBackend-FDO if available (legacy fallback)
 if(HAVE_WPE_FDO)
   target_link_libraries(${PLUGIN_NAME} PRIVATE PkgConfig::WPE_FDO)
+  target_link_libraries(${PLUGIN_NAME} PRIVATE PkgConfig::LIBWPE)
 endif()
 
 # === Library Bundling ===
@@ -346,8 +350,10 @@ list(REMOVE_DUPLICATES WPE_LIB_DIRS)
 # Find WPE WebKit library
 find_and_add_library("libWPEWebKit-2.0" "${WPE_LIB_DIRS}" WPE_BUNDLED_LIBS)
 
-# Find libwpe library  
-find_and_add_library("libwpe-1.0" "${WPE_LIB_DIRS}" WPE_BUNDLED_LIBS)
+# Find libwpe library (legacy FDO path only)
+if(HAVE_WPE_FDO)
+  find_and_add_library("libwpe-1.0" "${WPE_LIB_DIRS}" WPE_BUNDLED_LIBS)
+endif()
 
 # WPEPlatform is built into libWPEWebKit-2.0 on modern builds, so there are
 # no separate libWPEPlatform*.so files to bundle.
@@ -410,7 +416,6 @@ target_link_libraries(${TEST_RUNNER} PRIVATE PkgConfig::GTK)
 target_link_libraries(${TEST_RUNNER} PRIVATE PkgConfig::EPOXY)
 target_link_libraries(${TEST_RUNNER} PRIVATE nlohmann_json::nlohmann_json)
 target_link_libraries(${TEST_RUNNER} PRIVATE PkgConfig::WPE_WEBKIT)
-target_link_libraries(${TEST_RUNNER} PRIVATE PkgConfig::LIBWPE)
 target_link_libraries(${TEST_RUNNER} PRIVATE PkgConfig::WAYLAND_SERVER)
 target_link_libraries(${TEST_RUNNER} PRIVATE PkgConfig::LIBSECRET)
 if(HAVE_WPE_PLATFORM)
@@ -419,6 +424,7 @@ if(HAVE_WPE_PLATFORM)
 endif()
 if(HAVE_WPE_FDO)
   target_link_libraries(${TEST_RUNNER} PRIVATE PkgConfig::WPE_FDO)
+  target_link_libraries(${TEST_RUNNER} PRIVATE PkgConfig::LIBWPE)
 endif()
 target_link_libraries(${TEST_RUNNER} PRIVATE gtest_main gmock)
 
