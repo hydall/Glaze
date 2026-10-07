@@ -5,6 +5,7 @@ import '../../../../core/platform/haptics.dart';
 import '../../../../shared/theme/app_colors.dart';
 import '../../../../shared/widgets/glass_surface.dart';
 import '../../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../../shared/widgets/glaze_fab.dart';
 import 'memory_books_controls.dart';
 
 /// Everything the screen can *do*, behind one extended FAB.
@@ -43,37 +44,13 @@ class MemoryBooksActionsFab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return GlazeFab(
+      label: 'memory_books_fab'.tr(),
+      tooltip: 'memory_books_fab'.tr(),
       onTap: () {
         Haptics.selectionClick();
         _open(context);
       },
-      child: Container(
-        height: 48,
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        decoration: BoxDecoration(
-          color: context.cs.primary,
-          borderRadius: BorderRadius.circular(24),
-          boxShadow: const [
-            BoxShadow(blurRadius: 16, color: Color(0x80000000)),
-          ],
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.add_rounded, color: Colors.white, size: 20),
-            const SizedBox(width: 8),
-            Text(
-              'memory_books_fab'.tr(),
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w700,
-                fontSize: 15,
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 
