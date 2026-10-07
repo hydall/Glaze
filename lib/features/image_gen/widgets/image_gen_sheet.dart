@@ -7,12 +7,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/api_config.dart';
+import '../../../core/utils/error_format.dart';
 import '../../../core/utils/platform_paths.dart';
 import '../../character_gallery/gallery_image_picker.dart';
 import '../../settings/api_list_provider.dart';
 import '../../settings/widgets/connection_status.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/glaze_error_block.dart';
 import '../../../shared/widgets/help_tip.dart';
 import '../../../shared/widgets/menu_group.dart';
 import '../../../shared/widgets/sheet_view.dart';
@@ -126,10 +128,15 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
       if (!mounted || epoch != _connectionEpoch) return;
       setState(() {
         _connectionStatus = ApiConnectionStatus.failed;
-        _connectionError = error.toString().replaceFirst('Bad state: ', '');
+        _connectionError = _describeError(error);
       });
     }
   }
+
+  /// A DioException goes through the shared [formatError] — status line plus
+  /// the provider's reason — instead of Dio's multi-paragraph dump.
+  static String _describeError(Object error) =>
+      formatError(error).replaceFirst('Bad state: ', '');
 
   void _showOptions<T>({
     required String title,
@@ -232,19 +239,19 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
                 child: _buildPresetSelector(s.apiType),
               ),
             ),
+            // Right under the provider row, not under the Model group: the
+            // refresh button sits far down the list on most providers, and a
+            // failure reported below it is easy to miss.
+            if (_modelFetchError.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: GlazeErrorBlock(message: _modelFetchError),
+              ),
             MenuGroup(
               header: 'imggen_connection'.tr(),
               items: _buildConnectionFields(s),
             ),
             MenuGroup(header: 'Model', items: _buildModelFields(s)),
-            if (_modelFetchError.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-                child: Text(
-                  _modelFetchError,
-                  style: const TextStyle(color: Colors.red, fontSize: 12),
-                ),
-              ),
             MenuGroup(
               header: 'imggen_generation'.tr(),
               items: [
@@ -425,8 +432,7 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
       backgroundColor: Colors.transparent,
       builder: (_) => ComfyUiWorkflowSheet(
         settings: _settings.comfyui,
-        onUpdate: (comfyui) =>
-            _update(_settings.copyWith(comfyui: comfyui)),
+        onUpdate: (comfyui) => _update(_settings.copyWith(comfyui: comfyui)),
       ),
     );
   }
@@ -626,9 +632,7 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
         _update(_settings.copyWith(routmyModel: model));
       case ImageGenApiType.novelai:
         _update(
-          _settings.copyWith(
-            novelai: _settings.novelai.copyWith(model: model),
-          ),
+          _settings.copyWith(novelai: _settings.novelai.copyWith(model: model)),
         );
       default:
         _update(_settings.copyWith(customModel: model));
@@ -655,10 +659,7 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
       );
     } catch (error) {
       if (!mounted) return;
-      setState(
-        () =>
-            _modelFetchError = error.toString().replaceFirst('Bad state: ', ''),
-      );
+      setState(() => _modelFetchError = _describeError(error));
     } finally {
       if (mounted) setState(() => _isFetchingModels = false);
     }
