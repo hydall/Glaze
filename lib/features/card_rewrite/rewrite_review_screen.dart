@@ -17,6 +17,7 @@ import '../../shared/widgets/glaze_action_button.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_scaffold.dart';
 import '../../shared/widgets/glaze_spinner.dart';
+import '../../shared/widgets/glaze_text_field.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import 'rewrite_review_provider.dart';
 import 'widgets/rewrite_operation_card.dart';
@@ -791,7 +792,7 @@ class _EditSheetState extends State<_EditSheet> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          TextField(controller: controller, minLines: 5, maxLines: 12),
+          GlazeTextField(controller: controller, maxLines: 12),
           const SizedBox(height: 12),
           Row(
             children: [

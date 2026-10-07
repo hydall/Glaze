@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:easy_localization/easy_localization.dart';
 import '../theme/app_colors.dart';
+import 'glaze_switch.dart';
+import 'glaze_text_field.dart';
 import 'sheet_view.dart';
 
 /// A selectable tag for a [FilterTagsSection]. Identified by [id] when the
@@ -219,16 +221,7 @@ class _FilterToggleTile extends StatelessWidget {
             section.label,
             style: TextStyle(color: context.cs.onSurface, fontSize: 15),
           ),
-          Switch(
-            value: section.value,
-            onChanged: section.onChanged,
-            activeTrackColor: section.isDanger
-                ? Colors.redAccent
-                : context.cs.primary,
-            activeThumbColor: Colors.white,
-            inactiveTrackColor: Colors.white.withValues(alpha: 0.15),
-            inactiveThumbColor: Colors.white,
-          ),
+          GlazeSwitch(value: section.value, onChanged: section.onChanged),
         ],
       ),
     );
@@ -321,27 +314,14 @@ Widget _numberField(String label, int value, ValueChanged<int> onChanged) {
         ),
       ),
       const SizedBox(height: 4),
-      Container(
-        height: 38,
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.07),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-        ),
-        child: TextField(
-          controller: TextEditingController(text: '$value'),
-          keyboardType: TextInputType.number,
-          style: const TextStyle(fontSize: 14, color: Colors.white),
-          decoration: const InputDecoration(
-            border: InputBorder.none,
-            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            isDense: true,
-          ),
-          onSubmitted: (v) {
-            final p = int.tryParse(v);
-            if (p != null) onChanged(p);
-          },
-        ),
+      GlazeTextField(
+        controller: TextEditingController(text: '$value'),
+        keyboardType: TextInputType.number,
+        isDense: true,
+        onSubmitted: (v) {
+          final p = int.tryParse(v);
+          if (p != null) onChanged(p);
+        },
       ),
     ],
   );
@@ -531,40 +511,30 @@ class _FilterTagsState extends State<_FilterTags> {
           ),
 
         // Search
-        Container(
-          height: 40,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.07),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-          ),
-          child: TextField(
-            controller: _controller,
-            style: const TextStyle(fontSize: 14, color: Colors.white),
-            textInputAction: _s.allowCustomTags ? TextInputAction.done : null,
-            decoration: InputDecoration(
-              hintText: _s.searchHint,
-              hintStyle: TextStyle(color: context.cs.onSurfaceVariant),
-              border: InputBorder.none,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 10,
+        Row(
+          children: [
+            Expanded(
+              child: GlazeTextField(
+                controller: _controller,
+                hint: _s.searchHint,
+                isDense: true,
+                textInputAction: _s.allowCustomTags
+                    ? TextInputAction.done
+                    : null,
+                onChanged: _onSearchChanged,
+                onSubmitted: _s.allowCustomTags ? _addCustomTag : null,
               ),
-              isDense: true,
-              suffixIcon: _loading
-                  ? const Padding(
-                      padding: EdgeInsets.all(11),
-                      child: SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    )
-                  : null,
             ),
-            onChanged: _onSearchChanged,
-            onSubmitted: _s.allowCustomTags ? _addCustomTag : null,
-          ),
+            if (_loading)
+              const Padding(
+                padding: EdgeInsets.only(left: 8),
+                child: SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+          ],
         ),
 
         // Custom (name-based) tag suggestions — sources without a curated id.

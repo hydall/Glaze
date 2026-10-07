@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/glaze_text_field.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/list_controls.dart';
 import '../../chat/bridge/chat_webview_environment.dart';
@@ -287,7 +288,7 @@ class _ChubKeyFormState extends ConsumerState<_ChubKeyForm> {
             style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
           ),
           const SizedBox(height: 16),
-          _field(cs, _key, 'chub_key_hint'.tr(), enabled: !_busy),
+          _field(_key, 'chub_key_hint'.tr(), enabled: !_busy),
           const SizedBox(height: 16),
           GlazeActionButton(
             icon: Icons.save_rounded,
@@ -310,31 +311,16 @@ class _ChubKeyFormState extends ConsumerState<_ChubKeyForm> {
   }
 
   Widget _field(
-    ColorScheme cs,
     TextEditingController controller,
     String hint, {
     bool enabled = true,
   }) {
-    return TextField(
+    return GlazeTextField(
       controller: controller,
       enabled: enabled,
       autocorrect: false,
       enableSuggestions: false,
-      style: TextStyle(fontSize: 14, color: cs.onSurface),
-      decoration: InputDecoration(
-        hintText: hint,
-        hintStyle: TextStyle(color: cs.onSurfaceVariant, fontSize: 14),
-        filled: true,
-        fillColor: cs.surfaceContainerHighest,
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 14,
-          vertical: 12,
-        ),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
-        ),
-      ),
+      hint: hint,
     );
   }
 }

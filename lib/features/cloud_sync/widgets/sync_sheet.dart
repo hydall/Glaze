@@ -9,6 +9,8 @@ import '../../../shared/widgets/glaze_error_dialog.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/sheet_view.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/glaze_action_button.dart';
+import '../../../shared/widgets/glaze_switch.dart';
 import '../sync_provider.dart';
 import '../sync_models.dart';
 import '../services/sync_conflict.dart';
@@ -343,54 +345,21 @@ class _SyncSheetState extends ConsumerState<SyncSheet> {
           Row(
             children: [
               Expanded(
-                child: TextButton(
-                  onPressed: isSyncing
-                      ? null
-                      : () => _resolveAllConflicts('local'),
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 6,
-                    ),
-                    backgroundColor: Colors.blueAccent.withValues(alpha: 0.15),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                  child: Text(
-                    'sync_keep_all_local'.tr(),
-                    style: const TextStyle(
-                      color: Colors.blueAccent,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
+                child: GlazeActionButton(
+                  icon: Icons.smartphone_rounded,
+                  label: 'sync_keep_all_local'.tr(),
+                  expand: true,
+                  onTap: isSyncing ? null : () => _resolveAllConflicts('local'),
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
-                child: TextButton(
-                  onPressed: isSyncing
-                      ? null
-                      : () => _resolveAllConflicts('cloud'),
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 6,
-                    ),
-                    backgroundColor: Colors.greenAccent.withValues(alpha: 0.15),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                  child: Text(
-                    'sync_keep_all_cloud'.tr(),
-                    style: const TextStyle(
-                      color: Colors.greenAccent,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
+                child: GlazeActionButton(
+                  icon: Icons.cloud_rounded,
+                  label: 'sync_keep_all_cloud'.tr(),
+                  tone: GlazeActionTone.primary,
+                  expand: true,
+                  onTap: isSyncing ? null : () => _resolveAllConflicts('cloud'),
                 ),
               ),
             ],
@@ -446,11 +415,7 @@ class _SyncSheetState extends ConsumerState<SyncSheet> {
                 ],
               ),
             ),
-            Switch(
-              value: autoEnabled,
-              onChanged: _setAutoSync,
-              activeThumbColor: context.colors.accent,
-            ),
+            GlazeSwitch(value: autoEnabled, onChanged: _setAutoSync),
           ],
         ),
       ),
@@ -536,10 +501,9 @@ class _SyncSheetState extends ConsumerState<SyncSheet> {
                 ],
               ),
             ),
-            Switch(
+            GlazeSwitch(
               value: _ctrl.syncIncludeApiKeys,
               onChanged: _setIncludeApiKeys,
-              activeThumbColor: context.colors.accent,
             ),
           ],
         ),

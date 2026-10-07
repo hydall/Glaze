@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../../core/llm/tokenizer.dart';
 import '../../../core/models/preset.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_switch.dart';
 
 IconData presetBlockRoleIcon(String role) {
   return switch (role) {
@@ -172,10 +173,9 @@ class PresetBlockRow extends StatelessWidget {
                       : Transform.scale(
                           scale: 0.8,
                           alignment: Alignment.centerRight,
-                          child: Switch(
+                          child: GlazeSwitch(
                             value: block.enabled,
                             onChanged: onToggle,
-                            activeThumbColor: context.cs.primary,
                           ),
                         )),
             ),

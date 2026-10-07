@@ -28,6 +28,7 @@ import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_scaffold.dart';
 import '../../shared/widgets/glaze_sheet.dart';
 import '../../shared/widgets/glaze_spinner.dart';
+import '../../shared/widgets/glaze_text_field.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/list_controls.dart';
 import '../../shared/widgets/menu_group.dart';
@@ -1810,19 +1811,11 @@ class _MatchPreviewState extends State<_MatchPreview> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          TextField(
+          GlazeTextField(
             controller: _controller,
             keyboardType: TextInputType.multiline,
             textInputAction: TextInputAction.newline,
-            style: TextStyle(color: context.cs.onSurface),
-            decoration: InputDecoration(
-              hintText: 'placeholder_search_lore'.tr(),
-              hintStyle: TextStyle(
-                color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
-              ),
-              filled: true,
-              fillColor: Colors.white.withValues(alpha: 0.05),
-            ),
+            hint: 'placeholder_search_lore'.tr(),
             maxLines: 3,
             minLines: 1,
             onChanged: (_) => setState(() {}),

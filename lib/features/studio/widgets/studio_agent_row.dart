@@ -9,6 +9,7 @@ import '../../../core/state/pipeline_settings_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_filter_chip_bar.dart';
+import '../../../shared/widgets/glaze_switch.dart';
 
 /// One agent inside the block list, rendered under the header of the stage it
 /// runs in and above the blocks addressed to that stage. Same row geometry as
@@ -109,11 +110,7 @@ class StudioAgentRow extends StatelessWidget {
                     : Transform.scale(
                         scale: 0.8,
                         alignment: Alignment.centerRight,
-                        child: Switch(
-                          value: enabled,
-                          onChanged: onToggle,
-                          activeThumbColor: context.cs.primary,
-                        ),
+                        child: GlazeSwitch(value: enabled, onChanged: onToggle),
                       ),
               ),
             ],

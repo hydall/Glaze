@@ -6,6 +6,7 @@ import '../../../core/utils/error_format.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_action_button.dart';
+import '../../../shared/widgets/glaze_text_field.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../saucepan_account_provider.dart';
 
@@ -160,9 +161,9 @@ class _SaucepanLoginFormState extends ConsumerState<_SaucepanLoginForm> {
           ),
           const SizedBox(height: 16),
           if (!_useToken) ...[
-            _field(cs, _handle, 'Handle', enabled: !_busy),
+            _field(_handle, 'Handle', enabled: !_busy),
             const SizedBox(height: 10),
-            _field(cs, _password, 'Password', obscure: true, enabled: !_busy),
+            _field(_password, 'Password', obscure: true, enabled: !_busy),
             const SizedBox(height: 16),
             _primaryButton('Log in', _busy ? null : _login),
             const SizedBox(height: 8),
@@ -173,7 +174,7 @@ class _SaucepanLoginFormState extends ConsumerState<_SaucepanLoginForm> {
               onTap: _busy ? null : () => setState(() => _useToken = true),
             ),
           ] else ...[
-            _field(cs, _token, 'Bearer token', enabled: !_busy),
+            _field(_token, 'Bearer token', enabled: !_busy),
             const SizedBox(height: 16),
             _primaryButton('Save token', _busy ? null : _saveToken),
             const SizedBox(height: 8),
@@ -195,29 +196,16 @@ class _SaucepanLoginFormState extends ConsumerState<_SaucepanLoginForm> {
   }
 
   Widget _field(
-    ColorScheme cs,
     TextEditingController controller,
     String hint, {
     bool obscure = false,
     bool enabled = true,
   }) {
-    return TextField(
+    return GlazeTextField(
       controller: controller,
       obscureText: obscure,
       enabled: enabled,
-      style: TextStyle(fontSize: 14, color: cs.onSurface),
-      decoration: InputDecoration(
-        hintText: hint,
-        hintStyle: TextStyle(color: cs.onSurfaceVariant, fontSize: 14),
-        filled: true,
-        fillColor: cs.surfaceContainerHighest,
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
-        ),
-      ),
+      hint: hint,
     );
   }
 

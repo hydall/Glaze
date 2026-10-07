@@ -8,7 +8,9 @@ import '../../core/platform/haptics.dart';
 import '../theme/app_colors.dart';
 import '../../features/settings/app_settings_provider.dart';
 import 'glass_surface.dart';
+import 'glaze_action_button.dart';
 import 'glaze_sheet.dart';
+import 'glaze_text_field.dart';
 import 'top_edge_blur.dart';
 
 // ── Data models ───────────────────────────────────────────────────────────────
@@ -1999,12 +2001,12 @@ class _BigInfo extends StatelessWidget {
           ),
           if (info.buttonText != null) ...[
             const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: info.buttonDisabled ? null : info.onButtonTap,
-                child: Text(info.buttonText!),
-              ),
+            GlazeActionButton(
+              icon: Icons.check_rounded,
+              label: info.buttonText!,
+              tone: GlazeActionTone.primary,
+              expand: true,
+              onTap: info.buttonDisabled ? null : info.onButtonTap,
             ),
           ],
         ],
@@ -2040,23 +2042,19 @@ class _InputSection extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       child: Column(
         children: [
-          TextField(
+          GlazeTextField(
             controller: controller,
             focusNode: focusNode,
-            style: TextStyle(color: context.cs.onSurface),
-            decoration: InputDecoration(
-              hintText: input.placeholder,
-              hintStyle: TextStyle(color: context.cs.onSurfaceVariant),
-            ),
+            hint: input.placeholder,
             onSubmitted: (_) => _confirm(context),
           ),
           const SizedBox(height: 10),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: () => _confirm(context),
-              child: Text(input.confirmLabel),
-            ),
+          GlazeActionButton(
+            icon: Icons.check_rounded,
+            label: input.confirmLabel,
+            tone: GlazeActionTone.primary,
+            expand: true,
+            onTap: () => _confirm(context),
           ),
         ],
       ),
