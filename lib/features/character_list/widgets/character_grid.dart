@@ -48,6 +48,10 @@ class CharacterGrid extends StatelessWidget {
   /// dice draws from the complete set. Falls back to [characters] when null.
   final List<Character> Function()? randomPool;
 
+  /// Fills the space below [headerSliver] instead of the controls and the
+  /// grid while [characters] is empty.
+  final Widget? emptyState;
+
   const CharacterGrid({
     super.key,
     required this.characters,
@@ -65,6 +69,7 @@ class CharacterGrid extends StatelessWidget {
     this.headerSliver,
     this.folderId,
     this.randomPool,
+    this.emptyState,
   });
 
   /// The pool the shuffle button draws from — always the currently matching set
@@ -170,69 +175,79 @@ class CharacterGrid extends StatelessWidget {
         if (topPadding > 0)
           SliverToBoxAdapter(child: SizedBox(height: topPadding)),
         ?headerSliver,
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-            child: _buildControls(context),
-          ),
-        ),
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
-            child: Text(
-              '$totalCount ${'count_characters'.plural(totalCount)}',
-              style: TextStyle(
-                fontSize: 11,
-                color: context.cs.onSurfaceVariant,
-              ),
+        if (characters.isEmpty && emptyState != null)
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: Padding(
+              padding: EdgeInsets.only(bottom: bottomPadding),
+              child: emptyState,
+            ),
+          )
+        else ...[
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: _buildControls(context),
             ),
           ),
-        ),
-        SliverPadding(
-          padding: EdgeInsets.fromLTRB(16, 0, 16, 0),
-          sliver: SliverLayoutBuilder(
-            builder: (context, constraints) => SliverGrid(
-              // Two fixed columns turned into two poster-sized cards on a
-              // desktop window; Vue used `minmax(220px, 1fr)` here.
-              gridDelegate: ResponsiveGridDelegate(
-                availableWidth: constraints.crossAxisExtent,
-                minCellExtent: 180,
-                childAspectRatio: 2 / 3,
-              ),
-              delegate: SliverChildBuilderDelegate(
-                // No explicit RepaintBoundary: SliverChildBuilderDelegate already
-                // wraps each child in one (addRepaintBoundaries: true by default).
-                //
-                // Keyed by character id so Flutter matches each card's State to its
-                // character across list changes. Without this, deleting a card mid-
-                // list left its slot's State (which still holds the finished dust
-                // cloud) attached to the character that shifted up into that slot —
-                // showing an empty slot instead of the next card.
-                (ctx, i) => CharacterCard(
-                  key: ValueKey(characters[i].id),
-                  character: characters[i],
-                  folderId: folderId,
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+              child: Text(
+                '$totalCount ${'count_characters'.plural(totalCount)}',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: context.cs.onSurfaceVariant,
                 ),
-                childCount: characters.length,
               ),
             ),
           ),
-        ),
-        SliverToBoxAdapter(
-          child: SizedBox(
-            height: hasMore || isLoadingMore ? 56 : 0,
-            child: isLoadingMore
-                ? Center(
-                    child: SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: GlazeSpinner(color: context.cs.primary),
-                    ),
-                  )
-                : null,
+          SliverPadding(
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 0),
+            sliver: SliverLayoutBuilder(
+              builder: (context, constraints) => SliverGrid(
+                // Two fixed columns turned into two poster-sized cards on a
+                // desktop window; Vue used `minmax(220px, 1fr)` here.
+                gridDelegate: ResponsiveGridDelegate(
+                  availableWidth: constraints.crossAxisExtent,
+                  minCellExtent: 180,
+                  childAspectRatio: 2 / 3,
+                ),
+                delegate: SliverChildBuilderDelegate(
+                  // No explicit RepaintBoundary: SliverChildBuilderDelegate already
+                  // wraps each child in one (addRepaintBoundaries: true by default).
+                  //
+                  // Keyed by character id so Flutter matches each card's State to its
+                  // character across list changes. Without this, deleting a card mid-
+                  // list left its slot's State (which still holds the finished dust
+                  // cloud) attached to the character that shifted up into that slot —
+                  // showing an empty slot instead of the next card.
+                  (ctx, i) => CharacterCard(
+                    key: ValueKey(characters[i].id),
+                    character: characters[i],
+                    folderId: folderId,
+                  ),
+                  childCount: characters.length,
+                ),
+              ),
+            ),
           ),
-        ),
-        SliverToBoxAdapter(child: SizedBox(height: bottomPadding)),
+          SliverToBoxAdapter(
+            child: SizedBox(
+              height: hasMore || isLoadingMore ? 56 : 0,
+              child: isLoadingMore
+                  ? Center(
+                      child: SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: GlazeSpinner(color: context.cs.primary),
+                      ),
+                    )
+                  : null,
+            ),
+          ),
+          SliverToBoxAdapter(child: SizedBox(height: bottomPadding)),
+        ],
       ],
     );
   }
