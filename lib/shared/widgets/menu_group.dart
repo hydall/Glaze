@@ -626,6 +626,10 @@ class MenuFieldItem extends StatelessWidget {
   /// ignored then.
   final bool expands;
 
+  /// Key placed on the internal [TextField] rather than on the item itself, so
+  /// a caller (or a widget test) can address the editable widget directly.
+  final Key? fieldKey;
+
   const MenuFieldItem({
     super.key,
     required this.label,
@@ -645,6 +649,7 @@ class MenuFieldItem extends StatelessWidget {
     this.helperIsError = false,
     this.onReset,
     this.expands = false,
+    this.fieldKey,
   });
 
   @override
@@ -660,6 +665,7 @@ class MenuFieldItem extends StatelessWidget {
         ],
         Expanded(
           child: TextField(
+            key: fieldKey,
             controller: controller,
             obscureText: obscure,
             keyboardType: keyboardType,

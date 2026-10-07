@@ -7,6 +7,7 @@ import '../../core/glossary/glossary_models.dart';
 import '../../core/glossary/glossary_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glaze_spinner.dart';
+import '../../shared/widgets/glaze_text_field.dart';
 import '../../shared/widgets/sheet_view.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../settings/app_settings_provider.dart';
@@ -310,16 +311,11 @@ class _GlossarySheetState extends ConsumerState<GlossarySheet> {
             Icon(Icons.search, size: 18, color: context.cs.onSurfaceVariant),
             const SizedBox(width: 8),
             Expanded(
-              child: TextField(
+              child: GlazeTextField(
                 controller: _searchCtrl,
                 onChanged: (v) => setState(() => _query = v),
-                decoration: InputDecoration(
-                  isCollapsed: true,
-                  border: InputBorder.none,
-                  hintText: _safeTr('search', fallback: 'Search...'),
-                  hintStyle: TextStyle(color: context.cs.onSurfaceVariant),
-                ),
-                style: TextStyle(fontSize: 15, color: context.cs.onSurface),
+                hint: _safeTr('search', fallback: 'Search...'),
+                isDense: true,
               ),
             ),
             if (_query.trim().isNotEmpty)

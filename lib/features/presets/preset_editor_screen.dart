@@ -19,6 +19,8 @@ import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_scaffold.dart';
+import '../../shared/widgets/glaze_switch.dart';
+import '../../shared/widgets/glaze_text_field.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/folder_name_dialog.dart';
 import '../../shared/widgets/generic_editor.dart';
@@ -988,18 +990,16 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
                 Row(
                   children: [
                     Expanded(
-                      child: TextField(
+                      child: GlazeTextField(
                         controller: _reasoningStartCtrl,
-                        style: TextStyle(color: context.cs.onSurface),
-                        decoration: _inputDecoration('<think>'),
+                        hint: '<think>',
                       ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: TextField(
+                      child: GlazeTextField(
                         controller: _reasoningEndCtrl,
-                        style: TextStyle(color: context.cs.onSurface),
-                        decoration: _inputDecoration('</think>'),
+                        hint: '</think>',
                       ),
                     ),
                   ],
@@ -1016,14 +1016,11 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
                 ),
               ),
               const SizedBox(height: 8),
-              TextField(
+              GlazeTextField(
                 controller: _impersonationPromptCtrl,
-                style: TextStyle(color: context.cs.onSurface),
+                hint: '[Write {{user}}\'s next message.]',
                 minLines: 2,
                 maxLines: 5,
-                decoration: _inputDecoration(
-                  '[Write {{user}}\'s next message.]',
-                ),
               ),
             ],
           ),
@@ -1437,30 +1434,6 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
     final preset = presets.where((p) => p.id == _currentId).firstOrNull;
     if (preset != null) setState(() => _regexes = List.from(preset.regexes));
   }
-
-  InputDecoration _inputDecoration(String hint) {
-    return InputDecoration(
-      hintText: hint,
-      hintStyle: TextStyle(
-        color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
-      ),
-      filled: true,
-      fillColor: Colors.white.withValues(alpha: 0.04),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(10),
-        borderSide: BorderSide(color: context.cs.outline),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(10),
-        borderSide: BorderSide(color: context.cs.outline),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(10),
-        borderSide: BorderSide(color: context.cs.primary),
-      ),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-    );
-  }
 }
 
 // ─── _SectionLabel ───────────────────────────────────────────────────────────
@@ -1541,7 +1514,7 @@ class _SettingsToggle extends StatelessWidget {
             ],
           ),
         ),
-        Switch(value: value, onChanged: onChanged),
+        GlazeSwitch(value: value, onChanged: onChanged),
       ],
     );
   }

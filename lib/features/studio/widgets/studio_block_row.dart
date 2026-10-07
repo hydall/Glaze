@@ -6,6 +6,7 @@ import '../../../core/llm/tokenizer.dart';
 import '../../../core/models/studio_config.dart';
 import '../../../core/models/studio_preset_block_groups.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_switch.dart';
 import '../../presets/widgets/preset_block_row.dart';
 
 /// Short, badge-sized name of a controller spec (`Continuity Controller` →
@@ -88,10 +89,9 @@ class StudioBlockRow extends StatelessWidget {
       trailingWidget = Transform.scale(
         scale: 0.8,
         alignment: Alignment.centerRight,
-        child: Switch(
+        child: GlazeSwitch(
           value: block.enabled,
           onChanged: block.locked ? null : onToggle,
-          activeThumbColor: context.cs.primary,
         ),
       );
     } else {
@@ -469,11 +469,7 @@ class StudioFactCheckerRow extends StatelessWidget {
                 child: Transform.scale(
                   scale: 0.8,
                   alignment: Alignment.centerRight,
-                  child: Switch(
-                    value: block.enabled,
-                    onChanged: onToggle,
-                    activeThumbColor: context.cs.primary,
-                  ),
+                  child: GlazeSwitch(value: block.enabled, onChanged: onToggle),
                 ),
               ),
             ],
@@ -680,7 +676,7 @@ class _StudioBlockGroupRowState extends State<StudioBlockGroupRow> {
                       ),
                     ),
                   ),
-                  Switch.adaptive(
+                  GlazeSwitch(
                     value: header.enabled,
                     onChanged: widget.onToggleGroup,
                   ),

@@ -30,6 +30,7 @@ import '../../shared/widgets/folder_section.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_spinner.dart';
+import '../../shared/widgets/glaze_text_field.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/list_controls.dart';
@@ -1383,36 +1384,7 @@ class _CheckboxOption extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: () => onChanged(!value),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 22,
-              height: 22,
-              child: Checkbox(
-                value: value,
-                onChanged: (v) => onChanged(v ?? false),
-                activeColor: context.cs.primary,
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                visualDensity: VisualDensity.compact,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w500,
-                color: context.cs.onSurface,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    return MenuSwitchItem(label: label, value: value, onChanged: onChanged);
   }
 }
 
@@ -1446,21 +1418,12 @@ class _DepthInput extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 4),
-            TextField(
+            GlazeTextField(
               controller: controller,
               keyboardType: TextInputType.number,
-              style: TextStyle(fontSize: 15, color: context.cs.onSurface),
               onChanged: (v) => onChanged(int.tryParse(v)),
-              decoration: InputDecoration(
-                isDense: true,
-                border: InputBorder.none,
-                contentPadding: EdgeInsets.zero,
-                hintText: 'regex_unlimited_placeholder'.tr(),
-                hintStyle: TextStyle(
-                  color: context.cs.onSurfaceVariant.withValues(alpha: 0.4),
-                  fontSize: 15,
-                ),
-              ),
+              hint: 'regex_unlimited_placeholder'.tr(),
+              isDense: true,
             ),
           ],
         ),

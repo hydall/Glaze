@@ -8,6 +8,7 @@ import '../../../core/platform/haptics.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/glaze_text_field.dart';
 import '../../../shared/widgets/glass_surface.dart';
 import '../chat_provider.dart';
 import '../composer_pins_provider.dart';
@@ -485,15 +486,12 @@ class _QuickReplyEditFormState extends State<_QuickReplyEditForm> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          TextField(
+          GlazeTextField(
             controller: _labelCtrl,
             autofocus: widget.isNew,
             textInputAction: TextInputAction.next,
-            decoration: InputDecoration(
-              labelText: 'label_block_name'.tr(),
-              hintText: 'placeholder_block_name'.tr(),
-              border: const OutlineInputBorder(),
-            ),
+            label: 'label_block_name'.tr(),
+            hint: 'placeholder_block_name'.tr(),
           ),
           const SizedBox(height: 12),
           _IconPicker(
@@ -507,15 +505,11 @@ class _QuickReplyEditFormState extends State<_QuickReplyEditForm> {
           if (widget.builtIn)
             _BuiltInNote(text: 'quick_reply_builtin_note'.tr())
           else
-            TextField(
+            GlazeTextField(
               controller: _textCtrl,
               maxLines: 4,
-              minLines: 2,
-              decoration: InputDecoration(
-                labelText: 'label_content'.tr(),
-                hintText: 'placeholder_prompt_text'.tr(),
-                border: const OutlineInputBorder(),
-              ),
+              label: 'label_content'.tr(),
+              hint: 'placeholder_prompt_text'.tr(),
             ),
           const SizedBox(height: 20),
           Row(

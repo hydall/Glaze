@@ -13,6 +13,7 @@ import '../../settings/api_list_provider.dart';
 import '../../settings/widgets/connection_status.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/glaze_switch.dart';
 import '../../../shared/widgets/help_tip.dart';
 import '../../../shared/widgets/menu_group.dart';
 import '../../../shared/widgets/sheet_view.dart';
@@ -171,7 +172,7 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
           ),
           const HelpTip(term: 'image-gen'),
           const Spacer(),
-          Switch(
+          GlazeSwitch(
             value: s.enabled,
             onChanged: (v) => _update(s.copyWith(enabled: v)),
           ),

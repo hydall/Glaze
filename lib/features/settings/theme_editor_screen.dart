@@ -21,6 +21,7 @@ import '../../shared/widgets/swipe_tab_switcher.dart';
 import '../../shared/widgets/tab_slide_switcher.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glass_surface.dart';
+import '../../shared/widgets/glaze_text_field.dart';
 import '../../shared/widgets/list_controls.dart';
 import '../../shared/widgets/menu_group.dart';
 import 'app_settings_provider.dart';
@@ -2412,77 +2413,72 @@ class _ColorPickerSheetState extends ConsumerState<_ColorPickerSheet> {
                                   ),
                                   const SizedBox(height: 12),
                                   if (_isHslMode) ...[
-                                    _PickerSlider(
+                                    MenuRangeItem(
                                       label: 'Hue',
                                       value: _h,
                                       min: 0,
                                       max: 360,
                                       divisions: 360,
-                                      display: '${_h.round()}\u00B0',
+                                      decimalPlaces: 0,
+                                      unit: '\u00B0',
                                       onChanged: (v) { _h = v; _onHslChanged(); setState(() {}); },
                                     ),
-                                    _PickerSlider(
+                                    MenuRangeItem(
                                       label: 'Saturation',
                                       value: _s * 100,
                                       min: 0,
                                       max: 100,
                                       divisions: 100,
-                                      display: '${(_s * 100).round()}%',
+                                      decimalPlaces: 0,
+                                      unit: '%',
                                       onChanged: (v) { _s = v / 100; _onHslChanged(); setState(() {}); },
                                     ),
-                                    _PickerSlider(
+                                    MenuRangeItem(
                                       label: 'Lightness',
                                       value: _l * 100,
                                       min: 0,
                                       max: 100,
                                       divisions: 100,
-                                      display: '${(_l * 100).round()}%',
+                                      decimalPlaces: 0,
+                                      unit: '%',
                                       onChanged: (v) { _l = v / 100; _onHslChanged(); setState(() {}); },
                                     ),
                                   ] else ...[
-                                    _PickerSlider(
+                                    MenuRangeItem(
                                       label: 'Red',
                                       value: _r.toDouble(),
                                       min: 0,
                                       max: 255,
                                       divisions: 255,
-                                      display: '$_r',
-                                      activeColor: const Color(0xFFFF4444),
+                                      decimalPlaces: 0,
                                       onChanged: (v) { _r = v.round(); _onRgbChanged(); setState(() {}); },
                                     ),
-                                    _PickerSlider(
+                                    MenuRangeItem(
                                       label: 'Green',
                                       value: _g.toDouble(),
                                       min: 0,
                                       max: 255,
                                       divisions: 255,
-                                      display: '$_g',
-                                      activeColor: const Color(0xFF44BB44),
+                                      decimalPlaces: 0,
                                       onChanged: (v) { _g = v.round(); _onRgbChanged(); setState(() {}); },
                                     ),
-                                    _PickerSlider(
+                                    MenuRangeItem(
                                       label: 'Blue',
                                       value: _b.toDouble(),
                                       min: 0,
                                       max: 255,
                                       divisions: 255,
-                                      display: '$_b',
-                                      activeColor: const Color(0xFF4488FF),
+                                      decimalPlaces: 0,
                                       onChanged: (v) { _b = v.round(); _onRgbChanged(); setState(() {}); },
                                     ),
                                   ],
                                   const SizedBox(height: 12),
-                                  TextField(
+                                  MenuFieldItem(
+                                    label: 'theme_hex_color'.tr(),
                                     controller: _hexCtrl,
-                                    decoration: InputDecoration(
-                                      hintText: '#C42A4A',
-                                      labelText: 'theme_hex_color'.tr(),
-                                      errorText: _error,
-                                      prefixText:
-                                          _hexCtrl.text.startsWith('#') ? null : '#',
-                                      border: const OutlineInputBorder(),
-                                      isDense: true,
-                                    ),
+                                    placeholder: '#C42A4A',
+                                    helper: _error,
+                                    helperIsError: true,
                                     onChanged: _onHexChanged,
                                   ),
                                   const SizedBox(height: 8),
@@ -2864,58 +2860,6 @@ class _PickerIconButtonState extends State<_PickerIconButton>
   }
 }
 
-class _PickerSlider extends StatelessWidget {
-  final String label;
-  final double value;
-  final double min;
-  final double max;
-  final int divisions;
-  final String display;
-  final Color? activeColor;
-  final ValueChanged<double> onChanged;
-
-  const _PickerSlider({
-    required this.label,
-    required this.value,
-    required this.min,
-    required this.max,
-    required this.divisions,
-    required this.display,
-    required this.onChanged,
-    this.activeColor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 80,
-            child: Text(label, style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
-          ),
-          Expanded(
-            child: Slider(
-              value: value.clamp(min, max),
-              min: min,
-              max: max,
-              divisions: divisions,
-              activeColor: activeColor ?? cs.primary,
-              onChanged: onChanged,
-            ),
-          ),
-          SizedBox(
-            width: 48,
-            child: Text(display, style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant), textAlign: TextAlign.end),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 // ─── Google Fonts ─────────────────────────────────────────────────────────────
 
 const _kPopularGoogleFonts = [
@@ -3002,15 +2946,10 @@ class _GoogleFontPickerSheetState extends State<_GoogleFontPickerSheet> {
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                  child: TextField(
+                  child: GlazeTextField(
                     controller: _controller,
-                    decoration: InputDecoration(
-                      hintText: 'theme_search_fonts'.tr(),
-                      prefixIcon: Icon(Icons.search, color: cs.onSurfaceVariant),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                    ),
+                    hint: 'theme_search_fonts'.tr(),
+                    isDense: true,
                     onChanged: (v) => setState(() => _query = v),
                   ),
                 ),

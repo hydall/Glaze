@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
+import '../../../shared/widgets/glaze_switch.dart';
+import '../../../shared/widgets/glaze_text_field.dart';
 import '../../../shared/widgets/menu_group.dart';
 import '../image_gen_models.dart';
 
@@ -287,19 +289,11 @@ class _ImageGenReferenceRowState extends State<ImageGenReferenceRow> {
   Widget _descriptionField(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(left: 48, bottom: 4),
-      child: TextField(
+      child: GlazeTextField(
         controller: _descriptionController,
         onChanged: widget.onDescriptionChanged,
-        style: const TextStyle(fontSize: 13),
-        decoration: InputDecoration(
-          hintText: 'imggen_ref_description_hint'.tr(),
-          isDense: true,
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 8,
-            vertical: 6,
-          ),
-          border: InputBorder.none,
-        ),
+        hint: 'imggen_ref_description_hint'.tr(),
+        isDense: true,
       ),
     );
   }
@@ -345,18 +339,11 @@ class _ImageGenReferenceRowState extends State<ImageGenReferenceRow> {
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: TextField(
+            child: GlazeTextField(
               controller: _controller,
               onChanged: widget.onNameChanged,
-              decoration: InputDecoration(
-                hintText: '${'imggen_ref_keyword'.tr()} (Zoe, Зои)',
-                isDense: true,
-                contentPadding: EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 10,
-                ),
-                border: InputBorder.none,
-              ),
+              hint: '${'imggen_ref_keyword'.tr()} (Zoe, Зои)',
+              isDense: true,
             ),
           ),
           InkWell(
@@ -382,17 +369,9 @@ class _ImageGenReferenceRowState extends State<ImageGenReferenceRow> {
             ),
           ),
           const SizedBox(width: 4),
-          Switch(
+          GlazeSwitch(
             value: widget.refItem.enabled,
             onChanged: widget.onEnabledChanged,
-            activeThumbColor: context.cs.primary,
-            activeTrackColor: context.cs.primary.withValues(alpha: 0.5),
-            trackOutlineColor: WidgetStateProperty.resolveWith(
-              (states) => states.contains(WidgetState.selected)
-                  ? Colors.transparent
-                  : context.cs.outlineVariant,
-            ),
-            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
           ),
           IconButton(
             icon: Icon(
