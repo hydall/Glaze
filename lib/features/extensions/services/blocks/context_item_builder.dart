@@ -12,6 +12,7 @@ import '../../../../core/models/character.dart';
 import '../../../../core/models/chat_message.dart';
 import '../../../../core/models/persona.dart';
 import '../../../../core/models/preset.dart';
+import '../../../image_gen/services/image_tag_markup.dart';
 import '../../models/block_config.dart';
 import '../../models/block_context_item.dart';
 import '../../models/info_block.dart';
@@ -130,7 +131,11 @@ class _ContextItemBuilder {
     if (text.isEmpty) return text;
     return expand(
       text,
-      MacroContext(character: character, persona: persona?.name),
+      MacroContext(
+        character: character,
+        persona: persona?.name,
+        personaDescription: persona?.prompt,
+      ),
     );
   }
 
@@ -221,7 +226,12 @@ class _ContextItemBuilder {
         messages[i],
       ).where((b) => b.blockName == item.blockName).firstOrNull;
       if (match == null || match.content.trim().isEmpty) continue;
-      collected.add(_wrap(item.blockName, match.content.trim()));
+      collected.add(
+        _wrap(
+          item.blockName,
+          ImageTagMarkup.reduceBlocksToInstructions(match.content).trim(),
+        ),
+      );
     }
 
     return collected.reversed.join('\n\n');
@@ -260,7 +270,13 @@ class _ContextItemBuilder {
       final suffix = _expand(isUser ? item.userSuffix : item.charSuffix);
       final placement = isUser ? 1 : 2;
       final depth = count - i - 1;
-      final body = _promptRegex(message.content.trim(), placement, depth);
+      // Image blocks reach the model as the tag that asked for the picture,
+      // never as the stored element with this device's file paths (INV-IG12).
+      final body = _promptRegex(
+        ImageTagMarkup.reduceBlocksToInstructions(message.content).trim(),
+        placement,
+        depth,
+      );
       parts.add('$prefix$body$suffix');
     }
 

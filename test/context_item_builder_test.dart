@@ -1,11 +1,13 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
+import 'package:glaze_flutter/core/models/persona.dart';
 import 'package:glaze_flutter/core/models/preset.dart';
 import 'package:glaze_flutter/features/extensions/models/block_config.dart';
 import 'package:glaze_flutter/features/extensions/models/block_context_item.dart';
 import 'package:glaze_flutter/features/extensions/models/info_block.dart';
 import 'package:glaze_flutter/features/extensions/services/blocks/context_item_builder.dart';
+import 'package:glaze_flutter/features/extensions/services/upstream_block_codec.dart';
 
 const _character = Character(id: 'c1', name: 'Alice');
 
@@ -40,12 +42,14 @@ List<Map<String, dynamic>> _build({
   Map<String, String> globalVars = const {},
   List<PresetRegex> promptRegexes = const [],
   Map<String, List<InfoBlock>> blocksByMessageId = const {},
+  Character? character = _character,
+  Persona? persona,
 }) => buildContextItemMessages(
   blockConfig: blockConfig,
   messages: messages,
   anchorMessageId: anchorMessageId,
-  character: _character,
-  persona: null,
+  character: character,
+  persona: persona,
   sessionVars: sessionVars,
   globalVars: globalVars,
   promptRegexes: promptRegexes,
@@ -301,5 +305,119 @@ void main() {
 
       expect(out.single['content'], 'BYE');
     });
+  });
+
+  group('image blocks', () {
+    const instruction = '{"prompt":"a red door"}';
+    const finished =
+        '[IMG:RESULT:generated/a.png;;*generated/b.png|$instruction]';
+
+    test('chat messages carry the instruction, not the stored files', () {
+      final out = _build(
+        blockConfig: _block([
+          const BlockContextItem(
+            id: '1',
+            type: ContextItemType.lastMessages,
+            messagesCount: 1,
+          ),
+        ]),
+        messages: [_msg('a1', 'assistant', 'She opens it. $finished')],
+        anchorMessageId: 'a1',
+      );
+
+      expect(out.single['content'], 'She opens it. [IMG:GEN:$instruction]');
+    });
+
+    test('a previous block carries the instruction, not the stored files', () {
+      final out = _build(
+        blockConfig: _block([
+          const BlockContextItem(
+            id: '1',
+            type: ContextItemType.previousBlock,
+            blockName: 'naicom',
+          ),
+        ]),
+        messages: [
+          _msg('a1', 'assistant', 'one'),
+          _msg('a2', 'assistant', 'two'),
+        ],
+        anchorMessageId: 'a2',
+        blocksByMessageId: {
+          'a1': [_infoBlock('a1', 'naicom', finished)],
+        },
+      );
+
+      expect(
+        out.single['content'],
+        '<naicom>\n[IMG:GEN:$instruction]\n</naicom>',
+      );
+    });
+  });
+
+  // The context list of the naicom block (an image-prompt writer for NovelAI)
+  // as exported by the original extension: appearance reaches the model only
+  // through {{persona}} and {{description}} in its text items.
+  test('an imported image-prompt block gets both appearances', () {
+    final config = decodeUpstreamBlock({
+      'id': 'naicom',
+      'name': 'naicom',
+      'block_type': 'generated',
+      'prompt': 'Create a prompt for ONE comic page.',
+      'template': '<naicom>\n...\n</naicom>\n',
+      'context': [
+        {
+          'id': '1',
+          'name': 'chat',
+          'role': 'user',
+          'type': 'last_messages',
+          'messages_count': 2,
+          'messages_offset': 0,
+          'messages_separator': 'double_newline',
+        },
+        {
+          'id': '2',
+          'name': 'block',
+          'role': 'system',
+          'type': 'previous_block',
+          'block_name': '',
+          'block_count': 1,
+        },
+        {
+          'id': '3',
+          'name': '{{user}}',
+          'role': 'user',
+          'type': 'text',
+          'text': 'Appearance of {{user}}:\n{{persona}}',
+        },
+        {
+          'id': '4',
+          'name': '{{char}}',
+          'role': 'user',
+          'type': 'text',
+          'text': 'Appearance of {{char}}:\n{{description}}',
+        },
+      ],
+    });
+
+    final out = _build(
+      blockConfig: config,
+      messages: [
+        _msg('u1', 'user', 'Hi.'),
+        _msg('a1', 'assistant', 'Hello.'),
+      ],
+      anchorMessageId: 'a1',
+      character: const Character(
+        id: 'c1',
+        name: 'Rhea',
+        description: 'red hair, green eyes',
+      ),
+      persona: const Persona(id: 'p1', name: 'Alex', prompt: 'tall, glasses'),
+    );
+
+    expect(out, hasLength(1));
+    final content = out.single['content'] as String;
+    expect(content, contains('Appearance of Alex:\ntall, glasses'));
+    expect(content, contains('Appearance of Rhea:\nred hair, green eyes'));
+    expect(content, isNot(contains('{{')));
   });
 }
