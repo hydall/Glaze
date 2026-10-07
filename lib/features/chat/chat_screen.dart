@@ -1896,11 +1896,6 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                               .length >
                                           1,
                                   beforeRegenerate: _maybeSeedGameTime,
-                                  onReadAloud: () => speakMessageNow(
-                                    ref,
-                                    widget.charId,
-                                    messageId,
-                                  ),
                                 );
                               },
                           onSwipe: (id, direction) {

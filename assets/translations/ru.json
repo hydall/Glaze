@@ -3299,7 +3299,6 @@
   "vector_error_rebuild_failed": "Переиндексация не удалась: {error}",
   "tts_title": "Озвучка",
   "tts_subtitle": "Голосовые сообщения",
-  "tts_read_aloud": "Озвучить",
   "tts_disabled_placeholder": "Озвучка выключена. Включите её, чтобы сообщения заговорили.",
   "tts_provider": "Сервис",
   "tts_local_server": "Локальный сервер",
