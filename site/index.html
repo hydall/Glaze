@@ -5,6 +5,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Glaze: AI roleplay chat client</title>
   <meta name="description" content="Glaze is a local, open-source client for AI roleplay chats. Android, iOS, Windows, Linux. Any OpenAI-compatible API, SillyTavern-compatible.">
+  <link rel="canonical" href="https://hydall.github.io/Glaze/">
+  <link rel="alternate" hreflang="en" href="https://hydall.github.io/Glaze/">
+  <link rel="alternate" hreflang="ru" href="https://hydall.github.io/Glaze/ru/">
+  <link rel="alternate" hreflang="x-default" href="https://hydall.github.io/Glaze/">
+  <script>
+    // The Russian page is ru/. Whoever picked Russian, or reads in it and has
+    // not picked yet, goes there before the English page is drawn.
+    (() => {
+      if (document.documentElement.dataset.lang) return;
+      const stored = localStorage.getItem('glaze-site-lang');
+      const ru = stored ? stored === 'ru' : (navigator.language || '').toLowerCase().startsWith('ru');
+      if (ru) location.replace('ru/' + location.hash);
+    })();
+  </script>
   <meta name="theme-color" content="#19191A">
   <meta property="og:title" content="Glaze">
   <meta property="og:description" content="AI roleplay chat client. Local, novice-friendly, open-source.">
@@ -24,6 +38,23 @@
   <link rel="preload" href="assets/fonts/InterVariable.ttf" as="font" type="font/ttf" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0..1,0&display=block">
   <link rel="stylesheet" href="assets/style.css">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Glaze",
+    "description": "Glaze is a local, open-source client for AI roleplay chats. Android, iOS, Windows, Linux. Any OpenAI-compatible API, SillyTavern-compatible.",
+    "url": "https://hydall.github.io/Glaze/",
+    "image": "https://hydall.github.io/Glaze/assets/img/og.png",
+    "applicationCategory": "CommunicationApplication",
+    "operatingSystem": "Android, iOS, Windows, Linux",
+    "downloadUrl": "https://github.com/hydall/Glaze/releases",
+    "license": "https://www.gnu.org/licenses/agpl-3.0.html",
+    "isAccessibleForFree": true,
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "sameAs": ["https://github.com/hydall/Glaze"]
+  }
+  </script>
 </head>
 <body>
   <header class="topbar" id="topbar">

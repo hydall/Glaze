@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  One page per language: English at the root, Russian at ru/. Sections and
+  articles are #fragments of a page, which crawlers drop; articles/<slug>/ are
+  only link-preview stubs that redirect to a page, so they are left out. A
+  project site has no robots.txt of its own (crawlers read only
+  hydall.github.io/robots.txt), so this sitemap is submitted by hand in Google
+  Search Console and Yandex Webmaster.
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <url>
+    <loc>https://hydall.github.io/Glaze/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://hydall.github.io/Glaze/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://hydall.github.io/Glaze/ru/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://hydall.github.io/Glaze/"/>
+  </url>
+  <url>
+    <loc>https://hydall.github.io/Glaze/ru/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://hydall.github.io/Glaze/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://hydall.github.io/Glaze/ru/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://hydall.github.io/Glaze/"/>
+  </url>
+</urlset>

@@ -15,8 +15,15 @@
     boosty: '<svg viewBox="0 0 235.6 292.2" fill="currentColor"><path d="M44.3,164.5L76.9,51.6H127l-10.1,35c-0.1,0.2-0.2,0.4-0.3,0.6L90,179.6h24.8c-10.4,25.9-18.5,46.2-24.3,60.9c-45.8-0.5-58.6-33.3-47.4-72.1 M90.7,240.6l60.4-86.9h-25.6l22.3-55.7c38.2,4,56.2,34.1,45.6,70.5c-11.3,39.1-57.1,72.1-101.7,72.1C91.3,240.6,91,240.6,90.7,240.6z"/></svg>',
   };
 
+  // Each language is its own page: English at the site root, Russian at ru/.
+  // The ru/ copy of index.html (made by .github/scripts/prerender_site.sh)
+  // marks its language and the way back to the root, which every relative
+  // path to assets and articles goes through.
+  const PAGE_LANG = document.documentElement.dataset.lang || 'en';
+  const ROOT = document.documentElement.dataset.root || '';
+
   const state = {
-    lang: initialLang(),
+    lang: PAGE_LANG,
     release: null,           // { tag, date, assets: [{ name, size, url }] }
     releaseState: 'loading', // loading | live | fallback
     open: new Set(),         // expanded roadmap entries
@@ -31,12 +38,6 @@
   };
 
   // ── helpers ────────────────────────────────────────────────────────────
-
-  function initialLang() {
-    const stored = localStorage.getItem('glaze-site-lang');
-    if (stored === 'ru' || stored === 'en') return stored;
-    return (navigator.language || 'en').toLowerCase().startsWith('ru') ? 'ru' : 'en';
-  }
 
   const t = (key) => G.ui[state.lang][key] ?? G.ui.en[key] ?? key;
   const pick = (obj) => (obj && typeof obj === 'object' && !Array.isArray(obj) ? obj[state.lang] ?? obj.en : obj);
@@ -226,6 +227,12 @@
 
   function renderChrome() {
     document.documentElement.lang = state.lang;
+    // The head is baked into the page by the prerender, so search results and
+    // link previews of each language's page get its own text.
+    const tagline = t('tagline').replace('\n', ' ');
+    $('meta[name="description"]').content = t('meta_description');
+    $('meta[property="og:description"]').content = tagline;
+    $('meta[name="twitter:description"]').content = tagline;
     document.querySelectorAll('[data-t]').forEach((el) => { el.textContent = t(el.dataset.t); });
 
     // The app's DesktopPopup: a glass panel anchored under its button.
@@ -395,7 +402,7 @@
     if (articleCache.has(key)) return;
     articleCache.set(key, 'loading');
     try {
-      const res = await fetch(`articles/${key}.md`);
+      const res = await fetch(`${ROOT}articles/${key}.md`);
       if (!res.ok) throw new Error(res.status);
       articleCache.set(key, md(await res.text()));
     } catch {
@@ -409,7 +416,7 @@
   function articleAuthor(a, link) {
     const au = G.authors[a.author];
     if (!au) return a.author ? `<span class="article-author">${esc(a.author)}</span>` : '';
-    const inner = `<img src="assets/img/${au.img}" alt="" loading="lazy"><span>${esc(au.name)}</span>`;
+    const inner = `<img src="${ROOT}assets/img/${au.img}" alt="" loading="lazy"><span>${esc(au.name)}</span>`;
     return link
       ? `<a class="article-author" href="${au.url}" ${ext}>${inner}</a>`
       : `<span class="article-author">${inner}</span>`;
@@ -476,7 +483,7 @@
 
   // ── screenshots ────────────────────────────────────────────────────────
 
-  const shotSrc = (id) => `assets/img/screens/web/${state.shots}_${id}_${state.lang}.webp`;
+  const shotSrc = (id) => `${ROOT}assets/img/screens/web/${state.shots}_${id}_${state.lang}.webp`;
 
   // The shots of the chosen device in page order; the viewer steps through it.
   const visibleShots = () => G.screenshots.flatMap((g) =>
@@ -751,7 +758,7 @@
   function renderResources() {
     const author = (name, role, img, color, note = '') => `
       <a class="row tile-row" href="https://github.com/${name}" ${ext}>
-        <span class="tile photo" style="--tile-border:${color}66"><img src="assets/img/${img}" alt="" loading="lazy"></span>
+        <span class="tile photo" style="--tile-border:${color}66"><img src="${ROOT}assets/img/${img}" alt="" loading="lazy"></span>
         <span class="row-text"><span class="tile-label">${esc(name)}${note ? `<span class="chip chip-gray">${esc(note)}</span>` : ''}</span><span class="tile-sub">${esc(role)}</span></span>
       </a>`;
 
@@ -851,7 +858,7 @@
       }
     });
     markActive(id);
-    document.title = id === 'overview' ? 'Glaze: AI roleplay chat client' : `${t('nav_' + id)} · Glaze`;
+    document.title = id === 'overview' ? t('meta_title') : `${t('nav_' + id)} · Glaze`;
   }
 
   function route(animate = true) {
@@ -919,10 +926,8 @@
     if (lang) {
       toggleLangMenu(false);
       if (lang.dataset.lang !== state.lang) {
-        state.lang = lang.dataset.lang;
-        localStorage.setItem('glaze-site-lang', state.lang);
-        renderAll();
-        showTab(state.active, false);
+        localStorage.setItem('glaze-site-lang', lang.dataset.lang);
+        location.href = (lang.dataset.lang === 'ru' ? `${ROOT}ru/` : ROOT || './') + location.hash;
       }
       return;
     }
@@ -938,7 +943,7 @@
     }
     const copy = e.target.closest('[data-copy-article]');
     if (copy) {
-      const url = new URL(`articles/${copy.dataset.copyArticle}/`, location.href).href;
+      const url = new URL(`${ROOT}articles/${copy.dataset.copyArticle}/`, location.href).href;
       const done = () => {
         const label = copy.querySelector('span');
         const was = label.textContent;

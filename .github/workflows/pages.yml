@@ -27,6 +27,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+      # Crawlers get the drawn page, not the empty shell app.js fills in.
+      - name: Prerender index.html
+        run: bash .github/scripts/prerender_site.sh site
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
