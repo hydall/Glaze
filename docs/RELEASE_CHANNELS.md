@@ -1,13 +1,12 @@
 # Release channels
 
-Three long-lived branches, one per build channel. The channel decides packaging
+Two long-lived branches, one per build channel. The channel decides packaging
 — app identity, data folder, cloud root and update source — and the watermark
 default. It no longer decides whether developer mode is on.
 
 | Branch    | Channel   | Dev mode default | Watermark default   | Audience              |
 |-----------|-----------|------------------|---------------------|-----------------------|
 | `stable`  | `stable`  | off              | on while `0.x`      | public releases       |
-| `staging` | `staging` | off              | **on**              | testers / release RCs |
 | `nightly` | `nightly` | off              | **on**              | daily internal builds |
 | any other | `nightly` | off              | **on**              | feature branches      |
 
@@ -27,7 +26,6 @@ compile-time define (`.github/workflows/build-branch.yml`, `metadata` job):
 ```bash
 case "$BUILD_BRANCH" in
   stable)  BUILD_CHANNEL=stable  ;;
-  staging) BUILD_CHANNEL=staging ;;
   *)       BUILD_CHANNEL=nightly ;;
 esac
 ```
@@ -78,7 +76,7 @@ return prefs?.getBool(_prefsKey) ?? (isStableChannel && !isBetaVersion);
 
 ### One-time dev-mode reset
 
-Older `nightly`/`staging` builds defaulted dev mode to **on**, and that `true`
+Older `nightly` builds defaulted dev mode to **on**, and that `true`
 was written to `SharedPreferences` the moment the user touched any dev toggle —
 a stored value outranks the new default, so those installs would have kept the
 Dev group forever. `resetLegacyDevModeFlag`
@@ -102,10 +100,9 @@ installs are untouched.
 | Channel   | Android applicationId       | iOS bundle id                     | Launcher name    | Desktop data folder | Cloud sync root |
 |-----------|-----------------------------|-----------------------------------|------------------|---------------------|-----------------|
 | `stable`  | `app.glaze.flutter`         | `com.glaze.glazeFlutter`          | `Glaze`          | `Glaze`             | `Glaze`         |
-| `staging` | `app.glaze.flutter.staging` | `com.glaze.glazeFlutter.staging`  | `Glaze Staging`  | `Glaze-staging`     | `Glaze-staging` |
 | `nightly` | `app.glaze.flutter.nightly` | `com.glaze.glazeFlutter.nightly`  | `Glaze Nightly`  | `Glaze-nightly`     | `Glaze-nightly` |
 
-**Signing does not change.** All three channels are signed with the same CI
+**Signing does not change.** Both channels are signed with the same CI
 keystore (`ANDROID_KEYSTORE_BASE64` and friends). Android only refuses to
 co-install packages that share an `applicationId`; a shared certificate is fine
 — and keeping it shared is what lets a build promoted from `nightly` to
@@ -129,7 +126,7 @@ co-install packages that share an `applicationId`; a shared certificate is fine
   them, so the channel goes into the data path instead:
   `glazeDataFolderName` in `lib/core/constants/build_channel.dart` drives
   `_desktopDataDir()` in `lib/core/utils/platform_paths.dart`. Without this the
-  three installs would share one `glaze.db`.
+  two installs would share one `glaze.db`.
 
 ## Cloud sync
 
@@ -162,12 +159,11 @@ Two configurations are therefore supported, and the code is correct under both:
    exist). Each non-stable channel lives in a sub-folder of the shared App
    folder: `/Apps/Glaze/nightly/…`. `stable` keeps the flat layout it has
    always had, so its existing files never move.
-2. **Per-channel app key** — set `DROPBOX_APP_KEY_STAGING` /
-   `DROPBOX_APP_KEY_NIGHTLY` in the repository secrets and register a separate
-   Dropbox app for that channel. The channel then gets its own App folder, and
-   the sub-folder is just one harmless extra level inside it. CI falls back to
-   `DROPBOX_APP_KEY` whenever the channel secret is empty, so adding them is
-   safe to do one at a time.
+2. **Per-channel app key** — set `DROPBOX_APP_KEY_NIGHTLY` in the repository
+   secrets and register a separate Dropbox app for that channel. The channel
+   then gets its own App folder, and the sub-folder is just one harmless extra
+   level inside it. CI falls back to `DROPBOX_APP_KEY` whenever the channel
+   secret is empty, so adding it is safe to do on its own.
 
 Three things in `dropbox_adapter.dart` make this work:
 
@@ -181,7 +177,7 @@ Three things in `dropbox_adapter.dart` make this work:
 - `_belongsToAnotherChannel` keeps one channel out of another's sub-tree. This
   matters for exactly one operation: wiping cloud data from `stable` goes
   through `_deleteAllInRoot`, which lists the App folder root *recursively* —
-  without the guard it would delete `nightly/` and `staging/` along with its
+  without the guard it would delete `nightly/` along with its
   own files. It also hides sibling channel folders from `listFolder`, which is
   what used to keep the post-wipe "waiting for cloud to finalize" poll spinning
   until it timed out.
@@ -189,7 +185,7 @@ Three things in `dropbox_adapter.dart` make this work:
 ### Migrating existing installs
 
 Cloud data written before this split stays where it is, under the `Glaze` root.
-A `stable` build keeps seeing it unchanged. A `staging` / `nightly` build starts
+A `stable` build keeps seeing it unchanged. A `nightly` build starts
 against an empty root and pushes its local library up on the first sync — the
 old data is not touched or deleted, just no longer read by that channel. There
 is no automatic copy, and for a nightly channel that seems like the right
@@ -197,17 +193,17 @@ trade rather than a gap worth closing.
 
 ### Known limitations
 
-- **The `com.hydall.glaze://` OAuth scheme is still shared.** All three Android
-  builds register it, so a Dropbox/Google Drive callback can raise an app
-  chooser. Making it per-channel means registering the extra redirect URIs
-  (`com.hydall.glaze.nightly://oauth/…`, `…staging…`) in the Google and Dropbox
-  consoles first, otherwise sync auth breaks outright on those channels.
+- **The `com.hydall.glaze://` OAuth scheme is still shared.** Both Android builds
+  register it, so a Dropbox/Google Drive callback can raise an app chooser.
+  Making it per-channel means registering the extra redirect URI
+  (`com.hydall.glaze.nightly://oauth/…`) in the Google and Dropbox consoles
+  first, otherwise sync auth breaks outright on that channel.
 - **macOS and Linux bundle identities are not split** — CI produces no builds
   for them, so only the data folder is channel-aware there.
-- Switching an existing desktop install to `staging`/`nightly` starts from an
-  empty data folder; the old `%APPDATA%\Glaze` contents stay put and are picked
-  up again by a `stable` build. The same applies to a local `flutter run`,
-  which defaults to `nightly`.
+- Switching an existing desktop install to `nightly` starts from an empty data
+  folder; the old `%APPDATA%\Glaze` contents stay put and are picked up again by
+  a `stable` build. The same applies to a local `flutter run`, which defaults to
+  `nightly`.
 
 ## Adding a new channel
 

@@ -722,16 +722,11 @@ class _ChatScrollButton extends StatelessWidget {
     required this.visible,
     required this.icon,
     required this.onTap,
-    this.slideFromBelow = true,
   });
 
   final bool visible;
   final IconData icon;
   final VoidCallback onTap;
-
-  /// Parks the hidden button below its resting spot (scroll-to-bottom) or
-  /// above it (scroll-to-top), so each slides toward the edge it sits nearest.
-  final bool slideFromBelow;
 
   @override
   Widget build(BuildContext context) {
@@ -744,11 +739,7 @@ class _ChatScrollButton extends StatelessWidget {
         child: AnimatedSlide(
           duration: const Duration(milliseconds: 180),
           curve: Curves.easeOutCubic,
-          offset: visible
-              ? Offset.zero
-              : (slideFromBelow
-                    ? const Offset(0, 0.2)
-                    : const Offset(0, -0.2)),
+          offset: visible ? Offset.zero : const Offset(0, 0.2),
           child: GestureDetector(
             onTap: onTap,
             child: Container(
@@ -2334,24 +2325,18 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                       sessionId: widget.state.session?.id,
                     ),
                   ),
-                  // Scroll-to-top: centred just under the header. It is gated on the
-                  // header's own hide-on-scroll (`!widget.isHeaderHidden`), so a
-                  // downward scroll takes it away with the header and an upward one
-                  // brings it back. Rendered after the status cards so it stays above
-                  // them; the centre of those cards is dead space, so it covers no
-                  // control. Suppressed while searching, like the bottom button.
+                  // Scroll-to-top: stacked directly above the scroll-to-bottom
+                  // button in the bottom-right corner. It is gated on the header's
+                  // own hide-on-scroll (`!widget.isHeaderHidden`), so a downward
+                  // scroll takes it away with the header and an upward one brings it
+                  // back. Suppressed while searching, like the bottom button.
                   Positioned(
-                    left: 0,
-                    right: 0,
-                    top: messageListTop + kContextCardHeaderGap,
-                    child: Align(
-                      alignment: Alignment.topCenter,
-                      child: _ChatScrollButton(
-                        visible: showScrollTopBtn,
-                        icon: Icons.keyboard_arrow_up_rounded,
-                        onTap: _scrollToTop,
-                        slideFromBelow: false,
-                      ),
+                    right: 16,
+                    bottom: messageListBottom + 16 + 44 + 8,
+                    child: _ChatScrollButton(
+                      visible: showScrollTopBtn,
+                      icon: Icons.keyboard_arrow_up_rounded,
+                      onTap: _scrollToTop,
                     ),
                   ),
                   // Bottom panel: drawer + input bar

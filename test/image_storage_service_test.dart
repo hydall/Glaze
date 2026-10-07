@@ -359,7 +359,7 @@ void main() {
       },
     );
 
-    test('recognizes staging and nightly sibling roots', () async {
+    test('recognizes a nightly sibling root', () async {
       final parent = await Directory.systemTemp.createTemp('glaze_channels_');
       addTearDown(() => parent.delete(recursive: true));
       final stable = Directory(p.join(parent.path, 'Glaze'));
@@ -368,19 +368,17 @@ void main() {
       await target.writeAsBytes([1]);
       final stableService = ImageStorageService(stable.path);
 
-      for (final root in ['Glaze-staging', 'Glaze-nightly']) {
-        final sibling = p.join(
-          parent.path,
-          root,
-          'gallery',
-          'char',
-          'image.png',
-        );
-        expect(
-          p.equals(stableService.absolutePath(sibling)!, target.path),
-          isTrue,
-        );
-      }
+      final sibling = p.join(
+        parent.path,
+        'Glaze-nightly',
+        'gallery',
+        'char',
+        'image.png',
+      );
+      expect(
+        p.equals(stableService.absolutePath(sibling)!, target.path),
+        isTrue,
+      );
     });
 
     test('empty and null are passed through', () {

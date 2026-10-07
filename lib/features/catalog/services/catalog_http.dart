@@ -6,10 +6,10 @@ import 'package:flutter/foundation.dart';
 const _timeout = Duration(seconds: 20);
 
 /// Browser User-Agent for the raw catalog Dio client. Without this, dart:io
-/// sends `Dart/x (dart:io)`, which Cloudflare / WAF-fronted hosts (jannyai.com,
-/// datacat.run) reject with 403. The janitor provider avoids this by routing
-/// through a real WebView; janny/datacat use this client directly, so they must
-/// carry a plausible browser UA themselves.
+/// sends `Dart/x (dart:io)`, which Cloudflare / WAF-fronted hosts
+/// (search.jannyai.com, datacat.run) reject with 403. Hosts behind a full
+/// managed challenge (janitorai.com, jannyai.com pages) can't be reached from
+/// Dio at all and go through their WebView proxies instead.
 const _catalogUA =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
     '(KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36';

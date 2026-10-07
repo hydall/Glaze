@@ -86,7 +86,6 @@ jobs:
 
           case "$BUILD_BRANCH" in
             stable)  BUILD_CHANNEL=stable  ;;
-            staging) BUILD_CHANNEL=staging ;;
             *)       BUILD_CHANNEL=nightly ;;
           esac
 
@@ -145,7 +144,6 @@ jobs:
         env:
           BUILD_CHANNEL: ${{ needs.metadata.outputs.build_channel }}
           DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
-          DROPBOX_APP_KEY_STAGING: ${{ secrets.DROPBOX_APP_KEY_STAGING }}
           DROPBOX_APP_KEY_NIGHTLY: ${{ secrets.DROPBOX_APP_KEY_NIGHTLY }}
           DROPBOX_REDIRECT_NATIVE: ${{ secrets.DROPBOX_REDIRECT_NATIVE }}
           GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
@@ -158,7 +156,6 @@ jobs:
           # _channelSubfolder in dropbox_adapter.dart. Both layouts work.
           case "$BUILD_CHANNEL" in
             stable)  CHANNEL_DROPBOX_KEY="" ;;
-            staging) CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_STAGING" ;;
             *)       CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_NIGHTLY" ;;
           esac
           {
@@ -332,7 +329,6 @@ jobs:
         env:
           BUILD_CHANNEL: ${{ needs.metadata.outputs.build_channel }}
           DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
-          DROPBOX_APP_KEY_STAGING: ${{ secrets.DROPBOX_APP_KEY_STAGING }}
           DROPBOX_APP_KEY_NIGHTLY: ${{ secrets.DROPBOX_APP_KEY_NIGHTLY }}
           DROPBOX_REDIRECT_NATIVE: ${{ secrets.DROPBOX_REDIRECT_NATIVE }}
           GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
@@ -345,7 +341,6 @@ jobs:
           # _channelSubfolder in dropbox_adapter.dart. Both layouts work.
           case "$BUILD_CHANNEL" in
             stable)  CHANNEL_DROPBOX_KEY="" ;;
-            staging) CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_STAGING" ;;
             *)       CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_NIGHTLY" ;;
           esac
           {
@@ -412,7 +407,6 @@ jobs:
         env:
           BUILD_CHANNEL: ${{ needs.metadata.outputs.build_channel }}
           DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
-          DROPBOX_APP_KEY_STAGING: ${{ secrets.DROPBOX_APP_KEY_STAGING }}
           DROPBOX_APP_KEY_NIGHTLY: ${{ secrets.DROPBOX_APP_KEY_NIGHTLY }}
           DROPBOX_REDIRECT_NATIVE: ${{ secrets.DROPBOX_REDIRECT_NATIVE }}
           GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
@@ -425,7 +419,6 @@ jobs:
           # _channelSubfolder in dropbox_adapter.dart. Both layouts work.
           case "$BUILD_CHANNEL" in
             stable)  CHANNEL_DROPBOX_KEY="" ;;
-            staging) CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_STAGING" ;;
             *)       CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_NIGHTLY" ;;
           esac
           {
@@ -475,7 +468,6 @@ jobs:
           set -euo pipefail
           case "$BUILD_CHANNEL" in
             stable)  SUFFIX="";         NAME="Glaze" ;;
-            staging) SUFFIX=".staging"; NAME="Glaze Staging" ;;
             *)       SUFFIX=".nightly"; NAME="Glaze Nightly" ;;
           esac
           printf 'BUNDLE_ID_SUFFIX = %s\nAPP_DISPLAY_NAME = %s\n' \
@@ -525,8 +517,8 @@ jobs:
     steps:
       - name: Install Arch build dependencies
         # base-devel brings makepkg/fakeroot for the pacman package. wpewebkit is
-        # the WebView engine; wpebackend-fdo is the plugin's fallback backend in
-        # case the distro build lacks the headless WPEPlatform. gstreamer and
+        # the WebView engine and ships the headless WPEPlatform the plugin uses
+        # (Arch dropped wpebackend-fdo, the plugin's legacy fallback). gstreamer and
         # gst-plugins-base-libs provide the pkg-config modules audioplayers_linux
         # requires. The rest is the Flutter Linux desktop toolchain.
         run: |
@@ -534,7 +526,7 @@ jobs:
             base-devel git curl unzip zip xz which zstd \
             clang cmake ninja pkgconf gtk3 libsecret wayland libepoxy \
             gstreamer gst-plugins-base-libs \
-            wpewebkit wpebackend-fdo
+            wpewebkit
           useradd -m builder
 
       - uses: actions/checkout@v4
@@ -545,7 +537,6 @@ jobs:
         env:
           BUILD_CHANNEL: ${{ needs.metadata.outputs.build_channel }}
           DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
-          DROPBOX_APP_KEY_STAGING: ${{ secrets.DROPBOX_APP_KEY_STAGING }}
           DROPBOX_APP_KEY_NIGHTLY: ${{ secrets.DROPBOX_APP_KEY_NIGHTLY }}
           DROPBOX_REDIRECT_NATIVE: ${{ secrets.DROPBOX_REDIRECT_NATIVE }}
           GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
@@ -553,7 +544,6 @@ jobs:
           set -euo pipefail
           case "$BUILD_CHANNEL" in
             stable)  CHANNEL_DROPBOX_KEY="" ;;
-            staging) CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_STAGING" ;;
             *)       CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_NIGHTLY" ;;
           esac
           {

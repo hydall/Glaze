@@ -1,6 +1,38 @@
 part of '../app_db.dart';
 
 extension _AppDatabaseIntegrityMigrations on AppDatabase {
+  /// Installs every index and integrity trigger of the current schema.
+  ///
+  /// Runs after `createAll` and after the last upgrade step, never from a
+  /// historical step: the helpers below describe the current schema, so a
+  /// step that predates one of their tables would abort the whole upgrade.
+  /// `Migrator.createTable` also skips a table's `@TableIndex` indexes, so
+  /// upgraded databases get those here.
+  Future<void> _ensureSchemaIntegrity() async {
+    final existing = (await customSelect(
+      "SELECT name FROM sqlite_master WHERE type = 'index'",
+    ).get()).map((row) => row.read<String>('name')).toSet();
+    for (final index in allSchemaEntities.whereType<Index>()) {
+      if (existing.contains(index.entityName)) continue;
+      final sql = index.createStatementsByDialect[SqlDialect.sqlite]!;
+      try {
+        await customStatement(sql);
+      } catch (error) {
+        // Rows written while an upgraded database lacked a unique index can
+        // violate it. Keep the database openable; the next upgrade retries.
+        if (!sql.startsWith('CREATE UNIQUE INDEX')) rethrow;
+        debugPrint('Unique index ${index.entityName} not created: $error');
+      }
+    }
+    await _createLorebookUseManifestImmutabilityTriggers();
+    await _createLorebookUseManifestIntegrityTriggers();
+    await _createLedgerReconciliationImmutabilityTriggers();
+    await _createCardEvolutionIntegrity();
+    await _createRewriteAuditIntegrity();
+    await _createSessionCanonIntegrity();
+    await _createLlmCallEventImmutabilityTrigger();
+  }
+
   Future<void> _createLorebookUseManifestImmutabilityTriggers() async {
     for (final table in const [
       'lorebook_use_manifests',
@@ -22,17 +54,6 @@ extension _AppDatabaseIntegrityMigrations on AppDatabase {
       'reconciliation_run_invalidations',
       'ledger_reconciliation_cursors',
     ]) {
-      // `ledger_reconciliation_effects` only arrives at v126, but this helper
-      // is also called from the older v90/v91 steps, where a trigger on a table
-      // that is not there yet aborts the whole upgrade (a genuine 0.7.x
-      // database predates the reconciliation schema entirely). The trigger is
-      // put on it by the v126 step instead.
-      final exists =
-          await customSelect(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '$table'",
-          ).getSingleOrNull() !=
-          null;
-      if (!exists) continue;
       await customStatement(
         'CREATE TRIGGER IF NOT EXISTS ${table}_no_update '
         'BEFORE UPDATE ON $table BEGIN '

@@ -359,11 +359,19 @@ class ImageGenConnectionService {
       ),
     );
     final status = response.statusCode ?? 0;
-    if (status < 200 || status >= 300) {
-      throw StateError('HTTP $status');
-    }
+    if (status < 200 || status >= 300) throw _badResponse(response);
     return response.data;
   }
+
+  /// A non-2xx answer as the [DioException] Dio itself would have thrown, so
+  /// [formatError] renders the status line plus the provider's reason instead
+  /// of a bare `HTTP 401`.
+  static DioException _badResponse(Response<dynamic> response) =>
+      DioException.badResponse(
+        statusCode: response.statusCode ?? 0,
+        requestOptions: response.requestOptions,
+        response: response,
+      );
 
   /// Minimal authenticated request that proves the rout.my key is accepted.
   /// `GET /v1/models` cannot be used: it is a public catalog that answers 200
@@ -387,24 +395,7 @@ class ImageGenConnectionService {
     );
     final status = response.statusCode ?? 0;
     if (status >= 200 && status < 300 || status == 403) return;
-    if (status == 401) {
-      throw StateError('Invalid rout.my API key (HTTP 401)');
-    }
-    throw StateError('HTTP $status${_errorMessage(response.data)}');
-  }
-
-  /// `error.message` from a rout.my error body, prefixed for a status line.
-  static String _errorMessage(dynamic data) {
-    if (data is Map) {
-      final error = data['error'];
-      if (error is Map) {
-        final message = error['message'];
-        if (message is String && message.trim().isNotEmpty) {
-          return ': ${message.trim()}';
-        }
-      }
-    }
-    return '';
+    throw _badResponse(response);
   }
 
   /// Both probes reuse the chat transports' normalization, so an endpoint

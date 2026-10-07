@@ -970,7 +970,12 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       isAborted: () => !_abortHandler.isCurrentGen(genId),
     );
 
-    final impersonationPrompt = service.resolveImpersonationPrompt(session.id);
+    // A guided run can stand on the guided-impersonation wrapper alone (it
+    // always has the default to fall back on), so a preset without a base
+    // impersonation prompt only blocks the unguided one.
+    final impersonationPrompt =
+        service.resolveImpersonationPrompt(session.id) ??
+        (_pendingImpersonationGuidance != null ? '' : null);
     if (impersonationPrompt == null) {
       ref.read(impersonationNeedsConfigProvider(arg).notifier).state = true;
       return;

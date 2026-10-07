@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'catalog_http.dart';
+import 'janny_webview_proxy.dart';
 import '../catalog_models.dart';
 
 const _searchUrl = 'https://search.jannyai.com/multi-search';
@@ -10,12 +11,14 @@ const _tokenKey = 'gz_janny_token';
 const _jannyImageCdn = 'https://image.jannyai.com/bot-avatars/';
 const _fallbackToken = '88a6463b66e04fb07ba87ee3db06af337f492ce511d93df6e2d2968cb2ff2b30';
 
+/// GETs a jannyai.com page or asset. The site is behind a Cloudflare managed
+/// challenge that Dio can never pass, so it goes through the WebView proxy.
+Future<String> _jannyGetText(String url) =>
+    JannyWebViewProxy.instance.fetchText(url);
+
 Future<String> _fetchSearchToken() async {
   try {
-    final html = await catalogGetText('$_baseUrl/characters/search', {
-      'Origin': _baseUrl,
-      'Referer': '$_baseUrl/',
-    });
+    final html = await _jannyGetText('$_baseUrl/characters/search');
 
     String? configPath;
     final configMatch = RegExp(r'client-config\.[a-zA-Z0-9_-]+\.js').firstMatch(html);
@@ -24,18 +27,14 @@ Future<String> _fetchSearchToken() async {
     } else {
       final spMatch = RegExp(r'SearchPage\.[a-zA-Z0-9_-]+\.js').firstMatch(html);
       if (spMatch != null) {
-        final spJs = await catalogGetText('$_baseUrl/_astro/${spMatch.group(0)}', {
-          'Referer': '$_baseUrl/',
-        });
+        final spJs = await _jannyGetText('$_baseUrl/_astro/${spMatch.group(0)}');
         final impMatch = RegExp(r'client-config\.[a-zA-Z0-9_-]+\.js').firstMatch(spJs);
         if (impMatch != null) configPath = '/_astro/${impMatch.group(0)}';
       }
     }
 
     if (configPath != null) {
-      final configJs = await catalogGetText('$_baseUrl$configPath', {
-        'Referer': '$_baseUrl/',
-      });
+      final configJs = await _jannyGetText('$_baseUrl$configPath');
       final tokenMatch = RegExp(r'"([a-f0-9]{64})"').firstMatch(configJs);
       if (tokenMatch != null) return tokenMatch.group(1)!;
     }
@@ -263,14 +262,8 @@ Future<DownloadedCharacter> jannyFetchCharacter(String characterId, String? slug
     effectiveSlug = 'character-$effectiveSlug';
   }
 
-  final html = await catalogGetText(
-    '$_baseUrl/characters/${characterId}_$effectiveSlug',
-    {
-      'Origin': 'https://jannyai.com',
-      'Referer': 'https://jannyai.com/',
-      'Accept': 'text/html',
-    },
-  );
+  final html =
+      await _jannyGetText('$_baseUrl/characters/${characterId}_$effectiveSlug');
 
   var astroMatch = RegExp(r'astro-island[^>]*component-export="CharacterButtons"[^>]*props="([^"]+)"').firstMatch(html);
   astroMatch ??= RegExp(r'astro-island[^>]*props="([^"]*character[^"]*)"').firstMatch(html);
