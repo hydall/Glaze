@@ -187,7 +187,7 @@
             "marker": false,
             "name": "Language",
             "role": "user",
-            "content": "<language>\nStory, dialogue, and character thoughts: Russian. Preserve setting-specific names and register; Russian does not imply a Russian or modern setting. Onomatopoeia, sounds, etc. must be adapt to Russian.\n</language>",
+            "content": "<language>\nStory, dialogue, and character thoughts: English. Preserve setting-specific names and register; English does not imply an English-speaking or modern setting. Onomatopoeia, sounds, etc. must be adapted to English.\n</language>",
             "injection_position": 0,
             "injection_depth": 0,
             "injection_order": 100,
