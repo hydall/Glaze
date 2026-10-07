@@ -92,6 +92,15 @@ All schema changes must update the registration/migration path in
 step; never modify existing column types without a migration. The current
 schema is **v131** with **56 registered tables**.
 
+Never install indexes or triggers from a versioned step. Add them to
+`_ensureSchemaIntegrity` (`migrations/database_integrity.dart`), which runs
+after `createAll` and after the last upgrade step: a helper that describes the
+current schema aborts the whole upgrade when an older step calls it before
+its table exists, and `Migrator.createTable` does not create `@TableIndex`
+indexes. `test/db_release_fixture_migration_test.dart` upgrades databases
+written by released builds and requires the result to match a fresh install;
+add a fixture for every stable release.
+
 Migration history:
 - v18: added `characters.picksHash`
 - v19: added `characters.createdAt` + data migration (`SET created_at = updated_at WHERE created_at = 0`)
@@ -237,6 +246,8 @@ Migration history:
   URLs.
 - v137: added `api_configs.tokenizer` TEXT DEFAULT 'auto' (per-connection
   tokenizer choice). The v136 table rebuild adds it first on older databases.
+- v140: no schema change. Runs `_ensureSchemaIntegrity` on v139 databases to
+  restore the `@TableIndex` indexes their earlier upgrades never created.
 
 ---
 

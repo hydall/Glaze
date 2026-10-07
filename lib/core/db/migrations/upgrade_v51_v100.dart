@@ -1053,7 +1053,6 @@ extension _AppDatabaseUpgradeV51ToV100 on AppDatabase {
       await m.createTable(lorebookUseManifests);
       await m.createTable(lorebookUseManifestEntries);
       await m.createTable(lorebookUseAcceptanceRecords);
-      await _createLorebookUseManifestImmutabilityTriggers();
     }
     if (from < 88) {
       // v87 used prompt_hash as part of the manifest identity. Rebuild the
@@ -1068,8 +1067,6 @@ extension _AppDatabaseUpgradeV51ToV100 on AppDatabase {
       await m.createTable(lorebookUseManifests);
       await m.createTable(lorebookUseManifestEntries);
       await m.createTable(lorebookUseAcceptanceRecords);
-      await _createLorebookUseManifestImmutabilityTriggers();
-      await _createLorebookUseManifestIntegrityTriggers();
     }
     if (from < 89) {
       // v88 called the provisional record a `generation` acceptance, but no
@@ -1093,22 +1090,19 @@ extension _AppDatabaseUpgradeV51ToV100 on AppDatabase {
         );
       }
       await customStatement('DELETE FROM lorebook_use_acceptance_records');
+      // alterTable rebuilds the table and drops its append-only trigger;
+      // `_ensureSchemaIntegrity` re-arms it after the last step.
       await m.alterTable(TableMigration(lorebookUseAcceptanceRecords));
-      // alterTable rebuilds the table and drops its append-only trigger.
-      await _createLorebookUseManifestImmutabilityTriggers();
-      await _createLorebookUseManifestIntegrityTriggers();
     }
     if (from < 90) {
       await m.createTable(ledgerReconciliationSuccessfulRuns);
       await m.createTable(ledgerReconciliationRunInvalidations);
       await m.createTable(ledgerReconciliationCursors);
-      await _createLedgerReconciliationImmutabilityTriggers();
     }
     if (from < 91) {
       // v90 accidentally rejected the empty predecessor required by the
       // genesis cursor. Rebuild to match the fresh-schema contract.
       await m.alterTable(TableMigration(ledgerReconciliationCursors));
-      await _createLedgerReconciliationImmutabilityTriggers();
     }
     if (from < 92) {
       await m.createTable(cardEvolutionClaims);
@@ -1121,7 +1115,6 @@ extension _AppDatabaseUpgradeV51ToV100 on AppDatabase {
         'ON card_evolution_claims (session_id, input_hash)',
       );
       await m.createTable(cardEvolutionProposalRuns);
-      await _createCardEvolutionIntegrity();
     }
     if (from < 93) {
       await m.createTable(sessionLorebookEvolutionRows);

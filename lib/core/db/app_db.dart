@@ -101,7 +101,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 139;
+  int get schemaVersion => 140;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -125,13 +125,7 @@ class AppDatabase extends _$AppDatabase {
           now,
         ],
       );
-      await _createLorebookUseManifestImmutabilityTriggers();
-      await _createLorebookUseManifestIntegrityTriggers();
-      await _createLedgerReconciliationImmutabilityTriggers();
-      await _createCardEvolutionIntegrity();
-      await _createRewriteAuditIntegrity();
-      await _createSessionCanonIntegrity();
-      await _createLlmCallEventImmutabilityTrigger();
+      await _ensureSchemaIntegrity();
     },
     onUpgrade: (Migrator m, int from, int to) async {
       await _upgradeV2ToV50(m, from);
@@ -145,6 +139,10 @@ class AppDatabase extends _$AppDatabase {
       await _upgradeV137(m, from);
       await _upgradeV138(m, from);
       await _upgradeV139(m, from);
+      // v140 has no step of its own: it brings databases already at v139
+      // through this pass, which restores the indexes and triggers their
+      // earlier upgrades missed.
+      await _ensureSchemaIntegrity();
     },
   );
 
