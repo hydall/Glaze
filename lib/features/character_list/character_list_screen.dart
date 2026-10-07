@@ -25,6 +25,7 @@ import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/glaze_action_button.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../shared/widgets/glaze_fab.dart';
 import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/glaze_tab_bar.dart';
 import '../../shared/widgets/swipe_tab_switcher.dart';
@@ -1667,8 +1668,8 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
 class _AddButton extends StatelessWidget {
   final VoidCallback onTap;
 
-  /// 48 as the button floating over the grid on mobile; 42 inline in the
-  /// desktop tabs row, where it lines up with the tab strip beside it.
+  /// 48 (the default) floats over the grid on mobile as a [GlazeFab]; 42 sits
+  /// inline in the desktop tabs row, lined up with the tab strip beside it.
   final double height;
 
   const _AddButton({required this.onTap, this.height = 48});
@@ -1676,6 +1677,13 @@ class _AddButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final compact = height < 48;
+    if (!compact) {
+      return GlazeFab(
+        label: 'btn_add'.tr(),
+        tooltip: 'btn_add'.tr(),
+        onTap: onTap,
+      );
+    }
     return GestureDetector(
       onTap: onTap,
       child: Container(
