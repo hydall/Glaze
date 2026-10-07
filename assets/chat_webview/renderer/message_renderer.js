@@ -17,7 +17,6 @@ import {
 } from './message_template.js';
 import { SHADOW_STYLE } from './shadow_style.js';
 import { DEFAULT_TYPING_TEXT } from './typing_phase.js';
-import { applyTtsState, createTtsPill } from './tts_pill.js';
 
 /* ============================================================
  * Renderer — produces DOM matching Glaze/src/components/chat/ChatMessage.vue
@@ -55,36 +54,6 @@ export class Renderer {
     // Held here rather than on the message map so a re-render (a preset switch,
     // a scrollback batch) keeps the rule without Flutter re-sending it.
     this.contextStartId = null;
-    // TTS voice pills. Held here, like contextStartId, so a full re-render
-    // redraws every pill without Flutter re-sending the states.
-    this.ttsEnabled = false;
-    this.ttsStates = new Map();
-  }
-
-  /**
-   * Adds, refreshes or removes the TTS pill under a message's header so it
-   * matches `ttsEnabled` and the message's entry in `ttsStates`.
-   */
-  syncTtsPill(section) {
-    if (!section || !section.classList) return;
-    let pill = section.querySelector(':scope > .msg-tts');
-    const id = section.dataset.messageId;
-    const eligible = this.ttsEnabled && id && id !== '__streaming__' &&
-      (section.classList.contains('char') || section.classList.contains('user')) &&
-      !section.classList.contains('error');
-    if (!eligible) {
-      if (pill) pill.remove();
-      return;
-    }
-    const state = this.ttsStates.get(id) || { s: 'idle' };
-    if (pill) {
-      applyTtsState(pill, state);
-      return;
-    }
-    pill = createTtsPill(id, state);
-    const header = section.querySelector(':scope > .msg-header');
-    if (header) header.after(pill);
-    else section.prepend(pill);
   }
 
   /** Sets which message opens the prompt window; '' or null clears the rule. */
@@ -188,9 +157,6 @@ if (messageData.isEditing) classes.push('editing');
 
     /* --- Header --- */
     section.appendChild(this._createHeader(messageData));
-
-    /* --- TTS voice pill (under avatar + name) --- */
-    if (this.ttsEnabled && !isTyping) this.syncTtsPill(section);
 
     /* --- Guidance block (header-level) --- */
     if (guidanceText) {

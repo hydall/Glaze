@@ -146,13 +146,6 @@ List<ToolsTileDef> buildToolsTileCatalog() => [
     defaultSize: ToolsTileSize.small,
   ),
   ToolsTileDef(
-    id: 'tts',
-    titleKey: 'tts_title',
-    subtitleKey: 'tts_subtitle',
-    icon: Icons.record_voice_over_outlined,
-    defaultSize: ToolsTileSize.small,
-  ),
-  ToolsTileDef(
     id: 'ext-blocks',
     titleKey: 'ext_blocks_title',
     subtitleKey: 'tools_ext_blocks_subtitle',

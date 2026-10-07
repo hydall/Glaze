@@ -78,8 +78,6 @@ const Map<String, HandlerSpec> bridgeHandlers = {
   'onToggleImageHidden': HandlerSpec(HandlerKind.stringArg),
   'onSelectionChange': HandlerSpec(HandlerKind.idList),
   'onInjectClick': HandlerSpec(HandlerKind.stringArg),
-  // TTS voice pill
-  'onTtsToggle': HandlerSpec(HandlerKind.stringArg),
   // Image generation
   'onImgRetry': HandlerSpec(HandlerKind.imageAction),
   'onImgEnableRetry': HandlerSpec(HandlerKind.imageAction),

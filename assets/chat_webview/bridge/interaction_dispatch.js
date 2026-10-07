@@ -270,7 +270,6 @@ export class InteractionDispatch {
     const bridge = this.bridge;
     return {
       'memory-click': (e, el) => bridge._sendToFlutter('onMemoryClick', [el.dataset.messageId]),
-      'tts-toggle': (e, el) => bridge._sendToFlutter('onTtsToggle', [el.dataset.messageId]),
       'inject-click': (e, el) => bridge._sendToFlutter('onInjectClick', [el.dataset.messageId]),
       'ext-blocks-run-all': (e, el) => bridge._sendToFlutter('onExtBlocksRunAll', [el.dataset.messageId]),
       'ext-block-stop': (e, el) => bridge._sendToFlutter('onExtBlockStop', [el.dataset.blockId, el.dataset.messageId]),
