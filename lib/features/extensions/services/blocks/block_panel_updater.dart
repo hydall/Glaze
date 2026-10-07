@@ -6,8 +6,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/block_config.dart';
 import '../../models/block_run_status.dart';
 import '../../models/info_block.dart';
+import '../../../../core/llm/regex_service.dart';
+import '../../../../core/models/character.dart';
+import '../../../../core/models/persona.dart';
+import '../../../../core/models/preset.dart';
+import '../../../../core/state/active_selection_provider.dart';
 import '../../../../core/state/character_provider.dart';
-import '../../../../core/state/persona_resolution.dart';
 import '../../providers/info_blocks_provider.dart';
 import '../../../chat/chat_provider.dart';
 import '../ext_blocks_panel_builder.dart';
@@ -67,7 +71,12 @@ class BlockPanelUpdater {
       }
       await bridge.showExtBlocksPanel(
         messageId,
-        _expandBlockPayloads(blocks, charId, sessionId),
+        _expandBlockPayloads(
+          blocks,
+          charId,
+          sessionId,
+          _ref.read(displayRegexesProvider).value ?? const [],
+        ),
         canRunAll: ExtBlocksPanelBuilder.canRunAll(blocks),
       );
     });
@@ -127,7 +136,12 @@ class BlockPanelUpdater {
         blockId: placeholder.blockId,
         swipeId: placeholder.swipeId,
         agentSwipeId: placeholder.agentSwipeId,
-        content: _expandContent(content, charId, sessionId),
+        content: _expandContent(
+          content,
+          charId,
+          sessionId,
+          _ref.read(displayRegexesProvider).value ?? const [],
+        ),
         status: BlockRunStatus.running.name,
       ),
     );
@@ -137,6 +151,7 @@ class BlockPanelUpdater {
     List<Map<String, dynamic>> blocks,
     String charId,
     String sessionId,
+    List<PresetRegex> displayRegexes,
   ) {
     return [
       for (final block in blocks)
@@ -147,19 +162,34 @@ class BlockPanelUpdater {
               block['content'] as String,
               charId,
               sessionId,
+              displayRegexes,
             ),
         },
     ];
   }
 
-  String _expandContent(String content, String charId, String sessionId) {
+  String _expandContent(
+    String content,
+    String charId,
+    String sessionId,
+    List<PresetRegex> displayRegexes,
+  ) {
     final character = _ref.read(characterByIdProvider(charId));
     final persona = _ref.read(
       effectivePersonaForChatProvider((charId: charId, sessionId: sessionId)),
     );
-    return expand(
+    final expanded = expand(
       content,
       MacroContext(character: character, persona: persona?.name),
+    );
+    final session = _ref.read(chatProvider(charId)).value?.session;
+    return applyExtBlockDisplayRegexes(
+      expanded,
+      character: character,
+      persona: persona,
+      sessionVars: session?.sessionVars ?? const {},
+      globalVars: _ref.read(globalVarsProvider),
+      displayRegexes: displayRegexes,
     );
   }
 
@@ -197,4 +227,38 @@ class BlockPanelUpdater {
       content: partial,
     );
   }
+}
+
+/// Runs the chat's display regexes over one block's rendered content.
+///
+/// The original extension appends block output to the message's `display_text`,
+/// which SillyTavern renders through the display regex pass (`isMarkdown: true`,
+/// placement AI_OUTPUT). That pass is what turns a tagged model reply into a
+/// styled card; without it a `markdownOnly` script never fires on a block, no
+/// matter what `applyRegex` says. The stored content stays raw — the transform
+/// happens here, on every render, so switching preset/character re-applies it.
+String applyExtBlockDisplayRegexes(
+  String content, {
+  required Character? character,
+  required Persona? persona,
+  required Map<String, String> sessionVars,
+  required Map<String, String> globalVars,
+  required List<PresetRegex> displayRegexes,
+}) {
+  if (displayRegexes.isEmpty || content.isEmpty || character == null) {
+    return content;
+  }
+  return applyRegexes(
+    content,
+    2,
+    1,
+    displayRegexes,
+    RegexApplyContext(
+      char: character,
+      persona: persona,
+      sessionVars: sessionVars,
+      globalVars: globalVars,
+    ),
+    isMarkdown: true,
+  );
 }

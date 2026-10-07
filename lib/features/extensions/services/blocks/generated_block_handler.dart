@@ -1,6 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/db/repositories/info_blocks_repository.dart';
+import '../../../../core/llm/regex_service.dart';
+import '../../../../core/state/active_selection_provider.dart';
+import '../../../chat/chat_provider.dart';
 import '../../models/block_config.dart';
 import '../../models/block_modes.dart';
 import '../../models/block_run_status.dart';
@@ -73,6 +76,14 @@ class GeneratedBlockHandler implements BlockHandler {
             persona: context.persona?.name,
             personaPrompt: context.persona?.prompt,
             previousOutput: context.previousOutput,
+            sessionVars:
+                ref
+                    .read(chatProvider(context.charId))
+                    .value
+                    ?.session
+                    ?.sessionVars ??
+                const {},
+            globalVars: ref.read(globalVarsProvider),
             contextPolicy: blockConfig.contextPolicy,
             mainModelContextSnapshot: context.mainModelContextSnapshot,
             personaModel: context.persona,
@@ -104,6 +115,15 @@ class GeneratedBlockHandler implements BlockHandler {
       _publish(context, content);
     }
 
+    // The original extension's `apply_regex`: after the block's reply is
+    // extracted, run it through the user's regex rules and store the result.
+    // It calls ST's `getRegexedString(content, AI_OUTPUT, { depth: 0,
+    // isPrompt: true })`, so the pass is the prompt one, at depth 0, before the
+    // content is stored and shown.
+    if (blockConfig.applyRegex) {
+      content = await _applyBlockRegexes(context, content);
+    }
+
     // Pictures, if the content asks for any. A block with no image tag never
     // touches the image pipeline, so this costs an ordinary infoblock nothing.
     content = await BlockImageRenderer(
@@ -126,6 +146,34 @@ class GeneratedBlockHandler implements BlockHandler {
     }
 
     return _finish(context, content);
+  }
+
+  /// Mirrors the original extension's `getRegexedString(content, 2, { depth: 0,
+  /// isPrompt: true })` for a block with `applyRegex`: the active prompt regex
+  /// set (active preset plus global scripts) runs at depth 0, and the
+  /// transformed text is what gets stored.
+  Future<String> _applyBlockRegexes(
+    BlockContext context,
+    String content,
+  ) async {
+    if (content.isEmpty) return content;
+    final regexes = await ref.read(activeRegexesProvider.future);
+    if (regexes.isEmpty) return content;
+    final session = ref.read(chatProvider(context.charId)).value?.session;
+    return applyRegexes(
+      content,
+      2,
+      2,
+      regexes,
+      RegexApplyContext(
+        char: context.character,
+        persona: context.persona,
+        sessionVars: session?.sessionVars ?? const {},
+        globalVars: ref.read(globalVarsProvider),
+        depth: 0,
+      ),
+      isPrompt: true,
+    );
   }
 
   /// Hands the block's markup to the sandboxed iframe host.
