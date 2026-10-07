@@ -3262,7 +3262,6 @@
   "vector_error_rebuild_failed": "Vector rebuild failed: {error}",
   "tts_title": "Text to Speech",
   "tts_subtitle": "Voice messages",
-  "tts_read_aloud": "Read aloud",
   "tts_disabled_placeholder": "Text to speech is off. Turn it on to voice messages.",
   "tts_provider": "Provider",
   "tts_local_server": "Local server",

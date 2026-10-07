@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:easy_localization/easy_localization.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
@@ -26,7 +25,6 @@ void showMessageContextMenu({
   required bool canDeleteSwipe,
   required bool canDeleteAgentSwipe,
   Future<bool> Function()? beforeRegenerate,
-  VoidCallback? onReadAloud,
 }) {
   // Notifier is read fresh inside each onTap callback instead of captured
   // here. If the provider is invalidated while the menu is open (e.g. by a
@@ -111,15 +109,6 @@ void showMessageContextMenu({
                 '/chat/${branch.characterId}?session=${branch.sessionIndex}',
               );
             }
-          },
-        ),
-      if (!isError && !isTyping && onReadAloud != null)
-        BottomSheetItem(
-          icon: Icons.record_voice_over_outlined,
-          label: 'tts_read_aloud'.tr(),
-          onTap: () {
-            Navigator.of(context, rootNavigator: true).pop();
-            onReadAloud();
           },
         ),
       BottomSheetItem(
