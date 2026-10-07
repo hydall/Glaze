@@ -61,11 +61,19 @@ List<MenuSearchEntry> buildSettingsSearchIndex() {
       open: (context) => goOrFloat(context, 'theme-settings', push: true),
     ),
     row(
-      'theme_mode',
-      'theme_title',
-      null,
+      'theme_follow_system',
+      'theme_follow_system',
+      'desc_theme_follow_system',
       Icons.brightness_6_outlined,
-      const ['dark', 'light', 'тёмная', 'светлая', 'тема'],
+      const [
+        'dark',
+        'light',
+        'system',
+        'тёмная',
+        'светлая',
+        'системная',
+        'тема',
+      ],
       groupKey: 'settings_group_appearance',
     ),
     row(

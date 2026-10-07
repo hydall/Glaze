@@ -11,13 +11,19 @@ part 'theme_preset.g.dart';
 /// be edited — only fonts and background/element effects are customisable.
 const String kMaterialYouPresetId = 'material_you';
 
+/// [ThemePreset.themeMode] values: the theme is dark, light, or follows the
+/// device.
+const String kThemeModeDark = 'dark';
+const String kThemeModeLight = 'light';
+const String kThemeModeSystem = 'system';
+
 @Freezed(fromJson: true, toJson: true)
 abstract class ThemePreset with _$ThemePreset {
   const factory ThemePreset({
     required String id,
     required String name,
     @Default('') String author,
-    @Default('dark') String themeMode,
+    @Default(kThemeModeDark) String themeMode,
     @Default('#C42A4A') String accentColor,
     @Default(0) double bgBlur,
     @Default(0.8) double elementOpacity,
@@ -189,6 +195,14 @@ extension ThemePresetX on ThemePreset {
 
   /// Built-in standard themes that always exist and cannot be deleted.
   bool get isBuiltIn => id == 'default' || id == kMaterialYouPresetId;
+
+  /// The brightness the preset is drawn in: the one set in the editor, or the
+  /// device's for a "same as device" preset ([kThemeModeSystem]).
+  Brightness brightnessOn(Brightness device) => switch (themeMode) {
+    kThemeModeLight => Brightness.light,
+    kThemeModeDark => Brightness.dark,
+    _ => device,
+  };
 }
 
 Color _parseHex(String hex) {

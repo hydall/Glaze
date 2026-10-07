@@ -297,6 +297,18 @@ class _GeneralTab extends StatelessWidget {
               onChanged: (v) =>
                   onUpdate((p) => p.copyWith(accentColor: v ?? '#C42A4A')),
             ),
+            if (!preset.isBuiltIn)
+              _FontModeRow(
+                label: 'theme_kind'.tr(),
+                mode: preset.themeMode,
+                modes: const [kThemeModeDark, kThemeModeLight, kThemeModeSystem],
+                modeLabels: [
+                  'theme_dark'.tr(),
+                  'theme_light'.tr(),
+                  'theme_kind_device'.tr(),
+                ],
+                onChanged: (v) => onUpdate((p) => p.copyWith(themeMode: v)),
+              ),
           ],
         ),
         MenuGroup(

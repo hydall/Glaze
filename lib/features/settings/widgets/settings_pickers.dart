@@ -11,30 +11,28 @@ import 'chat_layout_picker.dart';
 /// The bottom-sheet pickers behind the settings rows that carry a value rather
 /// than a switch. Extracted from the screen so it stays a thin orchestrator.
 
-String themeModeLabel(ThemeMode mode) => switch (mode) {
-  ThemeMode.dark => 'theme_dark'.tr(),
-  ThemeMode.light => 'theme_light'.tr(),
-  ThemeMode.system => 'theme_system'.tr(),
-};
-
-void showThemeModePicker(BuildContext context, WidgetRef ref) {
-  final current = ref.read(themeProvider).mode;
+/// Picks the theme used while the device is in the [slot] brightness.
+void showThemeSlotPicker(BuildContext context, WidgetRef ref, Brightness slot) {
+  final theme = ref.read(themeProvider);
+  final current = theme.slotPreset(slot).id;
   GlazeBottomSheet.show<void>(
     context,
-    title: 'theme_title'.tr(),
-    items: ThemeMode.values
+    title: slot == Brightness.dark
+        ? 'theme_dark_preset'.tr()
+        : 'theme_light_preset'.tr(),
+    items: theme.presets
         .map(
-          (mode) => BottomSheetItem(
-            label: themeModeLabel(mode),
-            icon: mode == current
+          (preset) => BottomSheetItem(
+            label: preset.name,
+            icon: preset.id == current
                 ? Icons.radio_button_checked
                 : Icons.radio_button_off,
-            iconColor: mode == current
+            iconColor: preset.id == current
                 ? context.cs.primary
                 : context.cs.onSurfaceVariant,
             onTap: () {
               Navigator.of(context, rootNavigator: true).pop();
-              ref.read(themeProvider.notifier).setMode(mode);
+              ref.read(themeProvider.notifier).setSlotPreset(slot, preset.id);
             },
           ),
         )
@@ -68,9 +66,7 @@ void showBatterySaverModePicker(
                 : context.cs.onSurfaceVariant,
             onTap: () {
               Navigator.of(context, rootNavigator: true).pop();
-              ref
-                  .read(appSettingsProvider.notifier)
-                  .setBatterySaverMode(mode);
+              ref.read(appSettingsProvider.notifier).setBatterySaverMode(mode);
             },
           ),
         )

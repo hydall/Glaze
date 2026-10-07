@@ -68,16 +68,35 @@ class _AppearanceGroup extends SettingsGroup {
           ),
           onTap: () => goOrFloat(context, 'theme-settings', push: true),
         ),
-        highlightIf(
-          'theme_mode',
-          highlightId,
-          MenuItem(
-            icon: Icons.brightness_6_outlined,
-            label: 'theme_title'.tr(),
-            value: themeModeLabel(theme.mode),
-            onTap: () => showThemeModePicker(context, ref),
-          ),
+        toggle(
+          id: 'theme_follow_system',
+          label: 'theme_follow_system'.tr(),
+          description: 'desc_theme_follow_system'.tr(),
+          value: theme.followSystem,
+          onChanged: (v) => ref.read(themeProvider.notifier).setFollowSystem(v),
         ),
+        if (theme.followSystem) ...[
+          highlightIf(
+            'theme_light_preset',
+            highlightId,
+            MenuItem(
+              icon: Icons.light_mode_outlined,
+              label: 'theme_light_preset'.tr(),
+              value: theme.slotPreset(Brightness.light).name,
+              onTap: () => showThemeSlotPicker(context, ref, Brightness.light),
+            ),
+          ),
+          highlightIf(
+            'theme_dark_preset',
+            highlightId,
+            MenuItem(
+              icon: Icons.dark_mode_outlined,
+              label: 'theme_dark_preset'.tr(),
+              value: theme.slotPreset(Brightness.dark).name,
+              onTap: () => showThemeSlotPicker(context, ref, Brightness.dark),
+            ),
+          ),
+        ],
         highlightIf(
           'chat_layout',
           highlightId,

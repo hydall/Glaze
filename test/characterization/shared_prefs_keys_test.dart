@@ -274,6 +274,9 @@ void main() {
         'feature_studio_enabled',
         'theme_presets',
         'theme_active_preset',
+        'theme_follow_system',
+        'theme_light_preset',
+        'theme_dark_preset',
         'gz_embedding_max_chunk_tokens',
         'presetsConnections',
       };
