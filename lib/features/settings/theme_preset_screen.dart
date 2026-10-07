@@ -158,6 +158,10 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
             p,
             p.id == activeId,
             theme.activePreset,
+            inLightSlot: theme.followSystem &&
+                p.id == theme.slotPreset(Brightness.light).id,
+            inDarkSlot: theme.followSystem &&
+                p.id == theme.slotPreset(Brightness.dark).id,
           ),
         ),
       ],
@@ -318,6 +322,8 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
     bool isActive,
     ThemePreset activePreset, {
     bool catalog = false,
+    bool inLightSlot = false,
+    bool inDarkSlot = false,
   }) {
     final cs = context.cs;
     final accent = preset.accent;
@@ -418,6 +424,27 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
                   ],
                 ),
               ),
+              // The device modes this theme is set for.
+              if (inLightSlot)
+                Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: Icon(
+                    Icons.light_mode_rounded,
+                    size: 18,
+                    color: labelColor,
+                    shadows: textShadows,
+                  ),
+                ),
+              if (inDarkSlot)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: Icon(
+                    Icons.dark_mode_rounded,
+                    size: 18,
+                    color: labelColor,
+                    shadows: textShadows,
+                  ),
+                ),
               if (catalog)
                 GestureDetector(
                   onTap: () => _installBuiltIn(preset),
@@ -639,7 +666,7 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
 
   Future<void> _openThemeEditor(ThemePreset preset, {required bool isActive}) async {
     if (!isActive) {
-      _applyPreset(preset);
+      await ref.read(themeProvider.notifier).applyPreset(preset);
     }
     if (!mounted) return;
     await _pushThemeEditor();
@@ -712,14 +739,10 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
     }
   }
 
-  void _applyPreset(ThemePreset preset) {
-    ref.read(themeProvider.notifier).applyPreset(preset);
-  }
-
   /// Applies a preset from a direct tap. For Material You, also offers the
   /// wallpaper-background permission prompt (Android only).
   Future<void> _selectPreset(ThemePreset preset) async {
-    _applyPreset(preset);
+    await ref.read(themeProvider.notifier).applyPreset(preset);
     if (preset.isMaterialYou) {
       await _promptWallpaperPermissionIfNeeded();
     }

@@ -83,8 +83,15 @@ import '../../core/state/db_provider.dart';
 import 'widgets/session_lifecycle_tracker.dart';
 import '../../shared/widgets/glaze_sheet.dart';
 
-String _chatWebViewThemeSyncKey(ThemePreset preset, String chatLayout) {
+String _chatWebViewThemeSyncKey(
+  ThemePreset preset,
+  String chatLayout,
+  Brightness brightness,
+) {
   return [
+    // A "same as device" theme repaints with different colors when only the
+    // brightness changes.
+    brightness.name,
     preset.id,
     preset.accentColor,
     preset.uiColor,
@@ -1795,6 +1802,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                         themeSyncKey: _chatWebViewThemeSyncKey(
                           preset,
                           preset.chatLayout,
+                          Theme.of(context).brightness,
                         ),
                         elementOpacity: preset.elementOpacity,
                         elementBlur: preset.elementBlur,

@@ -164,6 +164,15 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
   }
 
   @override
+  void didChangePlatformBrightness() {
+    ref
+        .read(themeProvider.notifier)
+        .setPlatformBrightness(
+          WidgetsBinding.instance.platformDispatcher.platformBrightness,
+        );
+  }
+
+  @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (!_startupReady) return;
     GenerationNotificationService.instance.updateLifecycleState(state);
@@ -356,11 +365,8 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
     final themeSettings = ref.watch(themeProvider);
     final uiFont = ref.watch(uiFontFamilyProvider).value;
     final preset = themeSettings.activePreset;
-    final mode = preset.themeMode == 'light'
-        ? ThemeMode.light
-        : preset.themeMode == 'dark'
-        ? ThemeMode.dark
-        : themeSettings.mode;
+    // The active theme's own type (dark / light / same as device) decides.
+    final mode = themeSettings.isDark ? ThemeMode.dark : ThemeMode.light;
     return DynamicColorBuilder(
       builder: (lightDynamic, darkDynamic) {
         // Material You dynamic colors are sourced from the system only on

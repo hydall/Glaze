@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show PlatformDispatcher;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/legacy.dart';
@@ -6,34 +7,91 @@ import 'package:flutter_riverpod/legacy.dart';
 import 'theme_preset.dart';
 import 'theme_preset_storage.dart';
 
+const _kDefaultPresetId = 'default';
+const _kDefaultPreset = ThemePreset(id: _kDefaultPresetId, name: 'Default');
+
+/// Theme state. [selectedPresetId] is the theme picked in the theme list;
+/// while [followSystem] is on, the slot for the device brightness overrides
+/// it. [activePreset] is the one that ends up on screen.
 class ThemeSettings {
-  final ThemeMode mode;
+  final bool followSystem;
+
+  /// The device brightness.
+  final Brightness platformBrightness;
+  final String selectedPresetId;
+  final String lightPresetId;
+  final String darkPresetId;
   final Color accentColor;
   final ThemePreset activePreset;
   final List<ThemePreset> presets;
   final bool ignoreCustomFont;
 
   const ThemeSettings({
-    this.mode = ThemeMode.dark,
+    this.followSystem = false,
+    this.platformBrightness = Brightness.dark,
+    this.selectedPresetId = _kDefaultPresetId,
+    this.lightPresetId = _kDefaultPresetId,
+    this.darkPresetId = _kDefaultPresetId,
     this.accentColor = const Color(0xFFC42A4A),
-    this.activePreset = const ThemePreset(id: 'default', name: 'Default'),
-    this.presets = const [ThemePreset(id: 'default', name: 'Default')],
+    this.activePreset = _kDefaultPreset,
+    this.presets = const [_kDefaultPreset],
     this.ignoreCustomFont = false,
   });
 
+  /// The brightness the app renders in: the active theme's own type. The
+  /// built-ins have no editable type, so they follow the device while the
+  /// slots do and stay dark otherwise, as they always have.
+  Brightness get brightness {
+    if (activePreset.isBuiltIn) {
+      return followSystem ? platformBrightness : Brightness.dark;
+    }
+    return activePreset.brightnessOn(platformBrightness);
+  }
+
+  bool get isDark => brightness == Brightness.dark;
+
+  String slotPresetId(Brightness slot) =>
+      slot == Brightness.dark ? darkPresetId : lightPresetId;
+
+  ThemePreset slotPreset(Brightness slot) =>
+      _presetOrDefault(presets, slotPresetId(slot));
+
+  ThemeSlots get slots => ThemeSlots(
+    followSystem: followSystem,
+    lightPresetId: lightPresetId,
+    darkPresetId: darkPresetId,
+  );
+
   ThemeSettings copyWith({
-    ThemeMode? mode,
+    bool? followSystem,
+    Brightness? platformBrightness,
+    String? selectedPresetId,
+    String? lightPresetId,
+    String? darkPresetId,
     Color? accentColor,
     ThemePreset? activePreset,
     List<ThemePreset>? presets,
     bool? ignoreCustomFont,
   }) => ThemeSettings(
-    mode: mode ?? this.mode,
+    followSystem: followSystem ?? this.followSystem,
+    platformBrightness: platformBrightness ?? this.platformBrightness,
+    selectedPresetId: selectedPresetId ?? this.selectedPresetId,
+    lightPresetId: lightPresetId ?? this.lightPresetId,
+    darkPresetId: darkPresetId ?? this.darkPresetId,
     accentColor: accentColor ?? this.accentColor,
     activePreset: activePreset ?? this.activePreset,
     presets: presets ?? this.presets,
     ignoreCustomFont: ignoreCustomFont ?? this.ignoreCustomFont,
   );
+}
+
+ThemePreset _presetOrDefault(List<ThemePreset> presets, String id) {
+  ThemePreset? fallback;
+  for (final p in presets) {
+    if (p.id == id) return p;
+    if (p.id == _kDefaultPresetId) fallback = p;
+  }
+  return fallback ?? (presets.isEmpty ? _kDefaultPreset : presets.first);
 }
 
 class ThemeNotifier extends StateNotifier<ThemeSettings> {
@@ -56,6 +114,7 @@ class ThemeNotifier extends StateNotifier<ThemeSettings> {
     Future<ThemePresetStore> Function()? storageFactory,
     this._persistenceDebounce = const Duration(milliseconds: 300),
     Future<void> Function(Duration)? delay,
+    Brightness? platformBrightness,
   }) : assert(storage == null || storageFactory == null),
        _storageFactory =
            storageFactory ??
@@ -63,7 +122,13 @@ class ThemeNotifier extends StateNotifier<ThemeSettings> {
                ? (() async => storage)
                : ThemePresetStorage.create),
        _delay = delay ?? Future<void>.delayed,
-       super(const ThemeSettings()) {
+       super(
+         ThemeSettings(
+           platformBrightness:
+               platformBrightness ??
+               PlatformDispatcher.instance.platformBrightness,
+         ),
+       ) {
     _init();
   }
 
@@ -89,35 +154,94 @@ class ThemeNotifier extends StateNotifier<ThemeSettings> {
   }
 
   Future<void> _load() async {
-    if (_storage == null) return;
-    final presets = await _storage!.loadAll();
-    final activeId = await _storage!.loadActiveId();
+    final storage = _storage;
+    if (storage == null) return;
+    final presets = await storage.loadAll();
+    final activeId = await storage.loadActiveId();
+    final slots = await storage.loadSlots();
     if (_disposed) return;
-    final active = presets.firstWhere(
-      (p) => p.id == activeId,
-      orElse: () => presets.first,
-    );
-    state = ThemeSettings(
-      mode: state.mode,
-      accentColor: active.accent,
-      activePreset: active,
-      presets: presets,
+    state = _resolve(
+      state.copyWith(
+        presets: presets,
+        selectedPresetId: activeId,
+        followSystem: slots?.followSystem ?? false,
+        // Until the slots are first set, both start on the current theme.
+        lightPresetId: slots?.lightPresetId ?? activeId,
+        darkPresetId: slots?.darkPresetId ?? activeId,
+      ),
     );
   }
 
-  Future<void> setMode(ThemeMode mode) async {
-    state = state.copyWith(mode: mode);
+  ThemeSettings _resolve(ThemeSettings s) {
+    final id = s.followSystem
+        ? s.slotPresetId(s.platformBrightness)
+        : s.selectedPresetId;
+    final active = _presetOrDefault(s.presets, id);
+    return s.copyWith(activePreset: active, accentColor: active.accent);
+  }
+
+  Future<void> _saveSlots() =>
+      _sequenceWrite(() => _storage!.saveSlots(state.slots));
+
+  /// Fed by the app root whenever the device switches light/dark.
+  void setPlatformBrightness(Brightness brightness) {
+    if (_disposed || brightness == state.platformBrightness) return;
+    state = _resolve(state.copyWith(platformBrightness: brightness));
+  }
+
+  Future<void> setFollowSystem(bool value) async {
+    await _awaitReady();
+    if (_disposed) return;
+    state = _resolve(state.copyWith(followSystem: value));
+    await _saveSlots();
+  }
+
+  /// Picks the theme for the device's light or dark mode.
+  Future<void> setSlotPreset(Brightness slot, String id) async {
+    await _awaitReady();
+    if (_disposed) return;
+    state = _resolve(
+      slot == Brightness.dark
+          ? state.copyWith(darkPresetId: id)
+          : state.copyWith(lightPresetId: id),
+    );
+    await _saveSlots();
   }
 
   Future<void> setAccentColor(Color color) async {
     state = state.copyWith(accentColor: color);
   }
 
+  /// Shows [preset]. While following the device it goes into the slot of the
+  /// current device brightness, so the tap is never a no-op.
   Future<void> applyPreset(ThemePreset preset) async {
     await _awaitReady();
     if (_disposed) return;
-    state = state.copyWith(accentColor: preset.accent, activePreset: preset);
+    var next = state.copyWith(selectedPresetId: preset.id);
+    if (next.followSystem) {
+      next = state.platformBrightness == Brightness.dark
+          ? next.copyWith(darkPresetId: preset.id)
+          : next.copyWith(lightPresetId: preset.id);
+    }
+    state = _resolve(next);
     await _sequenceWrite(() => _storage!.setActive(preset.id));
+    if (state.followSystem) await _saveSlots();
+  }
+
+  /// Back to the factory theme: Default, without following the device.
+  Future<void> resetToDefault() async {
+    await _awaitReady();
+    if (_disposed) return;
+    state = _resolve(
+      state.copyWith(
+        followSystem: false,
+        selectedPresetId: _kDefaultPresetId,
+        lightPresetId: _kDefaultPresetId,
+        darkPresetId: _kDefaultPresetId,
+      ),
+    );
+    await _sequenceWrite(() => _storage!.setActive(_kDefaultPresetId));
+    await _saveSlots();
   }
 
   Future<void> importPreset(ThemePreset preset) async {
@@ -126,7 +250,7 @@ class ThemeNotifier extends StateNotifier<ThemeSettings> {
     await _sequenceWrite(() => _storage!.addPreset(preset));
     final presets = await _storage!.loadAll();
     if (_disposed) return;
-    state = state.copyWith(presets: presets);
+    state = _resolve(state.copyWith(presets: presets));
   }
 
   Future<ThemePreset?> importPresetFromFile(
@@ -148,15 +272,16 @@ class ThemeNotifier extends StateNotifier<ThemeSettings> {
     await _sequenceWrite(() => _storage!.removePreset(id));
     final presets = await _storage!.loadAll();
     if (_disposed) return;
-    var active = state.activePreset;
-    if (active.id == id) {
-      active = presets.first;
-    }
-    state = state.copyWith(
-      presets: presets,
-      activePreset: active,
-      accentColor: active.accent,
+    String keep(String slotId) => slotId == id ? _kDefaultPresetId : slotId;
+    state = _resolve(
+      state.copyWith(
+        presets: presets,
+        selectedPresetId: keep(state.selectedPresetId),
+        lightPresetId: keep(state.lightPresetId),
+        darkPresetId: keep(state.darkPresetId),
+      ),
     );
+    await _saveSlots();
   }
 
   /// Live-update the active preset and persist it (mirrors JS auto-save on change).
@@ -181,11 +306,7 @@ class ThemeNotifier extends StateNotifier<ThemeSettings> {
     final updated = state.presets
         .map((p) => p.id == preset.id ? preset : p)
         .toList();
-    state = state.copyWith(
-      activePreset: preset,
-      accentColor: preset.accent,
-      presets: updated,
-    );
+    state = _resolve(state.copyWith(presets: updated));
     _pendingPresets = updated;
     final epoch = ++_debounceEpoch;
     unawaited(_persistAfterDebounce(epoch));

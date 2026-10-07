@@ -3,10 +3,35 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
+import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../application/sync_theme_store.dart';
 import 'theme_preset.dart';
+
+/// Themes picked per device brightness, used while [followSystem] is on.
+@immutable
+class ThemeSlots {
+  const ThemeSlots({
+    required this.followSystem,
+    required this.lightPresetId,
+    required this.darkPresetId,
+  });
+
+  final bool followSystem;
+  final String lightPresetId;
+  final String darkPresetId;
+
+  @override
+  bool operator ==(Object other) =>
+      other is ThemeSlots &&
+      other.followSystem == followSystem &&
+      other.lightPresetId == lightPresetId &&
+      other.darkPresetId == darkPresetId;
+
+  @override
+  int get hashCode => Object.hash(followSystem, lightPresetId, darkPresetId);
+}
 
 abstract interface class ThemePresetStore {
   Future<List<ThemePreset>> loadAll();
@@ -16,11 +41,18 @@ abstract interface class ThemePresetStore {
   Future<void> addPreset(ThemePreset preset);
   Future<void> removePreset(String id);
   Future<void> setActive(String id);
+
+  /// Null until the slots are first saved.
+  Future<ThemeSlots?> loadSlots();
+  Future<void> saveSlots(ThemeSlots slots);
 }
 
 class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
   static const _presetsKey = 'theme_presets';
   static const _activeKey = 'theme_active_preset';
+  static const _followSystemKey = 'theme_follow_system';
+  static const _lightSlotKey = 'theme_light_preset';
+  static const _darkSlotKey = 'theme_dark_preset';
 
   final SharedPreferences _prefs;
   ThemePresetStorage(this._prefs);
@@ -115,6 +147,25 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
 
   Future<void> saveActiveId(String id) async {
     await _prefs.setString(_activeKey, id);
+  }
+
+  @override
+  Future<ThemeSlots?> loadSlots() async {
+    final light = _prefs.getString(_lightSlotKey);
+    final dark = _prefs.getString(_darkSlotKey);
+    if (light == null || dark == null) return null;
+    return ThemeSlots(
+      followSystem: _prefs.getBool(_followSystemKey) ?? false,
+      lightPresetId: light,
+      darkPresetId: dark,
+    );
+  }
+
+  @override
+  Future<void> saveSlots(ThemeSlots slots) async {
+    await _prefs.setBool(_followSystemKey, slots.followSystem);
+    await _prefs.setString(_lightSlotKey, slots.lightPresetId);
+    await _prefs.setString(_darkSlotKey, slots.darkPresetId);
   }
 
   @override

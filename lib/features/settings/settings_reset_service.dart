@@ -1,6 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../shared/theme/built_in_themes.dart';
 import '../../shared/theme/theme_provider.dart';
 import 'app_settings_provider.dart';
 
@@ -29,6 +28,5 @@ Future<void> resetGlazeSettings(WidgetRef ref) async {
         ),
       );
 
-  final theme = ref.read(themeProvider.notifier);
-  await theme.applyPreset(kBuiltInThemes.first);
+  await ref.read(themeProvider.notifier).resetToDefault();
 }

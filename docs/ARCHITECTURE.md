@@ -1298,10 +1298,21 @@ feature-local adapters to `SyncService`.
 ### Files
 - `shared/theme/theme_preset.dart` — Freezed `ThemePreset` model
 - `shared/theme/theme_preset_storage.dart` — `ThemePresetStorage`: load/save/import presets (SharedPreferences)
-- `shared/theme/theme_provider.dart` — `ThemeNotifier`: loads active preset, generates `ThemeData`
+- `shared/theme/theme_provider.dart` — `ThemeNotifier`: theme mode, light/dark preset slots, resolves the active preset
 - `shared/theme/theme_font_provider.dart` — `ThemeFontNotifier`: loads Google Fonts async at startup
 - `shared/theme/app_colors.dart` — `AppColors.fromPreset()`: all palette slots with defaults
 - `shared/theme/app_theme.dart` — `AppTheme` builder: generates `ThemeData` + `ColorScheme` from preset
+
+### Theme type and device slots
+- A preset's brightness is its manually set `themeMode` (`dark`, `light`, or
+  `system` = same as device). The built-ins have no editable type: they follow
+  the device while slots are on and stay dark otherwise.
+- `ThemeSettings.selectedPresetId` is the theme picked in the list. With
+  `followSystem` on, `lightPresetId` / `darkPresetId` override it by the
+  device brightness, which `GlazeApp.didChangePlatformBrightness` feeds in;
+  picking a theme in the list then fills the slot of the current brightness.
+- Persisted as `theme_active_preset`, `theme_follow_system`,
+  `theme_light_preset`, `theme_dark_preset`.
 
 ### `updatePreset(ThemePreset preset)` flow
 1. `ThemeNotifier.updatePreset()` updates preview state immediately.
