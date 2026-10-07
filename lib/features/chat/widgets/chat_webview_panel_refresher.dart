@@ -2,12 +2,14 @@ import 'package:collection/collection.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/chat_message.dart';
+import '../../../core/state/active_selection_provider.dart';
 import '../../../core/state/character_provider.dart';
-import '../../../core/state/persona_resolution.dart';
 import '../../extensions/providers/info_blocks_provider.dart';
+import '../../extensions/services/blocks/block_panel_updater.dart';
 import '../../extensions/services/ext_blocks_panel_builder.dart';
 import '../../extensions/services/macro_expander.dart';
 import '../bridge/chat_bridge_controller.dart';
+import '../chat_provider.dart';
 
 /// Refresh / sync helpers for the inline ext-block panels rendered
 /// by the chat WebView. Extracted from `chat_webview_widget.dart` so
@@ -104,12 +106,21 @@ class ChatWebViewPanelRefresher {
       effectivePersonaForChatProvider((charId: charId, sessionId: sessionId)),
     );
     final macroCtx = MacroContext(character: character, persona: persona?.name);
+    final session = ref.read(chatProvider(charId)).value?.session;
+    final displayRegexes = ref.read(displayRegexesProvider).value ?? const [];
     return [
       for (final block in blocks)
         {
           ...block,
           if (block['content'] is String)
-            'content': expand(block['content'] as String, macroCtx),
+            'content': applyExtBlockDisplayRegexes(
+              expand(block['content'] as String, macroCtx),
+              character: character,
+              persona: persona,
+              sessionVars: session?.sessionVars ?? const {},
+              globalVars: ref.read(globalVarsProvider),
+              displayRegexes: displayRegexes,
+            ),
         },
     ];
   }
