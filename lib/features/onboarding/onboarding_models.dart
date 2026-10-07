@@ -54,8 +54,7 @@ List<OnboardingSlideData> buildOnboardingSlides({
   required bool includeNotifications,
 }) => <OnboardingSlideData>[
   for (final slide in _allOnboardingSlides)
-    if (slide.type != OnboardingSlideType.notifications ||
-        includeNotifications)
+    if (slide.type != OnboardingSlideType.notifications || includeNotifications)
       slide,
 ];
 
@@ -63,6 +62,7 @@ const _allOnboardingSlides = <OnboardingSlideData>[
   OnboardingSlideData(
     type: OnboardingSlideType.welcome,
     title: 'onboarding_welcome_title',
+    desc: 'onboarding_welcome_desc',
   ),
   OnboardingSlideData(
     type: OnboardingSlideType.features,
@@ -106,11 +106,11 @@ const _allOnboardingSlides = <OnboardingSlideData>[
   ),
 ];
 
-const onboardingIntroContent = <OnboardingInfoBlock>[
+const onboardingFeaturesContent = <OnboardingInfoBlock>[
   OnboardingInfoBlock(
     icon: Icons.layers_outlined,
-    title: 'onboarding_feature_roleplay_title',
-    desc: 'onboarding_feature_roleplay_desc',
+    title: 'onboarding_feature_friendly_title',
+    desc: 'onboarding_feature_friendly_desc',
   ),
   OnboardingInfoBlock(
     icon: Icons.link_rounded,
@@ -122,16 +122,10 @@ const onboardingIntroContent = <OnboardingInfoBlock>[
     title: 'onboarding_feature_privacy_title',
     desc: 'onboarding_feature_privacy_desc',
   ),
-];
-
-const onboardingFeaturesContent = <OnboardingInfoBlock>[
-  // First on the slide on purpose: the chat drawer is the one feature a new
-  // user cannot stumble into from the menu, and the Actions tab in particular
-  // is invisible until someone says it is there.
   OnboardingInfoBlock(
-    icon: Icons.bolt_outlined,
-    title: 'onboarding_feature_drawer_title',
-    desc: 'onboarding_feature_drawer_desc',
+    icon: Icons.travel_explore_rounded,
+    title: 'onboarding_feature_catalog_title',
+    desc: 'onboarding_feature_catalog_desc',
   ),
   OnboardingInfoBlock(
     icon: Icons.image_outlined,
