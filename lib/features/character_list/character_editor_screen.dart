@@ -263,12 +263,7 @@ class _CharacterEditorScreenState extends ConsumerState<CharacterEditorScreen> {
             alternateGreetings: alternateGreetings,
             updatedAt: currentTimestampSeconds(),
             createdAt: _original?.createdAt ?? currentTimestampSeconds(),
-            extensions: {
-              ...?_original?.extensions,
-              'talkativeness': item['talkativeness'] is num
-                  ? (item['talkativeness'] as num).toDouble()
-                  : 1.0,
-            },
+            extensions: _extensionsFor(item, _original?.extensions),
             depthPrompt: (item['depth_prompt'] as String?)?.trim() ?? '',
             depthPromptDepth: item['depth_prompt_depth'] as int? ?? 4,
             depthPromptRole: item['depth_prompt_role'] as String? ?? 'system',
@@ -321,11 +316,7 @@ class _CharacterEditorScreenState extends ConsumerState<CharacterEditorScreen> {
             alternateGreetings: alternateGreetings,
             updatedAt: currentTimestampSeconds(),
             createdAt: currentTimestampSeconds(),
-            extensions: {
-              'talkativeness': item['talkativeness'] is num
-                  ? (item['talkativeness'] as num).toDouble()
-                  : 1.0,
-            },
+            extensions: _extensionsFor(item, null),
             depthPrompt: (item['depth_prompt'] as String?)?.trim() ?? '',
             depthPromptDepth: item['depth_prompt_depth'] as int? ?? 4,
             depthPromptRole: item['depth_prompt_role'] as String? ?? 'system',
@@ -348,6 +339,36 @@ class _CharacterEditorScreenState extends ConsumerState<CharacterEditorScreen> {
     }
   }
 
+  /// Depths 0–20, plus the card's own value when an imported card uses a
+  /// deeper one, so the selector can still show it.
+  List<int> _depthOptions() {
+    final current = _item['depth_prompt_depth'];
+    return [
+      for (var i = 0; i <= 20; i++) i,
+      if (current is int && current > 20) current,
+    ];
+  }
+
+  /// The card extensions to save. The depth prompt and the linked lorebook
+  /// are stored there too (the repository writes the fields back into them),
+  /// so a value cleared in the editor has to leave the extensions as well.
+  Map<String, dynamic> _extensionsFor(
+    Map<String, dynamic> item,
+    Map<String, dynamic>? original,
+  ) {
+    final ext = <String, dynamic>{
+      ...?original,
+      'talkativeness': item['talkativeness'] is num
+          ? (item['talkativeness'] as num).toDouble()
+          : 1.0,
+    };
+    if ((item['depth_prompt'] as String?)?.trim().isEmpty ?? true) {
+      ext.remove('depth_prompt');
+    }
+    if ((item['world'] as String?)?.isEmpty ?? true) ext.remove('world');
+    return ext;
+  }
+
   String _getFieldLabel(String field) => switch (field) {
     'name' => 'label_name'.tr(),
     'creator' => 'placeholder_author_name'.tr(),
@@ -365,6 +386,8 @@ class _CharacterEditorScreenState extends ConsumerState<CharacterEditorScreen> {
       "${'block_chat_history'.tr()} ${'guidance_placeholder'.tr().replaceAll('...', '')}",
     'creator_notes' =>
       '${'onboarding_placeholder_desc'.tr().split(' ')[0]} ${'label_description'.tr()}',
+    'depth_prompt' =>
+      '${'label_depth'.tr()} ${'placeholder_prompt_text'.tr().replaceAll('...', '')}',
     _ =>
       field
           .replaceAll('_', ' ')
@@ -479,14 +502,34 @@ class _CharacterEditorScreenState extends ConsumerState<CharacterEditorScreen> {
         ],
       ),
       GenericEditorSection(
-        // No depth-prompt fields here: a character-scoped prompt at a fixed
-        // depth is what the preset's own blocks are for, and the three controls
-        // only ever sat in the way. The character still carries the values —
-        // they are part of the SillyTavern V2 card and are seeded, saved and
-        // exported untouched — so an imported card keeps its depth prompt and
-        // survives a round trip through this editor.
         title: 'section_advanced_settings'.tr(),
         fields: [
+          GenericEditorField(
+            key: 'depth_prompt',
+            label: _getFieldLabel('depth_prompt'),
+            type: 'textarea',
+            rows: 4,
+            expandable: true,
+          ),
+          GenericEditorField(
+            key: 'depth_prompt_role',
+            label: "${'label_depth'.tr()} ${'label_role'.tr()}",
+            type: 'select',
+            options: [
+              {'label': 'role_system'.tr(), 'value': 'system'},
+              {'label': 'role_user'.tr(), 'value': 'user'},
+              {'label': 'role_assistant'.tr(), 'value': 'assistant'},
+            ],
+          ),
+          GenericEditorField(
+            key: 'depth_prompt_depth',
+            label: 'label_depth'.tr(),
+            type: 'select',
+            options: [
+              for (final depth in _depthOptions())
+                {'label': '$depth', 'value': depth},
+            ],
+          ),
           GenericEditorField(
             key: 'world',
             label: 'menu_lorebooks'.tr(),
