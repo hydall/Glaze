@@ -7,7 +7,6 @@ import '../../core/glossary/glossary_models.dart';
 import '../../core/glossary/glossary_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glaze_spinner.dart';
-import '../../shared/widgets/glaze_text_field.dart';
 import '../../shared/widgets/sheet_view.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../settings/app_settings_provider.dart';
@@ -300,46 +299,38 @@ class _GlossarySheetState extends ConsumerState<GlossarySheet> {
   }
 
   Widget _buildSearchBar(BuildContext context) {
-    return GlassSurface(
-      borderRadius: BorderRadius.circular(14),
-      border: Border.all(color: context.cs.outlineVariant),
-      child: Container(
-        height: 44,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        child: Row(
-          children: [
-            Icon(Icons.search, size: 18, color: context.cs.onSurfaceVariant),
-            const SizedBox(width: 8),
-            Expanded(
-              child: GlazeTextField(
-                controller: _searchCtrl,
-                onChanged: (v) => setState(() => _query = v),
-                hint: _safeTr('search', fallback: 'Search...'),
-                isDense: true,
-              ),
-            ),
-            if (_query.trim().isNotEmpty)
-              GestureDetector(
-                onTap: () {
+    return TextField(
+      controller: _searchCtrl,
+      onChanged: (v) => setState(() => _query = v),
+      style: TextStyle(color: context.cs.onSurface, fontSize: 14),
+      decoration: InputDecoration(
+        hintText: _safeTr('search', fallback: 'Search...'),
+        hintStyle: TextStyle(
+          color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
+        ),
+        prefixIcon: Icon(
+          Icons.search,
+          size: 18,
+          color: context.cs.onSurfaceVariant,
+        ),
+        suffixIcon: _query.trim().isEmpty
+            ? null
+            : IconButton(
+                icon: Icon(
+                  Icons.close,
+                  size: 16,
+                  color: context.cs.onSurfaceVariant,
+                ),
+                onPressed: () {
                   _searchCtrl.clear();
                   setState(() => _query = '');
                 },
-                child: Container(
-                  width: 22,
-                  height: 22,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.1),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    Icons.close,
-                    size: 14,
-                    color: context.cs.onSurfaceVariant,
-                  ),
-                ),
               ),
-          ],
-        ),
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(vertical: 10),
+        filled: true,
+        fillColor: Colors.white.withValues(alpha: 0.05),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
   }
