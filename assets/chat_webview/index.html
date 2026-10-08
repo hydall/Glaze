@@ -61,22 +61,12 @@
       transition: opacity 0.2s;
       pointer-events: none;
     }
-    #loading-screen .app-loader-spinner {
-      width: 40px;
-      height: 40px;
-      border: 3px solid rgba(255, 255, 255, 0.1);
-      border-top-color: var(--primary-color, #c42a4a);
-      border-radius: 50%;
-      animation: loaderSpin 0.8s linear infinite;
-    }
-    @keyframes loaderSpin {
-      to { transform: rotate(360deg); }
-    }
   </style>
   <link rel="stylesheet" href="styles.css">
+  <script src="loading_spinner.js"></script>
 </head>
 <body>
-  <div id="loading-screen"><div class="app-loader-spinner"></div></div>
+  <div id="loading-screen"><glaze-spinner></glaze-spinner></div>
   <div id="chat-container" class="layout-default"></div>
 
   <script type="module" src="formatter/index.js"></script>

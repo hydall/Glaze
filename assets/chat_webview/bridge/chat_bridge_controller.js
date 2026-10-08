@@ -714,7 +714,7 @@ export class Bridge {
     if (!loading) {
       loading = document.createElement('div');
       loading.id = 'loading-screen';
-      loading.textContent = 'Loading...';
+      loading.appendChild(document.createElement('glaze-spinner'));
       document.body.insertBefore(loading, document.body.firstChild);
     }
     loading.style.opacity = '1';
