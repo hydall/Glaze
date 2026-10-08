@@ -403,6 +403,46 @@ void main() {
       expect(result!.extensions.containsKey('depth_prompt'), isTrue);
     });
 
+    test('depth prompt and world link survive put/getById', () async {
+      await repo.put(
+        Character(
+          id: 'c2',
+          name: 'Depth',
+          depthPrompt: 'Stay curious.',
+          depthPromptDepth: 2,
+          depthPromptRole: 'user',
+          world: 'Book',
+        ),
+      );
+      final saved = await repo.getById('c2');
+      expect(saved!.depthPrompt, 'Stay curious.');
+      expect(saved.depthPromptDepth, 2);
+      expect(saved.depthPromptRole, 'user');
+      expect(saved.world, 'Book');
+      expect(saved.extensions['depth_prompt'], {
+        'prompt': 'Stay curious.',
+        'depth': 2,
+        'role': 'user',
+      });
+
+      // A card that only carries the extension (every importer before this
+      // fix) reads back with the fields filled in.
+      await repo.put(
+        Character(
+          id: 'c3',
+          name: 'Legacy',
+          extensions: {
+            'depth_prompt': {'prompt': 'Old', 'depth': 6},
+            'world': 'Legacy Book',
+          },
+        ),
+      );
+      final legacy = await repo.getById('c3');
+      expect(legacy!.depthPrompt, 'Old');
+      expect(legacy.depthPromptDepth, 6);
+      expect(legacy.world, 'Legacy Book');
+    });
+
     test('watchAll emits updates', () async {
       final stream = repo.watchAll();
 

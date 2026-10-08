@@ -19,16 +19,13 @@ import 'image_storage_service.dart';
 enum BackupFormat { legacyJsonGlaze, flutterZip, sillyTavernZip, tavoZip }
 
 class BackupService {
-  /// Master switch for Tavo (`.tbk`) backup import.
+  /// Master switch for Tavo (`.tbk`) backup import. Turning it off hides the
+  /// format in the UI and stops detection here, so a Tavo archive is rejected
+  /// as an unsupported ZIP.
   ///
-  /// Disabled: the format is not advertised in the UI and is not detected
-  /// here, so a Tavo archive is rejected as an unsupported ZIP. The importer
-  /// ([TavoBackupImporter]), its LMDB reader and [BackupFormat.tavoZip] stay
-  /// in the tree — flipping this back to `true` re-enables the whole path.
-  ///
-  /// Deliberately `final` rather than `const` so the disabled branch is not
-  /// treated as dead code by the analyzer.
-  static final bool tavoImportEnabled = false;
+  /// Deliberately `final` rather than `const` so neither branch is treated as
+  /// dead code by the analyzer.
+  static final bool tavoImportEnabled = true;
 
   static const _zipMagic = [0x50, 0x4B, 0x03, 0x04];
   static const _legacyV1JsonGlazeMaxBytes = 4;
@@ -87,6 +84,20 @@ class BackupService {
         break;
     }
     await _db.purgeRetiredAgenticMicroMemory();
+  }
+
+  /// What [filePath] is and what of it will not come over, when it is a Tavo
+  /// backup, so the UI can say so before the restore clears anything; null
+  /// for any other file.
+  Future<TavoBackupInspection?> inspectTavoBackup(String filePath) async {
+    if (!tavoImportEnabled) return null;
+    try {
+      if (await _detectFormat(filePath) != BackupFormat.tavoZip) return null;
+    } on FormatException {
+      return null;
+    }
+    final archive = ZipDecoder().decodeStream(InputFileStream(filePath));
+    return TavoBackupInspection.fromArchive(archive);
   }
 
   Future<BackupFormat> _detectFormat(String filePath) async {

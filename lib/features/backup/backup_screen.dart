@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app.dart';
 import '../../core/services/backup/backup_cancel.dart';
+import '../../core/services/backup/tavo_backup_importer.dart';
+import '../../core/services/backup_service.dart';
 import '../../core/services/onboarding_service.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
@@ -132,10 +134,13 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
     }
   }
 
-  /// Extensions the picker offers, in sync with what `BackupService` still
-  /// accepts. `tbk` (Tavo) is omitted while `BackupService.tavoImportEnabled`
-  /// is off.
-  static const List<String> _importExtensions = ['glz', 'json', 'zip'];
+  /// Extensions the picker offers, in sync with what `BackupService` accepts.
+  static final List<String> _importExtensions = [
+    'glz',
+    'json',
+    'zip',
+    if (BackupService.tavoImportEnabled) 'tbk',
+  ];
 
   Future<void> _triggerImport() async {
     final result = await FilePicker.pickFiles(
@@ -148,13 +153,23 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
     final path = result.files.single.path;
     if (path == null) return;
 
+    TavoBackupInspection? tavo;
+    try {
+      tavo = await (await ref.read(
+        backupServiceProvider.future,
+      )).inspectTavoBackup(path);
+    } catch (_) {
+      // An unreadable backup fails the import itself, with the real error.
+    }
     if (!mounted) return;
     final confirmed = await GlazeBottomSheet.show<bool>(
       context,
       title: 'confirm_restore'.tr(),
-      bigInfo: const BottomSheetBigInfo(
+      bigInfo: BottomSheetBigInfo(
         icon: Icons.warning_amber_rounded,
-        description: '', // Desc is already in title of confirm_restore
+        // The title already asks the question; the body only carries what a
+        // Tavo backup needs said before its restore.
+        description: tavo == null ? '' : _tavoNotice(tavo),
       ),
       items: [
         BottomSheetItem(
@@ -235,6 +250,54 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
     }
   }
 
+  /// The version warning and the list of what will not come over, for the
+  /// restore confirmation of a Tavo backup.
+  String _tavoNotice(TavoBackupInspection tavo) {
+    final parts = <String>[
+      if (!tavo.info.isTested)
+        'backup_tavo_version_warning'.tr(
+          namedArgs: {
+            'version': tavo.info.appVersion ?? '?',
+            'format': '${tavo.info.databaseFormat ?? '?'}',
+            'tested_version': TavoBackupInfo.testedAppVersion,
+            'tested_format': '${TavoBackupInfo.testedDatabaseFormat}',
+          },
+        ),
+    ];
+    if (tavo.skipped.isNotEmpty) {
+      parts.add(
+        [
+          'backup_tavo_skipped_title'.tr(),
+          for (final item in tavo.skipped) '• ${_tavoSkippedLine(item)}',
+        ].join('\n'),
+      );
+    }
+    return parts.join('\n\n');
+  }
+
+  static String _tavoSkippedLine(TavoSkipped item) {
+    final key = switch (item.kind) {
+      TavoSkippedKind.groupChats => 'backup_tavo_skipped_group_chats',
+      TavoSkippedKind.endpointHeaders => 'backup_tavo_skipped_headers',
+      TavoSkippedKind.rerollsNeedFullBackup => 'backup_tavo_skipped_rerolls',
+      TavoSkippedKind.chatScenarios => 'backup_tavo_skipped_scenarios',
+      TavoSkippedKind.chatOverrides => 'backup_tavo_skipped_chat_overrides',
+      TavoSkippedKind.attachments => 'backup_tavo_skipped_attachments',
+      TavoSkippedKind.translations => 'backup_tavo_skipped_translations',
+      TavoSkippedKind.variables => 'backup_tavo_skipped_variables',
+      TavoSkippedKind.chatThemes => 'backup_tavo_skipped_themes',
+      TavoSkippedKind.plugins => 'backup_tavo_skipped_plugins',
+      TavoSkippedKind.otherEndpoints => 'backup_tavo_skipped_other_endpoints',
+    };
+    final line = key.tr();
+    if (item.names.isNotEmpty) {
+      final shown = item.names.take(3).map((n) => n.isEmpty ? '?' : n);
+      final more = item.names.length > 3 ? ' +${item.names.length - 3}' : '';
+      return '$line: ${shown.join(', ')}$more';
+    }
+    return item.count > 0 ? '$line: ${item.count}' : line;
+  }
+
   Future<void> _cancelImport() async {
     final service = await ref.read(backupServiceProvider.future);
     service.cancelImport();
@@ -291,11 +354,9 @@ class _NormalView extends StatelessWidget {
               const SizedBox(height: 4),
               _Hint(
                 lines: [
-                  // Tavo (.tbk) is hidden while
-                  // `BackupService.tavoImportEnabled` is off — the
-                  // `backup_hint_import_tavo` string stays in the translations
-                  // for when the format comes back.
                   _HintLine.markup('backup_hint_import_st'.tr()),
+                  if (BackupService.tavoImportEnabled)
+                    _HintLine.markup('backup_hint_import_tavo'.tr()),
                   _HintLine.markup('backup_hint_import_glaze'.tr()),
                 ],
               ),

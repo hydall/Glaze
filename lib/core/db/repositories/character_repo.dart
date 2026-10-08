@@ -555,6 +555,8 @@ class CharacterRepo implements SyncCharacterStore {
         ? Map<String, dynamic>.from(jsonDecode(c.extensionsJson!) as Map)
         : <String, dynamic>{};
     final rawDisplayName = extensions.remove('displayName');
+    final depthPrompt = _depthPromptOf(extensions);
+    final world = extensions['world'];
 
     return Character(
       id: c.charId,
@@ -590,6 +592,10 @@ class CharacterRepo implements SyncCharacterStore {
       fav: c.fav,
       extensions: extensions,
       characterVersion: c.characterVersion,
+      depthPrompt: depthPrompt.prompt,
+      depthPromptDepth: depthPrompt.depth,
+      depthPromptRole: depthPrompt.role,
+      world: world is String && world.isNotEmpty ? world : null,
       macroName: c.macroName,
       picksHash: c.picksHash,
       tokenCount: c.tokenCount,
@@ -637,8 +643,27 @@ class CharacterRepo implements SyncCharacterStore {
     return relativeGlazeFilePath(path);
   }
 
+  /// The depth prompt and the linked lorebook have no columns of their own:
+  /// they live in the extensions, under the SillyTavern V2 card keys, and the
+  /// model fields are read from there. A field left at its default leaves the
+  /// extension as the caller passed it, so code that only sets the extensions
+  /// keeps working; clearing one means removing the key (the editor does).
   String? _encodeCharacterExtensions(Character m) {
     final extensions = Map<String, dynamic>.from(m.extensions);
+    if (m.depthPrompt.isNotEmpty) {
+      final current = _depthPromptOf(extensions);
+      if (current.prompt != m.depthPrompt ||
+          current.depth != m.depthPromptDepth ||
+          current.role != m.depthPromptRole) {
+        extensions['depth_prompt'] = {
+          'prompt': m.depthPrompt,
+          'depth': m.depthPromptDepth,
+          'role': m.depthPromptRole,
+        };
+      }
+    }
+    final world = m.world;
+    if (world != null && world.isNotEmpty) extensions['world'] = world;
     final displayName = m.displayName?.trim();
     if (displayName != null && displayName.isNotEmpty) {
       extensions['displayName'] = displayName;
@@ -646,6 +671,21 @@ class CharacterRepo implements SyncCharacterStore {
       extensions.remove('displayName');
     }
     return extensions.isNotEmpty ? jsonEncode(extensions) : null;
+  }
+
+  static ({String prompt, int depth, String role}) _depthPromptOf(
+    Map<String, dynamic> extensions,
+  ) {
+    final dp = extensions['depth_prompt'];
+    if (dp is! Map) return (prompt: '', depth: 4, role: 'system');
+    final prompt = dp['prompt'];
+    final depth = dp['depth'];
+    final role = dp['role'];
+    return (
+      prompt: prompt is String ? prompt : '',
+      depth: depth is num ? depth.toInt() : 4,
+      role: role is String && role.isNotEmpty ? role : 'system',
+    );
   }
 
   Map<String, dynamic> _decodeJsonMap(String? text) {
