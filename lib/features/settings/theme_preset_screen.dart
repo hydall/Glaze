@@ -12,6 +12,7 @@ import '../../../core/platform/wallpaper.dart';
 import '../../../core/services/file_export_service.dart';
 import '../../../shared/shell/desktop/desktop_floating_provider.dart';
 import '../../../shared/shell/nav_height_provider.dart';
+import '../../../shared/shell/shell_header_provider.dart';
 import '../../../shared/state/preset_sort.dart';
 import '../../../shared/theme/built_in_themes.dart';
 import '../../../shared/theme/theme_font_provider.dart';
@@ -30,6 +31,9 @@ import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/list_controls.dart';
 import 'theme_editor_screen.dart';
 import 'theme_preset_sort.dart';
+
+/// Height of the pill [GlazeTabBar] floating over the lists.
+const double _kTabBarHeight = 42;
 
 class ThemePresetScreen extends ConsumerStatefulWidget {
   const ThemePresetScreen({super.key});
@@ -53,51 +57,65 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
   Widget build(BuildContext context) {
     final theme = ref.watch(themeProvider);
     final bottomPad = ref.watch(navHeightProvider) + 20;
+    // The lists run under the shell header and the tab strip, the way the
+    // preset SheetView's list runs under its header: both are glass, so the
+    // cards stay visible (blurred) behind them as they scroll past. Inside a
+    // desktop window the window's title bar is the header and nothing is
+    // reserved for one here (see GlazeScaffold).
+    final headerBottom = DetachedShellHost.drawsChrome(context)
+        ? 0.0
+        : MediaQuery.paddingOf(context).top + 66;
+    final tabBarTop = headerBottom + 12;
+    final listTop = tabBarTop + _kTabBarHeight + 12;
 
     return GlazeScaffold(
       title: 'theme_presets'.tr(),
       useShellHeader: true,
       headerBranchIndex: 3,
+      extendBodyBehindHeader: true,
       onBack: () => Navigator.pop(context),
       body: Stack(
         children: [
-          Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                child: GlazeTabBar(
-                  tabs: [
-                    GlazeTabItem(
-                      label: 'theme_tab_my'.tr(),
-                      icon: Icons.palette_outlined,
-                    ),
-                    GlazeTabItem(
-                      label: 'theme_tab_built_in'.tr(),
-                      icon: Icons.auto_awesome_outlined,
+          Positioned.fill(
+            child: SwipeTabSwitcher(
+              index: _activeTab,
+              length: 2,
+              onChanged: (i) => setState(() => _activeTab = i),
+              child: TabSlideSwitcher(
+                index: _activeTab,
+                child: IndexedStack(
+                  index: _activeTab,
+                  children: [
+                    _buildMyThemesList(context, theme, listTop, bottomPad),
+                    _buildBuiltInList(
+                      context,
+                      theme.activePreset,
+                      listTop,
+                      bottomPad,
                     ),
                   ],
-                  activeIndex: _activeTab,
-                  onChanged: (i) => setState(() => _activeTab = i),
                 ),
               ),
-              Expanded(
-                child: SwipeTabSwitcher(
-                  index: _activeTab,
-                  length: 2,
-                  onChanged: (i) => setState(() => _activeTab = i),
-                  child: TabSlideSwitcher(
-                    index: _activeTab,
-                    child: IndexedStack(
-                      index: _activeTab,
-                      children: [
-                        _buildMyThemesList(context, theme, bottomPad),
-                        _buildBuiltInList(context, theme.activePreset, bottomPad),
-                      ],
-                    ),
-                  ),
+            ),
+          ),
+          Positioned(
+            top: tabBarTop,
+            left: 16,
+            right: 16,
+            child: GlazeTabBar(
+              tabs: [
+                GlazeTabItem(
+                  label: 'theme_tab_my'.tr(),
+                  icon: Icons.palette_outlined,
                 ),
-              ),
-            ],
+                GlazeTabItem(
+                  label: 'theme_tab_built_in'.tr(),
+                  icon: Icons.auto_awesome_outlined,
+                ),
+              ],
+              activeIndex: _activeTab,
+              onChanged: (i) => setState(() => _activeTab = i),
+            ),
           ),
           // The add/import FAB only applies to the user's own theme list.
           if (_activeTab == 0)
@@ -114,6 +132,7 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
   Widget _buildMyThemesList(
     BuildContext context,
     ThemeSettings theme,
+    double padTop,
     double padBottom,
   ) {
     final activeId = theme.activePreset.id;
@@ -121,7 +140,7 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
         ref.watch(themePresetSortProvider).value ?? const PresetSortState();
     final presets = sortThemePresets(theme.presets, sortState);
     return ListView(
-      padding: EdgeInsets.only(bottom: padBottom + 60),
+      padding: EdgeInsets.only(top: padTop, bottom: padBottom + 60),
       children: [
         _buildFontToggle(context),
         Padding(
@@ -172,14 +191,18 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
   Widget _buildBuiltInList(
     BuildContext context,
     ThemePreset activePreset,
+    double topPad,
     double bottomPad,
   ) {
     final catalog = ref.watch(builtInThemesProvider);
     if (catalog.isEmpty) {
-      return _buildBuiltInEmptyState(context);
+      return Padding(
+        padding: EdgeInsets.only(top: topPad),
+        child: _buildBuiltInEmptyState(context),
+      );
     }
     return ListView(
-      padding: EdgeInsets.only(top: 8, bottom: bottomPad + 60),
+      padding: EdgeInsets.only(top: topPad, bottom: bottomPad + 60),
       children: [
         ...catalog.map(
           (p) => _buildPresetTile(
