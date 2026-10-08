@@ -1880,6 +1880,10 @@
   margin: 0 0 10px;
   user-select: none;
 }
+/* Under the newest message: the prompt carries none of the chat. */
+.context-limit-marker.after {
+  margin: 10px 0 0;
+}
 .context-limit-marker .date-separator-line {
   background: rgba(224, 160, 48, 0.35);
 }

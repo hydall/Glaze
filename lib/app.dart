@@ -10,6 +10,7 @@ import 'package:go_router/go_router.dart';
 
 import 'package:glaze_flutter/core/llm/prompt_worker.dart';
 import 'package:glaze_flutter/core/llm/tokenizer.dart';
+import 'core/models/api_config.dart';
 import 'core/navigation/router.dart';
 import 'core/navigation/rewrite_review_navigation.dart';
 import 'core/services/deep_link_service.dart';
@@ -276,6 +277,23 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
         tokenizerStatusProvider.select((status) => status.active),
         (previous, next) {
           if (previous == null || previous == next) return;
+          ref.invalidate(cachedTokenBreakdownProvider);
+        },
+      ),
+    );
+    // A different window or trim mode changes which messages survive into the
+    // prompt, so every breakdown counted under the old one — and the CONTEXT
+    // LIMIT rule drawn off it — is stale. Watched here rather than in the API
+    // editor's save: switching the active connection from anywhere moves it
+    // too, and the open chat recounts off the dropped breakdown (see
+    // `contextWindowRecountProvider`).
+    _warmSubs.add(
+      ref.listenManual<String>(
+        activeApiConfigProvider.select(
+          (config) => config?.contextBudgetSignature ?? '',
+        ),
+        (previous, next) {
+          if (previous == null || previous.isEmpty || previous == next) return;
           ref.invalidate(cachedTokenBreakdownProvider);
         },
       ),

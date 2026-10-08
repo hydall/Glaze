@@ -903,16 +903,19 @@ export class Bridge {
   }
 
   // Moves the CONTEXT LIMIT rule to the oldest message the next prompt still
-  // carries; '' retires it. Patches only the two rows involved instead of
-  // re-rendering the chat, and reaches them through `itemMap`, which retains
+  // carries; '' retires it. `after` draws it under the message instead — the
+  // prompt kept none of the chat. Patches only the two rows involved instead
+  // of re-rendering the chat, and reaches them through `itemMap`, which retains
   // every row element — so the rule is right whether or not the boundary is
   // currently mounted. The renderer keeps the id as well, which is what makes a
   // later full re-render draw the rule again without another call from Flutter.
-  setContextWindowStart(messageId) {
+  setContextWindowStart(messageId, after = false) {
     const next = messageId || null;
+    const nextAfter = !!(next && after);
     const previous = this.renderer.contextStartId || null;
-    this.renderer.setContextWindowStart(next);
-    if (previous === next) return;
+    const previousAfter = !!this.renderer.contextStartAfter;
+    this.renderer.setContextWindowStart(next, nextAfter);
+    if (previous === next && previousAfter === nextAfter) return;
     if (previous) {
       const el = this.virtualList.itemMap?.get(previous)?.el;
       if (el) {
@@ -924,7 +927,9 @@ export class Bridge {
       const el = this.virtualList.itemMap?.get(next)?.el;
       if (el && !el.querySelector(':scope > .context-limit-marker')) {
         el.dataset.contextStart = '1';
-        el.insertBefore(this.renderer.createContextLimitMarker(), el.firstChild);
+        const marker = this.renderer.createContextLimitMarker(nextAfter);
+        if (nextAfter) el.appendChild(marker);
+        else el.insertBefore(marker, el.firstChild);
       }
     }
   }

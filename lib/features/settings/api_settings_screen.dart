@@ -20,7 +20,9 @@ import '../../core/llm/history_trim.dart';
 import '../../core/llm/tokenizer.dart';
 import '../../core/models/api_config.dart';
 import '../../core/models/extra_request_parameter.dart';
+import '../../core/state/active_selection_provider.dart';
 import '../../core/state/shared_prefs_provider.dart';
+import '../presets/preset_list_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_action_button.dart';
@@ -32,6 +34,7 @@ import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/sheet_view.dart';
 import 'api_config_draft.dart';
+import 'context_budget_check.dart';
 import '../studio/widgets/studio_slots_tab.dart';
 import 'api_list_provider.dart';
 import 'api_preset_selection_provider.dart';
@@ -50,6 +53,23 @@ import '../../shared/widgets/glaze_sheet.dart';
 /// model declares, so the numbers live in one place — the model — instead of
 /// being copied into each row as a literal.
 const _apiDefaults = ApiConfig(id: '');
+
+/// Tokens the globally active chat preset puts into every prompt — see
+/// [presetPromptTokens].
+final _activePresetTokensProvider = Provider.autoDispose<int>((ref) {
+  // A tokenizer switch changes every count.
+  ref.watch(tokenizerStatusProvider.select((status) => status.active));
+  final presets = ref.watch(presetListProvider).value;
+  if (presets == null) return 0;
+  final preset = getEffectivePreset(
+    presets,
+    null,
+    null,
+    ref.watch(activePresetIdProvider),
+    ref.watch(presetConnectionsProvider),
+  );
+  return preset == null ? 0 : presetPromptTokens(preset);
+});
 
 /// A section of the API screen a caller can open it *on*.
 enum ApiSettingsSection {
@@ -1052,21 +1072,32 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
             },
           ),
         ],
-        ValueListenableBuilder<TextEditingValue>(
-          valueListenable: _maxTokensCtrl,
-          builder: (context, value, _) => MenuFieldItem(
-            label: 'label_max_tokens'.tr(),
-            helpTerm: 'max-tokens',
-            controller: _maxTokensCtrl,
-            placeholder: '${_apiDefaults.maxTokens}',
-            keyboardType: TextInputType.number,
-            onReset: value.text.trim() != '${_apiDefaults.maxTokens}'
-                ? () {
-                    _maxTokensCtrl.text = '${_apiDefaults.maxTokens}';
-                    _scheduleSave();
-                  }
-                : null,
-          ),
+        // Listens to both fields: the cap below moves with the context size.
+        ListenableBuilder(
+          listenable: Listenable.merge([_maxTokensCtrl, _contextSizeCtrl]),
+          builder: (context, _) {
+            final contextSize = _typedContextSize;
+            final exceeds = contextSize > 0 && _typedMaxTokens > contextSize;
+            return MenuFieldItem(
+              label: 'label_max_tokens'.tr(),
+              helpTerm: 'max-tokens',
+              controller: _maxTokensCtrl,
+              placeholder: '${_apiDefaults.maxTokens}',
+              keyboardType: TextInputType.number,
+              helper: exceeds
+                  ? 'error_max_tokens_exceeds_context'.tr(
+                      args: ['$contextSize'],
+                    )
+                  : null,
+              helperIsError: exceeds,
+              onReset: _maxTokensCtrl.text.trim() != '${_apiDefaults.maxTokens}'
+                  ? () {
+                      _maxTokensCtrl.text = '${_apiDefaults.maxTokens}';
+                      _scheduleSave();
+                    }
+                  : null,
+            );
+          },
         ),
         ValueListenableBuilder<TextEditingValue>(
           valueListenable: _contextSizeCtrl,
@@ -1084,12 +1115,64 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                 : null,
           ),
         ),
+        ListenableBuilder(
+          listenable: Listenable.merge([_maxTokensCtrl, _contextSizeCtrl]),
+          builder: (context, _) => _buildPresetFitWarning(),
+        ),
         // Auto follows the model field as it is typed, not the saved row.
         ListenableBuilder(
           listenable: _modelCtrl,
           builder: (context, _) => _buildTokenizerSelector(),
         ),
       ],
+    );
+  }
+
+  /// The context size as the next save will store it — an unparsable field
+  /// keeps the preset's value, the same fallback [ApiConfigDraft] applies.
+  int get _typedContextSize =>
+      int.tryParse(_contextSizeCtrl.text.trim()) ??
+      ref.read(activeApiConfigProvider)?.contextSize ??
+      _apiDefaults.contextSize;
+
+  int get _typedMaxTokens =>
+      int.tryParse(_maxTokensCtrl.text.trim()) ??
+      ref.read(activeApiConfigProvider)?.maxTokens ??
+      _apiDefaults.maxTokens;
+
+  /// Warns when the active chat preset alone outgrows what the context window
+  /// leaves for the prompt once the reply is reserved.
+  Widget _buildPresetFitWarning() {
+    final fits = presetFitsContext(
+      presetTokens: ref.watch(_activePresetTokensProvider),
+      contextSize: _typedContextSize,
+      maxTokens: _typedMaxTokens,
+    );
+    if (fits) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 2, 16, 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 1, right: 8),
+            child: Icon(
+              Icons.warning_amber_rounded,
+              size: 16,
+              color: context.cs.error,
+            ),
+          ),
+          Expanded(
+            child: PresetFitWarningText(
+              style: TextStyle(
+                color: context.cs.error,
+                fontSize: 12,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

@@ -123,6 +123,16 @@ Map<String, dynamic> _normalizeApiConfigJson(Map<String, dynamic> json) {
   return normalized;
 }
 
+/// [maxTokens] capped at [contextSize].
+///
+/// The reply is carved out of the context window, so a completion budget larger
+/// than the window leaves the prompt nothing at all: the history trim keeps no
+/// message, and the provider rejects `prompt + max_tokens > context` anyway. A
+/// non-positive [contextSize] is left alone rather than dragging the reply
+/// budget down to zero with it.
+int clampMaxOutputTokens(int maxTokens, int contextSize) =>
+    contextSize > 0 && maxTokens > contextSize ? contextSize : maxTokens;
+
 extension ApiConfigContextX on ApiConfig {
   /// Every field that changes which messages survive into the prompt.
   ///

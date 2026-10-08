@@ -104,6 +104,42 @@ void main() {
     expect(saved.contextBudgetSignature, isNot(stored.contextBudgetSignature));
   });
 
+  // The reply is carved out of the context window, so a reply budget above the
+  // window would leave the prompt no room at all.
+  test('caps Max Output Tokens at the context size', () {
+    const stored = ApiConfig(id: 'api', maxTokens: 1500, contextSize: 32000);
+    final source = ApiConfigDraft.fromConfig(stored);
+    ApiConfig save({required String maxTokens, required String contextSize}) =>
+        ApiConfigDraft(
+          values: source.values,
+          name: source.name,
+          endpoint: source.endpoint,
+          apiKey: source.apiKey,
+          model: source.model,
+          maxTokens: maxTokens,
+          contextSize: contextSize,
+          firstChunkTimeoutSeconds: source.firstChunkTimeoutSeconds,
+          reasoningHistoryCount: source.reasoningHistoryCount,
+          embeddingEndpoint: source.embeddingEndpoint,
+          embeddingApiKey: source.embeddingApiKey,
+          embeddingModel: source.embeddingModel,
+          embeddingMaxChunkTokens: source.embeddingMaxChunkTokens,
+          embeddingRequestsPerMinute: source.embeddingRequestsPerMinute,
+        ).applyLlmTo(stored);
+
+    final over = save(maxTokens: '160000', contextSize: '100000');
+    expect(over.maxTokens, 100000);
+    expect(over.contextSize, 100000);
+
+    final within = save(maxTokens: '4000', contextSize: '100000');
+    expect(within.maxTokens, 4000);
+
+    // An unparsable context field keeps the stored window, and caps against it.
+    final blankContext = save(maxTokens: '64000', contextSize: '');
+    expect(blankContext.contextSize, 32000);
+    expect(blankContext.maxTokens, 32000);
+  });
+
   // A garbage trim mode — an older build, a hand-edited backup — must not be
   // written back onto the row as-is.
   test('normalizes an unknown trim mode to sliding', () {

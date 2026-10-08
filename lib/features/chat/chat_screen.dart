@@ -50,6 +50,7 @@ import '../personas/persona_list_screen.dart';
 import '../presets/preset_editor_screen.dart';
 import '../settings/api_list_provider.dart';
 import '../settings/api_settings_screen.dart';
+import '../settings/context_budget_check.dart';
 import '../settings/app_settings_provider.dart';
 import 'chat_drawer_controller.dart'
     show ChatDrawerController, kKeyboardHeightPref;
@@ -1333,6 +1334,82 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
     return false;
   }
 
+  /// The guard a quick reply runs before it sends or continues: the same
+  /// context check the composer's send makes, then the game-time seed.
+  Future<bool> _beforeQuickReply() async =>
+      _ensureContextFits() && await _maybeSeedGameTime();
+
+  /// Blocks a send the context window cannot carry: when the chat's preset
+  /// alone outgrows what the window leaves after the reply's reservation, the
+  /// history trim keeps no message — not even the one being sent — so the
+  /// request would go out without the chat. Shows the API settings' hint
+  /// instead and returns false so the caller aborts the send.
+  bool _ensureContextFits() {
+    // Studio builds the final prompt without the chat preset, from its own
+    // connection's window.
+    if (ref.read(studioFeatureEnabledProvider)) return true;
+    final api = ref.read(activeApiConfigProvider);
+    if (api == null) return true;
+    final preset = ref.read(
+      effectivePresetForChatProvider((
+        charId: widget.charId,
+        sessionId: widget.state.session?.id,
+      )),
+    );
+    if (preset == null) return true;
+    final fits = presetFitsContext(
+      presetTokens: presetPromptTokens(preset),
+      contextSize: api.contextSize,
+      maxTokens: api.maxTokens,
+    );
+    if (fits) return true;
+    GlazeBottomSheet.show<void>(
+      context,
+      title: 'preset_exceeds_context_title'.tr(),
+      child: Builder(
+        builder: (sheetContext) => Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.warning_amber_rounded,
+                size: 64,
+                color: sheetContext.cs.onSurfaceVariant.withValues(alpha: 0.5),
+              ),
+              const SizedBox(height: 16),
+              PresetFitWarningText(
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 16,
+                  color: sheetContext.cs.onSurface,
+                  height: 1.5,
+                ),
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () {
+                    Navigator.of(sheetContext, rootNavigator: true).pop();
+                    unawaited(
+                      showApiSettingsSheet(
+                        context,
+                        focusSection: ApiSettingsSection.context,
+                      ),
+                    );
+                  },
+                  child: Text('api_required_select'.tr()),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    return false;
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -2361,7 +2438,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                             height: widget.drawerCtrl.activeDrawerHeight,
                             child: ChatDrawerPanel(
                               charId: widget.charId,
-                              beforeGeneration: _maybeSeedGameTime,
+                              beforeGeneration: _beforeQuickReply,
                               onClose: () => widget.drawerCtrl.closeDrawer(),
                               disableEffects:
                                   batterySaver &&
@@ -2512,7 +2589,8 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                             enterToSend: widget.enterToSend,
                                             canSend: () =>
                                                 _ensurePersonaSelected() &&
-                                                _ensureApiSelected(),
+                                                _ensureApiSelected() &&
+                                                _ensureContextFits(),
                                             onSend: (text) async {
                                               if (text.trim().isEmpty) {
                                                 return false;
@@ -2650,8 +2728,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                                     widget.drawerCtrl
                                                         .toggleDrawer(context);
                                                   },
-                                            beforeGeneration:
-                                                _maybeSeedGameTime,
+                                            beforeGeneration: _beforeQuickReply,
                                             onImpersonate: (guidance) => ref
                                                 .read(
                                                   chatProvider(

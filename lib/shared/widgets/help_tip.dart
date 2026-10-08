@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -5,6 +7,16 @@ import '../../features/glossary/glossary_sheet.dart';
 import '../../features/settings/app_settings_provider.dart';
 import '../shell/desktop/desktop_glossary_popup.dart';
 import '../shell/desktop/desktop_layout_provider.dart';
+
+/// Opens the glossary at [term]: the floating glossary window on desktop, the
+/// modal [GlossarySheet] elsewhere.
+void openGlossaryTerm(BuildContext context, WidgetRef ref, String term) {
+  if (isDesktopLayout(context)) {
+    openGlossaryPopup(ref, term: term);
+  } else {
+    unawaited(GlossarySheet.show(context, initialTerm: term));
+  }
+}
 
 /// Small inline help button — opens the glossary at a specific term.
 ///
@@ -36,9 +48,7 @@ class HelpTip extends ConsumerWidget {
         shape: const CircleBorder(),
         child: InkWell(
           customBorder: const CircleBorder(),
-          onTap: () => isDesktopLayout(context)
-              ? openGlossaryPopup(ref, term: term)
-              : GlossarySheet.show(context, initialTerm: term),
+          onTap: () => openGlossaryTerm(context, ref, term),
           child: SizedBox(
             width: 20,
             height: 20,
