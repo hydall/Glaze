@@ -356,16 +356,12 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
     if (preset.isMaterialYou) {
       return DynamicColorBuilder(
         builder: (lightDynamic, darkDynamic) {
-          final isDark = switch (preset.themeMode) {
-            'light' => false,
-            'dark' => true,
-            _ => switch (ref.read(themeProvider).mode) {
-              ThemeMode.light => false,
-              ThemeMode.dark => true,
-              ThemeMode.system =>
-                MediaQuery.platformBrightnessOf(context) == Brightness.dark,
-            },
-          };
+          // Built-ins follow the device while the slots do, else stay dark
+          // (see ThemeSettings.brightness).
+          final theme = ref.read(themeProvider);
+          final isDark =
+              !theme.followSystem ||
+              theme.platformBrightness == Brightness.dark;
           return _buildPresetTileContent(
             context,
             preset,
@@ -377,6 +373,8 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
               isDark: isDark,
             ),
             catalog: catalog,
+            inLightSlot: inLightSlot,
+            inDarkSlot: inDarkSlot,
           );
         },
       );
@@ -388,6 +386,8 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
       activePreset,
       accent: preset.accent,
       catalog: catalog,
+      inLightSlot: inLightSlot,
+      inDarkSlot: inDarkSlot,
     );
   }
 
@@ -398,6 +398,8 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
     ThemePreset activePreset, {
     required Color accent,
     bool catalog = false,
+    bool inLightSlot = false,
+    bool inDarkSlot = false,
   }) {
     final cs = context.cs;
     final bgBytes = _decodeBgImage(preset);
