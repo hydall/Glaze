@@ -1,4 +1,5 @@
 import 'package:flex_color_scheme/flex_color_scheme.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:gpt_markdown/gpt_markdown.dart';
 
@@ -120,6 +121,22 @@ ColorScheme _materialYouScheme(
     seedColor: _materialYouFallbackSeed,
     brightness: isDark ? Brightness.dark : Brightness.light,
   );
+}
+
+/// Accent the "Material You" theme actually renders with, resolved the same
+/// way as in `app.dart`: the system dynamic palette on Android, otherwise the
+/// seeded fallback. Used to preview the theme (e.g. the preset list swatch)
+/// without relying on the placeholder `accentColor` stored on the preset.
+Color materialYouAccent({
+  ColorScheme? lightDynamic,
+  ColorScheme? darkDynamic,
+  required bool isDark,
+}) {
+  final useDynamic = defaultTargetPlatform == TargetPlatform.android;
+  final dynamicScheme = useDynamic
+      ? (isDark ? darkDynamic : lightDynamic)
+      : null;
+  return _materialYouScheme(dynamicScheme, isDark: isDark).primary;
 }
 
 Color _deriveUiColor(Color accent, bool isDark) {
