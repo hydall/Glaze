@@ -32,11 +32,16 @@ class MenuCollapsibleSection extends StatefulWidget {
   final String? helpTerm;
   final List<Widget> children;
 
+  /// Opens the section on mount — for one whose rows are already in use, so
+  /// an active setting is never hidden behind the disclosure.
+  final bool initiallyExpanded;
+
   const MenuCollapsibleSection({
     super.key,
     required this.label,
     this.helpTerm,
     required this.children,
+    this.initiallyExpanded = false,
   });
 
   @override
@@ -44,7 +49,7 @@ class MenuCollapsibleSection extends StatefulWidget {
 }
 
 class _MenuCollapsibleSectionState extends State<MenuCollapsibleSection> {
-  bool _expanded = false;
+  late bool _expanded = widget.initiallyExpanded;
 
   @override
   Widget build(BuildContext context) {
@@ -505,6 +510,9 @@ class MenuSwitchItem extends StatelessWidget {
   final bool value;
   final ValueChanged<bool> onChanged;
 
+  /// See [GlazeSwitch.activeColor].
+  final Color? activeColor;
+
   const MenuSwitchItem({
     super.key,
     required this.label,
@@ -514,6 +522,7 @@ class MenuSwitchItem extends StatelessWidget {
     this.onIncludedChanged,
     required this.value,
     required this.onChanged,
+    this.activeColor,
   }) : assert(
          (included == null) == (onIncludedChanged == null),
          'included and onIncludedChanged must be provided together',
@@ -577,6 +586,7 @@ class MenuSwitchItem extends StatelessWidget {
             GlazeSwitch(
               value: value,
               onChanged: included ?? true ? onChanged : null,
+              activeColor: activeColor,
             ),
           ],
         ),

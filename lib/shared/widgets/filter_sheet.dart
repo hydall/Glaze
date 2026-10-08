@@ -1,11 +1,12 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:easy_localization/easy_localization.dart';
 import '../theme/app_colors.dart';
-import 'glaze_switch.dart';
-import 'glaze_text_field.dart';
+import 'filter_tag_picker.dart';
+import 'menu_group.dart';
 import 'sheet_view.dart';
+
+export 'filter_tag_picker.dart' show FilterTagChip, FilterSearchField;
 
 /// A selectable tag for a [FilterTagsSection]. Identified by [id] when the
 /// source provides one (e.g. catalog tags), otherwise matched by [name]
@@ -25,9 +26,20 @@ sealed class FilterSection {
   const FilterSection();
 }
 
+/// A row that lives inside a card: a switch, a number or a range. Consecutive
+/// rows outside a [FilterGroupSection] share one untitled card.
+sealed class FilterRowSection extends FilterSection {
+  const FilterRowSection();
+
+  /// Whether the row narrows the results — drives the active count a
+  /// collapsible group shows while closed.
+  bool get isActive;
+}
+
 /// A single labelled on/off switch row.
-class FilterToggleSection extends FilterSection {
+class FilterToggleSection extends FilterRowSection {
   final String label;
+  final String? description;
   final bool value;
   final ValueChanged<bool> onChanged;
   final bool isDanger;
@@ -36,12 +48,16 @@ class FilterToggleSection extends FilterSection {
     required this.label,
     required this.value,
     required this.onChanged,
+    this.description,
     this.isDanger = false,
   });
+
+  @override
+  bool get isActive => value;
 }
 
 /// A titled min/max integer range row with two numeric fields.
-class FilterRangeSection extends FilterSection {
+class FilterRangeSection extends FilterRowSection {
   final String title;
   final String minLabel;
   final String maxLabel;
@@ -49,6 +65,10 @@ class FilterRangeSection extends FilterSection {
   final int max;
   final ValueChanged<int> onMinChanged;
   final ValueChanged<int> onMaxChanged;
+
+  /// The unfiltered bounds, used only to tell whether the range is in use.
+  final int? defaultMin;
+  final int? defaultMax;
 
   const FilterRangeSection({
     required this.title,
@@ -58,11 +78,18 @@ class FilterRangeSection extends FilterSection {
     required this.max,
     required this.onMinChanged,
     required this.onMaxChanged,
+    this.defaultMin,
+    this.defaultMax,
   });
+
+  @override
+  bool get isActive =>
+      (defaultMin != null && min != defaultMin) ||
+      (defaultMax != null && max != defaultMax);
 }
 
 /// A titled row with a single integer field.
-class FilterNumberSection extends FilterSection {
+class FilterNumberSection extends FilterRowSection {
   final String title;
   final String label;
   final int value;
@@ -76,6 +103,23 @@ class FilterNumberSection extends FilterSection {
     required this.onChanged,
     this.hint,
   });
+
+  @override
+  bool get isActive => value > 0;
+}
+
+/// A titled card of rows. [collapsible] folds it behind a disclosure header
+/// that shows how many of its rows are in use; it opens by itself when any is.
+class FilterGroupSection extends FilterSection {
+  final String? title;
+  final List<FilterRowSection> rows;
+  final bool collapsible;
+
+  const FilterGroupSection({
+    this.title,
+    required this.rows,
+    this.collapsible = false,
+  }) : assert(!collapsible || title != null, 'a collapsible group needs a title');
 }
 
 /// A titled, searchable, multi-select tag picker row.
@@ -102,6 +146,17 @@ class FilterTagsSection extends FilterSection {
   /// even when neither [tags] nor the suggestions contain it.
   final bool allowCustomTags;
 
+  /// Switches that change how the selection is applied (Chub's "match any
+  /// tag"), rendered in the tags card above the picker.
+  final List<FilterToggleSection> options;
+
+  /// How many chips the grid shows before folding the rest behind a
+  /// "show all" button.
+  final int collapsedCount;
+
+  /// Shown in place of the grid while [tags] is still being fetched.
+  final bool loading;
+
   const FilterTagsSection({
     required this.title,
     required this.searchHint,
@@ -112,22 +167,30 @@ class FilterTagsSection extends FilterSection {
     required this.onClear,
     this.fetchSuggestions,
     this.allowCustomTags = false,
+    this.options = const [],
+    this.collapsedCount = 24,
+    this.loading = false,
   });
 }
 
 /// An arbitrary feature-specific widget rendered inline as a section. Use for
 /// rows the descriptor types above can't express (e.g. the JanitorAI blocked
-/// tags + keywords control with its own autocomplete).
+/// tags + keywords control with its own autocomplete). By default the child is
+/// laid out inside the sheet's 16 px gutters; a child that brings its own
+/// [MenuGroup] card passes `padded: false`.
 class FilterCustomSection extends FilterSection {
   final Widget child;
-  const FilterCustomSection({required this.child});
+  final bool padded;
+  const FilterCustomSection({required this.child, this.padded = true});
 }
 
 /// Generic, reusable filter bottom sheet.
 ///
-/// Renders an ordered list of [FilterSection]s inside a [SheetView]. Used by
-/// the catalog filters and the My Characters filters; add new consumers by
-/// composing the section descriptors above.
+/// Renders an ordered list of [FilterSection]s inside a [SheetView], as
+/// [MenuGroup] cards: switches, numbers and ranges are menu rows, tags get a
+/// card of their own with a search field and a folded chip grid. Used by the
+/// catalog, My Characters and preset filters; add new consumers by composing
+/// the section descriptors above.
 class FilterSheet extends StatelessWidget {
   final String title;
   final List<FilterSection> sections;
@@ -150,491 +213,317 @@ class FilterSheet extends StatelessWidget {
       title: title,
       showHandle: true,
       fitContent: fitContent,
-      bodyPadding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+      bodyPadding: EdgeInsets.zero,
       // A fitted sheet gives its body unbounded height, so the list has to
-      // shrink-wrap; the trailing spacer only exists to keep the last section
-      // clear of the sheet's bottom edge on the scrollable variant.
-      body: ListView(
-        shrinkWrap: fitContent,
-        children: [
-          const SizedBox(height: 16),
-          for (final section in sections) ..._buildSection(section),
-          SizedBox(height: fitContent ? 8 : 40),
-        ],
+      // shrink-wrap. Cards carry their own 16 px gutters and 12 px gap.
+      body: Builder(
+        builder: (context) {
+          final insets = MediaQuery.paddingOf(context);
+          return ListView(
+            shrinkWrap: fitContent,
+            padding: EdgeInsets.fromLTRB(
+              0,
+              insets.top + 8,
+              0,
+              insets.bottom + (fitContent ? 8 : 32),
+            ),
+            children: _buildSections(),
+          );
+        },
       ),
     );
   }
 
-  List<Widget> _buildSection(FilterSection section) {
-    return switch (section) {
-      FilterToggleSection() => [_FilterToggleTile(section: section)],
-      FilterRangeSection() => [
-        const SizedBox(height: 20),
-        _FilterRange(section: section),
-      ],
-      FilterNumberSection() => [
-        const SizedBox(height: 20),
-        _FilterNumber(section: section),
-      ],
-      FilterTagsSection() => [
-        const SizedBox(height: 20),
-        _FilterTags(section: section),
-      ],
-      FilterCustomSection() => [
-        const SizedBox(height: 20),
-        section.child,
-      ],
-    };
+  List<Widget> _buildSections() {
+    final out = <Widget>[];
+    var pending = <FilterRowSection>[];
+
+    void flushRows() {
+      if (pending.isEmpty) return;
+      out.add(_FilterGroup(group: FilterGroupSection(rows: pending)));
+      pending = [];
+    }
+
+    for (final section in sections) {
+      if (section is FilterRowSection) {
+        pending.add(section);
+        continue;
+      }
+      flushRows();
+      out.add(switch (section) {
+        FilterGroupSection() => _FilterGroup(group: section),
+        FilterTagsSection() => FilterTagPicker(section: section),
+        FilterCustomSection(padded: false) => section.child,
+        FilterCustomSection() => Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+          child: section.child,
+        ),
+        FilterRowSection() => throw StateError('rows are batched above'),
+      });
+    }
+    flushRows();
+    return out;
   }
 }
 
-class _SectionLabel extends StatelessWidget {
-  final String text;
-  const _SectionLabel(this.text);
+class _FilterGroup extends StatelessWidget {
+  final FilterGroupSection group;
+  const _FilterGroup({required this.group});
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      text.toUpperCase(),
-      style: TextStyle(
-        fontSize: 12,
-        fontWeight: FontWeight.w600,
-        color: context.cs.onSurfaceVariant,
-        letterSpacing: 0.6,
-      ),
+    final rows = [for (final r in group.rows) filterRow(r)];
+    if (!group.collapsible) {
+      return MenuGroup(
+        header: group.title,
+        headerVariant: MenuGroupHeaderVariant.accentCaps,
+        items: rows,
+      );
+    }
+    final active = group.rows.where((r) => r.isActive).length;
+    return MenuCollapsibleSection(
+      label: active > 0 ? '${group.title} · $active' : group.title!,
+      initiallyExpanded: active > 0,
+      children: [MenuGroup(items: rows)],
     );
   }
 }
 
-class _FilterToggleTile extends StatelessWidget {
-  final FilterToggleSection section;
-  const _FilterToggleTile({required this.section});
+/// The menu row for one [FilterRowSection]. Shared with the tags card, which
+/// renders its [FilterTagsSection.options] the same way.
+Widget filterRow(FilterRowSection row) {
+  return switch (row) {
+    FilterToggleSection() => MenuSwitchItem(
+      label: row.label,
+      description: row.description,
+      value: row.value,
+      onChanged: row.onChanged,
+      activeColor: row.isDanger ? _dangerColor : null,
+    ),
+    FilterNumberSection() => _NumberRow(section: row),
+    FilterRangeSection() => _RangeRow(section: row),
+  };
+}
+
+const _dangerColor = Color(0xFFFF5A5F);
+
+const _rowLabelStyle = TextStyle(fontSize: 16, fontWeight: FontWeight.w400);
+
+/// Label on the left, a compact number field on the right.
+class _NumberRow extends StatelessWidget {
+  final FilterNumberSection section;
+  const _NumberRow({required this.section});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  section.title,
+                  style: _rowLabelStyle.copyWith(
+                    color: context.cs.onSurfaceVariant,
+                  ),
+                ),
+                if (section.hint != null) ...[
+                  const SizedBox(height: 1),
+                  Text(
+                    section.hint!,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: context.cs.onSurfaceVariant.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 16),
+          SizedBox(
+            width: 96,
+            child: _NumberField(
+              value: section.value,
+              onChanged: section.onChanged,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Label on its own line, then the two bounds side by side.
+class _RangeRow extends StatelessWidget {
+  final FilterRangeSection section;
+  const _RangeRow({required this.section});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            section.label,
-            style: TextStyle(color: context.cs.onSurface, fontSize: 15),
+            section.title,
+            style: _rowLabelStyle.copyWith(color: context.cs.onSurfaceVariant),
           ),
-          GlazeSwitch(value: section.value, onChanged: section.onChanged),
-        ],
-      ),
-    );
-  }
-}
-
-class _FilterRange extends StatelessWidget {
-  final FilterRangeSection section;
-  const _FilterRange({required this.section});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _SectionLabel(section.title),
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(
-              child: _numberField(
-                section.minLabel,
-                section.min,
-                section.onMinChanged,
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Text(
-                '—',
-                style: TextStyle(
-                  color: context.cs.onSurfaceVariant,
-                  fontSize: 18,
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: _NumberField(
+                  value: section.min,
+                  onChanged: section.onMinChanged,
+                  prefix: section.minLabel,
                 ),
               ),
-            ),
-            Expanded(
-              child: _numberField(
-                section.maxLabel,
-                section.max,
-                section.onMaxChanged,
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                child: Text(
+                  '–',
+                  style: TextStyle(
+                    color: context.cs.onSurfaceVariant,
+                    fontSize: 16,
+                  ),
+                ),
               ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
-/// A section with a single labelled integer field, for one-dimensional numeric
-/// filters (e.g. Chub's minimum AI rating) that a min/max range doesn't fit.
-class _FilterNumber extends StatelessWidget {
-  final FilterNumberSection section;
-  const _FilterNumber({required this.section});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _SectionLabel(section.title),
-        const SizedBox(height: 10),
-        _numberField(section.label, section.value, section.onChanged),
-        if (section.hint != null) ...[
-          const SizedBox(height: 6),
-          Text(
-            section.hint!,
-            style: TextStyle(
-              fontSize: 11,
-              color: context.cs.onSurfaceVariant,
-            ),
+              Expanded(
+                child: _NumberField(
+                  value: section.max,
+                  onChanged: section.onMaxChanged,
+                  prefix: section.maxLabel,
+                ),
+              ),
+            ],
           ),
         ],
-      ],
+      ),
     );
   }
 }
 
-Widget _numberField(String label, int value, ValueChanged<int> onChanged) {
-  return Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Text(
-        label.toUpperCase(),
-        style: TextStyle(
-          color: Colors.white.withValues(alpha: 0.4),
-          fontSize: 11,
-          letterSpacing: 0.5,
-        ),
-      ),
-      const SizedBox(height: 4),
-      GlazeTextField(
-        controller: TextEditingController(text: '$value'),
-        keyboardType: TextInputType.number,
-        isDense: true,
-        onSubmitted: (v) {
-          final p = int.tryParse(v);
-          if (p != null) onChanged(p);
-        },
-      ),
-    ],
-  );
-}
+/// An integer field that commits on every edit, not only on submit: the sheet
+/// applies its state when it closes, and a value typed without pressing Enter
+/// used to be lost. Holds its own controller so a rebuild of the sheet does
+/// not reset the caret or the text being typed.
+class _NumberField extends StatefulWidget {
+  final int value;
+  final ValueChanged<int> onChanged;
+  final String? prefix;
 
-class _FilterTags extends StatefulWidget {
-  final FilterTagsSection section;
-  const _FilterTags({required this.section});
+  const _NumberField({
+    required this.value,
+    required this.onChanged,
+    this.prefix,
+  });
 
   @override
-  State<_FilterTags> createState() => _FilterTagsState();
+  State<_NumberField> createState() => _NumberFieldState();
 }
 
-class _FilterTagsState extends State<_FilterTags> {
-  final _controller = TextEditingController();
-  Timer? _debounce;
+class _NumberFieldState extends State<_NumberField> {
+  late final _controller = TextEditingController(text: '${widget.value}');
+  final _focus = FocusNode();
 
-  /// Trimmed query. Doubles as the guard for [_fetch] so an out-of-order
-  /// response can't overwrite results for a newer query.
-  String _search = '';
+  @override
+  void initState() {
+    super.initState();
+    _focus.addListener(_onFocusChange);
+  }
 
-  /// Free-text suggestions for [_search], from [FilterTagsSection.fetchSuggestions].
-  List<String> _suggestions = [];
-  bool _loading = false;
+  @override
+  void didUpdateWidget(_NumberField old) {
+    super.didUpdateWidget(old);
+    // Follow outside changes (a reset), but never fight the user's typing.
+    if (!_focus.hasFocus && int.tryParse(_controller.text) != widget.value) {
+      _controller.text = '${widget.value}';
+    }
+  }
 
-  FilterTagsSection get _s => widget.section;
+  /// An emptied field snaps back to the committed value once it loses focus.
+  void _onFocusChange() {
+    if (!_focus.hasFocus && int.tryParse(_controller.text) == null) {
+      _controller.text = '${widget.value}';
+    }
+  }
 
   @override
   void dispose() {
-    _debounce?.cancel();
+    _focus.dispose();
     _controller.dispose();
     super.dispose();
   }
 
-  bool _isSelected(FilterTag tag) {
-    if (tag.id != null) return _s.selectedIds.contains(tag.id);
-    return _s.selectedNames.contains(tag.name);
+  @override
+  Widget build(BuildContext context) {
+    final prefix = widget.prefix;
+    return TextField(
+      controller: _controller,
+      focusNode: _focus,
+      keyboardType: TextInputType.number,
+      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+      textAlign: prefix == null ? TextAlign.center : TextAlign.end,
+      style: TextStyle(
+        fontSize: 15,
+        color: context.cs.onSurface,
+        fontFeatures: const [FontFeature.tabularFigures()],
+      ),
+      decoration: InputDecoration(
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 11,
+        ),
+        prefixIcon: prefix == null
+            ? null
+            : Padding(
+                padding: const EdgeInsets.only(left: 12, right: 8),
+                child: Text(
+                  prefix,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: context.cs.onSurfaceVariant,
+                  ),
+                ),
+              ),
+        prefixIconConstraints: const BoxConstraints(),
+      ),
+      onChanged: (v) {
+        final parsed = int.tryParse(v);
+        if (parsed != null) widget.onChanged(parsed);
+      },
+      onTapOutside: (_) => _focus.unfocus(),
+    );
   }
+}
 
-  void _onSearchChanged(String value) {
-    final q = value.trim();
-    setState(() => _search = q);
-    _debounce?.cancel();
-    if (_s.fetchSuggestions == null) return;
-    if (q.isEmpty) {
-      setState(() {
-        _suggestions = [];
-        _loading = false;
-      });
-      return;
-    }
-    setState(() => _loading = true);
-    _debounce = Timer(const Duration(milliseconds: 250), () => _fetch(q));
-  }
+/// The "Clear (n)" action in a card header.
+class FilterClearButton extends StatelessWidget {
+  final int count;
+  final VoidCallback onTap;
 
-  Future<void> _fetch(String q) async {
-    final results = await _s.fetchSuggestions!(q);
-    if (!mounted || q != _search) return;
-    setState(() {
-      _suggestions = results;
-      _loading = false;
-    });
-  }
-
-  /// Selects [name] as a name-based tag (no id) and clears the query.
-  void _addCustomTag(String name) {
-    final n = name.trim();
-    if (n.isEmpty || _s.selectedNames.contains(n)) return;
-    _s.onToggle(FilterTag(name: n));
-    _reset();
-  }
-
-  void _reset() {
-    _controller.clear();
-    setState(() {
-      _search = '';
-      _suggestions = [];
-      _loading = false;
-    });
-  }
-
-  List<FilterTag> get _filtered {
-    if (_search.isEmpty) return _s.tags;
-    final q = _search.toLowerCase();
-    return _s.tags.where((t) => t.name.toLowerCase().contains(q)).toList();
-  }
-
-  /// Names already offered by the curated grid — suggestions that duplicate one
-  /// would just be a second way to pick the same chip.
-  Set<String> get _knownNames =>
-      {for (final t in _s.tags) t.name.toLowerCase()};
-
-  /// Suggested custom tags for the current query, minus curated and already
-  /// selected ones.
-  List<String> get _customMatches {
-    if (_search.isEmpty || _suggestions.isEmpty) return const [];
-    final known = _knownNames;
-    final seen = <String>{};
-    final out = <String>[];
-    for (final s in _suggestions) {
-      final name = s.trim();
-      if (name.isEmpty) continue;
-      if (known.contains(name.toLowerCase())) continue;
-      if (_s.selectedNames.contains(name)) continue;
-      if (!seen.add(name.toLowerCase())) continue;
-      out.add(name);
-      if (out.length == 8) break;
-    }
-    return out;
-  }
-
-  /// Whether to offer the raw query as a custom tag — only when it isn't
-  /// already reachable as a curated chip, a suggestion or a selected tag.
-  bool get _canAddRaw {
-    if (!_s.allowCustomTags || _search.isEmpty) return false;
-    final q = _search.toLowerCase();
-    if (_knownNames.contains(q)) return false;
-    if (_s.selectedNames.any((n) => n.toLowerCase() == q)) return false;
-    return !_customMatches.any((s) => s.toLowerCase() == q);
-  }
-
-  /// Selected curated chips plus selected custom tags, which have no entry in
-  /// [FilterTagsSection.tags] and would otherwise be invisible.
-  List<FilterTag> get _selectedList {
-    final list = _s.tags.where(_isSelected).toList();
-    final shown = {
-      for (final t in _s.tags)
-        if (t.id == null) t.name,
-    };
-    for (final name in _s.selectedNames) {
-      if (!shown.contains(name)) list.add(FilterTag(name: name));
-    }
-    return list;
-  }
-
-  int get _selectedCount => _s.selectedIds.length + _s.selectedNames.length;
+  const FilterClearButton({super.key, required this.count, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Header
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            _SectionLabel(_s.title),
-            if (_selectedCount > 0)
-              GestureDetector(
-                onTap: _s.onClear,
-                child: Text(
-                  'catalog_clear_tags'.tr(
-                    namedArgs: {'count': '$_selectedCount'},
-                  ),
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: context.cs.primary,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-          ],
-        ),
-        const SizedBox(height: 12),
-
-        // Selected preview
-        if (_selectedList.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Container(
-              padding: const EdgeInsets.only(bottom: 12),
-              decoration: BoxDecoration(
-                border: Border(
-                  bottom: BorderSide(
-                    color: Colors.white.withValues(alpha: 0.06),
-                  ),
-                ),
-              ),
-              child: Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: _selectedList
-                    .map((t) => _chip(t, active: true))
-                    .toList(),
-              ),
-            ),
-          ),
-
-        // Search
-        Row(
-          children: [
-            Expanded(
-              child: GlazeTextField(
-                controller: _controller,
-                hint: _s.searchHint,
-                isDense: true,
-                textInputAction: _s.allowCustomTags
-                    ? TextInputAction.done
-                    : null,
-                onChanged: _onSearchChanged,
-                onSubmitted: _s.allowCustomTags ? _addCustomTag : null,
-              ),
-            ),
-            if (_loading)
-              const Padding(
-                padding: EdgeInsets.only(left: 8),
-                child: SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-              ),
-          ],
-        ),
-
-        // Custom (name-based) tag suggestions — sources without a curated id.
-        if (_customMatches.isNotEmpty || _canAddRaw) ...[
-          const SizedBox(height: 6),
-          ..._customMatches.map(
-            (name) => _suggestionRow(
-              icon: Icons.sell_outlined,
-              label: name,
-              onTap: () => _addCustomTag(name),
-            ),
-          ),
-          if (_canAddRaw)
-            _suggestionRow(
-              icon: Icons.add,
-              label: 'catalog_add_custom_tag'.tr(
-                namedArgs: {'tag': _search},
-              ),
-              onTap: () => _addCustomTag(_search),
-            ),
-        ],
-        const SizedBox(height: 12),
-
-        // Grid
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: _filtered
-              .map((t) => _chip(t, active: _isSelected(t)))
-              .toList(),
-        ),
-      ],
-    );
-  }
-
-  Widget _suggestionRow({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-        child: Row(
-          children: [
-            Icon(icon, size: 16, color: context.cs.onSurfaceVariant),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: Colors.white.withValues(alpha: 0.85),
-                ),
-              ),
-            ),
-          ],
-        ),
+    return TextButton(
+      onPressed: onTap,
+      style: TextButton.styleFrom(
+        foregroundColor: context.cs.primary,
+        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
       ),
-    );
-  }
-
-  Widget _chip(FilterTag tag, {required bool active}) {
-    return GestureDetector(
-      onTap: () => _s.onToggle(tag),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: active
-                ? context.cs.primary
-                : Colors.white.withValues(alpha: 0.12),
-          ),
-          color: active
-              ? context.cs.primary.withValues(alpha: 0.2)
-              : Colors.white.withValues(alpha: 0.05),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              tag.name,
-              style: TextStyle(
-                fontSize: 12,
-                color: active
-                    ? Colors.white
-                    : Colors.white.withValues(alpha: 0.65),
-              ),
-            ),
-            if (active) ...[
-              const SizedBox(width: 5),
-              const Icon(Icons.close, size: 10, color: Colors.white),
-            ],
-          ],
-        ),
+      // Styled on the Text, not via `textStyle:` — that replaces the theme's
+      // label style wholesale, font family included.
+      child: Text(
+        'catalog_clear_tags'.tr(namedArgs: {'count': '$count'}),
+        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
       ),
     );
   }
