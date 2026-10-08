@@ -717,8 +717,8 @@ class ChatBridgeController {
   Future<void> retireTypingPlaceholder() =>
       messages.retireTypingPlaceholder();
   Future<void> setLastMessage(String? id) => messages.setLastMessage(id);
-  Future<void> setContextWindowStart(String? id) =>
-      messages.setContextWindowStart(id);
+  Future<void> setContextWindowStart(String? id, {bool after = false}) =>
+      messages.setContextWindowStart(id, after: after);
   Future<void> clearAll({bool keepPlaceholder = true}) =>
       messages.clearAll(keepPlaceholder: keepPlaceholder);
   Future<void> scrollToBottom({bool smooth = false}) =>

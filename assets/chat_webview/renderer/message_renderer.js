@@ -54,11 +54,15 @@ export class Renderer {
     // Held here rather than on the message map so a re-render (a preset switch,
     // a scrollback batch) keeps the rule without Flutter re-sending it.
     this.contextStartId = null;
+    // The rule goes *under* contextStartId instead: the prompt carries none of
+    // the chat, so even the newest message is past the limit.
+    this.contextStartAfter = false;
   }
 
   /** Sets which message opens the prompt window; '' or null clears the rule. */
-  setContextWindowStart(messageId) {
+  setContextWindowStart(messageId, after = false) {
     this.contextStartId = messageId || null;
+    this.contextStartAfter = !!(this.contextStartId && after);
   }
 
   /* ----- Public: render a message ----- */
@@ -150,8 +154,9 @@ if (messageData.isEditing) classes.push('editing');
     section.addEventListener('animationend', () => section.classList.remove('msg-appear'), { once: true });
 
     /* --- Context-window rule: the chat above it is out of the prompt --- */
-    if (id && id === this.contextStartId) {
-      section.dataset.contextStart = '1';
+    const contextRule = !!id && id === this.contextStartId;
+    if (contextRule) section.dataset.contextStart = '1';
+    if (contextRule && !this.contextStartAfter) {
       section.appendChild(this.createContextLimitMarker());
     }
 
@@ -213,6 +218,10 @@ if (messageData.isEditing) classes.push('editing');
     /* --- Footer --- */
     stack.appendChild(this._createFooter(messageData));
     section.appendChild(stack);
+
+    if (contextRule && this.contextStartAfter) {
+      section.appendChild(this.createContextLimitMarker(true));
+    }
 
     // Avatars and attachments are the message's light-DOM pictures, so the
     // body's own pass (writeShadowContent) never sees them.
@@ -1105,9 +1114,10 @@ if (messageData.isEditing) classes.push('editing');
   /// The rule the first in-prompt message wears. Built like a date separator
   /// so the two read as the same kind of divider, and public because the bridge
   /// stamps it onto an already-rendered row when the boundary moves.
-  createContextLimitMarker() {
+  /// `after` draws it under the message, for a prompt that kept no chat.
+  createContextLimitMarker(after = false) {
     const el = document.createElement('div');
-    el.className = 'context-limit-marker';
+    el.className = after ? 'context-limit-marker after' : 'context-limit-marker';
     el.innerHTML = `<div class="date-separator-line"></div><span class="date-separator-label">Context limit</span><div class="date-separator-line"></div>`;
     return el;
   }
