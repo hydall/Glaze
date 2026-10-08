@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 enum OnboardingSlideType {
   welcome,
   features,
+  glossary,
   dataImport,
   api,
   persona,
@@ -68,6 +69,14 @@ const _allOnboardingSlides = <OnboardingSlideData>[
   OnboardingSlideData(
     type: OnboardingSlideType.features,
     title: 'onboarding_features_title',
+  ),
+  // Its own slide rather than a block on Features: as one line in that list
+  // it went unread, and the questions it answers kept arriving at support.
+  OnboardingSlideData(
+    type: OnboardingSlideType.glossary,
+    title: 'onboarding_feature_glossary_title',
+    desc: 'onboarding_glossary_slide_desc',
+    icon: Icons.menu_book_outlined,
   ),
   OnboardingSlideData(
     type: OnboardingSlideType.dataImport,
@@ -138,11 +147,6 @@ const onboardingFeaturesContent = <OnboardingInfoBlock>[
     icon: Icons.image_outlined,
     title: 'onboarding_feature_imggen_title',
     desc: 'onboarding_feature_imggen_desc',
-  ),
-  OnboardingInfoBlock(
-    icon: Icons.menu_book_outlined,
-    title: 'onboarding_feature_glossary_title',
-    desc: 'onboarding_feature_glossary_desc',
   ),
   OnboardingInfoBlock(
     icon: Icons.palette_outlined,

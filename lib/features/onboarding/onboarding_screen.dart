@@ -17,6 +17,7 @@ import '../../core/services/featured_presets.dart';
 import '../../core/services/generation_notification_service.dart';
 import '../../core/services/onboarding_service.dart';
 import '../backup/backup_screen.dart';
+import '../glossary/glossary_sheet.dart';
 import '../../core/state/active_selection_provider.dart';
 import '../settings/api_list_provider.dart';
 import '../settings/api_settings_screen.dart';
@@ -462,6 +463,13 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
           sub: 'onboarding_action_setup_sub'.tr(),
           onTap: () => _openSheet(const PersonaListScreen()),
         );
+      case OnboardingSlideType.glossary:
+        return (
+          icon: Icons.menu_book_outlined,
+          title: 'onboarding_action_open_glossary'.tr(),
+          sub: 'onboarding_action_open_glossary_sub'.tr(),
+          onTap: () => unawaited(GlossarySheet.show(context)),
+        );
       case OnboardingSlideType.notifications:
         return (
           icon: Icons.notifications_active_outlined,
@@ -494,6 +502,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
         return const SizedBox.shrink();
       case OnboardingSlideType.features:
         return OnboardingFeatureGrid(blocks: _slideBlocks(slide)!);
+      case OnboardingSlideType.glossary:
       case OnboardingSlideType.dataImport:
       case OnboardingSlideType.api:
       case OnboardingSlideType.persona:
