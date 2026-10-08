@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 
+import 'package:dynamic_color/dynamic_color.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -19,6 +20,7 @@ import '../../../shared/theme/theme_font_provider.dart';
 import '../../../shared/theme/theme_preset.dart';
 import '../../../shared/theme/theme_provider.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/theme/app_theme.dart';
 import '../../../shared/widgets/glass_surface.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_fab.dart';
@@ -349,8 +351,57 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
     bool inLightSlot = false,
     bool inDarkSlot = false,
   }) {
+    // Material You's stored accent is only a placeholder; show the color the
+    // theme really renders with (system dynamic palette / seeded fallback).
+    if (preset.isMaterialYou) {
+      return DynamicColorBuilder(
+        builder: (lightDynamic, darkDynamic) {
+          // Built-ins follow the device while the slots do, else stay dark
+          // (see ThemeSettings.brightness).
+          final theme = ref.read(themeProvider);
+          final isDark =
+              !theme.followSystem ||
+              theme.platformBrightness == Brightness.dark;
+          return _buildPresetTileContent(
+            context,
+            preset,
+            isActive,
+            activePreset,
+            accent: materialYouAccent(
+              lightDynamic: lightDynamic,
+              darkDynamic: darkDynamic,
+              isDark: isDark,
+            ),
+            catalog: catalog,
+            inLightSlot: inLightSlot,
+            inDarkSlot: inDarkSlot,
+          );
+        },
+      );
+    }
+    return _buildPresetTileContent(
+      context,
+      preset,
+      isActive,
+      activePreset,
+      accent: preset.accent,
+      catalog: catalog,
+      inLightSlot: inLightSlot,
+      inDarkSlot: inDarkSlot,
+    );
+  }
+
+  Widget _buildPresetTileContent(
+    BuildContext context,
+    ThemePreset preset,
+    bool isActive,
+    ThemePreset activePreset, {
+    required Color accent,
+    bool catalog = false,
+    bool inLightSlot = false,
+    bool inDarkSlot = false,
+  }) {
     final cs = context.cs;
-    final accent = preset.accent;
     final bgBytes = _decodeBgImage(preset);
     final hasImage = bgBytes != null;
 
