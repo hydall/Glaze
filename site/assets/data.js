@@ -116,7 +116,7 @@ window.GLAZE = {
       nightly_failed_short: 'Недоступно',
       dl_loading_short: 'Загрузка…',
       nightly_header: 'Ночные сборки',
-      nightly_text: 'Собираются автоматически из ветки nightly, со всем, что ещё в работе, и без проверки. Что-то может сломаться, поэтому перед установкой сделайте бэкап. Nightly ставится отдельным приложением рядом со стабильной версией и не делит с ней данные. Файлы скачиваются ZIP-архивом через nightly.link. Распакуйте его.',
+      nightly_text: 'Nightly — ветка, на которой ведётся основная разработка: новые функции появляются здесь первыми, но непроверенными. Собираются автоматически со всем, что в работе, поэтому что-то может сломаться — перед установкой сделайте бэкап. Nightly ставится отдельным приложением рядом со стабильной версией и не делит с ней данные. Файлы скачиваются ZIP-архивом. Распакуйте его.',
       dl_how_nightly: {
         android: 'В архиве APK. Распакуйте и откройте его. Приложение появится как «Glaze Nightly».',
         ios: 'В архиве IPA. Поставьте его через AltStore или похожий инструмент, рядом с обычным Glaze.',
@@ -258,7 +258,7 @@ window.GLAZE = {
       nightly_failed_short: 'Unavailable',
       dl_loading_short: 'Loading…',
       nightly_header: 'Nightly builds',
-      nightly_text: 'Built automatically from the nightly branch, with everything still in progress and nothing tested. Things may break, so make a backup first. Nightly installs as a separate app next to the stable one and does not share its data. Files download as a ZIP via nightly.link. Unpack it.',
+      nightly_text: 'Nightly is the branch where main development happens: new features land here first, but untested. Builds are automatic and include everything in progress, so things may break — make a backup first. Nightly installs as a separate app next to the stable one and does not share its data. Files download as a ZIP. Unpack it.',
       dl_how_nightly: {
         android: 'The archive holds an APK. Unpack and open it. The app shows up as "Glaze Nightly".',
         ios: 'The archive holds an IPA. Sideload it with AltStore or a similar tool, next to regular Glaze.',
