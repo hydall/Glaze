@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -123,6 +124,80 @@ void main() {
       await tester.pumpWidget(buildChatInputBar(virtualKeyboardSend: false));
       final textField = tester.widget<TextField>(find.byType(TextField));
       expect(textField.textInputAction, TextInputAction.newline);
+    });
+
+    group('Enter to send', () {
+      Future<FocusNode> pumpFocused(
+        WidgetTester tester, {
+        required bool enterToSend,
+      }) async {
+        final focusNode = FocusNode();
+        addTearDown(focusNode.dispose);
+        await tester.pumpWidget(
+          buildChatInputBar(focusNode: focusNode, enterToSend: enterToSend),
+        );
+        focusNode.requestFocus();
+        await tester.pump();
+        await tester.enterText(find.byType(TextField), 'hello');
+        await tester.pump();
+        return focusNode;
+      }
+
+      testWidgets('a hardware Enter sends when enabled', (tester) async {
+        await pumpFocused(tester, enterToSend: true);
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pump();
+        expect(sentMessages, ['hello']);
+      });
+
+      testWidgets('Enter does not send when disabled', (tester) async {
+        await pumpFocused(tester, enterToSend: false);
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pump();
+        expect(sentMessages, isEmpty);
+      });
+
+      testWidgets('Shift+Enter does not send', (tester) async {
+        await pumpFocused(tester, enterToSend: true);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.pump();
+        expect(sentMessages, isEmpty);
+      });
+
+      for (final platform in [TargetPlatform.android, TargetPlatform.iOS]) {
+        testWidgets(
+          'a soft keyboard Enter on ${platform.name} does not send',
+          (tester) async {
+            debugDefaultTargetPlatformOverride = platform;
+            addTearDown(() => debugDefaultTargetPlatformOverride = null);
+            tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+            addTearDown(tester.view.resetViewInsets);
+
+            await pumpFocused(tester, enterToSend: true);
+            // Samsung Keyboard reports its Enter as a key event.
+            await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+            await tester.pump();
+            expect(sentMessages, isEmpty);
+            debugDefaultTargetPlatformOverride = null;
+          },
+        );
+
+        testWidgets(
+          'a hardware Enter on ${platform.name} still sends with no IME up',
+          (tester) async {
+            debugDefaultTargetPlatformOverride = platform;
+            addTearDown(() => debugDefaultTargetPlatformOverride = null);
+
+            await pumpFocused(tester, enterToSend: true);
+            await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+            await tester.pump();
+            expect(sentMessages, ['hello']);
+            debugDefaultTargetPlatformOverride = null;
+          },
+        );
+      }
     });
 
     testWidgets('editing blocks impersonate action', (tester) async {

@@ -154,7 +154,7 @@ class ChatInputBar extends ConsumerStatefulWidget {
     this.onFullScreen,
     this.onImpersonate,
     this.virtualKeyboardSend = false,
-    this.enterToSend = true,
+    this.enterToSend = false,
     this.batterySaver = false,
     this.isDrawerOpen = false,
     this.focusNode,
@@ -416,11 +416,28 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     if (widget.focusNode != null &&
         widget.enterToSend &&
         event.logicalKey == LogicalKeyboardKey.enter &&
-        !HardwareKeyboard.instance.isShiftPressed) {
+        !HardwareKeyboard.instance.isShiftPressed &&
+        !_softKeyboardVisible) {
       _handleSend();
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
+  }
+
+  /// Whether an on-screen keyboard is up on a touch platform.
+  ///
+  /// Some soft keyboards (Samsung Keyboard) deliver their Enter as a synthetic
+  /// KEYCODE_ENTER rather than committing "\n", which reaches [onKeyEvent]
+  /// looking exactly like a hardware key. Enter-to-send is meant for physical
+  /// keyboards only, so while the IME is showing that Enter is left to the
+  /// field to insert a newline. Reads the raw view insets: the Scaffold strips
+  /// the bottom inset from the MediaQuery its body sees.
+  bool get _softKeyboardVisible {
+    if (defaultTargetPlatform != TargetPlatform.android &&
+        defaultTargetPlatform != TargetPlatform.iOS) {
+      return false;
+    }
+    return View.of(context).viewInsets.bottom > 0;
   }
 
   static bool _isPasteShortcut(KeyEvent event) {
