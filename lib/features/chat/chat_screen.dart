@@ -17,6 +17,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../core/debug/perf_debug.dart';
 import '../../core/llm/game_time.dart';
+import '../../core/models/character.dart';
 import '../../core/utils/image_src.dart';
 import '../../core/utils/platform_paths.dart';
 import '../../shared/widgets/glaze_spinner.dart';
@@ -32,6 +33,7 @@ import '../../shared/shell/desktop/desktop_layout_provider.dart'
     show isDesktopLayout;
 import '../../shared/shell/title_bar_header.dart';
 import 'widgets/chat_column_width.dart';
+import 'widgets/chat_header_search.dart';
 import 'widgets/message_actions.dart';
 import 'widgets/message_delete_confirmation.dart';
 import 'widgets/game_time_seed_dialog.dart';
@@ -483,8 +485,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         flushHeader: isDesktopLayout(context),
         hideHeader: _isHeaderHidden,
         title: title,
-        // Desktop never swaps the header for a search field — it has a
-        // permanent one beside the character (see [_InlineChatSearchField]).
+        // Desktop swaps only the character block for its own field, from the
+        // toggle after the session name (see [DesktopChatHeaderSearch]).
         titleWidget: _search.showSearch && !isDesktopLayout(context)
             ? TextField(
                 controller: _search.searchController,
@@ -515,51 +517,33 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                 },
               )
             : (character != null && inTitleBar
-                  ? ChatHeader(
-                      character: character,
-                      sessionName: sessionName,
-                      currentSessionIndex: sessionIndex,
-                      compact: true,
-                      onTapInfo: () => _showCharacterCard(charId),
-                      onTapAvatar:
-                          (character.avatarPath != null &&
-                              character.avatarPath!.isNotEmpty)
-                          ? () => _showAvatarViewer(character.avatarPath!)
-                          : null,
+                  ? DesktopChatHeaderSearch(
+                      search: _search,
+                      charId: charId,
+                      inTitleBar: true,
+                      headerBuilder: (toggle) => ChatHeader(
+                        character: character,
+                        sessionName: sessionName,
+                        currentSessionIndex: sessionIndex,
+                        compact: true,
+                        trailing: Padding(
+                          padding: const EdgeInsets.only(left: 6),
+                          child: toggle,
+                        ),
+                        onTapInfo: () => _showCharacterCard(charId),
+                        onTapAvatar:
+                            (character.avatarPath != null &&
+                                character.avatarPath!.isNotEmpty)
+                            ? () => _showAvatarViewer(character.avatarPath!)
+                            : null,
+                      ),
                     )
                   : character != null
-                  ? Row(
-                      children: [
-                        Expanded(
-                          child: GuideAnchor(
-                            id: GuideIds.chatHeader,
-                            child: ChatHeader(
-                              character: character,
-                              sessionName: sessionName,
-                              currentSessionIndex: sessionIndex,
-                              onTapInfo: () => _showCharacterCard(charId),
-                              onTapAvatar:
-                                  (character.avatarPath != null &&
-                                      character.avatarPath!.isNotEmpty)
-                                  ? () =>
-                                        _showAvatarViewer(character.avatarPath!)
-                                  : null,
-                            ),
-                          ),
-                        ),
-                        // Desktop has room for the search field to live in the
-                        // header permanently, so it does (Vue's
-                        // `.chat-search-inline-desktop`); the toggle button is
-                        // dropped below to match.
-                        if (isDesktopLayout(context))
-                          GuideAnchor(
-                            id: GuideIds.chatSearch,
-                            child: _InlineChatSearchField(
-                              search: _search,
-                              charId: charId,
-                            ),
-                          ),
-                      ],
+                  ? _buildCharacterHeader(
+                      character: character,
+                      charId: charId,
+                      sessionName: sessionName,
+                      sessionIndex: sessionIndex,
                     )
                   : null),
         onBack: () {
@@ -578,7 +562,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
             _drawerCtrl.closeDrawer();
             return;
           }
-          if (_search.showSearch) {
+          if (_search.showSearch || _search.inlineOpen) {
             _search.closeSearch();
             return;
           }
@@ -597,17 +581,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           }
           context.go('/');
         },
-        actions: inTitleBar
-            ? [
-                _InlineChatSearchField(
-                  search: _search,
-                  charId: charId,
-                  inTitleBar: true,
-                ),
-              ]
-            : _search.showSearch
-            ? const []
-            : isDesktopLayout(context)
+        // Desktop keeps the search toggle in the header itself, right after
+        // the session name (see [DesktopChatHeaderSearch]).
+        actions: _search.showSearch || isDesktopLayout(context)
             ? const []
             : [
                 GuideAnchor(
@@ -622,6 +598,41 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                 ),
               ],
         body: body,
+      ),
+    );
+  }
+
+  /// The character block of the in-app (not title bar) header. Desktop adds
+  /// the search toggle after the session name.
+  Widget _buildCharacterHeader({
+    required Character character,
+    required String charId,
+    required String sessionName,
+    required int sessionIndex,
+  }) {
+    Widget header({Widget? trailing}) => GuideAnchor(
+      id: GuideIds.chatHeader,
+      child: ChatHeader(
+        character: character,
+        sessionName: sessionName,
+        currentSessionIndex: sessionIndex,
+        trailing: trailing,
+        onTapInfo: () => _showCharacterCard(charId),
+        onTapAvatar:
+            (character.avatarPath != null && character.avatarPath!.isNotEmpty)
+            ? () => _showAvatarViewer(character.avatarPath!)
+            : null,
+      ),
+    );
+    if (!isDesktopLayout(context)) return header();
+    return DesktopChatHeaderSearch(
+      search: _search,
+      charId: charId,
+      headerBuilder: (toggle) => header(
+        trailing: Padding(
+          padding: const EdgeInsets.only(left: 8),
+          child: toggle,
+        ),
       ),
     );
   }
@@ -649,91 +660,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     final resolved = resolveGlazeFilePath(avatarPath);
     if (resolved == null || resolved.isEmpty) return;
     ImageViewer.show(context, imageProvider: FileImage(File(resolved)));
-  }
-}
-
-/// The always-visible search field the desktop chat header carries, in place
-/// of the phone layout's search toggle (Vue: `.chat-search-inline-desktop`).
-///
-/// Search mode follows the query — typing turns highlighting on, clearing the
-/// field turns it back off — so there is no open/close button at all.
-///
-/// Under the app's title bar it sits on the bar's right edge as a small
-/// rounded box, the way a window's search usually looks there.
-class _InlineChatSearchField extends ConsumerWidget {
-  final ChatSearchDelegate search;
-  final String charId;
-  final bool inTitleBar;
-
-  const _InlineChatSearchField({
-    required this.search,
-    required this.charId,
-    this.inTitleBar = false,
-  });
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final field = SizedBox(
-      width: 220,
-      child: ListenableBuilder(
-        listenable: search,
-        builder: (context, _) => TextField(
-          controller: search.searchController,
-          style: TextStyle(color: context.cs.onSurface, fontSize: 14),
-          textInputAction: TextInputAction.search,
-          decoration: InputDecoration(
-            isDense: true,
-            // In the title bar the rounded box below is the background; the
-            // theme's square fill on top left only a ragged ring of it.
-            filled: inTitleBar ? false : null,
-            hintText: 'search_messages'.tr(),
-            hintStyle: TextStyle(
-              fontSize: 14,
-              color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
-            ),
-            prefixIcon: Icon(
-              Icons.search_rounded,
-              size: 18,
-              color: context.cs.primary,
-            ),
-            prefixIconConstraints: const BoxConstraints(
-              minWidth: 34,
-              minHeight: 0,
-            ),
-            suffixIcon: search.searchQuery.isEmpty
-                ? null
-                : IconButton(
-                    icon: const Icon(Icons.close_rounded, size: 16),
-                    onPressed: () {
-                      search.searchController.clear();
-                      search.closeSearch();
-                    },
-                  ),
-            border: InputBorder.none,
-            enabledBorder: InputBorder.none,
-            focusedBorder: InputBorder.none,
-            contentPadding: EdgeInsets.symmetric(vertical: inTitleBar ? 6 : 8),
-          ),
-          // The id comes from the screen rather than the router: under the
-          // title bar the field is built outside the chat route.
-          onChanged: (q) => search.syncInlineQuery(
-            q,
-            ref.read(chatProvider(charId)).value?.messages ?? const [],
-          ),
-        ),
-      ),
-    );
-    if (!inTitleBar) return field;
-    return Padding(
-      padding: const EdgeInsets.only(right: 6),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: context.cs.onSurface.withValues(alpha: 0.06),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: SizedBox(height: 30, child: Center(child: field)),
-      ),
-    );
   }
 }
 

@@ -27,6 +27,9 @@ class ChatHeader extends ConsumerWidget {
   /// the bar free to drag the window by.
   final bool compact;
 
+  /// Sits right after the name / session text (the desktop search toggle).
+  final Widget? trailing;
+
   const ChatHeader({
     super.key,
     required this.character,
@@ -35,6 +38,7 @@ class ChatHeader extends ConsumerWidget {
     this.onTapInfo,
     this.onTapAvatar,
     this.compact = false,
+    this.trailing,
   });
 
   @override
@@ -134,11 +138,15 @@ class ChatHeader extends ConsumerWidget {
               ),
             ),
           ),
+          ?trailing,
         ],
       );
     }
 
     return Row(
+      // With a trailing widget the block hugs its content, so it has a width
+      // of its own that the desktop search field can take over.
+      mainAxisSize: trailing == null ? MainAxisSize.max : MainAxisSize.min,
       children: [
         GestureDetector(
           behavior: HitTestBehavior.opaque,
@@ -146,7 +154,10 @@ class ChatHeader extends ConsumerWidget {
           child: avatar,
         ),
         const SizedBox(width: 10),
-        Expanded(
+        // With a trailing widget the text block only takes its own width, so
+        // the trailing one lands right after the session line.
+        Flexible(
+          fit: trailing == null ? FlexFit.tight : FlexFit.loose,
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: onTapInfo,
@@ -183,6 +194,7 @@ class ChatHeader extends ConsumerWidget {
             ),
           ),
         ),
+        ?trailing,
       ],
     );
   }
