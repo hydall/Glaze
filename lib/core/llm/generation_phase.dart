@@ -32,7 +32,12 @@ enum GenerationPhase {
   streaming,
 
   /// Post-generation work (cleaner, ledger, extension blocks, image tags).
-  finalizing;
+  finalizing,
+
+  /// Stop was pressed; the partial reply is being settled before the bubble
+  /// goes away. Without it the bubble falls back to "Generating…" for that
+  /// second, which reads as the run restarting rather than stopping.
+  aborting;
 
   /// Translation key for the label shown in the typing bubble.
   /// [idle] has no label — callers must not render it.
@@ -46,5 +51,6 @@ enum GenerationPhase {
     GenerationPhase.reasoning => 'gen_phase_reasoning',
     GenerationPhase.streaming => 'gen_phase_streaming',
     GenerationPhase.finalizing => 'gen_phase_finalizing',
+    GenerationPhase.aborting => 'gen_phase_aborting',
   };
 }
