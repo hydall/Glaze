@@ -796,6 +796,36 @@
   user-select: none;
 }
 
+/* Output-token cap warning: the reply was cut off by Max Tokens. Sits under
+   the body, above the footer, in the same chip shape as the game clock. */
+.msg-output-limit {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-start;
+  margin-top: 6px;
+  padding: 3px 10px;
+  border-radius: 8px;
+  font-size: 0.78em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #ffb340;
+  background-color: rgba(255, 159, 10, 0.14);
+  border: 1px solid rgba(255, 159, 10, 0.35);
+  font-family: inherit;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.msg-output-limit:active { background-color: rgba(255, 159, 10, 0.24); }
+.msg-output-limit svg {
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
+  flex-shrink: 0;
+}
+.message-section.user .msg-output-limit { align-self: flex-end; }
+
 .msg-studio-outputs {
   display: flex;
   flex-direction: column;

@@ -36,6 +36,7 @@ import 'widgets/chat_column_width.dart';
 import 'widgets/chat_header_search.dart';
 import 'widgets/message_actions.dart';
 import 'widgets/message_delete_confirmation.dart';
+import 'widgets/output_limit_sheet.dart';
 import 'widgets/game_time_seed_dialog.dart';
 import '../../shared/theme/theme_font_provider.dart';
 import '../../shared/theme/theme_preset.dart';
@@ -2020,6 +2021,8 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                   const [],
                             );
                           },
+                          onOutputLimitClick: (_) =>
+                              showOutputLimitSheet(context),
                         ),
                         editActions: EditActionsCallbacks(
                           onEditSave: (id, text) async {

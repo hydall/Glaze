@@ -367,6 +367,10 @@ class ChatBridgeController {
   void Function(String id)? onToggleImageHidden;
   void Function(List<String> ids)? onSelectionChange;
   void Function(String id)? onInjectClick;
+
+  /// The "Max output tokens reached" chip under a reply cut off by the cap.
+  /// Carries the message id.
+  void Function(String id)? onOutputLimitClick;
   // `blockIndex` addresses one image block of the message; null when the tap
   // did not come from an image gen block.
   void Function(String instruction, String messageId, int? blockIndex)?
@@ -512,6 +516,8 @@ class ChatBridgeController {
         onToggleImageHidden?.call(s);
       case 'onInjectClick':
         onInjectClick?.call(s);
+      case 'onOutputLimitClick':
+        onOutputLimitClick?.call(s);
       case 'onExtBlocksRunAll':
         onExtBlocksRunAll?.call(s);
       case 'onRerunCleaner':

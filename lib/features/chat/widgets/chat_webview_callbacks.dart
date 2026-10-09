@@ -123,6 +123,10 @@ class ChatWebViewCallbacks {
     messageActions.onInjectClick?.call(id);
   }
 
+  void onOutputLimitClick(String id) {
+    messageActions.onOutputLimitClick?.call(id);
+  }
+
   void onImgRetry(String instruction, String messageId, int? blockIndex) {
     imageGenActions.onImgRetry?.call(instruction, messageId, blockIndex);
   }

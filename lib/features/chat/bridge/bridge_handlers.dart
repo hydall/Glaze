@@ -78,6 +78,7 @@ const Map<String, HandlerSpec> bridgeHandlers = {
   'onToggleImageHidden': HandlerSpec(HandlerKind.stringArg),
   'onSelectionChange': HandlerSpec(HandlerKind.idList),
   'onInjectClick': HandlerSpec(HandlerKind.stringArg),
+  'onOutputLimitClick': HandlerSpec(HandlerKind.stringArg),
   // Image generation
   'onImgRetry': HandlerSpec(HandlerKind.imageAction),
   'onImgEnableRetry': HandlerSpec(HandlerKind.imageAction),

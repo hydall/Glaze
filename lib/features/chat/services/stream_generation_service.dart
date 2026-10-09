@@ -27,6 +27,7 @@ import '../../../core/llm/stream_accumulator.dart';
 import '../../../core/llm/studio_regex_applicator.dart';
 import '../../../core/llm/beauty_state_parser.dart';
 import '../../../core/llm/idle_timeout_guard.dart';
+import '../../../core/llm/output_limit.dart';
 import '../../../core/llm/transport/call_attempt_outcome.dart';
 import '../../../core/llm/transport/chat_transport_request.dart';
 import '../../../core/llm/transport/llm_call_event.dart';
@@ -582,6 +583,14 @@ class StreamGenerationService {
               studioOutputs: StudioStreamInterceptor.studioOutputsToJson(
                 studioResult.stageBriefs,
               ),
+              // The final writer's cap lives in the Studio settings, not on
+              // this connection, so only the provider's own finish reason
+              // can tell here.
+              outputLimitHit: hitOutputTokenLimit(
+                text: studioResult.response,
+                rawResponse: studioResult.rawResponseJson,
+                maxTokens: 0,
+              ),
             )
             .copyWith(
               promptPayload: finalPayload,
@@ -748,17 +757,18 @@ class StreamGenerationService {
         );
       }
 
+      final request = ChatTransportRequest.fromApiConfig(
+        apiConfig,
+        messages: apiMessages,
+        sessionId: session.id,
+        previousMessages: previousApiMessages,
+        charName: inputs.character.name,
+        userName: inputs.persona?.name ?? 'User',
+        captureContext: captureContext,
+      );
       _phase(GenerationPhase.waiting);
       await transport.stream(
-        request: ChatTransportRequest.fromApiConfig(
-          apiConfig,
-          messages: apiMessages,
-          sessionId: session.id,
-          previousMessages: previousApiMessages,
-          charName: inputs.character.name,
-          userName: inputs.persona?.name ?? 'User',
-          captureContext: captureContext,
-        ),
+        request: request,
         cancelToken: cancelToken,
         onUpdate: (delta, reasoningDelta) {
           if (_isAborted()) return;
@@ -824,6 +834,17 @@ class StreamGenerationService {
               .inMilliseconds;
           final timeStr = '${(elapsed / 1000).toStringAsFixed(1)}s';
           final tokenCount = estimateTokens(finalText);
+          // Read off what the model produced, before the reasoning markers
+          // and beauty-state blocks were stripped: all of it counted against
+          // the cap.
+          final outputLimitHit = hitOutputTokenLimit(
+            text: accumulator.text,
+            reasoning: accumulator.reasoning.isNotEmpty
+                ? accumulator.reasoning
+                : reasoning,
+            rawResponse: rawResponseJson,
+            maxTokens: request.maxTokens,
+          );
           finalState = _writer
               .writeAssistant(
                 text: finalText,
@@ -848,6 +869,7 @@ class StreamGenerationService {
                 triggeredMemories: triggeredMemories,
                 regenTargetId: regenTargetId,
                 visibleStartIndex: vsi,
+                outputLimitHit: outputLimitHit,
               )
               .copyWith(
                 promptPayload: payload,

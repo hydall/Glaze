@@ -433,6 +433,7 @@ void main() {
         'onToggleHidden',
         'onSelectionChange',
         'onInjectClick',
+        'onOutputLimitClick',
         'onImgRetry',
         'onImgEnableRetry',
         'onImgFind',

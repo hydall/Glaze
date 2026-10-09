@@ -271,6 +271,7 @@ export class InteractionDispatch {
     return {
       'memory-click': (e, el) => bridge._sendToFlutter('onMemoryClick', [el.dataset.messageId]),
       'inject-click': (e, el) => bridge._sendToFlutter('onInjectClick', [el.dataset.messageId]),
+      'output-limit-click': (e, el) => bridge._sendToFlutter('onOutputLimitClick', [el.dataset.messageId]),
       'ext-blocks-run-all': (e, el) => bridge._sendToFlutter('onExtBlocksRunAll', [el.dataset.messageId]),
       'ext-block-stop': (e, el) => bridge._sendToFlutter('onExtBlockStop', [el.dataset.blockId, el.dataset.messageId]),
       'ext-block-regen': (e, el) => bridge._sendToFlutter('onExtBlockRegen', [el.dataset.blockId, el.dataset.messageId]),
