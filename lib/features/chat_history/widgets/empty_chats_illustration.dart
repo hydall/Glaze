@@ -1,74 +1,58 @@
-import 'dart:math';
-
 import 'package:flutter/material.dart';
 
 import '../../../shared/theme/app_colors.dart';
-import 'typing_dots.dart';
 
-/// The empty dialog list's illustration: two drifting chat bubbles — a muted "their" bubble with placeholder lines and an accent
-/// "your" bubble that is typing, i.e. the conversation waiting to happen.
-class EmptyChatsIllustration extends StatefulWidget {
+/// The empty dialog list's illustration: two chat bubbles — a muted "their"
+/// bubble with placeholder lines and an accent "your" bubble that is typing,
+/// i.e. the conversation waiting to happen. The bubbles slide in once on
+/// mount and then stay still: an idle loop on an empty screen distracts.
+class EmptyChatsIllustration extends StatelessWidget {
   const EmptyChatsIllustration({super.key});
 
-  @override
-  State<EmptyChatsIllustration> createState() => _EmptyChatsIllustrationState();
-}
-
-class _EmptyChatsIllustrationState extends State<EmptyChatsIllustration>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _float = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 4200),
-  )..repeat();
-
-  @override
-  void dispose() {
-    _float.dispose();
-    super.dispose();
-  }
+  static const _curve = Cubic(0.2, 0.8, 0.2, 1);
 
   @override
   Widget build(BuildContext context) {
     final cs = context.cs;
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0, end: 1),
-      duration: const Duration(milliseconds: 500),
-      curve: const Cubic(0.2, 0.8, 0.2, 1),
-      builder: (context, t, child) => Opacity(
-        opacity: t,
-        child: Transform.scale(scale: 0.9 + 0.1 * t, child: child),
-      ),
-      child: SizedBox(
-        width: 200,
-        height: 160,
-        child: AnimatedBuilder(
-          animation: _float,
-          builder: (context, _) {
-            final a = _float.value * 2 * pi;
-            // Opposite phases, so the bubbles bob past each other.
-            final backDy = sin(a) * 4;
-            final frontDy = sin(a + pi) * 4;
-            return Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Positioned(
-                  left: 14,
-                  top: 22 + backDy,
+      duration: const Duration(milliseconds: 700),
+      builder: (context, t, _) {
+        // The reply lands a beat after the incoming bubble.
+        final back = _curve.transform(const Interval(0, 0.7).transform(t));
+        final front = _curve.transform(const Interval(0.25, 1).transform(t));
+        return SizedBox(
+          width: 200,
+          height: 160,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Positioned(
+                left: 14 - 16 * (1 - back),
+                top: 22 + 10 * (1 - back),
+                child: Opacity(
+                  opacity: back,
                   child: _BackBubble(color: cs.onSurfaceVariant),
                 ),
-                Positioned(
-                  right: 18,
-                  bottom: 26 + frontDy,
-                  child: _FrontBubble(
-                    color: cs.primary,
-                    dotColor: cs.onPrimary,
+              ),
+              Positioned(
+                right: 18 - 16 * (1 - front),
+                bottom: 26 - 10 * (1 - front),
+                child: Opacity(
+                  opacity: front,
+                  child: Transform.scale(
+                    scale: 0.85 + 0.15 * front,
+                    child: _FrontBubble(
+                      color: cs.primary,
+                      dotColor: cs.onPrimary,
+                    ),
                   ),
                 ),
-              ],
-            );
-          },
-        ),
-      ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -139,7 +123,21 @@ class _FrontBubble extends StatelessWidget {
           ),
         ],
       ),
-      child: TypingDots(color: dotColor, size: 7),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final (i, alpha) in const [1.0, 0.7, 0.4].indexed)
+            Container(
+              width: 7,
+              height: 7,
+              margin: EdgeInsets.only(left: i == 0 ? 0 : 4),
+              decoration: BoxDecoration(
+                color: dotColor.withValues(alpha: alpha),
+                shape: BoxShape.circle,
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

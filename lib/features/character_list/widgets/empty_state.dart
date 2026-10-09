@@ -1,5 +1,3 @@
-import 'dart:math';
-
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
@@ -74,76 +72,60 @@ class EmptyCharacterState extends StatelessWidget {
   }
 }
 
-/// Three character cards fanned out and gently bobbing: two muted ones behind
-/// and an accent one in front.
-class _CardsIllustration extends StatefulWidget {
+/// Three character cards fanned out: two muted ones behind and an accent one
+/// in front. The fan opens once on mount and then stays still: an idle loop
+/// on an empty screen distracts.
+class _CardsIllustration extends StatelessWidget {
   const _CardsIllustration();
 
-  @override
-  State<_CardsIllustration> createState() => _CardsIllustrationState();
-}
-
-class _CardsIllustrationState extends State<_CardsIllustration>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _float = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 4200),
-  )..repeat();
-
-  @override
-  void dispose() {
-    _float.dispose();
-    super.dispose();
-  }
+  static const _curve = Cubic(0.2, 0.8, 0.2, 1);
 
   @override
   Widget build(BuildContext context) {
     final cs = context.cs;
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0, end: 1),
-      duration: const Duration(milliseconds: 500),
-      curve: const Cubic(0.2, 0.8, 0.2, 1),
-      builder: (context, t, child) => Opacity(
-        opacity: t,
-        child: Transform.scale(scale: 0.9 + 0.1 * t, child: child),
-      ),
-      child: SizedBox(
-        width: 200,
-        height: 160,
-        child: AnimatedBuilder(
-          animation: _float,
-          builder: (context, _) {
-            final a = _float.value * 2 * pi;
-            // Side cards bob opposite to the front one.
-            final sideDy = sin(a) * 3;
-            final frontDy = sin(a + pi) * 4;
-            return Stack(
-              alignment: Alignment.center,
-              clipBehavior: Clip.none,
-              children: [
-                Transform.translate(
-                  offset: Offset(-46, 8 + sideDy),
-                  child: Transform.rotate(
-                    angle: -0.22,
-                    child: _MutedCard(color: cs.onSurfaceVariant),
+      duration: const Duration(milliseconds: 700),
+      builder: (context, t, _) {
+        // The front card rises first, then the side cards fan out from
+        // behind it.
+        final front = _curve.transform(const Interval(0, 0.6).transform(t));
+        final fan = _curve.transform(const Interval(0.2, 1).transform(t));
+        return SizedBox(
+          width: 200,
+          height: 160,
+          child: Stack(
+            alignment: Alignment.center,
+            clipBehavior: Clip.none,
+            children: [
+              for (final side in const [-1.0, 1.0])
+                Opacity(
+                  opacity: fan,
+                  child: Transform.translate(
+                    offset: Offset(46 * side * fan, 8),
+                    child: Transform.rotate(
+                      angle: 0.22 * side * fan,
+                      child: _MutedCard(color: cs.onSurfaceVariant),
+                    ),
                   ),
                 ),
-                Transform.translate(
-                  offset: Offset(46, 8 - sideDy),
-                  child: Transform.rotate(
-                    angle: 0.22,
-                    child: _MutedCard(color: cs.onSurfaceVariant),
+              Opacity(
+                opacity: front,
+                child: Transform.translate(
+                  offset: Offset(0, 14 * (1 - front)),
+                  child: Transform.scale(
+                    scale: 0.9 + 0.1 * front,
+                    child: _AccentCard(
+                      color: cs.primary,
+                      onColor: cs.onPrimary,
+                    ),
                   ),
                 ),
-                Transform.translate(
-                  offset: Offset(0, frontDy),
-                  child: _AccentCard(color: cs.primary, onColor: cs.onPrimary),
-                ),
-              ],
-            );
-          },
-        ),
-      ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
