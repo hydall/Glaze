@@ -286,7 +286,7 @@ void main() {
     expect(mapped.model, 'model');
     expect(mapped.maxTokens, 123);
     expect(mapped.contextSize, 456);
-    expect(mapped.firstChunkTimeoutMs, 60000);
+    expect(mapped.firstChunkTimeoutMs, 120000);
     expect(mapped.reasoningHistoryCount, 0);
     expect(mapped.embeddingEndpoint, 'embedding endpoint');
     expect(mapped.embeddingApiKey, 'embedding key');

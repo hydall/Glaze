@@ -36,7 +36,7 @@ class BlockLlmRunner {
   final BlockTransportPicker transportPicker;
 
   /// Fallback deadline when the connection carries no `firstChunkTimeoutMs`.
-  static const int fallbackTimeoutMs = 60000;
+  static const int fallbackTimeoutMs = 120000;
 
   /// Generates the block's raw text.
   ///

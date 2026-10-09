@@ -706,7 +706,7 @@ class StreamGenerationService {
       // AgentStreamRunner and AuxLlmClient patterns.
       final idleTimeoutMs = apiConfig.firstChunkTimeoutMs > 0
           ? apiConfig.firstChunkTimeoutMs
-          : 60000;
+          : 120000;
       bool idleTimedOut = false;
       final idleGuard = IdleTimeoutGuard(idleTimeoutMs, () {
         idleTimedOut = true;
