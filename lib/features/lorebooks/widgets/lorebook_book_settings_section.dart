@@ -9,6 +9,7 @@ import '../../../core/state/lorebook_embedding_provider.dart';
 import '../../../core/state/lorebook_provider.dart';
 import '../../../shared/widgets/menu_group.dart';
 import 'lorebook_option_sheet.dart';
+import 'vector_setup_gate.dart';
 
 /// One lorebook's own overrides, as a collapsible block above its entries.
 ///
@@ -92,9 +93,9 @@ class _LorebookBookSettingsSectionState
     ref.watch(lorebookSettingsProvider);
     final s = _effective;
     final hasCustom = widget.settings != null;
-    // Hidden while the active API preset has semantic search off: the
-    // per-book vector overrides could not take effect anyway.
-    final vectorAvailable = ref.watch(vectorSearchAvailableProvider);
+    // Without embeddings the vector overrides stay visible but lead to the
+    // embedding setup instead of taking effect.
+    final configured = ref.watch(embeddingConfiguredProvider);
 
     return MenuCollapsibleSection(
       label: 'title_lorebook_settings'.tr(),
@@ -165,14 +166,13 @@ class _LorebookBookSettingsSectionState
                   LorebookOption('true', 'on'.tr()),
                   LorebookOption('glaze', 'match_whole_words_glaze'.tr()),
                 ],
-                onSelect: (v) => _update(
-                  s.copyWith(matchWholeWords: v.isEmpty ? null : v),
-                ),
+                onSelect: (v) =>
+                    _update(s.copyWith(matchWholeWords: v.isEmpty ? null : v)),
               ),
             ),
           ],
         ),
-        if (vectorAvailable) _vectorGroup(s),
+        _vectorGroup(s, configured),
         if (hasCustom)
           MenuGroup(
             items: [
@@ -187,17 +187,26 @@ class _LorebookBookSettingsSectionState
     );
   }
 
-  Widget _vectorGroup(LorebookSettings s) {
+  /// Turning the book's vector search on first checks the embedding
+  /// connection; turning it off never needs to.
+  Future<void> _setVectorSearch(bool value) async {
+    if (value && !await ensureVectorsReady(context, ref)) return;
+    if (!mounted) return;
+    _update(_effective.copyWith(vectorSearchEnabled: value));
+  }
+
+  Widget _vectorGroup(LorebookSettings s, bool configured) {
     final target = LorebookEmbeddingTarget.values.contains(s.embeddingTarget)
         ? s.embeddingTarget
         : LorebookEmbeddingTarget.content;
     return MenuGroup(
       header: 'section_vector_search'.tr(),
       items: [
+        if (!configured) const VectorSetupItem(),
         MenuSwitchItem(
           label: 'label_vector_search'.tr(),
           value: s.vectorSearchEnabled,
-          onChanged: (v) => _update(s.copyWith(vectorSearchEnabled: v)),
+          onChanged: _setVectorSearch,
         ),
         if (s.vectorSearchEnabled) ...[
           MenuSwitchItem(

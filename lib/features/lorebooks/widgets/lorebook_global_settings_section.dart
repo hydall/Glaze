@@ -9,11 +9,9 @@ import '../../../core/models/lorebook.dart';
 import '../../../core/state/lorebook_auto_index_provider.dart';
 import '../../../core/state/lorebook_embedding_provider.dart';
 import '../../../core/state/lorebook_provider.dart';
-import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/menu_group.dart';
-import '../../settings/api_list_provider.dart';
-import '../../settings/api_settings_screen.dart';
 import 'lorebook_option_sheet.dart';
+import 'vector_setup_gate.dart';
 
 /// The global lorebook knobs, as a collapsible block at the top of the
 /// lorebook list.
@@ -58,22 +56,21 @@ class _LorebookGlobalSettingsSectionState
     saveLorebookSettings(s);
   }
 
-  /// A vector mode is only kept when there is an embedding connection to run
-  /// it on. Without one it would silently behave as keyword search, so the
-  /// mode goes back to keys and the user is pointed at the setup instead.
+  /// A vector mode is only kept when there is a working embedding connection
+  /// to run it on. Without one it would silently behave as keyword search, so
+  /// the mode goes back to keys and the user is pointed at the setup instead.
   Future<void> _selectSearchType(String type) async {
     if (type == 'keyword') {
       _update(ref.read(lorebookSettingsProvider).copyWith(searchType: type));
       return;
     }
-    final configured = await _vectorsConfigured();
+    final ready = await ensureVectorsReady(context, ref);
     if (!mounted) return;
     final current = ref.read(lorebookSettingsProvider);
-    if (!configured) {
+    if (!ready) {
       if (current.searchType != 'keyword') {
         _update(current.copyWith(searchType: 'keyword'));
       }
-      _showVectorSetupSheet();
       return;
     }
     _update(current.copyWith(searchType: type));
@@ -82,33 +79,11 @@ class _LorebookGlobalSettingsSectionState
     }
   }
 
-  Future<bool> _vectorsConfigured() async {
-    await ref.read(apiListProvider.future);
-    if (!ref.read(vectorSearchAvailableProvider)) return false;
-    final config = ref.read(embeddingConfigProvider);
-    return config.endpoint.trim().isNotEmpty && config.model.trim().isNotEmpty;
-  }
-
-  void _showVectorSetupSheet() {
-    GlazeBottomSheet.show<void>(
-      context,
-      title: 'vectors_setup_title'.tr(),
-      bigInfo: BottomSheetBigInfo(
-        icon: Icons.hub_outlined,
-        description: 'vectors_setup_desc'.tr(),
-        buttonText: 'vectors_setup_open'.tr(),
-        onButtonTap: () {
-          Navigator.of(context, rootNavigator: true).pop();
-          unawaited(
-            showApiSettingsSheet(
-              context,
-              focusSection: ApiSettingsSection.embeddings,
-            ),
-          );
-        },
-      ),
-    );
-  }
+  static String _searchTypeHint(String type) => switch (type) {
+    'vector' => 'search_type_vector_hint'.tr(),
+    'both' => 'search_type_both_hint'.tr(),
+    _ => 'search_type_keys_hint'.tr(),
+  };
 
   void _setAutoIndex(LorebookGlobalSettings s, bool value) {
     _update(s.copyWith(autoIndexVectors: value));
@@ -131,12 +106,12 @@ class _LorebookGlobalSettingsSectionState
   /// first, then what the semantic pass adds, then how the survivors are
   /// placed in the prompt.
   List<Widget> _buildGroups(LorebookGlobalSettings s) {
-    // With semantic search off in the API a stored vector mode runs as
-    // keyword search, so the picker shows that and the vector group is
-    // dropped. The picker itself stays: choosing a vector mode is how the
-    // user finds out the embeddings need setting up.
-    final vectorAvailable = ref.watch(vectorSearchAvailableProvider);
-    final searchType = vectorAvailable ? s.searchType : 'keyword';
+    // Without a configured embedding connection a stored vector mode runs as
+    // keyword search, so the picker shows that. The vector group stays
+    // visible and leads to the embedding setup; choosing a vector mode does
+    // the same after checking the connection.
+    final configured = ref.watch(embeddingConfiguredProvider);
+    final searchType = configured ? s.searchType : 'keyword';
     final isVector = searchType != 'keyword';
 
     return [
@@ -146,6 +121,7 @@ class _LorebookGlobalSettingsSectionState
         items: [
           MenuSelectorItem(
             label: 'label_search_type'.tr(),
+            description: _searchTypeHint(searchType),
             currentValue: switch (searchType) {
               'vector' => 'search_type_vector'.tr(),
               'both' => 'search_type_both'.tr(),
@@ -156,9 +132,12 @@ class _LorebookGlobalSettingsSectionState
               title: 'label_search_type'.tr(),
               current: searchType,
               options: [
-                LorebookOption('keyword', 'search_type_keys'.tr()),
-                LorebookOption('vector', 'search_type_vector'.tr()),
-                LorebookOption('both', 'search_type_both'.tr()),
+                for (final (type, label) in [
+                  ('keyword', 'search_type_keys'),
+                  ('vector', 'search_type_vector'),
+                  ('both', 'search_type_both'),
+                ])
+                  LorebookOption(type, label.tr(), hint: _searchTypeHint(type)),
               ],
               onSelect: _selectSearchType,
             ),
@@ -215,32 +194,32 @@ class _LorebookGlobalSettingsSectionState
           ),
         ],
       ),
-      if (isVector)
-        MenuGroup(
-          header: 'section_vector_search'.tr(),
-          items: [
-            MenuRangeItem(
-              label: 'label_similarity_threshold'.tr(),
-              value: s.vectorThreshold,
-              min: 0,
-              max: 1,
-              divisions: 100,
-              onChanged: (v) => _update(
-                s.copyWith(vectorThreshold: double.parse(v.toStringAsFixed(2))),
-              ),
+      MenuGroup(
+        header: 'section_vector_search'.tr(),
+        items: [
+          if (!configured) const VectorSetupItem(),
+          MenuRangeItem(
+            label: 'label_similarity_threshold'.tr(),
+            value: s.vectorThreshold,
+            min: 0,
+            max: 1,
+            divisions: 100,
+            onChanged: (v) => _update(
+              s.copyWith(vectorThreshold: double.parse(v.toStringAsFixed(2))),
             ),
-            _NumberItem(
-              label: 'label_top_k'.tr(),
-              controller: _topKCtrl,
-              onChanged: (v) {
-                final n = int.tryParse(v);
-                if (n != null && n >= 1 && n <= 50) {
-                  _update(s.copyWith(vectorTopK: n));
-                }
-              },
-            ),
-          ],
-        ),
+          ),
+          _NumberItem(
+            label: 'label_top_k'.tr(),
+            controller: _topKCtrl,
+            onChanged: (v) {
+              final n = int.tryParse(v);
+              if (n != null && n >= 1 && n <= 50) {
+                _update(s.copyWith(vectorTopK: n));
+              }
+            },
+          ),
+        ],
+      ),
       MenuGroup(
         header: 'section_injection_rules'.tr(),
         helpTerm: 'lorebook-budget',
