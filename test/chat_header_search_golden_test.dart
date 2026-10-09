@@ -153,6 +153,16 @@ void main() {
         tester.getSize(find.byType(Stack).last).width,
         tester.getSize(find.byType(ChatHeader)).width,
       );
+      // Placeholder, typed text and the cross share one centre line.
+      double centreY(Finder f) => tester.getCenter(f).dy;
+      final fieldBox = find.ancestor(
+        of: find.byType(TextField),
+        matching: find.byType(DecoratedBox),
+      );
+      final boxY = centreY(fieldBox.first);
+      expect(centreY(find.text('Поиск сообщений')), closeTo(boxY, 0.5));
+      expect(centreY(find.byType(EditableText)), closeTo(boxY, 0.5));
+      expect(centreY(find.byIcon(Icons.close_rounded)), closeTo(boxY, 0.5));
       await shoot('${tag}_open');
 
       search.searchController.text = 'dragon';
