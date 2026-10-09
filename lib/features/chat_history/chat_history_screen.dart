@@ -9,6 +9,7 @@ import '../../shared/shell/shell_header_provider.dart';
 import '../../shared/theme/app_colors.dart';
 
 import '../../shared/widgets/glow_ripple.dart';
+import '../guides/guide_anchor.dart';
 import '../settings/app_settings_provider.dart';
 import 'chat_history_actions.dart';
 import 'chat_history_list.dart';
@@ -114,16 +115,19 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
       title: _searchExpanded ? null : 'tab_dialogs'.tr(),
       titleWidget: _searchExpanded ? _buildSearchField() : null,
       actions: [
-        SizedBox(
-          width: 44,
-          height: 44,
-          child: IconButton(
-            icon: Icon(
-              _searchExpanded ? Icons.close_rounded : Icons.search_rounded,
-              size: 22,
+        GuideAnchor(
+          id: GuideIds.chatsSearch,
+          child: SizedBox(
+            width: 44,
+            height: 44,
+            child: IconButton(
+              icon: Icon(
+                _searchExpanded ? Icons.close_rounded : Icons.search_rounded,
+                size: 22,
+              ),
+              color: context.cs.primary,
+              onPressed: _searchExpanded ? _closeSearch : _openSearch,
             ),
-            color: context.cs.primary,
-            onPressed: _searchExpanded ? _closeSearch : _openSearch,
           ),
         ),
       ],

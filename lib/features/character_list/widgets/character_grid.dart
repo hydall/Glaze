@@ -14,6 +14,7 @@ import '../../../shared/widgets/glaze_spinner.dart';
 import '../../settings/app_settings_provider.dart';
 import '../character_detail_screen.dart';
 import '../character_sort.dart';
+import '../../guides/guide_anchor.dart';
 import 'character_card.dart';
 import 'randomizing_card_overlay.dart';
 import '../../../shared/widgets/glaze_sheet.dart';
@@ -142,16 +143,22 @@ class CharacterGrid extends StatelessWidget {
                   (s) => s.value?.useStandardRandomizer ?? false,
                 ),
               );
-              return _DiceButton(
-                standard: standard,
-                onTap: () => standard
-                    ? _openStandardRandom(context)
-                    : _openRandomizing(context),
+              return GuideAnchor(
+                id: GuideIds.charsRandom,
+                child: _DiceButton(
+                  standard: standard,
+                  onTap: () => standard
+                      ? _openStandardRandom(context)
+                      : _openRandomizing(context),
+                ),
               );
             },
           ),
         if (onFilterTap != null)
-          _FilterButton(count: filterCount, onTap: onFilterTap!),
+          GuideAnchor(
+            id: GuideIds.charsFilter,
+            child: _FilterButton(count: filterCount, onTap: onFilterTap!),
+          ),
         if (isDesktop) ...[
           sortTypePill,
           sortDirButton,
@@ -222,10 +229,17 @@ class CharacterGrid extends StatelessWidget {
                   // list left its slot's State (which still holds the finished dust
                   // cloud) attached to the character that shifted up into that slot —
                   // showing an empty slot instead of the next card.
-                  (ctx, i) => CharacterCard(
+                  //
+                  // The first card is the one the Characters tour points at;
+                  // the anchor wraps every card alike so the key stays on the
+                  // outermost widget, where the delegate matches it.
+                  (ctx, i) => GuideAnchor(
                     key: ValueKey(characters[i].id),
-                    character: characters[i],
-                    folderId: folderId,
+                    id: i == 0 ? GuideIds.charsCard : null,
+                    child: CharacterCard(
+                      character: characters[i],
+                      folderId: folderId,
+                    ),
                   ),
                   childCount: characters.length,
                 ),
