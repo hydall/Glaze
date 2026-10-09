@@ -35,7 +35,7 @@ abstract class ApiConfig with _$ApiConfig {
     @Default(0) int topK,
     @Default(0.0) double frequencyPenalty,
     @Default(0.0) double presencePenalty,
-    @Default(true) bool stream,
+    @Default(false) bool stream,
     @Default('medium') String reasoningEffort,
     @Default(false) bool requestReasoning,
     @Default(false) bool useResponsesApi,
