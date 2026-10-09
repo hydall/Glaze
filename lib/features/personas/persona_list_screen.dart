@@ -30,6 +30,8 @@ import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/help_tip.dart';
 import '../../shared/widgets/sheet_view.dart';
+import '../guides/guide_anchor.dart';
+import '../guides/guide_service.dart';
 
 class PersonaListScreen extends ConsumerStatefulWidget {
   final bool startExpanded;
@@ -42,6 +44,14 @@ class PersonaListScreen extends ConsumerStatefulWidget {
 class _PersonaListScreenState extends ConsumerState<PersonaListScreen> {
   /// Folder currently being browsed, or null at the top level.
   String? _currentFolderId;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) maybeShowGuide(context, AppGuide.personas);
+    });
+  }
 
   void _openFolder(String id) => setState(() => _currentFolderId = id);
 
@@ -103,13 +113,19 @@ class _PersonaListScreenState extends ConsumerState<PersonaListScreen> {
       actions: [
         if (folderId == null)
           SheetViewAction(
-            icon: const Icon(Icons.create_new_folder_outlined, size: 20),
+            icon: const GuideAnchor(
+              id: GuideIds.personasFolder,
+              child: Icon(Icons.create_new_folder_outlined, size: 20),
+            ),
             tooltip: 'folder_new'.tr(),
             onPressed: () =>
                 showCreateFolderDialog(context, ref, FolderDomain.persona),
           ),
         SheetViewAction(
-          icon: const Icon(Icons.add, size: 20),
+          icon: const GuideAnchor(
+            id: GuideIds.personasAdd,
+            child: Icon(Icons.add, size: 20),
+          ),
           tooltip: "${'create_new'.tr()} ${'tab_personas'.tr()}",
           onPressed: () => _showEditor(context),
         ),
@@ -143,12 +159,14 @@ class _PersonaListScreenState extends ConsumerState<PersonaListScreen> {
                 children: [
                   Text('no_results'.tr()),
                   const SizedBox(height: 8),
-                  GlazeActionButton(
-                    icon: Icons.add_rounded,
-                    label:
-                        "${'create_new'.tr()} ${'tab_personas'.tr()}",
-                    tone: GlazeActionTone.primary,
-                    onTap: () => _showEditor(context),
+                  GuideAnchor(
+                    id: GuideIds.personasAdd,
+                    child: GlazeActionButton(
+                      icon: Icons.add_rounded,
+                      label: "${'create_new'.tr()} ${'tab_personas'.tr()}",
+                      tone: GlazeActionTone.primary,
+                      onTap: () => _showEditor(context),
+                    ),
                   ),
                 ],
               ),
@@ -173,10 +191,13 @@ class _PersonaListScreenState extends ConsumerState<PersonaListScreen> {
                   ),
               ];
               final rows = <Widget>[
-                for (final persona in list)
-                  _PersonaTile(
-                    persona: persona,
-                    openEditor: (persona) => _showEditor(context, persona),
+                for (final (i, persona) in list.indexed)
+                  GuideAnchor(
+                    id: i == 0 ? GuideIds.personasRow : null,
+                    child: _PersonaTile(
+                      persona: persona,
+                      openEditor: (persona) => _showEditor(context, persona),
+                    ),
                   ),
               ];
               return ListView(

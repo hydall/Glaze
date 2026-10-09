@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:glaze_flutter/features/onboarding/onboarding_models.dart';
+import 'package:glaze_flutter/shared/widgets/sheet_view.dart';
 import 'package:glaze_flutter/features/guides/guide_anchor.dart';
 import 'package:glaze_flutter/features/guides/guide_service.dart';
 import 'package:glaze_flutter/features/guides/guide_tour.dart';
@@ -165,6 +167,12 @@ void main() {
           () => showGuide(context, guide),
           wait: const Duration(milliseconds: 1700),
         );
+        // A setup screen's tour is all optional steps: with none of its
+        // controls on screen there is nothing to show.
+        if (required == 0) {
+          expect(find.byType(GuideTourView), findsNothing);
+          return;
+        }
         var steps = 1;
         while (find.byTooltip('Next').evaluate().isNotEmpty) {
           await tapNext(tester);
@@ -242,6 +250,80 @@ void main() {
       expect(prefs.getBool(AppGuide.tabs.shownKey), isTrue);
     });
 
+    testWidgets('stays away with the guides turned off', (tester) async {
+      final context = await pumpScreen(
+        tester,
+        prefs: const {'onboarding_complete': true, guidesEnabledKey: false},
+      );
+      await trigger(tester, context);
+
+      expect(find.byType(GuideTourView), findsNothing);
+      final prefs = await SharedPreferences.getInstance();
+      expect(
+        prefs.getBool(AppGuide.tabs.shownKey),
+        isNull,
+        reason: 'turned off is not seen: the Help list still offers it',
+      );
+    });
+
+    testWidgets('a replay runs even with the guides turned off', (
+      tester,
+    ) async {
+      final context = await pumpScreen(
+        tester,
+        prefs: {
+          'onboarding_complete': true,
+          guidesEnabledKey: false,
+          AppGuide.chat.shownKey: true,
+        },
+      );
+      await start(tester, () => replayGuide(context, AppGuide.chat));
+      await tester.pump(const Duration(seconds: 4));
+      await start(
+        tester,
+        () => maybeShowGuide(context, AppGuide.chat),
+        wait: const Duration(milliseconds: 1700),
+      );
+
+      expect(find.byType(GuideTourView), findsOneWidget);
+    });
+
+    testWidgets('a tour over a half-height sheet expands it first', (
+      tester,
+    ) async {
+      final context = await pumpScreen(tester);
+      unawaited(
+        showModalBottomSheet<void>(
+          context: context,
+          isScrollControlled: true,
+          backgroundColor: Colors.transparent,
+          builder: (_) => SheetView(
+            title: 'Sheet',
+            body: Center(
+              child: GuideAnchor(
+                id: GuideIds.apiAdd,
+                child: const SizedBox(width: 120, height: 48),
+              ),
+            ),
+          ),
+        ),
+      );
+      await settle(tester);
+      double height() => tester.getSize(find.byType(SheetView)).height;
+      final collapsed = height();
+
+      await start(
+        tester,
+        () => showGuide(context, AppGuide.api),
+        wait: const Duration(milliseconds: 600),
+      );
+      // The snap runs on the test clock; the tour only opens once it is done.
+      await settle(tester);
+
+      expect(find.byType(GuideTourView), findsOneWidget);
+      expect(height(), greaterThan(collapsed));
+    });
+
     testWidgets('stays away once seen', (tester) async {
       final context = await pumpScreen(
         tester,
@@ -251,5 +333,14 @@ void main() {
 
       expect(find.byType(GuideTourView), findsNothing);
     });
+  });
+
+  test('the onboarding asks about the guides right before the finish', () {
+    for (final notifications in [true, false]) {
+      final slides = buildOnboardingSlides(
+        includeNotifications: notifications,
+      ).map((s) => s.type).toList();
+      expect(slides[slides.length - 2], OnboardingSlideType.guides);
+    }
   });
 }

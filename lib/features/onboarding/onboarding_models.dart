@@ -10,11 +10,9 @@ enum OnboardingSlideType {
   features,
   glossary,
   dataImport,
-  api,
-  persona,
-  preset,
   layout,
   notifications,
+  guides,
   allSet,
 }
 
@@ -84,24 +82,9 @@ const _allOnboardingSlides = <OnboardingSlideData>[
     desc: 'onboarding_import_slide_desc',
     icon: Icons.download_rounded,
   ),
-  OnboardingSlideData(
-    type: OnboardingSlideType.api,
-    title: 'onboarding_api_title',
-    desc: 'onboarding_preset_slide_desc',
-    icon: Icons.dns_outlined,
-  ),
-  OnboardingSlideData(
-    type: OnboardingSlideType.persona,
-    title: 'onboarding_persona_title',
-    desc: 'onboarding_persona_slide_desc',
-    icon: Icons.person_outline_rounded,
-  ),
-  OnboardingSlideData(
-    type: OnboardingSlideType.preset,
-    title: 'onboarding_slide_preset_title',
-    desc: 'onboarding_slide_preset_desc',
-    icon: Icons.tune_rounded,
-  ),
+  // API, persona and preset used to be set up here. They moved to the Tools
+  // tab's guide, which shows the real screens they live on instead of a
+  // one-off copy of them that the reader never saw again.
   OnboardingSlideData(
     type: OnboardingSlideType.layout,
     title: 'onboarding_layout_title',
@@ -113,6 +96,14 @@ const _allOnboardingSlides = <OnboardingSlideData>[
     title: 'onboarding_notifications_title',
     desc: 'onboarding_notifications_slide_desc',
     icon: Icons.notifications_active_outlined,
+  ),
+  // Last before the finish: the guides it offers start right after it, on the
+  // tabs the reader is about to land on.
+  OnboardingSlideData(
+    type: OnboardingSlideType.guides,
+    title: 'onboarding_guides_title',
+    desc: 'onboarding_guides_desc',
+    icon: Icons.school_outlined,
   ),
   OnboardingSlideData(
     type: OnboardingSlideType.allSet,

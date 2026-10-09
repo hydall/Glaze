@@ -117,6 +117,19 @@ abstract final class GuideIds {
   static String toolsTile(String tileId) => 'tools.tile.$tileId';
   static const toolsEdit = 'tools.edit';
 
+  static const apiAdd = 'api.add';
+  static const apiSwitcher = 'api.switcher';
+  static const apiTabs = 'api.tabs';
+  static const apiConnection = 'api.connection';
+
+  static const presetsRow = 'presets.row';
+  static const presetsControls = 'presets.controls';
+  static const presetsAdd = 'presets.add';
+
+  static const personasAdd = 'personas.add';
+  static const personasFolder = 'personas.folder';
+  static const personasRow = 'personas.row';
+
   static const moreSettings = 'more.settings';
   static const moreSearch = 'more.search';
   static const moreData = 'more.data';

@@ -495,8 +495,8 @@ class _OnboardingGreeterState extends State<OnboardingGreeter>
   }
 }
 
-/// Clickable action card, outlined in the accent — for data import / api /
-/// persona slides
+/// Clickable action card, outlined in the accent — for the slides that open
+/// something (data import, glossary, notifications)
 class OnboardingClickableBlock extends StatefulWidget {
   final IconData icon;
   final String title;
@@ -568,6 +568,85 @@ class _OnboardingClickableBlockState extends State<OnboardingClickableBlock> {
   }
 }
 
+/// One answer of a two-way question: an icon, the answer and a line under
+/// it. The picked one wears the accent outline and a check.
+class OnboardingChoiceCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final bool selected;
+  final VoidCallback onTap;
+  const OnboardingChoiceCard({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = context.cs;
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(16, 14, 14, 14),
+        decoration: BoxDecoration(
+          color: selected ? const Color(0x26808080) : const Color(0x14808080),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected ? cs.primary : const Color(0xFF2A2A2E),
+            width: 1.5,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 28, color: selected ? cs.primary : Colors.white70),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: cs.onSurfaceVariant,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            AnimatedOpacity(
+              opacity: selected ? 1 : 0,
+              duration: const Duration(milliseconds: 180),
+              child: Icon(
+                Icons.check_circle_rounded,
+                color: cs.primary,
+                size: 24,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// Full-width accent primary button
 class OnboardingPrimaryButton extends StatefulWidget {
   final String label;
@@ -612,116 +691,6 @@ class _OnboardingPrimaryButtonState extends State<OnboardingPrimaryButton> {
               fontSize: 17,
               fontWeight: FontWeight.w600,
               color: Colors.white,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// A built-in preset on the preset step: its cover behind a dark scrim, the
-/// name, author and one-line pitch. The active one wears the accent outline
-/// and a check.
-class OnboardingPresetCard extends StatelessWidget {
-  final String name;
-  final String author;
-  final String description;
-  final String imageAsset;
-  final bool selected;
-  final VoidCallback onTap;
-  const OnboardingPresetCard({
-    super.key,
-    required this.name,
-    required this.author,
-    required this.description,
-    required this.imageAsset,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = context.cs;
-    return GestureDetector(
-      onTap: onTap,
-      // The border is painted over the clipped cover rather than around it, so
-      // no sliver of the image shows past the scrim at the rounded edges.
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        foregroundDecoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: selected ? cs.primary : const Color(0xFF2A2A2E),
-            width: 1.5,
-          ),
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(20),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              image: DecorationImage(
-                image: AssetImage(imageAsset),
-                fit: BoxFit.cover,
-              ),
-            ),
-            child: DecoratedBox(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.centerLeft,
-                  end: Alignment.centerRight,
-                  colors: [Color(0xE6000000), Color(0x99000000)],
-                ),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            name,
-                            style: const TextStyle(
-                              fontSize: 17,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.white,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            'by $author',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Color(0xB3FFFFFF),
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            description,
-                            style: const TextStyle(
-                              fontSize: 14,
-                              color: Color(0xE6FFFFFF),
-                              height: 1.35,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    AnimatedOpacity(
-                      opacity: selected ? 1 : 0,
-                      duration: const Duration(milliseconds: 180),
-                      child: Icon(
-                        Icons.check_circle_rounded,
-                        color: cs.primary,
-                        size: 26,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
             ),
           ),
         ),

@@ -45,6 +45,9 @@ Future<void> showGuidesList(BuildContext context) {
         onTap: () => open(replayCatalogOnboarding),
       ),
       guide(AppGuide.tools, Icons.handyman_rounded, 'guides_tools'),
+      guide(AppGuide.api, Icons.cloud_rounded, 'guides_api'),
+      guide(AppGuide.presets, Icons.tune_rounded, 'guides_presets'),
+      guide(AppGuide.personas, Icons.person_rounded, 'guides_personas'),
       guide(AppGuide.more, Icons.settings_rounded, 'guides_more'),
     ],
   );

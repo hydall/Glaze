@@ -13,8 +13,9 @@ class FeaturedPreset {
   final String name;
   final String author;
 
-  /// Translation key of the one-line pitch shown where the preset is offered
-  /// (the onboarding preset step).
+  /// Translation key of the one-line pitch for a screen that offers the
+  /// preset. None does right now: the onboarding's preset step, which showed
+  /// it, is gone, and the preset list shows these presets like any other.
   final String descriptionKey;
 
   /// Bundled ST-format preset JSON.
