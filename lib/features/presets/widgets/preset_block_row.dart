@@ -108,8 +108,16 @@ class PresetBlockRow extends StatelessWidget {
                 child: Row(
                   children: [
                     Expanded(
-                      child: Text(
-                        block.name,
+                      child: Text.rich(
+                        TextSpan(
+                          text: block.name,
+                          children: [
+                            if (block.content.contains('{{setvar::'))
+                              _macroBadge('set', context.cs.primary),
+                            if (block.content.contains('{{getvar::'))
+                              _macroBadge('get', _kGetvarGreen),
+                          ],
+                        ),
                         style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w500,
@@ -211,6 +219,33 @@ class PresetBlockRow extends StatelessWidget {
       child: Tooltip(message: 'studio_move_block'.tr(), child: child),
     );
   }
+}
+
+const Color _kGetvarGreen = Color(0xFF4CAF50);
+
+/// Inline SET/GET chip after the block name, flagging blocks that write or
+/// read session variables via `{{setvar::}}` / `{{getvar::}}`.
+InlineSpan _macroBadge(String label, Color color) {
+  return WidgetSpan(
+    alignment: PlaceholderAlignment.middle,
+    child: Container(
+      margin: const EdgeInsets.only(left: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        label.toUpperCase(),
+        style: const TextStyle(
+          fontSize: 9,
+          fontWeight: FontWeight.w700,
+          color: Colors.white,
+          height: 1,
+        ),
+      ),
+    ),
+  );
 }
 
 Widget _systemBadge(BuildContext context) {
