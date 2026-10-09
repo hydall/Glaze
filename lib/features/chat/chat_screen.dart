@@ -334,7 +334,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
     final appSettings = ref.watch(appSettingsProvider).value;
     final virtualKeyboardSend = appSettings?.virtualKeyboardSend ?? false;
-    final enterToSend = appSettings?.enterToSend ?? true;
+    final enterToSend = appSettings?.enterToSend ?? false;
     final batterySaver = appSettings?.batterySaver ?? false;
     _drawerCtrl.setBatterySaverMode(batterySaver);
 
@@ -750,7 +750,7 @@ class _ChatBody extends ConsumerStatefulWidget {
     required this.keyboardHeight,
     this.onScrollDirection,
     this.virtualKeyboardSend = false,
-    this.enterToSend = true,
+    this.enterToSend = false,
     this.targetMessageId,
     this.isHeaderHidden = false,
     required this.blurIsFlutterSide,

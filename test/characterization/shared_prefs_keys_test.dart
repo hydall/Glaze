@@ -50,8 +50,9 @@ void main() {
             // value of `batterySaverMode` now, and under the System default it
             // starts off until the platform says otherwise.
             // `dialogGrouping` groups dialogs by character out of the box.
-            if (entry.key == 'enterToSend' ||
-                entry.key == 'showOurPicks' ||
+            // `enterToSend` starts off: some soft keyboards send Enter as a
+            // key event, and it is a physical-keyboard opt-in anyway.
+            if (entry.key == 'showOurPicks' ||
                 entry.key == 'openCardAfterImport' ||
                 entry.key == 'hapticFeedback' ||
                 entry.key == 'messageVibration' ||

@@ -122,7 +122,7 @@ final appSettingsProvider =
 @freezed
 abstract class AppSettings with _$AppSettings {
   const factory AppSettings({
-    @Default(true) bool enterToSend,
+    @Default(false) bool enterToSend,
     @Default(false) bool hideMessageId,
     @Default(false) bool hideGenerationTime,
     @Default(false) bool hideTokenCount,
