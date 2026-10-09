@@ -29,6 +29,7 @@ import '../../shared/widgets/glaze_scaffold.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/help_tip.dart';
+import '../../shared/widgets/menu_group.dart';
 import '../../shared/widgets/sheet_view.dart';
 import '../guides/guide_anchor.dart';
 import '../guides/guide_service.dart';
@@ -200,11 +201,12 @@ class _PersonaListScreenState extends ConsumerState<PersonaListScreen> {
                     ),
                   ),
               ];
+              final flat = inSidebarPanel(context);
               return ListView(
                 padding: EdgeInsets.fromLTRB(
-                  16,
-                  widget.startExpanded ? 16 : 0,
-                  16,
+                  flat ? 0 : 16,
+                  widget.startExpanded && !flat ? 16 : 0,
+                  flat ? 0 : 16,
                   16,
                 ).add(mediaPad),
                 children: [
@@ -291,6 +293,125 @@ class _PersonaTile extends ConsumerWidget {
         (rawAvatarPath != null && rawAvatarPath.isNotEmpty)
         ? resolveGlazeFilePath(rawAvatarPath)
         : null;
+    final flat = inSidebarPanel(context);
+    final tile = ListTile(
+      contentPadding: EdgeInsets.symmetric(
+        horizontal: flat ? 16 : 12,
+        vertical: 4,
+      ),
+      shape: flat
+          ? null
+          : RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      onTap: () => setActivePersona(ref, isActive ? null : persona.id),
+      leading: CircleAvatar(
+        radius: 24,
+        backgroundColor: context.cs.primary.withValues(alpha: 0.18),
+        backgroundImage:
+            resolvedAvatarPath != null && resolvedAvatarPath.isNotEmpty
+            ? FileImage(File(resolvedAvatarPath))
+            : null,
+        child: resolvedAvatarPath == null || resolvedAvatarPath.isEmpty
+            ? Text(
+                displayName.isNotEmpty ? displayName[0].toUpperCase() : '?',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: context.cs.onSurface,
+                ),
+              )
+            : null,
+      ),
+      title: Text(displayName),
+      subtitle: persona.prompt != null && persona.prompt!.isNotEmpty
+          ? Text(persona.prompt!, maxLines: 1, overflow: TextOverflow.ellipsis)
+          : Text(
+              'no_prompt'.tr(),
+              style: TextStyle(color: context.cs.onSurfaceVariant),
+            ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            icon: const Icon(Icons.link, size: 18),
+            tooltip: 'header_connections'.tr(),
+            onPressed: () => showPersonaConnections(context, persona.id),
+          ),
+          IconButton(
+            icon: const Icon(Icons.more_vert, size: 20),
+            tooltip: 'header_more'.tr(),
+            onPressed: () {
+              GlazeBottomSheet.show<void>(
+                context,
+                title: "${'tab_personas'.tr()} ${'header_more'.tr()}",
+                items: [
+                  BottomSheetItem(
+                    label: 'action_edit'.tr(),
+                    icon: Icons.edit,
+                    onTap: () {
+                      Navigator.of(context, rootNavigator: true).pop();
+                      openEditor(persona);
+                    },
+                  ),
+                  BottomSheetItem(
+                    label: 'action_add_to_folder'.tr(),
+                    icon: Icons.create_new_folder_outlined,
+                    onTap: () {
+                      Navigator.of(context, rootNavigator: true).pop();
+                      showAddToFolderSheet(
+                        context,
+                        domain: FolderDomain.persona,
+                        targets: [persona.id],
+                      );
+                    },
+                  ),
+                  BottomSheetItem(
+                    label: 'action_clone_persona'.tr(),
+                    icon: Icons.copy_outlined,
+                    onTap: () async {
+                      Navigator.of(context, rootNavigator: true).pop();
+                      await ref
+                          .read(personaListProvider.notifier)
+                          .clone(persona);
+                    },
+                  ),
+                  BottomSheetItem(
+                    label: 'action_convert_to_character'.tr(),
+                    icon: Icons.person_outline,
+                    onTap: () async {
+                      Navigator.of(context, rootNavigator: true).pop();
+                      await convertPersonaToCharacter(ref, persona);
+                      if (!context.mounted) return;
+                      GlazeToast.show(
+                        context,
+                        'convert_to_character_done'.tr(),
+                      );
+                    },
+                  ),
+                  BottomSheetItem(
+                    label: 'action_delete'.tr(),
+                    icon: Icons.delete,
+                    isDestructive: true,
+                    onTap: () {
+                      Navigator.of(context, rootNavigator: true).pop();
+                      ref.read(personaListProvider.notifier).remove(persona.id);
+                    },
+                  ),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+    // In a sidebar panel the persona is a row of the list, edge to edge, and
+    // the active one is marked by its fill and a bar down its edge.
+    if (flat) {
+      return FlatGroupSurface(
+        color: isActive ? context.cs.primary.withValues(alpha: 0.12) : null,
+        accent: isActive ? context.cs.primary : null,
+        child: tile,
+      );
+    }
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: GlassSurface(
@@ -307,121 +428,7 @@ class _PersonaTile extends ConsumerWidget {
               ? context.cs.primary.withValues(alpha: 0.5)
               : context.cs.outline,
         ),
-        child: ListTile(
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 12,
-            vertical: 4,
-          ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          onTap: () => setActivePersona(ref, isActive ? null : persona.id),
-          leading: CircleAvatar(
-            radius: 24,
-            backgroundColor: context.cs.primary.withValues(alpha: 0.18),
-            backgroundImage:
-                resolvedAvatarPath != null && resolvedAvatarPath.isNotEmpty
-                ? FileImage(File(resolvedAvatarPath))
-                : null,
-            child: resolvedAvatarPath == null || resolvedAvatarPath.isEmpty
-                ? Text(
-                    displayName.isNotEmpty ? displayName[0].toUpperCase() : '?',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: context.cs.onSurface,
-                    ),
-                  )
-                : null,
-          ),
-          title: Text(displayName),
-          subtitle: persona.prompt != null && persona.prompt!.isNotEmpty
-              ? Text(
-                  persona.prompt!,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                )
-              : Text(
-                  'no_prompt'.tr(),
-                  style: TextStyle(color: context.cs.onSurfaceVariant),
-                ),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                icon: const Icon(Icons.link, size: 18),
-                tooltip: 'header_connections'.tr(),
-                onPressed: () => showPersonaConnections(context, persona.id),
-              ),
-              IconButton(
-                icon: const Icon(Icons.more_vert, size: 20),
-                tooltip: 'header_more'.tr(),
-                onPressed: () {
-                  GlazeBottomSheet.show<void>(
-                    context,
-                    title: "${'tab_personas'.tr()} ${'header_more'.tr()}",
-                    items: [
-                      BottomSheetItem(
-                        label: 'action_edit'.tr(),
-                        icon: Icons.edit,
-                        onTap: () {
-                          Navigator.of(context, rootNavigator: true).pop();
-                          openEditor(persona);
-                        },
-                      ),
-                      BottomSheetItem(
-                        label: 'action_add_to_folder'.tr(),
-                        icon: Icons.create_new_folder_outlined,
-                        onTap: () {
-                          Navigator.of(context, rootNavigator: true).pop();
-                          showAddToFolderSheet(
-                            context,
-                            domain: FolderDomain.persona,
-                            targets: [persona.id],
-                          );
-                        },
-                      ),
-                      BottomSheetItem(
-                        label: 'action_clone_persona'.tr(),
-                        icon: Icons.copy_outlined,
-                        onTap: () async {
-                          Navigator.of(context, rootNavigator: true).pop();
-                          await ref
-                              .read(personaListProvider.notifier)
-                              .clone(persona);
-                        },
-                      ),
-                      BottomSheetItem(
-                        label: 'action_convert_to_character'.tr(),
-                        icon: Icons.person_outline,
-                        onTap: () async {
-                          Navigator.of(context, rootNavigator: true).pop();
-                          await convertPersonaToCharacter(ref, persona);
-                          if (!context.mounted) return;
-                          GlazeToast.show(
-                            context,
-                            'convert_to_character_done'.tr(),
-                          );
-                        },
-                      ),
-                      BottomSheetItem(
-                        label: 'action_delete'.tr(),
-                        icon: Icons.delete,
-                        isDestructive: true,
-                        onTap: () {
-                          Navigator.of(context, rootNavigator: true).pop();
-                          ref
-                              .read(personaListProvider.notifier)
-                              .remove(persona.id);
-                        },
-                      ),
-                    ],
-                  );
-                },
-              ),
-            ],
-          ),
-        ),
+        child: tile,
       ),
     );
   }

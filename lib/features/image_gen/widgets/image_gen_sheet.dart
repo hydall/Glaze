@@ -171,20 +171,30 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
     final s = _settings;
 
     return SheetView(
+      // The title gives way to the switch, not the other way round: in a
+      // narrow sidebar panel the switch used to be pushed off the edge.
       titleWidget: Row(
         children: [
-          Text(
-            'section_image_gen'.tr(),
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+          Flexible(
+            child: Text(
+              'section_image_gen'.tr(),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+            ),
           ),
           const HelpTip(term: 'image-gen'),
-          const Spacer(),
-          GlazeSwitch(
+        ],
+      ),
+      actions: [
+        SheetViewAction(
+          icon: GlazeSwitch(
             value: s.enabled,
             onChanged: (v) => _update(s.copyWith(enabled: v)),
           ),
-        ],
-      ),
+          onPressed: () => _update(s.copyWith(enabled: !s.enabled)),
+        ),
+      ],
       fitContent: false,
       scrollController: _scrollController,
       enableHeaderBlur: false,
