@@ -18,6 +18,7 @@ import '../../../shared/theme/theme_provider.dart';
 import '../../../shared/widgets/fullscreen_editor.dart';
 import '../../../shared/widgets/glass_surface.dart';
 import '../../../shared/widgets/glaze_toast.dart';
+import '../../../shared/widgets/swipe_tab_switcher.dart' show kSwipeDevices;
 import '../chat_provider.dart'
     show ImpersonationState, chatProvider, impersonationStateProvider;
 import '../composer_empty_action_provider.dart';
@@ -1386,6 +1387,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
 
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
+      supportedDevices: kSwipeDevices,
       onVerticalDragStart: (_) => _resetVerticalDrag(),
       onVerticalDragUpdate: _handleVerticalDragUpdate,
       onVerticalDragEnd: (_) => _handleVerticalDragEnd(context),

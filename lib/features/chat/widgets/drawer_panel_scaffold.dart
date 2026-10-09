@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
+import '../../../shared/widgets/swipe_tab_switcher.dart' show kSwipeDevices;
 import '../../../shared/widgets/top_edge_blur.dart';
 
 /// Top inset every drawer tab body must leave clear for the header.
@@ -144,6 +145,7 @@ class _DismissHandleState extends State<_DismissHandle> {
 
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
+      supportedDevices: kSwipeDevices,
       onVerticalDragStart: (_) => _dragDistance = 0,
       onVerticalDragUpdate: (details) => _dragDistance += details.delta.dy,
       onVerticalDragEnd: (details) {
