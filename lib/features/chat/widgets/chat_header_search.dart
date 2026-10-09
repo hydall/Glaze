@@ -83,6 +83,8 @@ class DesktopChatHeaderSearch extends ConsumerWidget {
         autofocus: true,
         style: TextStyle(color: context.cs.onSurface, fontSize: 14),
         textInputAction: TextInputAction.search,
+        // Keeps the text on the cross's centre line rather than the top.
+        textAlignVertical: TextAlignVertical.center,
         decoration: InputDecoration(
           isDense: true,
           // The rounded box below is the background; the theme's square fill
@@ -100,6 +102,17 @@ class DesktopChatHeaderSearch extends ConsumerWidget {
             horizontal: 10,
             vertical: 7,
           ),
+          // The cross sits inside the field, at its right edge — where the
+          // search icon was.
+          suffixIcon: _HeaderIconButton(
+            icon: Icons.close_rounded,
+            tooltip: 'btn_close'.tr(),
+            onPressed: search.closeSearch,
+          ),
+          suffixIconConstraints: const BoxConstraints(
+            minWidth: 32,
+            minHeight: 0,
+          ),
         ),
         // The id comes from the screen rather than the router: under the
         // title bar the field is built outside the chat route.
@@ -110,25 +123,12 @@ class DesktopChatHeaderSearch extends ConsumerWidget {
       ),
     );
 
-    // The cross lands where the search icon was: the block's right edge.
-    return Row(
-      children: [
-        Expanded(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: context.cs.onSurface.withValues(alpha: 0.06),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: SizedBox.expand(child: Center(child: field)),
-          ),
-        ),
-        const SizedBox(width: 4),
-        _HeaderIconButton(
-          icon: Icons.close_rounded,
-          tooltip: 'btn_close'.tr(),
-          onPressed: search.closeSearch,
-        ),
-      ],
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: context.cs.onSurface.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: SizedBox.expand(child: Center(child: field)),
     );
   }
 }
