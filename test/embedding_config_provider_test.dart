@@ -186,8 +186,8 @@ void main() {
       // index controls unconditionally.
       const gated = [
         'lib/features/lorebooks/lorebook_list_screen.dart',
-        'lib/features/lorebooks/lorebook_global_settings_screen.dart',
-        'lib/features/lorebooks/lorebook_per_book_settings_screen.dart',
+        'lib/features/lorebooks/widgets/lorebook_global_settings_section.dart',
+        'lib/features/lorebooks/widgets/lorebook_book_settings_section.dart',
         'lib/features/lorebooks/lorebook_editor_screen.dart',
         'lib/features/chat/widgets/memory_books_tab.dart',
         // The memory settings sheet reads the gate once and hands it to its

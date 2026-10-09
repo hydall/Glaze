@@ -28,12 +28,11 @@ void main() {
   });
 
   test('a deep link at the MemoryBook slot opens the Agents tab', () {
-    expect(
-      screen,
-      contains(
-        '_tab = widget.focusSection == ApiSettingsSection.memoryBook ? 1 : 0;',
-      ),
-    );
+    expect(screen, contains('ApiSettingsSection.memoryBook => 1,'));
+  });
+
+  test('a deep link at the embeddings opens the Embeddings tab', () {
+    expect(screen, contains('ApiSettingsSection.embeddings => 2,'));
   });
 
   test('each tab scrolls its own list', () {

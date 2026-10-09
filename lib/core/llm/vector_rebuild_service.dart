@@ -178,6 +178,10 @@ class VectorRebuildService {
     }
 
     if (request.sources.contains(VectorRebuildSource.lorebooks)) {
+      // One capture group for the whole rebuild, not one per entry.
+      final captureRunId =
+          'embedding.lorebook_index:rebuild:'
+          '${DateTime.now().millisecondsSinceEpoch}';
       final lorebooks = await _lorebookRepo.getAll();
       for (final lorebook in lorebooks) {
         final vectorizeAll = lorebook.settings?.vectorizeAllEntries ?? false;
@@ -201,6 +205,7 @@ class VectorRebuildService {
                           lorebook.settings?.embeddingTarget ??
                           LorebookEmbeddingTarget.content,
                       vectorizeAll: vectorizeAll,
+                      captureRunId: captureRunId,
                     );
                 return _VectorTaskResult(
                   indexed: result.indexed,

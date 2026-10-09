@@ -10,6 +10,7 @@ import '../utils/cast_helpers.dart';
 import 'embedding_service.dart';
 import 'lorebook_embedding_service.dart';
 import 'lorebook_embedding_text.dart';
+import 'transport/llm_capture_context.dart';
 
 class SessionLorebookEmbeddingWorker {
   SessionLorebookEmbeddingWorker({
@@ -136,9 +137,15 @@ class SessionLorebookEmbeddingWorker {
     }
 
     try {
-      final chunks = await _embeddingService.getEmbeddingsWithChunks([
-        text,
-      ], config);
+      final chunks = await _embeddingService.getEmbeddingsWithChunks(
+        [text],
+        config,
+        captureContext: LlmCaptureContext(
+          stage: 'embedding.lorebook_session',
+          sessionId: job.chatSessionId,
+          callId: 'embedding.lorebook_session:${job.id}',
+        ),
+      );
       final vectors = chunks.map((chunk) => chunk.vector).toList();
       await _db.transaction(() async {
         final currentOverlay = await _evolutionRepo.getByTarget(

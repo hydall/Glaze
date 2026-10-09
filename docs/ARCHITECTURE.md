@@ -435,7 +435,7 @@ GoRouter lives in `router.dart`, not `app.dart`. Shell tabs and overlay routes:
 |-------|--------|
 | `/` | `ChatHistoryScreen` (mobile); redirects to `/characters` on desktop (window ≥ 768 wide and, on a tablet, landscape; non-mobile force) |
 | `/characters` | `CharacterListScreen` |
-| `/tools` (+ nested `api`, `personas`, `presets`, `regex`, `lorebooks`, `lorebooks/settings`, `embeddings`) | `ToolsScreen` |
+| `/tools` (+ nested `api`, `personas`, `presets`, `regex`, `lorebooks`, `embeddings`) | `ToolsScreen` |
 | `/menu` (+ `settings`, `themes`, `about`, `glossary`) | `MenuScreen` — the header search filters the tab's nested settings; `settings` is one flat screen of themed groups with its own header search, and takes `?highlight=<row id>` so a hit deep-links to the row (`features/menu/search/`) |
 | `/chat/:charId` | `ChatScreen` (query params: `?session=`, `?new=1`, `?msg=`) |
 | `/character/create`, `/character/:charId`, `…/edit`, `…/gallery` | Character CRUD overlays |
@@ -931,7 +931,7 @@ INV-C5.
 - `embedding_types.dart` — shared embedding type definitions
 - `embedding_error_labels.dart` — error classification for embedding status UI
 - `vector_math.dart` — `cosineSimilarity`, `findTopK`, `findTopKMulti` (MaxSim)
-- `lorebook_provider.dart` — CRUD + activations + settings (SharedPreferences)
+- `lorebook_provider.dart` — CRUD + activations + settings (SharedPreferences); every save hands the book to `lorebook_auto_index_provider.dart`, which embeds new and changed entries in the background while the global "Auto-index vectors" switch is on
 
 ### Search Type System
 - `searchType`: `'keyword'` | `'vector'` | `'both'`

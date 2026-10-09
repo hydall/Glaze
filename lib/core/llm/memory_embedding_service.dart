@@ -6,6 +6,7 @@ import '../utils/cast_helpers.dart';
 import 'embedding_service.dart';
 import 'lorebook_embedding_service.dart';
 import 'retrieval_hints.dart';
+import 'transport/llm_capture_context.dart';
 
 class MemoryEmbeddingService {
   final EmbeddingRepo _repo;
@@ -50,9 +51,17 @@ class MemoryEmbeddingService {
     }
 
     try {
-      final chunks = await _embeddingService.getEmbeddingsWithChunks([
-        text,
-      ], config);
+      final chunks = await _embeddingService.getEmbeddingsWithChunks(
+        [text],
+        config,
+        captureContext: LlmCaptureContext(
+          stage: 'embedding.memory_index',
+          sessionId: sessionId,
+          callId:
+              'embedding.memory_index:${entry.id}:'
+              '${DateTime.now().millisecondsSinceEpoch}',
+        ),
+      );
       final vectors = chunks.map((c) => c.vector).toList();
       final chunkTexts = chunks.map((c) => c.text).toList(growable: false);
 

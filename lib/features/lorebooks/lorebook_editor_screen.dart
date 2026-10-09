@@ -11,6 +11,7 @@ import '../../core/llm/lorebook_embedding_service.dart';
 import '../../core/llm/lorebook_embedding_text.dart';
 import '../../core/models/lorebook.dart';
 import '../../core/state/db_provider.dart';
+import '../../core/state/lorebook_auto_index_provider.dart';
 import '../../core/state/lorebook_embedding_provider.dart';
 import '../../core/state/lorebook_provider.dart';
 import '../../core/utils/cast_helpers.dart';
@@ -18,7 +19,6 @@ import '../../core/utils/id_generator.dart';
 import '../../core/utils/time_helpers.dart';
 import '../../features/settings/api_list_provider.dart';
 import '../../shared/shell/desktop/desktop_floating_provider.dart';
-import '../../shared/shell/desktop/desktop_layout_provider.dart';
 import '../../shared/shell/desktop/sidebar_sheet_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glass_surface.dart';
@@ -27,14 +27,13 @@ import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_fab.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_scaffold.dart';
-import '../../shared/widgets/glaze_sheet.dart';
 import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/glaze_text_field.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/menu_group.dart';
 import '../../shared/widgets/sheet_view.dart';
 import 'lorebook_connections_sheet.dart';
-import 'lorebook_per_book_settings_screen.dart';
+import 'widgets/lorebook_book_settings_section.dart';
 import 'widgets/lorebook_entry_tile.dart';
 import 'widgets/lorebook_option_sheet.dart';
 
@@ -926,36 +925,18 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
     );
   }
 
-  Future<void> _openPerBookSettings() async {
-    Widget settingsScreen(BuildContext _) => LorebookPerBookSettingsScreen(
-      settings: _settings,
-      globalSettings: ref.read(lorebookSettingsProvider),
-    );
-    // On desktop a window over this one; a page would cover the whole app.
-    final result = isDesktopLayout(context)
-        ? await showGlazeSheet<Map<String, dynamic>>(
-            context: context,
-            useRootNavigator: true,
-            builder: settingsScreen,
-          )
-        : await Navigator.push<Map<String, dynamic>>(
-            context,
-            MaterialPageRoute(builder: settingsScreen),
-          );
-    if (result != null) {
-      setState(() {
-        if (result['reset'] == true) {
-          _settings = null;
-        } else if (result['settings'] != null) {
-          _settings = LorebookSettings.fromJson(
-            result['settings'] as Map<String, dynamic>,
-          );
-        }
-      });
-      unawaited(_save());
-      // The embedding target and the vectorize-all switch decide which entries
-      // are indexed and what text was hashed for them, so the per-entry status
-      // the screen is showing is about the old settings until this re-runs.
+  /// Applies an edit from the inline settings block. [settings] null drops
+  /// the book's overrides and goes back to the global settings.
+  void _onSettingsChanged(LorebookSettings? settings) {
+    final before = _settings;
+    setState(() => _settings = settings);
+    _saveDebounce?.cancel();
+    unawaited(_save());
+    // The embedding target and the vectorize-all switch decide which entries
+    // are indexed and what text was hashed for them, so the per-entry status
+    // the screen is showing is about the old settings until this re-runs.
+    if (before?.embeddingTarget != settings?.embeddingTarget ||
+        before?.vectorizeAllEntries != settings?.vectorizeAllEntries) {
       unawaited(_loadEmbeddingStatuses());
     }
   }
@@ -971,14 +952,6 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
             _renameLorebook();
-          },
-        ),
-        BottomSheetItem(
-          label: 'title_lorebook_settings'.tr(),
-          icon: Icons.settings_outlined,
-          onTap: () {
-            Navigator.of(context, rootNavigator: true).pop();
-            _openPerBookSettings();
           },
         ),
         BottomSheetItem(
@@ -1065,6 +1038,15 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
     }
 
     final isEntries = _view == _View.entries;
+
+    // A background pass over this book just finished; the per-entry statuses
+    // on screen predate it.
+    ref.listen(lorebookAutoIndexerProvider, (prev, next) {
+      if ((prev?.contains(widget.lorebookId) ?? false) &&
+          !next.contains(widget.lorebookId)) {
+        unawaited(_loadEmbeddingStatuses());
+      }
+    });
 
     return SheetView(
       showRouteBackground: false,
@@ -1179,6 +1161,10 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
           ),
         ),
         children: [
+          LorebookBookSettingsSection(
+            settings: _settings,
+            onChanged: _onSettingsChanged,
+          ),
           if (vectorAvailable && _needsReindex) _reindexBanner(),
           if (_entries.isNotEmpty) _toolbar(vectorAvailable),
           if (vectorAvailable) ...[
@@ -1270,7 +1256,13 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
             icon: Icons.auto_fix_high,
             label: 'btn_index_all'.tr(),
             tone: GlazeActionTone.neutral,
-            busy: _isIndexing,
+            busy:
+                _isIndexing ||
+                ref.watch(
+                  lorebookAutoIndexerProvider.select(
+                    (ids) => ids.contains(widget.lorebookId),
+                  ),
+                ),
             onTap: _indexEntries,
           ),
         ],

@@ -152,4 +152,37 @@ void main() {
     expect(capture.transportOutcome?.responseText, '{"operations":[]}');
     expect(capture.parserVerdicts.single.parserCode, 'accepted');
   });
+
+  test('lists session-less embedding requests alongside the chat', () async {
+    Future<void> aux(String stage, String? sessionId, DateTime at) {
+      return repo.record(
+        LlmRequestCaptureEvent(
+          sequence: at.millisecondsSinceEpoch,
+          createdAt: at,
+          protocol: stage,
+          context: LlmCaptureContext(stage: stage, sessionId: sessionId),
+          request: const {'messages': <Object>[]},
+          truncated: false,
+        ),
+      );
+    }
+
+    await repo.record(
+      _event(
+        stage: 'main',
+        content: 'turn',
+        createdAt: DateTime.utc(2026, 1, 1),
+      ),
+    );
+    await aux('embedding.lorebook_index', null, DateTime.utc(2026, 1, 2));
+    await aux('card.writer', null, DateTime.utc(2026, 1, 3));
+    await aux('embedding.memory', 'other-session', DateTime.utc(2026, 1, 4));
+
+    final captures = await service.load('session');
+
+    expect(captures.map((item) => item.row.stage), [
+      'embedding.lorebook_index',
+      'main',
+    ]);
+  });
 }
