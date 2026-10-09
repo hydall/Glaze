@@ -215,6 +215,11 @@ if (messageData.isEditing) classes.push('editing');
     wrapper.appendChild(body);
     stack.appendChild(wrapper);
 
+    /* --- Output-token cap warning (under the body) --- */
+    if (messageData.outputLimitHit) {
+      stack.appendChild(this._createOutputLimitChip(id));
+    }
+
     /* --- Footer --- */
     stack.appendChild(this._createFooter(messageData));
     section.appendChild(stack);
@@ -391,6 +396,25 @@ if (messageData.isEditing) classes.push('editing');
     badge.className = 'msg-continuing';
     badge.textContent = 'Continuing…';
     return badge;
+  }
+
+  /* ----- Output-token cap warning -----
+   * The reply stopped because it ran out of output tokens, not because the
+   * model finished it. Flutter decides that (finish reason, usage, or its own
+   * count) and sends `outputLimitHit`; the chip only reports it.
+   */
+  _createOutputLimitChip(messageId) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'msg-output-limit';
+    // Tapping it opens Flutter's sheet explaining the cap and what to do.
+    chip.dataset.action = 'output-limit-click';
+    chip.dataset.messageId = messageId;
+    chip.innerHTML = ICON.warning;
+    const label = document.createElement('span');
+    label.textContent = 'Max output tokens reached';
+    chip.appendChild(label);
+    return chip;
   }
 
   /* ----- In-game clock (ledger-stamped, display-only) ----- */
@@ -1008,6 +1032,19 @@ if (messageData.isEditing) classes.push('editing');
     // partial patches (memory badges, plain content updates) carry no
     // `isContinuing` and must leave the badge exactly as it is.
     if (msg.role !== undefined) {
+      // Same contract for the output-token cap warning: it follows the
+      // visible variation, so a swipe or a continuation can add or drop it.
+      const limitChip = stack?.querySelector(':scope > .msg-output-limit');
+      if (msg.outputLimitHit && !limitChip && stack) {
+        const footer = stack.querySelector(':scope > .msg-footer');
+        stack.insertBefore(
+          this._createOutputLimitChip(sectionEl.dataset.messageId),
+          footer || null,
+        );
+      } else if (!msg.outputLimitHit && limitChip) {
+        limitChip.remove();
+      }
+
       const existing = sectionEl.querySelector('.msg-continuing');
       if (msg.isContinuing && !existing) {
         if (footerMeta) footerMeta.appendChild(this._createContinuingBadge());

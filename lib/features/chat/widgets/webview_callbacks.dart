@@ -49,6 +49,7 @@ class MessageActionsCallbacks {
   final ToggleHiddenCallback? onToggleHidden;
   final ToggleHiddenCallback? onToggleImageHidden;
   final InjectClickCallback? onInjectClick;
+  final InjectClickCallback? onOutputLimitClick;
   final MemoryClickCallback? onMemoryClick;
   final GuidedSwipeCallback? onGuidedSwipe;
 
@@ -62,6 +63,7 @@ class MessageActionsCallbacks {
     this.onToggleHidden,
     this.onToggleImageHidden,
     this.onInjectClick,
+    this.onOutputLimitClick,
     this.onMemoryClick,
     this.onGuidedSwipe,
   });

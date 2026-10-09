@@ -47,6 +47,7 @@ class SavedMessageWriter {
     String? regenTargetId,
     int visibleStartIndex = 0,
     List<Map<String, dynamic>> studioOutputs = const [],
+    bool outputLimitHit = false,
   }) {
     // A reply can only *ask* for a picture. Glaze is the sole writer of a
     // finished image block — it writes the `<img data-iig-…>` element the
@@ -78,6 +79,9 @@ class SavedMessageWriter {
       // renders with the initial append instead of waiting for the
       // post-turn Ledger update.
       'time': ?time,
+      // The reply ran into the output-token cap: the bubble shows a warning
+      // under this variation (see `hitOutputTokenLimit`).
+      if (outputLimitHit) 'outputLimitHit': true,
       if (studioOutputs.isNotEmpty) 'studioOutputs': studioOutputs,
       // Persist triggered entries per swipe so each variation shows its own
       // lorebook/memory activations (restored on swipe in ChatMessageService).

@@ -3160,6 +3160,8 @@
   "desc_history_trim_threshold": "The anchor jumps once the held history reaches this share of its budget.",
   "label_history_trim_step": "History freed per step",
   "desc_history_trim_step": "How much of the history budget one jump frees. The freed share is how long the prompt keeps the same start, so a bigger step means rarer trims and longer cache hits, but less history in view.",
+  "output_limit_title": "Max output tokens reached",
+  "output_limit_desc": "The reply stopped because it ran out of output tokens, not because the model finished it. Reasoning is paid from the same budget, so a long chain of thought leaves less room for the answer.\n\nRaise Max Tokens in the API settings to give replies more room.",
   "history_trim_toast": {
     "one": "History trimmed: {} message ({tokens} tokens)",
     "other": "History trimmed: {} messages ({tokens} tokens)"

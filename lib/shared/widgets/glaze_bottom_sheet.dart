@@ -158,6 +158,9 @@ class BottomSheetBigInfo {
   final IconData icon;
   final String description;
   final String? buttonText;
+
+  /// Glyph in front of [buttonText]; null keeps the default check mark.
+  final IconData? buttonIcon;
   final bool buttonDisabled;
   final VoidCallback? onButtonTap;
 
@@ -165,6 +168,7 @@ class BottomSheetBigInfo {
     required this.icon,
     required this.description,
     this.buttonText,
+    this.buttonIcon,
     this.buttonDisabled = false,
     this.onButtonTap,
   });
@@ -2005,7 +2009,7 @@ class _BigInfo extends StatelessWidget {
           if (info.buttonText != null) ...[
             const SizedBox(height: 24),
             GlazeActionButton(
-              icon: Icons.check_rounded,
+              icon: info.buttonIcon ?? Icons.check_rounded,
               label: info.buttonText!,
               tone: GlazeActionTone.primary,
               expand: true,
