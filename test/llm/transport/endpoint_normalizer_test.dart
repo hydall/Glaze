@@ -64,6 +64,66 @@ void main() {
     });
   });
 
+  group('switching protocol rewrites the stored URL', () {
+    String persist(String raw, String protocol) =>
+        EndpointNormalizer.persistedLlmEndpoint(
+          raw: raw,
+          protocol: protocol,
+          model: 'm',
+          stream: true,
+        );
+
+    test('Gemini → OpenAI-shaped protocols swaps v1beta for v1', () {
+      const stored = 'https://proxy.tld/api/v1beta/models/m:generateContent';
+      expect(
+        persist(stored, LlmProtocol.openai),
+        'https://proxy.tld/api/v1/chat/completions',
+      );
+      expect(
+        persist(stored, LlmProtocol.openaiResponses),
+        'https://proxy.tld/api/v1/responses',
+      );
+      expect(
+        persist(stored, LlmProtocol.anthropic),
+        'https://proxy.tld/api/v1/messages',
+      );
+    });
+
+    test('Google: OpenAI-compatible path ↔ Gemini native', () {
+      const openAi =
+          'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
+      const native =
+          'https://generativelanguage.googleapis.com/v1beta/models/m:streamGenerateContent';
+      expect(persist(openAi, LlmProtocol.gemini), native);
+      expect(persist(native, LlmProtocol.openai), openAi);
+    });
+
+    test('every protocol round-trips back to the URL it started from', () {
+      const protocols = [
+        LlmProtocol.openai,
+        LlmProtocol.customChatCompletion,
+        LlmProtocol.openaiResponses,
+        LlmProtocol.anthropic,
+        LlmProtocol.gemini,
+      ];
+      const hosts = [
+        'https://example.com',
+        'https://proxy.tld/api/v1',
+        'https://api.openai.com',
+        'https://generativelanguage.googleapis.com',
+      ];
+      for (final host in hosts) {
+        for (final from in protocols) {
+          final stored = persist(host, from);
+          for (final to in protocols) {
+            final back = persist(persist(stored, to), from);
+            expect(back, stored, reason: '$host: $from → $to → $from');
+          }
+        }
+      }
+    });
+  });
+
   group('bare host → full chat URL', () {
     test('adds scheme and the version the provider serves', () {
       expect(
