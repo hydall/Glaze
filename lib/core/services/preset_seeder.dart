@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../features/presets/preset_list_provider.dart';
 import '../state/db_provider.dart';
 import '../state/shared_prefs_provider.dart';
 import 'featured_presets.dart';
@@ -74,26 +75,36 @@ Future<void> seedFeaturedPresets(WidgetRef ref) async {
   final prefs = await ref.read(sharedPreferencesProvider.future);
   final firstRun = prefs.getBool(_featuredSeededKey) != true;
   final repo = ref.read(presetRepoProvider);
+  var wrote = false;
 
-  for (final f in featuredPresets) {
-    final revisionKey = _featuredRevisionKey(f.id);
-    final existing = await repo.getById(f.id);
-    if (existing == null) {
-      // A first run seeds everything; a later run leaves a deleted preset
-      // deleted instead of resurrecting it.
-      if (firstRun) {
-        await repo.put(await loadFeaturedPreset(f));
-        await prefs.setInt(revisionKey, f.revision);
+  try {
+    for (final f in featuredPresets) {
+      final revisionKey = _featuredRevisionKey(f.id);
+      final existing = await repo.getById(f.id);
+      if (existing == null) {
+        // A first run seeds everything; a later run leaves a deleted preset
+        // deleted instead of resurrecting it.
+        if (firstRun) {
+          await repo.put(await loadFeaturedPreset(f));
+          await prefs.setInt(revisionKey, f.revision);
+          wrote = true;
+        }
+        continue;
       }
-      continue;
+      // An install seeded before revisions were tracked counts as revision 1.
+      final seededRevision = prefs.getInt(revisionKey) ?? 1;
+      if (f.revision > seededRevision) {
+        await repo.put(await loadFeaturedPreset(f));
+        wrote = true;
+      }
+      await prefs.setInt(revisionKey, f.revision);
     }
-    // An install seeded before revisions were tracked counts as revision 1.
-    final seededRevision = prefs.getInt(revisionKey) ?? 1;
-    if (f.revision > seededRevision) {
-      await repo.put(await loadFeaturedPreset(f));
-    }
-    await prefs.setInt(revisionKey, f.revision);
-  }
 
-  await prefs.setBool(_featuredSeededKey, true);
+    await prefs.setBool(_featuredSeededKey, true);
+  } finally {
+    // Seeding runs in the background, so the preset list (Tools card, desktop
+    // sidebar, chat preset resolution) may already have loaded the library
+    // without these presets and would keep that until the next launch.
+    if (wrote) ref.invalidate(presetListProvider);
+  }
 }

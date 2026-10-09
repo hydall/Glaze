@@ -60,10 +60,12 @@ const featuredPresets = <FeaturedPreset>[
     imageAsset: 'assets/presets/shino.jpg',
     createdAt: 1,
     reasoningEnabled: true,
-    reasoningStart: '<thinking>',
-    reasoningEnd: '</thinking>',
+    reasoningStart: '<rp_plan>',
+    reasoningEnd: '</rp_plan>',
     // v2: the Gemini 3.8 "flash" rewrite of the bundled Shino preset.
-    revision: 2,
+    // v3: reasoning parsed from the <rp_plan> block the prompt asks for, and
+    // the Language block off by default.
+    revision: 3,
   ),
   FeaturedPreset(
     id: 'default_fawnie',
