@@ -10,6 +10,7 @@ import 'package:go_router/go_router.dart';
 
 import 'package:glaze_flutter/core/llm/prompt_worker.dart';
 import 'package:glaze_flutter/core/llm/tokenizer.dart';
+
 import 'core/models/api_config.dart';
 import 'core/navigation/router.dart';
 import 'core/navigation/rewrite_review_navigation.dart';
@@ -44,6 +45,7 @@ import 'features/chat/widgets/continue_failure_listener.dart';
 import 'features/chat/widgets/lorebook_vector_search_diagnostic_listener.dart';
 import 'shared/widgets/app_launch_splash.dart';
 import 'shared/shell/desktop/app_title_bar.dart';
+import 'shared/shell/desktop/desktop_layout_provider.dart';
 import 'shared/shell/desktop/desktop_glossary_popup.dart';
 import 'shared/widgets/build_watermark.dart';
 import 'shared/widgets/glaze_toast.dart' show toastOverlayKey;
@@ -455,22 +457,27 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
         // Records where the pointer last went down so desktop dropdowns can
         // anchor themselves at the cursor without every call site passing an
         // anchor (see [showDesktopPopup]).
-        return PointerPositionTracker(
-          // The title bar and the glossary window sit outside the navigator;
-          // this gives their tooltips and text fields an overlay to open in.
-          child: RootOverlay(
-            child: AppWindowFrame(
-              child: AppLaunchSplash(
-                isReady: _startupReady,
-                child: Stack(
-                  children: [
-                    Positioned.fill(child: appChild),
-                    // Above the router, so the glossary window a help tip opens
-                    // floats over every route, sheet and dialog rather than
-                    // being buried by the one it was opened from.
-                    const DesktopGlossaryPopup(),
-                    const BuildWatermark(),
-                  ],
+        // Above the navigator, so routes outside the shell (dialogs, sheet
+        // windows, root-pushed pages) know the layout too and open their
+        // sheets as windows on desktop.
+        return AppDesktopScope(
+          child: PointerPositionTracker(
+            // The title bar and the glossary window sit outside the navigator;
+            // this gives their tooltips and text fields an overlay to open in.
+            child: RootOverlay(
+              child: AppWindowFrame(
+                child: AppLaunchSplash(
+                  isReady: _startupReady,
+                  child: Stack(
+                    children: [
+                      Positioned.fill(child: appChild),
+                      // Above the router, so the glossary window a help tip opens
+                      // floats over every route, sheet and dialog rather than
+                      // being buried by the one it was opened from.
+                      const DesktopGlossaryPopup(),
+                      const BuildWatermark(),
+                    ],
+                  ),
                 ),
               ),
             ),

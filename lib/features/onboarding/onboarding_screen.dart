@@ -24,22 +24,17 @@ import '../../shared/widgets/glaze_sheet.dart';
 // Flow widget
 // ---------------------------------------------------------------------------
 
-/// Onboarding is pushed on the root navigator, above the shell, so there is
-/// no `DesktopScope` to inherit — provide one here using the shell's own rule
-/// (see `DesktopShell.build`). Everything opened from the flow (settings,
-/// persona list, glossary, the skip confirmation) reads it to open as a
-/// window instead of a bottom sheet.
-class OnboardingScreen extends ConsumerWidget {
+/// Onboarding is pushed on the root navigator, above the shell. The app's
+/// builder already provides a [DesktopScope] there; this one keeps the screen
+/// self-contained when it is built without it (tests). Everything opened from
+/// the flow (settings, persona list, glossary, the skip confirmation) reads it
+/// to open as a window instead of a bottom sheet.
+class OnboardingScreen extends StatelessWidget {
   const OnboardingScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return DesktopScope(
-      isDesktop:
-          isDesktopViewportSize(MediaQuery.sizeOf(context)) &&
-          !ref.watch(forceMobileLayoutProvider),
-      child: const _OnboardingFlow(),
-    );
+  Widget build(BuildContext context) {
+    return const AppDesktopScope(child: _OnboardingFlow());
   }
 }
 
