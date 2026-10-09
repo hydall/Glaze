@@ -76,7 +76,8 @@ class ApiSlotGroup extends ConsumerStatefulWidget {
 }
 
 class _ApiSlotGroupState extends ConsumerState<ApiSlotGroup> {
-  /// Fetched model ids keyed by `'<cacheTag>:<apiConfigId>|<endpoint>|<model>'`.
+  /// Fetched model ids keyed by
+  /// `'<cacheTag>:<apiConfigId>|<endpoint>|<apiKey>|<model>'`.
   final Map<String, List<String>> _fetchedModels = {};
 
   /// Cache keys currently in flight, so a second tap does not refetch.
@@ -162,11 +163,13 @@ class _ApiSlotGroupState extends ConsumerState<ApiSlotGroup> {
     return ref.read(activeApiConfigProvider);
   }
 
+  /// A new endpoint or key may list different models, so either one changing
+  /// leaves the old list behind.
   String _cacheKey(String cacheTag, List<ApiConfig> configs) {
     final config = _slotApiConfig(configs);
     final identity = config == null
         ? widget.apiConfigId
-        : '${config.id}|${config.endpoint}|${config.model}';
+        : '${config.id}|${config.endpoint}|${config.apiKey}|${config.model}';
     return '$cacheTag:$identity';
   }
 
@@ -206,12 +209,10 @@ class _ApiSlotGroupState extends ConsumerState<ApiSlotGroup> {
       await _fetchModels(cacheKey, configs);
       if (!mounted) return;
     }
-    final models =
-        <String>{
-          ...?_fetchedModels[cacheKey],
-          if (row.value.isNotEmpty) row.value,
-        }.toList()
-          ..sort();
+    final models = <String>{
+      ...?_fetchedModels[cacheKey],
+      if (row.value.isNotEmpty) row.value,
+    }.toList()..sort();
     // "Automatic" is always offered, even when the fetch came back empty —
     // otherwise a slot pointed at a stale model id could never be reset.
     final items = <BottomSheetItem>[

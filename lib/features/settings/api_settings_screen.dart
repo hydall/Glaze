@@ -275,6 +275,10 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     for (final c in _ctrls) {
       c.addListener(_scheduleSave);
     }
+    _endpointCtrl.addListener(_onLlmConnectionEdited);
+    _keyCtrl.addListener(_onLlmConnectionEdited);
+    _embEndpointCtrl.addListener(_onEmbeddingConnectionEdited);
+    _embApiKeyCtrl.addListener(_onEmbeddingConnectionEdited);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadActivePreset();
     });
@@ -377,6 +381,39 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     if (_loading) return;
     _saveTimer?.cancel();
     _saveTimer = Timer(const Duration(milliseconds: 800), _save);
+  }
+
+  /// The endpoint and key the cached model lists were last valid for. A
+  /// controller also notifies on cursor moves, so only a change of the text
+  /// itself counts.
+  String _llmConnection = '';
+  String _embConnection = '';
+
+  /// A model list fetched with the old endpoint or key may not exist on the
+  /// new one, so it is dropped and the next picker tap fetches afresh.
+  void _onLlmConnectionEdited() {
+    final connection = '${_endpointCtrl.text.trim()}\n${_keyCtrl.text.trim()}';
+    if (connection == _llmConnection) return;
+    _llmConnection = connection;
+    // "Use LLM API" without a named preset fetches through these same fields.
+    final embBorrowsFields = _embeddingUseSame && _embeddingLlmPresetId.isEmpty;
+    if (_fetchedModels.isEmpty &&
+        (!embBorrowsFields || _embFetchedModels.isEmpty)) {
+      return;
+    }
+    setState(() {
+      _fetchedModels = [];
+      if (embBorrowsFields) _embFetchedModels = [];
+    });
+  }
+
+  void _onEmbeddingConnectionEdited() {
+    final connection =
+        '${_embEndpointCtrl.text.trim()}\n${_embApiKeyCtrl.text.trim()}';
+    if (connection == _embConnection) return;
+    _embConnection = connection;
+    if (_embeddingUseSame || _embFetchedModels.isEmpty) return;
+    setState(() => _embFetchedModels = []);
   }
 
   void _persistActiveId(String? id) async {
@@ -1969,10 +2006,17 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     try {
       final ids = await ModelFetcher.fetchModelIds(source);
       if (!mounted) return;
+      // The connection was edited while the request was out.
+      final current = _embeddingModelSource();
+      final stale =
+          current == null ||
+          current.endpoint != source.endpoint ||
+          current.apiKey != source.apiKey;
       setState(() {
-        _embFetchedModels = ids;
+        if (!stale) _embFetchedModels = ids;
         _isLoadingEmbModels = false;
       });
+      if (stale) return;
       if (ids.isEmpty) {
         GlazeToast.show(context, 'settings_err_no_models'.tr());
       }
@@ -2680,10 +2724,16 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
         _protocol,
       ).fetchModels(endpoint: persistedEndpoint, apiKey: apiKey);
       if (!mounted) return;
+      // The endpoint or key was edited while the request was out: the list
+      // describes a connection that is no longer in the fields.
+      final stale =
+          endpoint != _endpointCtrl.text.trim() ||
+          apiKey != _keyCtrl.text.trim();
       setState(() {
-        _fetchedModels = models;
+        if (!stale) _fetchedModels = models;
         _isLoadingModels = false;
       });
+      if (stale) return;
       if (models.isEmpty) {
         GlazeToast.show(context, 'settings_err_no_models'.tr());
       }
