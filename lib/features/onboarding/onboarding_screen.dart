@@ -1,29 +1,19 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
 
 import 'package:easy_localization/easy_localization.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../shared/theme/app_colors.dart';
 import '../../shared/theme/theme_provider.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
-import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_scaffold.dart';
-import '../../core/import/silly_tavern_preset_parser.dart';
-import '../../core/services/featured_presets.dart';
 import '../../core/services/generation_notification_service.dart';
 import '../../core/services/onboarding_service.dart';
+import '../guides/guide_service.dart';
 import '../backup/backup_screen.dart';
 import '../glossary/glossary_sheet.dart';
-import '../../core/state/active_selection_provider.dart';
-import '../settings/api_list_provider.dart';
-import '../settings/api_settings_screen.dart';
 import '../settings/widgets/chat_layout_picker.dart';
-import '../personas/persona_list_screen.dart';
-import '../presets/preset_list_provider.dart';
 import '../../shared/shell/desktop/desktop_layout_provider.dart';
 import 'onboarding_models.dart';
 import 'widgets/onboarding_desktop_wizard.dart';
@@ -53,13 +43,12 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   );
 
   /// Whether the reader has granted notifications on this slide. `null` until
-  /// they have answered — the button reads Skip until then, the way the API
-  /// and Persona slides do.
+  /// they have answered — the button reads Skip until then.
   bool? _notificationsGranted;
 
-  /// Name of the preset loaded from a file on the preset step, so its card can
-  /// say what it loaded.
-  String? _importedPresetName;
+  /// The answer on the guides step. On until the reader says otherwise — the
+  /// same default [maybeShowGuide] falls back to when the step was skipped.
+  bool _guidesOn = true;
 
   bool get _isLastSlide => _currentSlide == _slides.length - 1;
 
@@ -70,18 +59,6 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     if (_isLastSlide) return 'onboarding_btn_start'.tr();
     switch (_slides[_currentSlide].type) {
       case OnboardingSlideType.dataImport:
-        return 'onboarding_btn_skip'.tr();
-      case OnboardingSlideType.persona:
-        final personaId = ref.watch(activePersonaIdProvider);
-        if (personaId != null) {
-          return 'onboarding_btn_next'.tr();
-        }
-        return 'onboarding_btn_skip'.tr();
-      case OnboardingSlideType.api:
-        final apiConfig = ref.watch(activeApiConfigProvider);
-        if (apiConfig != null && apiConfig.apiKey.isNotEmpty) {
-          return 'onboarding_btn_next'.tr();
-        }
         return 'onboarding_btn_skip'.tr();
       case OnboardingSlideType.layout:
         return 'onboarding_btn_next'.tr();
@@ -143,6 +120,18 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     if (_slides.any((s) => s.type == OnboardingSlideType.notifications)) {
       unawaited(_loadNotificationState());
     }
+    unawaited(_loadGuidesState());
+  }
+
+  /// A replayed onboarding shows the answer given the first time.
+  Future<void> _loadGuidesState() async {
+    final enabled = await guidesEnabled();
+    if (mounted && enabled != _guidesOn) setState(() => _guidesOn = enabled);
+  }
+
+  void _setGuides(bool enabled) {
+    setState(() => _guidesOn = enabled);
+    unawaited(setGuidesEnabled(enabled));
   }
 
   Future<void> _loadNotificationState() async {
@@ -199,7 +188,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
             Positioned.fill(
               child: SingleChildScrollView(
                 padding: EdgeInsets.only(
-                  top: topPad + 92,
+                  top: topPad + 120,
                   bottom: 120 + bottomPad,
                   left: 24,
                   right: 24,
@@ -269,7 +258,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
               right: 0,
               child: IgnorePointer(
                 child: Container(
-                  height: topPad + 96,
+                  height: topPad + 124,
                   decoration: const BoxDecoration(
                     gradient: LinearGradient(
                       begin: Alignment.topCenter,
@@ -286,9 +275,18 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
               ),
             ),
 
-            // ── Stories progress bar ──
+            // ── Step title, at the top ──
             Positioned(
-              top: topPad + 16,
+              top: topPad + 12,
+              left: 20,
+              right: 20,
+              height: 32,
+              child: _buildHeaderTitle(),
+            ),
+
+            // ── Stories progress bar, under the title ──
+            Positioned(
+              top: topPad + 56,
               left: 20,
               right: 20,
               child: OnboardingStoriesBar(
@@ -297,9 +295,10 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
               ),
             ),
 
-            // ── Header: back, step title, skip onboarding ──
+            // ── Buttons under the progress bar: back on the left, skip
+            // onboarding on the right ──
             Positioned(
-              top: topPad + 36,
+              top: topPad + 72,
               left: 12,
               right: 12,
               height: 40,
@@ -307,12 +306,9 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                 children: [
                   if (_currentSlide > 0)
                     OnboardingGlassBackButton(onTap: _prev),
-                  const SizedBox(width: 12),
-                  Expanded(child: _buildHeaderTitle()),
-                  if (!_isLastSlide) ...[
-                    const SizedBox(width: 12),
+                  const Spacer(),
+                  if (!_isLastSlide)
                     OnboardingSkipButton(onTap: _confirmSkipOnboarding),
-                  ],
                 ],
               ),
             ),
@@ -407,7 +403,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     );
   }
 
-  /// The current step's title, in the header next to the skip button. The
+  /// The current step's title, above the progress bar. The
   /// greeter carries its own big greeting, so the header stays empty there.
   Widget _buildHeaderTitle() {
     final slide = _slides[_currentSlide];
@@ -448,20 +444,6 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
           title: 'onboarding_action_restore'.tr(),
           sub: 'onboarding_action_restore_sub'.tr(),
           onTap: () => _openSheet(const BackupScreen(fromOnboarding: true)),
-        );
-      case OnboardingSlideType.api:
-        return (
-          icon: Icons.settings_outlined,
-          title: 'onboarding_action_configure_api'.tr(),
-          sub: 'onboarding_action_configure_sub'.tr(),
-          onTap: () => _openSheet(const ApiSettingsScreen(startExpanded: true)),
-        );
-      case OnboardingSlideType.persona:
-        return (
-          icon: Icons.person_add_outlined,
-          title: 'onboarding_action_setup_persona'.tr(),
-          sub: 'onboarding_action_setup_sub'.tr(),
-          onTap: () => _openSheet(const PersonaListScreen()),
         );
       case OnboardingSlideType.glossary:
         return (
@@ -504,8 +486,6 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
         return OnboardingFeatureGrid(blocks: _slideBlocks(slide)!);
       case OnboardingSlideType.glossary:
       case OnboardingSlideType.dataImport:
-      case OnboardingSlideType.api:
-      case OnboardingSlideType.persona:
       case OnboardingSlideType.notifications:
         final action = _slideAction(slide)!;
         return _buildActionSlide(
@@ -515,14 +495,14 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
           actionSub: action.sub,
           onAction: action.onTap,
         );
-      case OnboardingSlideType.preset:
-        return _buildCenteredSlide(
-          slide,
-          fallbackIcon: Icons.tune_rounded,
-          child: _buildPresetPicker(),
-        );
       case OnboardingSlideType.layout:
         return _buildLayoutSlide(slide);
+      case OnboardingSlideType.guides:
+        return _buildCenteredSlide(
+          slide,
+          fallbackIcon: Icons.school_outlined,
+          child: _buildGuidesChoice(),
+        );
       case OnboardingSlideType.allSet:
         return _buildStandardSlide(slide);
     }
@@ -543,7 +523,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       );
     }
     if (slide.type == OnboardingSlideType.layout) return _buildLayoutPicker();
-    if (slide.type == OnboardingSlideType.preset) return _buildPresetPicker();
+    if (slide.type == OnboardingSlideType.guides) return _buildGuidesChoice();
     return null;
   }
 
@@ -651,71 +631,34 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     );
   }
 
-  /// The built-in presets to pick from, then a way to load a SillyTavern one
-  /// instead. Shared by the phone slide and the desktop wizard's content pane.
-  Widget _buildPresetPicker() {
-    final activeId = ref.watch(activePresetIdProvider);
+  /// "Turn on interactive guides?" — yes, or no with a pointer to where the
+  /// guides stay available. Shared by the phone slide and the desktop wizard.
+  Widget _buildGuidesChoice() {
     return Column(
       children: [
-        for (final f in featuredPresets) ...[
-          OnboardingPresetCard(
-            name: f.name,
-            author: f.author,
-            description: f.descriptionKey.tr(),
-            imageAsset: f.imageAsset,
-            selected: activeId == f.id,
-            onTap: () => setActivePreset(ref, f.id),
-          ),
-          const SizedBox(height: 10),
-        ],
-        const SizedBox(height: 8),
+        OnboardingChoiceCard(
+          icon: Icons.school_outlined,
+          title: 'onboarding_guides_yes'.tr(),
+          subtitle: 'onboarding_guides_yes_sub'.tr(),
+          selected: _guidesOn,
+          onTap: () => _setGuides(true),
+        ),
+        const SizedBox(height: 10),
+        OnboardingChoiceCard(
+          icon: Icons.explore_off_outlined,
+          title: 'onboarding_guides_no'.tr(),
+          subtitle: 'onboarding_guides_no_sub'.tr(),
+          selected: !_guidesOn,
+          onTap: () => _setGuides(false),
+        ),
+        const SizedBox(height: 16),
         Text(
-          'onboarding_preset_import_st_hint'.tr(),
+          'onboarding_guides_note'.tr(),
           textAlign: TextAlign.center,
           style: TextStyle(fontSize: 14, color: context.cs.onSurfaceVariant),
         ),
-        const SizedBox(height: 12),
-        OnboardingClickableBlock(
-          icon: Icons.upload_file_rounded,
-          title: 'onboarding_btn_import_preset'.tr(),
-          subtitle: _importedPresetName != null
-              ? 'onboarding_import_preset_done'.tr(args: [_importedPresetName!])
-              : 'onboarding_import_preset_sub'.tr(),
-          onTap: _importPreset,
-        ),
       ],
     );
-  }
-
-  /// Loads a SillyTavern preset from a file and makes it the active one.
-  Future<void> _importPreset() async {
-    FilePickerResult? result;
-    try {
-      result = await FilePicker.pickFiles(
-        type: Platform.isIOS ? FileType.any : FileType.custom,
-        allowedExtensions: Platform.isIOS ? null : ['json'],
-        withData: true,
-      );
-    } catch (_) {}
-    final picked = result?.files.firstOrNull;
-    if (picked == null || !mounted) return;
-    try {
-      final raw = picked.bytes != null && picked.bytes!.isNotEmpty
-          ? utf8.decode(picked.bytes!)
-          : await File(picked.path!).readAsString();
-      final json = jsonDecode(raw) as Map<String, dynamic>;
-      final preset = parseSillyTavernPreset(json, picked.name);
-      await ref.read(presetListProvider.notifier).add(preset);
-      await setActivePreset(ref, preset.id);
-      if (mounted) setState(() => _importedPresetName = preset.name);
-    } catch (e) {
-      if (!mounted) return;
-      GlazeErrorDialog.show(
-        context,
-        e,
-        prefix: 'error_import_failed_prefix'.tr(),
-      );
-    }
   }
 
   Future<void> _setChatLayout(String layout) async {

@@ -52,6 +52,8 @@ import 'widgets/preset_folders_section.dart';
 import 'widgets/preset_options_sheet.dart';
 import 'widgets/preset_small_badge.dart';
 import '../../shared/widgets/glaze_sheet.dart';
+import '../guides/guide_anchor.dart';
+import '../guides/guide_service.dart';
 
 /// Nominal height of one preset row (card + the gap below it). Only used to
 /// estimate the scroll offset of the active preset before its row is laid out;
@@ -149,6 +151,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     // the first frame (writing to a provider during initState is not allowed).
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) ref.read(presetSelectionProvider.notifier).clear();
+      if (mounted) maybeShowGuide(context, AppGuide.presets);
     });
   }
 
@@ -452,26 +455,33 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
         child: Padding(
           key: _revealPending && i == activeIndex ? _activeRowKey : null,
           padding: const EdgeInsets.only(bottom: 10),
-          child: _PsCard(
-            item: item,
-            isActive: active,
-            selectionMode: selection.active,
-            isSelected: selection.contains(item.id, item.kind),
-            onTap: () => _onCardTap(item, active),
-            // While dragging is armed a long press lifts the row, so it can't
-            // also open multi-select — that moves to the row menu.
-            onLongPress: reordering
-                ? null
-                : () => _startSelection(item.id, item.kind),
-            onConnections: item.isAgentic
-                ? null
-                : () => showPresetConnections(context, item.preset!.id),
-            onEdit: item.isAgentic
-                ? (studioAvailable
-                      ? () => _openStudioEditor(item.studioPreset!.id)
-                      : null)
-                : () => _openEditor(item.preset),
-            onMenu: () => _showItemMenu(item),
+          child: GuideAnchor(
+            // The guide points at the active preset, or the first one when
+            // none is active.
+            id: i == (activeIndex < 0 ? 0 : activeIndex)
+                ? GuideIds.presetsRow
+                : null,
+            child: _PsCard(
+              item: item,
+              isActive: active,
+              selectionMode: selection.active,
+              isSelected: selection.contains(item.id, item.kind),
+              onTap: () => _onCardTap(item, active),
+              // While dragging is armed a long press lifts the row, so it can't
+              // also open multi-select — that moves to the row menu.
+              onLongPress: reordering
+                  ? null
+                  : () => _startSelection(item.id, item.kind),
+              onConnections: item.isAgentic
+                  ? null
+                  : () => showPresetConnections(context, item.preset!.id),
+              onEdit: item.isAgentic
+                  ? (studioAvailable
+                        ? () => _openStudioEditor(item.studioPreset!.id)
+                        : null)
+                  : () => _openEditor(item.preset),
+              onMenu: () => _showItemMenu(item),
+            ),
           ),
         ),
       );
@@ -545,7 +555,12 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
             ),
           SliverPadding(
             padding: EdgeInsets.fromLTRB(16, 4, 16, 16 + bottomInset),
-            sliver: SliverToBoxAdapter(child: _buildAddButton(context)),
+            sliver: SliverToBoxAdapter(
+              child: GuideAnchor(
+                id: GuideIds.presetsAdd,
+                child: _buildAddButton(context),
+              ),
+            ),
           ),
         ],
       ),
@@ -746,7 +761,10 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
 
         // One backdrop capture for the row instead of one per chip: these are
         // plain siblings that never overlap. See [GlassBackdropGroup].
-        return GlassBackdropGroup(child: row);
+        return GuideAnchor(
+          id: GuideIds.presetsControls,
+          child: GlassBackdropGroup(child: row),
+        );
       },
     );
   }

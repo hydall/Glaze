@@ -21,7 +21,7 @@ List<GuideTourStep> tabsTourSteps() => [
     'guide_tabs_start',
     content: GuideTipList(
       tips: [
-        GuideTip.tr(Icons.cloud_rounded, 'guide_tabs_start_api'),
+        GuideTip.tr(Icons.build_rounded, 'guide_tabs_start_api'),
         GuideTip.tr(Icons.person_add_rounded, 'guide_tabs_start_char'),
         GuideTip.tr(Icons.forum_rounded, 'guide_tabs_start_chat'),
       ],

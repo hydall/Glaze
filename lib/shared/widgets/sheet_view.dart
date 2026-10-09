@@ -119,6 +119,15 @@ class SheetView extends ConsumerStatefulWidget {
 
   @override
   ConsumerState<SheetView> createState() => _SheetViewState();
+
+  /// Expands the modal sheet [context] sits in to full height, the way a drag
+  /// up would. Returns once the snap has played, or at once when there is
+  /// nothing to expand: no enclosing sheet, a fullscreen route, a sheet sized
+  /// by its content, or one that is already expanded.
+  static Future<void> expandEnclosing(BuildContext context) {
+    final state = context.findAncestorStateOfType<_SheetViewState>();
+    return state?._expandFully() ?? Future<void>.value();
+  }
 }
 
 class _SheetViewState extends ConsumerState<SheetView>
@@ -626,6 +635,12 @@ class _SheetViewState extends ConsumerState<SheetView>
     _commitKeyboardLift();
     final target = _expanded ? _collapsed(context) : _full(context);
     _animateTo(target, expanding: !_expanded);
+  }
+
+  Future<void> _expandFully() async {
+    if (!mounted || !_inModalSheet || widget.fitContent || _expanded) return;
+    _animateTo(_full(context), expanding: true);
+    await _ctrl.forward().orCancel.catchError((_) {});
   }
 
   void _animateTo(double target, {required bool expanding}) {

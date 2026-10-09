@@ -46,6 +46,8 @@ import '../../shared/widgets/menu_group.dart';
 import '../../shared/widgets/preset_switcher.dart';
 import '../../shared/widgets/extra_request_parameters_editor.dart';
 import '../../shared/widgets/glaze_sheet.dart';
+import '../guides/guide_anchor.dart';
+import '../guides/guide_service.dart';
 
 /// The factory values every reset affordance on this screen restores.
 ///
@@ -304,6 +306,8 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   void _reveal() {
     if (_revealed || !mounted) return;
     setState(() => _revealed = true);
+    // Not before: the guide's controls only exist once the content is built.
+    maybeShowGuide(context, AppGuide.api);
     // The deep-linked section only exists once the content is built, so the
     // scroll is kicked off here rather than in `initState` — where the spinner
     // was still on screen and the key had no context to measure.
@@ -766,17 +770,23 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   // bodies slide. Agents sits next to LLM: both are connections a chat runs
   // on, while embeddings are only read by search.
   Widget _buildTabBar() {
-    return GlazeTabBar(
-      tabs: [
-        GlazeTabItem(label: 'LLM', icon: Icons.chat_bubble_outline_rounded),
-        GlazeTabItem(
-          label: 'studio_agents'.tr(),
-          icon: Icons.smart_toy_outlined,
-        ),
-        GlazeTabItem(label: 'tab_embeddings'.tr(), icon: Icons.layers_outlined),
-      ],
-      activeIndex: _tab,
-      onChanged: (i) => setState(() => _tab = i),
+    return GuideAnchor(
+      id: GuideIds.apiTabs,
+      child: GlazeTabBar(
+        tabs: [
+          GlazeTabItem(label: 'LLM', icon: Icons.chat_bubble_outline_rounded),
+          GlazeTabItem(
+            label: 'studio_agents'.tr(),
+            icon: Icons.smart_toy_outlined,
+          ),
+          GlazeTabItem(
+            label: 'tab_embeddings'.tr(),
+            icon: Icons.layers_outlined,
+          ),
+        ],
+        activeIndex: _tab,
+        onChanged: (i) => setState(() => _tab = i),
+      ),
     );
   }
 
@@ -854,13 +864,16 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 12),
-          GlazeActionButton(
-            icon: Icons.add_rounded,
-            label: forEmbedding
-                ? 'settings_add_embedding_config'.tr()
-                : 'settings_add_api_config'.tr(),
-            tone: GlazeActionTone.primary,
-            onTap: () => _createNewPreset(forEmbedding: forEmbedding),
+          GuideAnchor(
+            id: forEmbedding ? null : GuideIds.apiAdd,
+            child: GlazeActionButton(
+              icon: Icons.add_rounded,
+              label: forEmbedding
+                  ? 'settings_add_embedding_config'.tr()
+                  : 'settings_add_api_config'.tr(),
+              tone: GlazeActionTone.primary,
+              onTap: () => _createNewPreset(forEmbedding: forEmbedding),
+            ),
           ),
         ],
       ),
@@ -887,9 +900,15 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: _buildTopControls(list, activeName, forEmbedding: false),
+            child: GuideAnchor(
+              id: GuideIds.apiSwitcher,
+              child: _buildTopControls(list, activeName, forEmbedding: false),
+            ),
           ),
-          _buildConnectionGroup(context),
+          GuideAnchor(
+            id: GuideIds.apiConnection,
+            child: _buildConnectionGroup(context),
+          ),
           _buildContextGroup(),
           _buildGenerationGroup(),
           _buildReasoningGroup(),

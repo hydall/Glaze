@@ -6,6 +6,7 @@ import 'package:flutter/scheduler.dart';
 
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glass_surface.dart';
+import '../../shared/widgets/sheet_view.dart';
 import 'guide_anchor.dart';
 
 /// One stop of a guide tour: the control to point at and what to say about it.
@@ -51,6 +52,10 @@ const _kAnchorWait = Duration(milliseconds: 1500);
 /// Space between a spotlit control and the edge of its spotlight.
 const double _kHolePad = 6;
 
+/// The shortest the hint card is squeezed to make room for a tall control;
+/// below this it keeps its full height and overlaps instead.
+const double _kMinCardHeight = 180;
+
 /// Runs [steps] as a spotlight tour over the whole app: the screen dims, the
 /// current step's control is cut out and ringed, a hint card sits at the top
 /// and the step buttons at the bottom — each moved out of the way when the
@@ -61,12 +66,29 @@ Future<void> showGuideTour(
 ) async {
   final navigator = Navigator.of(context, rootNavigator: true);
 
-  bool ready() => steps.every(
-    (s) => s.optional || s.target == null || GuideAnchors.isVisible(s.target!),
-  );
+  // Every required control is up, and at least one control at all: a tour of
+  // optional steps only (a screen whose layout depends on its data) would
+  // otherwise be judged before the screen had built any of them.
+  final targets = [for (final s in steps) ?s.target];
+  bool ready() =>
+      steps.every(
+        (s) =>
+            s.optional || s.target == null || GuideAnchors.isVisible(s.target!),
+      ) &&
+      (targets.isEmpty || targets.any(GuideAnchors.isVisible));
   final deadline = DateTime.now().add(_kAnchorWait);
   while (!ready() && DateTime.now().isBefore(deadline)) {
     await Future<void>.delayed(const Duration(milliseconds: 100));
+  }
+  if (!navigator.mounted) return;
+
+  // A tour over a half-height sheet would point at controls the sheet cuts
+  // off, so the sheet goes full height first.
+  for (final id in targets) {
+    final anchor = GuideAnchors.contextOf(id);
+    if (anchor == null || !anchor.mounted) continue;
+    await SheetView.expandEnclosing(anchor);
+    break;
   }
   if (!navigator.mounted) return;
 
@@ -367,14 +389,6 @@ class _TourLayout extends MultiChildLayoutDelegate {
       _Slot.controls,
       BoxConstraints.tightFor(width: width),
     );
-    final card = layoutChild(
-      _Slot.card,
-      BoxConstraints(
-        minWidth: width,
-        maxWidth: width,
-        maxHeight: size.height * 0.46,
-      ),
-    );
 
     var controlsTop = size.height - padding.bottom - gap - controls.height;
     if (hole != null && hole.bottom > controlsTop) {
@@ -382,9 +396,22 @@ class _TourLayout extends MultiChildLayoutDelegate {
     }
 
     final top = padding.top + gap;
+    final below = hole == null ? top : hole.bottom + gap;
+    // A tall control (a large tile) leaves little room on either side; the
+    // card then shrinks into the larger free band and scrolls, rather than
+    // covering the control it explains.
+    var maxHeight = size.height * 0.46;
+    if (hole != null) {
+      final room = math.max(hole.top - gap - top, controlsTop - gap - below);
+      if (room >= _kMinCardHeight) maxHeight = math.min(maxHeight, room);
+    }
+    final card = layoutChild(
+      _Slot.card,
+      BoxConstraints(minWidth: width, maxWidth: width, maxHeight: maxHeight),
+    );
+
     var cardTop = top;
     if (hole != null && hole.top < cardTop + card.height) {
-      final below = hole.bottom + gap;
       // Below the control when that still clears the buttons; otherwise back
       // at the top, where the control at least stays partly visible.
       cardTop = below + card.height <= controlsTop - gap ? below : top;

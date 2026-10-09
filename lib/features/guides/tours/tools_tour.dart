@@ -3,6 +3,9 @@ import '../guide_tour.dart';
 
 /// The Tools tab: one step per tile, in the default order, then the pencil
 /// that rearranges them. A tile the reader hid drops out of the tour.
+///
+/// API, Presets and Personas only say what they are and where else they open;
+/// each screen walks through its own setup the first time it opens.
 List<GuideTourStep> toolsTourSteps() => [
   for (final (tile, key) in const [
     ('api', 'guide_tools_api'),
