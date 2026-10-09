@@ -87,8 +87,14 @@ class SheetView extends ConsumerStatefulWidget {
   /// the sheet is presented as a modal bottom sheet; as a fullscreen route back
   /// already goes through [onBack].
   ///
-  /// Dragging the sheet down stays an outright dismissal either way.
+  /// Dragging the sheet down stays an outright dismissal either way — unless
+  /// [confirmDismiss] says otherwise.
   final bool canPop;
+
+  /// Asked before a drag-down dismisses the sheet; false keeps it open. For a
+  /// body whose close has to be confirmed — a back press is already covered by
+  /// [canPop] and [onBack], but a fling bypasses both.
+  final Future<bool> Function()? confirmDismiss;
 
   const SheetView({
     super.key,
@@ -115,6 +121,7 @@ class SheetView extends ConsumerStatefulWidget {
     this.shellBranchIndex,
     this.enableHeaderBlur = true,
     this.canPop = true,
+    this.confirmDismiss,
   });
 
   @override
@@ -679,7 +686,21 @@ class _SheetViewState extends ConsumerState<SheetView>
   /// sheet away is an explicit dismissal, so it closes the whole sheet even
   /// when [SheetView.canPop] is false because the body has an inner state a
   /// *back* press would step out of first.
-  void _dismiss() => Navigator.of(context).pop();
+  ///
+  /// With [SheetView.confirmDismiss] the sheet first settles back where it was,
+  /// so the question is asked over an open sheet rather than a half-dragged one.
+  Future<void> _dismiss() async {
+    final confirm = widget.confirmDismiss;
+    if (confirm == null) {
+      Navigator.of(context).pop();
+      return;
+    }
+    _animateTo(
+      _expanded ? _full(context) : _collapsed(context),
+      expanding: _expanded,
+    );
+    if (await confirm() && mounted) Navigator.of(context).pop();
+  }
 
   void _onDragEnd(DragEndDetails d) {
     final vy = d.velocity.pixelsPerSecond.dy;

@@ -1505,6 +1505,8 @@
   "catalog_lorebooks_phase_build": "Сборка",
   "catalog_lorebooks_phase_save": "Сохранение",
   "catalog_lorebooks_build_patience": "Сборка лорбука может занять время, пожалуйста, подождите.",
+  "catalog_lorebooks_close_title": "Вы уверены?",
+  "catalog_lorebooks_close_desc": "Лорбук ещё не сохранён и не экспортирован. Если закрыть сейчас, прогресс извлечения будет потерян.",
   "catalog_ctx_card": "Карточка персонажа",
   "catalog_ctx_catalog": "Описание карточки на сайте",
   "catalog_ctx_scenario": "Сценарий",

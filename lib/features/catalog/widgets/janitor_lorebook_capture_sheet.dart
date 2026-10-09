@@ -78,6 +78,9 @@ Future<void> showJanitorLorebookCaptureSheet(
     context: context,
     useRootNavigator: true,
     isScrollControlled: true,
+    // The modal's own drag-to-close pops straight past the "are you sure?" the
+    // sheet asks before closing; SheetView's drag goes through it instead.
+    enableDrag: false,
     backgroundColor: Colors.transparent,
     barrierColor: Colors.black54,
     builder: (_) => JanitorLorebookCapture(
@@ -253,6 +256,12 @@ class _JanitorLorebookCaptureState
   /// see [_publicScriptContents].
   final Map<String, Lorebook> _convertedScripts = {};
 
+  /// Whether a lorebook has made it out of the sheet — saved to Glaze, or
+  /// exported as `.json` / `.txt`. Until then closing throws away a flow that
+  /// is slow and account-mutating to redo, so it is confirmed first
+  /// ([_confirmClose]).
+  bool _delivered = false;
+
   @override
   void initState() {
     super.initState();
@@ -418,6 +427,7 @@ class _JanitorLorebookCaptureState
           await ref.read(lorebooksProvider.notifier).addLorebook(lb);
           if (!mounted) return;
           if (book.isJs) _convertedScripts[book.id] = lb;
+          _delivered = true;
           saved++;
         } catch (e) {
           debugPrint('[janitor-lorebook] save-all ${book.id} failed: $e');
@@ -486,6 +496,7 @@ class _JanitorLorebookCaptureState
   Future<void> _saveLorebook(Lorebook book) async {
     try {
       await ref.read(lorebooksProvider.notifier).addLorebook(book);
+      if (mounted) setState(() => _delivered = true);
       if (mounted) {
         GlazeToast.show(
           context,
@@ -513,6 +524,7 @@ class _JanitorLorebookCaptureState
         subfolder: 'Lorebooks',
       );
       if (path.isEmpty) return; // user cancelled the save dialog
+      if (mounted) setState(() => _delivered = true);
       if (mounted) {
         GlazeToast.show(
           context,
@@ -715,6 +727,7 @@ class _JanitorLorebookCaptureState
         subfolder: 'Lorebooks',
       );
       if (path.isEmpty) return; // user cancelled the save dialog
+      if (mounted) setState(() => _delivered = true);
       if (mounted) {
         GlazeToast.show(
           context,
@@ -750,6 +763,38 @@ class _JanitorLorebookCaptureState
       : _extraction != null
       ? _Phase.build
       : _Phase.collect;
+
+  /// Whether closing may go ahead: straight away once a lorebook has been
+  /// delivered, otherwise only after the user confirms it.
+  Future<bool> _confirmClose() async {
+    if (_delivered) return true;
+    final confirmed = await GlazeBottomSheet.show<bool>(
+      context,
+      title: 'catalog_lorebooks_close_title'.tr(),
+      bigInfo: BottomSheetBigInfo(
+        icon: Icons.warning_amber_rounded,
+        description: 'catalog_lorebooks_close_desc'.tr(),
+      ),
+      items: [
+        BottomSheetItem(
+          label: 'btn_close'.tr(),
+          isDestructive: true,
+          centered: true,
+          onTap: () => Navigator.of(context, rootNavigator: true).pop(true),
+        ),
+        BottomSheetItem(
+          label: 'btn_cancel'.tr(),
+          centered: true,
+          onTap: () => Navigator.of(context, rootNavigator: true).pop(false),
+        ),
+      ],
+    );
+    return confirmed == true;
+  }
+
+  Future<void> _close() async {
+    if (await _confirmClose() && mounted) Navigator.of(context).pop();
+  }
 
   /// One step back through the flow, the way the header arrow goes.
   void _stepBack() {
@@ -791,8 +836,15 @@ class _JanitorLorebookCaptureState
       // move the strip's arrow makes — instead of closing the running flow.
       // While a stage is busy the gesture is held, as the arrow is, so a
       // capture or a build in flight is never torn down by an accidental back.
-      canPop: _phase == _Phase.collect,
+      // On the first stage back closes the sheet, which — until a lorebook has
+      // been delivered — asks first; so does flinging it away.
+      canPop: _phase == _Phase.collect && _delivered,
+      confirmDismiss: _confirmClose,
       onBack: () {
+        if (_phase == _Phase.collect) {
+          _close();
+          return;
+        }
         if (_building || _extracting) return;
         _stepBack();
       },
