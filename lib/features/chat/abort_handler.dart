@@ -127,12 +127,15 @@ class AbortHandler {
         const PostCleanerState.idle();
     clearStreaming();
     clearStudioCycle();
-    setGenerationPhase(_ref, _charId, GenerationPhase.idle);
+    // The bubble stays up until the partial reply is durable; name that wait
+    // instead of letting it fall back to "Generating…", which reads as the
+    // run carrying on rather than stopping.
+    setGenerationPhase(_ref, _charId, GenerationPhase.aborting);
+    final abortGenId = _activeGenId;
 
     final current = _getState().value;
     if (current != null && (current.isGenerating || current.isPostGenRunning)) {
       final restorationSnapshot = _restorationMessage;
-      final abortGenId = _activeGenId;
       try {
         final durableSession = await _finalizeAbortWithPartial(
           current,
@@ -183,6 +186,11 @@ class AbortHandler {
       _setState(AsyncData(current.copyWith(isGeneratingImage: false)));
     }
     _restorationMessage = null;
+    // A run started meanwhile owns the phase now; the early returns above
+    // already leave it alone, this guard covers the remaining paths.
+    if (_ref.mounted && _activeGenId == abortGenId) {
+      setGenerationPhase(_ref, _charId, GenerationPhase.idle);
+    }
   }
 
   /// Stop pressed while `continueMessage()` was streaming. The partial text
