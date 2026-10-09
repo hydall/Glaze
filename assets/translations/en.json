@@ -1446,6 +1446,8 @@
   "catalog_lorebooks_phase_build": "Building",
   "catalog_lorebooks_phase_save": "Saving",
   "catalog_lorebooks_build_patience": "Building a lorebook may take a while, please be patient.",
+  "catalog_lorebooks_close_title": "Are you sure?",
+  "catalog_lorebooks_close_desc": "The lorebook hasn't been saved or exported yet. Closing now discards the extraction progress.",
   "catalog_ctx_card": "Character card",
   "catalog_ctx_catalog": "Card description on site",
   "catalog_ctx_scenario": "Scenario",
