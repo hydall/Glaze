@@ -210,13 +210,14 @@ class JanitorExtractor {
       // imported card and its lorebook stay portable. `{{user}}` is normally
       // already intact (the capture binds a persona named `{{user}}`);
       // [bakedUserName] is set only when that persona could not be created.
+      // The same pass drops JanitorAI's "created by … on janitorai.com" credit.
       final charNames = <String>{
         name,
         (meta?['name'] ?? '').toString(),
         (meta?['chat_name'] ?? '').toString(),
       }.where((n) => n.trim().isNotEmpty).toList();
       String macro(String text) => restoreMacros(
-            text,
+            stripJanitorCredit(text),
             charNames: charNames,
             userName: capture.bakedUserName,
           );
