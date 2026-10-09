@@ -74,6 +74,11 @@ class DesktopChatHeaderSearch extends ConsumerWidget {
   }
 
   Widget _buildField(BuildContext context, WidgetRef ref) {
+    // Text and placeholder share one style with a fixed line height, and the
+    // field is collapsed (no decorator padding or suffix of its own), so the
+    // single text line is centred by the row below exactly like the cross —
+    // whatever the font's own metrics are.
+    const lineStyle = TextStyle(fontSize: 14, height: 1.25);
     final field = CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.escape): search.closeSearch,
@@ -81,25 +86,22 @@ class DesktopChatHeaderSearch extends ConsumerWidget {
       child: TextField(
         controller: search.searchController,
         autofocus: true,
-        style: TextStyle(color: context.cs.onSurface, fontSize: 14),
+        style: lineStyle.copyWith(color: context.cs.onSurface),
+        strutStyle: StrutStyle.fromTextStyle(lineStyle, forceStrutHeight: true),
         textInputAction: TextInputAction.search,
         decoration: InputDecoration(
-          isDense: true,
-          // The rounded box below is the background; the theme's square fill
-          // on top would leave only a ragged ring of it.
-          filled: false,
+          isCollapsed: true,
+          contentPadding: EdgeInsets.zero,
           hintText: 'search_messages'.tr(),
-          hintStyle: TextStyle(
-            fontSize: 14,
+          hintStyle: lineStyle.copyWith(
             color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
           ),
+          // The rounded box below is the background; the theme's fill and
+          // borders on top would draw a second box inside it.
+          filled: false,
           border: InputBorder.none,
           enabledBorder: InputBorder.none,
           focusedBorder: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 10,
-            vertical: 7,
-          ),
         ),
         // The id comes from the screen rather than the router: under the
         // title bar the field is built outside the chat route.
@@ -110,25 +112,25 @@ class DesktopChatHeaderSearch extends ConsumerWidget {
       ),
     );
 
-    // The cross lands where the search icon was: the block's right edge.
-    return Row(
-      children: [
-        Expanded(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: context.cs.onSurface.withValues(alpha: 0.06),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: SizedBox.expand(child: Center(child: field)),
+    // The cross is part of the field's box, at its right edge — where the
+    // search icon was.
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: context.cs.onSurface.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          const SizedBox(width: 10),
+          Expanded(child: field),
+          _HeaderIconButton(
+            icon: Icons.close_rounded,
+            tooltip: 'btn_close'.tr(),
+            onPressed: search.closeSearch,
           ),
-        ),
-        const SizedBox(width: 4),
-        _HeaderIconButton(
-          icon: Icons.close_rounded,
-          tooltip: 'btn_close'.tr(),
-          onPressed: search.closeSearch,
-        ),
-      ],
+          const SizedBox(width: 2),
+        ],
+      ),
     );
   }
 }
