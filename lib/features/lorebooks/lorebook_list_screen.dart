@@ -32,7 +32,9 @@ import '../../shared/widgets/sheet_view.dart';
 import 'embedding_settings_screen.dart';
 import 'lorebook_connections_sheet.dart';
 import 'lorebook_editor_screen.dart';
+import '../settings/api_list_provider.dart';
 import 'widgets/lorebook_global_settings_section.dart';
+import 'widgets/vector_setup_gate.dart';
 
 class LorebookListScreen extends ConsumerStatefulWidget {
   /// True when presented as a fullscreen route (`/tools/lorebooks`); false when
@@ -117,14 +119,20 @@ class _LorebookListScreenState extends ConsumerState<LorebookListScreen> {
         onTap: () => _openLorebookMenu(context),
       ),
       actions: [
-        // Embedding settings are only reachable while the active API preset
-        // has vector search switched on.
-        if (ref.watch(vectorSearchAvailableProvider))
-          SheetViewAction(
-            icon: const Icon(Icons.search, size: 20),
-            tooltip: 'lorebook_embedding_settings_tooltip'.tr(),
+        // Without a configured embedding connection this leads to its setup
+        // instead of the vector settings.
+        SheetViewAction(
+          icon: const Icon(Icons.search, size: 20),
+          tooltip: 'lorebook_embedding_settings_tooltip'.tr(),
+          onPressed: () async {
+            await ref.read(apiListProvider.future);
+            if (!context.mounted) return;
+            if (!ref.read(embeddingConfiguredProvider)) {
+              showVectorSetupSheet(context);
+              return;
+            }
             // On desktop a window; a page would cover the whole app.
-            onPressed: () => isDesktopLayout(context)
+            await (isDesktopLayout(context)
                 ? showGlazeSheet<void>(
                     context: context,
                     useRootNavigator: true,
@@ -134,13 +142,16 @@ class _LorebookListScreenState extends ConsumerState<LorebookListScreen> {
                     MaterialPageRoute<void>(
                       builder: (_) => const EmbeddingSettingsScreen(),
                     ),
-                  ),
-          ),
+                  ));
+          },
+        ),
       ],
       body: lorebooksAsync.when(
         data: (all) {
           final memberships =
-              ref.watch(folderMembershipsProvider(FolderDomain.lorebook)).value ??
+              ref
+                  .watch(folderMembershipsProvider(FolderDomain.lorebook))
+                  .value ??
               FolderMemberships.empty;
           final hasFolders =
               (ref.watch(foldersProvider(FolderDomain.lorebook)).value ??
@@ -419,8 +430,10 @@ class _LorebookListScreenState extends ConsumerState<LorebookListScreen> {
       final json = const JsonEncoder.withIndent(
         '  ',
       ).convert(glazeLorebookToSTJson(lb));
-      final safeName =
-          lb.name.trim().replaceAll(RegExp(r'[\\/:*?"<>|]'), '_').trim();
+      final safeName = lb.name
+          .trim()
+          .replaceAll(RegExp(r'[\\/:*?"<>|]'), '_')
+          .trim();
       final path = await FileExportService.export(
         data: json,
         filename: '${safeName.isEmpty ? 'lorebook' : safeName}.json',

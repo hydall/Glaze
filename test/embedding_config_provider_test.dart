@@ -185,10 +185,6 @@ void main() {
       // Each of these screens/sheets used to show its vector, embedding or
       // index controls unconditionally.
       const gated = [
-        'lib/features/lorebooks/lorebook_list_screen.dart',
-        'lib/features/lorebooks/widgets/lorebook_global_settings_section.dart',
-        'lib/features/lorebooks/widgets/lorebook_book_settings_section.dart',
-        'lib/features/lorebooks/lorebook_editor_screen.dart',
         'lib/features/chat/widgets/memory_books_tab.dart',
         // The memory settings sheet reads the gate once and hands it to its
         // section builders, so the sheet is what has to carry it now.
@@ -199,6 +195,33 @@ void main() {
           File(path).readAsStringSync(),
           contains('vectorSearchAvailableProvider'),
           reason: '$path must gate its vector UI on the API toggle',
+        );
+      }
+    });
+
+    test('lorebook vector settings stay visible and lead to the setup', () {
+      // The lorebook screens keep their vector controls on screen; without
+      // a working connection they send the user to the embedding settings.
+      const routed = [
+        'lib/features/lorebooks/lorebook_list_screen.dart',
+        'lib/features/lorebooks/widgets/lorebook_global_settings_section.dart',
+        'lib/features/lorebooks/widgets/lorebook_book_settings_section.dart',
+        'lib/features/lorebooks/lorebook_editor_screen.dart',
+      ];
+      for (final path in routed) {
+        final source = File(path).readAsStringSync();
+        expect(
+          source,
+          contains('embeddingConfiguredProvider'),
+          reason: '$path must know whether embeddings are set up',
+        );
+        expect(
+          source,
+          anyOf(
+            contains('ensureVectorsReady'),
+            contains('showVectorSetupSheet'),
+          ),
+          reason: '$path must send the user to the embedding setup',
         );
       }
     });
