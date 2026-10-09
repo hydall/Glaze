@@ -2442,7 +2442,7 @@
   "post_building_studio_section": "Studio agents",
   "post_building_studio_section_desc": "Controller + generator timeout before the first response chunk arrives.",
   "post_building_studio_timeout": "Studio agent timeout",
-  "post_building_studio_timeout_desc": "Idle timeout before any text or reasoning chunk arrives. Once the model emits its first chunk, the timer is cancelled and the agent runs to completion. 0 = use per-agent defaults (final generator 90s, controllers 60s).",
+  "post_building_studio_timeout_desc": "Idle timeout before any text or reasoning chunk arrives. Once the model emits its first chunk, the timer is cancelled and the agent runs to completion. 0 = use per-agent defaults (120s).",
   "post_building_studio_max_tokens": "Final generator max tokens",
   "post_building_studio_max_tokens_desc": "Token budget for the Main Responder. Increase for reasoning models (e.g. Gemini) that spend most of the budget on thinking and leave too little for the actual reply. 0 = use the agent default (8000).",
   "post_building_studio_final_context_size": "Final context size",

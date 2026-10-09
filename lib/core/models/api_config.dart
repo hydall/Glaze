@@ -80,7 +80,7 @@ abstract class ApiConfig with _$ApiConfig {
     @Default('') String noAssistantUserPrefix,
     @Default('') String noAssistantCharPrefix,
     @Default('assistant') String noAssistantSquashRole,
-    @Default(60000) int firstChunkTimeoutMs,
+    @Default(120000) int firstChunkTimeoutMs,
 
     /// Send the leading run of system blocks in the provider's own field —
     /// Gemini's `system_instruction`, Anthropic's `system`. When off it stays

@@ -167,7 +167,7 @@ class ApiConfigs extends Table {
   TextColumn get sessionIdMode =>
       text().withDefault(const Constant('openrouter'))();
   IntColumn get firstChunkTimeoutMs =>
-      integer().withDefault(const Constant(60000))();
+      integer().withDefault(const Constant(120000))();
   TextColumn get promptPostProcessing =>
       text().withDefault(const Constant('none'))();
   BoolColumn get noAssistant => boolean().withDefault(const Constant(false))();

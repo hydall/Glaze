@@ -36,7 +36,7 @@ const summaryPreviousHeader =
 const _fallbackMaxTokens = 1024;
 
 /// Fallback idle timeout when the API config carries no `firstChunkTimeoutMs`.
-const _fallbackTimeoutMs = 60000;
+const _fallbackTimeoutMs = 120000;
 
 /// Temperature a summary runs at unless the connection's slot pins one.
 /// Summarizing is extraction, not prose — a hot summariser invents facts.

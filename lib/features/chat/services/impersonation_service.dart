@@ -161,7 +161,7 @@ class ImpersonationService {
 
     final idleTimeoutMs = apiConfig.firstChunkTimeoutMs > 0
         ? apiConfig.firstChunkTimeoutMs
-        : 60000;
+        : 120000;
     var idleTimedOut = false;
     final idleGuard = IdleTimeoutGuard(idleTimeoutMs, () {
       idleTimedOut = true;
