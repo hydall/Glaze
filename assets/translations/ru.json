@@ -1537,6 +1537,8 @@
   "catalog_lorebooks_llm_debug": "Ответ LLM (отладка)",
   "catalog_lorebooks_built": "Собрано записей: {}",
   "catalog_lorebooks_save": "Сохранить в Glaze",
+  "catalog_lorebooks_save_sub": "Добавить в библиотеку лорбуков",
+  "catalog_lorebooks_all_downloaded": "Все лорбуки были скачаны",
   "catalog_lorebooks_export": "Экспорт .json",
   "catalog_lorebooks_export_sub": "World info в формате SillyTavern",
   "catalog_lorebooks_saved": "Сохранено «{}» (записей: {})",

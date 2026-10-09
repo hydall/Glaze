@@ -1478,6 +1478,8 @@
   "catalog_lorebooks_llm_debug": "LLM response (debug)",
   "catalog_lorebooks_built": "Built {} entries",
   "catalog_lorebooks_save": "Save to Glaze",
+  "catalog_lorebooks_save_sub": "Add to your lorebook library",
+  "catalog_lorebooks_all_downloaded": "All lorebooks have been downloaded",
   "catalog_lorebooks_export": "Export .json",
   "catalog_lorebooks_export_sub": "SillyTavern world info",
   "catalog_lorebooks_saved": "Saved “{}” ({} entries)",
