@@ -24,14 +24,33 @@ import '../../shared/widgets/glaze_sheet.dart';
 // Flow widget
 // ---------------------------------------------------------------------------
 
-class OnboardingScreen extends ConsumerStatefulWidget {
+/// Onboarding is pushed on the root navigator, above the shell, so there is
+/// no `DesktopScope` to inherit — provide one here using the shell's own rule
+/// (see `DesktopShell.build`). Everything opened from the flow (settings,
+/// persona list, glossary, the skip confirmation) reads it to open as a
+/// window instead of a bottom sheet.
+class OnboardingScreen extends ConsumerWidget {
   const OnboardingScreen({super.key});
 
   @override
-  ConsumerState<OnboardingScreen> createState() => _OnboardingScreenState();
+  Widget build(BuildContext context, WidgetRef ref) {
+    return DesktopScope(
+      isDesktop:
+          isDesktopViewportSize(MediaQuery.sizeOf(context)) &&
+          !ref.watch(forceMobileLayoutProvider),
+      child: const _OnboardingFlow(),
+    );
+  }
 }
 
-class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
+class _OnboardingFlow extends ConsumerStatefulWidget {
+  const _OnboardingFlow();
+
+  @override
+  ConsumerState<_OnboardingFlow> createState() => _OnboardingFlowState();
+}
+
+class _OnboardingFlowState extends ConsumerState<_OnboardingFlow> {
   int _currentSlide = 0;
   int _direction = 1;
 
@@ -161,16 +180,9 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     );
   }
 
-  /// Onboarding is pushed on the root navigator, above the shell, so there is
-  /// no `DesktopScope` to read here — apply the shell's own rule directly
-  /// (see `DesktopShell.build`).
-  bool _isDesktop(BuildContext context) =>
-      isDesktopViewportSize(MediaQuery.sizeOf(context)) &&
-      !ref.watch(forceMobileLayoutProvider);
-
   @override
   Widget build(BuildContext context) {
-    if (_isDesktop(context)) return _buildDesktop(context);
+    if (isDesktopLayout(context)) return _buildDesktop(context);
 
     final topPad = MediaQuery.of(context).padding.top;
     final bottomPad = MediaQuery.of(context).padding.bottom;
