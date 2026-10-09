@@ -52,6 +52,7 @@ class MemoryVectorSearcher {
     String currentText,
     EmbeddingConfig config,
     MemoryGlobalSettings settings, {
+    String? sessionId,
     bool Function()? shouldAbort,
     CancelToken? cancelToken,
   }) async {
@@ -147,7 +148,12 @@ class MemoryVectorSearcher {
             [queryText],
             config,
             cancelToken: cancelToken,
-            captureContext: const LlmCaptureContext(stage: 'embedding.memory'),
+            // The session puts the request in that chat's Prompt Inspector;
+            // without it the search was captured but listed nowhere.
+            captureContext: LlmCaptureContext(
+              stage: 'embedding.memory',
+              sessionId: sessionId,
+            ),
           )
           .timeout(const Duration(seconds: 30), onTimeout: () => []);
       if (cancelToken?.isCancelled == true) {

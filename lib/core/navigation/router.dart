@@ -14,7 +14,6 @@ import '../../features/character_gallery/gallery_screen.dart';
 import '../../features/chat/chat_screen.dart';
 import '../../features/chat_history/chat_history_screen.dart';
 import '../../features/lorebooks/lorebook_list_screen.dart';
-import '../../features/lorebooks/lorebook_global_settings_screen.dart';
 import '../../features/lorebooks/embedding_settings_screen.dart';
 import '../../features/diagnostics/log_viewer_screen.dart';
 import '../../features/diagnostics/logs_screen.dart';
@@ -219,19 +218,6 @@ GoRouter buildRouter(
                         state: state,
                         child: const LorebookListScreen(startExpanded: true),
                       ),
-                      routes: [
-                        // Drill-down inside the lorebook list (not a direct sub-view
-                        // of the tools overlay), so it keeps the platform push
-                        // transition — an opaque cover reads fine here and avoids
-                        // the OverlayPortal layout regression covered in tests.
-                        GoRoute(
-                          path: 'settings',
-                          pageBuilder: (_, state) => _adaptivePage(
-                            state: state,
-                            child: const LorebookGlobalSettingsScreen(),
-                          ),
-                        ),
-                      ],
                     ),
                     GoRoute(
                       path: 'embeddings',

@@ -81,6 +81,10 @@ enum ApiSettingsSection {
   /// The MemoryBook generation slot on the Agents tab. Memory settings link
   /// here since the connection and the model moved out of that sheet.
   memoryBook,
+
+  /// The Embeddings tab. The lorebook search-type picker sends people here
+  /// when they pick a vector mode with no embedding connection set up.
+  embeddings,
 }
 
 class ApiSettingsScreen extends ConsumerStatefulWidget {
@@ -185,7 +189,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     final key = switch (widget.focusSection) {
       ApiSettingsSection.context => _contextGroupKey,
       ApiSettingsSection.memoryBook => _memoryBookSlotKey,
-      null => null,
+      ApiSettingsSection.embeddings || null => null,
     };
     if (key == null) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -261,9 +265,13 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   @override
   void initState() {
     super.initState();
-    // A deep link at the MemoryBook slot opens straight on the tab that holds
-    // it rather than on LLM and then jumping.
-    _tab = widget.focusSection == ApiSettingsSection.memoryBook ? 1 : 0;
+    // A deep link at the MemoryBook slot or the embeddings opens straight on
+    // the tab that holds it rather than on LLM and then jumping.
+    _tab = switch (widget.focusSection) {
+      ApiSettingsSection.memoryBook => 1,
+      ApiSettingsSection.embeddings => 2,
+      _ => 0,
+    };
     for (final c in _ctrls) {
       c.addListener(_scheduleSave);
     }

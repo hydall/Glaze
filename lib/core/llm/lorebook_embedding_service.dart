@@ -6,6 +6,7 @@ import '../utils/cast_helpers.dart';
 import 'embedding_service.dart';
 import 'lorebook_embedding_text.dart';
 import 'retrieval_hints.dart';
+import 'transport/llm_capture_context.dart';
 
 class LorebookEmbeddingService {
   final EmbeddingRepo _repo;
@@ -25,7 +26,16 @@ class LorebookEmbeddingService {
     bool forceReindex = false,
     String embeddingTarget = LorebookEmbeddingTarget.content,
     bool vectorizeAll = false,
+    String? captureRunId,
   }) async {
+    // Indexing belongs to no chat, so its requests are captured without a
+    // session; the Prompt Inspector lists them alongside every chat's own.
+    // One run id folds a pass into one group, and a call id per entry keeps
+    // the entries from collapsing into "attempts" of a single call.
+    final runId =
+        captureRunId ??
+        'embedding.lorebook_index:$lorebookId:'
+            '${DateTime.now().millisecondsSinceEpoch}';
     int indexed = 0;
     int skipped = 0;
     int failed = 0;
@@ -108,9 +118,15 @@ class LorebookEmbeddingService {
       }
 
       try {
-        final chunks = await _embeddingService.getEmbeddingsWithChunks([
-          text,
-        ], config);
+        final chunks = await _embeddingService.getEmbeddingsWithChunks(
+          [text],
+          config,
+          captureContext: LlmCaptureContext(
+            stage: 'embedding.lorebook_index',
+            pipelineRunId: runId,
+            callId: '$runId:${entry.id}',
+          ),
+        );
         final vectors = chunks.map((c) => c.vector).toList();
 
         await _repo.putEmbeddingVector(

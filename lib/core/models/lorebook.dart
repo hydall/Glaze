@@ -125,6 +125,11 @@ abstract class LorebookGlobalSettings with _$LorebookGlobalSettings {
     /// system 4 analog).
     @Default(0.3) double fallbackThreshold,
     @Default(3) int fallbackTopK,
+
+    /// Embed new and changed entries in the background after every lorebook
+    /// save, instead of waiting for "Index all" in the editor. Only acts
+    /// while [searchType] uses vectors and an embedding connection is set up.
+    @Default(false) bool autoIndexVectors,
   }) = _LorebookGlobalSettings;
 
   factory LorebookGlobalSettings.fromJson(Map<String, dynamic> json) =>

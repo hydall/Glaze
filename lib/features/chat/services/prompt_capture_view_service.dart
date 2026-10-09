@@ -94,10 +94,18 @@ final class PromptCaptureViewService {
 
   final LlmRequestCaptureRepo _repo;
 
+  /// The chat's own requests plus the session-less embedding ones (lorebook
+  /// indexing), newest first. Indexing runs outside any chat, and without
+  /// them the inspector never showed what it sent.
   Future<List<PromptCaptureView>> load(String sessionId) async {
     final rowsFuture = _repo.newestForSession(sessionId);
+    final sharedFuture = _repo.newestEmbeddingsWithoutSession();
     final eventsFuture = _repo.newestCallEventsForSession(sessionId);
-    final rows = await rowsFuture;
+    final rows = [...await rowsFuture, ...await sharedFuture]
+      ..sort((a, b) {
+        final byTime = b.createdAtMs.compareTo(a.createdAtMs);
+        return byTime != 0 ? byTime : b.id.compareTo(a.id);
+      });
     final events = await eventsFuture;
     final eventsByCall = <String, List<LlmCallEventRow>>{};
     for (final event in events.reversed) {
