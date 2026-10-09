@@ -812,8 +812,12 @@ class _SheetViewState extends ConsumerState<SheetView>
               child: Builder(
                 builder: (context) {
                   final mediaQuery = MediaQuery.of(context);
+                  // A flush header has no inset pill to clear, so the body
+                  // starts right under its rule.
                   final extraTop = _hasHeader
-                      ? (mediaQuery.padding.top + 10 + _headerH)
+                      ? (mediaQuery.padding.top +
+                            (_flushHeader ? 0 : 10) +
+                            _headerH)
                       : mediaQuery.padding.top;
                   final newPadding = mediaQuery.padding.copyWith(
                     top: extraTop,
@@ -944,6 +948,12 @@ class _SheetViewState extends ConsumerState<SheetView>
                               ),
                               child: widget.headerBottom!,
                             ),
+                          // Flush, the body starts right under the header, so
+                          // the rows below the app bar keep their gap from it.
+                          if (_flushHeader &&
+                              (widget.tabs.isNotEmpty ||
+                                  widget.headerBottom != null))
+                            const SizedBox(height: 12),
                         ],
                       ),
                     ),
@@ -1510,14 +1520,20 @@ class _HeaderIconButton extends StatelessWidget {
       child: InkWell(
         customBorder: const CircleBorder(),
         onTap: onPressed,
-        child: SizedBox(
-          width: 40,
-          height: 40,
+        // At least an icon button's square, and as wide as a wider control
+        // needs (a switch): a fixed square let one spill past it, off the edge
+        // of a flush header.
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(
+            minWidth: 40,
+            minHeight: 40,
+            maxHeight: 40,
+          ),
           child: IconTheme(
             data: IconThemeData(color: fg),
             child: DefaultTextStyle(
               style: TextStyle(color: fg),
-              child: Center(child: child),
+              child: Center(widthFactor: 1, heightFactor: 1, child: child),
             ),
           ),
         ),

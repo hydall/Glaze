@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'desktop_popup.dart';
 import '../shell/desktop/desktop_layout_provider.dart';
+import '../shell/desktop/sidebar_sheet_provider.dart';
 import '../../core/platform/haptics.dart';
 import '../theme/app_colors.dart';
 import '../../features/settings/app_settings_provider.dart';
@@ -11,6 +12,7 @@ import 'glass_surface.dart';
 import 'glaze_action_button.dart';
 import 'glaze_sheet.dart';
 import 'glaze_text_field.dart';
+import 'menu_group.dart';
 import 'top_edge_blur.dart';
 
 // ── Data models ───────────────────────────────────────────────────────────────
@@ -1470,11 +1472,15 @@ class GlazeSessionList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // In a sidebar panel the sessions are rows of the panel, edge to edge.
+    final flat = inSidebarPanel(context);
     return _SheetReveal(
       visible: _anyVisible(visible),
       animate: animateFilter,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        padding: flat
+            ? const EdgeInsets.only(bottom: 16)
+            : const EdgeInsets.fromLTRB(16, 0, 16, 16),
         child: Column(
           children: [
             for (int i = 0; i < items.length; i++)
@@ -1482,7 +1488,7 @@ class GlazeSessionList extends StatelessWidget {
                 visible: visible == null || visible![i],
                 animate: animateFilter,
                 child: Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
+                  padding: EdgeInsets.only(bottom: flat ? 0 : 10),
                   child: GlazeSessionRow(item: items[i]),
                 ),
               ),
@@ -1500,135 +1506,48 @@ class GlazeSessionRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final content = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: _buildContent(context),
+    );
+    // A row of a sidebar panel: no card, only the rule under it, and the open
+    // session marked by a bar down its edge as well as its dot.
+    if (inSidebarPanel(context)) {
+      return FlatGroupSurface(
+        color: item.isActive
+            ? context.cs.primary.withValues(alpha: 0.08)
+            : null,
+        accent: item.isActive ? context.cs.primary : null,
+        child: InkWell(onTap: item.onTap, child: content),
+      );
+    }
     return Material(
       color: Colors.white.withValues(alpha: 0.06),
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         onTap: item.onTap,
         borderRadius: BorderRadius.circular(16),
-        child: Container(
+        child: DecoratedBox(
           decoration: BoxDecoration(
             border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
             borderRadius: BorderRadius.circular(16),
           ),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Row(
+          child: content,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildContent(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        if (item.unread) ...[
-                          Container(
-                            width: 8,
-                            height: 8,
-                            decoration: BoxDecoration(
-                              color: context.cs.primary,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                        ],
-                        Flexible(
-                          child: Text(
-                            item.title,
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: item.unread
-                                  ? FontWeight.w700
-                                  : FontWeight.w600,
-                              color: context.cs.onSurface,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.chat_bubble_outline,
-                              size: 13,
-                              color: context.cs.onSurfaceVariant,
-                            ),
-                            const SizedBox(width: 3),
-                            Text(
-                              '${item.count}',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: context.cs.onSurfaceVariant,
-                              ),
-                            ),
-                            if (item.time.isNotEmpty) ...[
-                              Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 4,
-                                ),
-                                child: Text(
-                                  '·',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.bold,
-                                    color: context.cs.onSurfaceVariant
-                                        .withValues(alpha: 0.5),
-                                  ),
-                                ),
-                              ),
-                              Text(
-                                item.time,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: context.cs.onSurfaceVariant,
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 3),
-                    if (item.generating)
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.edit,
-                            size: 13,
-                            color: context.cs.onSurfaceVariant.withValues(
-                              alpha: 0.7,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            'model_typing'.tr(),
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontStyle: FontStyle.italic,
-                              color: context.cs.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                      )
-                    else
-                      Text(
-                        item.preview,
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: item.unread
-                              ? context.cs.onSurface
-                              : context.cs.onSurfaceVariant,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
               Row(
-                mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (item.isActive) ...[
+                  if (item.unread) ...[
                     Container(
                       width: 8,
                       height: 8,
@@ -1637,25 +1556,127 @@ class GlazeSessionRow extends StatelessWidget {
                         shape: BoxShape.circle,
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 6),
                   ],
-                  GestureDetector(
-                    onTap: item.onMore,
-                    child: Padding(
-                      padding: const EdgeInsets.all(4),
-                      child: Icon(
-                        Icons.more_vert,
-                        size: 20,
+                  Flexible(
+                    child: Text(
+                      item.title,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: item.unread
+                            ? FontWeight.w700
+                            : FontWeight.w600,
+                        color: context.cs.onSurface,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.chat_bubble_outline,
+                        size: 13,
                         color: context.cs.onSurfaceVariant,
                       ),
-                    ),
+                      const SizedBox(width: 3),
+                      Text(
+                        '${item.count}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: context.cs.onSurfaceVariant,
+                        ),
+                      ),
+                      if (item.time.isNotEmpty) ...[
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: Text(
+                            '·',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: context.cs.onSurfaceVariant.withValues(
+                                alpha: 0.5,
+                              ),
+                            ),
+                          ),
+                        ),
+                        Text(
+                          item.time,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: context.cs.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ],
               ),
+              const SizedBox(height: 3),
+              if (item.generating)
+                Row(
+                  children: [
+                    Icon(
+                      Icons.edit,
+                      size: 13,
+                      color: context.cs.onSurfaceVariant.withValues(alpha: 0.7),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'model_typing'.tr(),
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontStyle: FontStyle.italic,
+                        color: context.cs.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                )
+              else
+                Text(
+                  item.preview,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: item.unread
+                        ? context.cs.onSurface
+                        : context.cs.onSurfaceVariant,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
             ],
           ),
         ),
-      ),
+        const SizedBox(width: 12),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (item.isActive) ...[
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: context.cs.primary,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 8),
+            ],
+            GestureDetector(
+              onTap: item.onMore,
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Icon(
+                  Icons.more_vert,
+                  size: 20,
+                  color: context.cs.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

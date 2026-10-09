@@ -96,6 +96,12 @@ class SidebarPanelScope extends InheritedWidget {
   bool updateShouldNotify(SidebarPanelScope oldWidget) => false;
 }
 
+/// Whether [context] is inside a right-sidebar panel. The sidebar already
+/// frames the screen on every side, so what is laid out in it runs edge to
+/// edge: no gutters around the list, no rounded cards, only rules between rows.
+bool inSidebarPanel(BuildContext context) =>
+    SidebarPanelScope.maybeOf(context) != null;
+
 /// Leaves the sheet or screen [context] is in, wherever it is shown: steps its
 /// desktop window back (closing it from its root), closes its sidebar panel,
 /// or pops its route.

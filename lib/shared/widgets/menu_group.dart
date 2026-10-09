@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 
 import '../../core/platform/haptics.dart';
 import '../theme/app_colors.dart';
+import '../shell/desktop/sidebar_sheet_provider.dart';
 import '../shell/shell_header_provider.dart';
 import 'glass_surface.dart';
 import 'glow_ripple.dart';
@@ -11,6 +12,13 @@ import 'help_tip.dart';
 import 'glaze_switch.dart';
 
 enum MenuGroupHeaderVariant { standard, accentCaps }
+
+/// Whether menu groups at [context] drop their cards and run flat: inside a
+/// host that already frames them — a desktop window ([DetachedShellHost]'s
+/// chrome) or a right-sidebar panel. A card there reads as a card inside a
+/// card, so groups render as plain runs of rows with a rule under each.
+bool menuGroupsFlat(BuildContext context) =>
+    DetachedShellHost.drawsChrome(context) || inSidebarPanel(context);
 
 // ── Collapsible section ────────────────────────────────────────────────────────
 
@@ -53,7 +61,7 @@ class _MenuCollapsibleSectionState extends State<MenuCollapsibleSection> {
 
   @override
   Widget build(BuildContext context) {
-    final flat = DetachedShellHost.drawsChrome(context);
+    final flat = menuGroupsFlat(context);
     final radius = flat ? BorderRadius.zero : BorderRadius.circular(20);
     final content = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -82,7 +90,7 @@ class _MenuCollapsibleSectionState extends State<MenuCollapsibleSection> {
       ],
     );
 
-    if (flat) return _FlatGroupSurface(child: content);
+    if (flat) return FlatGroupSurface(child: content);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       child: GlassSurface(
@@ -154,23 +162,47 @@ class _MenuCollapsibleSectionState extends State<MenuCollapsibleSection> {
 }
 
 /// A group's surface inside a host that draws its own frame (see
-/// [DetachedShellHost.drawsChrome]): the rule under it and the tap glow, but
-/// no glass. The window's own fill is already under it, and a second tint
-/// over that marked out a lighter band exactly as tall as the groups, with
-/// the bare window showing below the last one.
-class _FlatGroupSurface extends StatelessWidget {
+/// [menuGroupsFlat]): the rule under it and the tap glow, but no glass. The
+/// host's own fill is already under it, and a second tint over that marked
+/// out a lighter band exactly as tall as the groups, with the bare host
+/// showing below the last one.
+///
+/// Also the surface of a list card laid out flat in a sidebar panel, so a row
+/// of the list and a group of a settings screen read the same there.
+class FlatGroupSurface extends StatelessWidget {
   final Widget child;
 
-  const _FlatGroupSurface({required this.child});
+  /// Fill under the content, for a row that marks itself out (the active
+  /// one, say). Transparent by default.
+  final Color? color;
+
+  /// Bar down the leading edge, drawn over the content — what a card's accent
+  /// border says when there is no card. It stays visible over a row that
+  /// paints its own background (a cover image), where [color] would not.
+  final Color? accent;
+
+  const FlatGroupSurface({
+    super.key,
+    required this.child,
+    this.color,
+    this.accent,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final accent = this.accent;
     return GlowRippleOverlay(
       glowColor: context.cs.primary,
-      child: DecoratedBox(
+      child: Container(
         decoration: BoxDecoration(
+          color: color,
           border: Border(bottom: BorderSide(color: context.cs.outlineVariant)),
         ),
+        foregroundDecoration: accent == null || accent.a == 0
+            ? null
+            : BoxDecoration(
+                border: Border(left: BorderSide(color: accent, width: 3)),
+              ),
         // What a [GlassSurface] gives its content: a Material the rows' ink
         // lands on (the window's own sits under the screen's fill), and glass
         // inside that blurs on its own rather than joining the list's group.
@@ -279,12 +311,12 @@ class MenuGroup extends StatelessWidget {
       );
     }
 
-    // Inside the floating window the host already draws a frame, so a group
-    // that keeps its own card reads as a card inside a card. There it runs
-    // edge to edge — no side gutters, no left/right edges, no rounding — and
-    // only the rule under it separates one group from the next.
-    if (DetachedShellHost.drawsChrome(context)) {
-      return _FlatGroupSurface(child: body);
+    // Inside a window or a sidebar panel the host already draws a frame, so a
+    // group that keeps its own card reads as a card inside a card. There it
+    // runs edge to edge — no side gutters, no left/right edges, no rounding —
+    // and only the rule under it separates one group from the next.
+    if (menuGroupsFlat(context)) {
+      return FlatGroupSurface(child: body);
     }
 
     return Padding(

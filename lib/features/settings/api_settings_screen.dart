@@ -747,7 +747,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     return SheetView(
       startExpanded: widget.startExpanded,
       showRouteBackground: false,
-      title: 'menu_app_settings'.tr(),
+      title: 'menu_api_settings'.tr(),
       showBack: true,
       onBack: _goBack,
       scrollController: switch (_tab) {
@@ -938,8 +938,11 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
         cacheExtent: widget.focusSection == ApiSettingsSection.context
             ? 3000
             : null,
+        // A sidebar panel's header already keeps its gap below the tab bar.
         padding: EdgeInsets.only(
-          top: MediaQuery.paddingOf(context).top + 12,
+          top:
+              MediaQuery.paddingOf(context).top +
+              (inSidebarPanel(context) ? 0 : 12),
           bottom: MediaQuery.paddingOf(context).bottom + 16,
         ),
         children: [
@@ -1731,8 +1734,11 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     return Builder(
       builder: (context) => ListView(
         controller: _embScrollController,
+        // A sidebar panel's header already keeps its gap below the tab bar.
         padding: EdgeInsets.only(
-          top: MediaQuery.paddingOf(context).top + 12,
+          top:
+              MediaQuery.paddingOf(context).top +
+              (inSidebarPanel(context) ? 0 : 12),
           bottom: MediaQuery.paddingOf(context).bottom + 16,
         ),
         children: [

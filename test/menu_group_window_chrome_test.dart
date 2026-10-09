@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:glaze_flutter/shared/shell/desktop/sidebar_sheet_provider.dart';
 import 'package:glaze_flutter/shared/shell/shell_header_provider.dart';
 import 'package:glaze_flutter/shared/widgets/glass_surface.dart';
 import 'package:glaze_flutter/shared/widgets/menu_group.dart';
@@ -70,5 +71,32 @@ void main() {
     final card = tester.getRect(find.byType(GlassSurface));
     expect(card.left, greaterThan(host.left));
     expect(card.right, lessThan(host.right));
+  });
+
+  testWidgets('a group in a sidebar panel runs edge to edge', (tester) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        child: MaterialApp(
+          theme: ThemeData.dark(),
+          home: Scaffold(
+            body: DetachedShellHost(
+              child: SidebarPanelScope(
+                onClose: () {},
+                back: SidebarPanelBack(),
+                child: const MenuGroup(items: [Text('row')]),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(GlassSurface), findsNothing);
+    expect(find.byType(FlatGroupSurface), findsOneWidget);
+    final host = tester.getRect(find.byType(DetachedShellHost));
+    final group = tester.getRect(find.byType(MenuGroup));
+    expect(group.left, moreOrLessEquals(host.left, epsilon: 0.5));
+    expect(group.right, moreOrLessEquals(host.right, epsilon: 0.5));
   });
 }

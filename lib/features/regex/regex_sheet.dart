@@ -738,12 +738,19 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
       key: const ValueKey('regex-list'),
       builder: (innerContext) => ListView(
         key: const PageStorageKey('regex_list'),
-        padding: const EdgeInsets.fromLTRB(0, 20, 0, 16).add(
-          EdgeInsets.only(
-            top: MediaQuery.paddingOf(innerContext).top,
-            bottom: MediaQuery.paddingOf(innerContext).bottom,
-          ),
-        ),
+        // A sidebar panel starts its groups right under the header.
+        padding:
+            EdgeInsets.fromLTRB(
+              0,
+              inSidebarPanel(innerContext) ? 0 : 20,
+              0,
+              16,
+            ).add(
+              EdgeInsets.only(
+                top: MediaQuery.paddingOf(innerContext).top,
+                bottom: MediaQuery.paddingOf(innerContext).bottom,
+              ),
+            ),
         children: [
           if (studioEnabled)
             _buildAgentGroup(innerContext, studioRegexes)
@@ -1188,12 +1195,13 @@ class _RegexEditViewState extends State<_RegexEditView> {
     final s = widget.script;
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(0, 20, 0, 80).add(
-        EdgeInsets.only(
-          top: MediaQuery.paddingOf(context).top,
-          bottom: MediaQuery.paddingOf(context).bottom,
-        ),
-      ),
+      padding: EdgeInsets.fromLTRB(0, inSidebarPanel(context) ? 0 : 20, 0, 80)
+          .add(
+            EdgeInsets.only(
+              top: MediaQuery.paddingOf(context).top,
+              bottom: MediaQuery.paddingOf(context).bottom,
+            ),
+          ),
       children: [
         if (widget.studioStages != null)
           MenuGroup(

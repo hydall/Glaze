@@ -28,6 +28,7 @@ import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/glaze_sheet.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/help_tip.dart';
+import '../../shared/widgets/menu_group.dart';
 import '../../shared/widgets/sheet_view.dart';
 import 'embedding_settings_screen.dart';
 import 'lorebook_connections_sheet.dart';
@@ -161,7 +162,10 @@ class _LorebookListScreenState extends ConsumerState<LorebookListScreen> {
             builder: (context) => ListView(
               padding: const EdgeInsets.fromLTRB(0, 0, 0, 16).add(
                 EdgeInsets.only(
-                  top: MediaQuery.paddingOf(context).top + 16,
+                  // A sidebar panel starts its rows right under the header.
+                  top:
+                      MediaQuery.paddingOf(context).top +
+                      (inSidebarPanel(context) ? 0 : 16),
                   bottom: MediaQuery.paddingOf(context).bottom,
                 ),
               ),
@@ -195,7 +199,12 @@ class _LorebookListScreenState extends ConsumerState<LorebookListScreen> {
                             showLorebookConnections(context, lb.id),
                       ),
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                    padding: EdgeInsets.fromLTRB(
+                      16,
+                      inSidebarPanel(context) ? 16 : 4,
+                      16,
+                      8,
+                    ),
                     child: _AddButton(
                       label: 'btn_add'.tr(),
                       onTap: () => _openLorebookMenu(context),
@@ -566,82 +575,89 @@ class _LorebookCard extends ConsumerWidget {
         ? Colors.orange
         : context.cs.onSurfaceVariant;
 
+    final content = Padding(
+      padding: const EdgeInsets.all(16),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  lorebook.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: context.cs.onSurface,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${lorebook.entries.length} ${'label_entries'.tr()}',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: context.cs.onSurfaceVariant,
+                  ),
+                ),
+                if (lorebook.enabled || charCount > 0 || chatCount > 0) ...[
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      if (lorebook.enabled)
+                        _ConnBadge(
+                          label: 'label_global'.tr(),
+                          color: Colors.green,
+                        ),
+                      if (charCount > 0)
+                        _ConnBadge(
+                          label: '$charCount ${'header_characters'.tr()}',
+                          color: Colors.purple,
+                        ),
+                      if (chatCount > 0)
+                        _ConnBadge(
+                          label: '$chatCount ${'tab_dialogs'.tr()}',
+                          color: Colors.orange,
+                        ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          IconButton(
+            icon: Icon(Icons.link, size: 18, color: scopeColor),
+            tooltip: 'header_connections'.tr(),
+            onPressed: onConnections,
+          ),
+          IconButton(
+            icon: Icon(
+              Icons.more_vert,
+              size: 20,
+              color: context.cs.onSurfaceVariant,
+            ),
+            onPressed: onMore,
+          ),
+        ],
+      ),
+    );
+    // In a sidebar panel the lorebook is a row of the list, edge to edge.
+    if (inSidebarPanel(context)) {
+      return FlatGroupSurface(
+        child: InkWell(onTap: onTap, child: content),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
       child: GlassSurface(
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
         onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      lorebook.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: context.cs.onSurface,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${lorebook.entries.length} ${'label_entries'.tr()}',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: context.cs.onSurfaceVariant,
-                      ),
-                    ),
-                    if (lorebook.enabled || charCount > 0 || chatCount > 0) ...[
-                      const SizedBox(height: 6),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        children: [
-                          if (lorebook.enabled)
-                            _ConnBadge(
-                              label: 'label_global'.tr(),
-                              color: Colors.green,
-                            ),
-                          if (charCount > 0)
-                            _ConnBadge(
-                              label: '$charCount ${'header_characters'.tr()}',
-                              color: Colors.purple,
-                            ),
-                          if (chatCount > 0)
-                            _ConnBadge(
-                              label: '$chatCount ${'tab_dialogs'.tr()}',
-                              color: Colors.orange,
-                            ),
-                        ],
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              IconButton(
-                icon: Icon(Icons.link, size: 18, color: scopeColor),
-                tooltip: 'header_connections'.tr(),
-                onPressed: onConnections,
-              ),
-              IconButton(
-                icon: Icon(
-                  Icons.more_vert,
-                  size: 20,
-                  color: context.cs.onSurfaceVariant,
-                ),
-                onPressed: onMore,
-              ),
-            ],
-          ),
-        ),
+        child: content,
       ),
     );
   }

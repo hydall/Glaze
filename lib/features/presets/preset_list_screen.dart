@@ -7,7 +7,9 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../shared/shell/desktop/desktop_layout_provider.dart';
 import '../../shared/shell/desktop/sidebar_sheet_provider.dart';
+import '../../shared/widgets/menu_group.dart';
 import '../../core/import/silly_tavern_preset_parser.dart';
 import '../../core/models/preset.dart';
 import '../../core/models/preset_folder.dart';
@@ -277,6 +279,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     // one card is ever highlighted.
     final studioEnabled = ref.watch(studioFeatureEnabledProvider);
     final selection = ref.watch(presetSelectionProvider);
+    final desktop = isDesktopLayout(context);
 
     _resolveInitialFolder(
       activeId: studioEnabled ? activeStudioId : activeId,
@@ -313,8 +316,21 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
       actions: _blockActions == null
           ? const []
           : presetBlockEditorSheetActions(context, _blockActions!),
-      headerBottom: _inAnyEditor ? null : _buildControlsRow(context),
-      floating: _inAnyEditor || !selection.active
+      // On desktop the sheet lives in the sidebar, where a bar pinned to the
+      // bottom ends up far from the list it acts on: the selection takes the
+      // controls row's place in the header instead.
+      headerBottom: _inAnyEditor
+          ? null
+          : selection.active && desktop
+          ? _SelectionBar(
+              compact: true,
+              count: selection.count,
+              onCancel: () =>
+                  ref.read(presetSelectionProvider.notifier).clear(),
+              onMore: () => _showSelectionActions(context, selection),
+            )
+          : _buildControlsRow(context),
+      floating: _inAnyEditor || !selection.active || desktop
           ? null
           : Align(
               alignment: Alignment.bottomCenter,
@@ -438,6 +454,10 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
 
     final topInset = MediaQuery.paddingOf(context).top;
     final bottomInset = MediaQuery.paddingOf(context).bottom;
+    // In a sidebar panel the rows run edge to edge, one under the other, and
+    // start right under the header.
+    final flat = inSidebarPanel(context);
+    final gutter = flat ? 0.0 : 16.0;
 
     final rowIndexByKey = <String, int>{
       for (var i = 0; i < items.length; i++) _rowKey(items[i]): i,
@@ -454,7 +474,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
         exiting: _exitingKeys.contains(item.memberKey),
         child: Padding(
           key: _revealPending && i == activeIndex ? _activeRowKey : null,
-          padding: const EdgeInsets.only(bottom: 10),
+          padding: EdgeInsets.only(bottom: flat ? 0 : 10),
           child: GuideAnchor(
             // The guide points at the active preset, or the first one when
             // none is active.
@@ -496,7 +516,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
         controller: controller,
         slivers: [
           SliverPadding(
-            padding: EdgeInsets.fromLTRB(16, 12 + topInset, 16, 0),
+            padding: EdgeInsets.fromLTRB(16, (flat ? 0 : 12) + topInset, 16, 0),
             sliver: SliverToBoxAdapter(
               child: KeyedSubtree(
                 // Only while the auto-scroll still needs to measure this block:
@@ -527,7 +547,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
             )
           else if (reordering)
             SliverPadding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+              padding: EdgeInsets.symmetric(horizontal: gutter),
               sliver: SliverReorderableList(
                 itemCount: items.length,
                 onReorderItem: (oldIndex, newIndex) =>
@@ -541,7 +561,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
             )
           else
             SliverPadding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+              padding: EdgeInsets.symmetric(horizontal: gutter),
               sliver: SliverList.builder(
                 itemCount: items.length,
                 itemBuilder: (_, i) => row(i),
@@ -554,7 +574,12 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
               ),
             ),
           SliverPadding(
-            padding: EdgeInsets.fromLTRB(16, 4, 16, 16 + bottomInset),
+            padding: EdgeInsets.fromLTRB(
+              16,
+              flat ? 16 : 4,
+              16,
+              16 + bottomInset,
+            ),
             sliver: SliverToBoxAdapter(
               child: GuideAnchor(
                 id: GuideIds.presetsAdd,
@@ -1477,16 +1502,18 @@ class _PsCard extends ConsumerWidget {
     // While selecting, the highlight tracks the checkbox rather than which
     // preset is in effect.
     final highlighted = selectionMode ? isSelected : isActive;
+    final flat = inSidebarPanel(context);
+    // Flat, the text lines up with every other row of a sidebar panel.
+    final rowPadding = flat
+        ? const EdgeInsets.symmetric(horizontal: 16, vertical: 10)
+        : const EdgeInsets.all(10);
 
     final Widget content;
     if (item.isAgentic) {
-      content = Padding(
-        padding: const EdgeInsets.all(10),
-        child: _buildAgenticRow(context),
-      );
+      content = Padding(padding: rowPadding, child: _buildAgenticRow(context));
     } else if (cover == null) {
       content = Padding(
-        padding: const EdgeInsets.all(10),
+        padding: rowPadding,
         child: _buildRow(
           context,
           hasChatBinding: hasChatBinding,
@@ -1498,8 +1525,28 @@ class _PsCard extends ConsumerWidget {
       content = _buildCover(
         context,
         cover,
+        padding: rowPadding,
         hasChatBinding: hasChatBinding,
         hasCharBinding: hasCharBinding,
+      );
+    }
+
+    // A row of a sidebar panel: no card, no rounding — the highlight is a
+    // fill and a bar down its edge, and a rule separates it from the next.
+    if (flat) {
+      return TweenAnimationBuilder<double>(
+        tween: Tween<double>(
+          begin: highlighted ? 1.0 : 0.0,
+          end: highlighted ? 1.0 : 0.0,
+        ),
+        duration: _activeFade,
+        curve: Curves.easeOut,
+        child: InkWell(onTap: onTap, onLongPress: onLongPress, child: content),
+        builder: (context, t, child) => FlatGroupSurface(
+          color: context.cs.primary.withValues(alpha: 0.12 * t),
+          accent: context.cs.primary.withValues(alpha: t),
+          child: child!,
+        ),
       );
     }
 
@@ -1534,6 +1581,7 @@ class _PsCard extends ConsumerWidget {
   Widget _buildCover(
     BuildContext context,
     ImageProvider cover, {
+    required EdgeInsets padding,
     required bool hasChatBinding,
     required bool hasCharBinding,
   }) {
@@ -1559,7 +1607,7 @@ class _PsCard extends ConsumerWidget {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.all(10),
+            padding: padding,
             child: Column(
               mainAxisAlignment: MainAxisAlignment.end,
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1859,22 +1907,59 @@ class _ConnBadge extends StatelessWidget {
   }
 }
 
-/// Bottom selection bar shown while multi-selecting presets. Mirrors the chat's
+/// Selection bar shown while multi-selecting presets. Mirrors the chat's
 /// message-selection bar: a glass pill with a cancel button, the selected
 /// count, and a "more" button that opens the bulk-actions sheet.
+///
+/// [compact] is the desktop form that stands in for the header's controls row:
+/// the same buttons at the row's 32 px height, without the pill around them,
+/// so swapping the two leaves the list where it was.
 class _SelectionBar extends StatelessWidget {
   final int count;
   final VoidCallback onCancel;
   final VoidCallback onMore;
+  final bool compact;
 
   const _SelectionBar({
     required this.count,
     required this.onCancel,
     required this.onMore,
+    this.compact = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    if (compact) {
+      return GlassBackdropGroup(
+        child: Row(
+          children: [
+            _CircleIconBtn(
+              icon: Icons.close_rounded,
+              onTap: onCancel,
+              size: 32,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                '$count ${'selected_count'.tr()}',
+                style: TextStyle(
+                  color: context.cs.onSurface,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            _CircleIconBtn(
+              icon: Icons.more_horiz_rounded,
+              onTap: count > 0 ? onMore : null,
+              size: 32,
+            ),
+          ],
+        ),
+      );
+    }
     return Material(
       color: Colors.transparent,
       elevation: 0,
@@ -1918,18 +2003,19 @@ class _SelectionBar extends StatelessWidget {
 class _CircleIconBtn extends StatelessWidget {
   final IconData icon;
   final VoidCallback? onTap;
+  final double size;
 
-  const _CircleIconBtn({required this.icon, this.onTap});
+  const _CircleIconBtn({required this.icon, this.onTap, this.size = 40});
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
       child: SizedBox(
-        width: 40,
-        height: 40,
+        width: size,
+        height: size,
         child: GlassSurface(
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(size / 2),
           tint: context.cs.surface,
           border: Border.all(color: context.cs.primary.withValues(alpha: 0.18)),
           child: Center(
