@@ -270,13 +270,17 @@ class EditController {
     if (!body) return;
 
     body.dataset.originalHtml = body.innerHTML;
-    body.innerHTML = '';
+    // Mirrors bridge/edit_controller.js: the attachment block and the bubble
+    // meta stay (hidden) so the re-render after the edit carries them over.
+    for (const child of [...body.children]) {
+      if (!child.matches('.msg-image-attachment, .bubble-meta')) child.remove();
+    }
     const textarea = document.createElement('textarea');
     textarea.className = 'edit-textarea';
     textarea.rows = 1;
     textarea.value = editText;
     textarea.dataset.originalText = editText;
-    body.appendChild(textarea);
+    body.insertBefore(textarea, body.firstChild);
 
     textarea.addEventListener('wheel', (e) => {
       e.preventDefault();

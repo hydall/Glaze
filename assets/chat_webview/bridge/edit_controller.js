@@ -45,13 +45,20 @@ export class EditController {
     if (!body) return;
 
     body.dataset.originalHtml = body.innerHTML;
-    body.innerHTML = '';
+    // The attachment block and the bubble meta stay in the body, hidden by the
+    // `.editing` rule: `updateMessageContent` carries them across a re-render
+    // only when it finds them there, and neither can be rebuilt from the
+    // section dataset — clearing them here lost the images until the chat was
+    // re-rendered from Flutter.
+    for (const child of [...body.children]) {
+      if (!child.matches('.msg-image-attachment, .bubble-meta')) child.remove();
+    }
     const textarea = document.createElement('textarea');
     textarea.className = 'edit-textarea';
     textarea.rows = 1;
     textarea.value = editText;
     textarea.dataset.originalText = editText;
-    body.appendChild(textarea);
+    body.insertBefore(textarea, body.firstChild);
 
     textarea.addEventListener('wheel', (e) => {
       const delta = this._scaledWheelDelta(e, textarea);

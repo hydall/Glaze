@@ -1177,7 +1177,9 @@
 }
 .edit-textarea:focus { border-color: var(--primary-color, #C42A4A); }
 .message-section.editing .msg-reasoning,
-.message-section.editing .msg-studio-outputs { display: none !important; }
+.message-section.editing .msg-studio-outputs,
+.message-section.editing .msg-image-attachment,
+.message-section.editing .msg-body > .bubble-meta { display: none !important; }
 
 .edit-buttons {
   display: flex;
