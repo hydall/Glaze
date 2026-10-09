@@ -36,6 +36,8 @@ import '../../shared/widgets/glaze_toast.dart';
 import '../catalog/catalog_provider.dart';
 import '../catalog/third_party_providers_provider.dart';
 import '../catalog/widgets/widgets.dart';
+import '../guides/guide_anchor.dart';
+import '../guides/guide_service.dart';
 import '../picks/widgets/picks_grid.dart';
 import '../settings/app_settings_provider.dart';
 import 'character_sort.dart';
@@ -119,7 +121,9 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     // screen, so a list left scrolled down would re-open with its header still
     // slid away. Opening the screen always starts from a visible header.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _showHeader();
+      if (!mounted) return;
+      _showHeader();
+      maybeShowGuide(context, AppGuide.characters);
     });
   }
 
@@ -212,20 +216,23 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
       actions: inPicks || _searchInStrip
           ? null
           : [
-              SizedBox(
-                width: 44,
-                height: 44,
-                child: IconButton(
-                  icon: Icon(
-                    _searchExpanded
-                        ? Icons.close_rounded
-                        : Icons.search_rounded,
-                    size: 22,
+              GuideAnchor(
+                id: GuideIds.charsSearch,
+                child: SizedBox(
+                  width: 44,
+                  height: 44,
+                  child: IconButton(
+                    icon: Icon(
+                      _searchExpanded
+                          ? Icons.close_rounded
+                          : Icons.search_rounded,
+                      size: 22,
+                    ),
+                    color: context.cs.primary,
+                    onPressed: timelineLocked && !_searchExpanded
+                        ? null
+                        : (_searchExpanded ? _closeSearch : _openSearch),
                   ),
-                  color: context.cs.primary,
-                  onPressed: timelineLocked && !_searchExpanded
-                      ? null
-                      : (_searchExpanded ? _closeSearch : _openSearch),
                 ),
               ),
             ],
@@ -721,33 +728,36 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
             // full unfiltered library instead of just the rendered cards.
             randomPool: () => ref.read(filteredCharactersProvider(_query())),
             headerSliver: SliverToBoxAdapter(
-              child: CharacterFoldersSection(
-                onOpenFolder: (id) {
-                  _showHeader();
-                  setState(() => _currentFolderId = id);
-                  refreshShellHeader();
-                },
-                showFavorites: showFavorites,
-                onOpenFavorites: () {
-                  _showHeader();
-                  setState(() => _currentFolderId = kFavoritesFolderId);
-                  refreshShellHeader();
-                },
-                showOurPicks: showOurPicks,
-                onOpenPicks: () {
-                  _showHeader();
-                  setState(() => _currentFolderId = kPicksFolderId);
-                  refreshShellHeader();
-                },
-                onHidePicks: () {
-                  final s = ref.read(appSettingsProvider).value;
-                  if (s != null) {
-                    ref
-                        .read(appSettingsProvider.notifier)
-                        .save(s.copyWith(showOurPicks: false));
-                    GlazeToast.show(context, 'our_picks_hidden_toast'.tr());
-                  }
-                },
+              child: GuideAnchor(
+                id: GuideIds.charsFolders,
+                child: CharacterFoldersSection(
+                  onOpenFolder: (id) {
+                    _showHeader();
+                    setState(() => _currentFolderId = id);
+                    refreshShellHeader();
+                  },
+                  showFavorites: showFavorites,
+                  onOpenFavorites: () {
+                    _showHeader();
+                    setState(() => _currentFolderId = kFavoritesFolderId);
+                    refreshShellHeader();
+                  },
+                  showOurPicks: showOurPicks,
+                  onOpenPicks: () {
+                    _showHeader();
+                    setState(() => _currentFolderId = kPicksFolderId);
+                    refreshShellHeader();
+                  },
+                  onHidePicks: () {
+                    final s = ref.read(appSettingsProvider).value;
+                    if (s != null) {
+                      ref
+                          .read(appSettingsProvider.notifier)
+                          .save(s.copyWith(showOurPicks: false));
+                      GlazeToast.show(context, 'our_picks_hidden_toast'.tr());
+                    }
+                  },
+                ),
               ),
             ),
             onSortDirToggle: () => setState(() {
@@ -1106,7 +1116,10 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
       padding: desktop
           ? const EdgeInsets.fromLTRB(16, 10, 16, 0)
           : const EdgeInsets.only(top: 10),
-      child: desktop ? _buildDesktopTabsRow() : _buildTabStrip(),
+      child: GuideAnchor(
+        id: GuideIds.charsTabs,
+        child: desktop ? _buildDesktopTabsRow() : _buildTabStrip(),
+      ),
     );
   }
 
@@ -1676,6 +1689,10 @@ class _AddButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return GuideAnchor(id: GuideIds.charsAdd, child: _buildButton(context));
+  }
+
+  Widget _buildButton(BuildContext context) {
     final compact = height < 48;
     if (!compact) {
       return GlazeFab(

@@ -45,6 +45,8 @@ import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/image_viewer.dart';
 import '../character_list/character_detail_screen.dart';
+import '../guides/guide_anchor.dart';
+import '../guides/guide_service.dart';
 import '../image_gen/image_gen_provider.dart';
 import '../personas/persona_list_screen.dart';
 import '../presets/preset_editor_screen.dart';
@@ -192,6 +194,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     // reached the WebView, so the prev/next buttons looked dead and closing
     // search left the highlight behind until some unrelated rebuild.
     _search.addListener(_onSearchChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) maybeShowGuide(context, AppGuide.chat);
+    });
     if (widget.forceNewSession || widget.initialSessionIndex != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _applySessionPreference();
@@ -526,16 +531,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                   ? Row(
                       children: [
                         Expanded(
-                          child: ChatHeader(
-                            character: character,
-                            sessionName: sessionName,
-                            currentSessionIndex: sessionIndex,
-                            onTapInfo: () => _showCharacterCard(charId),
-                            onTapAvatar:
-                                (character.avatarPath != null &&
-                                    character.avatarPath!.isNotEmpty)
-                                ? () => _showAvatarViewer(character.avatarPath!)
-                                : null,
+                          child: GuideAnchor(
+                            id: GuideIds.chatHeader,
+                            child: ChatHeader(
+                              character: character,
+                              sessionName: sessionName,
+                              currentSessionIndex: sessionIndex,
+                              onTapInfo: () => _showCharacterCard(charId),
+                              onTapAvatar:
+                                  (character.avatarPath != null &&
+                                      character.avatarPath!.isNotEmpty)
+                                  ? () =>
+                                        _showAvatarViewer(character.avatarPath!)
+                                  : null,
+                            ),
                           ),
                         ),
                         // Desktop has room for the search field to live in the
@@ -543,9 +552,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                         // `.chat-search-inline-desktop`); the toggle button is
                         // dropped below to match.
                         if (isDesktopLayout(context))
-                          _InlineChatSearchField(
-                            search: _search,
-                            charId: charId,
+                          GuideAnchor(
+                            id: GuideIds.chatSearch,
+                            child: _InlineChatSearchField(
+                              search: _search,
+                              charId: charId,
+                            ),
                           ),
                       ],
                     )
@@ -598,12 +610,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
             : isDesktopLayout(context)
             ? const []
             : [
-                IconButton(
-                  icon: const Icon(Icons.search),
-                  color: context.cs.primary,
-                  onPressed: () {
-                    _search.openSearch();
-                  },
+                GuideAnchor(
+                  id: GuideIds.chatSearch,
+                  child: IconButton(
+                    icon: const Icon(Icons.search),
+                    color: context.cs.primary,
+                    onPressed: () {
+                      _search.openSearch();
+                    },
+                  ),
                 ),
               ],
         body: body,

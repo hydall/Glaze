@@ -29,6 +29,9 @@ import '../catalog/widgets/janitor_extract_sheet.dart';
 import '../catalog/widgets/third_party_providers_screen.dart';
 import '../dev/menu_group_demo_screen.dart';
 import '../dev/spinner_demo_screen.dart';
+import '../guides/guide_anchor.dart';
+import '../guides/guide_service.dart';
+import '../guides/widgets/guides_list_sheet.dart';
 import '../lorebooks/lorebook_connections_sheet.dart';
 import '../personas/persona_connections_sheet.dart';
 import '../personas/persona_list_provider.dart';
@@ -68,20 +71,31 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with ShellHeaderMixin {
     title: _searchExpanded ? null : 'menu_menu_title'.tr(),
     titleWidget: _searchExpanded ? _buildSearchField(context) : null,
     actions: [
-      SizedBox(
-        width: 44,
-        height: 44,
-        child: IconButton(
-          icon: Icon(
-            _searchExpanded ? Icons.close_rounded : Icons.search_rounded,
-            size: 22,
+      GuideAnchor(
+        id: GuideIds.moreSearch,
+        child: SizedBox(
+          width: 44,
+          height: 44,
+          child: IconButton(
+            icon: Icon(
+              _searchExpanded ? Icons.close_rounded : Icons.search_rounded,
+              size: 22,
+            ),
+            color: context.cs.primary,
+            onPressed: _searchExpanded ? _closeSearch : _openSearch,
           ),
-          color: context.cs.primary,
-          onPressed: _searchExpanded ? _closeSearch : _openSearch,
         ),
       ),
     ],
   );
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) maybeShowGuide(context, AppGuide.more);
+    });
+  }
 
   @override
   void dispose() {
@@ -261,45 +275,51 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with ShellHeaderMixin {
               controller: _scrollController,
               padding: listPadding,
               children: [
-                MenuGroup(
-                  header: 'section_settings'.tr(),
-                  headerIcon: Icons.settings_rounded,
-                  items: [
-                    MenuItem(
-                      icon: Icons.settings_outlined,
-                      label: 'menu_app_settings'.tr(),
-                      subtitle: 'menu_app_settings_hint'.tr(),
-                      onTap: () => goOrFloat(context, 'settings', push: true),
-                    ),
-                    MenuItem(
-                      icon: Icons.extension_outlined,
-                      label: 'menu_third_party_providers'.tr(),
-                      subtitle: 'menu_third_party_providers_hint'.tr(),
-                      onTap: () => openThirdPartyProvidersScreen(context),
-                    ),
-                  ],
+                GuideAnchor(
+                  id: GuideIds.moreSettings,
+                  child: MenuGroup(
+                    header: 'section_settings'.tr(),
+                    headerIcon: Icons.settings_rounded,
+                    items: [
+                      MenuItem(
+                        icon: Icons.settings_outlined,
+                        label: 'menu_app_settings'.tr(),
+                        subtitle: 'menu_app_settings_hint'.tr(),
+                        onTap: () => goOrFloat(context, 'settings', push: true),
+                      ),
+                      MenuItem(
+                        icon: Icons.extension_outlined,
+                        label: 'menu_third_party_providers'.tr(),
+                        subtitle: 'menu_third_party_providers_hint'.tr(),
+                        onTap: () => openThirdPartyProvidersScreen(context),
+                      ),
+                    ],
+                  ),
                 ),
-                MenuGroup(
-                  header: 'section_data'.tr(),
-                  headerIcon: Icons.storage_rounded,
-                  items: [
-                    MenuItem(
-                      icon: Icons.backup_outlined,
-                      label: 'menu_backups'.tr(),
-                      subtitle: 'menu_backups_hint'.tr(),
-                      onTap: () => isDesktopLayout(context)
-                          ? goOrFloat(context, 'backup', push: true)
-                          : openBackupsSheet(context),
-                    ),
-                    MenuItem(
-                      icon: Icons.sync_rounded,
-                      label: 'menu_cloud_sync'.tr(),
-                      subtitle: 'menu_cloud_sync_hint'.tr(),
-                      onTap: () => isDesktopLayout(context)
-                          ? goOrFloat(context, 'sync', push: true)
-                          : openCloudSyncSheet(context),
-                    ),
-                  ],
+                GuideAnchor(
+                  id: GuideIds.moreData,
+                  child: MenuGroup(
+                    header: 'section_data'.tr(),
+                    headerIcon: Icons.storage_rounded,
+                    items: [
+                      MenuItem(
+                        icon: Icons.backup_outlined,
+                        label: 'menu_backups'.tr(),
+                        subtitle: 'menu_backups_hint'.tr(),
+                        onTap: () => isDesktopLayout(context)
+                            ? goOrFloat(context, 'backup', push: true)
+                            : openBackupsSheet(context),
+                      ),
+                      MenuItem(
+                        icon: Icons.sync_rounded,
+                        label: 'menu_cloud_sync'.tr(),
+                        subtitle: 'menu_cloud_sync_hint'.tr(),
+                        onTap: () => isDesktopLayout(context)
+                            ? goOrFloat(context, 'sync', push: true)
+                            : openCloudSyncSheet(context),
+                      ),
+                    ],
+                  ),
                 ),
                 if (ref.watch(devModeProvider))
                   MenuGroup(
@@ -518,6 +538,44 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with ShellHeaderMixin {
                       ),
                     ],
                   ),
+                GuideAnchor(
+                  id: GuideIds.moreHelp,
+                  child: MenuGroup(
+                    header: 'section_help'.tr(),
+                    headerIcon: Icons.help_rounded,
+                    items: [
+                      MenuItem(
+                        icon: Icons.school_rounded,
+                        label: 'guides_menu'.tr(),
+                        subtitle: 'guides_hint'.tr(),
+                        onTap: () => showGuidesList(context),
+                      ),
+                      MenuItem(
+                        icon: Icons.menu_book_rounded,
+                        label: 'menu_glossary'.tr(),
+                        subtitle: 'menu_glossary_hint'.tr(),
+                        onTap: () {
+                          if (!isDesktopLayout(context)) {
+                            context.push('/menu/glossary');
+                          } else if (ref.read(glossaryPopupVisibleProvider)) {
+                            ref
+                                    .read(glossaryPopupVisibleProvider.notifier)
+                                    .state =
+                                false;
+                          } else {
+                            openGlossaryPopup(ref);
+                          }
+                        },
+                      ),
+                      MenuItem(
+                        icon: Icons.receipt_long_outlined,
+                        label: 'logs_title'.tr(),
+                        subtitle: 'logs_menu_hint'.tr(),
+                        onTap: () => goOrFloat(context, 'logs', push: true),
+                      ),
+                    ],
+                  ),
+                ),
                 MenuGroup(
                   header: 'section_info'.tr(),
                   headerIcon: Icons.info_rounded,
@@ -527,29 +585,6 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with ShellHeaderMixin {
                       label: 'menu_about'.tr(),
                       subtitle: 'menu_about_hint'.tr(),
                       onTap: () => goOrFloat(context, 'about', push: true),
-                    ),
-                    MenuItem(
-                      icon: Icons.receipt_long_outlined,
-                      label: 'logs_title'.tr(),
-                      subtitle: 'logs_menu_hint'.tr(),
-                      onTap: () => goOrFloat(context, 'logs', push: true),
-                    ),
-                    MenuItem(
-                      icon: Icons.menu_book_rounded,
-                      label: 'menu_glossary'.tr(),
-                      subtitle: 'menu_glossary_hint'.tr(),
-                      onTap: () {
-                        if (!isDesktopLayout(context)) {
-                          context.push('/menu/glossary');
-                        } else if (ref.read(glossaryPopupVisibleProvider)) {
-                          ref
-                                  .read(glossaryPopupVisibleProvider.notifier)
-                                  .state =
-                              false;
-                        } else {
-                          openGlossaryPopup(ref);
-                        }
-                      },
                     ),
                     if (lang == 'en')
                       MenuItem(
@@ -577,12 +612,6 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with ShellHeaderMixin {
                         subtitle: 'about_join_community'.tr(),
                         onTap: () => _openLink('https://t.me/glazeapp'),
                       ),
-                    MenuItem(
-                      icon: Icons.replay_rounded,
-                      label: 'onboarding_replay'.tr(),
-                      subtitle: 'onboarding_replay_hint'.tr(),
-                      onTap: () => replayOnboarding(context),
-                    ),
                   ],
                 ),
               ],

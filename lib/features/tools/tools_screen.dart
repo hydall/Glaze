@@ -21,6 +21,8 @@ import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../chat/widgets/chat_stats_sheet.dart';
 import '../chat/widgets/magic_drawer_widgets.dart' show MagicCardBadge;
 import '../extensions/widgets/ext_blocks_settings_sheet.dart';
+import '../guides/guide_anchor.dart';
+import '../guides/guide_service.dart';
 import '../image_gen/widgets/image_gen_sheet.dart';
 import '../personas/persona_list_provider.dart';
 import '../presets/preset_image.dart';
@@ -134,13 +136,25 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
   @override
   ShellHeaderConfig buildShellHeader() => ShellHeaderConfig(
     title: 'tab_tools'.tr(),
-    actions: [_HeaderEditToggle(editing: _editing, onTap: _toggleEditing)],
+    actions: [
+      GuideAnchor(
+        id: GuideIds.toolsEdit,
+        child: _HeaderEditToggle(editing: _editing, onTap: _toggleEditing),
+      ),
+    ],
   );
 
   @override
   void initState() {
     super.initState();
     _loadLayout();
+    // The desktop sidebar hub has no layout editing and is always on screen;
+    // the guide belongs to the tab.
+    if (!widget.inSidebar) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) maybeShowGuide(context, AppGuide.tools);
+      });
+    }
   }
 
   @override
@@ -395,13 +409,16 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
     final rows = <Widget>[];
     final pendingSmall = <ToolsTileDef>[];
 
-    Widget tileFor(ToolsTileDef def) => _buildTile(
-      context,
-      def,
-      personaInfo,
-      resolvedAvatar,
-      presetName,
-      presetImage,
+    Widget tileFor(ToolsTileDef def) => GuideAnchor(
+      id: GuideIds.toolsTile(def.id),
+      child: _buildTile(
+        context,
+        def,
+        personaInfo,
+        resolvedAvatar,
+        presetName,
+        presetImage,
+      ),
     );
 
     void flushSmallRow() {

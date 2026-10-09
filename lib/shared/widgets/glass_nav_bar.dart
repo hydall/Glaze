@@ -6,6 +6,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../core/platform/haptics.dart';
 import '../../core/state/character_provider.dart';
+import '../../features/guides/guide_anchor.dart';
 import '../shell/nav_height_provider.dart';
 import '../shell/nav_retap_provider.dart';
 import '../theme/app_colors.dart';
@@ -98,21 +99,24 @@ class _GlassNavBarState extends ConsumerState<GlassNavBar> {
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: List.generate(
           _items.length,
-          (i) => _NavButton(
-            item: _items[i],
-            isActive: i == widget.currentIndex,
-            onTap: () {
-              if (i != widget.currentIndex) {
-                Haptics.selectionClick();
-              } else {
-                // Re-tap on the already-active tab: ask that branch's screen to
-                // return to the top of its main view (sub-routes are popped by
-                // the shell's goBranch(initialLocation: true)).
-                ref.read(navReTapProvider.notifier).reTap(i);
-              }
-              if (i == _kCharactersTabIndex) _registerCharactersTabTap();
-              widget.onTap(i);
-            },
+          (i) => GuideAnchor(
+            id: GuideIds.navTab(i),
+            child: _NavButton(
+              item: _items[i],
+              isActive: i == widget.currentIndex,
+              onTap: () {
+                if (i != widget.currentIndex) {
+                  Haptics.selectionClick();
+                } else {
+                  // Re-tap on the already-active tab: ask that branch's screen to
+                  // return to the top of its main view (sub-routes are popped by
+                  // the shell's goBranch(initialLocation: true)).
+                  ref.read(navReTapProvider.notifier).reTap(i);
+                }
+                if (i == _kCharactersTabIndex) _registerCharactersTabTap();
+                widget.onTap(i);
+              },
+            ),
           ),
         ),
       ),
@@ -126,11 +130,14 @@ class _GlassNavBarState extends ConsumerState<GlassNavBar> {
         16,
         (isIosLikeTargetPlatform ? 6 : 16) + bottomPad,
       ),
-      child: GlassSurface(
-        enableRipple: true,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: context.cs.outlineVariant),
-        child: row,
+      child: GuideAnchor(
+        id: GuideIds.navBar,
+        child: GlassSurface(
+          enableRipple: true,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: context.cs.outlineVariant),
+          child: row,
+        ),
       ),
     );
   }

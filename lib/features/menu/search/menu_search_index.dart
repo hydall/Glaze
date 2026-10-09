@@ -6,6 +6,7 @@ import '../../../core/platform/haptics.dart';
 import '../../../core/platform/system_settings.dart';
 import '../../../shared/shell/desktop/desktop_floating_provider.dart';
 import '../../catalog/widgets/third_party_providers_screen.dart';
+import '../../guides/widgets/guides_list_sheet.dart';
 import '../menu_actions.dart';
 import 'menu_search_entry.dart';
 
@@ -239,14 +240,13 @@ List<MenuSearchEntry> buildSettingsSearchIndex() {
       groupKey: 'settings_group_desktop',
     ),
     // ── General ─────────────────────────────────────────────────────────────
-    row(
+    row('language', 'menu_language', null, Icons.language_outlined, const [
       'language',
-      'menu_language',
-      null,
-      Icons.language_outlined,
-      const ['language', 'english', 'русский', 'язык', 'локаль'],
-      groupKey: 'settings_group_general',
-    ),
+      'english',
+      'русский',
+      'язык',
+      'локаль',
+    ], groupKey: 'settings_group_general'),
     if (SystemSettings.canOpenNotificationSettings)
       row(
         'notifications',
@@ -272,6 +272,7 @@ List<MenuSearchEntry> buildSettingsSearchIndex() {
 
 List<MenuSearchEntry> _menuEntries() {
   final more = ['menu_menu_title'.tr()];
+  final help = [...more, 'section_help'.tr()];
   return [
     MenuSearchEntry(
       title: 'menu_app_settings'.tr(),
@@ -333,9 +334,17 @@ List<MenuSearchEntry> _menuEntries() {
     MenuSearchEntry(
       title: 'logs_title'.tr(),
       description: 'logs_menu_hint'.tr(),
-      breadcrumb: more,
+      breadcrumb: help,
       icon: Icons.receipt_long_outlined,
-      keywords: const ['logs', 'crash', 'bug', 'журнал', 'логи', 'краш', 'сбой'],
+      keywords: const [
+        'logs',
+        'crash',
+        'bug',
+        'журнал',
+        'логи',
+        'краш',
+        'сбой',
+      ],
       open: (context) => goOrFloat(context, 'logs', push: true),
     ),
     MenuSearchEntry(
@@ -362,15 +371,30 @@ List<MenuSearchEntry> _menuEntries() {
     MenuSearchEntry(
       title: 'menu_glossary'.tr(),
       description: 'menu_glossary_hint'.tr(),
-      breadcrumb: more,
+      breadcrumb: help,
       icon: Icons.menu_book_rounded,
       keywords: const ['glossary', 'terms', 'глоссарий', 'термины'],
       open: (context) => context.push('/menu/glossary'),
     ),
     MenuSearchEntry(
+      title: 'guides_menu'.tr(),
+      description: 'guides_hint'.tr(),
+      breadcrumb: help,
+      icon: Icons.school_rounded,
+      keywords: const [
+        'guide',
+        'tutorial',
+        'onboarding',
+        'гид',
+        'обучение',
+        'онбординг',
+      ],
+      open: (context) => showGuidesList(context),
+    ),
+    MenuSearchEntry(
       title: 'onboarding_replay'.tr(),
       description: 'onboarding_replay_hint'.tr(),
-      breadcrumb: more,
+      breadcrumb: [...help, 'guides_title'.tr()],
       icon: Icons.replay_rounded,
       keywords: const ['tutorial', 'onboarding', 'обучение'],
       open: (context) => replayOnboarding(context),

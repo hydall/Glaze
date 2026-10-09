@@ -29,6 +29,7 @@ import '../state/chat_drawer_editing_provider.dart';
 import 'action_glyph.dart';
 import 'chat_blur_region_tracker.dart';
 import 'magic_drawer_catalog.dart';
+import '../../guides/guide_anchor.dart';
 import 'magic_drawer_widgets.dart';
 
 Border _uiBorder(BuildContext context, ThemePreset preset) {
@@ -701,7 +702,9 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
       final button = _buildPinnedButton(pins[index], editing);
       if (button == null) continue;
       if (buttons.isNotEmpty) buttons.add(const SizedBox(width: 8));
-      buttons.add(button);
+      buttons.add(
+        GuideAnchor(id: GuideIds.chatPin(pins[index].encode()), child: button),
+      );
     }
     if (buttons.isEmpty) return const SizedBox.shrink();
 
@@ -1401,83 +1404,91 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
               ),
               const SizedBox(height: 8),
             ],
-            Material(
-              color: Colors.transparent,
-              elevation: 0,
-              borderRadius: BorderRadius.circular(28),
-              child: _floatingChrome(
-                id: 'input-pill',
-                radius: 28,
-                child: GlassSurface(
-                  enableRipple: true,
-                  blurViaWebView: widget.blurViaWebView,
-                  backdropKey: widget.backdropKey,
-                  borderRadius: BorderRadius.circular(28),
-                  tint: context.cs.surface,
-                  border: _guidanceMode
-                      ? Border.all(
-                          color: Colors.orange.withValues(alpha: 0.3),
-                          width: preset.borderWidth.clamp(1.0, double.infinity),
-                        )
-                      : uiBorder,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      // The instruction is the pill's top half, over a hairline
-                      // and the message field — one block, the way the Vue
-                      // composer had it, rather than a card floating above it.
-                      if (_guidanceMode)
-                        _buildGuidanceField(scale, letterSpacing),
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(minHeight: 56),
-                        child: TextField(
-                          controller: _controller,
-                          focusNode: _effectiveFocusNode,
-                          contextMenuBuilder: _buildContextMenu,
-                          contentInsertionConfiguration:
-                              ContentInsertionConfiguration(
-                                onContentInserted: _handleInsertedContent,
-                              ),
-                          readOnly: widget.isEditingMessage || _isImpersonating,
-                          canRequestFocus: !widget.isEditingMessage,
-                          enableInteractiveSelection: !widget.isEditingMessage,
-                          showCursor: !widget.isEditingMessage,
-                          maxLines: 5,
-                          minLines: 1,
-                          textCapitalization: TextCapitalization.sentences,
-                          textInputAction: widget.virtualKeyboardSend
-                              ? TextInputAction.send
-                              : TextInputAction.newline,
-                          onSubmitted: widget.virtualKeyboardSend
-                              ? (_) => _handleSend()
-                              : null,
-                          style: TextStyle(
-                            fontSize: 16 * scale,
-                            color: textColor,
-                            letterSpacing: letterSpacing,
-                          ),
-                          decoration: InputDecoration(
-                            hintText: _guidanceMode
-                                ? 'chat_guidance_message_hint'.tr()
-                                : 'chat_placeholder'.tr(),
-                            hintStyle: TextStyle(
-                              color: secondaryColor,
+            GuideAnchor(
+              id: GuideIds.chatComposer,
+              child: Material(
+                color: Colors.transparent,
+                elevation: 0,
+                borderRadius: BorderRadius.circular(28),
+                child: _floatingChrome(
+                  id: 'input-pill',
+                  radius: 28,
+                  child: GlassSurface(
+                    enableRipple: true,
+                    blurViaWebView: widget.blurViaWebView,
+                    backdropKey: widget.backdropKey,
+                    borderRadius: BorderRadius.circular(28),
+                    tint: context.cs.surface,
+                    border: _guidanceMode
+                        ? Border.all(
+                            color: Colors.orange.withValues(alpha: 0.3),
+                            width: preset.borderWidth.clamp(
+                              1.0,
+                              double.infinity,
+                            ),
+                          )
+                        : uiBorder,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // The instruction is the pill's top half, over a hairline
+                        // and the message field — one block, the way the Vue
+                        // composer had it, rather than a card floating above it.
+                        if (_guidanceMode)
+                          _buildGuidanceField(scale, letterSpacing),
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(minHeight: 56),
+                          child: TextField(
+                            controller: _controller,
+                            focusNode: _effectiveFocusNode,
+                            contextMenuBuilder: _buildContextMenu,
+                            contentInsertionConfiguration:
+                                ContentInsertionConfiguration(
+                                  onContentInserted: _handleInsertedContent,
+                                ),
+                            readOnly:
+                                widget.isEditingMessage || _isImpersonating,
+                            canRequestFocus: !widget.isEditingMessage,
+                            enableInteractiveSelection:
+                                !widget.isEditingMessage,
+                            showCursor: !widget.isEditingMessage,
+                            maxLines: 5,
+                            minLines: 1,
+                            textCapitalization: TextCapitalization.sentences,
+                            textInputAction: widget.virtualKeyboardSend
+                                ? TextInputAction.send
+                                : TextInputAction.newline,
+                            onSubmitted: widget.virtualKeyboardSend
+                                ? (_) => _handleSend()
+                                : null,
+                            style: TextStyle(
                               fontSize: 16 * scale,
+                              color: textColor,
                               letterSpacing: letterSpacing,
                             ),
-                            border: InputBorder.none,
-                            enabledBorder: InputBorder.none,
-                            focusedBorder: InputBorder.none,
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 18,
-                              vertical: 16,
+                            decoration: InputDecoration(
+                              hintText: _guidanceMode
+                                  ? 'chat_guidance_message_hint'.tr()
+                                  : 'chat_placeholder'.tr(),
+                              hintStyle: TextStyle(
+                                color: secondaryColor,
+                                fontSize: 16 * scale,
+                                letterSpacing: letterSpacing,
+                              ),
+                              border: InputBorder.none,
+                              enabledBorder: InputBorder.none,
+                              focusedBorder: InputBorder.none,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 18,
+                                vertical: 16,
+                              ),
+                              filled: false,
                             ),
-                            filled: false,
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -1491,10 +1502,13 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
                 // shoving the send button off the screen.
                 Expanded(child: _buildActionRow(editing)),
                 const SizedBox(width: 8),
-                _buildSendButton(
-                  isGenerating: isGenerating,
-                  hasContent: hasContent,
-                  editing: editing,
+                GuideAnchor(
+                  id: GuideIds.chatSend,
+                  child: _buildSendButton(
+                    isGenerating: isGenerating,
+                    hasContent: hasContent,
+                    editing: editing,
+                  ),
                 ),
               ],
             ),
