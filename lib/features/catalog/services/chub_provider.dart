@@ -187,6 +187,7 @@ Future<CatalogSearchResult> chubSearch({
   CatalogFilters filters = const CatalogFilters(),
   String? apiKey,
   bool accountNsfl = false,
+  String? username,
 }) async {
   // "Timeline" is chub.ai's account-scoped recommendation feed, served from a
   // separate endpoint that pages by number and ignores the free-text query and
@@ -215,6 +216,11 @@ Future<CatalogSearchResult> chubSearch({
   );
   if (sortEntry.maxDaysAgo != null) params.write('&max_days_ago=${sortEntry.maxDaysAgo}');
   if (query.isNotEmpty) params.write('&search=${Uri.encodeComponent(query)}');
+  // Narrows the search to one creator — the request chub.ai's own user page
+  // makes for the characters grid.
+  if (username != null && username.isNotEmpty) {
+    params.write('&username=${Uri.encodeComponent(username)}');
+  }
   if (filters.maxTokens < 100000) params.write('&max_tokens=${filters.maxTokens}');
 
   final includeTags = filters.tagNames;
@@ -282,6 +288,20 @@ Future<CatalogSearchResult> _chubTimeline({
     total: nodes.length,
     hasMore: nodes.isNotEmpty,
   );
+}
+
+/// [username]'s public profile (`/api/users/{username}`): display name, avatar,
+/// bio and follower count. The payload also embeds a page of the user's
+/// projects, which is ignored — the grid comes from [chubSearch], which pages.
+Future<Map<String, dynamic>> chubFetchUser(
+  String username, {
+  String? apiKey,
+}) async {
+  final data = await catalogGet(
+    '$_apiBase/api/users/${Uri.encodeComponent(username)}',
+    chubHeaders(apiKey: apiKey),
+  );
+  return (data['node'] ?? data) as Map<String, dynamic>;
 }
 
 Future<DownloadedCharacter> chubGetCharacter(

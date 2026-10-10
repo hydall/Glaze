@@ -63,6 +63,10 @@ class GlazeSheetWindowScope extends InheritedWidget {
 /// window with [windowChrome] draws a title bar (fed by the hosted screen's
 /// shell-header claim) plus a close button; without it the content supplies its
 /// own header, as [GlazeBottomSheet] does.
+///
+/// [windowSize] is the size a resizable window opens at, for content that
+/// wants more room than the default sheet width (a grid, say). Still capped by
+/// the screen.
 Future<T?> showGlazeSheet<T>({
   required BuildContext context,
   required WidgetBuilder builder,
@@ -79,6 +83,7 @@ Future<T?> showGlazeSheet<T>({
   bool windowChrome = true,
   String? windowTitle,
   List<Widget>? windowActions,
+  Size? windowSize,
 }) {
   if (isDesktopLayout(context)) {
     return Navigator.of(context, rootNavigator: useRootNavigator).push<T>(
@@ -91,6 +96,7 @@ Future<T?> showGlazeSheet<T>({
         chrome: windowChrome,
         windowTitle: windowTitle,
         windowActions: windowActions,
+        windowSize: windowSize,
       ),
     );
   }
@@ -118,6 +124,7 @@ class _GlazeSheetWindowRoute<T> extends PopupRoute<T> {
   final bool chrome;
   final String? windowTitle;
   final List<Widget>? windowActions;
+  final Size? windowSize;
 
   _GlazeSheetWindowRoute({
     required this.builder,
@@ -128,6 +135,7 @@ class _GlazeSheetWindowRoute<T> extends PopupRoute<T> {
     required this.chrome,
     this.windowTitle,
     this.windowActions,
+    this.windowSize,
   });
 
   // A window with a title bar is one window among the others on the desktop
@@ -157,6 +165,7 @@ class _GlazeSheetWindowRoute<T> extends PopupRoute<T> {
       chrome: chrome,
       fallbackTitle: windowTitle,
       fallbackActions: windowActions,
+      preferredSize: windowSize,
       child: builder(context),
     );
   }
@@ -190,6 +199,9 @@ class GlazeSheetWindow extends ConsumerStatefulWidget {
   final bool chrome;
   final String? fallbackTitle;
   final List<Widget>? fallbackActions;
+
+  /// The size a resizable window opens at; the sheet default when null.
+  final Size? preferredSize;
   final Widget child;
 
   const GlazeSheetWindow({
@@ -198,6 +210,7 @@ class GlazeSheetWindow extends ConsumerStatefulWidget {
     required this.chrome,
     this.fallbackTitle,
     this.fallbackActions,
+    this.preferredSize,
     required this.child,
   });
 
@@ -306,7 +319,8 @@ class _GlazeSheetWindowState extends ConsumerState<GlazeSheetWindow> {
               _rect ??
                   defaultWindowRect(
                     bounds,
-                    Size(kGlazeSheetWindowMaxWidth, maxHeight),
+                    widget.preferredSize ??
+                        Size(kGlazeSheetWindowMaxWidth, maxHeight),
                   ),
               bounds,
             );

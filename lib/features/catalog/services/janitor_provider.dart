@@ -310,6 +310,62 @@ Future<CatalogSearchResult> janitorSearch({
   );
 }
 
+/// JanitorAI's listing page size. Fixed by the server; a size parameter is
+/// ignored.
+const _janitorListingPageSize = 34;
+
+/// One page of [creatorId]'s characters, newest first.
+///
+/// JanitorAI has no per-profile character endpoint; its own profile page asks
+/// the ordinary listing for `user_id[]`. Pages past the first may need a
+/// signed-in session, as they do for every listing sort.
+Future<CatalogSearchResult> janitorFetchCreatorCharacters(
+  String creatorId, {
+  int page = 1,
+  CatalogFilters filters = const CatalogFilters(),
+}) async {
+  final params =
+      'page=$page&sort=latest&mode=${filters.nsfw ? 'all' : 'sfw'}'
+      '&user_id[]=${Uri.encodeQueryComponent(creatorId)}';
+  final data = await _janitorFetch('$_hampterUrl?$params');
+  final hits = data is List
+      ? data
+      : (data['data'] as List?) ?? (data['characters'] as List?) ?? const [];
+  final total = data is Map ? (data['total'] as num?)?.toInt() : null;
+  final size = data is Map
+      ? (data['size'] as num?)?.toInt() ?? _janitorListingPageSize
+      : _janitorListingPageSize;
+  return CatalogSearchResult(
+    characters: hits.map(_normalizeHit).toList(),
+    total: total ?? hits.length,
+    hasMore: hits.isNotEmpty &&
+        (total == null ? hits.length >= size : page * size < total),
+  );
+}
+
+/// [creatorId]'s public profile row, or null when it cannot be found.
+///
+/// There is no profile-by-id endpoint either: the site resolves a creator
+/// through `/hampter/profiles/search` by name, so this searches for [name] and
+/// keeps the row whose id matches.
+Future<Map<String, dynamic>?> janitorFetchCreatorProfile(
+  String creatorId, {
+  required String name,
+}) async {
+  final q = name.trim();
+  if (q.isEmpty) return null;
+  final data = await _janitorFetch(
+    'https://janitorai.com/hampter/profiles/search'
+    '?mode=foryou&page=1&search=${Uri.encodeQueryComponent(q)}',
+  );
+  final rows = data is Map ? data['data'] : data;
+  if (rows is! List) return null;
+  for (final row in rows) {
+    if (row is Map<String, dynamic> && row['id'] == creatorId) return row;
+  }
+  return null;
+}
+
 /// Fetches the raw `/hampter/characters/{id}` metadata map. Exposed so callers
 /// (catalog preview, lorebook tab) can read `scripts`, `showdefinition`, etc.
 /// without a second request.
@@ -454,7 +510,9 @@ CatalogItem _normalizeHit(dynamic hit) {
     chatCount: (m['stats']?['chat'] ?? m['public_chat_count'] ?? 0) as int,
     messageCount:
         (m['stats']?['message'] ?? m['public_message_count'] ?? 0) as int,
-    creator: (m['creatorUsername'] ?? m['creator'] ?? '') as String,
+    creator:
+        (m['creatorUsername'] ?? m['creator_name'] ?? m['creator'] ?? '')
+            as String,
     creatorId: (m['creator_id'] ?? m['creatorId'] ?? '') as String?,
     nsfw: isNsfw,
     slug: (m['slug'] ?? m['id'] ?? '') as String?,
