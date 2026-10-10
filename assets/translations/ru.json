@@ -162,6 +162,7 @@
   "crash_kind_unclean": "Приложение неожиданно закрылось, пока было на экране.",
   "subtab_api": "API",
   "tab_api": "API",
+  "tab_llm": "LLM",
   "tab_presets": "Пресеты",
   "subtab_preset": "Пресет",
   "section_connection": "Подключение",

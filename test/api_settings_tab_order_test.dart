@@ -11,7 +11,7 @@ void main() {
   ).readAsStringSync();
 
   test('the strip reads LLM, Agents, Embeddings', () {
-    final llm = screen.indexOf("label: 'LLM'");
+    final llm = screen.indexOf("label: 'tab_llm'.tr()");
     final agents = screen.indexOf("label: 'studio_agents'.tr()");
     final embeddings = screen.indexOf("label: 'tab_embeddings'.tr()");
     expect(llm, greaterThan(-1));

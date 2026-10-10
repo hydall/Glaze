@@ -163,6 +163,7 @@
   "crash_kind_unclean": "The app closed unexpectedly while it was on screen.",
   "subtab_api": "API",
   "tab_api": "API",
+  "tab_llm": "LLM",
   "tab_presets": "Presets",
   "subtab_preset": "Preset",
   "section_connection": "Connection",
