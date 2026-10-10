@@ -369,6 +369,7 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
   /// the preset pill in the API settings screen.
   Widget _buildPresetSelector(ImageGenApiType selected) {
     return InkWell(
+      mouseCursor: SystemMouseCursors.click,
       onTap: _openApiTypeSelector,
       borderRadius: BorderRadius.circular(16),
       child: Container(

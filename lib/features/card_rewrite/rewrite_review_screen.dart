@@ -339,6 +339,7 @@ class _LorebookOperationItem extends ConsumerWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
         onTap: onSelect,
         borderRadius: BorderRadius.circular(14),
         child: Container(

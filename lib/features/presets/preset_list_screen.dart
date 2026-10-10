@@ -720,6 +720,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
       color: context.cs.primary,
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
         onTap: () => _showAddSheet(context),
         borderRadius: BorderRadius.circular(14),
         splashColor: Colors.white.withValues(alpha: 0.1),
@@ -1541,7 +1542,7 @@ class _PsCard extends ConsumerWidget {
         ),
         duration: _activeFade,
         curve: Curves.easeOut,
-        child: InkWell(onTap: onTap, onLongPress: onLongPress, child: content),
+        child: InkWell(mouseCursor: SystemMouseCursors.click, onTap: onTap, onLongPress: onLongPress, child: content),
         builder: (context, t, child) => FlatGroupSurface(
           color: context.cs.primary.withValues(alpha: 0.12 * t),
           accent: context.cs.primary.withValues(alpha: t),
@@ -1828,6 +1829,7 @@ class _RowIconButton extends StatelessWidget {
         color: Colors.transparent,
         borderRadius: BorderRadius.circular(8),
         child: InkWell(
+          mouseCursor: SystemMouseCursors.click,
           onTap: onTap,
           borderRadius: BorderRadius.circular(8),
           child: Icon(icon, size: 18, color: color),
@@ -1890,7 +1892,7 @@ class _ConnBadge extends StatelessWidget {
       color = context.cs.onSurfaceVariant.withValues(alpha: 0.5); // grey
     }
 
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       child: Container(
         width: 30,
@@ -1903,7 +1905,7 @@ class _ConnBadge extends StatelessWidget {
         ),
         child: Icon(Icons.link, size: 16, color: color),
       ),
-    );
+    ));
   }
 }
 
@@ -2009,7 +2011,7 @@ class _CircleIconBtn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       child: SizedBox(
         width: size,
@@ -2029,6 +2031,6 @@ class _CircleIconBtn extends StatelessWidget {
           ),
         ),
       ),
-    );
+    ));
   }
 }

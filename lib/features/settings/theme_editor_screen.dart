@@ -1184,6 +1184,7 @@ class _LayoutPickerRow extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
         borderRadius: BorderRadius.circular(14),
         onTap: onTap,
         child: Ink(
@@ -1340,7 +1341,7 @@ class _FontModeRow extends StatelessWidget {
             child: Text(label, style: TextStyle(fontSize: 15, color: context.cs.onSurfaceVariant, fontWeight: FontWeight.w400)),
           ),
           const Spacer(),
-          GestureDetector(
+          MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
             onTap: () {
               GlazeBottomSheet.show<void>(
                 context,
@@ -1368,7 +1369,7 @@ class _FontModeRow extends StatelessWidget {
                 Icon(Icons.arrow_drop_down, color: context.cs.primary),
               ],
             ),
-          ),
+          )),
         ],
       ),
     );
@@ -1435,6 +1436,7 @@ class _ColorRow extends ConsumerWidget {
     return Opacity(
       opacity: locked ? 0.4 : 1.0,
       child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
         onTap: locked
             ? null
             : () => _openPicker(context, ref.read(themeProvider).activePreset),
@@ -1790,6 +1792,7 @@ class _BgImageRow extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         InkWell(
+          mouseCursor: SystemMouseCursors.click,
           onTap: () => _pick(context),
           child: Padding(
             padding:
@@ -1817,6 +1820,7 @@ class _BgImageRow extends StatelessWidget {
         ),
         if (hasImage)
           InkWell(
+            mouseCursor: SystemMouseCursors.click,
             onTap: onReset,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -2231,7 +2235,7 @@ class _ColorPickerSheetState extends ConsumerState<_ColorPickerSheet> {
                                 runSpacing: 10,
                                 children: [
                                 if (widget.allowNull && !_gradientMode)
-                                  GestureDetector(
+                                  MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
                                     onTap: () {
                                       setState(() {
                                         _hexCtrl.clear();
@@ -2257,11 +2261,11 @@ class _ColorPickerSheetState extends ConsumerState<_ColorPickerSheet> {
                                       child: Icon(Icons.auto_awesome,
                                           size: 18, color: cs.onSurfaceVariant),
                                     ),
-                                  ),
+                                  )),
                                 ...primaryPalette.map((hex) {
                                   final color = _hex(hex);
                                   final isSelected = _isPaletteSelected(hex);
-                                  return GestureDetector(
+                                  return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
                                     onTap: () {
                                       _applyExternalColor(color);
                                       if (!_gradientMode) {
@@ -2282,9 +2286,9 @@ class _ColorPickerSheetState extends ConsumerState<_ColorPickerSheet> {
                                             : null,
                                       ),
                                     ),
-                                  );
+                                  ));
                                 }),
-                                GestureDetector(
+                                MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
                                   onTap: () {
                                     setState(() {
                                       _showAdvancedEditor = !_showAdvancedEditor;
@@ -2317,8 +2321,7 @@ class _ColorPickerSheetState extends ConsumerState<_ColorPickerSheet> {
                                               : Colors.white)
                                           : cs.onSurfaceVariant,
                                     ),
-                                  ),
-                                ),
+                                  ))),
                                 ],
                               ),
                               if (_recentCustomHexes.isNotEmpty) ...[
@@ -2332,7 +2335,7 @@ class _ColorPickerSheetState extends ConsumerState<_ColorPickerSheet> {
                                     final color = _hex(hex);
                                     final isSelected = _showAdvancedEditor &&
                                         _committedHex.toUpperCase() == hex.toUpperCase();
-                                    return GestureDetector(
+                                    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
                                       onTap: () {
                                         _applyExternalColor(color);
                                         setState(() {
@@ -2354,7 +2357,7 @@ class _ColorPickerSheetState extends ConsumerState<_ColorPickerSheet> {
                                               : null,
                                         ),
                                       ),
-                                    );
+                                    ));
                                   }).toList(),
                                 ),
                               ],
@@ -2374,7 +2377,7 @@ class _ColorPickerSheetState extends ConsumerState<_ColorPickerSheet> {
                                   Row(
                                     children: [
                                       Expanded(
-                                        child: GestureDetector(
+                                        child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
                                           onTap: () => setState(() => _isHslMode = true),
                                           child: Container(
                                             padding: const EdgeInsets.symmetric(vertical: 8),
@@ -2393,10 +2396,10 @@ class _ColorPickerSheetState extends ConsumerState<_ColorPickerSheet> {
                                               ),
                                             ),
                                           ),
-                                        ),
+                                        )),
                                       ),
                                       Expanded(
-                                        child: GestureDetector(
+                                        child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
                                           onTap: () => setState(() => _isHslMode = false),
                                           child: Container(
                                             padding: const EdgeInsets.symmetric(vertical: 8),
@@ -2419,7 +2422,7 @@ class _ColorPickerSheetState extends ConsumerState<_ColorPickerSheet> {
                                               ),
                                             ),
                                           ),
-                                        ),
+                                        )),
                                       ),
                                     ],
                                   ),
@@ -2524,7 +2527,7 @@ class _ModeToggle extends StatelessWidget {
     return Row(
       children: [
         Expanded(
-          child: GestureDetector(
+          child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
             onTap: onSolid,
             child: Container(
               padding: const EdgeInsets.symmetric(vertical: 9),
@@ -2546,10 +2549,10 @@ class _ModeToggle extends StatelessWidget {
                 ),
               ),
             ),
-          ),
+          )),
         ),
         Expanded(
-          child: GestureDetector(
+          child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
             onTap: onGradient,
             child: Container(
               padding: const EdgeInsets.symmetric(vertical: 9),
@@ -2575,7 +2578,7 @@ class _ModeToggle extends StatelessWidget {
                 ),
               ),
             ),
-          ),
+          )),
         ),
       ],
     );
@@ -2648,7 +2651,7 @@ class _AngleDial extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTapDown: (d) => _update(d.localPosition),
       onPanStart: (d) => _update(d.localPosition),
       onPanUpdate: (d) => _update(d.localPosition),
@@ -2664,7 +2667,7 @@ class _AngleDial extends StatelessWidget {
           ),
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -2756,7 +2759,7 @@ class _GradientStopToggle extends StatelessWidget {
       {required int index, required Color color, required String label}) {
     final cs = Theme.of(context).colorScheme;
     final selected = activeStop == index;
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: () => onSelect(index),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -2797,7 +2800,7 @@ class _GradientStopToggle extends StatelessWidget {
           ],
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -2848,7 +2851,7 @@ class _PickerIconButtonState extends State<_PickerIconButton>
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: widget.onTap,
       onTapDown: widget.onTap != null ? (_) => _press.forward() : null,
       onTapUp: widget.onTap != null ? (_) => _press.reverse() : null,
@@ -2868,7 +2871,7 @@ class _PickerIconButtonState extends State<_PickerIconButton>
           ),
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -3006,18 +3009,18 @@ class _GoogleFontDisplayRow extends StatelessWidget {
         children: [
           const SizedBox(width: 130),
           Expanded(
-            child: GestureDetector(
+            child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
               onTap: onTap,
               child: Text(
                 fontName,
                 style: TextStyle(color: context.cs.primary, fontSize: 14),
               ),
-            ),
+            )),
           ),
-          GestureDetector(
+          MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
             onTap: onClear,
             child: Icon(Icons.close, size: 18, color: context.cs.onSurfaceVariant),
-          ),
+          )),
         ],
       ),
     );

@@ -675,7 +675,7 @@ class _ErrorView extends StatelessWidget {
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 16),
-          GestureDetector(
+          MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
             onTap: onRetry,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
@@ -691,7 +691,7 @@ class _ErrorView extends StatelessWidget {
                 ),
               ),
             ),
-          ),
+          )),
         ],
       ),
     );

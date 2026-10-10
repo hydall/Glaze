@@ -1941,7 +1941,7 @@ class _EntryRow extends StatelessWidget {
                 activeThumbColor: context.cs.primary,
                 materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
-              GestureDetector(
+              MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: onMore,
                 child: Padding(
@@ -1952,7 +1952,7 @@ class _EntryRow extends StatelessWidget {
                     color: context.cs.onSurfaceVariant.withValues(alpha: 0.6),
                   ),
                 ),
-              ),
+              )),
             ],
           ),
         ),
@@ -1986,6 +1986,7 @@ class _ToolbarButton extends StatelessWidget {
         color: Colors.white.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(8),
         child: InkWell(
+          mouseCursor: SystemMouseCursors.click,
           borderRadius: BorderRadius.circular(8),
           onTap: onTap,
           child: Container(

@@ -383,7 +383,7 @@ class _SyncSheetState extends ConsumerState<SyncSheet> {
     bool autoEnabled,
     SyncService? service,
   ) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: () {
         _setAutoSync(!autoEnabled);
       },
@@ -419,7 +419,7 @@ class _SyncSheetState extends ConsumerState<SyncSheet> {
           ],
         ),
       ),
-    );
+    ));
   }
 
   Widget _buildAutoSyncThresholdRow(BuildContext context, SyncService service) {
@@ -469,7 +469,7 @@ class _SyncSheetState extends ConsumerState<SyncSheet> {
   }
 
   Widget _buildIncludeApiKeysToggle(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: () {
         _setIncludeApiKeys(!_ctrl.syncIncludeApiKeys);
       },
@@ -508,7 +508,7 @@ class _SyncSheetState extends ConsumerState<SyncSheet> {
           ],
         ),
       ),
-    );
+    ));
   }
 
   void _goBack() {

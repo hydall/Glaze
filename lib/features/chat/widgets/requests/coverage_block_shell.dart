@@ -56,6 +56,7 @@ class _CoverageBlockShellState extends State<CoverageBlockShell> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           InkWell(
+            mouseCursor: SystemMouseCursors.click,
             onTap: widget.enabled
                 ? () => setState(() => _expanded = !_expanded)
                 : null,

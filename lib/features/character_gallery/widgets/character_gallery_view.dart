@@ -251,7 +251,7 @@ class GalleryTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       onLongPress: () => _showActions(context, ref),
       child: ClipRRect(
@@ -292,7 +292,7 @@ class GalleryTile extends ConsumerWidget {
           ],
         ),
       ),
-    );
+    ));
   }
 
   void _showActions(BuildContext context, WidgetRef ref) {

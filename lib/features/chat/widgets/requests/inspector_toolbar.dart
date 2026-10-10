@@ -95,7 +95,7 @@ class InspectorViewToggle extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = context.cs;
 
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: () => onChanged(!isRaw),
       behavior: HitTestBehavior.opaque,
       child: Container(
@@ -130,7 +130,7 @@ class InspectorViewToggle extends StatelessWidget {
             ),
           ],
         ),
-      ),
+      )),
     );
   }
 

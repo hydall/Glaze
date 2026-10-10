@@ -1709,7 +1709,7 @@ class _AddButton extends StatelessWidget {
         onTap: onTap,
       );
     }
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       child: Container(
         height: height,
@@ -1745,7 +1745,7 @@ class _AddButton extends StatelessWidget {
           ],
         ),
       ),
-    );
+    ));
   }
 }
 

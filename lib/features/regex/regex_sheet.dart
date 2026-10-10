@@ -869,7 +869,7 @@ class _PresetChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: GestureDetector(
+      child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
         onTap: onTap,
         child: Container(
           padding: const EdgeInsets.fromLTRB(10, 6, 12, 6),
@@ -911,7 +911,7 @@ class _PresetChip extends StatelessWidget {
             ],
           ),
         ),
-      ),
+      )),
     );
   }
 }

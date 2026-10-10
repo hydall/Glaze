@@ -1548,6 +1548,7 @@ class _HeaderIconButton extends StatelessWidget {
       color: Colors.transparent,
       shape: const CircleBorder(),
       child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
         customBorder: const CircleBorder(),
         onTap: onPressed,
         // At least an icon button's square, and as wide as a wider control
@@ -1593,6 +1594,7 @@ class _SheetTabButton extends StatelessWidget {
           : Colors.white.withValues(alpha: 0.04),
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
         borderRadius: BorderRadius.circular(12),
         onTap: onTap,
         child: Container(

@@ -589,7 +589,7 @@ class _HeaderEditToggle extends StatelessWidget {
         button: true,
         toggled: editing,
         label: label,
-        child: GestureDetector(
+        child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
           onTap: onTap,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 200),
@@ -614,7 +614,7 @@ class _HeaderEditToggle extends StatelessWidget {
                   : context.cs.onSurface.withValues(alpha: 0.55),
             ),
           ),
-        ),
+        )),
       ),
     );
   }
@@ -1089,6 +1089,7 @@ class _ToolsAddList extends StatelessWidget {
       children: [
         for (final item in items)
           InkWell(
+            mouseCursor: SystemMouseCursors.click,
             onTap: () => onSelect(item),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),

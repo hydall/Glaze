@@ -65,6 +65,7 @@ class GlazeErrorBlock extends StatelessWidget {
                   ),
                 ),
                 InkWell(
+                  mouseCursor: SystemMouseCursors.click,
                   borderRadius: BorderRadius.circular(4),
                   onTap: () =>
                       Clipboard.setData(ClipboardData(text: message)),

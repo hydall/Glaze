@@ -112,6 +112,7 @@ class GlazeFab extends StatelessWidget {
             shape: shape,
             clipBehavior: Clip.antiAlias,
             child: InkWell(
+              mouseCursor: enabled ? SystemMouseCursors.click : MouseCursor.defer,
               onTap: enabled ? onTap : null,
               splashColor: glyph.withValues(alpha: 0.15),
               highlightColor: glyph.withValues(alpha: 0.08),

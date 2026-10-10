@@ -690,7 +690,7 @@ class _ChatScrollButton extends StatelessWidget {
           duration: const Duration(milliseconds: 180),
           curve: Curves.easeOutCubic,
           offset: visible ? Offset.zero : const Offset(0, 0.2),
-          child: GestureDetector(
+          child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
             onTap: onTap,
             child: Container(
               width: 44,
@@ -711,7 +711,7 @@ class _ChatScrollButton extends StatelessWidget {
               ),
               child: Icon(icon, color: context.cs.primary, size: 26),
             ),
-          ),
+          )),
         ),
       ),
     );

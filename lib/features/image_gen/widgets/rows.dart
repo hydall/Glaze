@@ -319,6 +319,7 @@ class _ImageGenReferenceRowState extends State<ImageGenReferenceRow> {
       child: Row(
         children: [
           InkWell(
+            mouseCursor: SystemMouseCursors.click,
             onTap: widget.onPickImage,
             borderRadius: BorderRadius.circular(8),
             child: Container(
@@ -347,6 +348,7 @@ class _ImageGenReferenceRowState extends State<ImageGenReferenceRow> {
             ),
           ),
           InkWell(
+            mouseCursor: SystemMouseCursors.click,
             onTap: () => _openMatchModePicker(context),
             child: Row(
               children: [

@@ -108,6 +108,7 @@ List<Widget> buildReferenceSections({
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: InkWell(
+            mouseCursor: SystemMouseCursors.click,
             onTap: () => onUpdate(
               settings.copyWith(
                 references: [

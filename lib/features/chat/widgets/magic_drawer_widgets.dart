@@ -95,7 +95,7 @@ class _MagicCardState extends State<MagicCard> {
     }
 
     final badge = _editBadge(size: 24);
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: widget.onTap,
       onLongPress: widget.onLongPress,
       onTapDown: (_) => setState(() => _pressed = true),
@@ -189,7 +189,7 @@ class _MagicCardState extends State<MagicCard> {
             ),
           ),
         ),
-      ),
+      )),
     );
   }
 }
@@ -227,7 +227,7 @@ class MagicCardBadge extends StatelessWidget {
       child: Semantics(
         button: true,
         label: tooltip,
-        child: GestureDetector(
+        child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
           onTap: onTap,
           child: Container(
             width: size,
@@ -245,7 +245,7 @@ class MagicCardBadge extends StatelessWidget {
             ),
             child: Icon(icon, size: size * 0.58, color: Colors.white),
           ),
-        ),
+        )),
       ),
     );
   }
@@ -298,6 +298,7 @@ class MagicDrawerAddList extends StatelessWidget {
       children.addAll(
         sectionItems.map(
           (item) => InkWell(
+            mouseCursor: SystemMouseCursors.click,
             onTap: () => onSelect(item),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
@@ -405,7 +406,7 @@ class AddMagicCard extends StatelessWidget {
         muted: true,
       );
     }
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(14),
@@ -438,7 +439,7 @@ class AddMagicCard extends StatelessWidget {
             ],
           ),
         ),
-      ),
+      )),
     );
   }
 }

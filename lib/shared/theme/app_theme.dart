@@ -196,6 +196,59 @@ Color _borderFor(Color bg, bool isDark) {
 /// desktop one. Matches the desktop right sidebar's usable width band.
 const BoxConstraints kSheetMaxWidthConstraints = BoxConstraints(maxWidth: 640);
 
+/// Hand pointer while a control is enabled, plain arrow while disabled.
+///
+/// Material's own default is `WidgetStateMouseCursor.adaptiveClickable`, which
+/// resolves to the hand pointer only on web — on every desktop target Glaze
+/// builds for it degrades to the plain arrow, so a button reads as inert on
+/// hover. Overriding it here is the one place that reaches every Material
+/// control at once.
+final WidgetStateProperty<MouseCursor?> _clickableCursor =
+    WidgetStateProperty.resolveWith<MouseCursor?>((states) {
+      return states.contains(WidgetState.disabled)
+          ? SystemMouseCursors.basic
+          : SystemMouseCursors.click;
+    });
+
+ButtonStyle _clickableStyle(ButtonStyle? style) =>
+    (style ?? const ButtonStyle()).copyWith(mouseCursor: _clickableCursor);
+
+/// Force the hand pointer onto the Material controls whose themes expose a
+/// cursor, so desktop hover matches the web behaviour Flutter gives for free.
+ThemeData _withPointerCursors(ThemeData theme) {
+  return theme.copyWith(
+    elevatedButtonTheme: ElevatedButtonThemeData(
+      style: _clickableStyle(theme.elevatedButtonTheme.style),
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: _clickableStyle(theme.filledButtonTheme.style),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: _clickableStyle(theme.outlinedButtonTheme.style),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: _clickableStyle(theme.textButtonTheme.style),
+    ),
+    iconButtonTheme: IconButtonThemeData(
+      style: _clickableStyle(theme.iconButtonTheme.style),
+    ),
+    segmentedButtonTheme: SegmentedButtonThemeData(
+      style: _clickableStyle(theme.segmentedButtonTheme.style),
+    ),
+    menuButtonTheme: MenuButtonThemeData(
+      style: _clickableStyle(theme.menuButtonTheme.style),
+    ),
+    listTileTheme: theme.listTileTheme.copyWith(mouseCursor: _clickableCursor),
+    checkboxTheme: theme.checkboxTheme.copyWith(mouseCursor: _clickableCursor),
+    radioTheme: theme.radioTheme.copyWith(mouseCursor: _clickableCursor),
+    switchTheme: theme.switchTheme.copyWith(mouseCursor: _clickableCursor),
+    floatingActionButtonTheme: theme.floatingActionButtonTheme.copyWith(
+      mouseCursor: _clickableCursor,
+    ),
+    tabBarTheme: theme.tabBarTheme.copyWith(mouseCursor: _clickableCursor),
+  );
+}
+
 class AppTheme {
   static ThemeData dark(
     ThemePreset preset, {
@@ -237,7 +290,7 @@ class AppTheme {
       fontFamily: effectiveFont,
     );
 
-    return base.copyWith(
+    final theme = base.copyWith(
       colorScheme: colorScheme,
       scaffoldBackgroundColor: colorScheme.surface,
       canvasColor: colorScheme.surface,
@@ -364,6 +417,8 @@ class AppTheme {
         ),
       ],
     );
+
+    return _withPointerCursors(theme);
   }
 
   static ThemeData light(
@@ -406,7 +461,7 @@ class AppTheme {
       fontFamily: effectiveFont,
     );
 
-    return base.copyWith(
+    final theme = base.copyWith(
       colorScheme: colorScheme,
       scaffoldBackgroundColor: colorScheme.surface,
       canvasColor: colorScheme.surface,
@@ -533,5 +588,7 @@ class AppTheme {
         ),
       ],
     );
+
+    return _withPointerCursors(theme);
   }
 }

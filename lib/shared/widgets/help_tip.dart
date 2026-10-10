@@ -47,6 +47,7 @@ class HelpTip extends ConsumerWidget {
         color: Colors.transparent,
         shape: const CircleBorder(),
         child: InkWell(
+          mouseCursor: SystemMouseCursors.click,
           customBorder: const CircleBorder(),
           onTap: () => openGlossaryTerm(context, ref, term),
           child: SizedBox(

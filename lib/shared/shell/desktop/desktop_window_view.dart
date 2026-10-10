@@ -500,6 +500,7 @@ class _DockEntry extends ConsumerWidget {
       child: Material(
         type: MaterialType.transparency,
         child: InkWell(
+          mouseCursor: SystemMouseCursors.click,
           borderRadius: BorderRadius.circular(10),
           onTap: () =>
               focused ? windows.minimize(window.id) : windows.focus(window.id),

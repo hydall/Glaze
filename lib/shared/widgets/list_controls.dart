@@ -95,7 +95,7 @@ class GlazeDropdownChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       child: SizedBox(
         height: 32,
@@ -135,7 +135,7 @@ class GlazeDropdownChip extends StatelessWidget {
           ),
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -157,7 +157,7 @@ class GlazeSortIconChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return Tooltip(
       message: tooltip,
-      child: GestureDetector(
+      child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
         onTap: onTap,
         child: SizedBox(
           height: 32,
@@ -184,7 +184,7 @@ class GlazeSortIconChip extends StatelessWidget {
             ),
           ),
         ),
-      ),
+      )),
     );
   }
 }
@@ -213,7 +213,7 @@ class GlazeActionChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return Tooltip(
       message: tooltip,
-      child: GestureDetector(
+      child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
         onTap: onTap,
         child: SizedBox(
           height: 32,
@@ -251,7 +251,7 @@ class GlazeActionChip extends StatelessWidget {
             ),
           ),
         ),
-      ),
+      )),
     );
   }
 }
@@ -278,7 +278,7 @@ class GlazeReorderToggleButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return Tooltip(
       message: tooltip,
-      child: GestureDetector(
+      child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
         onTap: onTap,
         child: SizedBox(
           width: 32,
@@ -298,7 +298,7 @@ class GlazeReorderToggleButton extends StatelessWidget {
             ),
           ),
         ),
-      ),
+      )),
     );
   }
 }
@@ -411,7 +411,7 @@ class GlazeFilterIconButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       child: SizedBox(
         width: 32,
@@ -464,6 +464,6 @@ class GlazeFilterIconButton extends StatelessWidget {
           ],
         ),
       ),
-    );
+    ));
   }
 }
