@@ -13,6 +13,7 @@ import '../catalog_models.dart';
 import '../catalog_provider.dart';
 import '../chub_account_provider.dart';
 import '../janitor_account_provider.dart';
+import '../services/catalog_creators.dart';
 import '../services/chub_provider.dart';
 // `ExtractionResult` here is DataCat's own; the one this file uses is
 // JanitorExtractor's, so the DataCat name is hidden to keep it unambiguous.
@@ -24,12 +25,12 @@ import '../services/janitor_public_lorebook.dart';
 import '../services/janitor_webview_proxy.dart';
 import '../services/janny_provider.dart';
 import '../third_party_providers_provider.dart';
+import 'catalog_creator_screen.dart';
 import 'datacat_phase_label.dart';
 import 'janitor_login_sheet.dart';
 import 'janitor_lorebook_capture_sheet.dart';
 import 'janitor_refused_sheet.dart';
 import 'datacat/datacat_community_section.dart';
-import 'datacat/datacat_creator_screen.dart';
 import 'datacat/datacat_verification_sheet.dart';
 import 'janitor_lorebooks_tab.dart';
 
@@ -554,18 +555,21 @@ class _CatalogDetailLauncherState
     );
   }
 
-  /// The creator's own screen, for a source that has one.
-  ///
-  /// DataCat addresses creators by `ref`, not by the raw id — a Saucepan
-  /// creator's ref carries a `saucepan:` prefix — so a row without one has no
-  /// page to open and the author line stays plain text.
+  /// The creator's own screen, for a source that has one (DataCat, JanitorAI,
+  /// Chub). A row that does not say who its creator is has no page to open,
+  /// and the author line stays plain text.
   VoidCallback? get _openCreator {
-    if (widget.provider != CatalogProvider.datacat) return null;
-    final ref = widget.item.creatorRef;
-    if (ref == null || ref.isEmpty) return null;
-    return () => openDatacatCreatorScreen(
+    final chub = ref.read(chubAccountProvider);
+    final feed = catalogCreatorFeedFor(
+      widget.item,
+      widget.provider,
+      chubApiKey: chub.apiKey,
+      chubAccountNsfl: chub.nsfl,
+    );
+    if (feed == null) return null;
+    return () => openCatalogCreatorScreen(
       context,
-      creatorRef: ref,
+      feed: feed,
       creatorName: widget.item.creator,
     );
   }
