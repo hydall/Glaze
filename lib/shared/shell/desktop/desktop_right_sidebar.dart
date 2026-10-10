@@ -23,16 +23,74 @@ const double _stripWidth = 64;
 /// flush [GlazeAppBar]), which the button lines up with.
 const double _stripBackHeight = 56;
 
-class DesktopRightSidebar extends ConsumerWidget {
+class DesktopRightSidebar extends ConsumerStatefulWidget {
   /// See [DesktopLeftSidebar.width].
   final double width;
 
   const DesktopRightSidebar({super.key, required this.width});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<DesktopRightSidebar> createState() =>
+      _DesktopRightSidebarState();
+}
+
+class _DesktopRightSidebarState extends ConsumerState<DesktopRightSidebar>
+    with SingleTickerProviderStateMixin {
+  /// Slides a panel in from the sidebar's right edge as it opens and back out
+  /// as it closes: 0 is closed, 1 is open.
+  late final AnimationController _panelAnim;
+  late final Animation<double> _panelT;
+  late final Animation<Offset> _panelSlide;
+
+  /// The panel on screen. It outlives the provider's by the close animation,
+  /// so the panel has something to slide out.
+  SidebarPanel? _shown;
+
+  double get width => widget.width;
+
+  @override
+  void initState() {
+    super.initState();
+    _shown = ref.read(rightSidebarPanelProvider);
+    _panelAnim = AnimationController(
+      vsync: this,
+      duration: DesktopSidebarSurface.animationDuration,
+      value: _shown == null ? 0 : 1,
+    )..addStatusListener(_onPanelAnimStatus);
+    _panelT = CurvedAnimation(
+      parent: _panelAnim,
+      curve: DesktopSidebarSurface.animationCurve,
+    );
+    _panelSlide = Tween(
+      begin: const Offset(1, 0),
+      end: Offset.zero,
+    ).animate(_panelT);
+  }
+
+  @override
+  void dispose() {
+    _panelAnim.dispose();
+    super.dispose();
+  }
+
+  void _onPanelAnimStatus(AnimationStatus status) {
+    if (status == AnimationStatus.dismissed && _shown != null && mounted) {
+      setState(() => _shown = null);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final controller = ref.watch(rightSidebarControllerProvider);
     final panel = ref.watch(rightSidebarPanelProvider);
+    ref.listen(rightSidebarPanelProvider, (_, next) {
+      if (next != null) {
+        setState(() => _shown = next);
+        _panelAnim.forward();
+      } else {
+        _panelAnim.reverse();
+      }
+    });
     final location = GoRouterState.of(context).uri;
     final charId = _extractCharId(location);
     // A panel needs room, so borrow the expanded width while one is open and
@@ -56,7 +114,7 @@ class DesktopRightSidebar extends ConsumerWidget {
         animate: !controller.dragging,
         child: Stack(
           children: [
-            Positioned.fill(child: _buildBody(context, ref, panel, charId)),
+            Positioned.fill(child: _buildBody(context, panel, charId)),
             Positioned(
               top: 0,
               bottom: 0,
@@ -69,20 +127,22 @@ class DesktopRightSidebar extends ConsumerWidget {
     );
   }
 
+  /// [active] is the provider's panel, which the strip marks; the body lays
+  /// out [_shown], which stays on screen while it slides out.
   Widget _buildBody(
     BuildContext context,
-    WidgetRef ref,
-    SidebarPanel? panel,
+    SidebarPanel? active,
     String? charId,
   ) {
     final collapsed = width < kSidebarCollapseThreshold;
+    final panel = _shown;
     if (charId != null) {
-      return _buildChatBody(context, ref, panel, charId, collapsed: collapsed);
+      return _buildChatBody(context, panel, charId, collapsed: collapsed);
     }
 
     // Collapsed: nothing but the strip — which is the whole point of the
     // collapsed state.
-    if (collapsed) return _buildToolStrip(context, ref, activeId: panel?.id);
+    if (collapsed) return _buildToolStrip(context, activeId: active?.id);
 
     if (panel == null) {
       return const Material(
@@ -106,14 +166,23 @@ class DesktopRightSidebar extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _StripBackButton(panel: panel),
-              Expanded(
-                child: _buildToolStrip(context, ref, activeId: panel.id),
+              FadeTransition(
+                opacity: _panelT,
+                child: _StripBackButton(panel: panel),
               ),
+              Expanded(child: _buildToolStrip(context, activeId: active?.id)),
             ],
           ),
         ),
-        ..._buildPanel(context, ref, panel),
+        // The panel slides in from the sidebar's right edge to the rail.
+        Expanded(
+          child: ClipRect(
+            child: SlideTransition(
+              position: _panelSlide,
+              child: _buildPanel(context, panel),
+            ),
+          ),
+        ),
       ],
     );
   }
@@ -126,9 +195,11 @@ class DesktopRightSidebar extends ConsumerWidget {
   /// height and its scroll are the same either way, so every icon stays where
   /// the list drew it. (Collapsing the sidebar to a width other than the
   /// strip's moves them sideways, to the middle of it.)
+  ///
+  /// A panel opening shrinks the list to the strip as the panel slides in
+  /// beside it, and closing widens it back as the panel slides out.
   Widget _buildChatBody(
     BuildContext context,
-    WidgetRef ref,
     SidebarPanel? panel,
     String charId, {
     required bool collapsed,
@@ -149,68 +220,94 @@ class DesktopRightSidebar extends ConsumerWidget {
         await bridge?.scrollToMessage(id, highlight: true);
       },
     );
+    // Built once, outside the animation: each frame hands the same instances
+    // back, so only the layout moves and neither subtree is rebuilt.
+    final backButton = showPanel
+        ? FadeTransition(
+            opacity: _panelT,
+            child: _StripBackButton(panel: panel),
+          )
+        : null;
+    final panelView = showPanel ? _buildPanel(context, panel) : null;
     return Material(
       color: Colors.transparent,
       child: LayoutBuilder(
-        builder: (context, constraints) => Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // The same widgets at the head of the row in every state, so the
-            // drawer is updated in place rather than built anew.
-            SizedBox(
-              width: showPanel ? _stripWidth : constraints.maxWidth,
-              child: Stack(
-                children: [
-                  Positioned.fill(child: drawer),
-                  // In the room the drawer's tabs leave above the strip.
-                  if (showPanel)
-                    Positioned(
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      child: _StripBackButton(panel: panel),
+        builder: (context, constraints) => AnimatedBuilder(
+          animation: _panelT,
+          builder: (context, _) {
+            final full = constraints.maxWidth;
+            final drawerWidth = showPanel
+                ? full - (full - _stripWidth) * _panelT.value
+                : full;
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // The same widgets at the head of the row in every state, so
+                // the drawer is updated in place rather than built anew.
+                SizedBox(
+                  width: drawerWidth,
+                  child: Stack(
+                    children: [
+                      Positioned.fill(child: drawer),
+                      // In the room the drawer's tabs leave above the strip.
+                      if (backButton != null)
+                        Positioned(
+                          top: 0,
+                          left: 0,
+                          width: _stripWidth,
+                          child: backButton,
+                        ),
+                    ],
+                  ),
+                ),
+                // Laid out at its open width throughout and clipped, so the
+                // panel slides rather than squeezes.
+                if (panelView != null)
+                  SizedBox(
+                    width: full - drawerWidth,
+                    child: ClipRect(
+                      child: OverflowBox(
+                        alignment: Alignment.centerLeft,
+                        minWidth: full - _stripWidth,
+                        maxWidth: full - _stripWidth,
+                        child: panelView,
+                      ),
                     ),
-                ],
-              ),
-            ),
-            if (showPanel) ..._buildPanel(context, ref, panel),
-          ],
+                  ),
+              ],
+            );
+          },
         ),
       ),
     );
   }
 
   /// An open panel and the rule between it and the strip on its left.
-  List<Widget> _buildPanel(
-    BuildContext context,
-    WidgetRef ref,
-    SidebarPanel panel,
-  ) {
-    return [
-      VerticalDivider(
-        width: 1,
-        color: Theme.of(context).colorScheme.outlineVariant,
-      ),
-      Expanded(
-        child: DetachedShellHost(
-          child: Material(
-            color: Colors.transparent,
-            child: SidebarPanelScope(
-              onClose: () => closeRightSidebarPanel(ref),
-              back: panel.back,
-              child: Builder(builder: panel.builder),
+  Widget _buildPanel(BuildContext context, SidebarPanel panel) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        VerticalDivider(
+          width: 1,
+          color: Theme.of(context).colorScheme.outlineVariant,
+        ),
+        Expanded(
+          child: DetachedShellHost(
+            child: Material(
+              color: Colors.transparent,
+              child: SidebarPanelScope(
+                onClose: () => closeRightSidebarPanel(ref),
+                back: panel.back,
+                child: Builder(builder: panel.builder),
+              ),
             ),
           ),
         ),
-      ),
-    ];
+      ],
+    );
   }
 
-  Widget _buildToolStrip(
-    BuildContext context,
-    WidgetRef ref, {
-    String? activeId,
-  }) {
+  Widget _buildToolStrip(BuildContext context, {String? activeId}) {
     return ScrollConfiguration(
       behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
       child: SingleChildScrollView(
