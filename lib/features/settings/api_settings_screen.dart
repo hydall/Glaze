@@ -819,7 +819,10 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       id: GuideIds.apiTabs,
       child: GlazeTabBar(
         tabs: [
-          GlazeTabItem(label: 'LLM', icon: Icons.chat_bubble_outline_rounded),
+          GlazeTabItem(
+            label: 'tab_llm'.tr(),
+            icon: Icons.chat_bubble_outline_rounded,
+          ),
           GlazeTabItem(
             label: 'studio_agents'.tr(),
             icon: Icons.smart_toy_outlined,
