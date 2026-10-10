@@ -74,6 +74,15 @@ class SheetView extends ConsumerStatefulWidget {
   /// When null, defaults to `min(0.55 * h, 500)`.
   final double? collapsedFraction;
   final bool fitContent;
+
+  /// Centers the body vertically in a desktop floating window a [fitContent]
+  /// body would otherwise pack against the top of, leaving the rest of the
+  /// frame empty. A short, self-contained screen (the backup sheet) reads as
+  /// balanced only when that leftover space is split above and below it.
+  ///
+  /// Ignored outside a window, and on a phone, where a fit-content sheet
+  /// already hugs the body.
+  final bool centerContent;
   final bool showRouteBackground;
   final int? shellBranchIndex;
   final bool enableHeaderBlur;
@@ -117,6 +126,7 @@ class SheetView extends ConsumerStatefulWidget {
     this.scrollController,
     this.collapsedFraction,
     this.fitContent = false,
+    this.centerContent = false,
     this.showRouteBackground = true,
     this.shellBranchIndex,
     this.enableHeaderBlur = true,
@@ -750,6 +760,11 @@ class _SheetViewState extends ConsumerState<SheetView>
       widget.headerBottom != null ||
       _effectiveShowHandle;
 
+  /// Whether the body should be centred in the frame it fills — a [fitContent]
+  /// body a desktop window was asked to centre ([SheetView.centerContent]).
+  bool get _centerBody =>
+      widget.fitContent && _inWindow && widget.centerContent;
+
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
@@ -832,7 +847,9 @@ class _SheetViewState extends ConsumerState<SheetView>
                       padding: EdgeInsets.only(
                         bottom: isKeyboardOpen ? bottomInset + 10 : 0,
                       ),
-                      child: widget.body,
+                      child: _centerBody
+                          ? Center(child: widget.body)
+                          : widget.body,
                     ),
                   );
 
@@ -1126,7 +1143,7 @@ class _SheetViewState extends ConsumerState<SheetView>
       child: CardBackdrop.closed(
         child: Stack(
           children: [
-            widget.fitContent ? body : Positioned.fill(child: body),
+            _bodyLayer(body),
 
             // Interactive header — rendered above the gradient so buttons
             // and drag handle are unobscured and fully hittable.
@@ -1195,6 +1212,19 @@ class _SheetViewState extends ConsumerState<SheetView>
         ),
       ),
     );
+  }
+
+  /// The body layer of the sheet's [Stack].
+  ///
+  /// A full-height body fills the slot. A [fitContent] body packs against the
+  /// top of it — unless a screen asked to centre it ([SheetView.centerContent])
+  /// and this sheet is inside a desktop window, where the body then sits in the
+  /// middle of the frame with the leftover space split above and below.
+  Widget _bodyLayer(Widget body) {
+    if (!widget.fitContent || _centerBody) {
+      return Positioned.fill(child: _centerBody ? Center(child: body) : body);
+    }
+    return body;
   }
 
   Widget _buildBodyChild(

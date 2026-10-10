@@ -59,6 +59,7 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
         title: 'menu_backups'.tr(),
         showBack: true,
         fitContent: true,
+        centerContent: true,
         onBack: () {
           if (_isBusy) {
             _blockClose();
