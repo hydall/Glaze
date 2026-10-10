@@ -100,6 +100,7 @@ class _ContextCoverageCardState extends ConsumerState<ContextCoverageCard> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             InkWell(
+              mouseCursor: SystemMouseCursors.click,
               onTap: widget.onToggle,
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),

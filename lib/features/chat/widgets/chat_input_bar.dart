@@ -1098,7 +1098,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
                 // Guidance was only dismissable from whichever button had
                 // opened it — a composer action that may be pinned anywhere,
                 // or the drawer.
-                GestureDetector(
+                MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
                   onTap: widget.isEditingMessage ? null : _toggleGuidance,
                   behavior: HitTestBehavior.opaque,
                   child: Padding(
@@ -1108,7 +1108,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
                       size: 16,
                       color: accent.withValues(alpha: 0.7),
                     ),
-                  ),
+                  )),
                 ),
               ],
             ),
@@ -1632,7 +1632,7 @@ class _AttachedImageThumb extends StatelessWidget {
           Positioned(
             top: 4,
             right: 4,
-            child: GestureDetector(
+            child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
               onTap: onRemove,
               child: Container(
                 width: 22,
@@ -1643,7 +1643,7 @@ class _AttachedImageThumb extends StatelessWidget {
                 ),
                 child: const Icon(Icons.close, color: Colors.white, size: 14),
               ),
-            ),
+            )),
           ),
         ],
       ),
@@ -1721,7 +1721,7 @@ class _CircleBtnState extends ConsumerState<_CircleBtn>
   Widget build(BuildContext context) {
     final preset = ref.watch(themeProvider.select((s) => s.activePreset));
     final floating = widget.blurRegionId != null;
-    final btn = GestureDetector(
+    final btn = MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: widget.onTap,
       onTapDown: (widget.onTap != null && !widget.batterySaver)
           ? (_) => _press.forward()
@@ -1756,7 +1756,7 @@ class _CircleBtnState extends ConsumerState<_CircleBtn>
             ),
           ),
         ),
-      ),
+      )),
     );
     final regionId = widget.blurRegionId;
     if (regionId == null || !widget.blurViaWebView) return btn;
@@ -1812,6 +1812,7 @@ class _SendBtnState extends State<_SendBtn>
   @override
   Widget build(BuildContext context) {
     return InkWell(
+      mouseCursor: SystemMouseCursors.click,
       customBorder: const CircleBorder(),
       onTap: widget.onTap,
       onTapDown: widget.batterySaver ? null : (_) => _press.forward(),

@@ -51,6 +51,7 @@ class RequestGroupCard extends StatelessWidget {
       child: Column(
         children: [
           InkWell(
+            mouseCursor: SystemMouseCursors.click,
             onTap: single == null ? onToggle : () => onOpenEntry(single),
             child: IntrinsicHeight(
               child: Row(
@@ -195,6 +196,7 @@ class _StepRow extends StatelessWidget {
     final model = '${entry.capture.request['model'] ?? ''}';
 
     return InkWell(
+      mouseCursor: SystemMouseCursors.click,
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
       child: Padding(

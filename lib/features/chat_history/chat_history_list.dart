@@ -552,7 +552,7 @@ class _SessionTileState extends ConsumerState<_SessionTile>
     bool generating,
     bool unread,
   ) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () =>
           context.go('/chat/${info.characterId}?session=${info.sessionIndex}'),
@@ -578,7 +578,7 @@ class _SessionTileState extends ConsumerState<_SessionTile>
             ],
           ),
         ),
-      ),
+      )),
     );
   }
 

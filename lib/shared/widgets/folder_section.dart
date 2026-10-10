@@ -248,6 +248,7 @@ class _NewFolderTile extends StatelessWidget {
         color: context.cs.primary.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
+          mouseCursor: SystemMouseCursors.click,
           borderRadius: BorderRadius.circular(12),
           onTap: onTap,
           child: Padding(
@@ -296,6 +297,7 @@ class _FolderTile extends StatelessWidget {
         color: Colors.white.withValues(alpha: 0.04),
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
+          mouseCursor: SystemMouseCursors.click,
           borderRadius: BorderRadius.circular(12),
           onTap: onTap,
           child: Padding(

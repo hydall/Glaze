@@ -206,7 +206,7 @@ class _FolderCircle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       onLongPress: onLongPress,
       child: SizedBox(
@@ -248,7 +248,7 @@ class _FolderCircle extends StatelessWidget {
           ],
         ),
       ),
-    );
+    ));
   }
 
   Widget _cover(BuildContext context) {
@@ -303,7 +303,7 @@ class _OurPicksCircle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       onLongPress: onLongPress,
       child: SizedBox(
@@ -356,7 +356,7 @@ class _OurPicksCircle extends StatelessWidget {
           ],
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -374,7 +374,7 @@ class _FavoritesCircle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       child: SizedBox(
         width: 72,
@@ -426,6 +426,6 @@ class _FavoritesCircle extends StatelessWidget {
           ],
         ),
       ),
-    );
+    ));
   }
 }

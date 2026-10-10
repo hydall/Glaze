@@ -32,6 +32,7 @@ Widget buildSyncProviderButton({
     color: color,
     borderRadius: BorderRadius.circular(14),
     child: InkWell(
+      mouseCursor: SystemMouseCursors.click,
       borderRadius: BorderRadius.circular(14),
       onTap: onPressed,
       child: Opacity(
@@ -75,6 +76,7 @@ Widget buildSyncManualButton({
     color: bg,
     borderRadius: BorderRadius.circular(14),
     child: InkWell(
+      mouseCursor: SystemMouseCursors.click,
       borderRadius: BorderRadius.circular(14),
       onTap: onPressed,
       child: Opacity(
@@ -116,6 +118,7 @@ Widget buildSyncDangerButton({
     color: bg,
     borderRadius: BorderRadius.circular(14),
     child: InkWell(
+      mouseCursor: SystemMouseCursors.click,
       borderRadius: BorderRadius.circular(14),
       onTap: onPressed,
       child: Opacity(
@@ -148,6 +151,7 @@ Widget buildSyncCountButton({required IconData icon, VoidCallback? onPressed}) {
     color: Colors.white.withValues(alpha: 0.05),
     borderRadius: BorderRadius.circular(8),
     child: InkWell(
+      mouseCursor: SystemMouseCursors.click,
       borderRadius: BorderRadius.circular(8),
       onTap: onPressed,
       child: Container(

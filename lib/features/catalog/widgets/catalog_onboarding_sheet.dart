@@ -408,7 +408,7 @@ class _SourceOption extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final accent = context.cs.primary;
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
@@ -470,7 +470,7 @@ class _SourceOption extends StatelessWidget {
           ],
         ),
       ),
-    );
+    ));
   }
 }
 

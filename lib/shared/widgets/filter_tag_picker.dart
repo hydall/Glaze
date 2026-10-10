@@ -427,6 +427,7 @@ class FilterTagChip extends StatelessWidget {
       ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
         onTap: () {
           Haptics.selectionClick();
           onTap();

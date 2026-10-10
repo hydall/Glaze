@@ -544,6 +544,7 @@ class _CategoryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return _GlossaryRowSurface(
       child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
         onTap: onTap,
         child: Padding(
           padding: inSidebarPanel(context)
@@ -608,6 +609,7 @@ class _TermTile extends StatelessWidget {
     return _GlossaryRowSurface(
       radius: 14,
       child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
         onTap: onTap,
         child: Padding(
           padding: EdgeInsets.symmetric(
@@ -800,7 +802,7 @@ class _LinkChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 2),
@@ -819,7 +821,7 @@ class _LinkChip extends StatelessWidget {
             height: 1.5,
           ),
         ),
-      ),
+      )),
     );
   }
 }

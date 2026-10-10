@@ -1041,6 +1041,7 @@ class _JanitorLorebookCaptureState
                       color: Colors.transparent,
                       shape: const CircleBorder(),
                       child: InkWell(
+                        mouseCursor: SystemMouseCursors.click,
                         customBorder: const CircleBorder(),
                         onTap: canGoBack ? _stepBack : null,
                         child: Icon(

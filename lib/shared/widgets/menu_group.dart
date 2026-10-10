@@ -67,6 +67,7 @@ class _MenuCollapsibleSectionState extends State<MenuCollapsibleSection> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         InkWell(
+          mouseCursor: SystemMouseCursors.click,
           // Only the top corners round while the section is open: the card
           // continues past the header into its own content.
           borderRadius: _expanded
@@ -462,7 +463,7 @@ class _MenuItemState extends State<MenuItem> {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTapDown: (_) => setState(() => _pressed = true),
       onTapUp: (_) {
         setState(() => _pressed = false);
@@ -527,7 +528,7 @@ class _MenuItemState extends State<MenuItem> {
           ],
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -563,6 +564,7 @@ class MenuSwitchItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return InkWell(
+      mouseCursor: SystemMouseCursors.click,
       onTap: included ?? true
           ? () {
               Haptics.selectionClick();
@@ -1137,7 +1139,7 @@ class _MenuScriptItemState extends State<MenuScriptItem> {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTapDown: (_) => setState(() => _pressed = true),
       onTapUp: (_) {
         setState(() => _pressed = false);
@@ -1203,7 +1205,7 @@ class _MenuScriptItemState extends State<MenuScriptItem> {
               ),
               materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
-            GestureDetector(
+            MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: () {
                 Haptics.selectionClick();
@@ -1217,11 +1219,11 @@ class _MenuScriptItemState extends State<MenuScriptItem> {
                   color: context.cs.onSurfaceVariant.withValues(alpha: 0.45),
                 ),
               ),
-            ),
+            )),
           ],
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -1262,6 +1264,7 @@ class MenuSelectorItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final isIncluded = included ?? true;
     return InkWell(
+      mouseCursor: SystemMouseCursors.click,
       onTap: isIncluded
           ? () {
               Haptics.selectionClick();
@@ -1377,6 +1380,7 @@ class _ResetToDefaultButton extends StatelessWidget {
     return Tooltip(
       message: 'reset_to_default'.tr(),
       child: InkResponse(
+        mouseCursor: SystemMouseCursors.click,
         onTap: () {
           Haptics.selectionClick();
           onPressed();

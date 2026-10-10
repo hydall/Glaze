@@ -478,7 +478,7 @@ class _ToastChipState extends ConsumerState<_ToastChip> {
           ),
           if (widget.showCopyButton) ...[
             const SizedBox(width: 8),
-            GestureDetector(
+            MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
               onTap: _copy,
               child: Container(
                 padding: const EdgeInsets.symmetric(
@@ -501,7 +501,7 @@ class _ToastChipState extends ConsumerState<_ToastChip> {
                   ),
                 ),
               ),
-            ),
+            )),
           ],
         ],
       ),

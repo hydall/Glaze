@@ -139,6 +139,7 @@ class _ErrorDialogContentState extends ConsumerState<_ErrorDialogContent> {
               Material(
                 color: Colors.transparent,
                 child: InkWell(
+                  mouseCursor: SystemMouseCursors.click,
                   onTap: _copy,
                   customBorder: const RoundedRectangleBorder(
                     borderRadius: BorderRadius.vertical(

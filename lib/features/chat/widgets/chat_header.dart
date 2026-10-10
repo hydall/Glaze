@@ -102,14 +102,14 @@ class ChatHeader extends ConsumerWidget {
       return Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          GestureDetector(
+          MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: onTapAvatar,
             child: avatar,
-          ),
+          )),
           const SizedBox(width: 8),
           Flexible(
-            child: GestureDetector(
+            child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: onTapInfo,
               child: Text.rich(
@@ -136,7 +136,7 @@ class ChatHeader extends ConsumerWidget {
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(letterSpacing: letterSpacing),
               ),
-            ),
+            )),
           ),
           ?trailing,
         ],
@@ -148,17 +148,17 @@ class ChatHeader extends ConsumerWidget {
       // of its own that the desktop search field can take over.
       mainAxisSize: trailing == null ? MainAxisSize.max : MainAxisSize.min,
       children: [
-        GestureDetector(
+        MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: onTapAvatar,
           child: avatar,
-        ),
+        )),
         const SizedBox(width: 10),
         // With a trailing widget the text block only takes its own width, so
         // the trailing one lands right after the session line.
         Flexible(
           fit: trailing == null ? FlexFit.tight : FlexFit.loose,
-          child: GestureDetector(
+          child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: onTapInfo,
             child: Column(
@@ -192,7 +192,7 @@ class ChatHeader extends ConsumerWidget {
                 ),
               ],
             ),
-          ),
+          )),
         ),
         ?trailing,
       ],

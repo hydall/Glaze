@@ -511,7 +511,7 @@ class _ActiveTagsRow extends StatelessWidget {
           itemBuilder: (context, index) {
             final name = names[index];
             final isNsfw = name.toUpperCase() == 'NSFW';
-            return GestureDetector(
+            return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
               onTap: () => _removeFilter(name),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -550,7 +550,7 @@ class _ActiveTagsRow extends StatelessWidget {
                   ],
                 ),
               ),
-            );
+            ));
           },
         ),
       ),

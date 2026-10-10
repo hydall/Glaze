@@ -128,7 +128,7 @@ class _ImageViewerState extends State<ImageViewer> with SingleTickerProviderStat
           // Image with zoom/pan
           Listener(
             onPointerSignal: _handlePointerSignal,
-            child: GestureDetector(
+            child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
               onTap: () {
                 if (widget.description != null && widget.description!.isNotEmpty) {
                   setState(() => _promptVisible = !_promptVisible);
@@ -162,14 +162,14 @@ class _ImageViewerState extends State<ImageViewer> with SingleTickerProviderStat
                       const _ImageViewerError(),
                 ),
               ),
-            ),
+            )),
           ),
           
           // Close button
           Positioned(
             top: MediaQuery.of(context).padding.top + 20,
             right: 20,
-            child: GestureDetector(
+            child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
               onTap: () => Navigator.of(context).pop(),
               child: Container(
                 width: 44,
@@ -184,7 +184,7 @@ class _ImageViewerState extends State<ImageViewer> with SingleTickerProviderStat
                   size: 24,
                 ),
               ),
-            ),
+            )),
           ),
           
           // Description

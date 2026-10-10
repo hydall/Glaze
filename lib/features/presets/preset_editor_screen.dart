@@ -2019,6 +2019,7 @@ Widget _linkedSessionContentCard(
                 color: context.cs.primary.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10),
                 child: InkWell(
+                  mouseCursor: SystemMouseCursors.click,
                   onTap: onEdit,
                   borderRadius: BorderRadius.circular(10),
                   child: Padding(

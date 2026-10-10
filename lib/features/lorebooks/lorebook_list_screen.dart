@@ -661,7 +661,7 @@ class _LorebookCard extends ConsumerWidget {
     // In a sidebar panel the lorebook is a row of the list, edge to edge.
     if (inSidebarPanel(context)) {
       return FlatGroupSurface(
-        child: InkWell(onTap: onTap, child: content),
+        child: InkWell(mouseCursor: SystemMouseCursors.click, onTap: onTap, child: content),
       );
     }
     return Padding(
@@ -716,6 +716,7 @@ class _AddButton extends StatelessWidget {
       color: context.cs.primary,
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
         borderRadius: BorderRadius.circular(14),
         onTap: onTap,
         child: Padding(

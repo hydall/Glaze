@@ -608,6 +608,7 @@ class _RandomizingCardOverlayState extends State<RandomizingCardOverlay>
     final Widget face;
     if (!showBack) {
       face = MouseRegion(
+        cursor: SystemMouseCursors.click,
         onHover: (e) => _onHoverTilt(e.localPosition, Size(cardW, cardH)),
         onExit: (_) => _onHoverExit(),
         child: GestureDetector(
@@ -633,7 +634,7 @@ class _RandomizingCardOverlayState extends State<RandomizingCardOverlay>
       face = Transform(
         alignment: Alignment.center,
         transform: Matrix4.identity()..rotateY(math.pi),
-        child: GestureDetector(
+        child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: _toggleFlip,
           child: RepaintBoundary(
@@ -643,7 +644,7 @@ class _RandomizingCardOverlayState extends State<RandomizingCardOverlay>
               accent: _accentFor(current),
             ),
           ),
-        ),
+        )),
       );
     }
 
@@ -810,7 +811,7 @@ class _RoundButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       child: Container(
         width: size,
@@ -831,7 +832,7 @@ class _RoundButton extends StatelessWidget {
         ),
         child: Icon(icon, size: iconSize, color: iconColor),
       ),
-    );
+    ));
   }
 }
 
@@ -1710,7 +1711,7 @@ class _BackTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Container(
@@ -1739,7 +1740,7 @@ class _BackTab extends StatelessWidget {
           ),
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -1855,7 +1856,7 @@ class _PromptAccordion extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          GestureDetector(
+          MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
             onTap: onToggle,
             behavior: HitTestBehavior.opaque,
             child: Padding(
@@ -1886,7 +1887,7 @@ class _PromptAccordion extends StatelessWidget {
                 ],
               ),
             ),
-          ),
+          )),
           AnimatedCrossFade(
             crossFadeState: expanded
                 ? CrossFadeState.showSecond

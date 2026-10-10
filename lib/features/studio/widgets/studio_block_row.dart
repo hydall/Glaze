@@ -110,6 +110,7 @@ class StudioBlockRow extends StatelessWidget {
       child: Opacity(
         opacity: block.enabled ? 1.0 : 0.5,
         child: InkWell(
+          mouseCursor: SystemMouseCursors.click,
           onTap: onEdit,
           onLongPress: onLongPress,
           child: Row(
@@ -213,6 +214,7 @@ class StudioBlockRow extends StatelessWidget {
                 child: Material(
                   color: Colors.transparent,
                   child: InkWell(
+                    mouseCursor: SystemMouseCursors.click,
                     onTap: onEdit,
                     child: Icon(
                       Icons.edit_outlined,
@@ -329,6 +331,7 @@ class StudioBlockSectionHeader extends StatelessWidget {
         ),
       ),
       child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
         onTap: onToggle,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
@@ -408,6 +411,7 @@ class StudioFactCheckerRow extends StatelessWidget {
       child: Opacity(
         opacity: block.enabled ? 1.0 : 0.5,
         child: InkWell(
+          mouseCursor: SystemMouseCursors.click,
           onTap: onEdit,
           child: Row(
             children: [
@@ -455,6 +459,7 @@ class StudioFactCheckerRow extends StatelessWidget {
                 child: Material(
                   color: Colors.transparent,
                   child: InkWell(
+                    mouseCursor: SystemMouseCursors.click,
                     onTap: onEdit,
                     child: Icon(
                       Icons.edit_outlined,
@@ -615,6 +620,7 @@ class _StudioBlockGroupRowState extends State<StudioBlockGroupRow> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             InkWell(
+              mouseCursor: SystemMouseCursors.click,
               onTap: () => setState(() => _expanded = !_expanded),
               onLongPress: () => widget.onDeleteGroup(group),
               child: Row(
@@ -686,6 +692,7 @@ class _StudioBlockGroupRowState extends State<StudioBlockGroupRow> {
                     child: Material(
                       color: Colors.transparent,
                       child: InkWell(
+                        mouseCursor: SystemMouseCursors.click,
                         onTap: () => widget.onDeleteGroup(group),
                         borderRadius: BorderRadius.circular(20),
                         child: Icon(

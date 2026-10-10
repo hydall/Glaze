@@ -450,6 +450,7 @@ class _BsButton extends StatelessWidget {
       color: bg,
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
         borderRadius: BorderRadius.circular(14),
         onTap: onPressed,
         child: Opacity(

@@ -315,7 +315,7 @@ class _SidebarButton extends StatelessWidget {
     final color = _itemColor(context, item);
     final textTheme = Theme.of(context).textTheme;
 
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       // Opaque: HoverGlow's overlays are IgnorePointer and the row's own
       // content only covers the icon and the label, so a deferToChild detector
       // would swallow clicks landing on the empty space between them.
@@ -346,7 +346,7 @@ class _SidebarButton extends StatelessWidget {
           ),
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -364,7 +364,7 @@ class _CharactersTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return Tooltip(
       message: item.label,
-      child: GestureDetector(
+      child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: item.onTap,
         child: ClipRRect(
@@ -395,7 +395,7 @@ class _CharactersTile extends StatelessWidget {
             ),
           ),
         ),
-      ),
+      )),
     );
   }
 }
@@ -411,7 +411,7 @@ class _CharactersButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final foreground = _itemColor(context, item);
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: item.onTap,
       child: HoverGlow(
@@ -438,7 +438,7 @@ class _CharactersButton extends StatelessWidget {
           ),
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -454,7 +454,7 @@ class _CollapsedIcon extends StatelessWidget {
     return Tooltip(
       message: item.label,
       preferBelow: false,
-      child: GestureDetector(
+      child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: item.onTap,
         child: Padding(
@@ -483,7 +483,7 @@ class _CollapsedIcon extends StatelessWidget {
             ),
           ),
         ),
-      ),
+      )),
     );
   }
 }

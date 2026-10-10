@@ -521,7 +521,7 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
                   ),
                 ),
               if (catalog)
-                GestureDetector(
+                MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
                   onTap: () => _installBuiltIn(preset),
                   child: Container(
                     width: 32,
@@ -540,9 +540,9 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
                       color: Colors.white,
                     ),
                   ),
-                )
+                ))
               else if (preset.id != 'default')
-                GestureDetector(
+                MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
                   onTap: () =>
                       _showPresetActions(context, preset, isActive),
                   child: Container(
@@ -562,7 +562,7 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
                       color: Colors.white,
                     ),
                   ),
-                ),
+                )),
             ],
           ),
         ),
@@ -625,6 +625,7 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
             Material(
               color: Colors.transparent,
               child: InkWell(
+                mouseCursor: SystemMouseCursors.click,
                 onTap: catalog
                     ? () => _installBuiltIn(preset)
                     : (isActive ? null : () => _selectPreset(preset)),

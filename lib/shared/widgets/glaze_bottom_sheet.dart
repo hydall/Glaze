@@ -933,7 +933,7 @@ class _SheetSearchField extends StatelessWidget {
             duration: const Duration(milliseconds: 120),
             child: IgnorePointer(
               ignoring: !hasQuery,
-              child: GestureDetector(
+              child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
                 onTap: onClear,
                 behavior: HitTestBehavior.opaque,
                 child: Icon(
@@ -941,7 +941,7 @@ class _SheetSearchField extends StatelessWidget {
                   size: 18,
                   color: context.cs.onSurfaceVariant,
                 ),
-              ),
+              )),
             ),
           ),
           suffixIconConstraints: const BoxConstraints(
@@ -1183,7 +1183,7 @@ class _ItemRowState extends State<_ItemRow> {
   @override
   Widget build(BuildContext context) {
     final item = widget.item;
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTapDown: (_) => setState(() => _pressed = true),
       onTapCancel: () => setState(() => _pressed = false),
       onTap: () {
@@ -1228,7 +1228,7 @@ class _ItemRowState extends State<_ItemRow> {
                 mainAxisSize: MainAxisSize.min,
                 children: item.actions
                     .map(
-                      (a) => GestureDetector(
+                      (a) => MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
                         onTap: a.onTap,
                         child: Padding(
                           padding: const EdgeInsets.all(8),
@@ -1238,14 +1238,14 @@ class _ItemRowState extends State<_ItemRow> {
                             color: a.color ?? context.cs.onSurfaceVariant,
                           ),
                         ),
-                      ),
+                      )),
                     )
                     .toList(),
               ),
           ],
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -1340,6 +1340,7 @@ class _ItemCardRowState extends State<_ItemCardRow> {
       color: Colors.white.withValues(alpha: 0.06),
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
         onTap: () {
           Haptics.selectionClick();
           item.onTap();
@@ -1382,7 +1383,7 @@ class _ItemCardRowState extends State<_ItemCardRow> {
                   mainAxisSize: MainAxisSize.min,
                   children: item.actions
                       .map(
-                        (a) => GestureDetector(
+                        (a) => MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
                           onTap: a.onTap,
                           child: Padding(
                             padding: const EdgeInsets.all(8),
@@ -1392,7 +1393,7 @@ class _ItemCardRowState extends State<_ItemCardRow> {
                               color: a.color ?? context.cs.onSurfaceVariant,
                             ),
                           ),
-                        ),
+                        )),
                       )
                       .toList(),
                 ),
@@ -1518,13 +1519,14 @@ class GlazeSessionRow extends StatelessWidget {
             ? context.cs.primary.withValues(alpha: 0.08)
             : null,
         accent: item.isActive ? context.cs.primary : null,
-        child: InkWell(onTap: item.onTap, child: content),
+        child: InkWell(mouseCursor: SystemMouseCursors.click, onTap: item.onTap, child: content),
       );
     }
     return Material(
       color: Colors.white.withValues(alpha: 0.06),
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
         onTap: item.onTap,
         borderRadius: BorderRadius.circular(16),
         child: DecoratedBox(
@@ -1663,7 +1665,7 @@ class GlazeSessionRow extends StatelessWidget {
               ),
               const SizedBox(width: 8),
             ],
-            GestureDetector(
+            MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
               onTap: item.onMore,
               child: Padding(
                 padding: const EdgeInsets.all(4),
@@ -1673,7 +1675,7 @@ class GlazeSessionRow extends StatelessWidget {
                   color: context.cs.onSurfaceVariant,
                 ),
               ),
-            ),
+            )),
           ],
         ),
       ],
@@ -1765,7 +1767,7 @@ class _CardRowState extends State<_CardRow> {
     final item = widget.item;
     final hasImage = item.imageUrl != null;
 
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTapDown: (_) => setState(() => _pressed = true),
       onTapUp: (_) {
         setState(() => _pressed = false);
@@ -1874,7 +1876,7 @@ class _CardRowState extends State<_CardRow> {
           ],
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -1975,7 +1977,7 @@ class _CardActions extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: actions
           .map(
-            (a) => GestureDetector(
+            (a) => MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
               onTap: a.onTap,
               child: Container(
                 margin: const EdgeInsets.only(bottom: 4),
@@ -1994,7 +1996,7 @@ class _CardActions extends StatelessWidget {
                       : (a.color ?? context.cs.onSurfaceVariant),
                 ),
               ),
-            ),
+            )),
           )
           .toList(),
     );

@@ -532,6 +532,7 @@ class _StyleCard extends StatelessWidget {
             : Colors.white.withValues(alpha: 0.06),
         borderRadius: radius,
         child: InkWell(
+          mouseCursor: SystemMouseCursors.click,
           onTap: onTap,
           borderRadius: radius,
           child: Container(

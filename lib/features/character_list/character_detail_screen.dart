@@ -1072,7 +1072,7 @@ class _DetailHeaderButtonState extends ConsumerState<_DetailHeaderButton>
   @override
   Widget build(BuildContext context) {
     final preset = ref.watch(themeProvider.select((s) => s.activePreset));
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: widget.onTap,
       onTapDown: widget.onTap != null ? (_) => _press.forward() : null,
       onTapUp: widget.onTap != null ? (_) => _press.reverse() : null,
@@ -1092,7 +1092,7 @@ class _DetailHeaderButtonState extends ConsumerState<_DetailHeaderButton>
           ),
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -1133,7 +1133,7 @@ class _HeroSection extends StatelessWidget {
     return SizedBox(
       height: 310,
       width: double.infinity,
-      child: GestureDetector(
+      child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
         onTap: () {
           ImageProvider? provider;
           if (previewAvatarUrl != null && previewAvatarUrl!.isNotEmpty) {
@@ -1192,7 +1192,7 @@ class _HeroSection extends StatelessWidget {
           ],
         ),
       ),
-    );
+    ));
   }
 
   Widget _buildAuthorLabel(BuildContext context) {
@@ -1208,11 +1208,11 @@ class _HeroSection extends StatelessWidget {
       ),
     );
     if (!hasLink) return label;
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: () => onOpenAuthor!(authorUrl!),
       behavior: HitTestBehavior.opaque,
       child: label,
-    );
+    ));
   }
 
   Widget _buildImage() {
@@ -2007,7 +2007,7 @@ class _AccordionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onToggle,
       behavior: HitTestBehavior.opaque,
       child: Padding(
@@ -2060,7 +2060,7 @@ class _AccordionHeader extends StatelessWidget {
           ],
         ),
       ),
-    );
+    ));
   }
 }
 

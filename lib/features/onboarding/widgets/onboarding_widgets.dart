@@ -67,7 +67,7 @@ class OnboardingSkipButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(20),
@@ -100,7 +100,7 @@ class OnboardingSkipButton extends StatelessWidget {
           ),
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -130,7 +130,7 @@ class OnboardingSkipConfirmSheet extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 20),
-          GestureDetector(
+          MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
             onTap: onConfirm,
             child: Container(
               padding: const EdgeInsets.symmetric(vertical: 15),
@@ -151,9 +151,9 @@ class OnboardingSkipConfirmSheet extends StatelessWidget {
                 ),
               ),
             ),
-          ),
+          )),
           const SizedBox(height: 10),
-          GestureDetector(
+          MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
             onTap: onCancel,
             child: Container(
               padding: const EdgeInsets.symmetric(vertical: 15),
@@ -172,7 +172,7 @@ class OnboardingSkipConfirmSheet extends StatelessWidget {
                 ),
               ),
             ),
-          ),
+          )),
         ],
       ),
     );
@@ -186,7 +186,7 @@ class OnboardingGlassBackButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(20),
@@ -211,7 +211,7 @@ class OnboardingGlassBackButton extends StatelessWidget {
           ),
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -520,7 +520,7 @@ class _OnboardingClickableBlockState extends State<OnboardingClickableBlock> {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTapDown: (_) => setState(() => _pressed = true),
       onTapUp: (_) {
         setState(() => _pressed = false);
@@ -564,7 +564,7 @@ class _OnboardingClickableBlockState extends State<OnboardingClickableBlock> {
           ),
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -588,7 +588,7 @@ class OnboardingChoiceCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = context.cs;
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
@@ -643,7 +643,7 @@ class OnboardingChoiceCard extends StatelessWidget {
           ],
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -667,7 +667,7 @@ class _OnboardingPrimaryButtonState extends State<OnboardingPrimaryButton> {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTapDown: (_) => setState(() => _pressed = true),
       onTapUp: (_) {
         setState(() => _pressed = false);
@@ -695,6 +695,6 @@ class _OnboardingPrimaryButtonState extends State<OnboardingPrimaryButton> {
           ),
         ),
       ),
-    );
+    ));
   }
 }

@@ -291,7 +291,7 @@ class _SortDirButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       child: SizedBox(
         width: 32,
@@ -314,7 +314,7 @@ class _SortDirButton extends StatelessWidget {
           ),
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -329,7 +329,7 @@ class _DiceButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       child: SizedBox(
         width: 32,
@@ -347,7 +347,7 @@ class _DiceButton extends StatelessWidget {
           ),
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -359,7 +359,7 @@ class _FilterButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       child: SizedBox(
         width: 32,
@@ -412,7 +412,7 @@ class _FilterButton extends StatelessWidget {
           ],
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -430,7 +430,7 @@ class _SortTypePill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: () => _showPicker(context),
       child: SizedBox(
         height: 32,
@@ -462,7 +462,7 @@ class _SortTypePill extends StatelessWidget {
           ),
         ),
       ),
-    );
+    ));
   }
 
   void _showPicker(BuildContext context) {

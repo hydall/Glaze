@@ -122,7 +122,7 @@ class _PillTabStripState extends State<PillTabStrip> {
 
                     return SizedBox(
                       width: tabWidth,
-                      child: GestureDetector(
+                      child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
                         onTap: () => widget.onChanged(index),
                         behavior: HitTestBehavior.opaque,
                         child: Row(
@@ -146,7 +146,7 @@ class _PillTabStripState extends State<PillTabStrip> {
                             ),
                           ],
                         ),
-                      ),
+                      )),
                     );
                   }),
                 ),
@@ -261,7 +261,7 @@ class _UnderlineTab extends StatelessWidget {
       duration: const Duration(milliseconds: 200),
       curve: Curves.easeOut,
       builder: (context, t, _) {
-        return GestureDetector(
+        return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
           onTap: onTap,
           behavior: HitTestBehavior.opaque,
           child: Padding(
@@ -309,7 +309,7 @@ class _UnderlineTab extends StatelessWidget {
               ),
             ),
           ),
-        );
+        ));
       },
     );
   }

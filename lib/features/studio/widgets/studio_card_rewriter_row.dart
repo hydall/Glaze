@@ -58,6 +58,7 @@ class StudioCardRewriterRow extends StatelessWidget {
       child: Opacity(
         opacity: enabled ? 1.0 : 0.5,
         child: InkWell(
+          mouseCursor: SystemMouseCursors.click,
           onTap: () => showCardRewriterLaneSettings(
             context,
             settings: settings,

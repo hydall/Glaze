@@ -121,7 +121,7 @@ class PresetDashboardCard extends StatelessWidget {
                 const SizedBox(width: 12),
               ],
               Expanded(
-                child: GestureDetector(
+                child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
                   onTap: onTitleTap,
                   child: Padding(
                     padding: const EdgeInsets.only(right: 8),
@@ -161,7 +161,7 @@ class PresetDashboardCard extends StatelessWidget {
                       ],
                     ),
                   ),
-                ),
+                )),
               ),
               PresetDotsButton(onTap: onMenuTap, onCover: onCover),
             ],
@@ -203,10 +203,10 @@ class PresetDashboardCard extends StatelessWidget {
               left: 0,
               right: 0,
               height: _coverHeight,
-              child: GestureDetector(
+              child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
                 onTap: onCoverTap,
                 child: _CoverBand(image: cover),
-              ),
+              )),
             ),
           content,
         ],
@@ -299,6 +299,7 @@ class PresetAddBlockRow extends StatelessWidget {
       color: Colors.transparent,
       borderRadius: radius,
       child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
         onTap: onTap,
         borderRadius: radius,
         child: Container(
@@ -361,6 +362,7 @@ class PresetDotsButton extends StatelessWidget {
             )
           : const CircleBorder(),
       child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
         onTap: onTap,
         customBorder: const CircleBorder(),
         child: SizedBox(
@@ -400,7 +402,7 @@ class PresetUtilButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       child: Stack(
         clipBehavior: Clip.none,
@@ -448,7 +450,7 @@ class PresetUtilButton extends StatelessWidget {
             ),
         ],
       ),
-    );
+    ));
   }
 }
 

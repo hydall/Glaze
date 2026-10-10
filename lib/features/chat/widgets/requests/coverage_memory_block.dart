@@ -44,6 +44,7 @@ class _CoverageMemoryBlockState extends State<CoverageMemoryBlock> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           InkWell(
+            mouseCursor: SystemMouseCursors.click,
             onTap: summary == null
                 ? null
                 : () => setState(() => _expanded = !_expanded),
