@@ -372,26 +372,70 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
 
     final tiles = _visibleTiles();
 
+    final list = ListView(
+      controller: _scrollController,
+      padding: EdgeInsets.fromLTRB(16, topPad + 16, 16, bottomPad),
+      children: _loading
+          ? const [
+              SizedBox(
+                height: 200,
+                child: Center(child: CircularProgressIndicator()),
+              ),
+            ]
+          : _buildRows(
+              context,
+              tiles,
+              personaInfo,
+              resolvedAvatar,
+              presetName,
+              presetImage,
+            ),
+    );
+
     return Scaffold(
       backgroundColor: Colors.transparent,
-      body: ListView(
-        controller: _scrollController,
-        padding: EdgeInsets.fromLTRB(16, topPad + 16, 16, bottomPad),
-        children: _loading
-            ? const [
-                SizedBox(
-                  height: 200,
-                  child: Center(child: CircularProgressIndicator()),
-                ),
-              ]
-            : _buildRows(
-                context,
-                tiles,
-                personaInfo,
-                resolvedAvatar,
-                presetName,
-                presetImage,
+      // The sidebar has no shell header, so the hub carries its own title row.
+      // It sits at the height of the Characters tab's search strip so the two
+      // columns' leading strips line up.
+      body: widget.inSidebar
+          ? Column(
+              children: [
+                _buildSidebarHeader(context),
+                Expanded(child: list),
+              ],
+            )
+          : list,
+    );
+  }
+
+  /// Height of the desktop sidebar hub's header, matching the Characters tab's
+  /// search strip ([_CharacterListScreenState._kSearchStripBlock]).
+  static const double _kSidebarHeaderHeight = 41.0;
+
+  /// Title row of the hub when hosted in the desktop right sidebar: the Tools
+  /// label and the same edit toggle the shell header carries on the route.
+  Widget _buildSidebarHeader(BuildContext context) {
+    return Container(
+      height: _kSidebarHeaderHeight,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: context.cs.outlineVariant)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              'tab_tools'.tr(),
+              style: TextStyle(
+                color: context.cs.onSurface,
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
               ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          _HeaderEditToggle(editing: _editing, onTap: _toggleEditing),
+        ],
       ),
     );
   }
