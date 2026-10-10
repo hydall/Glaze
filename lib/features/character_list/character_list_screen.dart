@@ -103,6 +103,11 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
   /// bar (see [_searchInStrip]), its bottom edge included.
   static const double _kSearchStripBlock = 41.0;
 
+  /// Room the character grid's scrollbar leaves at the top so its thumb starts
+  /// below the search strip floating over the column, rather than under it.
+  /// Zero unless the desktop strip is in use.
+  double get _scrollbarTopPadding => _searchInStrip ? _kSearchStripBlock : 0.0;
+
   // Owns one scroll position per sub-tab (the grids attach via
   // PrimaryScrollController), so tapping the active tab can animate it back to
   // the top and switching tabs returns each one to where it was left.
@@ -722,6 +727,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
             sortDir: _sortDir,
             topPadding: topPad,
             bottomPadding: navHeight + 20,
+            scrollbarTopPadding: _scrollbarTopPadding,
             filterCount: _filters.activeCount,
             onFilterTap: () => _showCharacterFilterSheet(context),
             // The grid only holds the loaded page; let the dice draw from the
@@ -854,6 +860,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
           sortDir: _sortDir,
           topPadding: topPad,
           bottomPadding: navHeight + 20,
+          scrollbarTopPadding: _scrollbarTopPadding,
           filterCount: _filters.activeCount,
           onFilterTap: () => _showCharacterFilterSheet(context),
           onSortDirToggle: () => setState(() {
@@ -931,6 +938,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
           sortDir: _sortDir,
           topPadding: topPad,
           bottomPadding: navHeight + 20,
+          scrollbarTopPadding: _scrollbarTopPadding,
           filterCount: _filters.activeCount,
           onFilterTap: () => _showCharacterFilterSheet(context),
           folderId: isFavorites ? null : folderId,

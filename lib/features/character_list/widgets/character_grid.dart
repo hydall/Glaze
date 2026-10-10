@@ -28,6 +28,12 @@ class CharacterGrid extends StatelessWidget {
   final ValueChanged<SortType> onSortTypeChanged;
   final double topPadding;
   final double bottomPadding;
+
+  /// Extra room the desktop scrollbar leaves at the top of the viewport, so a
+  /// header floating over the column (the title-bar search strip on Windows)
+  /// does not sit under the thumb. The framework's Material scrollbar reads its
+  /// padding from the ambient [MediaQuery], so this is applied there.
+  final double scrollbarTopPadding;
   final bool isLoadingMore;
   final bool hasMore;
   final int filterCount;
@@ -63,6 +69,7 @@ class CharacterGrid extends StatelessWidget {
     required this.onSortTypeChanged,
     this.topPadding = 0,
     this.bottomPadding = 16,
+    this.scrollbarTopPadding = 0,
     this.isLoadingMore = false,
     this.hasMore = false,
     this.filterCount = 0,
@@ -177,7 +184,7 @@ class CharacterGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return CustomScrollView(
+    final grid = CustomScrollView(
       slivers: [
         if (topPadding > 0)
           SliverToBoxAdapter(child: SizedBox(height: topPadding)),
@@ -263,6 +270,15 @@ class CharacterGrid extends StatelessWidget {
           SliverToBoxAdapter(child: SizedBox(height: bottomPadding)),
         ],
       ],
+    );
+
+    if (scrollbarTopPadding <= 0) return grid;
+    final media = MediaQuery.of(context);
+    return MediaQuery(
+      data: media.copyWith(
+        padding: media.padding.copyWith(top: scrollbarTopPadding),
+      ),
+      child: grid,
     );
   }
 }
