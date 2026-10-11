@@ -44,7 +44,12 @@ Future<void> maybeShowCharacterHidingOnboarding(BuildContext context) async {
     isDismissible: false,
     enableDrag: false,
     isScrollControlled: true,
+    // Desktop: a chrome-less, content-sized window — the same presentation
+    // every other onboarding sheet gets. The sheet draws its own card and dims
+    // the app behind it; a titled window would add a close button to a surface
+    // that is deliberately non-dismissible for a few seconds.
     windowContentSized: true,
+    windowChrome: false,
     builder: (_) => const _CharacterHidingOnboardingSheet(),
   );
 }
