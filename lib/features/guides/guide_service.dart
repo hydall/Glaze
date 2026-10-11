@@ -2,15 +2,18 @@ import 'dart:async';
 
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/services/onboarding_service.dart' show isOnboardingComplete;
+import '../../shared/shell/desktop/desktop_floating_provider.dart';
 import '../../shared/shell/desktop/desktop_layout_provider.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import 'guide_tour.dart';
 import 'tours/characters_tour.dart';
 import 'tours/chat_tour.dart';
+import 'tours/desktop_tour.dart';
 import 'tours/more_tour.dart';
 import 'tours/setup_tours.dart';
 import 'tours/tabs_tour.dart';
@@ -20,9 +23,8 @@ import 'tours/tools_tour.dart';
 /// the first time its part of the app opens, and replayable from
 /// More → Guides.
 enum AppGuide {
-  /// The four main tabs. Walks the phone navbar, so it is not offered in the
-  /// desktop layout.
-  tabs('guide_tabs_shown', mobileOnly: true),
+  /// The four main tabs. Walks the phone navbar.
+  tabs('guide_tabs_shown'),
   chat('guide_chat_shown'),
   characters('guide_characters_shown'),
   tools('guide_tools_shown'),
@@ -32,17 +34,36 @@ enum AppGuide {
   /// first time its screen opens, from Tools or as a sheet over a chat.
   api('guide_api_shown', route: '/tools/api'),
   presets('guide_presets_shown', route: '/tools/presets'),
-  personas('guide_personas_shown', route: '/tools/personas');
+  personas('guide_personas_shown', route: '/tools/personas'),
 
-  const AppGuide(this.shownKey, {this.mobileOnly = false, this.route});
+  /// The desktop layout in one pass: the left sidebar, the Characters column
+  /// and the Tools sidebar. On a computer all three are on screen at once, so
+  /// it stands in for [tabs], [characters] and [tools] there.
+  desktop('guide_desktop_shown');
+
+  const AppGuide(this.shownKey, {this.route});
 
   /// Persisted flag: the guide has been shown and never appears on its own
   /// again.
   final String shownKey;
-  final bool mobileOnly;
 
   /// The Tools sub-route the guide's screen lives on, for a replay to open.
   final String? route;
+
+  /// The guide that covers this one in the given layout: on desktop the tabs,
+  /// characters and tools tours fold into [desktop], and [desktop] has no
+  /// phone counterpart (null).
+  AppGuide? forLayout({required bool desktop}) => switch (this) {
+    AppGuide.tabs ||
+    AppGuide.characters ||
+    AppGuide.tools => desktop ? AppGuide.desktop : this,
+    AppGuide.desktop => desktop ? this : null,
+    AppGuide.chat ||
+    AppGuide.more ||
+    AppGuide.api ||
+    AppGuide.presets ||
+    AppGuide.personas => this,
+  };
 
   List<GuideTourStep> get steps => switch (this) {
     AppGuide.tabs => tabsTourSteps(),
@@ -53,6 +74,7 @@ enum AppGuide {
     AppGuide.api => apiTourSteps(),
     AppGuide.presets => presetsTourSteps(),
     AppGuide.personas => personasTourSteps(),
+    AppGuide.desktop => desktopTourSteps(),
   };
 }
 
@@ -85,10 +107,14 @@ bool _guideOpen = false;
 /// onboarding — a tour over it would point at screens the reader has not
 /// reached yet — and marks the guide seen up front, so a skipped or
 /// half-finished tour never reappears.
-Future<void> maybeShowGuide(BuildContext context, AppGuide guide) async {
-  if (_checked.contains(guide) || _guideOpen) return;
+///
+/// On desktop the tabs, characters and tools triggers all resolve to the one
+/// [AppGuide.desktop] tour, so whichever fires first shows it and the others
+/// back off.
+Future<void> maybeShowGuide(BuildContext context, AppGuide requested) async {
+  final guide = requested.forLayout(desktop: isDesktopLayout(context));
+  if (guide == null || _checked.contains(guide) || _guideOpen) return;
   _checked.add(guide);
-  if (guide.mobileOnly && isDesktopLayout(context)) return;
 
   final prefs = await SharedPreferences.getInstance();
   final armed = _armed.remove(guide);
@@ -146,6 +172,16 @@ Future<void> replayGuide(BuildContext context, AppGuide guide) async {
       await showGuide(context, guide);
     case AppGuide.tools:
       context.go('/tools');
+      await showGuide(context, guide);
+    case AppGuide.desktop:
+      // The tour points at the main window's columns; a floating window (the
+      // Menu the list was opened from) would sit over them.
+      final container = ProviderScope.containerOf(context, listen: false);
+      final windows = container.read(desktopWindowsProvider.notifier);
+      for (final window in container.read(desktopWindowsProvider)) {
+        windows.minimize(window.id);
+      }
+      context.go('/characters');
       await showGuide(context, guide);
     case AppGuide.tabs:
     case AppGuide.more:

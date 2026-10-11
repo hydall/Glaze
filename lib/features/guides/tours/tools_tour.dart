@@ -6,7 +6,10 @@ import '../guide_tour.dart';
 ///
 /// API, Presets and Personas only say what they are and where else they open;
 /// each screen walks through its own setup the first time it opens.
-List<GuideTourStep> toolsTourSteps() => [
+///
+/// [editOptional] lets the pencil drop out too — in the desktop tour the hub
+/// is not on screen while the right sidebar is collapsed to its strip.
+List<GuideTourStep> toolsTourSteps({bool editOptional = false}) => [
   for (final (tile, key) in const [
     ('api', 'guide_tools_api'),
     ('presets', 'guide_tools_presets'),
@@ -18,5 +21,9 @@ List<GuideTourStep> toolsTourSteps() => [
     ('stats', 'guide_tools_stats'),
   ])
     GuideTourStep.tr(key, target: GuideIds.toolsTile(tile), optional: true),
-  GuideTourStep.tr('guide_tools_edit', target: GuideIds.toolsEdit),
+  GuideTourStep.tr(
+    'guide_tools_edit',
+    target: GuideIds.toolsEdit,
+    optional: editOptional,
+  ),
 ];

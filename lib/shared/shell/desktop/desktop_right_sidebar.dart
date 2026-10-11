@@ -6,6 +6,7 @@ import '../../../core/platform/desktop_window.dart';
 import '../../../features/chat/bridge/chat_bridge_registry.dart';
 import '../../../features/chat/widgets/chat_drawer_panel.dart';
 import '../../../features/chat/widgets/magic_drawer_widgets.dart';
+import '../../../features/guides/guide_anchor.dart';
 import '../../../features/tools/tools_screen.dart';
 import '../../theme/app_colors.dart';
 import 'desktop_sidebar_surface.dart';
@@ -114,7 +115,14 @@ class _DesktopRightSidebarState extends ConsumerState<DesktopRightSidebar>
         animate: !controller.dragging,
         child: Stack(
           children: [
-            Positioned.fill(child: _buildBody(context, panel, charId)),
+            // Outside a chat the sidebar is the Tools hub (or its strip),
+            // which the desktop tour points at as a whole.
+            Positioned.fill(
+              child: GuideAnchor(
+                id: charId == null ? GuideIds.desktopTools : null,
+                child: _buildBody(context, panel, charId),
+              ),
+            ),
             Positioned(
               top: 0,
               bottom: 0,

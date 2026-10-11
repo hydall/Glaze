@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/platform/haptics.dart';
 import '../../../core/state/character_provider.dart';
 import '../../../features/chat_history/chat_history_list.dart';
+import '../../../features/guides/guide_anchor.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/hover_glow.dart';
 import '../../../shared/widgets/glaze_toast.dart';
@@ -130,6 +131,7 @@ class _DesktopLeftSidebarState extends ConsumerState<DesktopLeftSidebar> {
       icon: Icons.people_rounded,
       active: widget.currentView == 'characters',
       prominent: true,
+      anchor: GuideIds.desktopCharacters,
       onTap: _openCharacters,
     );
     final bottom = <_NavItem>[
@@ -137,12 +139,14 @@ class _DesktopLeftSidebarState extends ConsumerState<DesktopLeftSidebar> {
         label: 'menu_glossary'.tr(),
         icon: Icons.info_outline_rounded,
         active: glossaryOpen,
+        anchor: GuideIds.desktopGlossary,
         onTap: _toggleGlossary,
       ),
       _NavItem(
         label: 'tab_more'.tr(),
         icon: Icons.menu_rounded,
         active: widget.currentView == 'menu',
+        anchor: GuideIds.desktopMore,
         onTap: _openMenu,
       ),
     ];
@@ -180,19 +184,29 @@ class _DesktopLeftSidebarState extends ConsumerState<DesktopLeftSidebar> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-            child: _CharactersButton(item: characters),
+            child: GuideAnchor(
+              id: characters.anchor,
+              child: _CharactersButton(item: characters),
+            ),
           ),
           Expanded(
-            child: ChatHistoryList(
-              searchQuery: _searchQuery,
-              belowCount: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
-                child: _buildSearchField(context),
+            child: GuideAnchor(
+              id: GuideIds.desktopChats,
+              child: ChatHistoryList(
+                searchQuery: _searchQuery,
+                belowCount: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                  child: GuideAnchor(
+                    id: GuideIds.chatsSearch,
+                    child: _buildSearchField(context),
+                  ),
+                ),
               ),
             ),
           ),
           Divider(height: 1, color: context.cs.outlineVariant),
-          for (final item in bottom) _SidebarButton(item: item),
+          for (final item in bottom)
+            GuideAnchor(id: item.anchor, child: _SidebarButton(item: item)),
           const SizedBox(height: 4),
         ],
       ),
@@ -268,12 +282,21 @@ class _DesktopLeftSidebarState extends ConsumerState<DesktopLeftSidebar> {
         const SizedBox(height: 8),
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 4),
-          child: _CharactersTile(item: characters),
+          child: GuideAnchor(
+            id: characters.anchor,
+            child: _CharactersTile(item: characters),
+          ),
         ),
         const SizedBox(height: 4),
-        const Expanded(child: ChatHistoryList(collapsed: true)),
+        const Expanded(
+          child: GuideAnchor(
+            id: GuideIds.desktopChats,
+            child: ChatHistoryList(collapsed: true),
+          ),
+        ),
         Divider(height: 1, color: context.cs.outlineVariant),
-        for (final item in bottom) _CollapsedIcon(item: item),
+        for (final item in bottom)
+          GuideAnchor(id: item.anchor, child: _CollapsedIcon(item: item)),
         const SizedBox(height: 8),
       ],
     );
@@ -290,12 +313,16 @@ class _NavItem {
   /// rather than the muted tone used by the secondary entries.
   final bool prominent;
 
+  /// The [GuideAnchor] id the desktop tour points at this entry by.
+  final String? anchor;
+
   const _NavItem({
     required this.label,
     required this.icon,
     required this.onTap,
     this.active = false,
     this.prominent = false,
+    this.anchor,
   });
 }
 

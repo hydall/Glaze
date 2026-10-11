@@ -148,8 +148,8 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
   void initState() {
     super.initState();
     _loadLayout();
-    // The desktop sidebar hub has no layout editing and is always on screen;
-    // the guide belongs to the tab.
+    // The desktop sidebar hub is always on screen; it is covered by the
+    // desktop tour, which the Characters screen starts.
     if (!widget.inSidebar) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) maybeShowGuide(context, AppGuide.tools);
@@ -434,7 +434,10 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          _HeaderEditToggle(editing: _editing, onTap: _toggleEditing),
+          GuideAnchor(
+            id: GuideIds.toolsEdit,
+            child: _HeaderEditToggle(editing: _editing, onTap: _toggleEditing),
+          ),
         ],
       ),
     );

@@ -105,6 +105,7 @@ final prefs = <String, Object>{
     'guide_characters_shown',
     'guide_tools_shown',
     'guide_more_shown',
+    'guide_desktop_shown',
   ])
     key: true,
   'gz_global_regex_scripts': jsonEncode([

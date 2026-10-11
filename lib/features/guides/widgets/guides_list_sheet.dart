@@ -9,8 +9,10 @@ import '../guide_service.dart';
 
 /// More → Help → Replay onboarding: the first-run setup and every in-app
 /// guide, replayable on demand. The catalog explainer is listed with the
-/// guides, in the order the tabs come.
+/// guides, in the order the tabs come. On desktop the tabs, Characters and
+/// Tools guides are one tour, listed once.
 Future<void> showGuidesList(BuildContext context) {
+  final desktop = isDesktopLayout(context);
   void open(Future<void> Function(BuildContext) show) {
     Navigator.of(context, rootNavigator: true).pop();
     show(context);
@@ -34,17 +36,25 @@ Future<void> showGuidesList(BuildContext context) {
         icon: Icons.replay_rounded,
         onTap: () => open(replayOnboarding),
       ),
-      if (!isDesktopLayout(context))
+      if (desktop)
+        guide(AppGuide.desktop, Icons.view_column_rounded, 'guides_desktop')
+      else
         guide(AppGuide.tabs, Icons.explore_rounded, 'guides_tabs'),
       guide(AppGuide.chat, Icons.forum_rounded, 'guides_chat'),
-      guide(AppGuide.characters, Icons.people_alt_rounded, 'guides_characters'),
+      if (!desktop)
+        guide(
+          AppGuide.characters,
+          Icons.people_alt_rounded,
+          'guides_characters',
+        ),
       BottomSheetItem(
         label: 'catalog_onboarding_replay'.tr(),
         hint: 'catalog_onboarding_replay_hint'.tr(),
         icon: Icons.travel_explore_rounded,
         onTap: () => open(replayCatalogOnboarding),
       ),
-      guide(AppGuide.tools, Icons.handyman_rounded, 'guides_tools'),
+      if (!desktop)
+        guide(AppGuide.tools, Icons.handyman_rounded, 'guides_tools'),
       guide(AppGuide.api, Icons.cloud_rounded, 'guides_api'),
       guide(AppGuide.presets, Icons.tune_rounded, 'guides_presets'),
       guide(AppGuide.personas, Icons.person_rounded, 'guides_personas'),
