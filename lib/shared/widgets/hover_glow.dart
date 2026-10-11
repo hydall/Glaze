@@ -23,6 +23,14 @@ class HoverGlow extends StatefulWidget {
   /// Clips the glow to a rounded rectangle. Null keeps square corners.
   final BorderRadius? borderRadius;
 
+  /// Border painted above the child while the pointer is over it — a hover
+  /// outline. Null paints none. Shape it with [borderRadius].
+  final BoxBorder? hoverBorder;
+
+  /// Inset of [hoverBorder] from the child's edges, so the rounded corners of a
+  /// full-bleed row stay clear of the surface's own clipping.
+  final EdgeInsets borderInset;
+
   const HoverGlow({
     super.key,
     required this.child,
@@ -30,6 +38,8 @@ class HoverGlow extends StatefulWidget {
     this.hoverTintAlpha = 0.05,
     this.radius = 200,
     this.borderRadius,
+    this.hoverBorder,
+    this.borderInset = EdgeInsets.zero,
   });
 
   @override
@@ -76,6 +86,25 @@ class _HoverGlowState extends State<HoverGlow> {
           ),
         ),
         widget.child,
+        if (widget.hoverBorder != null)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: AnimatedOpacity(
+                opacity: _hovered ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 150),
+                curve: Curves.ease,
+                child: Padding(
+                  padding: widget.borderInset,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      border: widget.hoverBorder,
+                      borderRadius: widget.borderRadius,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
       ],
     );
 

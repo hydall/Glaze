@@ -35,6 +35,18 @@ import 'widgets/empty_chats_illustration.dart';
 import 'widgets/message_preview_text.dart';
 import 'widgets/typing_dots.dart';
 
+/// Hover outline for a top-level dialog row — the same hairline the grouped
+/// card draws around its sessions.
+final BoxBorder _hoverOutline = Border.all(
+  color: Colors.white.withValues(alpha: 0.1),
+);
+
+/// Inset of [_hoverOutline] so its rounded corners clear the sidebar's edge.
+const EdgeInsets _hoverOutlineInset = EdgeInsets.symmetric(
+  horizontal: 8,
+  vertical: 2,
+);
+
 class ChatHistoryList extends ConsumerStatefulWidget {
   final bool collapsed;
   final String searchQuery;
@@ -598,6 +610,9 @@ class _SessionTileState extends ConsumerState<_SessionTile>
       // list's `@contextmenu.prevent="openActions(chat)"`.
       onSecondaryTap: _handleContextGesture,
       child: HoverGlow(
+        borderRadius: BorderRadius.circular(12),
+        hoverBorder: _hoverOutline,
+        borderInset: _hoverOutlineInset,
         child: Container(
           height: 72,
           padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -931,6 +946,9 @@ class _GroupHeader extends ConsumerWidget {
       onLongPress: () => _showGroupActions(context, ref, latest),
       onSecondaryTap: () => _showGroupActions(context, ref, latest),
       child: HoverGlow(
+        borderRadius: BorderRadius.circular(12),
+        hoverBorder: _hoverOutline,
+        borderInset: _hoverOutlineInset,
         child: Container(
           height: 72,
           padding: const EdgeInsets.symmetric(horizontal: 16),
