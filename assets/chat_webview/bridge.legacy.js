@@ -286,7 +286,7 @@ class EditController {
       e.preventDefault();
       e.stopPropagation();
       if (e.deltaMode === 0) {
-        textarea.scrollTop += e.deltaY * 0.3;
+        textarea.scrollTop += e.deltaY;
       } else if (e.deltaMode === 1) {
         textarea.scrollTop += e.deltaY * 16;
       } else {

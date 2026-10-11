@@ -1,5 +1,7 @@
 ﻿/* Extracted from ../bridge.legacy.js. Keep public behavior stable. */
 
+import { WHEEL_PIXEL_SCALE } from './trackpad_scroll.js';
+
 export class EditController {
   constructor(sendToFlutter) {
     this._sendToFlutter = sendToFlutter;
@@ -274,7 +276,7 @@ export class EditController {
   }
 
   _scaledWheelDelta(e, textarea) {
-    if (e.deltaMode === 0) return e.deltaY * 0.3;
+    if (e.deltaMode === 0) return e.deltaY * WHEEL_PIXEL_SCALE;
     if (e.deltaMode === 1) return e.deltaY * 16;
     return e.deltaY * textarea.clientHeight;
   }

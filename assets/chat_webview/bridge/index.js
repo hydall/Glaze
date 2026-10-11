@@ -1,6 +1,7 @@
 import { Bridge } from './chat_bridge_controller.js';
 import { Formatter } from '../formatter/index.js';
 import { Renderer } from '../renderer/index.js';
+import { WHEEL_PIXEL_SCALE } from './trackpad_scroll.js';
 
 export { Bridge } from './chat_bridge_controller.js';
 export { EditController } from './edit_controller.js';
@@ -29,7 +30,7 @@ try {
   container.addEventListener('wheel', (e) => {
     if (e.deltaMode === 0) {
       e.preventDefault();
-      container.scrollTop += e.deltaY * 0.3;
+      container.scrollTop += e.deltaY * WHEEL_PIXEL_SCALE;
     } else if (e.deltaMode === 1) {
       e.preventDefault();
       container.scrollTop += e.deltaY * 16;

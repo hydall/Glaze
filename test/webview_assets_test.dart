@@ -1861,7 +1861,9 @@ void main() {
       expect(wheelSection, contains('_scaledWheelDelta(e, textarea)'));
       expect(
         editControllerJs,
-        contains('if (e.deltaMode === 0) return e.deltaY * 0.3'),
+        contains(
+          'if (e.deltaMode === 0) return e.deltaY * WHEEL_PIXEL_SCALE',
+        ),
       );
       expect(
         editControllerJs,
@@ -1984,12 +1986,20 @@ void main() {
       expect(bridgeIndexJs, contains("container.addEventListener('wheel'"));
     });
 
-    test('pixel-mode scroll uses 0.3 multiplier', () {
+    test('pixel-mode scroll uses the shared WHEEL_PIXEL_SCALE', () {
       expect(
         bridgeIndexJs,
-        contains('deltaY * 0.3'),
+        contains('deltaY * WHEEL_PIXEL_SCALE'),
         reason:
-            'Chat container scroll must use 0.3 multiplier for pixel-mode events',
+            'Chat container scroll must use the shared WHEEL_PIXEL_SCALE so it '
+            'stays in step with the trackpad replay and the edit textarea',
+      );
+      expect(
+        _bridgeAsset('trackpad_scroll.js'),
+        contains('export const WHEEL_PIXEL_SCALE = 1'),
+        reason:
+            'WHEEL_PIXEL_SCALE=1 scrolls one CSS pixel per wheel delta unit — '
+            'the browser-native pixel-mode rate instead of the old slow 0.3',
       );
     });
 

@@ -15,11 +15,13 @@
  */
 
 /* Pixel-mode wheel scale used by the page's own wheel handlers: they scroll by
- * `deltaY * 0.3`. Deltas arrive here already in CSS pixels, so they are
- * divided by the same factor to survive the round trip and track the finger
- * 1:1. Keep in sync with `e.deltaY * 0.3` in ./index.js and
- * EditController._scaledWheelDelta in ./edit_controller.js. */
-export const WHEEL_PIXEL_SCALE = 0.3;
+ * `deltaY * WHEEL_PIXEL_SCALE`. Deltas arrive here already in CSS pixels, so
+ * they are divided by the same factor to survive the round trip and track the
+ * finger 1:1. Shared with the container handler in ./index.js and
+ * EditController._scaledWheelDelta in ./edit_controller.js so all three stay
+ * in step. `1` is the browser's native pixel-mode rate — one CSS pixel of
+ * scroll per wheel delta unit — instead of the older, slower 0.3. */
+export const WHEEL_PIXEL_SCALE = 1;
 
 const SCROLLABLE_OVERFLOW = /^(auto|scroll|overlay)$/;
 
