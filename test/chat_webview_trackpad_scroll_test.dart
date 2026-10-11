@@ -209,11 +209,14 @@ void main() {
     });
 
     test('undoes the page wheel scale so the pan tracks the finger 1:1', () {
-      // The page's own wheel handlers scroll by `deltaY * 0.3`, so a delta
-      // already expressed in CSS pixels has to be divided by the same factor
-      // before it is replayed as a wheel event.
-      expect(bridgeIndexJs, contains('container.scrollTop += e.deltaY * 0.3'));
-      expect(trackpadJs, contains('export const WHEEL_PIXEL_SCALE = 0.3;'));
+      // The page's own wheel handlers scroll by `deltaY * WHEEL_PIXEL_SCALE`,
+      // so a delta already expressed in CSS pixels has to be divided by the
+      // same factor before it is replayed as a wheel event.
+      expect(
+        bridgeIndexJs,
+        contains('container.scrollTop += e.deltaY * WHEEL_PIXEL_SCALE'),
+      );
+      expect(trackpadJs, contains('export const WHEEL_PIXEL_SCALE = 1;'));
       expect(trackpadJs, contains('deltaX: dx / WHEEL_PIXEL_SCALE'));
       expect(trackpadJs, contains('deltaY: dy / WHEEL_PIXEL_SCALE'));
     });

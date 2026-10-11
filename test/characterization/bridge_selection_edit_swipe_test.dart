@@ -253,7 +253,7 @@ void main() {
       final idx = editControllerJs.indexOf('class EditController');
       final classBody = _extractBlockBody(editControllerJs, idx);
       expect(classBody, contains("addEventListener('wheel'"));
-      expect(classBody, contains('0.3'));
+      expect(classBody, contains('WHEEL_PIXEL_SCALE'));
     });
 
     test(
