@@ -79,6 +79,10 @@ class ChatWebViewCallbacks {
     messageActions.onRerunCleaner?.call(id);
   }
 
+  void onTranslateMessage(String id, String action, String text) {
+    messageActions.onTranslateMessage?.call(id, action, text);
+  }
+
   void onSelectionAction(String action, String text) {
     miscActions.onSelectionAction?.call(action, text);
   }

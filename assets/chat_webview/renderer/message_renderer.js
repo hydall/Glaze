@@ -31,7 +31,7 @@ import { DEFAULT_TYPING_TEXT } from './typing_phase.js';
  *     .msg-footer
  *       .msg-meta            — gen-stat (full layout only)
  *       .msg-center-controls — .msg-switcher / .msg-regenerate / .msg-guided-swipe-btn
- *       .msg-actions-btn or .edit-buttons
+ *       .msg-trailing-actions (> .msg-translate-btn .msg-actions-btn) or .edit-buttons
  *   .guided-swipe-container (toggled by bridge)
  * ============================================================ */
 
@@ -701,12 +701,31 @@ if (messageData.isEditing) classes.push('editing');
     if (m.isEditing) {
       footer.appendChild(this._createEditButtons(m.id));
     } else {
+      // The translate button sits left of the menu, so both share one cell
+      // of the footer grid. It is always built and shown only while
+      // translation is on (`.translation-enabled` on the container, see
+      // Bridge.setMessageSettings); the section's `translating` /
+      // `translated` class picks which glyph it wears.
+      const trailing = document.createElement('div');
+      trailing.className = 'msg-trailing-actions';
+      // Built on streaming and error bubbles too, because the footer is not
+      // rebuilt when the run ends; CSS hides it on those until then.
+      if (this._roleKey(m.role) !== 'system') {
+        const translate = document.createElement('div');
+        translate.className = 'msg-translate-btn';
+        translate.dataset.action = 'translate';
+        translate.dataset.messageId = m.id;
+        translate.title = 'Translate';
+        translate.innerHTML = ICON.translate + ICON.showOriginal;
+        trailing.appendChild(translate);
+      }
       const actions = document.createElement('div');
       actions.className = 'msg-actions-btn';
       actions.dataset.action = 'open-actions';
       actions.dataset.messageId = m.id;
       actions.innerHTML = ICON.menu;
-      footer.appendChild(actions);
+      trailing.appendChild(actions);
+      footer.appendChild(trailing);
     }
 
     return footer;

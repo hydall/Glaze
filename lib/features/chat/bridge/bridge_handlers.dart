@@ -66,6 +66,7 @@ const Map<String, HandlerSpec> bridgeHandlers = {
   'onRegenerate': HandlerSpec(HandlerKind.idStringPair),
   'onChangeGreeting': HandlerSpec(HandlerKind.idIntPair),
   'onRerunCleaner': HandlerSpec(HandlerKind.stringArg),
+  'onTranslateMessage': HandlerSpec(HandlerKind.jsonObject),
   'onSelectionAction': HandlerSpec(HandlerKind.jsonObject),
   // Edit
   'onEditSave': HandlerSpec(HandlerKind.idStringPair),

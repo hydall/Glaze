@@ -19,6 +19,7 @@ import '../../core/debug/perf_debug.dart';
 import '../../core/llm/game_time.dart';
 import '../../core/models/character.dart';
 import '../../core/utils/image_src.dart';
+import '../../core/utils/error_format.dart';
 import '../../core/utils/platform_paths.dart';
 import '../../shared/widgets/glaze_spinner.dart';
 import 'editing_message_provider.dart';
@@ -46,6 +47,8 @@ import '../../shared/widgets/glaze_scaffold.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_toast.dart';
+import '../translation/message_translation_controller.dart';
+import '../translation/translation_service.dart';
 import '../../shared/widgets/image_viewer.dart';
 import '../character_list/character_detail_screen.dart';
 import '../guides/guide_anchor.dart';
@@ -805,6 +808,63 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   bool _showingHistoryRotation = false;
   final GlobalKey<ChatWebViewWidgetState> _webViewStateKey = GlobalKey();
 
+  /// The per-message translate button. Display-only: the translation is
+  /// painted in the WebView and never reaches the message or the prompt.
+  late final MessageTranslationController
+  _translations = MessageTranslationController(
+    view: MessageTranslationView(
+      showPending: (id, original, label) =>
+          _webViewStateKey.currentState?.setTranslationPending(
+            id,
+            original,
+            label,
+          ) ??
+          Future.value(false),
+      showTranslation: (id, original, text) =>
+          _webViewStateKey.currentState?.setTranslation(id, original, text) ??
+          Future.value(),
+      showOriginal: (id) =>
+          _webViewStateKey.currentState?.clearTranslation(id) ?? Future.value(),
+    ),
+    onError: (error) {
+      if (!mounted) return;
+      GlazeToast.show(
+        context,
+        error is TranslationNotConfiguredException
+            ? 'translation_not_configured'.tr()
+            : 'translation_failed'.tr(args: [formatError(error)]),
+        isError: true,
+      );
+    },
+  );
+
+  void _onTranslateMessage(String id, String action, String text) {
+    final settings = ref.read(pipelineSettingsProvider).translation;
+    if (!settings.enabled) return;
+    final sessionId = widget.state.session?.id;
+    // The language the reader reads in: the one picked, or the interface's.
+    final target = settings.messageLanguage.isNotEmpty
+        ? settings.messageLanguage
+        : context.locale.languageCode;
+    unawaited(
+      _translations.handle(
+        id: id,
+        action: action,
+        text: text,
+        pendingLabel: 'translation_in_progress'.tr(),
+        translate: (text, token) => ref
+            .read(translationServiceProvider)
+            .translate(
+              text: text,
+              targetLanguageCode: target,
+              cancelToken: token,
+              sessionId: sessionId,
+              messageId: id,
+            ),
+      ),
+    );
+  }
+
   /// Rects of the glass overlays (header + input bar elements) measured in
   /// WebView-local coordinates and mirrored into the WebView so the messages
   /// scrolling underneath get blurred (Flutter's BackdropFilter cannot
@@ -854,6 +914,9 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   @override
   void didUpdateWidget(covariant _ChatBody oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.state.session?.id != widget.state.session?.id) {
+      _translations.cancelAll();
+    }
     if (oldWidget.drawerCtrl != widget.drawerCtrl) {
       _bindDrawerListenable();
     }
@@ -1356,6 +1419,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _keyboardSettleTimer?.cancel();
+    _translations.cancelAll();
     _blurRegistry.dispose();
     super.dispose();
   }
@@ -1874,6 +1938,11 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                 )
                                 .value ??
                             false,
+                        translationEnabled: ref.watch(
+                          pipelineSettingsProvider.select(
+                            (p) => p.translation.enabled,
+                          ),
+                        ),
                         messageActions: MessageActionsCallbacks(
                           onMessageContext:
                               (index, messageId, isUser, isSystem, content) {
@@ -1954,6 +2023,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                 .read(chatProvider(widget.charId).notifier)
                                 .rerunCleaner(id);
                           },
+                          onTranslateMessage: _onTranslateMessage,
                           onToggleHidden: (id) {
                             final idx = widget.state.messages.indexWhere(
                               (m) => m.id == id,

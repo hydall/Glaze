@@ -37,7 +37,11 @@ enum ComposerAction {
   ),
 
   /// Same, for a pair of double quotes.
-  quote('quote', Icons.format_quote, 'composer_action_quote');
+  quote('quote', Icons.format_quote, 'composer_action_quote'),
+
+  /// Translates the draft into the roleplay's language, in place. Offered
+  /// only while translation is switched on in the API sheet's Agents tab.
+  translate('translate', Icons.translate, 'composer_action_translate');
 
   final String id;
   final IconData icon;
@@ -70,6 +74,11 @@ enum ComposerAction {
   /// into a feature, while these only type, and a user who never writes
   /// markdown has nothing to lose by putting them away.
   bool get isInsert => insertToken != null;
+
+  /// True for an action that exists only while its feature is switched on.
+  /// Such an action is not part of the shipped row: a fresh install would
+  /// otherwise hold a slot for a button it never shows.
+  bool get isOptIn => this == ComposerAction.translate;
 
   /// Actions that appear as cards in the drawer's Actions tab while unpinned.
   ///
@@ -175,7 +184,7 @@ class ComposerPin {
 /// who wants one under the composer drags it there like any other card.
 final List<ComposerPin> kDefaultComposerPins = [
   for (final action in ComposerAction.values)
-    if (!action.isInsert) ComposerPin.action(action),
+    if (!action.isInsert && !action.isOptIn) ComposerPin.action(action),
 ];
 
 /// Which buttons sit under the composer, in display order.

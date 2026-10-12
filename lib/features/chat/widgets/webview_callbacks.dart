@@ -10,6 +10,8 @@ typedef SwipeCallback = void Function(String id, String direction);
 typedef GreetingCallback = void Function(String id, int direction);
 typedef RegenerateCallback = void Function(String id, String mode);
 typedef RerunCleanerCallback = void Function(String messageId);
+typedef TranslateMessageCallback =
+    void Function(String id, String action, String text);
 typedef ToggleHiddenCallback = void Function(String id);
 typedef InjectClickCallback = void Function(String id);
 typedef MemoryClickCallback = void Function(String id);
@@ -46,6 +48,7 @@ class MessageActionsCallbacks {
   final GreetingCallback? onChangeGreeting;
   final RegenerateCallback? onRegenerate;
   final RerunCleanerCallback? onRerunCleaner;
+  final TranslateMessageCallback? onTranslateMessage;
   final ToggleHiddenCallback? onToggleHidden;
   final ToggleHiddenCallback? onToggleImageHidden;
   final InjectClickCallback? onInjectClick;
@@ -60,6 +63,7 @@ class MessageActionsCallbacks {
     this.onChangeGreeting,
     this.onRegenerate,
     this.onRerunCleaner,
+    this.onTranslateMessage,
     this.onToggleHidden,
     this.onToggleImageHidden,
     this.onInjectClick,

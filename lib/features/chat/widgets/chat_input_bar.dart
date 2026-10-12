@@ -11,6 +11,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/models/chat_message.dart' show maxMessageAttachments;
 import '../../../core/platform/clipboard_images.dart';
 import '../../../core/platform/haptics.dart';
+import '../../../core/state/db_provider.dart';
+import '../../../core/utils/error_format.dart';
 import '../../../core/utils/text_insert.dart';
 import '../../../shared/shell/desktop/desktop_layout_provider.dart';
 import '../../../shared/theme/app_colors.dart';
@@ -32,6 +34,8 @@ import 'action_glyph.dart';
 import 'chat_blur_region_tracker.dart';
 import 'magic_drawer_catalog.dart';
 import '../../guides/guide_anchor.dart';
+import '../../translation/composer_translator.dart';
+import '../../translation/translation_service.dart';
 import 'magic_drawer_widgets.dart';
 
 Border _uiBorder(BuildContext context, ThemePreset preset) {
@@ -212,6 +216,12 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
   /// back, and `ref` is off limits once the element is being unmounted.
   late final ComposerActionBridge _actionBridge;
 
+  /// The translate action's state: a request in flight, or a translation the
+  /// next tap can undo.
+  late final ComposerTranslator _draftTranslator = ComposerTranslator(
+    _controller,
+  )..addListener(_onDraftTranslatorChanged);
+
   @override
   void initState() {
     super.initState();
@@ -245,7 +255,47 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
       case ComposerAction.quote:
         final token = action.insertToken;
         if (token != null) _insertSurround(token);
+      case ComposerAction.translate:
+        unawaited(_translateDraft());
     }
+  }
+
+  bool get _translationEnabled =>
+      ref.read(pipelineSettingsProvider).translation.enabled;
+
+  void _onDraftTranslatorChanged() {
+    if (mounted) setState(() {});
+  }
+
+  /// Translates the draft into the roleplay's language, or puts the original
+  /// back. Only the text field changes — nothing is sent.
+  Future<void> _translateDraft() async {
+    if (!_translationEnabled) return;
+    await _draftTranslator.toggle(
+      translate: (text, token) => ref
+          .read(translationServiceProvider)
+          .translate(
+            text: text,
+            targetLanguageCode: ref
+                .read(pipelineSettingsProvider)
+                .translation
+                .inputLanguage,
+            cancelToken: token,
+          ),
+      onEmpty: () {
+        if (mounted) GlazeToast.show(context, 'translation_input_empty'.tr());
+      },
+      onError: (error) {
+        if (!mounted) return;
+        GlazeToast.show(
+          context,
+          error is TranslationNotConfiguredException
+              ? 'translation_not_configured'.tr()
+              : 'translation_failed'.tr(args: [formatError(error)]),
+          isError: true,
+        );
+      },
+    );
   }
 
   /// Wraps the caret / selection in a pair of [token] and brings the keyboard
@@ -534,6 +584,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     // holding a handler into a disposed State.
     _actionBridge.unregister(_runComposerAction);
     _debounce?.cancel();
+    _draftTranslator.dispose();
     _controller.dispose();
     _guidanceController.dispose();
     _internalFocusNode.dispose();
@@ -1060,6 +1111,19 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
           glyph: action.glyph,
           onTap: () => _insertSurround(token),
         );
+      case ComposerAction.translate:
+        if (!ref.watch(
+          pipelineSettingsProvider.select((p) => p.translation.enabled),
+        )) {
+          return null;
+        }
+        // The glyph says what the tap does next: translate, or — while the
+        // field holds the translation — bring the original back.
+        return _ResolvedPin(
+          icon: _draftTranslator.canRestore ? Icons.undo : action.icon,
+          onTap: () => unawaited(_translateDraft()),
+          color: _draftTranslator.busy ? Colors.amber : null,
+        );
     }
   }
 
@@ -1473,7 +1537,9 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
                                   onContentInserted: _handleInsertedContent,
                                 ),
                             readOnly:
-                                widget.isEditingMessage || _isImpersonating,
+                                widget.isEditingMessage ||
+                                _isImpersonating ||
+                                _draftTranslator.busy,
                             canRequestFocus: !widget.isEditingMessage,
                             enableInteractiveSelection:
                                 !widget.isEditingMessage,

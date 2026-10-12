@@ -354,6 +354,11 @@ class ChatBridgeController {
   /// message: re-runs POST-cleaner against that message's final (agentSwipes[0])
   /// text and appends a new 'cleaned' sub-swipe. Carries the message id.
   void Function(String messageId)? onRerunCleaner;
+
+  /// The translate button on a message. [action] is `translate`, `original`
+  /// or `cancel`, read off the section's state; [text] is the text the bubble
+  /// shows, which is what gets translated.
+  void Function(String id, String action, String text)? onTranslateMessage;
   void Function(String action, String text)? onSelectionAction;
   void Function(String id, String text)? onEditSave;
   void Function(String id)? onEditCancel;
@@ -536,6 +541,12 @@ class ChatBridgeController {
             data['isUser'] as bool? ?? false,
             data['isSystem'] as bool? ?? false,
             restoreImgResults(data['content'] as String? ?? ''),
+          );
+        case 'onTranslateMessage':
+          onTranslateMessage?.call(
+            data['id'] as String? ?? '',
+            data['action'] as String? ?? 'translate',
+            data['text'] as String? ?? '',
           );
         case 'onSwipe':
           onSwipe?.call(
@@ -800,6 +811,7 @@ class ChatBridgeController {
     required bool hideTokenCount,
     required bool disableSwipeRegeneration,
     required bool studioEnabled,
+    bool translationEnabled = false,
   }) => layout.setMessageSettings(
     batterySaver: batterySaver,
     hideMessageId: hideMessageId,
@@ -807,7 +819,37 @@ class ChatBridgeController {
     hideTokenCount: hideTokenCount,
     disableSwipeRegeneration: disableSwipeRegeneration,
     studioEnabled: studioEnabled,
+    translationEnabled: translationEnabled,
   );
+
+  // Display-only translation. None of these touch the section's stored text:
+  // the WebView paints the translation over it and puts it back on request.
+
+  /// Shows the translating bubble. False when the message no longer shows
+  /// [original] (or the WebView is gone), so no request should be sent.
+  Future<bool> setTranslationPending(
+    String id,
+    String original,
+    String label,
+  ) async {
+    final payload = jsonEncode({
+      'id': id,
+      'original': original,
+      'label': label,
+    });
+    final result = await evalJsWithResult(
+      'window.bridge?.setTranslationPending(${escapeJsonStr(payload)})',
+    );
+    return result == true;
+  }
+
+  Future<void> setTranslation(String id, String original, String text) =>
+      callJs(
+        'setTranslation',
+        jsonEncode({'id': id, 'original': original, 'text': text}),
+      );
+
+  Future<void> clearTranslation(String id) => callJs('clearTranslation', id);
   Future<void> setSelectionMode(bool enabled) =>
       layout.setSelectionMode(enabled);
   Future<void> toggleMessageSelection(String id) =>

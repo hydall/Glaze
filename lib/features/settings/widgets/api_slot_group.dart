@@ -61,6 +61,13 @@ class ApiSlotGroup extends ConsumerStatefulWidget {
   /// parameters, a generation limit, anything the slot owns by itself.
   final List<Widget> trailingItems;
 
+  /// Rows placed above the connection — an on/off switch for the slot.
+  final List<Widget> leadingItems;
+
+  /// False hides the connection and model rows, leaving the leading and
+  /// trailing ones: a slot switched off has nothing to bind.
+  final bool showSlotRows;
+
   const ApiSlotGroup({
     super.key,
     required this.header,
@@ -69,6 +76,8 @@ class ApiSlotGroup extends ConsumerStatefulWidget {
     required this.onApiConfigChanged,
     required this.modelRows,
     this.trailingItems = const [],
+    this.leadingItems = const [],
+    this.showSlotRows = true,
   });
 
   @override
@@ -90,20 +99,23 @@ class _ApiSlotGroupState extends ConsumerState<ApiSlotGroup> {
       header: widget.header,
       description: widget.description,
       items: [
-        MenuSelectorItem(
-          label: 'studio_slot_api'.tr(),
-          currentValue: _apiName(configs, widget.apiConfigId),
-          onTap: () => _pickApiConfig(configs),
-        ),
-        for (final row in widget.modelRows)
+        ...widget.leadingItems,
+        if (widget.showSlotRows) ...[
           MenuSelectorItem(
-            label: row.label ?? 'studio_slot_model'.tr(),
-            description: row.description,
-            currentValue: row.value.isEmpty
-                ? 'studio_slot_model_auto'.tr()
-                : row.value,
-            onTap: () => _openModelSelector(row),
+            label: 'studio_slot_api'.tr(),
+            currentValue: _apiName(configs, widget.apiConfigId),
+            onTap: () => _pickApiConfig(configs),
           ),
+          for (final row in widget.modelRows)
+            MenuSelectorItem(
+              label: row.label ?? 'studio_slot_model'.tr(),
+              description: row.description,
+              currentValue: row.value.isEmpty
+                  ? 'studio_slot_model_auto'.tr()
+                  : row.value,
+              onTap: () => _openModelSelector(row),
+            ),
+        ],
         ...widget.trailingItems,
       ],
     );

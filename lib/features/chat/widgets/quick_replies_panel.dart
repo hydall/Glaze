@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/platform/haptics.dart';
+import '../../../core/state/db_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
@@ -188,6 +189,9 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
     final pins = ref.watch(composerPinsProvider).value ?? const <ComposerPin>[];
     final hiddenIds =
         ref.watch(hiddenComposerActionsProvider).value ?? const <String>{};
+    final translationEnabled = ref.watch(
+      pipelineSettingsProvider.select((p) => p.translation.enabled),
+    );
 
     // Anything pinned to the composer's row is dropped from the grid: the two
     // must never offer the same button twice. The stored order is untouched, so
@@ -202,7 +206,8 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
     final actions = [
       for (final action in ComposerAction.demotable)
         if (!pins.contains(ComposerPin.action(action)) &&
-            !hiddenIds.contains(action.id))
+            !hiddenIds.contains(action.id) &&
+            (action != ComposerAction.translate || translationEnabled))
           action,
     ];
     final replies = [

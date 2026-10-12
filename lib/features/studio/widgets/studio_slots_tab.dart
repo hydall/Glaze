@@ -10,12 +10,15 @@ import '../../../core/models/memory_book_api_settings.dart';
 import '../../../core/models/pipeline_settings.dart';
 import '../../../core/models/studio_config.dart';
 import '../../../core/models/studio_pipeline_overrides.dart';
+import '../../../core/models/translation_settings.dart';
 import '../../../core/state/active_studio_preset_provider.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/menu_group.dart';
 import '../../settings/api_list_provider.dart';
 import '../../settings/widgets/api_slot_group.dart';
+import '../../translation/translation_languages.dart';
+import '../../../shared/widgets/list_controls.dart';
 import '../studio_availability.dart';
 import '../studio_injection_points.dart';
 import 'studio_slot_settings_dialog.dart';
@@ -116,7 +119,109 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
           onModelChanged: (value) =>
               _saveMemoryBookApi((api) => api.copyWith(generationModel: value)),
         ),
+        _translationSlot(context, pipeline.translation),
       ],
+    );
+  }
+
+  /// Display-only translation. The switch gates everything — the connection
+  /// rows here, the translate button on messages and the composer action — so
+  /// nothing about translation shows until it is turned on.
+  Widget _translationSlot(BuildContext context, TranslationSettings settings) {
+    final enabled = settings.enabled;
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      alignment: Alignment.topCenter,
+      child: ApiSlotGroup(
+        key: const ValueKey('studio-slot-translation'),
+        header: 'translation_slot_title'.tr(),
+        description: 'translation_slot_desc'.tr(),
+        leadingItems: [
+          MenuSwitchItem(
+            label: 'translation_enable'.tr(),
+            description: 'translation_enable_desc'.tr(),
+            value: enabled,
+            onChanged: (value) =>
+                _saveTranslation((t) => t.copyWith(enabled: value)),
+          ),
+        ],
+        showSlotRows: enabled,
+        apiConfigId: settings.apiConfigId,
+        onApiConfigChanged: (id) => _saveTranslation(
+          // A model picked against the previous connection would not resolve
+          // on the new one.
+          (t) => t.copyWith(apiConfigId: id, model: ''),
+        ),
+        modelRows: [
+          ApiSlotModelRow(
+            value: settings.model,
+            onChanged: (value) =>
+                _saveTranslation((t) => t.copyWith(model: value)),
+          ),
+        ],
+        trailingItems: [
+          if (enabled) ...[
+            MenuSelectorItem(
+              label: 'translation_message_language'.tr(),
+              description: 'translation_message_language_desc'.tr(),
+              currentValue: settings.messageLanguage.isEmpty
+                  ? 'translation_language_interface'.tr()
+                  : resolveTranslationLanguage(
+                      settings.messageLanguage,
+                    ).nativeName,
+              onTap: () => _pickLanguage(
+                title: 'translation_message_language'.tr(),
+                current: settings.messageLanguage,
+                allowInterface: true,
+                onSelect: (code) =>
+                    _saveTranslation((t) => t.copyWith(messageLanguage: code)),
+              ),
+            ),
+            MenuSelectorItem(
+              label: 'translation_input_language'.tr(),
+              description: 'translation_input_language_desc'.tr(),
+              currentValue: resolveTranslationLanguage(
+                settings.inputLanguage,
+              ).nativeName,
+              onTap: () => _pickLanguage(
+                title: 'translation_input_language'.tr(),
+                current: settings.inputLanguage,
+                allowInterface: false,
+                onSelect: (code) =>
+                    _saveTranslation((t) => t.copyWith(inputLanguage: code)),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  void _pickLanguage({
+    required String title,
+    required String current,
+    required bool allowInterface,
+    required ValueChanged<String> onSelect,
+  }) {
+    showGlazePickerSheet(
+      context,
+      title: title,
+      items: [
+        if (allowInterface)
+          GlazePickerItem(
+            label: 'translation_language_interface'.tr(),
+            isActive: current.isEmpty,
+            value: '',
+          ),
+        for (final language in kTranslationLanguages)
+          GlazePickerItem(
+            label: language.nativeName,
+            isActive: language.code == current,
+            value: language.code,
+          ),
+      ],
+      onSelect: (value) => onSelect(value as String),
     );
   }
 
@@ -222,6 +327,10 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
       ),
     ];
   }
+
+  Future<void> _saveTranslation(
+    TranslationSettings Function(TranslationSettings) mutate,
+  ) => _savePipeline((p) => p.copyWith(translation: mutate(p.translation)));
 
   Future<void> _saveMemoryBookApi(
     MemoryBookApiSettings Function(MemoryBookApiSettings) mutate,

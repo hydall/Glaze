@@ -145,6 +145,10 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
   /// "Re-run cleaner" per-message button in the WebView (hidden when off).
   final bool studioEnabled;
 
+  /// Whether display-only translation is switched on: shows the translate
+  /// button beside each message's menu button.
+  final bool translationEnabled;
+
   // Callback objects
   final MessageActionsCallbacks messageActions;
   final EditActionsCallbacks editActions;
@@ -215,6 +219,7 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
     this.hideTokenCount = false,
     this.disableSwipeRegeneration = false,
     this.studioEnabled = false,
+    this.translationEnabled = false,
     this.messageActions = const MessageActionsCallbacks(),
     this.editActions = const EditActionsCallbacks(),
     this.imageGenActions = const ImageGenCallbacks(),
@@ -515,6 +520,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
           hideTokenCount: widget.hideTokenCount,
           disableSwipeRegeneration: widget.disableSwipeRegeneration,
           studioEnabled: widget.studioEnabled,
+          translationEnabled: widget.translationEnabled,
           messages: widget.messages,
           visibleStartIndex: widget.visibleStartIndex,
           memoryEntries: widget.memoryEntries,
@@ -779,6 +785,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     bridge.onScrollToTopVisibility = callbacks.onScrollToTopVisibility;
     bridge.onRegenerate = callbacks.onRegenerate;
     bridge.onRerunCleaner = callbacks.onRerunCleaner;
+    bridge.onTranslateMessage = callbacks.onTranslateMessage;
     bridge.onSelectionAction = callbacks.onSelectionAction;
     bridge.onSelectionChange = callbacks.onSelectionChange;
     bridge.onEditSave = callbacks.onEditSave;
@@ -1161,6 +1168,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       hideTokenCount: w.hideTokenCount,
       disableSwipeRegeneration: w.disableSwipeRegeneration,
       studioEnabled: w.studioEnabled,
+      translationEnabled: w.translationEnabled,
       memoryEntries: w.memoryEntries,
       memoryDrafts: w.memoryDrafts,
       sessionId: w.sessionId,
@@ -1488,6 +1496,25 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     final b = _bridge;
     if (b == null) return Future.value();
     return b.scrollToTop();
+  }
+
+  /// Display-only translation: see [ChatBridgeController.setTranslationPending].
+  Future<bool> setTranslationPending(String id, String original, String label) {
+    final bridge = _bridge;
+    if (bridge == null || !_ready) return Future.value(false);
+    return bridge.setTranslationPending(id, original, label);
+  }
+
+  Future<void> setTranslation(String id, String original, String text) {
+    final bridge = _bridge;
+    if (bridge == null || !_ready) return Future.value();
+    return bridge.setTranslation(id, original, text);
+  }
+
+  Future<void> clearTranslation(String id) {
+    final bridge = _bridge;
+    if (bridge == null || !_ready) return Future.value();
+    return bridge.clearTranslation(id);
   }
 
   /// Arm a one-shot "stick to bottom on the next append" so sending a message

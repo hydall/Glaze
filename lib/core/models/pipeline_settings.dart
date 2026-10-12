@@ -6,13 +6,14 @@ import 'ledger_settings.dart';
 import 'memory_book_api_settings.dart';
 import 'memory_pipeline_settings.dart';
 import 'studio_agent_settings.dart';
+import 'translation_settings.dart';
 
 part 'pipeline_settings.freezed.dart';
 part 'pipeline_settings.g.dart';
 
 /// Global generation-pipeline LLM settings, separated from [MemoryBookSettings].
 ///
-/// Organized as six nested sub-models, each owning a logical group of fields:
+/// Organized as seven nested sub-models, each owning a logical group of fields:
 /// - [studioAgent] — Studio pre-gen trackers, final generator, post-processing
 ///   context sizes, and per-slot sampling/reasoning overrides.
 /// - [cleaner] — POST-cleaner (anti-cliche rewrite + continuity/character
@@ -21,8 +22,9 @@ part 'pipeline_settings.g.dart';
 /// - [memoryPipeline] — shared auxiliary LLM fallback configuration.
 /// - [memoryBookApi] — MemoryBook draft-generation LLM (model/endpoint/key).
 /// - [cardRewriter] — review-only card-evolution enablement and dedicated LLM.
+/// - [translation] — display-only message / composer translation connection.
 ///
-/// Three of the six are **per-preset overridable**: [cleaner], [ledger] and
+/// Three of the seven are **per-preset overridable**: [cleaner], [ledger] and
 /// [cardRewriter] each have a matching nullable field on
 /// `StudioRuntimeSettings`, and a Studio preset that carries one runs on it
 /// instead of the value here. `applyStudioPresetOverrides`
@@ -49,6 +51,7 @@ abstract class PipelineSettings with _$PipelineSettings {
     @Default(MemoryPipelineSettings()) MemoryPipelineSettings memoryPipeline,
     @Default(MemoryBookApiSettings()) MemoryBookApiSettings memoryBookApi,
     @Default(CardRewriterSettings()) CardRewriterSettings cardRewriter,
+    @Default(TranslationSettings()) TranslationSettings translation,
   }) = _PipelineSettings;
 
   factory PipelineSettings.fromJson(Map<String, dynamic> json) =>

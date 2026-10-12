@@ -349,6 +349,19 @@ export class InteractionDispatch {
       'regenerate': (e, el) => bridge._sendToFlutter('onRegenerate', [el.dataset.messageId, el.dataset.mode || 'magic']),
       'toggle-guided': (e, el) => bridge._swipeHandler.toggleGuidedSwipe(el.dataset.messageId),
       'rerun-cleaner': (e, el) => bridge._sendToFlutter('onRerunCleaner', [el.dataset.messageId]),
+      'translate': (e, el) => {
+        const id = el.dataset.messageId;
+        const section = bridge._translationSection(id);
+        if (!section || !bridge.translationEnabled || id === '__streaming__') return;
+        if (section.classList.contains('error') || section.classList.contains('editing')) return;
+        // Flutter owns the request; the section's state says which way the
+        // tap goes, so a stale tap cannot start a second request.
+        const action = section.classList.contains('translating') ? 'cancel'
+          : section.classList.contains('translated') ? 'original' : 'translate';
+        bridge._sendToFlutter('onTranslateMessage', [JSON.stringify({
+          id, action, text: section.dataset.rawText || '',
+        })]);
+      },
       'edit-save': (e, el) => bridge._editController.handleSave(el),
       'edit-cancel': (e, el) => bridge._editController.handleCancel(el),
       'open-actions': (e, el) => {
