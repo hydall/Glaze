@@ -3560,11 +3560,11 @@
   "guide_lorebook_collect_title": "Collect, then rebuild",
   "guide_lorebook_collect_body": "This runs the capture. Once the entries are in, your own model rebuilds them into a lorebook with keys you can save or export.",
   "menu_plugins": "Plugins",
-  "menu_plugins_hint": "Tavo-format extensions for the chat",
+  "menu_plugins_hint": "Extensions for the chat",
   "plugins_title": "Plugins",
-  "plugins_intro": "Plugins add actions, panels and send hooks to every chat. Glaze runs Tavo plugins (.tpg) in an isolated frame inside the chat, and each one can only use what its manifest asks for. Install plugins only from authors you trust.",
+  "plugins_intro": "Plugins add actions, panels and send hooks to every chat. Each plugin runs in an isolated frame inside the chat and can only use what its manifest asks for. Install plugins only from authors you trust.",
   "plugins_import": "Import plugin",
-  "plugins_import_hint": "Install a .tpg or .zip package",
+  "plugins_import_hint": "Tavo Extensions are supportable.",
   "plugins_installed": "Installed",
   "plugins_empty": "No plugins installed yet.",
   "plugins_installed_toast": "Installed {name}",
@@ -3590,5 +3590,5 @@
   "plugins_action_missing": "The plugin did not register this action.",
   "plugins_action_failed": "The plugin action failed: {error}",
   "plugins_ask_submit": "Send",
-  "tools_plugins_subtitle": "Tavo extensions"
+  "tools_plugins_subtitle": "Chat extensions"
 }
