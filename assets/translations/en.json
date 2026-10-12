@@ -3589,5 +3589,6 @@
   "plugins_runtime_not_ready": "Plugins are still starting in this chat. Try again in a moment.",
   "plugins_action_missing": "The plugin did not register this action.",
   "plugins_action_failed": "The plugin action failed: {error}",
-  "plugins_ask_submit": "Send"
+  "plugins_ask_submit": "Send",
+  "tools_plugins_subtitle": "Tavo extensions"
 }

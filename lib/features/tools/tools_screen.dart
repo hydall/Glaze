@@ -7,6 +7,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/models/preset.dart';
+import '../plugins/screens/plugins_screen.dart';
 import '../../core/platform/haptics.dart';
 import '../../core/state/active_selection_provider.dart';
 import '../../core/state/db_provider.dart';
@@ -304,6 +305,8 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
         );
       case 'ext-blocks':
         _openExtBlocks();
+      case 'plugins':
+        openPluginsScreen(context);
     }
   }
 

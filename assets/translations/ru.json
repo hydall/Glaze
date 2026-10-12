@@ -3626,5 +3626,6 @@
   "plugins_runtime_not_ready": "Плагины в этом чате ещё запускаются. Попробуйте через секунду.",
   "plugins_action_missing": "Плагин не зарегистрировал это действие.",
   "plugins_action_failed": "Действие плагина завершилось ошибкой: {error}",
-  "plugins_ask_submit": "Отправить"
+  "plugins_ask_submit": "Отправить",
+  "tools_plugins_subtitle": "Расширения Tavo"
 }
