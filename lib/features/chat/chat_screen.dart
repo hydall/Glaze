@@ -11,13 +11,10 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:path/path.dart' as p;
-// ignore: depend_on_referenced_packages
-import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';
 import '../../core/debug/perf_debug.dart';
 import '../../core/llm/game_time.dart';
 import '../../core/models/character.dart';
+import '../../core/services/file_export_service.dart';
 import '../../core/utils/image_src.dart';
 import '../../core/utils/error_format.dart';
 import '../../core/utils/platform_paths.dart';
@@ -1137,9 +1134,8 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
     ImageViewer.show(context, imageProvider: provider);
   }
 
-  /// Saves/shares a generated image. The native share sheet on iOS/Android
-  /// exposes "Save Image"/"Save to Photos", which is the supported way to get
-  /// the image into the gallery without a dedicated gallery-saver dependency.
+  /// Saves a generated image to the public Glaze downloads folder
+  /// (`Downloads/Glaze/images`), with no share sheet in the way.
   Future<void> _downloadImage(String src) async {
     try {
       Uint8List bytes;
@@ -1176,22 +1172,13 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
       }
       if (bytes.isEmpty) return;
 
-      final tmpDir = await getTemporaryDirectory();
-      final tmpFile = File(
-        p.join(
-          tmpDir.path,
-          'glaze_image_${DateTime.now().millisecondsSinceEpoch}.$ext',
-        ),
+      final path = await FileExportService.saveBytesToGlaze(
+        bytes: bytes,
+        filename: 'glaze_image_${DateTime.now().millisecondsSinceEpoch}.$ext',
+        subfolder: 'images',
       );
-      await tmpFile.writeAsBytes(bytes);
-
-      await SharePlus.instance.share(
-        ShareParams(
-          files: [XFile(tmpFile.path)],
-          // Required on iPad so the share popover has an anchor rect.
-          sharePositionOrigin: const Rect.fromLTWH(0, 0, 1, 1),
-        ),
-      );
+      if (path.isEmpty) return;
+      if (mounted) GlazeToast.show(context, 'export_success'.tr());
     } catch (e) {
       if (mounted) {
         GlazeErrorDialog.show(context, e, prefix: 'settings_err_failed'.tr());
@@ -1214,7 +1201,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   }
 
   /// Options sheet for a generated/janitor image (Imagen UI, ported from
-  /// Glaze useMessageImageGen.js): Expand → fullscreen, Save → share/save,
+  /// Glaze useMessageImageGen.js): Expand → fullscreen, Save → Glaze folder,
   /// Regenerate → re-run image generation for the owning message. The
   /// Regenerate entry is hidden when the owning message can't be resolved in
   /// the current list (no messageId, or the message is already gone).

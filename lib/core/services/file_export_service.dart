@@ -65,6 +65,41 @@ class FileExportService {
     return _shareBytes(bytes, filename);
   }
 
+  /// Saves [bytes] straight into the public `Downloads/Glaze/<subfolder>`
+  /// folder — no save dialog, no share sheet. This backs the chat image "save"
+  /// action, where the file should land where the user expects in one click.
+  ///
+  /// Android writes to the well-known public Downloads path (see
+  /// [_androidGlazeDir]); desktop uses the platform downloads directory; iOS
+  /// has no public downloads folder, so it falls back to the app's documents.
+  /// Returns the saved path, or the empty string when no location is available.
+  static Future<String> saveBytesToGlaze({
+    required List<int> bytes,
+    required String filename,
+    required String subfolder,
+  }) async {
+    Directory? dir;
+    if (Platform.isAndroid) {
+      dir = await _androidGlazeDir(subfolder);
+    } else if (Platform.isIOS) {
+      final documents = await getApplicationDocumentsDirectory();
+      dir = Directory('${documents.path}/Glaze/$subfolder');
+    } else {
+      final downloads = await getDownloadsDirectory();
+      if (downloads != null) {
+        dir = Directory('${downloads.path}/Glaze/$subfolder');
+      }
+    }
+    if (dir == null) return '';
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    final file = File('${dir.path}/$filename');
+    await file.writeAsBytes(bytes);
+    if (Platform.isAndroid) await registerWithMediaStore(file.path);
+    return file.path;
+  }
+
   static Future<String> _saveWithPicker({
     required String data,
     required String filename,
