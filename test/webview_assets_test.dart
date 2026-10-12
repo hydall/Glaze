@@ -1978,6 +1978,15 @@ void main() {
       expect(swipeHandlerJs, contains('if (absY >= absX)'));
       expect(swipeHandlerJs, contains('scrollingVertical = true;'));
     });
+
+    test('a fast flick commits even below the distance threshold', () {
+      // A quick flick rarely travels THRESHOLD px; without a velocity check it
+      // snapped back and stayed on the same greeting / swipe.
+      expect(swipeHandlerJs, contains('FLICK_VELOCITY'));
+      expect(swipeHandlerJs, contains('const goNext = dx < -THRESHOLD || flick < 0;'));
+      expect(swipeHandlerJs, contains('const goPrev = dx > THRESHOLD || flick > 0;'));
+      expect(swipeHandlerJs, isNot(contains('if (dx < -THRESHOLD')));
+    });
   });
 
   // ─── main chat container scroll speed ────────────────────────────────────
