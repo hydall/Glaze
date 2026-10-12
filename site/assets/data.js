@@ -9,20 +9,20 @@ window.GLAZE = {
 
   // Shown until the GitHub API answers (or when it is rate-limited).
   fallbackRelease: {
-    tag: 'v0.8.1',
-    date: '2026-10-07',
+    tag: 'v0.8.2',
+    date: '2026-10-12',
     assets: [
-      { name: 'v0.8.1.apk', size: 100391057 },
-      { name: 'v0.8.1-arm64-v8a.apk', size: 54456464 },
-      { name: 'v0.8.1-armeabi-v7a.apk', size: 53435642 },
-      { name: 'v0.8.1.ipa', size: 24985869 },
-      { name: 'v0.8.1-windows.zip', size: 27843202 },
-      { name: 'v0.8.1-linux.pkg.tar.zst', size: 24956579 },
-      { name: 'v0.8.1-linux.tar.zst', size: 23830636 },
+      { name: 'v0.8.2.apk', size: 101287499 },
+      { name: 'v0.8.2-arm64-v8a.apk', size: 54877770 },
+      { name: 'v0.8.2-armeabi-v7a.apk', size: 53938868 },
+      { name: 'v0.8.2.ipa', size: 25207852 },
+      { name: 'v0.8.2-windows.zip', size: 28044503 },
+      { name: 'v0.8.2-linux.pkg.tar.zst', size: 25147219 },
+      { name: 'v0.8.2-linux.tar.zst', size: 24028176 },
     ],
   },
 
-  devVersion: '0.8.1',
+  devVersion: '0.8.2',
 
   // Where the Download page's Nightly channel looks for builds.
   nightly: { workflow: 'build-branch.yml', branch: 'nightly' },
@@ -125,7 +125,7 @@ window.GLAZE = {
       },
       dl_all: 'Все релизы',
       dl_loading: 'Загружаем данные релиза…',
-      dl_api_failed: 'Не удалось связаться с GitHub. Показаны ссылки на v0.8.1.',
+      dl_api_failed: 'Не удалось связаться с GitHub. Показаны ссылки на v0.8.2.',
       dl_missing: 'В этом релизе нет',
       dl_how: {
         android: 'Скачайте APK и откройте его. Разрешите установку из этого источника, если система спросит. Есть универсальная сборка, а также отдельные под arm64 и arm32.',
@@ -267,7 +267,7 @@ window.GLAZE = {
       },
       dl_all: 'All releases',
       dl_loading: 'Loading release data…',
-      dl_api_failed: 'Could not reach GitHub. Showing links for v0.8.1.',
+      dl_api_failed: 'Could not reach GitHub. Showing links for v0.8.2.',
       dl_missing: 'Not in this release',
       dl_how: {
         android: 'Download the APK and open it. Allow installs from this source if the system asks. There is a universal build, plus separate arm64 and arm32 ones.',
@@ -465,6 +465,19 @@ window.GLAZE = {
   // languages it is written in; any other shows the first one with a notice.
   articles: [
     {
+      slug: '0.8.2',
+      kind: 'changelog',
+      date: '2026-10-12',
+      author: 'hydall',
+      langs: ['ru', 'en'],
+      download: 'v0.8.2',
+      title: { ru: 'Glaze beta 0.8.2', en: 'Glaze beta 0.8.2' },
+      lead: {
+        ru: 'Перевод сообщений, гиды по экранам, предупреждение о лимите токенов, поле «Внешность» для картинок, страницы авторов, автоиндексация лорбуков, импорт из Tavo и журналы сбоев.',
+        en: 'Message translation, screen guides, a token-cap warning, an Appearance field for images, creator pages, lorebook auto-indexing, Tavo import and crash logs.',
+      },
+    },
+    {
       slug: '0.8.1',
       kind: 'changelog',
       date: '2026-10-07',
@@ -559,9 +572,68 @@ window.GLAZE = {
       ],
     },
     {
+      version: '0.8.2',
+      date: '2026-10-12',
+      status: 'latest',
+      channel: 'beta',
+      tag: 'v0.8.2',
+      article: '0.8.2',
+      title: { ru: 'Перевод и гиды', en: 'Translation and guides' },
+      groups: [
+        {
+          title: { ru: 'Новое', en: 'New' },
+          items: {
+            ru: [
+              'Перевод сообщений и черновика: модель чата, DeepL, Google, Яндекс или LibreTranslate, автоперевод',
+              'Гиды по экранам, которые можно перепройти из меню',
+              'Поле «Внешность» у персонажа для генерации картинок без референсов',
+              'Страницы авторов JanitorAI и Chub, новый лист фильтров',
+              'Автоиндексация векторов в лорбуках',
+              'Восстановлен импорт бэкапа Tavo (.tbk)',
+              'Тема устройства: тип темы и отдельные темы для светлого и тёмного режима',
+              'Журналы и отчёты о сбоях на устройстве',
+            ],
+            en: [
+              'Message and draft translation: the chat model, DeepL, Google, Yandex or LibreTranslate, with auto-translation',
+              'Screen guides you can replay from the menu',
+              'A character Appearance field for image generation without references',
+              'JanitorAI and Chub creator pages, a new filter sheet',
+              'Vector auto-indexing for lorebooks',
+              'Tavo backup import (.tbk) is back',
+              'Device theme: a theme type and separate themes for light and dark mode',
+              'On-device logs and crash reports',
+            ],
+          },
+        },
+        {
+          title: { ru: 'Исправления', en: 'Fixes' },
+          items: {
+            ru: [
+              'Предупреждение об упоре в лимит токенов ответа и проверка бюджета контекста',
+              'Лимит JanitorAI в 120k токенов на лорбук обходится в свежих чатах, повторный вход при 401',
+              'Синхронизация API-ключей и раскладки чата',
+              'Адрес эндпоинта перестраивается при смене протокола',
+              'Встроенные пресеты видны с первого запуска, вернулись бейджи SET/GET',
+              'extBlocks учитывают список контекста, apply_regex и {{persona}}',
+              'Множество правок интерфейса на телефоне и ПК',
+            ],
+            en: [
+              'A warning when a reply hits the output token cap, and a context budget check',
+              'JanitorAI\'s 120k-token lorebook cap worked around in fresh chats, a re-login on 401',
+              'API keys and the chat layout sync',
+              'The endpoint URL is rebuilt when the protocol changes',
+              'Built-in presets show up from the first launch, SET/GET badges are back',
+              'extBlocks honour the context list, apply_regex and {{persona}}',
+              'A great many interface fixes on phone and desktop',
+            ],
+          },
+        },
+      ],
+    },
+    {
       version: '0.8.1',
       date: '2026-10-07',
-      status: 'latest',
+      status: 'released',
       channel: 'beta',
       tag: 'v0.8.1',
       article: '0.8.1',
