@@ -1,11 +1,18 @@
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/models/chat_message.dart';
 import '../../../core/models/memory_book.dart';
 import '../../../features/extensions/models/info_block.dart';
 import '../../../features/image_gen/services/image_tag_markup.dart';
+import '../../chat/composer_empty_action_provider.dart';
+import '../../chat/composer_pins_provider.dart';
+import '../../chat/hidden_composer_actions_provider.dart';
+import '../../chat/quick_replies_provider.dart';
+import '../../chat/services/magic_drawer_layout_service.dart';
+import '../../tools/tools_layout_service.dart';
 import '../cloud_adapter.dart';
 import '../sync_models.dart';
 
@@ -15,6 +22,63 @@ class SyncSerialization {
   static const globalRegexScriptsKey = 'gz_global_regex_scripts';
   static const studioRegexScriptsKey = 'gz_studio_regex_scripts';
   static const appSettingsKey = 'appSettings';
+  static const chatLayoutKey = 'chatLayout';
+  static const includeApiKeysPrefKey = 'gz_sync_include_api_keys';
+
+  /// Preferences that make up the chat layout the user arranges by hand: the
+  /// buttons under the composer, the quick replies, and the order of the chat
+  /// drawer and the Tools screen. Each holds either a string or a string list.
+  static const chatLayoutPrefKeys = [
+    ComposerPinsNotifier.storageKey,
+    ComposerPinsNotifier.legacyStorageKey,
+    HiddenComposerActionsNotifier.storageKey,
+    ComposerEmptyActionNotifier.storageKey,
+    QuickRepliesNotifier.storageKey,
+    MagicDrawerLayoutService.itemsKey,
+    MagicDrawerLayoutService.deletedItemsKey,
+    ToolsLayoutService.orderKey,
+    ToolsLayoutService.sizesKey,
+    ToolsLayoutService.deletedKey,
+  ];
+
+  /// Whether the user asked for API keys to travel with the sync. Read from
+  /// preferences rather than passed around so every push — manual, automatic
+  /// or the one after a conflict — honours the same switch.
+  static bool includeApiKeys(SharedPreferences prefs) =>
+      prefs.get(includeApiKeysPrefKey) == true;
+
+  /// The stored chat layout, or null when the user never changed any of it.
+  /// Null keeps the local_storage hash of an untouched install as it was.
+  static Map<String, dynamic>? readChatLayout(SharedPreferences prefs) {
+    final out = <String, dynamic>{};
+    for (final key in chatLayoutPrefKeys) {
+      final value = prefs.get(key);
+      if (value is String) {
+        out[key] = value;
+      } else if (value is List) {
+        out[key] = value.cast<String>().toList();
+      }
+    }
+    return out.isEmpty ? null : out;
+  }
+
+  /// Writes a pulled chat layout. A key the source device does not have is
+  /// removed here too, so a reset on one device resets the other.
+  static Future<void> applyChatLayout(
+    SharedPreferences prefs,
+    Map<String, dynamic> layout,
+  ) async {
+    for (final key in chatLayoutPrefKeys) {
+      final value = layout[key];
+      if (value is String) {
+        await prefs.setString(key, value);
+      } else if (value is List) {
+        await prefs.setStringList(key, value.map((e) => '$e').toList());
+      } else {
+        await prefs.remove(key);
+      }
+    }
+  }
 
   /// Content fingerprint for manifest conflict detection (not full session JSON).
   static String computeChatMetadataHash(SessionMetadata metadata) {
@@ -158,6 +222,7 @@ class SyncSerialization {
     String? globalRegexScripts,
     String? studioRegexScripts,
     Map<String, dynamic>? appSettings,
+    Map<String, dynamic>? chatLayout,
   }) {
     return {
       '__localStorage': true,
@@ -166,6 +231,7 @@ class SyncSerialization {
       globalRegexScriptsKey: ?globalRegexScripts,
       studioRegexScriptsKey: ?studioRegexScripts,
       appSettingsKey: ?appSettings,
+      chatLayoutKey: ?chatLayout,
     };
   }
 
