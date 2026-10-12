@@ -65,6 +65,7 @@ class _CatalogFilterSheetState extends ConsumerState<CatalogFilterSheet> {
   Set<String> _selectedTagNames = {};
 
   List<CatalogTag> _allTags = [];
+  bool _tagsLoading = true;
 
   /// Account-level blocked tags (JanitorAI only, when signed in). Loaded from
   /// the server on open and PATCHed back on dispose if changed. Null until the
@@ -118,6 +119,7 @@ class _CatalogFilterSheetState extends ConsumerState<CatalogFilterSheet> {
     if (mounted) {
       setState(() {
         _allTags = tags;
+        _tagsLoading = false;
       });
     }
 
@@ -248,69 +250,135 @@ class _CatalogFilterSheetState extends ConsumerState<CatalogFilterSheet> {
     });
   }
 
-  /// Chub's own search refinements, appended right after the token range. They
-  /// map 1:1 onto the parameters chub.ai's site sends, so their labels mirror
-  /// what the site calls them.
-  List<FilterSection> _chubFilterSections() {
+  bool get _isChub => widget.provider == CatalogProvider.chub;
+
+  /// NSFW, plus Chub's NSFL (account-gated, see [_onNsflToggle]) and "NSFW
+  /// only".
+  FilterGroupSection _contentGroup() {
+    return FilterGroupSection(
+      title: 'catalog_filter_group_content'.tr(),
+      rows: [
+        FilterToggleSection(
+          label: 'catalog_filter_nsfw'.tr(),
+          value: _nsfw,
+          onChanged: (v) => setState(() => _nsfw = v),
+        ),
+        if (_isChub) ...[
+          FilterToggleSection(
+            label: 'catalog_filter_nsfl'.tr(),
+            value: _nsfl,
+            onChanged: _onNsflToggle,
+            isDanger: true,
+          ),
+          if (!widget.timelineMode)
+            FilterToggleSection(
+              label: 'catalog_filter_nsfw_only'.tr(),
+              value: _nsfwOnly,
+              onChanged: (v) => setState(() => _nsfwOnly = v),
+            ),
+        ],
+      ],
+    );
+  }
+
+  /// Size and quality bounds. Chub's refinements map 1:1 onto the parameters
+  /// chub.ai's site sends, so their labels mirror what the site calls them.
+  FilterGroupSection _cardGroup() {
+    return FilterGroupSection(
+      title: 'catalog_filter_group_card'.tr(),
+      rows: [
+        FilterRangeSection(
+          title: 'catalog_token_range'.tr(),
+          minLabel: 'catalog_min'.tr(),
+          maxLabel: 'catalog_max'.tr(),
+          min: _minTokens,
+          max: _maxTokens,
+          defaultMin: const CatalogFilters().minTokens,
+          defaultMax: const CatalogFilters().maxTokens,
+          onMinChanged: (v) => setState(() => _minTokens = v),
+          onMaxChanged: (v) => setState(() => _maxTokens = v),
+        ),
+        if (_isChub) ...[
+          FilterNumberSection(
+            title: 'catalog_filter_min_ai_rating'.tr(),
+            label: 'catalog_min'.tr(),
+            value: _minAiRating,
+            onChanged: (v) => setState(() => _minAiRating = v),
+          ),
+          FilterNumberSection(
+            title: 'catalog_filter_min_tags'.tr(),
+            label: 'catalog_min'.tr(),
+            value: _minTags,
+            onChanged: (v) => setState(() => _minTags = v),
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// Chub's "card must have …" switches — five of them, rarely all wanted, so
+  /// they fold away until one is on.
+  List<FilterSection> _chubSections() {
     return [
-      FilterToggleSection(
-        label: 'catalog_filter_nsfw_only'.tr(),
-        value: _nsfwOnly,
-        onChanged: (v) => setState(() => _nsfwOnly = v),
+      FilterGroupSection(
+        title: 'catalog_filter_group_require'.tr(),
+        collapsible: true,
+        rows: [
+          FilterToggleSection(
+            label: 'catalog_filter_require_images'.tr(),
+            value: _requireImages,
+            onChanged: (v) => setState(() => _requireImages = v),
+          ),
+          FilterToggleSection(
+            label: 'catalog_filter_require_lore'.tr(),
+            value: _requireLore,
+            onChanged: (v) => setState(() => _requireLore = v),
+          ),
+          FilterToggleSection(
+            label: 'catalog_filter_require_custom_prompt'.tr(),
+            value: _requireCustomPrompt,
+            onChanged: (v) => setState(() => _requireCustomPrompt = v),
+          ),
+          FilterToggleSection(
+            label: 'catalog_filter_require_example_dialogues'.tr(),
+            value: _requireExampleDialogues,
+            onChanged: (v) => setState(() => _requireExampleDialogues = v),
+          ),
+          FilterToggleSection(
+            label: 'catalog_filter_require_alternate_greetings'.tr(),
+            value: _requireAlternateGreetings,
+            onChanged: (v) => setState(() => _requireAlternateGreetings = v),
+          ),
+        ],
       ),
-      FilterToggleSection(
-        label: 'catalog_filter_require_images'.tr(),
-        value: _requireImages,
-        onChanged: (v) => setState(() => _requireImages = v),
-      ),
-      FilterToggleSection(
-        label: 'catalog_filter_require_lore'.tr(),
-        value: _requireLore,
-        onChanged: (v) => setState(() => _requireLore = v),
-      ),
-      FilterToggleSection(
-        label: 'catalog_filter_require_custom_prompt'.tr(),
-        value: _requireCustomPrompt,
-        onChanged: (v) => setState(() => _requireCustomPrompt = v),
-      ),
-      FilterToggleSection(
-        label: 'catalog_filter_require_example_dialogues'.tr(),
-        value: _requireExampleDialogues,
-        onChanged: (v) => setState(() => _requireExampleDialogues = v),
-      ),
-      FilterToggleSection(
-        label: 'catalog_filter_require_alternate_greetings'.tr(),
-        value: _requireAlternateGreetings,
-        onChanged: (v) => setState(() => _requireAlternateGreetings = v),
-      ),
-      FilterToggleSection(
-        label: 'catalog_filter_recommended_verified'.tr(),
-        value: _recommendedVerified,
-        onChanged: (v) => setState(() => _recommendedVerified = v),
-      ),
-      FilterToggleSection(
-        label: 'catalog_filter_exclude_mine'.tr(),
-        value: _excludeMine,
-        onChanged: (v) => setState(() => _excludeMine = v),
-      ),
-      FilterToggleSection(
-        label: 'catalog_filter_inclusive_or'.tr(),
-        value: _inclusiveOr,
-        onChanged: (v) => setState(() => _inclusiveOr = v),
-      ),
-      FilterNumberSection(
-        title: 'catalog_filter_min_ai_rating'.tr(),
-        label: 'catalog_min'.tr(),
-        value: _minAiRating,
-        onChanged: (v) => setState(() => _minAiRating = v),
-      ),
-      FilterNumberSection(
-        title: 'catalog_filter_min_tags'.tr(),
-        label: 'catalog_min'.tr(),
-        value: _minTags,
-        onChanged: (v) => setState(() => _minTags = v),
+      FilterGroupSection(
+        title: 'catalog_filter_group_other'.tr(),
+        rows: [
+          FilterToggleSection(
+            label: 'catalog_filter_recommended_verified'.tr(),
+            value: _recommendedVerified,
+            onChanged: (v) => setState(() => _recommendedVerified = v),
+          ),
+          FilterToggleSection(
+            label: 'catalog_filter_exclude_mine'.tr(),
+            value: _excludeMine,
+            onChanged: (v) => setState(() => _excludeMine = v),
+          ),
+        ],
       ),
     ];
+  }
+
+  /// Free-text tag search for the active source: JanitorAI's custom-tag
+  /// autocomplete, or chub.ai's tag index (the grid only holds the most-used
+  /// few hundred of its tags).
+  Future<List<String>> Function(String)? get _tagSuggestions {
+    if (_isJanitor) return fetchJanitorTagSuggestions;
+    if (_isChub) {
+      final apiKey = ref.read(chubAccountProvider).apiKey;
+      return (q) => fetchChubTagSuggestions(q, apiKey: apiKey);
+    }
+    return null;
   }
 
   void _onNsflToggle(bool value) {
@@ -386,58 +454,48 @@ class _CatalogFilterSheetState extends ConsumerState<CatalogFilterSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final timelineMode = widget.timelineMode;
     return FilterSheet(
       title: 'catalog_filters'.tr(),
       sections: [
-        FilterToggleSection(
-          label: 'catalog_filter_nsfw'.tr(),
-          value: _nsfw,
-          onChanged: (v) => setState(() => _nsfw = v),
-        ),
-        if (widget.provider == CatalogProvider.chub)
-          FilterToggleSection(
-            label: 'catalog_filter_nsfl'.tr(),
-            value: _nsfl,
-            onChanged: _onNsflToggle,
-            isDanger: true,
-          ),
+        _contentGroup(),
         // Timeline's endpoint consumes only `nsfw`/`nsfl`; every other control
         // would silently do nothing, so it is replaced by a hint.
-        if (timelineMode)
+        if (widget.timelineMode)
           const FilterCustomSection(child: _TimelineFiltersHint())
         else ...[
           // DataCat's Client API filters by text, tags, sort and paging only —
-          // there are no token bounds to send. Showing the slider anyway would
+          // there are no token bounds to send. Showing the range anyway would
           // be a control that silently does nothing.
-          if (CatalogControls.supportsTokenRange(widget.provider))
-            FilterRangeSection(
-              title: 'catalog_token_range'.tr(),
-              minLabel: 'catalog_min'.tr(),
-              maxLabel: 'catalog_max'.tr(),
-              min: _minTokens,
-              max: _maxTokens,
-              onMinChanged: (v) => setState(() => _minTokens = v),
-              onMaxChanged: (v) => setState(() => _maxTokens = v),
-            ),
-          if (widget.provider == CatalogProvider.chub) ..._chubFilterSections(),
+          if (CatalogControls.supportsTokenRange(widget.provider)) _cardGroup(),
+          if (_isChub) ..._chubSections(),
           FilterTagsSection(
             title: 'catalog_tags'.tr(),
             searchHint: 'catalog_search_tags'.tr(),
             tags: [for (final t in _allTags) FilterTag(id: t.id, name: t.name)],
+            loading: _tagsLoading,
             selectedIds: _selectedTagIds,
             selectedNames: _selectedTagNames,
             onToggle: _toggleTag,
             onClear: _clearTags,
-            // JanitorAI: `/hampter/tags` only covers the curated tags searched by
-            // id. Custom tags are free text (`custom_tags[]`), so they come from
-            // the same `/tags/suggest` autocomplete the block list uses, and the
-            // raw query can be searched verbatim.
-            fetchSuggestions: _isJanitor ? fetchJanitorTagSuggestions : null,
-            allowCustomTags: _isJanitor,
+            options: [
+              if (_isChub)
+                FilterToggleSection(
+                  label: 'catalog_filter_inclusive_or'.tr(),
+                  value: _inclusiveOr,
+                  onChanged: (v) => setState(() => _inclusiveOr = v),
+                ),
+            ],
+            // JanitorAI: `/hampter/tags` only covers the curated tags searched
+            // by id; custom tags are free text (`custom_tags[]`) from the
+            // `/tags/suggest` autocomplete. Chub: topics are free text too, and
+            // the grid holds only the most-used ones. Either way the raw query
+            // can be searched verbatim.
+            fetchSuggestions: _tagSuggestions,
+            allowCustomTags: _isJanitor || _isChub,
           ),
           if (_blockList != null)
             FilterCustomSection(
+              padded: false,
               child: JanitorBlockedContentSection(
                 allTags: _allTags,
                 blockedTagIds: _blockedTagIds,

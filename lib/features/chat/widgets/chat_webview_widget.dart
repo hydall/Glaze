@@ -22,6 +22,7 @@ import '../../../shared/widgets/glaze_error_dialog.dart';
 import '../../extensions/services/panel_host_service.dart';
 import '../bridge/chat_bridge_registry.dart';
 import '../chat_provider.dart';
+import '../editing_message_provider.dart';
 import '../state/generation_phase_provider.dart';
 import 'chat_message_sync.dart';
 import 'chat_streaming_bridge_sync.dart';
@@ -144,6 +145,10 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
   /// "Re-run cleaner" per-message button in the WebView (hidden when off).
   final bool studioEnabled;
 
+  /// Whether display-only translation is switched on: shows the translate
+  /// button beside each message's menu button.
+  final bool translationEnabled;
+
   // Callback objects
   final MessageActionsCallbacks messageActions;
   final EditActionsCallbacks editActions;
@@ -214,6 +219,7 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
     this.hideTokenCount = false,
     this.disableSwipeRegeneration = false,
     this.studioEnabled = false,
+    this.translationEnabled = false,
     this.messageActions = const MessageActionsCallbacks(),
     this.editActions = const EditActionsCallbacks(),
     this.imageGenActions = const ImageGenCallbacks(),
@@ -478,7 +484,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     final initSessionId = widget.sessionId;
     final initMessages = List<ChatMessage>.of(widget.messages);
     final initVisibleStartIndex = widget.visibleStartIndex;
-    _resetStreamingPresentationState();
+    _resetAfterDomRework();
     PerfDebug.chatWebViewInitAttempted();
     try {
       await _waitForJsBridgeReady();
@@ -514,6 +520,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
           hideTokenCount: widget.hideTokenCount,
           disableSwipeRegeneration: widget.disableSwipeRegeneration,
           studioEnabled: widget.studioEnabled,
+          translationEnabled: widget.translationEnabled,
           messages: widget.messages,
           visibleStartIndex: widget.visibleStartIndex,
           memoryEntries: widget.memoryEntries,
@@ -618,7 +625,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     if (!mounted) return;
     _ready = false;
     _initFuture = null;
-    _resetStreamingPresentationState();
+    _resetAfterDomRework();
     _syncState.resetMutations();
     _clearBridgeRegistry?.call();
     _bridge = null;
@@ -667,7 +674,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       debugPrint('[ChatWebView] rebuilding the view after a failed $phase');
       _ready = false;
       _initFuture = null;
-      _resetStreamingPresentationState();
+      _resetAfterDomRework();
       _syncState.resetMutations();
       _bridge = null;
       _clearBridgeRegistry?.call();
@@ -712,7 +719,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       // header tracker would otherwise read as the user scrolling down.
       await _showChatHeader(bridge);
       await _bridgeOp(bridge.clearAll(), label: 'clearAll');
-      _resetStreamingPresentationState();
+      _resetAfterDomRework();
       await _bridgeOp(
         bridge.setMessages(
           widget.messages,
@@ -750,7 +757,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
         visibleStartIndex: widget.visibleStartIndex,
         busy: widget.isGenerating || widget.isSendPending,
         sessionSwitching: false,
-        onDomReset: _resetStreamingPresentationState,
+        onDomReset: _resetAfterDomRework,
       ),
       label: 'resyncMessagesAfterInit',
     );
@@ -778,6 +785,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     bridge.onScrollToTopVisibility = callbacks.onScrollToTopVisibility;
     bridge.onRegenerate = callbacks.onRegenerate;
     bridge.onRerunCleaner = callbacks.onRerunCleaner;
+    bridge.onTranslateMessage = callbacks.onTranslateMessage;
     bridge.onSelectionAction = callbacks.onSelectionAction;
     bridge.onSelectionChange = callbacks.onSelectionChange;
     bridge.onEditSave = callbacks.onEditSave;
@@ -790,6 +798,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     bridge.onToggleHidden = callbacks.onToggleHidden;
     bridge.onToggleImageHidden = callbacks.onToggleImageHidden;
     bridge.onInjectClick = callbacks.onInjectClick;
+    bridge.onOutputLimitClick = callbacks.onOutputLimitClick;
     bridge.onImgRetry = callbacks.onImgRetry;
     bridge.onImgEnableRetry = callbacks.onImgEnableRetry;
     bridge.onImgFind = callbacks.onImgFind;
@@ -972,7 +981,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
         label: 'clearAll',
       );
       if (!ownsSwitch()) return;
-      _resetStreamingPresentationState();
+      _resetAfterDomRework();
       await _bridgeOp(
         bridge.setMessages(
           widget.messages,
@@ -1047,6 +1056,28 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     _syncState.wasBusy = widget.isGenerating || widget.isSendPending;
     _syncState.streamingSent = false;
     _syncState.regenStreamingSent = false;
+  }
+
+  /// The message list is about to be rebuilt from scratch (a full re-render, a
+  /// session switch) or the page behind it is being replaced. Alongside the
+  /// streaming re-arm this drops any open edit session.
+  ///
+  /// The textarea the editor lived in is in the DOM being replaced, so the
+  /// Save/Cancel controls that would end the edit are gone with it — yet
+  /// `editingMessageIdProvider` stays set, and its guards keep the composer
+  /// read-only and regenerate/send disabled with no way to clear it. That is
+  /// the reported "tap edit, then nothing works until the app is restarted".
+  void _resetAfterDomRework() {
+    _resetStreamingPresentationState();
+    _clearEditingSession();
+  }
+
+  /// Clears an in-flight message edit, if any. See [_resetAfterDomRework].
+  void _clearEditingSession() {
+    final charId = widget.charId;
+    if (ref.read(editingMessageIdProvider(charId)) != null) {
+      ref.read(editingMessageIdProvider(charId).notifier).state = null;
+    }
   }
 
   /// Raises/lowers the switch cover, from anywhere.
@@ -1137,6 +1168,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       hideTokenCount: w.hideTokenCount,
       disableSwipeRegeneration: w.disableSwipeRegeneration,
       studioEnabled: w.studioEnabled,
+      translationEnabled: w.translationEnabled,
       memoryEntries: w.memoryEntries,
       memoryDrafts: w.memoryDrafts,
       sessionId: w.sessionId,
@@ -1308,7 +1340,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       visibleStartIndex: visibleStartIndex,
       busy: busy,
       sessionSwitching: sessionSwitching,
-      onDomReset: _resetStreamingPresentationState,
+      onDomReset: _resetAfterDomRework,
     );
   }
 
@@ -1370,7 +1402,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       onRefreshExtBlocksPanel: _refreshExtBlocksPanel,
       onSyncExtBlockPanels: _syncExtBlockPanels,
       onReconcileActiveGeneration: _reconcileActiveGenerationPresentation,
-      onDomReset: _resetStreamingPresentationState,
+      onDomReset: _resetAfterDomRework,
       isCurrentBridge: (bridge) => identical(_bridge, bridge),
     ).attach();
 
@@ -1464,6 +1496,40 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     final b = _bridge;
     if (b == null) return Future.value();
     return b.scrollToTop();
+  }
+
+  /// Display-only translation: see [ChatBridgeController.setTranslationPending].
+  Future<bool> setTranslationPending(
+    String id,
+    String original,
+    String label, {
+    bool deferred = false,
+  }) {
+    final bridge = _bridge;
+    if (bridge == null || !_ready) return Future.value(false);
+    return bridge.setTranslationPending(
+      id,
+      original,
+      label,
+      deferred: deferred,
+    );
+  }
+
+  Future<void> setTranslation(
+    String id,
+    String original,
+    String text, {
+    bool deferred = false,
+  }) {
+    final bridge = _bridge;
+    if (bridge == null || !_ready) return Future.value();
+    return bridge.setTranslation(id, original, text, deferred: deferred);
+  }
+
+  Future<void> clearTranslation(String id) {
+    final bridge = _bridge;
+    if (bridge == null || !_ready) return Future.value();
+    return bridge.clearTranslation(id);
   }
 
   /// Arm a one-shot "stick to bottom on the next append" so sending a message

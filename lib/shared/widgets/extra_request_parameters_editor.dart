@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/models/extra_request_parameter.dart';
 import '../theme/app_colors.dart';
+import 'glaze_switch.dart';
 import 'list_controls.dart';
 import 'menu_group.dart';
 
@@ -114,7 +115,7 @@ class _ExtraRequestParametersEditorState
         children: [
           Padding(
             padding: const EdgeInsets.only(top: 4),
-            child: Switch(
+            child: GlazeSwitch(
               value: parameter.enabled,
               onChanged: (value) {
                 setState(() => parameter.enabled = value);
@@ -126,24 +127,18 @@ class _ExtraRequestParametersEditorState
           Expanded(
             child: Column(
               children: [
-                TextField(
+                MenuFieldItem(
+                  label: widget.keyLabel,
                   controller: parameter.keyController,
-                  decoration: InputDecoration(
-                    labelText: widget.keyLabel,
-                    hintText: 'reasoning_effort',
-                    isDense: true,
-                  ),
+                  placeholder: 'reasoning_effort',
                   onChanged: (_) => _notifyChanged(),
                 ),
                 const SizedBox(height: 8),
-                TextField(
+                MenuFieldItem(
+                  label: widget.valueLabel,
                   controller: parameter.valueController,
-                  decoration: InputDecoration(
-                    labelText: widget.valueLabel,
-                    hintText: 'xhigh',
-                    helperText: 'JSON: true, 42, [1, 2], {"key": "value"}',
-                    isDense: true,
-                  ),
+                  placeholder: 'xhigh',
+                  helper: 'JSON: true, 42, [1, 2], {"key": "value"}',
                   onChanged: (_) => _notifyChanged(),
                 ),
               ],

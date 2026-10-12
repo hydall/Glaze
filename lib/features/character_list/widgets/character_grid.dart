@@ -14,6 +14,7 @@ import '../../../shared/widgets/glaze_spinner.dart';
 import '../../settings/app_settings_provider.dart';
 import '../character_detail_screen.dart';
 import '../character_sort.dart';
+import '../../guides/guide_anchor.dart';
 import 'character_card.dart';
 import 'randomizing_card_overlay.dart';
 import '../../../shared/widgets/glaze_sheet.dart';
@@ -27,6 +28,12 @@ class CharacterGrid extends StatelessWidget {
   final ValueChanged<SortType> onSortTypeChanged;
   final double topPadding;
   final double bottomPadding;
+
+  /// Extra room the desktop scrollbar leaves at the top of the viewport, so a
+  /// header floating over the column (the title-bar search strip on Windows)
+  /// does not sit under the thumb. The framework's Material scrollbar reads its
+  /// padding from the ambient [MediaQuery], so this is applied there.
+  final double scrollbarTopPadding;
   final bool isLoadingMore;
   final bool hasMore;
   final int filterCount;
@@ -48,6 +55,10 @@ class CharacterGrid extends StatelessWidget {
   /// dice draws from the complete set. Falls back to [characters] when null.
   final List<Character> Function()? randomPool;
 
+  /// Fills the space below [headerSliver] instead of the controls and the
+  /// grid while [characters] is empty.
+  final Widget? emptyState;
+
   const CharacterGrid({
     super.key,
     required this.characters,
@@ -58,6 +69,7 @@ class CharacterGrid extends StatelessWidget {
     required this.onSortTypeChanged,
     this.topPadding = 0,
     this.bottomPadding = 16,
+    this.scrollbarTopPadding = 0,
     this.isLoadingMore = false,
     this.hasMore = false,
     this.filterCount = 0,
@@ -65,6 +77,7 @@ class CharacterGrid extends StatelessWidget {
     this.headerSliver,
     this.folderId,
     this.randomPool,
+    this.emptyState,
   });
 
   /// The pool the shuffle button draws from — always the currently matching set
@@ -137,16 +150,22 @@ class CharacterGrid extends StatelessWidget {
                   (s) => s.value?.useStandardRandomizer ?? false,
                 ),
               );
-              return _DiceButton(
-                standard: standard,
-                onTap: () => standard
-                    ? _openStandardRandom(context)
-                    : _openRandomizing(context),
+              return GuideAnchor(
+                id: GuideIds.charsRandom,
+                child: _DiceButton(
+                  standard: standard,
+                  onTap: () => standard
+                      ? _openStandardRandom(context)
+                      : _openRandomizing(context),
+                ),
               );
             },
           ),
         if (onFilterTap != null)
-          _FilterButton(count: filterCount, onTap: onFilterTap!),
+          GuideAnchor(
+            id: GuideIds.charsFilter,
+            child: _FilterButton(count: filterCount, onTap: onFilterTap!),
+          ),
         if (isDesktop) ...[
           sortTypePill,
           sortDirButton,
@@ -165,75 +184,101 @@ class CharacterGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return CustomScrollView(
+    final grid = CustomScrollView(
       slivers: [
         if (topPadding > 0)
           SliverToBoxAdapter(child: SizedBox(height: topPadding)),
         ?headerSliver,
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-            child: _buildControls(context),
-          ),
-        ),
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
-            child: Text(
-              '$totalCount ${'count_characters'.plural(totalCount)}',
-              style: TextStyle(
-                fontSize: 11,
-                color: context.cs.onSurfaceVariant,
-              ),
+        if (characters.isEmpty && emptyState != null)
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: Padding(
+              padding: EdgeInsets.only(bottom: bottomPadding),
+              child: emptyState,
+            ),
+          )
+        else ...[
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: _buildControls(context),
             ),
           ),
-        ),
-        SliverPadding(
-          padding: EdgeInsets.fromLTRB(16, 0, 16, 0),
-          sliver: SliverLayoutBuilder(
-            builder: (context, constraints) => SliverGrid(
-              // Two fixed columns turned into two poster-sized cards on a
-              // desktop window; Vue used `minmax(220px, 1fr)` here.
-              gridDelegate: ResponsiveGridDelegate(
-                availableWidth: constraints.crossAxisExtent,
-                minCellExtent: 180,
-                childAspectRatio: 2 / 3,
-              ),
-              delegate: SliverChildBuilderDelegate(
-                // No explicit RepaintBoundary: SliverChildBuilderDelegate already
-                // wraps each child in one (addRepaintBoundaries: true by default).
-                //
-                // Keyed by character id so Flutter matches each card's State to its
-                // character across list changes. Without this, deleting a card mid-
-                // list left its slot's State (which still holds the finished dust
-                // cloud) attached to the character that shifted up into that slot —
-                // showing an empty slot instead of the next card.
-                (ctx, i) => CharacterCard(
-                  key: ValueKey(characters[i].id),
-                  character: characters[i],
-                  folderId: folderId,
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+              child: Text(
+                '$totalCount ${'count_characters'.plural(totalCount)}',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: context.cs.onSurfaceVariant,
                 ),
-                childCount: characters.length,
               ),
             ),
           ),
-        ),
-        SliverToBoxAdapter(
-          child: SizedBox(
-            height: hasMore || isLoadingMore ? 56 : 0,
-            child: isLoadingMore
-                ? Center(
-                    child: SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: GlazeSpinner(color: context.cs.primary),
+          SliverPadding(
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 0),
+            sliver: SliverLayoutBuilder(
+              builder: (context, constraints) => SliverGrid(
+                // Two fixed columns turned into two poster-sized cards on a
+                // desktop window; Vue used `minmax(220px, 1fr)` here.
+                gridDelegate: ResponsiveGridDelegate(
+                  availableWidth: constraints.crossAxisExtent,
+                  minCellExtent: 180,
+                  childAspectRatio: 2 / 3,
+                ),
+                delegate: SliverChildBuilderDelegate(
+                  // No explicit RepaintBoundary: SliverChildBuilderDelegate already
+                  // wraps each child in one (addRepaintBoundaries: true by default).
+                  //
+                  // Keyed by character id so Flutter matches each card's State to its
+                  // character across list changes. Without this, deleting a card mid-
+                  // list left its slot's State (which still holds the finished dust
+                  // cloud) attached to the character that shifted up into that slot —
+                  // showing an empty slot instead of the next card.
+                  //
+                  // The first card is the one the Characters tour points at;
+                  // the anchor wraps every card alike so the key stays on the
+                  // outermost widget, where the delegate matches it.
+                  (ctx, i) => GuideAnchor(
+                    key: ValueKey(characters[i].id),
+                    id: i == 0 ? GuideIds.charsCard : null,
+                    child: CharacterCard(
+                      character: characters[i],
+                      folderId: folderId,
                     ),
-                  )
-                : null,
+                  ),
+                  childCount: characters.length,
+                ),
+              ),
+            ),
           ),
-        ),
-        SliverToBoxAdapter(child: SizedBox(height: bottomPadding)),
+          SliverToBoxAdapter(
+            child: SizedBox(
+              height: hasMore || isLoadingMore ? 56 : 0,
+              child: isLoadingMore
+                  ? Center(
+                      child: SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: GlazeSpinner(color: context.cs.primary),
+                      ),
+                    )
+                  : null,
+            ),
+          ),
+          SliverToBoxAdapter(child: SizedBox(height: bottomPadding)),
+        ],
       ],
+    );
+
+    if (scrollbarTopPadding <= 0) return grid;
+    final media = MediaQuery.of(context);
+    return MediaQuery(
+      data: media.copyWith(
+        padding: media.padding.copyWith(top: scrollbarTopPadding),
+      ),
+      child: grid,
     );
   }
 }
@@ -246,7 +291,7 @@ class _SortDirButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       child: SizedBox(
         width: 32,
@@ -269,7 +314,7 @@ class _SortDirButton extends StatelessWidget {
           ),
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -284,7 +329,7 @@ class _DiceButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       child: SizedBox(
         width: 32,
@@ -302,7 +347,7 @@ class _DiceButton extends StatelessWidget {
           ),
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -314,7 +359,7 @@ class _FilterButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       child: SizedBox(
         width: 32,
@@ -367,7 +412,7 @@ class _FilterButton extends StatelessWidget {
           ],
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -385,7 +430,7 @@ class _SortTypePill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: () => _showPicker(context),
       child: SizedBox(
         height: 32,
@@ -417,7 +462,7 @@ class _SortTypePill extends StatelessWidget {
           ),
         ),
       ),
-    );
+    ));
   }
 
   void _showPicker(BuildContext context) {

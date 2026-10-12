@@ -15,6 +15,7 @@ abstract class Character with _$Character {
     String? description,
     String? personality,
     String? scenario,
+    String? appearance,
     String? firstMes,
     String? mesExample,
     String? systemPrompt,

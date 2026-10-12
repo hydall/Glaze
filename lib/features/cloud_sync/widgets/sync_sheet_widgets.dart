@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../../../../shared/theme/app_colors.dart';
+import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_action_button.dart';
 import '../services/sync_engine.dart';
 
 Widget buildSyncSectionHeader(BuildContext context, String title) {
@@ -31,6 +32,7 @@ Widget buildSyncProviderButton({
     color: color,
     borderRadius: BorderRadius.circular(14),
     child: InkWell(
+      mouseCursor: SystemMouseCursors.click,
       borderRadius: BorderRadius.circular(14),
       onTap: onPressed,
       child: Opacity(
@@ -74,6 +76,7 @@ Widget buildSyncManualButton({
     color: bg,
     borderRadius: BorderRadius.circular(14),
     child: InkWell(
+      mouseCursor: SystemMouseCursors.click,
       borderRadius: BorderRadius.circular(14),
       onTap: onPressed,
       child: Opacity(
@@ -115,6 +118,7 @@ Widget buildSyncDangerButton({
     color: bg,
     borderRadius: BorderRadius.circular(14),
     child: InkWell(
+      mouseCursor: SystemMouseCursors.click,
       borderRadius: BorderRadius.circular(14),
       onTap: onPressed,
       child: Opacity(
@@ -147,6 +151,7 @@ Widget buildSyncCountButton({required IconData icon, VoidCallback? onPressed}) {
     color: Colors.white.withValues(alpha: 0.05),
     borderRadius: BorderRadius.circular(8),
     child: InkWell(
+      mouseCursor: SystemMouseCursors.click,
       borderRadius: BorderRadius.circular(8),
       onTap: onPressed,
       child: Container(
@@ -243,25 +248,10 @@ Widget buildSyncResultCard(BuildContext context, Map<String, dynamic> result) {
           ),
         ),
         if (type == 'pull' && conflictsCount > 0)
-          TextButton(
-            style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              minimumSize: Size.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              backgroundColor: Colors.orange.withValues(alpha: 0.15),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(6),
-              ),
-            ),
-            onPressed: () {},
-            child: const Text(
-              'Resolve',
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.orangeAccent,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
+          GlazeActionButton(
+            icon: Icons.rule_rounded,
+            label: 'Resolve',
+            onTap: () {},
           ),
       ],
     ),

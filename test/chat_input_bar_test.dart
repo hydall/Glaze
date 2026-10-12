@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -13,6 +14,7 @@ import 'package:glaze_flutter/features/chat/composer_pins_provider.dart';
 import 'package:glaze_flutter/features/chat/state/chat_drawer_editing_provider.dart';
 import 'package:glaze_flutter/features/chat/widgets/chat_input_bar.dart';
 import 'package:glaze_flutter/features/chat/widgets/input_bar.dart';
+import 'package:glaze_flutter/shared/shell/desktop/desktop_layout_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -123,6 +125,80 @@ void main() {
       await tester.pumpWidget(buildChatInputBar(virtualKeyboardSend: false));
       final textField = tester.widget<TextField>(find.byType(TextField));
       expect(textField.textInputAction, TextInputAction.newline);
+    });
+
+    group('Enter to send', () {
+      Future<FocusNode> pumpFocused(
+        WidgetTester tester, {
+        required bool enterToSend,
+      }) async {
+        final focusNode = FocusNode();
+        addTearDown(focusNode.dispose);
+        await tester.pumpWidget(
+          buildChatInputBar(focusNode: focusNode, enterToSend: enterToSend),
+        );
+        focusNode.requestFocus();
+        await tester.pump();
+        await tester.enterText(find.byType(TextField), 'hello');
+        await tester.pump();
+        return focusNode;
+      }
+
+      testWidgets('a hardware Enter sends when enabled', (tester) async {
+        await pumpFocused(tester, enterToSend: true);
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pump();
+        expect(sentMessages, ['hello']);
+      });
+
+      testWidgets('Enter does not send when disabled', (tester) async {
+        await pumpFocused(tester, enterToSend: false);
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pump();
+        expect(sentMessages, isEmpty);
+      });
+
+      testWidgets('Shift+Enter does not send', (tester) async {
+        await pumpFocused(tester, enterToSend: true);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.pump();
+        expect(sentMessages, isEmpty);
+      });
+
+      for (final platform in [TargetPlatform.android, TargetPlatform.iOS]) {
+        testWidgets(
+          'a soft keyboard Enter on ${platform.name} does not send',
+          (tester) async {
+            debugDefaultTargetPlatformOverride = platform;
+            addTearDown(() => debugDefaultTargetPlatformOverride = null);
+            tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+            addTearDown(tester.view.resetViewInsets);
+
+            await pumpFocused(tester, enterToSend: true);
+            // Samsung Keyboard reports its Enter as a key event.
+            await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+            await tester.pump();
+            expect(sentMessages, isEmpty);
+            debugDefaultTargetPlatformOverride = null;
+          },
+        );
+
+        testWidgets(
+          'a hardware Enter on ${platform.name} still sends with no IME up',
+          (tester) async {
+            debugDefaultTargetPlatformOverride = platform;
+            addTearDown(() => debugDefaultTargetPlatformOverride = null);
+
+            await pumpFocused(tester, enterToSend: true);
+            await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+            await tester.pump();
+            expect(sentMessages, ['hello']);
+            debugDefaultTargetPlatformOverride = null;
+          },
+        );
+      }
     });
 
     testWidgets('editing blocks impersonate action', (tester) async {
@@ -730,6 +806,61 @@ void main() {
         ComposerPin.action(ComposerAction.guidance),
       );
       expect(find.byIcon(Icons.account_circle_rounded), findsNothing);
+    });
+
+    testWidgets('desktop keeps the row editable with the bottom drawer shut', (
+      tester,
+    ) async {
+      // On desktop the drawer is the right sidebar, which never opens as a
+      // bottom sheet, so `isDrawerOpen` stays false on the chat screen. The
+      // sidebar's own pencil still flips the shared edit-mode flag, and the row
+      // must honour it — otherwise nothing can be dragged into or along it.
+      Widget handle(String label, ComposerPin pin) => Draggable<ComposerPin>(
+        key: ValueKey(label),
+        data: pin,
+        feedback: const SizedBox(width: 20, height: 20),
+        child: const ColoredBox(
+          color: Color(0xFF00FF00),
+          child: SizedBox(width: 20, height: 20),
+        ),
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          child: MaterialApp(
+            home: Scaffold(
+              body: DesktopScope(
+                isDesktop: true,
+                child: Column(
+                  children: [
+                    handle(
+                      'reply',
+                      ComposerPin.action(ComposerAction.guidance),
+                    ),
+                    ChatInputBar(
+                      isGenerating: false,
+                      isDrawerOpen: false,
+                      onMagicDrawer: null,
+                      onSend: (_) async => true,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(ChatInputBar)),
+      );
+      container.read(chatDrawerEditingProvider.notifier).state = true;
+      await tester.pumpAndSettle();
+
+      // The demote badge is edit mode's mark on a pinnable button; it is only
+      // built while the row is editable.
+      expect(find.byIcon(Icons.arrow_downward), findsWidgets);
     });
 
     testWidgets('edit mode kills the empty tap but not send or stop', (

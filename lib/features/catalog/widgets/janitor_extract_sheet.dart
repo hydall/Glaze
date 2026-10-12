@@ -5,6 +5,7 @@ import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_error_block.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
+import '../../../shared/widgets/glaze_text_field.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../../core/llm/tokenizer.dart';
 import '../services/catalog_error_labels.dart';
@@ -164,27 +165,10 @@ class _JanitorExtractSheetState extends ConsumerState<_JanitorExtractSheet> {
                 style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
               ),
               const SizedBox(height: 16),
-              TextField(
+              GlazeTextField(
                 controller: _controller,
                 enabled: !_busy,
-                style: TextStyle(fontSize: 14, color: cs.onSurface),
-                decoration: InputDecoration(
-                  hintText: 'https://janitorai.com/characters/...',
-                  hintStyle: TextStyle(
-                    color: cs.onSurfaceVariant,
-                    fontSize: 14,
-                  ),
-                  filled: true,
-                  fillColor: cs.surfaceContainerHighest,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 12,
-                  ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
-                  ),
-                ),
+                hint: 'https://janitorai.com/characters/...',
                 onSubmitted: (_) => _busy ? null : _run(),
               ),
               if (_busy) ...[

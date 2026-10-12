@@ -25,6 +25,7 @@ import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/glaze_action_button.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../shared/widgets/glaze_fab.dart';
 import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/glaze_tab_bar.dart';
 import '../../shared/widgets/swipe_tab_switcher.dart';
@@ -35,6 +36,8 @@ import '../../shared/widgets/glaze_toast.dart';
 import '../catalog/catalog_provider.dart';
 import '../catalog/third_party_providers_provider.dart';
 import '../catalog/widgets/widgets.dart';
+import '../guides/guide_anchor.dart';
+import '../guides/guide_service.dart';
 import '../picks/widgets/picks_grid.dart';
 import '../settings/app_settings_provider.dart';
 import 'character_sort.dart';
@@ -100,6 +103,11 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
   /// bar (see [_searchInStrip]), its bottom edge included.
   static const double _kSearchStripBlock = 41.0;
 
+  /// Room the character grid's scrollbar leaves at the top so its thumb starts
+  /// below the search strip floating over the column, rather than under it.
+  /// Zero unless the desktop strip is in use.
+  double get _scrollbarTopPadding => _searchInStrip ? _kSearchStripBlock : 0.0;
+
   // Owns one scroll position per sub-tab (the grids attach via
   // PrimaryScrollController), so tapping the active tab can animate it back to
   // the top and switching tabs returns each one to where it was left.
@@ -118,7 +126,9 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     // screen, so a list left scrolled down would re-open with its header still
     // slid away. Opening the screen always starts from a visible header.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _showHeader();
+      if (!mounted) return;
+      _showHeader();
+      maybeShowGuide(context, AppGuide.characters);
     });
   }
 
@@ -211,20 +221,23 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
       actions: inPicks || _searchInStrip
           ? null
           : [
-              SizedBox(
-                width: 44,
-                height: 44,
-                child: IconButton(
-                  icon: Icon(
-                    _searchExpanded
-                        ? Icons.close_rounded
-                        : Icons.search_rounded,
-                    size: 22,
+              GuideAnchor(
+                id: GuideIds.charsSearch,
+                child: SizedBox(
+                  width: 44,
+                  height: 44,
+                  child: IconButton(
+                    icon: Icon(
+                      _searchExpanded
+                          ? Icons.close_rounded
+                          : Icons.search_rounded,
+                      size: 22,
+                    ),
+                    color: context.cs.primary,
+                    onPressed: timelineLocked && !_searchExpanded
+                        ? null
+                        : (_searchExpanded ? _closeSearch : _openSearch),
                   ),
-                  color: context.cs.primary,
-                  onPressed: timelineLocked && !_searchExpanded
-                      ? null
-                      : (_searchExpanded ? _closeSearch : _openSearch),
                 ),
               ),
             ],
@@ -669,6 +682,8 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
       return _buildFilteredResults(context, topPad, navHeight);
     }
 
+    final catalogVisible = ref.watch(catalogVisibleProvider);
+
     final key = InfiniteCharactersKey(
       sort: _sortField,
       dir: _sortDirEnum,
@@ -690,9 +705,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
             slivers: [
               SliverToBoxAdapter(child: SizedBox(height: topPad)),
               SliverFillRemaining(
-                child: EmptyCharacterState(
-                  onImport: () => _importCharacter(context, ref),
-                ),
+                child: _buildEmptyLibrary(context, catalogVisible),
               ),
             ],
           );
@@ -714,39 +727,43 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
             sortDir: _sortDir,
             topPadding: topPad,
             bottomPadding: navHeight + 20,
+            scrollbarTopPadding: _scrollbarTopPadding,
             filterCount: _filters.activeCount,
             onFilterTap: () => _showCharacterFilterSheet(context),
             // The grid only holds the loaded page; let the dice draw from the
             // full unfiltered library instead of just the rendered cards.
             randomPool: () => ref.read(filteredCharactersProvider(_query())),
             headerSliver: SliverToBoxAdapter(
-              child: CharacterFoldersSection(
-                onOpenFolder: (id) {
-                  _showHeader();
-                  setState(() => _currentFolderId = id);
-                  refreshShellHeader();
-                },
-                showFavorites: showFavorites,
-                onOpenFavorites: () {
-                  _showHeader();
-                  setState(() => _currentFolderId = kFavoritesFolderId);
-                  refreshShellHeader();
-                },
-                showOurPicks: showOurPicks,
-                onOpenPicks: () {
-                  _showHeader();
-                  setState(() => _currentFolderId = kPicksFolderId);
-                  refreshShellHeader();
-                },
-                onHidePicks: () {
-                  final s = ref.read(appSettingsProvider).value;
-                  if (s != null) {
-                    ref
-                        .read(appSettingsProvider.notifier)
-                        .save(s.copyWith(showOurPicks: false));
-                    GlazeToast.show(context, 'our_picks_hidden_toast'.tr());
-                  }
-                },
+              child: GuideAnchor(
+                id: GuideIds.charsFolders,
+                child: CharacterFoldersSection(
+                  onOpenFolder: (id) {
+                    _showHeader();
+                    setState(() => _currentFolderId = id);
+                    refreshShellHeader();
+                  },
+                  showFavorites: showFavorites,
+                  onOpenFavorites: () {
+                    _showHeader();
+                    setState(() => _currentFolderId = kFavoritesFolderId);
+                    refreshShellHeader();
+                  },
+                  showOurPicks: showOurPicks,
+                  onOpenPicks: () {
+                    _showHeader();
+                    setState(() => _currentFolderId = kPicksFolderId);
+                    refreshShellHeader();
+                  },
+                  onHidePicks: () {
+                    final s = ref.read(appSettingsProvider).value;
+                    if (s != null) {
+                      ref
+                          .read(appSettingsProvider.notifier)
+                          .save(s.copyWith(showOurPicks: false));
+                      GlazeToast.show(context, 'our_picks_hidden_toast'.tr());
+                    }
+                  },
+                ),
               ),
             ),
             onSortDirToggle: () => setState(() {
@@ -755,9 +772,19 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
             onSortTypeChanged: (t) => setState(() => _sortBy = t),
             isLoadingMore: state.isLoadingMore,
             hasMore: state.hasMore,
+            emptyState: state.totalCount == 0
+                ? _buildEmptyLibrary(context, catalogVisible)
+                : null,
           ),
         );
       },
+    );
+  }
+
+  Widget _buildEmptyLibrary(BuildContext context, bool catalogVisible) {
+    return EmptyCharacterState(
+      onAdd: () => _showAddSheet(context, ref),
+      onDiscover: catalogVisible ? () => _onTabSwipe(1) : null,
     );
   }
 
@@ -833,6 +860,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
           sortDir: _sortDir,
           topPadding: topPad,
           bottomPadding: navHeight + 20,
+          scrollbarTopPadding: _scrollbarTopPadding,
           filterCount: _filters.activeCount,
           onFilterTap: () => _showCharacterFilterSheet(context),
           onSortDirToggle: () => setState(() {
@@ -910,6 +938,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
           sortDir: _sortDir,
           topPadding: topPad,
           bottomPadding: navHeight + 20,
+          scrollbarTopPadding: _scrollbarTopPadding,
           filterCount: _filters.activeCount,
           onFilterTap: () => _showCharacterFilterSheet(context),
           folderId: isFavorites ? null : folderId,
@@ -1095,7 +1124,10 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
       padding: desktop
           ? const EdgeInsets.fromLTRB(16, 10, 16, 0)
           : const EdgeInsets.only(top: 10),
-      child: desktop ? _buildDesktopTabsRow() : _buildTabStrip(),
+      child: GuideAnchor(
+        id: GuideIds.charsTabs,
+        child: desktop ? _buildDesktopTabsRow() : _buildTabStrip(),
+      ),
     );
   }
 
@@ -1657,16 +1689,27 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
 class _AddButton extends StatelessWidget {
   final VoidCallback onTap;
 
-  /// 48 as the button floating over the grid on mobile; 42 inline in the
-  /// desktop tabs row, where it lines up with the tab strip beside it.
+  /// 48 (the default) floats over the grid on mobile as a [GlazeFab]; 42 sits
+  /// inline in the desktop tabs row, lined up with the tab strip beside it.
   final double height;
 
   const _AddButton({required this.onTap, this.height = 48});
 
   @override
   Widget build(BuildContext context) {
+    return GuideAnchor(id: GuideIds.charsAdd, child: _buildButton(context));
+  }
+
+  Widget _buildButton(BuildContext context) {
     final compact = height < 48;
-    return GestureDetector(
+    if (!compact) {
+      return GlazeFab(
+        label: 'btn_add'.tr(),
+        tooltip: 'btn_add'.tr(),
+        onTap: onTap,
+      );
+    }
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       child: Container(
         height: height,
@@ -1702,7 +1745,7 @@ class _AddButton extends StatelessWidget {
           ],
         ),
       ),
-    );
+    ));
   }
 }
 

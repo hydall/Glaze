@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../../core/models/preset.dart';
 import '../../../core/models/preset_block_groups.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_switch.dart';
 import 'preset_block_row.dart';
 
 /// One folder in the preset editor's block list — the agentic editor's folder
@@ -99,6 +100,7 @@ class _PresetBlockGroupRowState extends State<PresetBlockGroupRow> {
             Opacity(
               opacity: folder.enabled ? 1.0 : 0.5,
               child: InkWell(
+                mouseCursor: SystemMouseCursors.click,
                 onTap: () => setState(() => _expanded = !_expanded),
                 child: Row(
                   children: [
@@ -172,10 +174,9 @@ class _PresetBlockGroupRowState extends State<PresetBlockGroupRow> {
                     Transform.scale(
                       scale: 0.8,
                       alignment: Alignment.centerRight,
-                      child: Switch(
+                      child: GlazeSwitch(
                         value: folder.enabled,
                         onChanged: widget.onToggleFolder,
-                        activeThumbColor: context.cs.primary,
                       ),
                     ),
                     Padding(
@@ -273,6 +274,7 @@ class _PresetBlockGroupRowState extends State<PresetBlockGroupRow> {
     child: Material(
       color: Colors.transparent,
       child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
         onTap: onTap,
         borderRadius: BorderRadius.circular(20),
         child: Icon(icon, size: 20, color: context.cs.onSurfaceVariant),

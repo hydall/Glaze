@@ -9,6 +9,7 @@ import '../../../core/models/character.dart';
 import '../../../core/models/persona.dart';
 import '../../../core/services/image_storage_service.dart';
 import '../../../core/utils/error_format.dart';
+import '../image_gen_capabilities.dart';
 import '../image_gen_models.dart';
 import 'image_gen_dispatcher.dart';
 import 'image_prompt_builder.dart';
@@ -224,14 +225,41 @@ class ImageGenService {
               (isNaistera &&
                   NaisteraConstants.isNovelAIModel(settings.naisteraModel))),
     );
-    if (isNaistera && settings.sendRefDescriptions) {
+    final charDescription = _appearanceOf(
+      character?.name,
+      settings,
+      cardAppearance: character?.appearance,
+    );
+    final userDescription = _appearanceOf(persona?.name, settings);
+
+    // A model without reference support has no other way to carry the
+    // character, so the text is sent even if the stored source still says
+    // "image" (the UI only ever offers the text option for those models).
+    final sendAppearanceText =
+        settings.sendCharAvatar &&
+        (settings.charAppearanceSource == CharacterAppearanceSource.description ||
+            providerMaxReferences(settings) == 0);
+
+    if (isNaistera && settings.sendRefDescriptions && !sendAppearanceText) {
       finalPrompt = appendPromptBlock(
         finalPrompt,
         buildCharacterDescriptionPromptBlock(
           mode: descriptionsMode,
           references: references,
-          charDescription: _appearanceOf(character?.name, settings),
-          userDescription: _appearanceOf(persona?.name, settings),
+          charDescription: charDescription,
+          userDescription: userDescription,
+        ),
+      );
+    } else if (sendAppearanceText && charDescription.isNotEmpty) {
+      // Models without reference support — and an explicit "text description"
+      // choice on a model that has them — carry the character card's
+      // appearance in the prompt instead of as an image.
+      finalPrompt = appendPromptBlock(
+        finalPrompt,
+        buildCharacterDescriptionPromptBlock(
+          mode: CharacterDescriptionsMode.asIs,
+          references: references,
+          charDescription: charDescription,
         ),
       );
     }
@@ -254,10 +282,19 @@ class ImageGenService {
     );
   }
 
-  /// Appearance blurb for a character or persona: the description of the
-  /// reference-library entry whose aliases name them. Glaze has no separate
-  /// appearance field, and a library entry is exactly where a user writes one.
-  static String _appearanceOf(String? name, ImageGenSettings settings) {
+  /// Appearance blurb for a character or persona.
+  ///
+  /// The character card's [Character.appearance] field wins when it is set;
+  /// otherwise this is the description of the reference-library entry whose
+  /// aliases name them, which is where a persona (or an older card) keeps its
+  /// appearance.
+  static String _appearanceOf(
+    String? name,
+    ImageGenSettings settings, {
+    String? cardAppearance,
+  }) {
+    final fromCard = (cardAppearance ?? '').trim();
+    if (fromCard.isNotEmpty) return fromCard;
     final target = normalizeTriggerText(name ?? '');
     if (target.isEmpty) return '';
     for (final ref in settings.references) {

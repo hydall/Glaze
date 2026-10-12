@@ -15,15 +15,19 @@ Widget _desktopApp({required Widget Function(BuildContext) builder}) {
       theme: ThemeData.dark(),
       home: DesktopScope(
         isDesktop: true,
-        child: Scaffold(
-          body: Builder(builder: builder),
-        ),
+        child: Scaffold(body: Builder(builder: builder)),
       ),
     ),
   );
 }
 
 Finder _openButton() => find.byKey(const ValueKey('open'));
+
+/// Pumps past the title bar's double-tap window so its buttons' taps resolve.
+Future<void> _settleTitleBarTap(WidgetTester tester) async {
+  await tester.pump(const Duration(milliseconds: 400));
+  await tester.pumpAndSettle();
+}
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
@@ -101,6 +105,56 @@ void main() {
     expect(find.byType(BottomSheet), findsNothing);
   });
 
+  // A screen that walks its own levels (the glossary) offers its back step in
+  // the window's title bar, and the close button closes the window from
+  // whichever level it is on — rather than stepping back out of it.
+  testWidgets('a sheet window title bar carries the sheet back step', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1600, 1000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    var backs = 0;
+    await tester.pumpWidget(
+      _desktopApp(
+        builder: (context) => Center(
+          child: ElevatedButton(
+            key: const ValueKey('open'),
+            onPressed: () => showGlazeSheet<void>(
+              context: context,
+              builder: (_) => SheetView(
+                title: 'Glossary',
+                showBack: true,
+                onBack: () => backs++,
+                body: const Text('sheet body'),
+              ),
+            ),
+            child: const Text('open'),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(_openButton());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Glossary'), findsOneWidget);
+    expect(find.byIcon(Icons.arrow_back_rounded), findsOneWidget);
+
+    // Back steps the sheet, leaving the window open.
+    await tester.tap(find.byIcon(Icons.arrow_back_rounded));
+    await _settleTitleBarTap(tester);
+    expect(backs, 1);
+    expect(find.text('sheet body'), findsOneWidget);
+
+    // Close closes the window from that level.
+    await tester.tap(find.byIcon(Icons.close_rounded));
+    await _settleTitleBarTap(tester);
+    expect(find.text('sheet body'), findsNothing);
+  });
+
   testWidgets('a rich GlazeBottomSheet opens as a window on desktop', (
     tester,
   ) async {
@@ -166,5 +220,57 @@ void main() {
     final surface = tester.getRect(find.byType(GlassSurface));
     final title = tester.getRect(find.text('Sheet'));
     expect(title.top - surface.top, greaterThanOrEqualTo(16));
+  });
+
+  testWidgets('a sheet opened from a root-navigator dialog is still a window', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1600, 1000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    // As in the app: the scope sits above the navigator, so routes pushed on
+    // the root navigator (a dialog here) see it too.
+    await tester.pumpWidget(
+      ProviderScope(
+        child: MaterialApp(
+          theme: ThemeData.dark(),
+          builder: (context, child) => AppDesktopScope(child: child!),
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => Center(
+                child: ElevatedButton(
+                  key: const ValueKey('open'),
+                  onPressed: () => showDialog<void>(
+                    context: context,
+                    builder: (dialogContext) => Center(
+                      child: ElevatedButton(
+                        key: const ValueKey('open-sheet'),
+                        onPressed: () => showGlazeSheet<void>(
+                          context: dialogContext,
+                          builder: (_) => const Text('sheet content'),
+                        ),
+                        child: const Text('open sheet'),
+                      ),
+                    ),
+                  ),
+                  child: const Text('open'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(_openButton());
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('open-sheet')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('sheet content'), findsOneWidget);
+    expect(find.byType(BottomSheet), findsNothing);
+    expect(find.byType(GlazeSheetWindow), findsOneWidget);
   });
 }

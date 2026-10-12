@@ -6,10 +6,13 @@ import '../../../core/models/character.dart';
 /// Riverpod, no DB, no async) — call sites fetch the snapshot from their
 /// own provider and pass it in.
 class MacroContext {
-  const MacroContext({this.character, this.persona});
+  const MacroContext({this.character, this.persona, this.personaDescription});
 
   final Character? character;
   final String? persona;
+
+  /// The persona's description (its prompt), for `{{persona}}`.
+  final String? personaDescription;
 
   static const empty = MacroContext();
 }
@@ -20,6 +23,8 @@ class MacroContext {
 ///
 /// - `{{char}}` → [MacroContext.character] name
 /// - `{{user}}` → [MacroContext.persona] (empty string when null)
+/// - `{{persona}}` → [MacroContext.personaDescription], as in the main macro
+///   engine and SillyTavern
 /// - `{{description}}` → [MacroContext.character] description
 /// - `{{personality}}` → [MacroContext.character] personality
 /// - `{{scenario}}` → [MacroContext.character] scenario
@@ -36,6 +41,7 @@ String expand(String text, MacroContext ctx) {
   var result = text;
   result = _replaceCi(result, '{{char}}', ctx.character?.name ?? '');
   result = _replaceCi(result, '{{user}}', ctx.persona ?? '');
+  result = _replaceCi(result, '{{persona}}', ctx.personaDescription ?? '');
   result = _replaceCi(result, '{{description}}', ctx.character?.description ?? '');
   result = _replaceCi(result, '{{personality}}', ctx.character?.personality ?? '');
   result = _replaceCi(result, '{{scenario}}', ctx.character?.scenario ?? '');

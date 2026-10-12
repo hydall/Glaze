@@ -36,7 +36,7 @@ void main() {
     // message vibration and the notifications row are platform-gated, so they
     // are deliberately absent from this list.
     const expected = {
-      'theme_mode',
+      'theme_follow_system',
       'chat_layout',
       'show_help_tips',
       'dialog_grouping',

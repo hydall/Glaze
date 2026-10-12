@@ -28,7 +28,8 @@ class ThemeChatPreview extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final isDark = preset.themeMode != 'light';
+    // The preview shows the theme on screen, so it shares the app's brightness.
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     // Resolve the live UI/chat fonts through the same providers the real app
     // uses, so custom/google/glaze selections render in the preview (these load
     // the font into the engine on demand and return its family name).

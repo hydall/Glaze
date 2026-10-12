@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:drift/drift.dart';
+import 'package:drift/drift.dart' hide isNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
@@ -90,6 +90,44 @@ void main() {
     expect(finals.single.stage, 'studio.final');
     expect(jsonDecode(finals.single.eventJson), isA<Map<String, dynamic>>());
     expect(finals.single.eventJson, isNot(contains('secret')));
+  });
+
+  test('binds a turn to its message once, and nothing else', () async {
+    // The immutability trigger used to reject this UPDATE too, so a turn's
+    // requests were never bound and the timeline could not group them.
+    await repo.record(_event(sequence: 1, stage: 'main'));
+    await repo.record(_event(sequence: 2, stage: 'studio.controller'));
+
+    await repo.bindTurnMessageId(
+      sessionId: 'session',
+      messageId: 'message',
+      sinceMs: 0,
+    );
+
+    final rows = await repo.newestForSession('session');
+    expect(rows.map((row) => row.messageId), everyElement('message'));
+
+    final id = rows.first.id;
+    Future<void> update(String set) => db.customStatement(
+      'UPDATE llm_request_capture_rows SET $set WHERE id = ?',
+      [id],
+    );
+    // A bound message id is final, and the capture itself stays immutable.
+    await expectLater(update("message_id = 'other'"), throwsA(anything));
+    await expectLater(update('message_id = NULL'), throwsA(anything));
+    await expectLater(update("event_json = '{}'"), throwsA(anything));
+
+    await repo.record(_event(sequence: 3, stage: 'main'));
+    final unbound = (await repo.newestForSession('session')).first;
+    expect(unbound.messageId, isNull);
+    await expectLater(
+      db.customStatement(
+        "UPDATE llm_request_capture_rows SET message_id = 'm', stage = 'x' "
+        'WHERE id = ?',
+        [unbound.id],
+      ),
+      throwsA(anything),
+    );
   });
 
   test('retains only the newest rows per session', () async {

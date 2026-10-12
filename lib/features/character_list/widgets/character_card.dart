@@ -219,6 +219,7 @@ class _CharacterCardState extends ConsumerState<CharacterCard>
         child: RepaintBoundary(
           key: _boundaryKey,
           child: MouseRegion(
+            cursor: SystemMouseCursors.click,
             onEnter: (_) => setState(() => _hovered = true),
             onExit: (_) => setState(() => _hovered = false),
             child: GestureDetector(
@@ -945,7 +946,7 @@ class _CardMenuButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       child: Container(
         width: 32,
@@ -964,6 +965,6 @@ class _CardMenuButton extends StatelessWidget {
           color: Colors.white,
         ),
       ),
-    );
+    ));
   }
 }

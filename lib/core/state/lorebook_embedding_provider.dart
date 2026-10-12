@@ -61,6 +61,17 @@ final vectorSearchAvailableProvider = Provider<bool>((ref) {
   return config != null && config.embeddingEnabled;
 });
 
+/// True when, on top of [vectorSearchAvailableProvider], the resolved
+/// embedding connection has an endpoint and a model to send requests to.
+///
+/// Says nothing about whether that connection answers; the lorebook screens
+/// probe it before turning a vector feature on.
+final embeddingConfiguredProvider = Provider<bool>((ref) {
+  if (!ref.watch(vectorSearchAvailableProvider)) return false;
+  final config = ref.watch(embeddingConfigProvider);
+  return config.endpoint.trim().isNotEmpty && config.model.trim().isNotEmpty;
+});
+
 /// Builds the embedding connection out of the embedding preset, borrowing the
 /// endpoint and key from [llmConfig] while "Use LLM API" is on (or while the
 /// dedicated endpoint is still blank). [llmConfig] defaults to the embedding

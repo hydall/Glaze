@@ -5,6 +5,7 @@ import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/sheet_view.dart';
 import '../../../shared/widgets/glaze_sheet.dart';
+import '../../../shared/widgets/glaze_text_field.dart';
 
 /// Sheet helpers for editing / deleting an ext-block from the chat WebView's
 /// ext-blocks panel. Extracted from `chat_webview_widget.dart` so the widget
@@ -110,16 +111,11 @@ class _ExtBlockEditSheetState extends State<_ExtBlockEditSheet> {
       body: ListView(
         children: [
           const SizedBox(height: 8),
-          TextField(
+          GlazeTextField(
             controller: _controller,
             autofocus: true,
             maxLines: 16,
-            minLines: 8,
-            style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
-            decoration: InputDecoration(
-              border: const OutlineInputBorder(),
-              hintText: 'placeholder_empty'.tr(),
-            ),
+            hint: 'placeholder_empty'.tr(),
           ),
           const SizedBox(height: 16),
           GlazeActionButton(

@@ -74,6 +74,15 @@ class SheetView extends ConsumerStatefulWidget {
   /// When null, defaults to `min(0.55 * h, 500)`.
   final double? collapsedFraction;
   final bool fitContent;
+
+  /// Centers the body vertically in a desktop floating window a [fitContent]
+  /// body would otherwise pack against the top of, leaving the rest of the
+  /// frame empty. A short, self-contained screen (the backup sheet) reads as
+  /// balanced only when that leftover space is split above and below it.
+  ///
+  /// Ignored outside a window, and on a phone, where a fit-content sheet
+  /// already hugs the body.
+  final bool centerContent;
   final bool showRouteBackground;
   final int? shellBranchIndex;
   final bool enableHeaderBlur;
@@ -87,8 +96,14 @@ class SheetView extends ConsumerStatefulWidget {
   /// the sheet is presented as a modal bottom sheet; as a fullscreen route back
   /// already goes through [onBack].
   ///
-  /// Dragging the sheet down stays an outright dismissal either way.
+  /// Dragging the sheet down stays an outright dismissal either way — unless
+  /// [confirmDismiss] says otherwise.
   final bool canPop;
+
+  /// Asked before a drag-down dismisses the sheet; false keeps it open. For a
+  /// body whose close has to be confirmed — a back press is already covered by
+  /// [canPop] and [onBack], but a fling bypasses both.
+  final Future<bool> Function()? confirmDismiss;
 
   const SheetView({
     super.key,
@@ -111,14 +126,25 @@ class SheetView extends ConsumerStatefulWidget {
     this.scrollController,
     this.collapsedFraction,
     this.fitContent = false,
+    this.centerContent = false,
     this.showRouteBackground = true,
     this.shellBranchIndex,
     this.enableHeaderBlur = true,
     this.canPop = true,
+    this.confirmDismiss,
   });
 
   @override
   ConsumerState<SheetView> createState() => _SheetViewState();
+
+  /// Expands the modal sheet [context] sits in to full height, the way a drag
+  /// up would. Returns once the snap has played, or at once when there is
+  /// nothing to expand: no enclosing sheet, a fullscreen route, a sheet sized
+  /// by its content, or one that is already expanded.
+  static Future<void> expandEnclosing(BuildContext context) {
+    final state = context.findAncestorStateOfType<_SheetViewState>();
+    return state?._expandFully() ?? Future<void>.value();
+  }
 }
 
 class _SheetViewState extends ConsumerState<SheetView>
@@ -628,6 +654,12 @@ class _SheetViewState extends ConsumerState<SheetView>
     _animateTo(target, expanding: !_expanded);
   }
 
+  Future<void> _expandFully() async {
+    if (!mounted || !_inModalSheet || widget.fitContent || _expanded) return;
+    _animateTo(_full(context), expanding: true);
+    await _ctrl.forward().orCancel.catchError((_) {});
+  }
+
   void _animateTo(double target, {required bool expanding}) {
     _commitKeyboardLift();
     final start = _currentHeight;
@@ -664,7 +696,21 @@ class _SheetViewState extends ConsumerState<SheetView>
   /// sheet away is an explicit dismissal, so it closes the whole sheet even
   /// when [SheetView.canPop] is false because the body has an inner state a
   /// *back* press would step out of first.
-  void _dismiss() => Navigator.of(context).pop();
+  ///
+  /// With [SheetView.confirmDismiss] the sheet first settles back where it was,
+  /// so the question is asked over an open sheet rather than a half-dragged one.
+  Future<void> _dismiss() async {
+    final confirm = widget.confirmDismiss;
+    if (confirm == null) {
+      Navigator.of(context).pop();
+      return;
+    }
+    _animateTo(
+      _expanded ? _full(context) : _collapsed(context),
+      expanding: _expanded,
+    );
+    if (await confirm() && mounted) Navigator.of(context).pop();
+  }
 
   void _onDragEnd(DragEndDetails d) {
     final vy = d.velocity.pixelsPerSecond.dy;
@@ -713,6 +759,11 @@ class _SheetViewState extends ConsumerState<SheetView>
       widget.tabs.isNotEmpty ||
       widget.headerBottom != null ||
       _effectiveShowHandle;
+
+  /// Whether the body should be centred in the frame it fills — a [fitContent]
+  /// body a desktop window was asked to centre ([SheetView.centerContent]).
+  bool get _centerBody =>
+      widget.fitContent && _inWindow && widget.centerContent;
 
   @override
   Widget build(BuildContext context) {
@@ -776,8 +827,12 @@ class _SheetViewState extends ConsumerState<SheetView>
               child: Builder(
                 builder: (context) {
                   final mediaQuery = MediaQuery.of(context);
+                  // A flush header has no inset pill to clear, so the body
+                  // starts right under its rule.
                   final extraTop = _hasHeader
-                      ? (mediaQuery.padding.top + 10 + _headerH)
+                      ? (mediaQuery.padding.top +
+                            (_flushHeader ? 0 : 10) +
+                            _headerH)
                       : mediaQuery.padding.top;
                   final newPadding = mediaQuery.padding.copyWith(
                     top: extraTop,
@@ -792,7 +847,9 @@ class _SheetViewState extends ConsumerState<SheetView>
                       padding: EdgeInsets.only(
                         bottom: isKeyboardOpen ? bottomInset + 10 : 0,
                       ),
-                      child: widget.body,
+                      child: _centerBody
+                          ? Center(child: widget.body)
+                          : widget.body,
                     ),
                   );
 
@@ -908,6 +965,12 @@ class _SheetViewState extends ConsumerState<SheetView>
                               ),
                               child: widget.headerBottom!,
                             ),
+                          // Flush, the body starts right under the header, so
+                          // the rows below the app bar keep their gap from it.
+                          if (_flushHeader &&
+                              (widget.tabs.isNotEmpty ||
+                                  widget.headerBottom != null))
+                            const SizedBox(height: 12),
                         ],
                       ),
                     ),
@@ -996,7 +1059,17 @@ class _SheetViewState extends ConsumerState<SheetView>
                 borderRadius: const BorderRadius.vertical(
                   top: Radius.circular(_kSheetCornerRadius),
                 ),
-                child: child,
+                child: DecoratedBox(
+                  // Foreground, so the pinned header's scrim cannot cover it.
+                  position: DecorationPosition.foreground,
+                  decoration: BoxDecoration(
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(_kSheetCornerRadius),
+                    ),
+                    border: glazeSheetBorder(context),
+                  ),
+                  child: child,
+                ),
               ),
             );
           },
@@ -1070,7 +1143,7 @@ class _SheetViewState extends ConsumerState<SheetView>
       child: CardBackdrop.closed(
         child: Stack(
           children: [
-            widget.fitContent ? body : Positioned.fill(child: body),
+            _bodyLayer(body),
 
             // Interactive header — rendered above the gradient so buttons
             // and drag handle are unobscured and fully hittable.
@@ -1139,6 +1212,19 @@ class _SheetViewState extends ConsumerState<SheetView>
         ),
       ),
     );
+  }
+
+  /// The body layer of the sheet's [Stack].
+  ///
+  /// A full-height body fills the slot. A [fitContent] body packs against the
+  /// top of it — unless a screen asked to centre it ([SheetView.centerContent])
+  /// and this sheet is inside a desktop window, where the body then sits in the
+  /// middle of the frame with the leftover space split above and below.
+  Widget _bodyLayer(Widget body) {
+    if (!widget.fitContent || _centerBody) {
+      return Positioned.fill(child: _centerBody ? Center(child: body) : body);
+    }
+    return body;
   }
 
   Widget _buildBodyChild(
@@ -1462,16 +1548,23 @@ class _HeaderIconButton extends StatelessWidget {
       color: Colors.transparent,
       shape: const CircleBorder(),
       child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
         customBorder: const CircleBorder(),
         onTap: onPressed,
-        child: SizedBox(
-          width: 40,
-          height: 40,
+        // At least an icon button's square, and as wide as a wider control
+        // needs (a switch): a fixed square let one spill past it, off the edge
+        // of a flush header.
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(
+            minWidth: 40,
+            minHeight: 40,
+            maxHeight: 40,
+          ),
           child: IconTheme(
             data: IconThemeData(color: fg),
             child: DefaultTextStyle(
               style: TextStyle(color: fg),
-              child: Center(child: child),
+              child: Center(widthFactor: 1, heightFactor: 1, child: child),
             ),
           ),
         ),
@@ -1501,6 +1594,7 @@ class _SheetTabButton extends StatelessWidget {
           : Colors.white.withValues(alpha: 0.04),
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
         borderRadius: BorderRadius.circular(12),
         onTap: onTap,
         child: Container(

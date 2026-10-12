@@ -93,6 +93,7 @@ class PresetFolderCard extends StatelessWidget {
                 color: Colors.transparent,
                 borderRadius: BorderRadius.circular(8),
                 child: InkWell(
+                  mouseCursor: SystemMouseCursors.click,
                   onTap: onMenu,
                   borderRadius: BorderRadius.circular(8),
                   child: Icon(

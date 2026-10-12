@@ -31,7 +31,7 @@ import { DEFAULT_TYPING_TEXT } from './typing_phase.js';
  *     .msg-footer
  *       .msg-meta            — gen-stat (full layout only)
  *       .msg-center-controls — .msg-switcher / .msg-regenerate / .msg-guided-swipe-btn
- *       .msg-actions-btn or .edit-buttons
+ *       .msg-trailing-actions (> .msg-translate-btn .msg-actions-btn) or .edit-buttons
  *   .guided-swipe-container (toggled by bridge)
  * ============================================================ */
 
@@ -54,11 +54,15 @@ export class Renderer {
     // Held here rather than on the message map so a re-render (a preset switch,
     // a scrollback batch) keeps the rule without Flutter re-sending it.
     this.contextStartId = null;
+    // The rule goes *under* contextStartId instead: the prompt carries none of
+    // the chat, so even the newest message is past the limit.
+    this.contextStartAfter = false;
   }
 
   /** Sets which message opens the prompt window; '' or null clears the rule. */
-  setContextWindowStart(messageId) {
+  setContextWindowStart(messageId, after = false) {
     this.contextStartId = messageId || null;
+    this.contextStartAfter = !!(this.contextStartId && after);
   }
 
   /* ----- Public: render a message ----- */
@@ -150,8 +154,9 @@ if (messageData.isEditing) classes.push('editing');
     section.addEventListener('animationend', () => section.classList.remove('msg-appear'), { once: true });
 
     /* --- Context-window rule: the chat above it is out of the prompt --- */
-    if (id && id === this.contextStartId) {
-      section.dataset.contextStart = '1';
+    const contextRule = !!id && id === this.contextStartId;
+    if (contextRule) section.dataset.contextStart = '1';
+    if (contextRule && !this.contextStartAfter) {
       section.appendChild(this.createContextLimitMarker());
     }
 
@@ -210,9 +215,18 @@ if (messageData.isEditing) classes.push('editing');
     wrapper.appendChild(body);
     stack.appendChild(wrapper);
 
+    /* --- Output-token cap warning (under the body) --- */
+    if (messageData.outputLimitHit) {
+      stack.appendChild(this._createOutputLimitChip(id));
+    }
+
     /* --- Footer --- */
     stack.appendChild(this._createFooter(messageData));
     section.appendChild(stack);
+
+    if (contextRule && this.contextStartAfter) {
+      section.appendChild(this.createContextLimitMarker(true));
+    }
 
     // Avatars and attachments are the message's light-DOM pictures, so the
     // body's own pass (writeShadowContent) never sees them.
@@ -382,6 +396,25 @@ if (messageData.isEditing) classes.push('editing');
     badge.className = 'msg-continuing';
     badge.textContent = 'Continuing…';
     return badge;
+  }
+
+  /* ----- Output-token cap warning -----
+   * The reply stopped because it ran out of output tokens, not because the
+   * model finished it. Flutter decides that (finish reason, usage, or its own
+   * count) and sends `outputLimitHit`; the chip only reports it.
+   */
+  _createOutputLimitChip(messageId) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'msg-output-limit';
+    // Tapping it opens Flutter's sheet explaining the cap and what to do.
+    chip.dataset.action = 'output-limit-click';
+    chip.dataset.messageId = messageId;
+    chip.innerHTML = ICON.warning;
+    const label = document.createElement('span');
+    label.textContent = 'Max output tokens reached';
+    chip.appendChild(label);
+    return chip;
   }
 
   /* ----- In-game clock (ledger-stamped, display-only) ----- */
@@ -668,12 +701,31 @@ if (messageData.isEditing) classes.push('editing');
     if (m.isEditing) {
       footer.appendChild(this._createEditButtons(m.id));
     } else {
+      // The translate button sits left of the menu, so both share one cell
+      // of the footer grid. It is always built and shown only while
+      // translation is on (`.translation-enabled` on the container, see
+      // Bridge.setMessageSettings); the section's `translating` /
+      // `translated` class picks which glyph it wears.
+      const trailing = document.createElement('div');
+      trailing.className = 'msg-trailing-actions';
+      // Built on streaming and error bubbles too, because the footer is not
+      // rebuilt when the run ends; CSS hides it on those until then.
+      if (this._roleKey(m.role) !== 'system') {
+        const translate = document.createElement('div');
+        translate.className = 'msg-translate-btn';
+        translate.dataset.action = 'translate';
+        translate.dataset.messageId = m.id;
+        translate.title = 'Translate';
+        translate.innerHTML = ICON.translate + ICON.showOriginal;
+        trailing.appendChild(translate);
+      }
       const actions = document.createElement('div');
       actions.className = 'msg-actions-btn';
       actions.dataset.action = 'open-actions';
       actions.dataset.messageId = m.id;
       actions.innerHTML = ICON.menu;
-      footer.appendChild(actions);
+      trailing.appendChild(actions);
+      footer.appendChild(trailing);
     }
 
     return footer;
@@ -999,6 +1051,19 @@ if (messageData.isEditing) classes.push('editing');
     // partial patches (memory badges, plain content updates) carry no
     // `isContinuing` and must leave the badge exactly as it is.
     if (msg.role !== undefined) {
+      // Same contract for the output-token cap warning: it follows the
+      // visible variation, so a swipe or a continuation can add or drop it.
+      const limitChip = stack?.querySelector(':scope > .msg-output-limit');
+      if (msg.outputLimitHit && !limitChip && stack) {
+        const footer = stack.querySelector(':scope > .msg-footer');
+        stack.insertBefore(
+          this._createOutputLimitChip(sectionEl.dataset.messageId),
+          footer || null,
+        );
+      } else if (!msg.outputLimitHit && limitChip) {
+        limitChip.remove();
+      }
+
       const existing = sectionEl.querySelector('.msg-continuing');
       if (msg.isContinuing && !existing) {
         if (footerMeta) footerMeta.appendChild(this._createContinuingBadge());
@@ -1105,9 +1170,10 @@ if (messageData.isEditing) classes.push('editing');
   /// The rule the first in-prompt message wears. Built like a date separator
   /// so the two read as the same kind of divider, and public because the bridge
   /// stamps it onto an already-rendered row when the boundary moves.
-  createContextLimitMarker() {
+  /// `after` draws it under the message, for a prompt that kept no chat.
+  createContextLimitMarker(after = false) {
     const el = document.createElement('div');
-    el.className = 'context-limit-marker';
+    el.className = after ? 'context-limit-marker after' : 'context-limit-marker';
     el.innerHTML = `<div class="date-separator-line"></div><span class="date-separator-label">Context limit</span><div class="date-separator-line"></div>`;
     return el;
   }

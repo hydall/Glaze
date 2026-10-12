@@ -330,6 +330,7 @@ class AnthropicChatTransport implements ChatTransport {
     var fullText = prefill ?? '';
     var fullReasoning = '';
     final usage = <String, dynamic>{};
+    String? stopReason;
     var doneReceived = false;
     String? lastRawJsonPayload;
 
@@ -389,6 +390,8 @@ class AnthropicChatTransport implements ChatTransport {
             } else if (type == 'message_delta') {
               final u = json['usage'] as Map<String, dynamic>?;
               if (u != null) usage.addAll(u);
+              final reason = (json['delta'] as Map?)?['stop_reason'];
+              if (reason is String) stopReason = reason;
             } else if (type == 'message_stop') {
               if (cancelToken == null || !cancelToken.isCancelled) {
                 onComplete?.call(
@@ -398,6 +401,7 @@ class AnthropicChatTransport implements ChatTransport {
                     fullText: fullText,
                     fullReasoning: fullReasoning,
                     usage: usage,
+                    stopReason: stopReason,
                     fallbackPayload: lastRawJsonPayload,
                   ),
                 );
@@ -446,6 +450,7 @@ class AnthropicChatTransport implements ChatTransport {
           fullText: fullText,
           fullReasoning: fullReasoning,
           usage: usage,
+          stopReason: stopReason,
           fallbackPayload: lastRawJsonPayload,
         ),
       );
@@ -629,6 +634,7 @@ class AnthropicChatTransport implements ChatTransport {
     required String fullText,
     required String fullReasoning,
     required Map<String, dynamic> usage,
+    String? stopReason,
     String? fallbackPayload,
   }) {
     final content = <Map<String, dynamic>>[
@@ -640,6 +646,7 @@ class AnthropicChatTransport implements ChatTransport {
       'type': 'message',
       'role': 'assistant',
       'content': content,
+      'stop_reason': ?stopReason,
       if (usage.isNotEmpty) 'usage': usage,
       'last_event': ?fallbackPayload,
     });

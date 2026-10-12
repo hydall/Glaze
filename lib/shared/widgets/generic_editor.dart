@@ -717,6 +717,7 @@ class _GenericEditorState extends State<GenericEditor> {
             borderRadius: BorderRadius.circular(10),
             clipBehavior: Clip.antiAlias,
             child: InkWell(
+              mouseCursor: SystemMouseCursors.click,
               onTap: _addGreeting,
               child: Padding(
                 padding: const EdgeInsets.all(12),
@@ -879,6 +880,7 @@ class _GreetingCard extends StatelessWidget {
       ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
         onTap: onEdit,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(12, 4, 4, 12),

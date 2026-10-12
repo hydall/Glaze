@@ -47,6 +47,33 @@ export class SwipeGestureHandler {
     // touchmove cancels scrolling for the rest of the gesture.
     const AXIS_LOCK_SLOP = 12;
 
+    // A quick flick rarely travels THRESHOLD px before the finger lifts, so a
+    // drag also commits when it is fast enough at release. Velocity is read
+    // over the last FLICK_WINDOW_MS of movement (px/ms), and a flick still has
+    // to cover FLICK_MIN_DISTANCE so a twitchy tap can't switch variants.
+    const FLICK_VELOCITY = 0.35;
+    const FLICK_MIN_DISTANCE = 30;
+    const FLICK_WINDOW_MS = 100;
+    let samples = [];
+
+    const recordSample = (x) => {
+      const now = performance.now();
+      samples.push({ x, t: now });
+      while (samples.length > 2 && now - samples[0].t > FLICK_WINDOW_MS) samples.shift();
+    };
+
+    // -1 → flicked left, 1 → flicked right, 0 → not a flick.
+    const flickDirection = (dx, endX) => {
+      if (Math.abs(dx) < FLICK_MIN_DISTANCE || samples.length === 0) return 0;
+      const now = performance.now();
+      const first = samples.find(s => now - s.t <= FLICK_WINDOW_MS) || samples[samples.length - 1];
+      const dt = Math.max(now - first.t, 1);
+      const v = (endX - first.x) / dt;
+      if (Math.abs(v) < FLICK_VELOCITY) return 0;
+      // The flick has to agree with the overall drag, not just its tail.
+      return Math.sign(v) === Math.sign(dx) ? Math.sign(v) : 0;
+    };
+
     const reset = (targets) => {
       styleAll(targets, { transition: 'transform 0.3s ease', transform: '' });
       setTimeout(() => styleAll(targets, { transition: '' }), 300);
@@ -79,6 +106,7 @@ export class SwipeGestureHandler {
       startY = t.clientY;
       scrollingVertical = false;
       axisLocked = false;
+      samples = [{ x: startX, t: performance.now() }];
       activeSection = section;
       activeTargets = targets;
       styleAll(targets, { transition: 'none' });
@@ -90,6 +118,7 @@ export class SwipeGestureHandler {
       const dx = t.clientX - startX;
       const dy = t.clientY - startY;
       if (scrollingVertical) return;
+      recordSample(t.clientX);
 
       // Decide the gesture axis once, only after a deliberate amount of travel.
       // Ties and vertical-dominant drags become scrolls (native), so grabbing a
@@ -143,6 +172,11 @@ export class SwipeGestureHandler {
 
       const t = e.changedTouches ? e.changedTouches[0] : e;
       const dx = t.clientX - startX;
+      const dy = t.clientY - startY;
+      const horizontal = axisLocked || Math.abs(dx) > Math.abs(dy);
+      const flick = horizontal ? flickDirection(dx, t.clientX) : 0;
+      const goNext = dx < -THRESHOLD || flick < 0;
+      const goPrev = dx > THRESHOLD || flick > 0;
 
       const swipeId = parseInt(section.dataset.swipeId || '0', 10);
       const swipeTotal = parseInt(section.dataset.swipeTotal || '1', 10);
@@ -154,9 +188,9 @@ export class SwipeGestureHandler {
       const msgId = section.dataset.messageId;
 
       if (canSwitchGreeting) {
-        if (dx < -THRESHOLD && greetingId < greetingTotal - 1) {
+        if (goNext && greetingId < greetingTotal - 1) {
           self.animateVariantSwap(msgId, 'next', () => self._sendToFlutter('onChangeGreeting', [msgId, 1]), dx);
-        } else if (dx > THRESHOLD && greetingId > 0) {
+        } else if (goPrev && greetingId > 0) {
           self.animateVariantSwap(msgId, 'prev', () => self._sendToFlutter('onChangeGreeting', [msgId, -1]), dx);
         } else {
           reset(targets);
@@ -164,7 +198,7 @@ export class SwipeGestureHandler {
         return;
       }
 
-      if (dx < -THRESHOLD) {
+      if (goNext) {
         if (swipeId < swipeTotal - 1) {
           self.animateVariantSwap(msgId, 'next', () => self._sendToFlutter('onSwipe', [JSON.stringify({ id: msgId, direction: 'right' })]), dx);
         } else if (isLast && !self._disableRegen()) {
@@ -176,7 +210,7 @@ export class SwipeGestureHandler {
         } else {
           reset(targets);
         }
-      } else if (dx > THRESHOLD) {
+      } else if (goPrev) {
         if (swipeId > 0) {
           self.animateVariantSwap(msgId, 'prev', () => self._sendToFlutter('onSwipe', [JSON.stringify({ id: msgId, direction: 'left' })]), dx);
         } else {

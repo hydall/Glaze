@@ -21,6 +21,7 @@ import '../../shared/widgets/swipe_tab_switcher.dart';
 import '../../shared/widgets/tab_slide_switcher.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glass_surface.dart';
+import '../../shared/widgets/glaze_text_field.dart';
 import '../../shared/widgets/list_controls.dart';
 import '../../shared/widgets/menu_group.dart';
 import 'app_settings_provider.dart';
@@ -296,6 +297,18 @@ class _GeneralTab extends StatelessWidget {
               onChanged: (v) =>
                   onUpdate((p) => p.copyWith(accentColor: v ?? '#C42A4A')),
             ),
+            if (!preset.isBuiltIn)
+              _FontModeRow(
+                label: 'theme_kind'.tr(),
+                mode: preset.themeMode,
+                modes: const [kThemeModeDark, kThemeModeLight, kThemeModeSystem],
+                modeLabels: [
+                  'theme_dark'.tr(),
+                  'theme_light'.tr(),
+                  'theme_kind_device'.tr(),
+                ],
+                onChanged: (v) => onUpdate((p) => p.copyWith(themeMode: v)),
+              ),
           ],
         ),
         MenuGroup(
@@ -1171,6 +1184,7 @@ class _LayoutPickerRow extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
         borderRadius: BorderRadius.circular(14),
         onTap: onTap,
         child: Ink(
@@ -1327,7 +1341,7 @@ class _FontModeRow extends StatelessWidget {
             child: Text(label, style: TextStyle(fontSize: 15, color: context.cs.onSurfaceVariant, fontWeight: FontWeight.w400)),
           ),
           const Spacer(),
-          GestureDetector(
+          MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
             onTap: () {
               GlazeBottomSheet.show<void>(
                 context,
@@ -1355,7 +1369,7 @@ class _FontModeRow extends StatelessWidget {
                 Icon(Icons.arrow_drop_down, color: context.cs.primary),
               ],
             ),
-          ),
+          )),
         ],
       ),
     );
@@ -1422,6 +1436,7 @@ class _ColorRow extends ConsumerWidget {
     return Opacity(
       opacity: locked ? 0.4 : 1.0,
       child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
         onTap: locked
             ? null
             : () => _openPicker(context, ref.read(themeProvider).activePreset),
@@ -1777,6 +1792,7 @@ class _BgImageRow extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         InkWell(
+          mouseCursor: SystemMouseCursors.click,
           onTap: () => _pick(context),
           child: Padding(
             padding:
@@ -1804,6 +1820,7 @@ class _BgImageRow extends StatelessWidget {
         ),
         if (hasImage)
           InkWell(
+            mouseCursor: SystemMouseCursors.click,
             onTap: onReset,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -2218,7 +2235,7 @@ class _ColorPickerSheetState extends ConsumerState<_ColorPickerSheet> {
                                 runSpacing: 10,
                                 children: [
                                 if (widget.allowNull && !_gradientMode)
-                                  GestureDetector(
+                                  MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
                                     onTap: () {
                                       setState(() {
                                         _hexCtrl.clear();
@@ -2244,11 +2261,11 @@ class _ColorPickerSheetState extends ConsumerState<_ColorPickerSheet> {
                                       child: Icon(Icons.auto_awesome,
                                           size: 18, color: cs.onSurfaceVariant),
                                     ),
-                                  ),
+                                  )),
                                 ...primaryPalette.map((hex) {
                                   final color = _hex(hex);
                                   final isSelected = _isPaletteSelected(hex);
-                                  return GestureDetector(
+                                  return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
                                     onTap: () {
                                       _applyExternalColor(color);
                                       if (!_gradientMode) {
@@ -2269,9 +2286,9 @@ class _ColorPickerSheetState extends ConsumerState<_ColorPickerSheet> {
                                             : null,
                                       ),
                                     ),
-                                  );
+                                  ));
                                 }),
-                                GestureDetector(
+                                MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
                                   onTap: () {
                                     setState(() {
                                       _showAdvancedEditor = !_showAdvancedEditor;
@@ -2304,8 +2321,7 @@ class _ColorPickerSheetState extends ConsumerState<_ColorPickerSheet> {
                                               : Colors.white)
                                           : cs.onSurfaceVariant,
                                     ),
-                                  ),
-                                ),
+                                  ))),
                                 ],
                               ),
                               if (_recentCustomHexes.isNotEmpty) ...[
@@ -2319,7 +2335,7 @@ class _ColorPickerSheetState extends ConsumerState<_ColorPickerSheet> {
                                     final color = _hex(hex);
                                     final isSelected = _showAdvancedEditor &&
                                         _committedHex.toUpperCase() == hex.toUpperCase();
-                                    return GestureDetector(
+                                    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
                                       onTap: () {
                                         _applyExternalColor(color);
                                         setState(() {
@@ -2341,7 +2357,7 @@ class _ColorPickerSheetState extends ConsumerState<_ColorPickerSheet> {
                                               : null,
                                         ),
                                       ),
-                                    );
+                                    ));
                                   }).toList(),
                                 ),
                               ],
@@ -2361,7 +2377,7 @@ class _ColorPickerSheetState extends ConsumerState<_ColorPickerSheet> {
                                   Row(
                                     children: [
                                       Expanded(
-                                        child: GestureDetector(
+                                        child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
                                           onTap: () => setState(() => _isHslMode = true),
                                           child: Container(
                                             padding: const EdgeInsets.symmetric(vertical: 8),
@@ -2380,10 +2396,10 @@ class _ColorPickerSheetState extends ConsumerState<_ColorPickerSheet> {
                                               ),
                                             ),
                                           ),
-                                        ),
+                                        )),
                                       ),
                                       Expanded(
-                                        child: GestureDetector(
+                                        child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
                                           onTap: () => setState(() => _isHslMode = false),
                                           child: Container(
                                             padding: const EdgeInsets.symmetric(vertical: 8),
@@ -2406,83 +2422,78 @@ class _ColorPickerSheetState extends ConsumerState<_ColorPickerSheet> {
                                               ),
                                             ),
                                           ),
-                                        ),
+                                        )),
                                       ),
                                     ],
                                   ),
                                   const SizedBox(height: 12),
                                   if (_isHslMode) ...[
-                                    _PickerSlider(
+                                    MenuRangeItem(
                                       label: 'Hue',
                                       value: _h,
                                       min: 0,
                                       max: 360,
                                       divisions: 360,
-                                      display: '${_h.round()}\u00B0',
+                                      decimalPlaces: 0,
+                                      unit: '\u00B0',
                                       onChanged: (v) { _h = v; _onHslChanged(); setState(() {}); },
                                     ),
-                                    _PickerSlider(
+                                    MenuRangeItem(
                                       label: 'Saturation',
                                       value: _s * 100,
                                       min: 0,
                                       max: 100,
                                       divisions: 100,
-                                      display: '${(_s * 100).round()}%',
+                                      decimalPlaces: 0,
+                                      unit: '%',
                                       onChanged: (v) { _s = v / 100; _onHslChanged(); setState(() {}); },
                                     ),
-                                    _PickerSlider(
+                                    MenuRangeItem(
                                       label: 'Lightness',
                                       value: _l * 100,
                                       min: 0,
                                       max: 100,
                                       divisions: 100,
-                                      display: '${(_l * 100).round()}%',
+                                      decimalPlaces: 0,
+                                      unit: '%',
                                       onChanged: (v) { _l = v / 100; _onHslChanged(); setState(() {}); },
                                     ),
                                   ] else ...[
-                                    _PickerSlider(
+                                    MenuRangeItem(
                                       label: 'Red',
                                       value: _r.toDouble(),
                                       min: 0,
                                       max: 255,
                                       divisions: 255,
-                                      display: '$_r',
-                                      activeColor: const Color(0xFFFF4444),
+                                      decimalPlaces: 0,
                                       onChanged: (v) { _r = v.round(); _onRgbChanged(); setState(() {}); },
                                     ),
-                                    _PickerSlider(
+                                    MenuRangeItem(
                                       label: 'Green',
                                       value: _g.toDouble(),
                                       min: 0,
                                       max: 255,
                                       divisions: 255,
-                                      display: '$_g',
-                                      activeColor: const Color(0xFF44BB44),
+                                      decimalPlaces: 0,
                                       onChanged: (v) { _g = v.round(); _onRgbChanged(); setState(() {}); },
                                     ),
-                                    _PickerSlider(
+                                    MenuRangeItem(
                                       label: 'Blue',
                                       value: _b.toDouble(),
                                       min: 0,
                                       max: 255,
                                       divisions: 255,
-                                      display: '$_b',
-                                      activeColor: const Color(0xFF4488FF),
+                                      decimalPlaces: 0,
                                       onChanged: (v) { _b = v.round(); _onRgbChanged(); setState(() {}); },
                                     ),
                                   ],
                                   const SizedBox(height: 12),
-                                  TextField(
+                                  MenuFieldItem(
+                                    label: 'theme_hex_color'.tr(),
                                     controller: _hexCtrl,
-                                    decoration: InputDecoration(
-                                      hintText: '#C42A4A',
-                                      labelText: 'theme_hex_color'.tr(),
-                                      errorText: _error,
-                                      prefixText:
-                                          _hexCtrl.text.startsWith('#') ? null : '#',
-                                      border: const OutlineInputBorder(),
-                                      isDense: true,
-                                    ),
+                                    placeholder: '#C42A4A',
+                                    helper: _error,
+                                    helperIsError: true,
                                     onChanged: _onHexChanged,
                                   ),
                                   const SizedBox(height: 8),
@@ -2516,7 +2527,7 @@ class _ModeToggle extends StatelessWidget {
     return Row(
       children: [
         Expanded(
-          child: GestureDetector(
+          child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
             onTap: onSolid,
             child: Container(
               padding: const EdgeInsets.symmetric(vertical: 9),
@@ -2538,10 +2549,10 @@ class _ModeToggle extends StatelessWidget {
                 ),
               ),
             ),
-          ),
+          )),
         ),
         Expanded(
-          child: GestureDetector(
+          child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
             onTap: onGradient,
             child: Container(
               padding: const EdgeInsets.symmetric(vertical: 9),
@@ -2567,7 +2578,7 @@ class _ModeToggle extends StatelessWidget {
                 ),
               ),
             ),
-          ),
+          )),
         ),
       ],
     );
@@ -2640,7 +2651,7 @@ class _AngleDial extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTapDown: (d) => _update(d.localPosition),
       onPanStart: (d) => _update(d.localPosition),
       onPanUpdate: (d) => _update(d.localPosition),
@@ -2656,7 +2667,7 @@ class _AngleDial extends StatelessWidget {
           ),
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -2748,7 +2759,7 @@ class _GradientStopToggle extends StatelessWidget {
       {required int index, required Color color, required String label}) {
     final cs = Theme.of(context).colorScheme;
     final selected = activeStop == index;
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: () => onSelect(index),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -2789,7 +2800,7 @@ class _GradientStopToggle extends StatelessWidget {
           ],
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -2840,7 +2851,7 @@ class _PickerIconButtonState extends State<_PickerIconButton>
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: widget.onTap,
       onTapDown: widget.onTap != null ? (_) => _press.forward() : null,
       onTapUp: widget.onTap != null ? (_) => _press.reverse() : null,
@@ -2860,59 +2871,7 @@ class _PickerIconButtonState extends State<_PickerIconButton>
           ),
         ),
       ),
-    );
-  }
-}
-
-class _PickerSlider extends StatelessWidget {
-  final String label;
-  final double value;
-  final double min;
-  final double max;
-  final int divisions;
-  final String display;
-  final Color? activeColor;
-  final ValueChanged<double> onChanged;
-
-  const _PickerSlider({
-    required this.label,
-    required this.value,
-    required this.min,
-    required this.max,
-    required this.divisions,
-    required this.display,
-    required this.onChanged,
-    this.activeColor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 80,
-            child: Text(label, style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
-          ),
-          Expanded(
-            child: Slider(
-              value: value.clamp(min, max),
-              min: min,
-              max: max,
-              divisions: divisions,
-              activeColor: activeColor ?? cs.primary,
-              onChanged: onChanged,
-            ),
-          ),
-          SizedBox(
-            width: 48,
-            child: Text(display, style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant), textAlign: TextAlign.end),
-          ),
-        ],
-      ),
-    );
+    ));
   }
 }
 
@@ -3002,15 +2961,10 @@ class _GoogleFontPickerSheetState extends State<_GoogleFontPickerSheet> {
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                  child: TextField(
+                  child: GlazeTextField(
                     controller: _controller,
-                    decoration: InputDecoration(
-                      hintText: 'theme_search_fonts'.tr(),
-                      prefixIcon: Icon(Icons.search, color: cs.onSurfaceVariant),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                    ),
+                    hint: 'theme_search_fonts'.tr(),
+                    isDense: true,
                     onChanged: (v) => setState(() => _query = v),
                   ),
                 ),
@@ -3055,18 +3009,18 @@ class _GoogleFontDisplayRow extends StatelessWidget {
         children: [
           const SizedBox(width: 130),
           Expanded(
-            child: GestureDetector(
+            child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
               onTap: onTap,
               child: Text(
                 fontName,
                 style: TextStyle(color: context.cs.primary, fontSize: 14),
               ),
-            ),
+            )),
           ),
-          GestureDetector(
+          MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
             onTap: onClear,
             child: Icon(Icons.close, size: 18, color: context.cs.onSurfaceVariant),
-          ),
+          )),
         ],
       ),
     );

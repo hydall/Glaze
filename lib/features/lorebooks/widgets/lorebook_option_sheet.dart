@@ -8,7 +8,10 @@ class LorebookOption<T> {
   final T value;
   final String label;
 
-  const LorebookOption(this.value, this.label);
+  /// Muted line under the label explaining what the choice does.
+  final String? hint;
+
+  const LorebookOption(this.value, this.label, {this.hint});
 }
 
 /// Port of Vue `openOptionSelector` — a bottom sheet of mutually exclusive
@@ -28,6 +31,7 @@ Future<void> showLorebookOptionSheet<T>(
       final selected = opt.value == current;
       return BottomSheetItem(
         label: opt.label,
+        hint: opt.hint,
         icon: selected ? Icons.check : null,
         iconColor: selected ? context.cs.primary : null,
         onTap: () {

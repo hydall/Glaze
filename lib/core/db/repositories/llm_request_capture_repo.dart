@@ -100,6 +100,24 @@ final class LlmRequestCaptureRepo
     return query.get();
   }
 
+  /// Session-less embedding requests — lorebook indexing from the editor, the
+  /// background auto-indexer and the vector rebuild, the embedding connection
+  /// test. They belong to no chat, so every chat's Prompt Inspector lists them.
+  Future<List<LlmRequestCaptureRow>> newestEmbeddingsWithoutSession({
+    int limit = maxRowsWithoutSession,
+  }) {
+    final query = db.select(db.llmRequestCaptureRows)
+      ..where(
+        (row) => row.sessionId.isNull() & row.stage.like('embedding%'),
+      )
+      ..orderBy([
+        (row) => OrderingTerm.desc(row.createdAtMs),
+        (row) => OrderingTerm.desc(row.id),
+      ])
+      ..limit(limit);
+    return query.get();
+  }
+
   /// Stamps [messageId] over the generation-phase rows of one turn.
   ///
   /// The main request and the Studio agent shards are sent before the reply

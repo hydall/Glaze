@@ -5,6 +5,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../features/guides/guide_service.dart';
 import '../../features/studio/studio_availability.dart';
 import '../widgets/glass_nav_bar.dart';
 import '../widgets/glass_surface.dart';
@@ -34,7 +35,9 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) retireActiveStudio(context, ref);
+      if (!mounted) return;
+      retireActiveStudio(context, ref);
+      maybeShowGuide(context, AppGuide.tabs);
     });
   }
 

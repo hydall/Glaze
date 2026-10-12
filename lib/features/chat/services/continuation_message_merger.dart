@@ -80,7 +80,10 @@ ChatMessage mergeContinuationMessage(
     'continuationOffset': continuationOffset,
     'agentSwipes': agentSwipes.map((swipe) => swipe.toJson()).toList(),
     'agentSwipeId': agentSwipeId,
-  };
+  }..remove('outputLimitHit');
+  // The cap warning describes how the message ends now, which is wherever the
+  // continuation stopped — a continuation that finished on its own clears it.
+  if (_hitOutputLimit(generated)) swipesMeta[swipeId]['outputLimitHit'] = true;
 
   return original.copyWith(
     content: content,
@@ -94,6 +97,13 @@ ChatMessage mergeContinuationMessage(
     agentSwipes: agentSwipes,
     agentSwipeId: agentSwipeId,
   );
+}
+
+bool _hitOutputLimit(ChatMessage message) {
+  final meta = message.swipesMeta;
+  if (meta.isEmpty) return false;
+  return meta[message.swipeId.clamp(0, meta.length - 1)]['outputLimitHit'] ==
+      true;
 }
 
 /// Joins an assistant message with the text a continuation run produced.

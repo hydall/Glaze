@@ -29,6 +29,9 @@ const desktopFloatingViews = <String, String?>{
   'regex-editor': null,
   'about': '/menu/about',
   'hall-of-fame': '/menu/about/hall-of-fame',
+  'logs': '/menu/logs',
+  // `?path=<file>`.
+  'log-view': null,
   'sync': '/sync',
   'backup': '/menu/settings',
 };

@@ -74,6 +74,7 @@ class LayoutPreviewCard extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
         borderRadius: BorderRadius.circular(18),
         onTap: onTap,
         child: Ink(

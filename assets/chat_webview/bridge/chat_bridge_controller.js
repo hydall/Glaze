@@ -34,11 +34,19 @@ import { retryFailedLocalImages } from '../renderer/local_image_retry.js';
  * owns one constant id for it and the page keeps it pinned to the tail, so a
  * persisted message that lands while it is up never slots in underneath. */
 const STREAMING_ID = '__streaming__';
+/* Must match the .msg-body.translation-fade-out duration in styles.css. */
+const TRANSLATION_FADE_OUT_MS = 140;
 
 export class Bridge {
   constructor(renderer, virtualList) {
     this.renderer = renderer;
     this.virtualList = virtualList;
+    // Display-only translations, id -> { original, text, label }. `text` is
+    // null while the request is in flight. Never written into the section's
+    // datasets: rawText / sourceText keep the original, so edit, copy and
+    // everything Flutter reads back stay on the stored message.
+    this._translations = new Map();
+    this.translationEnabled = false;
     this._pendingRequests = new Map();
     this._requestCounter = 0;
     this.isGenerating = false;
@@ -714,7 +722,7 @@ export class Bridge {
     if (!loading) {
       loading = document.createElement('div');
       loading.id = 'loading-screen';
-      loading.textContent = 'Loading...';
+      loading.appendChild(document.createElement('glaze-spinner'));
       document.body.insertBefore(loading, document.body.firstChild);
     }
     loading.style.opacity = '1';
@@ -775,6 +783,131 @@ export class Bridge {
     }
   }
 
+  /* ---------- Display-only translation ---------- */
+  _translationSection(id) {
+    return this.virtualList.itemMap?.get(id)?.el
+      || [...document.querySelectorAll('.message-section[data-message-id]')]
+        .find(el => el.dataset.messageId === id)
+      || null;
+  }
+
+  /* Shows the "translating" typing bubble on [id]. Refused (false) when the
+   * message no longer shows [original] — a swipe or edit landed meanwhile. A
+   * section that has not rendered yet is not a refusal: the entry is kept and
+   * painted when the bubble appears (auto-translation of an arriving message
+   * races the sync that appends it). */
+  setTranslationPending(payloadJson) {
+    const { id, original, label, deferred } = JSON.parse(payloadJson);
+    const section = this._translationSection(id);
+    if (section && section.dataset.rawText !== original && !deferred) return false;
+    this._translations.set(id, { original, text: null, label: label || '' });
+    if (section) this._fadeTranslation(section);
+    return true;
+  }
+
+  setTranslation(payloadJson) {
+    const { id, original, text, deferred } = JSON.parse(payloadJson);
+    if (!text) {
+      this.clearTranslation(id);
+      return false;
+    }
+    const section = this._translationSection(id);
+    if (section && section.dataset.rawText !== original) {
+      if (deferred) {
+        // The section has not caught up yet; keep the result so it paints once
+        // it matches, instead of dropping a finished auto-translation.
+        this._translations.set(id, { original, text, label: '' });
+        return true;
+      }
+      this.clearTranslation(id);
+      return false;
+    }
+    this._translations.set(id, { original, text, label: '' });
+    if (section) this._fadeTranslation(section);
+    return true;
+  }
+
+  clearTranslation(id) {
+    const had = this._translations.delete(id);
+    const section = this._translationSection(id);
+    if (!section) return;
+    if (had || section.classList.contains('translated')
+        || section.classList.contains('translating')) {
+      this._fadeTranslation(section);
+    }
+  }
+
+  clearAllTranslations() {
+    for (const id of [...this._translations.keys()]) this.clearTranslation(id);
+  }
+
+  /* Re-applies a translation after the section was rendered from its stored
+   * text. Cheap no-op for the (usual) message that has none. */
+  _reapplyTranslation(section) {
+    const id = section?.dataset?.messageId;
+    if (!id || !this._translations.has(id)) return;
+    this._paintTranslation(section);
+  }
+
+  /* Paints whatever the map holds for the section: the translation, the
+   * translating bubble, or — with no (or a stale) entry — the original. */
+  _paintTranslation(section) {
+    const id = section.dataset.messageId;
+    let entry = this._translations.get(id);
+    if (entry && entry.original !== section.dataset.rawText) {
+      // Swiped, edited or regenerated under the translation.
+      this._translations.delete(id);
+      entry = null;
+    }
+    section.classList.toggle('translating', !!entry && entry.text == null);
+    section.classList.toggle('translated', !!entry && entry.text != null);
+    if (section.classList.contains('editing')) return;
+    const isUser = section.classList.contains('user');
+    const reasoning = section.dataset.reasoning || null;
+    if (entry && entry.text == null) {
+      this.renderer.updateMessageContent(section, '', reasoning, isUser, true, false);
+      const typing = section.querySelector('.msg-body > .typing-container');
+      if (typing) {
+        typing.classList.add('translation-typing');
+        const label = typing.querySelector('.typing-text');
+        if (label) label.textContent = entry.label;
+      }
+      return;
+    }
+    this.renderer.updateMessageContent(
+      section,
+      entry ? entry.text : (section.dataset.rawText || ''),
+      reasoning, isUser, false, false,
+    );
+  }
+
+  /* Cross-fades the body into whatever _paintTranslation draws now. Re-entrant:
+   * a second call mid-fade drops the pending swap, and the swap always paints
+   * the latest state, so nothing is lost. */
+  _fadeTranslation(section) {
+    const body = section.querySelector('.msg-body');
+    const animate = body && section.isConnected && !this.batterySaver
+      && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (!animate) {
+      this._paintTranslation(section);
+      return;
+    }
+    clearTimeout(body._translationFadeTimer);
+    clearTimeout(body._translationFadeInTimer);
+    body.classList.remove('translation-fade-in');
+    body.classList.add('translation-fade-out');
+    body._translationFadeTimer = setTimeout(() => {
+      body._translationFadeTimer = null;
+      this._paintTranslation(section);
+      body.classList.remove('translation-fade-out');
+      void body.offsetWidth;
+      body.classList.add('translation-fade-in');
+      body._translationFadeInTimer = setTimeout(() => {
+        body.classList.remove('translation-fade-in');
+      }, 240);
+    }, TRANSLATION_FADE_OUT_MS);
+  }
+
   /* ---------- Message list API ---------- */
   setMessages(messagesJson, preserveScroll = false) {
     this.flush();
@@ -813,6 +946,7 @@ export class Bridge {
     for (const msg of messages) {
       const rendered = this.renderer.renderMessage(msg);
       for (const el of rendered) {
+        this._reapplyTranslation(el);
         const id = el.dataset.messageId || `__date_${el.dataset.dateSeparator || Date.now()}`;
         ids.push(id);
         elements.push(el);
@@ -830,6 +964,7 @@ export class Bridge {
   _renderAndAppend(msg) {
     const rendered = this.renderer.renderMessage(msg);
     for (const el of rendered) {
+      this._reapplyTranslation(el);
       const id = el.dataset.messageId || `__date_${el.dataset.dateSeparator || Date.now()}`;
       this.virtualList.append(id, el);
     }
@@ -874,6 +1009,7 @@ export class Bridge {
       const rendered = this.renderer.renderMessage(msg);
       for (let j = rendered.length - 1; j >= 0; j--) {
         const el = rendered[j];
+        this._reapplyTranslation(el);
         const id = el.dataset.messageId || `__date_${el.dataset.dateSeparator || Date.now()}`;
         this.virtualList.prepend(id, el);
       }
@@ -903,16 +1039,19 @@ export class Bridge {
   }
 
   // Moves the CONTEXT LIMIT rule to the oldest message the next prompt still
-  // carries; '' retires it. Patches only the two rows involved instead of
-  // re-rendering the chat, and reaches them through `itemMap`, which retains
+  // carries; '' retires it. `after` draws it under the message instead — the
+  // prompt kept none of the chat. Patches only the two rows involved instead
+  // of re-rendering the chat, and reaches them through `itemMap`, which retains
   // every row element — so the rule is right whether or not the boundary is
   // currently mounted. The renderer keeps the id as well, which is what makes a
   // later full re-render draw the rule again without another call from Flutter.
-  setContextWindowStart(messageId) {
+  setContextWindowStart(messageId, after = false) {
     const next = messageId || null;
+    const nextAfter = !!(next && after);
     const previous = this.renderer.contextStartId || null;
-    this.renderer.setContextWindowStart(next);
-    if (previous === next) return;
+    const previousAfter = !!this.renderer.contextStartAfter;
+    this.renderer.setContextWindowStart(next, nextAfter);
+    if (previous === next && previousAfter === nextAfter) return;
     if (previous) {
       const el = this.virtualList.itemMap?.get(previous)?.el;
       if (el) {
@@ -924,7 +1063,9 @@ export class Bridge {
       const el = this.virtualList.itemMap?.get(next)?.el;
       if (el && !el.querySelector(':scope > .context-limit-marker')) {
         el.dataset.contextStart = '1';
-        el.insertBefore(this.renderer.createContextLimitMarker(), el.firstChild);
+        const marker = this.renderer.createContextLimitMarker(nextAfter);
+        if (nextAfter) el.appendChild(marker);
+        else el.insertBefore(marker, el.firstChild);
       }
     }
   }
@@ -976,15 +1117,25 @@ export class Bridge {
 
     if (msg.isError !== undefined) section.classList.toggle('error', !!msg.isError);
 
-    const isUser = section.classList.contains('user');
-    this.renderer.updateMessageContent(
-      section,
-      msg.text != null ? msg.text : (section.dataset.rawText || ''),
-      msg.reasoning ?? null,
-      isUser,
-      !!msg.isTyping,
-      animate,
-    );
+    // A background update (memory badge, LEDGER clock, gen-time) can land while
+    // the section is open for editing. `updateMessageContent` clears `.msg-body`
+    // and rebuilds it, which would destroy the `.edit-textarea` the user is
+    // typing into — leaving the section classed `editing` with no editor and
+    // the Dart side still believing an edit is active. Keep the textarea: the
+    // datasets above are what `stopEdit` re-renders from, so the saved text
+    // still reaches the bubble when the edit ends.
+    if (!section.classList.contains('editing')) {
+      const isUser = section.classList.contains('user');
+      this.renderer.updateMessageContent(
+        section,
+        msg.text != null ? msg.text : (section.dataset.rawText || ''),
+        msg.reasoning ?? null,
+        isUser,
+        !!msg.isTyping,
+        animate,
+      );
+      if (!msg.isTyping) this._reapplyTranslation(section);
+    }
     this._imgGenTimer.ensureRunning();
 
     if (msg.isHidden !== undefined) {
@@ -1222,6 +1373,8 @@ export class Bridge {
     const parked = this._detachStreamingPlaceholder();
     this._parkedPlaceholder = keepPlaceholder ? parked : null;
     if (!keepPlaceholder) this._placeholderActive = false;
+    // Another chat: its translations went with it.
+    if (!keepPlaceholder) this._translations.clear();
     this.virtualList.clear();
   }
 
@@ -1619,6 +1772,9 @@ export class Bridge {
     container.classList.toggle('hide-token-count', !!s.hideTokenCount);
     // Re-run cleaner is a Studio-only affordance — hide it when Studio is off.
     container.classList.toggle('hide-rerun-cleaner', !s.studioEnabled);
+    this.translationEnabled = !!s.translationEnabled;
+    container.classList.toggle('translation-enabled', this.translationEnabled);
+    if (!this.translationEnabled) this.clearAllTranslations();
     // Battery saver kills the overlay backdrop-filter strips too.
     this._renderOverlayBlurRegions();
   }
@@ -1667,6 +1823,10 @@ export class Bridge {
 
   stopEdit(messageId) {
     this._editController.stopEdit(messageId);
+    // The editor re-renders the stored text; a translation that still matches
+    // it (a cancelled edit) goes back on screen, a stale one is dropped.
+    const section = this._translationSection(messageId);
+    if (section) this._reapplyTranslation(section);
   }
 
   setBackgroundImage(url, blur) {

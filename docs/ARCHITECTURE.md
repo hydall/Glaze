@@ -435,7 +435,7 @@ GoRouter lives in `router.dart`, not `app.dart`. Shell tabs and overlay routes:
 |-------|--------|
 | `/` | `ChatHistoryScreen` (mobile); redirects to `/characters` on desktop (window ≥ 768 wide and, on a tablet, landscape; non-mobile force) |
 | `/characters` | `CharacterListScreen` |
-| `/tools` (+ nested `api`, `personas`, `presets`, `regex`, `lorebooks`, `lorebooks/settings`, `embeddings`) | `ToolsScreen` |
+| `/tools` (+ nested `api`, `personas`, `presets`, `regex`, `lorebooks`, `embeddings`) | `ToolsScreen` |
 | `/menu` (+ `settings`, `themes`, `about`, `glossary`) | `MenuScreen` — the header search filters the tab's nested settings; `settings` is one flat screen of themed groups with its own header search, and takes `?highlight=<row id>` so a hit deep-links to the row (`features/menu/search/`) |
 | `/chat/:charId` | `ChatScreen` (query params: `?session=`, `?new=1`, `?msg=`) |
 | `/character/create`, `/character/:charId`, `…/edit`, `…/gallery` | Character CRUD overlays |
@@ -931,7 +931,7 @@ INV-C5.
 - `embedding_types.dart` — shared embedding type definitions
 - `embedding_error_labels.dart` — error classification for embedding status UI
 - `vector_math.dart` — `cosineSimilarity`, `findTopK`, `findTopKMulti` (MaxSim)
-- `lorebook_provider.dart` — CRUD + activations + settings (SharedPreferences)
+- `lorebook_provider.dart` — CRUD + activations + settings (SharedPreferences); every save hands the book to `lorebook_auto_index_provider.dart`, which embeds new and changed entries in the background while the global "Auto-index vectors" switch is on
 
 ### Search Type System
 - `searchType`: `'keyword'` | `'vector'` | `'both'`
@@ -1298,10 +1298,21 @@ feature-local adapters to `SyncService`.
 ### Files
 - `shared/theme/theme_preset.dart` — Freezed `ThemePreset` model
 - `shared/theme/theme_preset_storage.dart` — `ThemePresetStorage`: load/save/import presets (SharedPreferences)
-- `shared/theme/theme_provider.dart` — `ThemeNotifier`: loads active preset, generates `ThemeData`
+- `shared/theme/theme_provider.dart` — `ThemeNotifier`: theme mode, light/dark preset slots, resolves the active preset
 - `shared/theme/theme_font_provider.dart` — `ThemeFontNotifier`: loads Google Fonts async at startup
 - `shared/theme/app_colors.dart` — `AppColors.fromPreset()`: all palette slots with defaults
 - `shared/theme/app_theme.dart` — `AppTheme` builder: generates `ThemeData` + `ColorScheme` from preset
+
+### Theme type and device slots
+- A preset's brightness is its manually set `themeMode` (`dark`, `light`, or
+  `system` = same as device). The built-ins have no editable type: they follow
+  the device while slots are on and stay dark otherwise.
+- `ThemeSettings.selectedPresetId` is the theme picked in the list. With
+  `followSystem` on, `lightPresetId` / `darkPresetId` override it by the
+  device brightness, which `GlazeApp.didChangePlatformBrightness` feeds in;
+  picking a theme in the list then fills the slot of the current brightness.
+- Persisted as `theme_active_preset`, `theme_follow_system`,
+  `theme_light_preset`, `theme_dark_preset`.
 
 ### `updatePreset(ThemePreset preset)` flow
 1. `ThemeNotifier.updatePreset()` updates preview state immediately.

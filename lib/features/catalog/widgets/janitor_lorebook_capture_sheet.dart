@@ -12,6 +12,8 @@ import '../../../core/services/character_book_converter.dart';
 import '../../../core/services/file_export_service.dart';
 import '../../../core/state/lorebook_provider.dart';
 import '../../../core/utils/error_format.dart';
+import '../../guides/guide_anchor.dart';
+import '../../guides/guide_service.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_error_block.dart';
@@ -35,7 +37,6 @@ import '../services/janitor_webview_proxy.dart';
 import 'datacat_phase_label.dart';
 import 'janitor_build_widgets.dart';
 import 'janitor_extraction_settings_sheet.dart';
-import 'janitor_lorebook_intro_sheet.dart';
 import 'janitor_lorebooks_tab.dart';
 import '../../../shared/widgets/glaze_sheet.dart';
 
@@ -64,20 +65,22 @@ extension _PhaseLabel on _Phase {
 /// [characterId] is the Glaze character the saved books are scoped to; null
 /// saves them as standalone (global) lorebooks.
 ///
-/// The very first open is preceded by a one-time explainer
-/// ([maybeShowJanitorLorebookIntro]).
+/// The first open is walked through once by a spotlight tour
+/// ([AppGuide.lorebookCapture]), started from the sheet itself once its
+/// lorebooks have loaded.
 Future<void> showJanitorLorebookCaptureSheet(
   BuildContext context, {
   required JanitorLorebookArgs args,
   String? characterId,
   ExtractionResult? initialExtraction,
 }) async {
-  await maybeShowJanitorLorebookIntro(context);
-  if (!context.mounted) return;
   return showGlazeSheet<void>(
     context: context,
     useRootNavigator: true,
     isScrollControlled: true,
+    // The modal's own drag-to-close pops straight past the "are you sure?" the
+    // sheet asks before closing; SheetView's drag goes through it instead.
+    enableDrag: false,
     backgroundColor: Colors.transparent,
     barrierColor: Colors.black54,
     builder: (_) => JanitorLorebookCapture(
@@ -253,6 +256,20 @@ class _JanitorLorebookCaptureState
   /// see [_publicScriptContents].
   final Map<String, Lorebook> _convertedScripts = {};
 
+  /// Whether a lorebook has made it out of the sheet — saved to Glaze, or
+  /// exported as `.json` / `.txt`. Until then closing throws away a flow that
+  /// is slow and account-mutating to redo, so it is confirmed first
+  /// ([_confirmClose]).
+  bool _delivered = false;
+
+  /// Public books (by id) already saved to Glaze or exported this session —
+  /// their rows show a check instead of the download affordance.
+  final Set<String> _downloadedIds = {};
+
+  /// Every public book is out and there is nothing closed left to recover: the
+  /// sheet has done its job, says so, and closes itself ([_markDownloaded]).
+  bool _allDownloaded = false;
+
   @override
   void initState() {
     super.initState();
@@ -281,6 +298,19 @@ class _JanitorLorebookCaptureState
       _public = books;
       _loadingPublic = false;
     });
+    _maybeShowCaptureTour();
+  }
+
+  /// Walks the reader through the sheet the first time it opens. Deferred to
+  /// after the frame the lorebooks landed in, so the controls the tour points
+  /// at are laid out. A capture the caller already ran
+  /// ([JanitorLorebookCapture.initialExtraction]) opens straight at the build
+  /// stage, which the collect-stage tour does not describe, so it is skipped.
+  void _maybeShowCaptureTour() {
+    if (widget.initialExtraction != null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) maybeShowGuide(context, AppGuide.lorebookCapture);
+    });
   }
 
   // ─── Public lorebook actions ───────────────────────────────────────────────
@@ -293,26 +323,54 @@ class _JanitorLorebookCaptureState
         BottomSheetItem(
           icon: Icons.bookmark_add_outlined,
           label: 'catalog_lorebooks_save'.tr(),
+          hint: 'catalog_lorebooks_save_sub'.tr(),
           onTap: () async {
             Navigator.of(context, rootNavigator: true).pop();
-            await _saveLorebook(
+            final ok = await _saveLorebook(
               book.toLorebook(characterId: widget.characterId),
             );
+            if (ok) _markDownloaded(book.id);
           },
         ),
         BottomSheetItem(
           icon: Icons.download_outlined,
           label: 'catalog_lorebooks_export'.tr(),
+          hint: 'catalog_lorebooks_export_sub'.tr(),
           onTap: () async {
             Navigator.of(context, rootNavigator: true).pop();
-            await _exportJson(
+            final ok = await _exportJson(
               book.toTavernJson(),
               book.title.isNotEmpty ? book.title : 'lorebook',
             );
+            if (ok) _markDownloaded(book.id);
           },
         ),
       ],
     );
+  }
+
+  /// Records [publicId] as delivered, and once every public book is — with no
+  /// closed one left to recover — swaps the sheet for the "all downloaded"
+  /// message and closes it a moment later.
+  void _markDownloaded(String publicId) {
+    if (!mounted) return;
+    setState(() {
+      _downloadedIds.add(publicId);
+      _allDownloaded = _everythingDownloaded;
+    });
+    if (_allDownloaded) {
+      Future.delayed(const Duration(milliseconds: 1600), () {
+        if (mounted) Navigator.of(context).pop();
+      });
+    }
+  }
+
+  bool get _everythingDownloaded {
+    final books = _downloadableBooks;
+    return !_loadingPublic &&
+        _closedBooks.isEmpty &&
+        books.isNotEmpty &&
+        books.every((b) => _downloadedIds.contains(b.id));
   }
 
   /// Download action for a public **advanced (JS)** lorebook. Unlike a JSON book
@@ -322,6 +380,13 @@ class _JanitorLorebookCaptureState
   /// download that opens a rebuild explanation.
   void _downloadJs(PublicLorebook book) {
     if (_savingAll) return;
+    // Already rebuilt this session: offer its destinations again instead of
+    // paying for a second rebuild.
+    final converted = _convertedScripts[book.id];
+    if (converted != null) {
+      _offerSaveExport(converted, publicId: book.id);
+      return;
+    }
     GlazeBottomSheet.show<void>(
       context,
       title: 'catalog_lorebooks_scripted_title'.tr(),
@@ -356,7 +421,7 @@ class _JanitorLorebookCaptureState
         _jsBuildingId = null;
         _convertedScripts[book.id] = lb;
       });
-      _offerSaveExport(lb);
+      _offerSaveExport(lb, publicId: book.id);
     } catch (e) {
       if (!mounted) return;
       setState(() => _jsBuildingId = null);
@@ -418,6 +483,8 @@ class _JanitorLorebookCaptureState
           await ref.read(lorebooksProvider.notifier).addLorebook(lb);
           if (!mounted) return;
           if (book.isJs) _convertedScripts[book.id] = lb;
+          _delivered = true;
+          _downloadedIds.add(book.id);
           saved++;
         } catch (e) {
           debugPrint('[janitor-lorebook] save-all ${book.id} failed: $e');
@@ -430,6 +497,12 @@ class _JanitorLorebookCaptureState
       if (mounted) setState(() => _savingAll = false);
     }
     if (!mounted) return;
+    // Everything made it and nothing closed is left: the sheet's own "all
+    // downloaded" message says it, no toast on top.
+    if (failed.isEmpty && _everythingDownloaded) {
+      _markDownloaded(books.last.id);
+      return;
+    }
     GlazeToast.show(
       context,
       failed.isEmpty
@@ -459,33 +532,44 @@ class _JanitorLorebookCaptureState
       withoutPublicEntries(text, _publicScriptContents);
 
   /// Bottom sheet offering Save-to-Glaze / Export-.json for a built [Lorebook].
-  void _offerSaveExport(Lorebook book) {
+  /// [publicId] is the public book it was converted from, marked downloaded
+  /// once either destination succeeds.
+  void _offerSaveExport(Lorebook book, {String? publicId}) {
     GlazeBottomSheet.show<void>(
       context,
       items: [
         BottomSheetItem(
           icon: Icons.bookmark_add_outlined,
           label: 'catalog_lorebooks_save'.tr(),
+          hint: 'catalog_lorebooks_save_sub'.tr(),
           onTap: () async {
             Navigator.of(context, rootNavigator: true).pop();
-            await _saveLorebook(book);
+            final ok = await _saveLorebook(book);
+            if (ok && publicId != null) _markDownloaded(publicId);
           },
         ),
         BottomSheetItem(
           icon: Icons.download_outlined,
           label: 'catalog_lorebooks_export'.tr(),
+          hint: 'catalog_lorebooks_export_sub'.tr(),
           onTap: () async {
             Navigator.of(context, rootNavigator: true).pop();
-            await _exportJson(glazeLorebookToTavernJson(book), book.name);
+            final ok = await _exportJson(
+              glazeLorebookToTavernJson(book),
+              book.name,
+            );
+            if (ok && publicId != null) _markDownloaded(publicId);
           },
         ),
       ],
     );
   }
 
-  Future<void> _saveLorebook(Lorebook book) async {
+  /// Saves [book] to Glaze; true when it landed.
+  Future<bool> _saveLorebook(Lorebook book) async {
     try {
       await ref.read(lorebooksProvider.notifier).addLorebook(book);
+      if (mounted) setState(() => _delivered = true);
       if (mounted) {
         GlazeToast.show(
           context,
@@ -494,6 +578,7 @@ class _JanitorLorebookCaptureState
           ),
         );
       }
+      return true;
     } catch (e) {
       if (mounted) {
         GlazeToast.show(
@@ -501,10 +586,13 @@ class _JanitorLorebookCaptureState
           'catalog_lorebooks_save_failed'.tr(args: [formatError(e)]),
         );
       }
+      return false;
     }
   }
 
-  Future<void> _exportJson(Map<String, dynamic> json, String name) async {
+  /// Exports [json] as `.json`; true when the file was written (false on a
+  /// cancelled dialog or a failure).
+  Future<bool> _exportJson(Map<String, dynamic> json, String name) async {
     try {
       final safe = name.replaceAll(RegExp(r'[^\w\- ]+'), '').trim();
       final path = await FileExportService.export(
@@ -512,13 +600,15 @@ class _JanitorLorebookCaptureState
         filename: '${safe.isEmpty ? 'lorebook' : safe}.json',
         subfolder: 'Lorebooks',
       );
-      if (path.isEmpty) return; // user cancelled the save dialog
+      if (path.isEmpty) return false; // user cancelled the save dialog
+      if (mounted) setState(() => _delivered = true);
       if (mounted) {
         GlazeToast.show(
           context,
           'catalog_lorebooks_exported'.tr(args: ['$name.json']),
         );
       }
+      return true;
     } catch (e) {
       if (mounted) {
         GlazeToast.show(
@@ -526,6 +616,7 @@ class _JanitorLorebookCaptureState
           'catalog_lorebooks_export_failed'.tr(args: [formatError(e)]),
         );
       }
+      return false;
     }
   }
 
@@ -715,6 +806,7 @@ class _JanitorLorebookCaptureState
         subfolder: 'Lorebooks',
       );
       if (path.isEmpty) return; // user cancelled the save dialog
+      if (mounted) setState(() => _delivered = true);
       if (mounted) {
         GlazeToast.show(
           context,
@@ -751,6 +843,38 @@ class _JanitorLorebookCaptureState
       ? _Phase.build
       : _Phase.collect;
 
+  /// Whether closing may go ahead: straight away once a lorebook has been
+  /// delivered, otherwise only after the user confirms it.
+  Future<bool> _confirmClose() async {
+    if (_delivered) return true;
+    final confirmed = await GlazeBottomSheet.show<bool>(
+      context,
+      title: 'catalog_lorebooks_close_title'.tr(),
+      bigInfo: BottomSheetBigInfo(
+        icon: Icons.warning_amber_rounded,
+        description: 'catalog_lorebooks_close_desc'.tr(),
+      ),
+      items: [
+        BottomSheetItem(
+          label: 'btn_close'.tr(),
+          isDestructive: true,
+          centered: true,
+          onTap: () => Navigator.of(context, rootNavigator: true).pop(true),
+        ),
+        BottomSheetItem(
+          label: 'btn_cancel'.tr(),
+          centered: true,
+          onTap: () => Navigator.of(context, rootNavigator: true).pop(false),
+        ),
+      ],
+    );
+    return confirmed == true;
+  }
+
+  Future<void> _close() async {
+    if (await _confirmClose() && mounted) Navigator.of(context).pop();
+  }
+
   /// One step back through the flow, the way the header arrow goes.
   void _stepBack() {
     if (_built != null) {
@@ -763,7 +887,6 @@ class _JanitorLorebookCaptureState
   @override
   Widget build(BuildContext context) {
     final cs = context.cs;
-    final closed = _closedBooks;
     return SheetView(
       // The help sits with the title it explains — the same inline [HelpTip]
       // every group header uses — and the header's action slot carries the
@@ -791,8 +914,15 @@ class _JanitorLorebookCaptureState
       // move the strip's arrow makes — instead of closing the running flow.
       // While a stage is busy the gesture is held, as the arrow is, so a
       // capture or a build in flight is never torn down by an accidental back.
-      canPop: _phase == _Phase.collect,
+      // On the first stage back closes the sheet, which — until a lorebook has
+      // been delivered — asks first; so does flinging it away.
+      canPop: _phase == _Phase.collect && _delivered,
+      confirmDismiss: _confirmClose,
       onBack: () {
+        if (_phase == _Phase.collect) {
+          _close();
+          return;
+        }
         if (_building || _extracting) return;
         _stepBack();
       },
@@ -806,41 +936,56 @@ class _JanitorLorebookCaptureState
       headerBottom: _hasFlow ? _phaseStrip(cs) : null,
       // No horizontal padding on the list: MenuGroup carries its own 16 px
       // margin, and the loose text between groups is padded individually.
-      body: _loadingPublic
-          ? const _SheetLoading()
-          : Builder(
-              builder: (inner) => ListView(
-                padding: EdgeInsets.only(
-                  top: MediaQuery.paddingOf(inner).top + 12,
-                  bottom: MediaQuery.paddingOf(inner).bottom + 24,
-                ),
-                children: [
-                  AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 240),
-                    switchInCurve: Curves.easeOutCubic,
-                    switchOutCurve: Curves.easeInCubic,
-                    transitionBuilder: (child, anim) =>
-                        FadeTransition(opacity: anim, child: child),
-                    // The outgoing stage is taken out of the layout (top-anchored
-                    // and unconstrained in height) so the sheet takes the height
-                    // of the stage arriving, instead of jumping to the taller of
-                    // the two for the length of the fade.
-                    layoutBuilder: (current, previous) => Stack(
-                      alignment: Alignment.topCenter,
-                      children: [
-                        for (final child in previous)
-                          Positioned(left: 0, right: 0, top: 0, child: child),
-                        ?current,
-                      ],
-                    ),
-                    child: KeyedSubtree(
-                      key: ValueKey(_phase),
-                      child: _stageContent(cs, closed),
-                    ),
-                  ),
-                ],
-              ),
+      body: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 260),
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeInCubic,
+        transitionBuilder: (child, anim) =>
+            FadeTransition(opacity: anim, child: child),
+        child: _allDownloaded
+            ? const _AllDownloaded(key: ValueKey('done'))
+            : _loadingPublic
+            ? const _SheetLoading(key: ValueKey('loading'))
+            : KeyedSubtree(key: const ValueKey('list'), child: _list()),
+      ),
+    );
+  }
+
+  Widget _list() {
+    final closed = _closedBooks;
+    final cs = context.cs;
+    return Builder(
+      builder: (inner) => ListView(
+        padding: EdgeInsets.only(
+          top: MediaQuery.paddingOf(inner).top + 12,
+          bottom: MediaQuery.paddingOf(inner).bottom + 24,
+        ),
+        children: [
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 240),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            transitionBuilder: (child, anim) =>
+                FadeTransition(opacity: anim, child: child),
+            // The outgoing stage is taken out of the layout (top-anchored
+            // and unconstrained in height) so the sheet takes the height
+            // of the stage arriving, instead of jumping to the taller of
+            // the two for the length of the fade.
+            layoutBuilder: (current, previous) => Stack(
+              alignment: Alignment.topCenter,
+              children: [
+                for (final child in previous)
+                  Positioned(left: 0, right: 0, top: 0, child: child),
+                ?current,
+              ],
             ),
+            child: KeyedSubtree(
+              key: ValueKey(_phase),
+              child: _stageContent(cs, closed),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -850,15 +995,19 @@ class _JanitorLorebookCaptureState
   Widget _stageContent(ColorScheme cs, List<PublicLorebook> closed) {
     final children = switch (_phase) {
       _Phase.collect => [
-        _PublicSection(
-          books: _public,
-          onDownload: _downloadPublic,
-          onDownloadJs: _downloadJs,
-          onDownloadAll: _downloadAllPublic,
-          buildingId: _jsBuildingId,
-          savingAll: _savingAll,
-          savedAllDone: _savedAllDone,
-          savedAllTotal: _savedAllTotal,
+        GuideAnchor(
+          id: GuideIds.lorebookCapturePublic,
+          child: _PublicSection(
+            books: _public,
+            onDownload: _downloadPublic,
+            onDownloadJs: _downloadJs,
+            onDownloadAll: _downloadAllPublic,
+            downloadedIds: _downloadedIds,
+            buildingId: _jsBuildingId,
+            savingAll: _savingAll,
+            savedAllDone: _savedAllDone,
+            savedAllTotal: _savedAllTotal,
+          ),
         ),
         if (closed.isNotEmpty)
           ...switch (_source) {
@@ -908,6 +1057,7 @@ class _JanitorLorebookCaptureState
                       color: Colors.transparent,
                       shape: const CircleBorder(),
                       child: InkWell(
+                        mouseCursor: SystemMouseCursors.click,
                         customBorder: const CircleBorder(),
                         onTap: canGoBack ? _stepBack : null,
                         child: Icon(
@@ -996,19 +1146,22 @@ class _JanitorLorebookCaptureState
       // A single action for every closed book: the capture assembles the whole
       // prompt at once, so all closed lorebooks are collected together (not one
       // per row).
-      Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-        child: ActionTile(
-          icon: Icons.auto_fix_high_rounded,
-          expand: true,
-          primary: true,
-          busy: _extracting,
-          // The capture's live phase reads inside the button it belongs to —
-          // one busy control, not a button plus a status line under it.
-          label: _extracting
-              ? (_extractPhase ?? 'catalog_lorebooks_extracting'.tr())
-              : 'catalog_lorebooks_collect_btn'.tr(),
-          onTap: _canRebuild ? _extractAll : null,
+      GuideAnchor(
+        id: GuideIds.lorebookCaptureCollect,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          child: ActionTile(
+            icon: Icons.auto_fix_high_rounded,
+            expand: true,
+            primary: true,
+            busy: _extracting,
+            // The capture's live phase reads inside the button it belongs to —
+            // one busy control, not a button plus a status line under it.
+            label: _extracting
+                ? (_extractPhase ?? 'catalog_lorebooks_extracting'.tr())
+                : 'catalog_lorebooks_collect_btn'.tr(),
+            onTap: _canRebuild ? _extractAll : null,
+          ),
         ),
       ),
       _buildExtractStatus(cs),
@@ -1311,6 +1464,7 @@ class _JanitorLorebookCaptureState
           MenuItem(
             icon: Icons.bookmark_add_outlined,
             label: 'catalog_lorebooks_save'.tr(),
+            subtitle: 'catalog_lorebooks_save_sub'.tr(),
             onTap: () => _saveLorebook(_named(book)),
           ),
           MenuItem(
@@ -1347,16 +1501,19 @@ class _JanitorLorebookCaptureState
       helpTerm: 'janitor-extract-context',
       description: 'catalog_lorebooks_extract_hint'.tr(),
       items: [
-        ContextSourceTile(
-          label: 'catalog_ctx_card'.tr(),
-          content: _extraction?.cardContext ?? '',
-          // The card only exists inside the assembled prompt, so before the
-          // capture there is nothing to show — but the capture's first send
-          // reveals it in time for the trigger, so the switch stays live.
-          emptyNote: 'catalog_ctx_card_pending'.tr(),
-          pending: _extraction == null,
-          value: _extractSources.card,
-          onChanged: (v) => setState(() => _extractSources.card = v),
+        GuideAnchor(
+          id: GuideIds.lorebookCaptureExtract,
+          child: ContextSourceTile(
+            label: 'catalog_ctx_card'.tr(),
+            content: _extraction?.cardContext ?? '',
+            // The card only exists inside the assembled prompt, so before the
+            // capture there is nothing to show — but the capture's first send
+            // reveals it in time for the trigger, so the switch stays live.
+            emptyNote: 'catalog_ctx_card_pending'.tr(),
+            pending: _extraction == null,
+            value: _extractSources.card,
+            onChanged: (v) => setState(() => _extractSources.card = v),
+          ),
         ),
         ContextSourceTile(
           label: 'catalog_ctx_catalog'.tr(),
@@ -1461,7 +1618,7 @@ class _JanitorLorebookCaptureState
 /// What the sheet shows until the character's lorebooks are known: nothing can
 /// be listed and no stage can be entered yet, so the whole sheet is the wait.
 class _SheetLoading extends StatelessWidget {
-  const _SheetLoading();
+  const _SheetLoading({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -1482,6 +1639,82 @@ class _SheetLoading extends StatelessWidget {
   }
 }
 
+/// What the sheet turns into once every public book is out and nothing closed
+/// is left: a check that pops in and the message rising under it, held briefly
+/// before the sheet closes itself.
+class _AllDownloaded extends StatefulWidget {
+  const _AllDownloaded({super.key});
+
+  @override
+  State<_AllDownloaded> createState() => _AllDownloadedState();
+}
+
+class _AllDownloadedState extends State<_AllDownloaded>
+    with SingleTickerProviderStateMixin {
+  late final _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  )..forward();
+
+  late final _badge = CurvedAnimation(
+    parent: _controller,
+    curve: const Interval(0, 0.7, curve: Curves.elasticOut),
+  );
+  late final _text = CurvedAnimation(
+    parent: _controller,
+    curve: const Interval(0.3, 0.8, curve: Curves.easeOutCubic),
+  );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = context.cs;
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ScaleTransition(
+            scale: _badge,
+            child: Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                color: cs.primary.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.check_rounded, size: 40, color: cs.primary),
+            ),
+          ),
+          const SizedBox(height: 20),
+          FadeTransition(
+            opacity: _text,
+            child: SlideTransition(
+              position: Tween(
+                begin: const Offset(0, 0.4),
+                end: Offset.zero,
+              ).animate(_text),
+              child: Text(
+                'catalog_lorebooks_all_downloaded'.tr(),
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w600,
+                  color: cs.onSurface,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _PublicSection extends StatelessWidget {
   final List<PublicLorebook> books;
   final void Function(PublicLorebook) onDownload;
@@ -1489,6 +1722,9 @@ class _PublicSection extends StatelessWidget {
 
   /// Convert + save every book of the section in one pass.
   final VoidCallback onDownloadAll;
+
+  /// Ids of books already saved or exported — their rows show a check.
+  final Set<String> downloadedIds;
   final String? buildingId;
 
   /// The batch is running: rows stop offering their own action (one save flow
@@ -1501,6 +1737,7 @@ class _PublicSection extends StatelessWidget {
     required this.onDownload,
     required this.onDownloadJs,
     required this.onDownloadAll,
+    required this.downloadedIds,
     required this.buildingId,
     required this.savingAll,
     required this.savedAllDone,
@@ -1561,6 +1798,7 @@ class _PublicSection extends StatelessWidget {
               _PublicRow(
                 book: b,
                 onDownload: savingAll ? null : () => onDownload(b),
+                downloaded: downloadedIds.contains(b.id),
               ),
             if (split) ...[
               MenuSubHeader('catalog_lorebooks_group_scripts'.tr()),
@@ -1571,6 +1809,7 @@ class _PublicSection extends StatelessWidget {
                 book: b,
                 onDownload: savingAll ? null : () => onDownloadJs(b),
                 building: buildingId == b.id,
+                downloaded: downloadedIds.contains(b.id),
               ),
             // The bulk action closes the group: with a single book it would
             // only duplicate that row, so it appears from two on.
@@ -1612,10 +1851,15 @@ class _PublicRow extends StatelessWidget {
   final PublicLorebook book;
   final VoidCallback? onDownload;
   final bool building;
+
+  /// Already saved or exported this session: a check replaces the action. The
+  /// row stays tappable, so the book can still be sent somewhere else.
+  final bool downloaded;
   const _PublicRow({
     required this.book,
     this.onDownload,
     this.building = false,
+    this.downloaded = false,
   });
 
   @override
@@ -1631,7 +1875,9 @@ class _PublicRow extends StatelessWidget {
             : 'catalog_lorebook_kind_public'.tr(args: ['${book.entryCount}']),
         if (desc.isNotEmpty) desc,
       ].join('\n'),
-      trailing: book.isJs
+      trailing: downloaded && !building
+          ? Icon(Icons.check_circle_rounded, size: 20, color: cs.primary)
+          : book.isJs
           ? ActionTile(
               icon: Icons.auto_fix_high_rounded,
               label: 'catalog_lorebooks_convert_btn'.tr(),

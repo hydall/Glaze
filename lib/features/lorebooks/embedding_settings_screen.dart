@@ -560,7 +560,7 @@ class _SearchModeChip extends StatelessWidget {
     final color = selected
         ? context.cs.primary
         : Colors.white.withValues(alpha: 0.1);
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -580,6 +580,6 @@ class _SearchModeChip extends StatelessWidget {
           ),
         ),
       ),
-    );
+    ));
   }
 }

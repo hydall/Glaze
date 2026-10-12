@@ -20,7 +20,9 @@ import '../../core/llm/history_trim.dart';
 import '../../core/llm/tokenizer.dart';
 import '../../core/models/api_config.dart';
 import '../../core/models/extra_request_parameter.dart';
+import '../../core/state/active_selection_provider.dart';
 import '../../core/state/shared_prefs_provider.dart';
+import '../presets/preset_list_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_action_button.dart';
@@ -32,6 +34,7 @@ import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/sheet_view.dart';
 import 'api_config_draft.dart';
+import 'context_budget_check.dart';
 import '../studio/widgets/studio_slots_tab.dart';
 import 'api_list_provider.dart';
 import 'api_preset_selection_provider.dart';
@@ -43,6 +46,8 @@ import '../../shared/widgets/menu_group.dart';
 import '../../shared/widgets/preset_switcher.dart';
 import '../../shared/widgets/extra_request_parameters_editor.dart';
 import '../../shared/widgets/glaze_sheet.dart';
+import '../guides/guide_anchor.dart';
+import '../guides/guide_service.dart';
 
 /// The factory values every reset affordance on this screen restores.
 ///
@@ -50,6 +55,23 @@ import '../../shared/widgets/glaze_sheet.dart';
 /// model declares, so the numbers live in one place — the model — instead of
 /// being copied into each row as a literal.
 const _apiDefaults = ApiConfig(id: '');
+
+/// Tokens the globally active chat preset puts into every prompt — see
+/// [presetPromptTokens].
+final _activePresetTokensProvider = Provider.autoDispose<int>((ref) {
+  // A tokenizer switch changes every count.
+  ref.watch(tokenizerStatusProvider.select((status) => status.active));
+  final presets = ref.watch(presetListProvider).value;
+  if (presets == null) return 0;
+  final preset = getEffectivePreset(
+    presets,
+    null,
+    null,
+    ref.watch(activePresetIdProvider),
+    ref.watch(presetConnectionsProvider),
+  );
+  return preset == null ? 0 : presetPromptTokens(preset);
+});
 
 /// A section of the API screen a caller can open it *on*.
 enum ApiSettingsSection {
@@ -59,6 +81,10 @@ enum ApiSettingsSection {
   /// The MemoryBook generation slot on the Agents tab. Memory settings link
   /// here since the connection and the model moved out of that sheet.
   memoryBook,
+
+  /// The Embeddings tab. The lorebook search-type picker sends people here
+  /// when they pick a vector mode with no embedding connection set up.
+  embeddings,
 }
 
 class ApiSettingsScreen extends ConsumerStatefulWidget {
@@ -163,7 +189,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     final key = switch (widget.focusSection) {
       ApiSettingsSection.context => _contextGroupKey,
       ApiSettingsSection.memoryBook => _memoryBookSlotKey,
-      null => null,
+      ApiSettingsSection.embeddings || null => null,
     };
     if (key == null) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -239,12 +265,20 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   @override
   void initState() {
     super.initState();
-    // A deep link at the MemoryBook slot opens straight on the tab that holds
-    // it rather than on LLM and then jumping.
-    _tab = widget.focusSection == ApiSettingsSection.memoryBook ? 1 : 0;
+    // A deep link at the MemoryBook slot or the embeddings opens straight on
+    // the tab that holds it rather than on LLM and then jumping.
+    _tab = switch (widget.focusSection) {
+      ApiSettingsSection.memoryBook => 1,
+      ApiSettingsSection.embeddings => 2,
+      _ => 0,
+    };
     for (final c in _ctrls) {
       c.addListener(_scheduleSave);
     }
+    _endpointCtrl.addListener(_onLlmConnectionEdited);
+    _keyCtrl.addListener(_onLlmConnectionEdited);
+    _embEndpointCtrl.addListener(_onEmbeddingConnectionEdited);
+    _embApiKeyCtrl.addListener(_onEmbeddingConnectionEdited);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadActivePreset();
     });
@@ -284,6 +318,8 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   void _reveal() {
     if (_revealed || !mounted) return;
     setState(() => _revealed = true);
+    // Not before: the guide's controls only exist once the content is built.
+    maybeShowGuide(context, AppGuide.api);
     // The deep-linked section only exists once the content is built, so the
     // scroll is kicked off here rather than in `initState` — where the spinner
     // was still on screen and the key had no context to measure.
@@ -345,6 +381,39 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     if (_loading) return;
     _saveTimer?.cancel();
     _saveTimer = Timer(const Duration(milliseconds: 800), _save);
+  }
+
+  /// The endpoint and key the cached model lists were last valid for. A
+  /// controller also notifies on cursor moves, so only a change of the text
+  /// itself counts.
+  String _llmConnection = '';
+  String _embConnection = '';
+
+  /// A model list fetched with the old endpoint or key may not exist on the
+  /// new one, so it is dropped and the next picker tap fetches afresh.
+  void _onLlmConnectionEdited() {
+    final connection = '${_endpointCtrl.text.trim()}\n${_keyCtrl.text.trim()}';
+    if (connection == _llmConnection) return;
+    _llmConnection = connection;
+    // "Use LLM API" without a named preset fetches through these same fields.
+    final embBorrowsFields = _embeddingUseSame && _embeddingLlmPresetId.isEmpty;
+    if (_fetchedModels.isEmpty &&
+        (!embBorrowsFields || _embFetchedModels.isEmpty)) {
+      return;
+    }
+    setState(() {
+      _fetchedModels = [];
+      if (embBorrowsFields) _embFetchedModels = [];
+    });
+  }
+
+  void _onEmbeddingConnectionEdited() {
+    final connection =
+        '${_embEndpointCtrl.text.trim()}\n${_embApiKeyCtrl.text.trim()}';
+    if (connection == _embConnection) return;
+    _embConnection = connection;
+    if (_embeddingUseSame || _embFetchedModels.isEmpty) return;
+    setState(() => _embFetchedModels = []);
   }
 
   void _persistActiveId(String? id) async {
@@ -678,7 +747,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     return SheetView(
       startExpanded: widget.startExpanded,
       showRouteBackground: false,
-      title: 'menu_app_settings'.tr(),
+      title: 'menu_api_settings'.tr(),
       showBack: true,
       onBack: _goBack,
       scrollController: switch (_tab) {
@@ -746,17 +815,26 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   // bodies slide. Agents sits next to LLM: both are connections a chat runs
   // on, while embeddings are only read by search.
   Widget _buildTabBar() {
-    return GlazeTabBar(
-      tabs: [
-        GlazeTabItem(label: 'LLM', icon: Icons.chat_bubble_outline_rounded),
-        GlazeTabItem(
-          label: 'studio_agents'.tr(),
-          icon: Icons.smart_toy_outlined,
-        ),
-        GlazeTabItem(label: 'tab_embeddings'.tr(), icon: Icons.layers_outlined),
-      ],
-      activeIndex: _tab,
-      onChanged: (i) => setState(() => _tab = i),
+    return GuideAnchor(
+      id: GuideIds.apiTabs,
+      child: GlazeTabBar(
+        tabs: [
+          GlazeTabItem(
+            label: 'tab_llm'.tr(),
+            icon: Icons.chat_bubble_outline_rounded,
+          ),
+          GlazeTabItem(
+            label: 'studio_agents'.tr(),
+            icon: Icons.smart_toy_outlined,
+          ),
+          GlazeTabItem(
+            label: 'tab_embeddings'.tr(),
+            icon: Icons.layers_outlined,
+          ),
+        ],
+        activeIndex: _tab,
+        onChanged: (i) => setState(() => _tab = i),
+      ),
     );
   }
 
@@ -834,13 +912,16 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 12),
-          GlazeActionButton(
-            icon: Icons.add_rounded,
-            label: forEmbedding
-                ? 'settings_add_embedding_config'.tr()
-                : 'settings_add_api_config'.tr(),
-            tone: GlazeActionTone.primary,
-            onTap: () => _createNewPreset(forEmbedding: forEmbedding),
+          GuideAnchor(
+            id: forEmbedding ? null : GuideIds.apiAdd,
+            child: GlazeActionButton(
+              icon: Icons.add_rounded,
+              label: forEmbedding
+                  ? 'settings_add_embedding_config'.tr()
+                  : 'settings_add_api_config'.tr(),
+              tone: GlazeActionTone.primary,
+              onTap: () => _createNewPreset(forEmbedding: forEmbedding),
+            ),
           ),
         ],
       ),
@@ -860,16 +941,25 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
         cacheExtent: widget.focusSection == ApiSettingsSection.context
             ? 3000
             : null,
+        // A sidebar panel's header already keeps its gap below the tab bar.
         padding: EdgeInsets.only(
-          top: MediaQuery.paddingOf(context).top + 12,
+          top:
+              MediaQuery.paddingOf(context).top +
+              (inSidebarPanel(context) ? 0 : 12),
           bottom: MediaQuery.paddingOf(context).bottom + 16,
         ),
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: _buildTopControls(list, activeName, forEmbedding: false),
+            child: GuideAnchor(
+              id: GuideIds.apiSwitcher,
+              child: _buildTopControls(list, activeName, forEmbedding: false),
+            ),
           ),
-          _buildConnectionGroup(context),
+          GuideAnchor(
+            id: GuideIds.apiConnection,
+            child: _buildConnectionGroup(context),
+          ),
           _buildContextGroup(),
           _buildGenerationGroup(),
           _buildReasoningGroup(),
@@ -1052,21 +1142,32 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
             },
           ),
         ],
-        ValueListenableBuilder<TextEditingValue>(
-          valueListenable: _maxTokensCtrl,
-          builder: (context, value, _) => MenuFieldItem(
-            label: 'label_max_tokens'.tr(),
-            helpTerm: 'max-tokens',
-            controller: _maxTokensCtrl,
-            placeholder: '${_apiDefaults.maxTokens}',
-            keyboardType: TextInputType.number,
-            onReset: value.text.trim() != '${_apiDefaults.maxTokens}'
-                ? () {
-                    _maxTokensCtrl.text = '${_apiDefaults.maxTokens}';
-                    _scheduleSave();
-                  }
-                : null,
-          ),
+        // Listens to both fields: the cap below moves with the context size.
+        ListenableBuilder(
+          listenable: Listenable.merge([_maxTokensCtrl, _contextSizeCtrl]),
+          builder: (context, _) {
+            final contextSize = _typedContextSize;
+            final exceeds = contextSize > 0 && _typedMaxTokens > contextSize;
+            return MenuFieldItem(
+              label: 'label_max_tokens'.tr(),
+              helpTerm: 'max-tokens',
+              controller: _maxTokensCtrl,
+              placeholder: '${_apiDefaults.maxTokens}',
+              keyboardType: TextInputType.number,
+              helper: exceeds
+                  ? 'error_max_tokens_exceeds_context'.tr(
+                      args: ['$contextSize'],
+                    )
+                  : null,
+              helperIsError: exceeds,
+              onReset: _maxTokensCtrl.text.trim() != '${_apiDefaults.maxTokens}'
+                  ? () {
+                      _maxTokensCtrl.text = '${_apiDefaults.maxTokens}';
+                      _scheduleSave();
+                    }
+                  : null,
+            );
+          },
         ),
         ValueListenableBuilder<TextEditingValue>(
           valueListenable: _contextSizeCtrl,
@@ -1084,12 +1185,64 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                 : null,
           ),
         ),
+        ListenableBuilder(
+          listenable: Listenable.merge([_maxTokensCtrl, _contextSizeCtrl]),
+          builder: (context, _) => _buildPresetFitWarning(),
+        ),
         // Auto follows the model field as it is typed, not the saved row.
         ListenableBuilder(
           listenable: _modelCtrl,
           builder: (context, _) => _buildTokenizerSelector(),
         ),
       ],
+    );
+  }
+
+  /// The context size as the next save will store it — an unparsable field
+  /// keeps the preset's value, the same fallback [ApiConfigDraft] applies.
+  int get _typedContextSize =>
+      int.tryParse(_contextSizeCtrl.text.trim()) ??
+      ref.read(activeApiConfigProvider)?.contextSize ??
+      _apiDefaults.contextSize;
+
+  int get _typedMaxTokens =>
+      int.tryParse(_maxTokensCtrl.text.trim()) ??
+      ref.read(activeApiConfigProvider)?.maxTokens ??
+      _apiDefaults.maxTokens;
+
+  /// Warns when the active chat preset alone outgrows what the context window
+  /// leaves for the prompt once the reply is reserved.
+  Widget _buildPresetFitWarning() {
+    final fits = presetFitsContext(
+      presetTokens: ref.watch(_activePresetTokensProvider),
+      contextSize: _typedContextSize,
+      maxTokens: _typedMaxTokens,
+    );
+    if (fits) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 2, 16, 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 1, right: 8),
+            child: Icon(
+              Icons.warning_amber_rounded,
+              size: 16,
+              color: context.cs.error,
+            ),
+          ),
+          Expanded(
+            child: PresetFitWarningText(
+              style: TextStyle(
+                color: context.cs.error,
+                fontSize: 12,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1584,8 +1737,11 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     return Builder(
       builder: (context) => ListView(
         controller: _embScrollController,
+        // A sidebar panel's header already keeps its gap below the tab bar.
         padding: EdgeInsets.only(
-          top: MediaQuery.paddingOf(context).top + 12,
+          top:
+              MediaQuery.paddingOf(context).top +
+              (inSidebarPanel(context) ? 0 : 12),
           bottom: MediaQuery.paddingOf(context).bottom + 16,
         ),
         children: [
@@ -1859,10 +2015,17 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     try {
       final ids = await ModelFetcher.fetchModelIds(source);
       if (!mounted) return;
+      // The connection was edited while the request was out.
+      final current = _embeddingModelSource();
+      final stale =
+          current == null ||
+          current.endpoint != source.endpoint ||
+          current.apiKey != source.apiKey;
       setState(() {
-        _embFetchedModels = ids;
+        if (!stale) _embFetchedModels = ids;
         _isLoadingEmbModels = false;
       });
+      if (stale) return;
       if (ids.isEmpty) {
         GlazeToast.show(context, 'settings_err_no_models'.tr());
       }
@@ -2570,10 +2733,16 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
         _protocol,
       ).fetchModels(endpoint: persistedEndpoint, apiKey: apiKey);
       if (!mounted) return;
+      // The endpoint or key was edited while the request was out: the list
+      // describes a connection that is no longer in the fields.
+      final stale =
+          endpoint != _endpointCtrl.text.trim() ||
+          apiKey != _keyCtrl.text.trim();
       setState(() {
-        _fetchedModels = models;
+        if (!stale) _fetchedModels = models;
         _isLoadingModels = false;
       });
+      if (stale) return;
       if (models.isEmpty) {
         GlazeToast.show(context, 'settings_err_no_models'.tr());
       }

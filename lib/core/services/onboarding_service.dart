@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../navigation/router.dart' show rootNavigatorKey;
+import '../../features/guides/guide_service.dart';
 import '../../features/onboarding/onboarding_screen.dart';
 
 const _onboardingCompleteKey = 'onboarding_complete';
@@ -21,6 +22,20 @@ Future<void> resetOnboarding([SharedPreferences? prefs]) async {
   await prefs.setBool(_onboardingCompleteKey, false);
 }
 
+/// Whether skipping the whole onboarding should still put the OS permission
+/// dialog in front of the reader.
+///
+/// The notification ask lives on an onboarding slide, so a reader who skips the
+/// flow before reaching it never gets asked and notifications stay silent. The
+/// fallback is to ask anyway on the way out — but only for someone who never
+/// saw the slide: a reader who reached it and then skipped has already answered
+/// (or deliberately declined), and asking again would be the "dialog out of
+/// nowhere" the slide exists to avoid.
+bool shouldRequestNotificationsAfterSkip({
+  required bool notificationsNeedPermission,
+  required bool reachedNotificationsSlide,
+}) => notificationsNeedPermission && !reachedNotificationsSlide;
+
 Future<void> checkAndShowOnboarding(BuildContext context) async {
   if (await isOnboardingComplete()) return;
   if (!context.mounted) return;
@@ -30,13 +45,23 @@ Future<void> checkAndShowOnboarding(BuildContext context) async {
 void showOnboarding(BuildContext context) {
   final nav = rootNavigatorKey.currentState;
   if (nav == null) return;
-  nav.push(
-    PageRouteBuilder<void>(
-      opaque: true,
-      fullscreenDialog: true,
-      pageBuilder: (_, _, _) => const OnboardingScreen(),
-      transitionsBuilder: (_, anim, _, child) =>
-          FadeTransition(opacity: anim, child: child),
-    ),
-  );
+  nav
+      .push(
+        PageRouteBuilder<void>(
+          opaque: true,
+          fullscreenDialog: true,
+          pageBuilder: (_, _, _) => const OnboardingScreen(),
+          transitionsBuilder: (_, anim, _, child) =>
+              FadeTransition(opacity: anim, child: child),
+        ),
+      )
+      .then((_) {
+        // The tabs guide waits out the onboarding; offer it the moment the
+        // reader lands on the tabs. The overlay sits under the root navigator,
+        // so sheets can be shown from it.
+        final context = nav.overlay?.context;
+        if (context != null && context.mounted) {
+          maybeShowGuide(context, AppGuide.tabs);
+        }
+      });
 }

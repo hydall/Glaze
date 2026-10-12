@@ -11,6 +11,7 @@ class Characters extends Table {
   TextColumn get description => text().nullable()();
   TextColumn get personality => text().nullable()();
   TextColumn get scenario => text().nullable()();
+  TextColumn get appearance => text().nullable()();
   TextColumn get firstMes => text().nullable()();
   TextColumn get mesExample => text().nullable()();
   TextColumn get systemPrompt => text().nullable()();

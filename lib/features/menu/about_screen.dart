@@ -258,7 +258,7 @@ class _UpdatesSectionState extends State<_UpdatesSection> {
       header: 'update_section_header'.tr(),
       headerIcon: Icons.system_update_alt_rounded,
       items: [
-        GestureDetector(
+        MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: _checking ? null : _check,
           child: Padding(
@@ -317,7 +317,7 @@ class _UpdatesSectionState extends State<_UpdatesSection> {
               ],
             ),
           ),
-        ),
+        )),
       ],
     );
   }
@@ -364,7 +364,7 @@ class _TestersTile extends StatelessWidget {
     final cs = context.cs;
     const accentColor = Color(0xFFFFD700);
 
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Padding(
@@ -408,7 +408,7 @@ class _TestersTile extends StatelessWidget {
           ],
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -450,7 +450,7 @@ class _VersionBadgeState extends ConsumerState<_VersionBadge> {
   @override
   Widget build(BuildContext context) {
     final cs = context.cs;
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: _handleTap,
       behavior: HitTestBehavior.opaque,
       child: Container(
@@ -469,7 +469,7 @@ class _VersionBadgeState extends ConsumerState<_VersionBadge> {
           ),
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -490,7 +490,7 @@ class _LicenseSection extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              GestureDetector(
+              MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: () => onLink('https://www.gnu.org/licenses/agpl-3.0.html'),
                 child: Container(
@@ -521,7 +521,7 @@ class _LicenseSection extends StatelessWidget {
                     ],
                   ),
                 ),
-              ),
+              )),
               const SizedBox(height: 10),
               Text(
                 'about_license_text'.tr(),
@@ -566,7 +566,7 @@ class _LinkTileState extends State<_LinkTile> {
   @override
   Widget build(BuildContext context) {
     final cs = context.cs;
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTapDown: (_) => setState(() => _pressed = true),
       onTapUp: (_) {
         setState(() => _pressed = false);
@@ -628,7 +628,7 @@ class _LinkTileState extends State<_LinkTile> {
           ],
         ),
       ),
-    );
+    ));
   }
 }
 

@@ -217,7 +217,7 @@ class _EditToggle extends StatelessWidget {
         button: true,
         toggled: editing,
         label: label,
-        child: GestureDetector(
+        child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
           onTap: onTap,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 200),
@@ -241,7 +241,7 @@ class _EditToggle extends StatelessWidget {
                   ? context.cs.primary
                   : context.cs.onSurface.withValues(alpha: 0.55),
             ),
-          ),
+          )),
         ),
       ),
     );

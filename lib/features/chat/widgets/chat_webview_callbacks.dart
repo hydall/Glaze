@@ -79,6 +79,10 @@ class ChatWebViewCallbacks {
     messageActions.onRerunCleaner?.call(id);
   }
 
+  void onTranslateMessage(String id, String action, String text) {
+    messageActions.onTranslateMessage?.call(id, action, text);
+  }
+
   void onSelectionAction(String action, String text) {
     miscActions.onSelectionAction?.call(action, text);
   }
@@ -121,6 +125,10 @@ class ChatWebViewCallbacks {
 
   void onInjectClick(String id) {
     messageActions.onInjectClick?.call(id);
+  }
+
+  void onOutputLimitClick(String id) {
+    messageActions.onOutputLimitClick?.call(id);
   }
 
   void onImgRetry(String instruction, String messageId, int? blockIndex) {

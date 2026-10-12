@@ -78,6 +78,7 @@ class _GalleryImagePicker extends ConsumerWidget {
                         resolveGlazeFilePath(entry.imagePath) ??
                         entry.imagePath;
                     return InkWell(
+                      mouseCursor: SystemMouseCursors.click,
                       onTap: () => Navigator.pop(context, entry),
                       borderRadius: BorderRadius.circular(8),
                       child: ClipRRect(

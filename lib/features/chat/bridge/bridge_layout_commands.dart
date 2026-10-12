@@ -72,6 +72,7 @@ class LayoutBridgeCommands {
     required bool hideTokenCount,
     required bool disableSwipeRegeneration,
     required bool studioEnabled,
+    bool translationEnabled = false,
   }) {
     final json = jsonEncode({
       'batterySaver': batterySaver,
@@ -80,6 +81,7 @@ class LayoutBridgeCommands {
       'hideTokenCount': hideTokenCount,
       'disableSwipeRegeneration': disableSwipeRegeneration,
       'studioEnabled': studioEnabled,
+      'translationEnabled': translationEnabled,
     });
     return _host.callJs('setMessageSettings', json);
   }

@@ -18,6 +18,7 @@ import 'services/datacat/datacat_discovery.dart';
 import 'services/datacat/datacat_sort.dart';
 import 'services/janitor_provider.dart';
 import 'services/janitor_public_lorebook.dart';
+import 'services/janitor_webview_proxy.dart';
 import 'services/janny_provider.dart';
 import 'services/chub_provider.dart';
 import 'third_party_providers_provider.dart';
@@ -43,6 +44,12 @@ class CatalogState {
   final List<CatalogItem> results;
   final bool loading;
   final String? error;
+
+  /// The last JanitorAI fetch ended in a 401 that survived both the session
+  /// refresh and the anonymous retry: the account cookies the WebView still
+  /// sends are being refused, so the grid offers a re-login instead of a bare
+  /// error. Cleared with [error].
+  final bool janitorSessionExpired;
   final int page;
   final bool hasMore;
   final String query;
@@ -64,6 +71,7 @@ class CatalogState {
     this.results = const [],
     this.loading = false,
     this.error,
+    this.janitorSessionExpired = false,
     this.page = 1,
     this.hasMore = true,
     this.query = '',
@@ -77,6 +85,7 @@ class CatalogState {
     List<CatalogItem>? results,
     bool? loading,
     String? error,
+    bool janitorSessionExpired = false,
     int? page,
     bool? hasMore,
     String? query,
@@ -89,6 +98,7 @@ class CatalogState {
       results: results ?? this.results,
       loading: loading ?? this.loading,
       error: error,
+      janitorSessionExpired: janitorSessionExpired,
       page: page ?? this.page,
       hasMore: hasMore ?? this.hasMore,
       query: query ?? this.query,
@@ -425,7 +435,11 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
       );
     } catch (e) {
       if (!mounted || epoch != _searchEpoch) return;
-      state = state.copyWith(loading: false, error: formatError(e));
+      state = state.copyWith(
+        loading: false,
+        error: formatError(e),
+        janitorSessionExpired: e is JanitorAuthException,
+      );
     }
   }
 

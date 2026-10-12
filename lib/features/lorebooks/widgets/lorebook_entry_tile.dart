@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/models/lorebook.dart';
-import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_switch.dart';
 import '../../../shared/widgets/menu_group.dart';
 
 class LorebookEntryBadge extends StatelessWidget {
@@ -77,11 +77,7 @@ class LorebookEntryTile extends StatelessWidget {
                   ),
               ],
               const SizedBox(width: 4),
-              Switch(
-                value: entry.enabled,
-                onChanged: (_) => onToggle(),
-                activeThumbColor: context.cs.primary,
-              ),
+              GlazeSwitch(value: entry.enabled, onChanged: (_) => onToggle()),
               IconButton(
                 icon: const Icon(Icons.edit_outlined, size: 18),
                 onPressed: onEdit,

@@ -10,6 +10,8 @@ import 'package:go_router/go_router.dart';
 
 import 'package:glaze_flutter/core/llm/prompt_worker.dart';
 import 'package:glaze_flutter/core/llm/tokenizer.dart';
+
+import 'core/models/api_config.dart';
 import 'core/navigation/router.dart';
 import 'core/navigation/rewrite_review_navigation.dart';
 import 'core/services/deep_link_service.dart';
@@ -38,10 +40,12 @@ import 'shared/theme/theme_preset.dart';
 import 'shared/theme/theme_provider.dart';
 
 import 'features/chat/widgets/chat_webview_preload.dart';
+import 'features/diagnostics/crash_prompt.dart';
 import 'features/chat/widgets/continue_failure_listener.dart';
 import 'features/chat/widgets/lorebook_vector_search_diagnostic_listener.dart';
 import 'shared/widgets/app_launch_splash.dart';
 import 'shared/shell/desktop/app_title_bar.dart';
+import 'shared/shell/desktop/desktop_layout_provider.dart';
 import 'shared/shell/desktop/desktop_glossary_popup.dart';
 import 'shared/widgets/build_watermark.dart';
 import 'shared/widgets/glaze_toast.dart' show toastOverlayKey;
@@ -163,6 +167,15 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
   }
 
   @override
+  void didChangePlatformBrightness() {
+    ref
+        .read(themeProvider.notifier)
+        .setPlatformBrightness(
+          WidgetsBinding.instance.platformDispatcher.platformBrightness,
+        );
+  }
+
+  @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (!_startupReady) return;
     GenerationNotificationService.instance.updateLifecycleState(state);
@@ -245,6 +258,7 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
       ref.read(sessionLorebookEmbeddingWorkerProvider).recoverAndDrain(),
     );
     _syncTokenizerWithConnection();
+    unawaited(offerCrashReportOnStartup());
     _updateChecks = AutomaticUpdateCheckController(
       check: (presentedUpdateIds) =>
           checkAndShowUpdateOnStartup(presentedUpdateIds: presentedUpdateIds),
@@ -265,6 +279,23 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
         tokenizerStatusProvider.select((status) => status.active),
         (previous, next) {
           if (previous == null || previous == next) return;
+          ref.invalidate(cachedTokenBreakdownProvider);
+        },
+      ),
+    );
+    // A different window or trim mode changes which messages survive into the
+    // prompt, so every breakdown counted under the old one — and the CONTEXT
+    // LIMIT rule drawn off it — is stale. Watched here rather than in the API
+    // editor's save: switching the active connection from anywhere moves it
+    // too, and the open chat recounts off the dropped breakdown (see
+    // `contextWindowRecountProvider`).
+    _warmSubs.add(
+      ref.listenManual<String>(
+        activeApiConfigProvider.select(
+          (config) => config?.contextBudgetSignature ?? '',
+        ),
+        (previous, next) {
+          if (previous == null || previous.isEmpty || previous == next) return;
           ref.invalidate(cachedTokenBreakdownProvider);
         },
       ),
@@ -354,11 +385,8 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
     final themeSettings = ref.watch(themeProvider);
     final uiFont = ref.watch(uiFontFamilyProvider).value;
     final preset = themeSettings.activePreset;
-    final mode = preset.themeMode == 'light'
-        ? ThemeMode.light
-        : preset.themeMode == 'dark'
-        ? ThemeMode.dark
-        : themeSettings.mode;
+    // The active theme's own type (dark / light / same as device) decides.
+    final mode = themeSettings.isDark ? ThemeMode.dark : ThemeMode.light;
     return DynamicColorBuilder(
       builder: (lightDynamic, darkDynamic) {
         // Material You dynamic colors are sourced from the system only on
@@ -429,22 +457,27 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
         // Records where the pointer last went down so desktop dropdowns can
         // anchor themselves at the cursor without every call site passing an
         // anchor (see [showDesktopPopup]).
-        return PointerPositionTracker(
-          // The title bar and the glossary window sit outside the navigator;
-          // this gives their tooltips and text fields an overlay to open in.
-          child: RootOverlay(
-            child: AppWindowFrame(
-              child: AppLaunchSplash(
-                isReady: _startupReady,
-                child: Stack(
-                  children: [
-                    Positioned.fill(child: appChild),
-                    // Above the router, so the glossary window a help tip opens
-                    // floats over every route, sheet and dialog rather than
-                    // being buried by the one it was opened from.
-                    const DesktopGlossaryPopup(),
-                    const BuildWatermark(),
-                  ],
+        // Above the navigator, so routes outside the shell (dialogs, sheet
+        // windows, root-pushed pages) know the layout too and open their
+        // sheets as windows on desktop.
+        return AppDesktopScope(
+          child: PointerPositionTracker(
+            // The title bar and the glossary window sit outside the navigator;
+            // this gives their tooltips and text fields an overlay to open in.
+            child: RootOverlay(
+              child: AppWindowFrame(
+                child: AppLaunchSplash(
+                  isReady: _startupReady,
+                  child: Stack(
+                    children: [
+                      Positioned.fill(child: appChild),
+                      // Above the router, so the glossary window a help tip opens
+                      // floats over every route, sheet and dialog rather than
+                      // being buried by the one it was opened from.
+                      const DesktopGlossaryPopup(),
+                      const BuildWatermark(),
+                    ],
+                  ),
                 ),
               ),
             ),

@@ -11,6 +11,7 @@ import '../../../core/state/active_studio_preset_provider.dart';
 import '../../../core/state/studio_feature_provider.dart';
 import '../../../core/state/summary_providers.dart';
 
+import '../../../shared/shell/desktop/desktop_layout_provider.dart';
 import '../../../shared/shell/desktop/sidebar_sheet_provider.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../chat_provider.dart';
@@ -86,6 +87,20 @@ class MagicDrawerPanel extends ConsumerStatefulWidget {
 
 class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
   final List<MagicDrawerItemDef> _allItems = buildMagicDrawerItems();
+
+  /// Cards the desktop chat drawer drops. Glossary has its own entry in the
+  /// desktop left sidebar, so listing it here too would offer it twice. Mobile
+  /// keeps it: there is no left sidebar to fall back to.
+  static const Set<String> _desktopHiddenIds = {'glossary'};
+
+  /// The catalog minus whatever the current layout hides. Composer pins still
+  /// resolve against the full [_allItems], so a hidden card can stay pinned.
+  List<MagicDrawerItemDef> _visibleItems(BuildContext context) {
+    if (!isDesktopLayout(context)) return _allItems;
+    return _allItems
+        .where((item) => !_desktopHiddenIds.contains(item.id))
+        .toList();
+  }
 
   final List<String> _itemIds = [];
   final Set<String> _deletedIds = {};
@@ -232,13 +247,14 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
   /// twice, and keeping the id in the saved order is what lets the down-arrow
   /// put the card back exactly where it was.
   List<MagicDrawerCardItem> _displayItems(
+    List<MagicDrawerItemDef> defs,
     ExtensionsSettings extSettings,
     List<ExtensionPreset> extPresets,
     Set<String> pinnedIds,
   ) {
     final list = _itemIds
         .where((id) => !pinnedIds.contains(id))
-        .map((id) => _allItems.where((item) => item.id == id).firstOrNull)
+        .map((id) => defs.where((item) => item.id == id).firstOrNull)
         .whereType<MagicDrawerItemDef>()
         .map(
           (def) => MagicDrawerCardItem(
@@ -250,8 +266,8 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
     return list;
   }
 
-  bool _canAddMore() =>
-      _allItems.any((item) => !_itemIds.contains(item.id));
+  bool _canAddMore(List<MagicDrawerItemDef> defs) =>
+      defs.any((item) => !_itemIds.contains(item.id));
 
   String? _statusFor(
     String id,
@@ -331,7 +347,7 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
   }
 
   Future<void> _showAddItemSheet() async {
-    final available = _allItems
+    final available = _visibleItems(context)
         .where((item) => !_itemIds.contains(item.id))
         .toList();
     if (available.isEmpty) return;
@@ -448,8 +464,9 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
           in ref.watch(composerPinsProvider).value ?? const <ComposerPin>[])
         if (pin.kind == ComposerPinKind.tool) pin.refId,
     };
-    final items = _displayItems(extSettings, extPresets, pinnedIds);
-    final canAdd = _canAddMore();
+    final defs = _visibleItems(context);
+    final items = _displayItems(defs, extSettings, extPresets, pinnedIds);
+    final canAdd = _canAddMore(defs);
     final strip = widget.iconOnly;
     // Flush with the edges: the list's rows, and the strip that replaces them.
     final list = widget.listLayout || strip;

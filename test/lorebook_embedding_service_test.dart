@@ -5,11 +5,13 @@ import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/db/repositories/embedding_repo.dart';
 import 'package:glaze_flutter/core/llm/embedding_service.dart';
 import 'package:glaze_flutter/core/llm/lorebook_embedding_service.dart';
+import 'package:glaze_flutter/core/llm/transport/llm_capture_context.dart';
 import 'package:glaze_flutter/core/models/lorebook.dart';
 import 'package:glaze_flutter/core/utils/cast_helpers.dart';
 
 class _FakeEmbeddingService extends EmbeddingService {
   final List<String> requestedTexts = [];
+  final List<LlmCaptureContext?> contexts = [];
 
   @override
   Future<List<EmbeddingChunk>> getEmbeddingsWithChunks(
@@ -19,6 +21,7 @@ class _FakeEmbeddingService extends EmbeddingService {
     captureContext,
   }) async {
     requestedTexts.addAll(texts);
+    contexts.add(captureContext);
     return [
       for (final text in texts)
         EmbeddingChunk(text: text, vector: const [1, 0]),
@@ -27,6 +30,29 @@ class _FakeEmbeddingService extends EmbeddingService {
 }
 
 void main() {
+  test('one indexing pass is one capture run with a call per entry', () async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final embeddingService = _FakeEmbeddingService();
+    final service = LorebookEmbeddingService(EmbeddingRepo(db), embeddingService);
+
+    await service.indexLorebookEntries(
+      'book',
+      const [
+        LorebookEntry(id: 'a', content: 'first', vectorSearch: true),
+        LorebookEntry(id: 'b', content: 'second', vectorSearch: true),
+      ],
+      const EmbeddingConfig(endpoint: 'http://localhost/v1', model: 'test'),
+    );
+
+    final contexts = embeddingService.contexts.whereType<LlmCaptureContext>();
+    expect(contexts, hasLength(2));
+    expect(contexts.map((c) => c.stage).toSet(), {'embedding.lorebook_index'});
+    expect(contexts.map((c) => c.pipelineRunId).toSet(), hasLength(1));
+    expect(contexts.map((c) => c.callId).toSet(), hasLength(2));
+    expect(contexts.every((c) => c.sessionId == null), isTrue);
+  });
+
   test('keys embedding target indexes and fingerprints entry keys', () async {
     final db = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(db.close);

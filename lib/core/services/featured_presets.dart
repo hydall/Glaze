@@ -13,6 +13,11 @@ class FeaturedPreset {
   final String name;
   final String author;
 
+  /// Translation key of the one-line pitch for a screen that offers the
+  /// preset. None does right now: the onboarding's preset step, which showed
+  /// it, is gone, and the preset list shows these presets like any other.
+  final String descriptionKey;
+
   /// Bundled ST-format preset JSON.
   final String jsonAsset;
 
@@ -33,6 +38,7 @@ class FeaturedPreset {
     required this.id,
     required this.name,
     required this.author,
+    required this.descriptionKey,
     required this.jsonAsset,
     required this.imageAsset,
     required this.createdAt,
@@ -47,19 +53,23 @@ class FeaturedPreset {
 const featuredPresets = <FeaturedPreset>[
   FeaturedPreset(
     id: 'default_shino',
+    descriptionKey: 'preset_shino_desc',
     name: 'Shino',
     author: 'Shino',
     jsonAsset: 'assets/presets/shino.json',
     imageAsset: 'assets/presets/shino.jpg',
     createdAt: 1,
     reasoningEnabled: true,
-    reasoningStart: '<thinking>',
-    reasoningEnd: '</thinking>',
+    reasoningStart: '<rp_plan>',
+    reasoningEnd: '</rp_plan>',
     // v2: the Gemini 3.8 "flash" rewrite of the bundled Shino preset.
-    revision: 2,
+    // v3: reasoning parsed from the <rp_plan> block the prompt asks for, and
+    // the Language block off by default.
+    revision: 3,
   ),
   FeaturedPreset(
     id: 'default_fawnie',
+    descriptionKey: 'preset_fawnie_desc',
     name: 'Fawnie v3',
     author: 'fawn1e',
     jsonAsset: 'assets/presets/fawnie.json',
@@ -68,6 +78,7 @@ const featuredPresets = <FeaturedPreset>[
   ),
   FeaturedPreset(
     id: 'default_microcot',
+    descriptionKey: 'preset_microcot_desc',
     name: 'MicroCot Talks Mini',
     author: 'MicroCoT',
     jsonAsset: 'assets/presets/microcot.json',
@@ -76,6 +87,7 @@ const featuredPresets = <FeaturedPreset>[
   ),
   FeaturedPreset(
     id: 'default_renri',
+    descriptionKey: 'preset_renri_desc',
     name: 'Renri',
     author: 'nimda trashcan',
     jsonAsset: 'assets/presets/renri.json',
@@ -84,6 +96,7 @@ const featuredPresets = <FeaturedPreset>[
   ),
   FeaturedPreset(
     id: 'default_norimyn',
+    descriptionKey: 'preset_norimyn_desc',
     name: 'NoriMyn',
     author: 'NoriMyn',
     jsonAsset: 'assets/presets/norimyn.json',

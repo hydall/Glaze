@@ -163,6 +163,7 @@ class ApiConfigDraft {
     final normalized = normalizeValues(values);
     final parsedReasoningHistoryCount =
         int.tryParse(reasoningHistoryCount) ?? 0;
+    final parsedContextSize = int.tryParse(contextSize) ?? base.contextSize;
     return base.copyWith(
       name: name.trim(),
       // The protocol picker can move a preset onto a custom endpoint, and the
@@ -172,10 +173,13 @@ class ApiConfigDraft {
       endpoint: endpoint.trim(),
       apiKey: apiKey.trim(),
       model: model.trim(),
-      maxTokens: int.tryParse(maxTokens) ?? base.maxTokens,
-      contextSize: int.tryParse(contextSize) ?? base.contextSize,
+      maxTokens: clampMaxOutputTokens(
+        int.tryParse(maxTokens) ?? base.maxTokens,
+        parsedContextSize,
+      ),
+      contextSize: parsedContextSize,
       firstChunkTimeoutMs:
-          (int.tryParse(firstChunkTimeoutSeconds) ?? 60) * 1000,
+          (int.tryParse(firstChunkTimeoutSeconds) ?? 120) * 1000,
       temperature: normalized.temperature,
       topP: normalized.topP,
       topK: normalized.topK,

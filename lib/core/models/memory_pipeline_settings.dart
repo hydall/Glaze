@@ -16,7 +16,7 @@ abstract class MemoryPipelineSettings with _$MemoryPipelineSettings {
     // ── Shared auxiliary LLM timeout ──────────────────────────────────────
     // Default timeout (ms) for auxiliary LLM calls when no service-specific
     // timeout is configured (postCleanerTimeoutMs, studioLedgerTimeoutMs).
-    @Default(60000) int auxTimeoutMs,
+    @Default(120000) int auxTimeoutMs,
   }) = _MemoryPipelineSettings;
 
   factory MemoryPipelineSettings.fromJson(Map<String, dynamic> json) =>

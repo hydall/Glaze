@@ -9,6 +9,7 @@ import '../models/folder.dart';
 import '../models/lorebook.dart';
 import 'db_provider.dart';
 import 'folder_provider.dart';
+import 'lorebook_auto_index_provider.dart';
 import 'shared_prefs_provider.dart';
 
 final lorebooksProvider =
@@ -105,6 +106,7 @@ class LorebooksNotifier extends AsyncNotifier<List<Lorebook>> {
     await repo.put(lorebook);
     await _syncActivationToPrefs(lorebook);
     ref.invalidateSelf();
+    _autoIndex(lorebook.id);
   }
 
   Future<void> put(Lorebook lorebook) async {
@@ -117,6 +119,7 @@ class LorebooksNotifier extends AsyncNotifier<List<Lorebook>> {
     );
     await _syncActivationToPrefs(lorebook);
     ref.invalidateSelf();
+    _autoIndex(lorebook.id);
   }
 
   /// Writes a chunk of lorebooks in one batch and refreshes the list once —
@@ -128,6 +131,9 @@ class LorebooksNotifier extends AsyncNotifier<List<Lorebook>> {
     await repo.putAll(lorebooks);
     await _syncActivationsToPrefs(lorebooks);
     ref.invalidateSelf();
+    for (final lorebook in lorebooks) {
+      _autoIndex(lorebook.id);
+    }
   }
 
   Future<void> updateLorebook(Lorebook lorebook) async {
@@ -135,7 +141,13 @@ class LorebooksNotifier extends AsyncNotifier<List<Lorebook>> {
     await repo.put(lorebook);
     await _syncActivationToPrefs(lorebook);
     ref.invalidateSelf();
+    _autoIndex(lorebook.id);
   }
+
+  /// Hands a saved book to the background indexer, which does nothing unless
+  /// the global "Auto-index vectors" switch is on.
+  void _autoIndex(String lorebookId) =>
+      ref.read(lorebookAutoIndexerProvider.notifier).schedule(lorebookId);
 
   Future<void> _syncActivationToPrefs(Lorebook lorebook) =>
       _syncActivationsToPrefs([lorebook]);

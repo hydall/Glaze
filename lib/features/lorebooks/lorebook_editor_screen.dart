@@ -11,31 +11,31 @@ import '../../core/llm/lorebook_embedding_service.dart';
 import '../../core/llm/lorebook_embedding_text.dart';
 import '../../core/models/lorebook.dart';
 import '../../core/state/db_provider.dart';
+import '../../core/state/lorebook_auto_index_provider.dart';
 import '../../core/state/lorebook_embedding_provider.dart';
 import '../../core/state/lorebook_provider.dart';
 import '../../core/utils/cast_helpers.dart';
 import '../../core/utils/id_generator.dart';
 import '../../core/utils/time_helpers.dart';
-import '../../features/settings/api_list_provider.dart';
 import '../../shared/shell/desktop/desktop_floating_provider.dart';
-import '../../shared/shell/desktop/desktop_layout_provider.dart';
 import '../../shared/shell/desktop/sidebar_sheet_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/glaze_action_button.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../shared/widgets/glaze_fab.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_scaffold.dart';
-import '../../shared/widgets/glaze_sheet.dart';
 import '../../shared/widgets/glaze_spinner.dart';
+import '../../shared/widgets/glaze_text_field.dart';
 import '../../shared/widgets/glaze_toast.dart';
-import '../../shared/widgets/list_controls.dart';
 import '../../shared/widgets/menu_group.dart';
 import '../../shared/widgets/sheet_view.dart';
 import 'lorebook_connections_sheet.dart';
-import 'lorebook_per_book_settings_screen.dart';
+import 'widgets/lorebook_book_settings_section.dart';
 import 'widgets/lorebook_entry_tile.dart';
 import 'widgets/lorebook_option_sheet.dart';
+import 'widgets/vector_setup_gate.dart';
 
 enum _View { entries, editEntry }
 
@@ -558,16 +558,21 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
     _commitEdit(immediate: true);
   }
 
+  /// Switching the entry's vector search on first checks the embedding
+  /// connection; switching it off never needs to.
+  Future<void> _setEntryVectorSearch(bool value) async {
+    final index = _editIndex;
+    if (value && !await ensureVectorsReady(context, ref)) return;
+    if (!mounted || _editIndex != index) return;
+    setState(() => _eVectorSearch = value);
+    _commitEdit(immediate: true);
+  }
+
   // ── Indexing actions (kept ~verbatim from the previous editor) ────────────
 
   Future<void> _indexEntries() async {
-    await ref.read(apiListProvider.future);
-    if (!mounted) return;
+    if (!await ensureVectorsReady(context, ref) || !mounted) return;
     final config = ref.read(embeddingConfigProvider);
-    if (config.endpoint.isEmpty) {
-      GlazeToast.show(context, 'vector_error_config_endpoint'.tr());
-      return;
-    }
     final vectorEntries = _indexableEntries;
     if (vectorEntries.isEmpty) {
       GlazeToast.show(context, 'no_entries_found'.tr());
@@ -634,13 +639,8 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
   }
 
   Future<void> _retryFailed() async {
-    await ref.read(apiListProvider.future);
-    if (!mounted) return;
+    if (!await ensureVectorsReady(context, ref) || !mounted) return;
     final config = ref.read(embeddingConfigProvider);
-    if (config.endpoint.isEmpty) {
-      GlazeToast.show(context, 'vector_error_config_endpoint'.tr());
-      return;
-    }
 
     setState(() {
       _isIndexing = true;
@@ -722,15 +722,10 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
         ),
       ],
     );
-    if (confirmed != true) return;
+    if (confirmed != true || !mounted) return;
 
-    await ref.read(apiListProvider.future);
-    if (!mounted) return;
+    if (!await ensureVectorsReady(context, ref) || !mounted) return;
     final config = ref.read(embeddingConfigProvider);
-    if (config.endpoint.isEmpty) {
-      GlazeToast.show(context, 'vector_error_config_endpoint'.tr());
-      return;
-    }
     final vectorEntries = _indexableEntries;
     if (vectorEntries.isEmpty) {
       GlazeToast.show(context, 'no_entries_found'.tr());
@@ -847,8 +842,10 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
     GlazeToast.show(context, 'action_reset'.tr());
   }
 
-  void _enableVectorForAll() {
+  Future<void> _enableVectorForAll() async {
     final alreadyAll = _entries.every((e) => e.vectorSearch || e.constant);
+    if (!alreadyAll && !await ensureVectorsReady(context, ref)) return;
+    if (!mounted) return;
     setState(() {
       for (int i = 0; i < _entries.length; i++) {
         if (!_entries[i].constant) {
@@ -856,8 +853,8 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
         }
       }
     });
-    _save();
-    _loadEmbeddingStatuses();
+    unawaited(_save());
+    unawaited(_loadEmbeddingStatuses());
     GlazeToast.show(
       context,
       alreadyAll
@@ -868,13 +865,8 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
 
   Future<void> _indexSingleEntry() async {
     final entry = _entries[_editIndex];
-    await ref.read(apiListProvider.future);
-    if (!mounted) return;
+    if (!await ensureVectorsReady(context, ref) || !mounted) return;
     final config = ref.read(embeddingConfigProvider);
-    if (config.endpoint.isEmpty) {
-      GlazeToast.show(context, 'vector_error_config_endpoint'.tr());
-      return;
-    }
     setState(() => _eIndexing = true);
     try {
       final service = ref.read(lorebookEmbeddingServiceProvider);
@@ -925,36 +917,18 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
     );
   }
 
-  Future<void> _openPerBookSettings() async {
-    Widget settingsScreen(BuildContext _) => LorebookPerBookSettingsScreen(
-      settings: _settings,
-      globalSettings: ref.read(lorebookSettingsProvider),
-    );
-    // On desktop a window over this one; a page would cover the whole app.
-    final result = isDesktopLayout(context)
-        ? await showGlazeSheet<Map<String, dynamic>>(
-            context: context,
-            useRootNavigator: true,
-            builder: settingsScreen,
-          )
-        : await Navigator.push<Map<String, dynamic>>(
-            context,
-            MaterialPageRoute(builder: settingsScreen),
-          );
-    if (result != null) {
-      setState(() {
-        if (result['reset'] == true) {
-          _settings = null;
-        } else if (result['settings'] != null) {
-          _settings = LorebookSettings.fromJson(
-            result['settings'] as Map<String, dynamic>,
-          );
-        }
-      });
-      unawaited(_save());
-      // The embedding target and the vectorize-all switch decide which entries
-      // are indexed and what text was hashed for them, so the per-entry status
-      // the screen is showing is about the old settings until this re-runs.
+  /// Applies an edit from the inline settings block. [settings] null drops
+  /// the book's overrides and goes back to the global settings.
+  void _onSettingsChanged(LorebookSettings? settings) {
+    final before = _settings;
+    setState(() => _settings = settings);
+    _saveDebounce?.cancel();
+    unawaited(_save());
+    // The embedding target and the vectorize-all switch decide which entries
+    // are indexed and what text was hashed for them, so the per-entry status
+    // the screen is showing is about the old settings until this re-runs.
+    if (before?.embeddingTarget != settings?.embeddingTarget ||
+        before?.vectorizeAllEntries != settings?.vectorizeAllEntries) {
       unawaited(_loadEmbeddingStatuses());
     }
   }
@@ -973,14 +947,6 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
           },
         ),
         BottomSheetItem(
-          label: 'title_lorebook_settings'.tr(),
-          icon: Icons.settings_outlined,
-          onTap: () {
-            Navigator.of(context, rootNavigator: true).pop();
-            _openPerBookSettings();
-          },
-        ),
-        BottomSheetItem(
           label: 'header_connections'.tr(),
           icon: Icons.link,
           onTap: () {
@@ -996,16 +962,15 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
             _showTestDialog();
           },
         ),
-        if (ref.read(vectorSearchAvailableProvider))
-          BottomSheetItem(
-            label: 'action_delete_indexes'.tr(),
-            icon: Icons.delete_outline,
-            isDestructive: true,
-            onTap: () {
-              Navigator.of(context, rootNavigator: true).pop();
-              _deleteAllIndexes();
-            },
-          ),
+        BottomSheetItem(
+          label: 'action_delete_indexes'.tr(),
+          icon: Icons.delete_outline,
+          isDestructive: true,
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            _deleteAllIndexes();
+          },
+        ),
       ],
     );
   }
@@ -1065,6 +1030,15 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
 
     final isEntries = _view == _View.entries;
 
+    // A background pass over this book just finished; the per-entry statuses
+    // on screen predate it.
+    ref.listen(lorebookAutoIndexerProvider, (prev, next) {
+      if ((prev?.contains(widget.lorebookId) ?? false) &&
+          !next.contains(widget.lorebookId)) {
+        unawaited(_loadEmbeddingStatuses());
+      }
+    });
+
     return SheetView(
       showRouteBackground: false,
       shellBranchIndex: 2,
@@ -1109,8 +1083,8 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
               ),
             ],
       floatingActionButton: isEntries
-          ? GlazeActionChip(
-              icon: Icons.add,
+          ? GlazeFab(
+              label: 'lorebook_new_entry'.tr(),
               tooltip: 'lorebook_new_entry'.tr(),
               onTap: _addEntryMenu,
             )
@@ -1166,9 +1140,9 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
 
   Widget _entriesBody() {
     final filtered = _filteredEntries;
-    // Indexing affordances only exist while the active API preset has semantic
-    // search switched on — without it there is no endpoint to index against.
-    final vectorAvailable = ref.watch(vectorSearchAvailableProvider);
+    // The vector actions stay on screen without embeddings and lead to their
+    // setup; only the reindex nag and the status badges wait for a connection.
+    final configured = ref.watch(embeddingConfiguredProvider);
     return Builder(
       builder: (context) => ListView(
         padding: const EdgeInsets.fromLTRB(0, 0, 0, 100).add(
@@ -1178,12 +1152,14 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
           ),
         ),
         children: [
-          if (vectorAvailable && _needsReindex) _reindexBanner(),
-          if (_entries.isNotEmpty) _toolbar(vectorAvailable),
-          if (vectorAvailable) ...[
-            if (!_isIndexing && _indexResult != null) _indexResultBlock(),
-            if (_failedEntries.isNotEmpty) _failedEntriesBlock(),
-          ],
+          LorebookBookSettingsSection(
+            settings: _settings,
+            onChanged: _onSettingsChanged,
+          ),
+          if (configured && _needsReindex) _reindexBanner(),
+          if (_entries.isNotEmpty) _toolbar(),
+          if (!_isIndexing && _indexResult != null) _indexResultBlock(),
+          if (_failedEntries.isNotEmpty) _failedEntriesBlock(),
           if (filtered.isEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 48, 16, 16),
@@ -1214,7 +1190,7 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
                     _EntryRow(
                       entry: entry,
                       status: _embeddingStatuses[entry.id],
-                      showVectorBadges: vectorAvailable,
+                      showVectorBadges: configured,
                       vectorizeAll: _vectorizeAll,
                       onTap: () => _openEntry(_entries.indexOf(entry)),
                       onToggle: () => _toggleEntry(_entries.indexOf(entry)),
@@ -1269,7 +1245,13 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
             icon: Icons.auto_fix_high,
             label: 'btn_index_all'.tr(),
             tone: GlazeActionTone.neutral,
-            busy: _isIndexing,
+            busy:
+                _isIndexing ||
+                ref.watch(
+                  lorebookAutoIndexerProvider.select(
+                    (ids) => ids.contains(widget.lorebookId),
+                  ),
+                ),
             onTap: _indexEntries,
           ),
         ],
@@ -1277,67 +1259,61 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
     );
   }
 
-  /// [vectorAvailable] false → only the non-vector actions are laid out; the
-  /// enable-vector / index / retry / drop-indexes buttons are dropped.
-  Widget _toolbar(bool vectorAvailable) {
+  /// The vector actions here check the embedding connection when tapped and
+  /// send the user to its setup when it is missing or failing.
+  Widget _toolbar() {
     final allVector = _entries.every((e) => e.vectorSearch || e.constant);
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
       child: Row(
         children: [
-          if (vectorAvailable) ...[
-            _ToolbarButton(
-              icon: Icons.check_circle_outline,
-              label: allVector
-                  ? 'btn_disable_vector_all'.tr()
-                  : 'btn_enable_vector_all'.tr(),
-              onTap: _entries.isEmpty ? null : _enableVectorForAll,
-            ),
-            const SizedBox(width: 8),
-          ],
+          _ToolbarButton(
+            icon: Icons.check_circle_outline,
+            label: allVector
+                ? 'btn_disable_vector_all'.tr()
+                : 'btn_enable_vector_all'.tr(),
+            onTap: _entries.isEmpty ? null : _enableVectorForAll,
+          ),
+          const SizedBox(width: 8),
           _ToolbarButton(
             icon: Icons.restore,
             label: 'match_global'.tr(),
             secondary: true,
             onTap: _resetEntriesToGlobal,
           ),
-          if (vectorAvailable) ...[
+          const SizedBox(width: 8),
+          _ToolbarButton(
+            icon: Icons.auto_fix_high,
+            label: _rateLimitCooldown > 0
+                ? 'btn_rate_limited'.tr(
+                    namedArgs: {'seconds': '$_rateLimitCooldown'},
+                  )
+                : _isIndexing
+                ? (_indexStatus.isNotEmpty ? _indexStatus : 'btn_indexing'.tr())
+                : 'btn_index_all'.tr(),
+            onTap: (_isIndexing || _rateLimitCooldown > 0)
+                ? null
+                : _indexEntries,
+          ),
+          if (_failedEntries.isNotEmpty) ...[
             const SizedBox(width: 8),
             _ToolbarButton(
-              icon: Icons.auto_fix_high,
-              label: _rateLimitCooldown > 0
-                  ? 'btn_rate_limited'.tr(
-                      namedArgs: {'seconds': '$_rateLimitCooldown'},
-                    )
-                  : _isIndexing
-                  ? (_indexStatus.isNotEmpty
-                        ? _indexStatus
-                        : 'btn_indexing'.tr())
-                  : 'btn_index_all'.tr(),
+              icon: Icons.refresh,
+              label: 'btn_retry_failed'.tr(),
+              secondary: true,
               onTap: (_isIndexing || _rateLimitCooldown > 0)
                   ? null
-                  : _indexEntries,
-            ),
-            if (_failedEntries.isNotEmpty) ...[
-              const SizedBox(width: 8),
-              _ToolbarButton(
-                icon: Icons.refresh,
-                label: 'btn_retry_failed'.tr(),
-                secondary: true,
-                onTap: (_isIndexing || _rateLimitCooldown > 0)
-                    ? null
-                    : _retryFailed,
-              ),
-            ],
-            const SizedBox(width: 8),
-            _ToolbarButton(
-              icon: Icons.delete_sweep_outlined,
-              label: 'action_delete_indexes'.tr(),
-              secondary: true,
-              onTap: _isIndexing ? null : _clearAndReindex,
+                  : _retryFailed,
             ),
           ],
+          const SizedBox(width: 8),
+          _ToolbarButton(
+            icon: Icons.delete_sweep_outlined,
+            label: 'action_delete_indexes'.tr(),
+            secondary: true,
+            onTap: _isIndexing ? null : _clearAndReindex,
+          ),
         ],
       ),
     );
@@ -1418,6 +1394,14 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
                 ],
               ),
             ),
+          // Most failures are the connection's, not the entry's.
+          const SizedBox(height: 10),
+          GlazeActionButton(
+            icon: Icons.hub_outlined,
+            label: 'vectors_setup_open'.tr(),
+            tone: GlazeActionTone.neutral,
+            onTap: () => unawaited(openEmbeddingSetup(context)),
+          ),
         ],
       ),
     );
@@ -1426,7 +1410,7 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
   // ── Edit-entry body ────────────────────────────────────────────────────────
 
   Widget _editBody() {
-    final vectorAvailable = ref.watch(vectorSearchAvailableProvider);
+    final configured = ref.watch(embeddingConfiguredProvider);
     return Builder(
       builder: (context) => ListView(
         padding: EdgeInsets.only(
@@ -1439,16 +1423,7 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
             header: 'section_activation_logic'.tr(),
             helpTerm: 'lorebook-keys',
             items: [
-              // With semantic search off in the API the entry has no vector
-              // section, so its activation-only switch is hosted here instead.
-              if (!vectorAvailable)
-                MenuSwitchItem(
-                  label: 'label_constant'.tr(),
-                  description: 'hint_always_active'.tr(),
-                  value: _eConstant,
-                  onChanged: _onConstantChanged,
-                ),
-              if (vectorAvailable && _eVectorSearch)
+              if (configured && _eVectorSearch)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
                   child: Text(
@@ -1615,84 +1590,79 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
             ],
           ),
 
-          // Vector Search — dropped entirely when the API has semantic search
-          // off; `label_constant` then lives in Activation & Logic above.
-          if (vectorAvailable)
-            MenuGroup(
-              header: 'section_vector_search'.tr(),
-              items: [
+          // Vector Search — shown without embeddings too, with a row leading
+          // to their setup; switching vector search on checks them first.
+          MenuGroup(
+            header: 'section_vector_search'.tr(),
+            items: [
+              if (!configured) const VectorSetupItem(),
+              MenuSwitchItem(
+                label: 'label_constant'.tr(),
+                description: 'desc_constant_disables_vector'.tr(),
+                value: _eConstant,
+                onChanged: _onConstantChanged,
+              ),
+              MenuSwitchItem(
+                label: 'label_vector_search'.tr(),
+                description: _eConstant
+                    ? 'desc_vector_disabled_for_constant'.tr()
+                    : 'desc_vector_search_entry'.tr(),
+                value: _eVectorSearch,
+                onChanged: _eConstant ? (_) {} : _setEntryVectorSearch,
+              ),
+              if (_eVectorSearch && !_eConstant)
                 MenuSwitchItem(
-                  label: 'label_constant'.tr(),
-                  description: 'desc_constant_disables_vector'.tr(),
-                  value: _eConstant,
-                  onChanged: _onConstantChanged,
+                  label: 'label_use_keyword_search'.tr(),
+                  description: 'desc_use_keyword_search'.tr(),
+                  value: _eUseKeywordSearch,
+                  onChanged: (v) {
+                    setState(() => _eUseKeywordSearch = v);
+                    _commitEdit(immediate: true);
+                  },
                 ),
-                MenuSwitchItem(
-                  label: 'label_vector_search'.tr(),
-                  description: _eConstant
-                      ? 'desc_vector_disabled_for_constant'.tr()
-                      : 'desc_vector_search_entry'.tr(),
-                  value: _eVectorSearch,
-                  onChanged: _eConstant
-                      ? (_) {}
-                      : (v) {
-                          setState(() => _eVectorSearch = v);
-                          _commitEdit(immediate: true);
-                        },
-                ),
-                if (_eVectorSearch && !_eConstant)
-                  MenuSwitchItem(
-                    label: 'label_use_keyword_search'.tr(),
-                    description: 'desc_use_keyword_search'.tr(),
-                    value: _eUseKeywordSearch,
-                    onChanged: (v) {
-                      setState(() => _eUseKeywordSearch = v);
-                      _commitEdit(immediate: true);
-                    },
-                  ),
-                if (_eVectorSearch && !_eConstant)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        GlazeActionButton(
-                          icon: Icons.auto_fix_high,
-                          label: _eIndexing
-                              ? 'btn_indexing'.tr()
-                              : 'btn_index_entry'.tr(),
-                          tone: GlazeActionTone.primary,
-                          expand: true,
-                          busy: _eIndexing,
-                          onTap: _indexSingleEntry,
-                        ),
-                        if (_embeddingStatuses[_entries[_editIndex].id] != null)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 8),
-                            child: Text(
-                              switch (_embeddingStatuses[_entries[_editIndex]
-                                  .id]) {
-                                'indexed' => 'entry_indexed'.tr(),
-                                'error' => 'entry_index_error'.tr(),
-                                _ => 'entry_not_indexed'.tr(),
-                              },
-                              style: TextStyle(
-                                fontSize: 12,
-                                color:
-                                    switch (_embeddingStatuses[_entries[_editIndex]
-                                        .id]) {
-                                      'indexed' => Colors.green,
-                                      'error' => Colors.orange,
-                                      _ => context.cs.onSurfaceVariant,
-                                    },
-                              ),
+              if (_eVectorSearch && !_eConstant)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      GlazeActionButton(
+                        icon: Icons.auto_fix_high,
+                        label: _eIndexing
+                            ? 'btn_indexing'.tr()
+                            : 'btn_index_entry'.tr(),
+                        tone: GlazeActionTone.primary,
+                        expand: true,
+                        busy: _eIndexing,
+                        onTap: _indexSingleEntry,
+                      ),
+                      if (_embeddingStatuses[_entries[_editIndex].id] != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text(
+                            switch (_embeddingStatuses[_entries[_editIndex]
+                                .id]) {
+                              'indexed' => 'entry_indexed'.tr(),
+                              'error' => 'entry_index_error'.tr(),
+                              _ => 'entry_not_indexed'.tr(),
+                            },
+                            style: TextStyle(
+                              fontSize: 12,
+                              color:
+                                  switch (_embeddingStatuses[_entries[_editIndex]
+                                      .id]) {
+                                    'indexed' => Colors.green,
+                                    'error' => Colors.orange,
+                                    _ => context.cs.onSurfaceVariant,
+                                  },
                             ),
                           ),
-                      ],
-                    ),
+                        ),
+                    ],
                   ),
-              ],
-            ),
+                ),
+            ],
+          ),
 
           // Temporal Logic
           MenuGroup(
@@ -1810,19 +1780,11 @@ class _MatchPreviewState extends State<_MatchPreview> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          TextField(
+          GlazeTextField(
             controller: _controller,
             keyboardType: TextInputType.multiline,
             textInputAction: TextInputAction.newline,
-            style: TextStyle(color: context.cs.onSurface),
-            decoration: InputDecoration(
-              hintText: 'placeholder_search_lore'.tr(),
-              hintStyle: TextStyle(
-                color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
-              ),
-              filled: true,
-              fillColor: Colors.white.withValues(alpha: 0.05),
-            ),
+            hint: 'placeholder_search_lore'.tr(),
             maxLines: 3,
             minLines: 1,
             onChanged: (_) => setState(() {}),
@@ -1838,11 +1800,7 @@ class _MatchPreviewState extends State<_MatchPreview> {
               padding: const EdgeInsets.symmetric(vertical: 2),
               child: Row(
                 children: [
-                  const Icon(
-                    Icons.check_circle,
-                    size: 14,
-                    color: Colors.green,
-                  ),
+                  const Icon(Icons.check_circle, size: 14, color: Colors.green),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
@@ -1983,7 +1941,7 @@ class _EntryRow extends StatelessWidget {
                 activeThumbColor: context.cs.primary,
                 materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
-              GestureDetector(
+              MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: onMore,
                 child: Padding(
@@ -1994,7 +1952,7 @@ class _EntryRow extends StatelessWidget {
                     color: context.cs.onSurfaceVariant.withValues(alpha: 0.6),
                   ),
                 ),
-              ),
+              )),
             ],
           ),
         ),
@@ -2028,6 +1986,7 @@ class _ToolbarButton extends StatelessWidget {
         color: Colors.white.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(8),
         child: InkWell(
+          mouseCursor: SystemMouseCursors.click,
           borderRadius: BorderRadius.circular(8),
           onTap: onTap,
           child: Container(

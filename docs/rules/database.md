@@ -248,6 +248,11 @@ Migration history:
   tokenizer choice). The v136 table rebuild adds it first on older databases.
 - v140: no schema change. Runs `_ensureSchemaIntegrity` on v139 databases to
   restore the `@TableIndex` indexes their earlier upgrades never created.
+- v141: no schema change. `_ensureSchemaIntegrity` replaces the
+  `llm_request_capture_rows_no_update` trigger with one that still rejects every
+  update except the turn binding: `message_id` set once from NULL, every other
+  column unchanged. The old one also rejected
+  `LlmRequestCaptureRepo.bindTurnMessageId`.
 
 ---
 

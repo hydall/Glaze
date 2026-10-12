@@ -56,7 +56,7 @@ void main() {
 
   test('an idle run pushes an empty label, not its last phase', () {
     // The page falls back to its own default text, so a bubble that outlives
-    // the run never keeps claiming "Waiting for the model…".
+    // the run never keeps claiming "Model is generating the reply…".
     expect(generationPhaseLabel(GenerationPhase.idle), isEmpty);
   });
 }

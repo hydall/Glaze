@@ -11,13 +11,12 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:path/path.dart' as p;
-// ignore: depend_on_referenced_packages
-import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';
 import '../../core/debug/perf_debug.dart';
 import '../../core/llm/game_time.dart';
+import '../../core/models/character.dart';
+import '../../core/services/file_export_service.dart';
 import '../../core/utils/image_src.dart';
+import '../../core/utils/error_format.dart';
 import '../../core/utils/platform_paths.dart';
 import '../../shared/widgets/glaze_spinner.dart';
 import 'editing_message_provider.dart';
@@ -32,8 +31,10 @@ import '../../shared/shell/desktop/desktop_layout_provider.dart'
     show isDesktopLayout;
 import '../../shared/shell/title_bar_header.dart';
 import 'widgets/chat_column_width.dart';
+import 'widgets/chat_header_search.dart';
 import 'widgets/message_actions.dart';
 import 'widgets/message_delete_confirmation.dart';
+import 'widgets/output_limit_sheet.dart';
 import 'widgets/game_time_seed_dialog.dart';
 import '../../shared/theme/theme_font_provider.dart';
 import '../../shared/theme/theme_preset.dart';
@@ -43,13 +44,18 @@ import '../../shared/widgets/glaze_scaffold.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_toast.dart';
+import '../translation/message_translation_controller.dart';
+import '../translation/translation_service.dart';
 import '../../shared/widgets/image_viewer.dart';
 import '../character_list/character_detail_screen.dart';
+import '../guides/guide_anchor.dart';
+import '../guides/guide_service.dart';
 import '../image_gen/image_gen_provider.dart';
 import '../personas/persona_list_screen.dart';
 import '../presets/preset_editor_screen.dart';
 import '../settings/api_list_provider.dart';
 import '../settings/api_settings_screen.dart';
+import '../settings/context_budget_check.dart';
 import '../settings/app_settings_provider.dart';
 import 'chat_drawer_controller.dart'
     show ChatDrawerController, kKeyboardHeightPref;
@@ -82,8 +88,15 @@ import '../../core/state/db_provider.dart';
 import 'widgets/session_lifecycle_tracker.dart';
 import '../../shared/widgets/glaze_sheet.dart';
 
-String _chatWebViewThemeSyncKey(ThemePreset preset, String chatLayout) {
+String _chatWebViewThemeSyncKey(
+  ThemePreset preset,
+  String chatLayout,
+  Brightness brightness,
+) {
   return [
+    // A "same as device" theme repaints with different colors when only the
+    // brightness changes.
+    brightness.name,
     preset.id,
     preset.accentColor,
     preset.uiColor,
@@ -184,6 +197,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     // reached the WebView, so the prev/next buttons looked dead and closing
     // search left the highlight behind until some unrelated rebuild.
     _search.addListener(_onSearchChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) maybeShowGuide(context, AppGuide.chat);
+    });
     if (widget.forceNewSession || widget.initialSessionIndex != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _applySessionPreference();
@@ -318,7 +334,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
     final appSettings = ref.watch(appSettingsProvider).value;
     final virtualKeyboardSend = appSettings?.virtualKeyboardSend ?? false;
-    final enterToSend = appSettings?.enterToSend ?? true;
+    final enterToSend = appSettings?.enterToSend ?? false;
     final batterySaver = appSettings?.batterySaver ?? false;
     _drawerCtrl.setBatterySaverMode(batterySaver);
 
@@ -470,8 +486,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         flushHeader: isDesktopLayout(context),
         hideHeader: _isHeaderHidden,
         title: title,
-        // Desktop never swaps the header for a search field — it has a
-        // permanent one beside the character (see [_InlineChatSearchField]).
+        // Desktop swaps only the character block for its own field, from the
+        // toggle after the session name (see [DesktopChatHeaderSearch]).
         titleWidget: _search.showSearch && !isDesktopLayout(context)
             ? TextField(
                 controller: _search.searchController,
@@ -502,44 +518,33 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                 },
               )
             : (character != null && inTitleBar
-                  ? ChatHeader(
-                      character: character,
-                      sessionName: sessionName,
-                      currentSessionIndex: sessionIndex,
-                      compact: true,
-                      onTapInfo: () => _showCharacterCard(charId),
-                      onTapAvatar:
-                          (character.avatarPath != null &&
-                              character.avatarPath!.isNotEmpty)
-                          ? () => _showAvatarViewer(character.avatarPath!)
-                          : null,
+                  ? DesktopChatHeaderSearch(
+                      search: _search,
+                      charId: charId,
+                      inTitleBar: true,
+                      headerBuilder: (toggle) => ChatHeader(
+                        character: character,
+                        sessionName: sessionName,
+                        currentSessionIndex: sessionIndex,
+                        compact: true,
+                        trailing: Padding(
+                          padding: const EdgeInsets.only(left: 6),
+                          child: toggle,
+                        ),
+                        onTapInfo: () => _showCharacterCard(charId),
+                        onTapAvatar:
+                            (character.avatarPath != null &&
+                                character.avatarPath!.isNotEmpty)
+                            ? () => _showAvatarViewer(character.avatarPath!)
+                            : null,
+                      ),
                     )
                   : character != null
-                  ? Row(
-                      children: [
-                        Expanded(
-                          child: ChatHeader(
-                            character: character,
-                            sessionName: sessionName,
-                            currentSessionIndex: sessionIndex,
-                            onTapInfo: () => _showCharacterCard(charId),
-                            onTapAvatar:
-                                (character.avatarPath != null &&
-                                    character.avatarPath!.isNotEmpty)
-                                ? () => _showAvatarViewer(character.avatarPath!)
-                                : null,
-                          ),
-                        ),
-                        // Desktop has room for the search field to live in the
-                        // header permanently, so it does (Vue's
-                        // `.chat-search-inline-desktop`); the toggle button is
-                        // dropped below to match.
-                        if (isDesktopLayout(context))
-                          _InlineChatSearchField(
-                            search: _search,
-                            charId: charId,
-                          ),
-                      ],
+                  ? _buildCharacterHeader(
+                      character: character,
+                      charId: charId,
+                      sessionName: sessionName,
+                      sessionIndex: sessionIndex,
                     )
                   : null),
         onBack: () {
@@ -558,7 +563,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
             _drawerCtrl.closeDrawer();
             return;
           }
-          if (_search.showSearch) {
+          if (_search.showSearch || _search.inlineOpen) {
             _search.closeSearch();
             return;
           }
@@ -577,28 +582,58 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           }
           context.go('/');
         },
-        actions: inTitleBar
-            ? [
-                _InlineChatSearchField(
-                  search: _search,
-                  charId: charId,
-                  inTitleBar: true,
-                ),
-              ]
-            : _search.showSearch
-            ? const []
-            : isDesktopLayout(context)
+        // Desktop keeps the search toggle in the header itself, right after
+        // the session name (see [DesktopChatHeaderSearch]).
+        actions: _search.showSearch || isDesktopLayout(context)
             ? const []
             : [
-                IconButton(
-                  icon: const Icon(Icons.search),
-                  color: context.cs.primary,
-                  onPressed: () {
-                    _search.openSearch();
-                  },
+                GuideAnchor(
+                  id: GuideIds.chatSearch,
+                  child: IconButton(
+                    icon: const Icon(Icons.search),
+                    color: context.cs.primary,
+                    onPressed: () {
+                      _search.openSearch();
+                    },
+                  ),
                 ),
               ],
         body: body,
+      ),
+    );
+  }
+
+  /// The character block of the in-app (not title bar) header. Desktop adds
+  /// the search toggle after the session name.
+  Widget _buildCharacterHeader({
+    required Character character,
+    required String charId,
+    required String sessionName,
+    required int sessionIndex,
+  }) {
+    Widget header({Widget? trailing}) => GuideAnchor(
+      id: GuideIds.chatHeader,
+      child: ChatHeader(
+        character: character,
+        sessionName: sessionName,
+        currentSessionIndex: sessionIndex,
+        trailing: trailing,
+        onTapInfo: () => _showCharacterCard(charId),
+        onTapAvatar:
+            (character.avatarPath != null && character.avatarPath!.isNotEmpty)
+            ? () => _showAvatarViewer(character.avatarPath!)
+            : null,
+      ),
+    );
+    if (!isDesktopLayout(context)) return header();
+    return DesktopChatHeaderSearch(
+      search: _search,
+      charId: charId,
+      headerBuilder: (toggle) => header(
+        trailing: Padding(
+          padding: const EdgeInsets.only(left: 8),
+          child: toggle,
+        ),
       ),
     );
   }
@@ -629,91 +664,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   }
 }
 
-/// The always-visible search field the desktop chat header carries, in place
-/// of the phone layout's search toggle (Vue: `.chat-search-inline-desktop`).
-///
-/// Search mode follows the query — typing turns highlighting on, clearing the
-/// field turns it back off — so there is no open/close button at all.
-///
-/// Under the app's title bar it sits on the bar's right edge as a small
-/// rounded box, the way a window's search usually looks there.
-class _InlineChatSearchField extends ConsumerWidget {
-  final ChatSearchDelegate search;
-  final String charId;
-  final bool inTitleBar;
-
-  const _InlineChatSearchField({
-    required this.search,
-    required this.charId,
-    this.inTitleBar = false,
-  });
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final field = SizedBox(
-      width: 220,
-      child: ListenableBuilder(
-        listenable: search,
-        builder: (context, _) => TextField(
-          controller: search.searchController,
-          style: TextStyle(color: context.cs.onSurface, fontSize: 14),
-          textInputAction: TextInputAction.search,
-          decoration: InputDecoration(
-            isDense: true,
-            // In the title bar the rounded box below is the background; the
-            // theme's square fill on top left only a ragged ring of it.
-            filled: inTitleBar ? false : null,
-            hintText: 'search_messages'.tr(),
-            hintStyle: TextStyle(
-              fontSize: 14,
-              color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
-            ),
-            prefixIcon: Icon(
-              Icons.search_rounded,
-              size: 18,
-              color: context.cs.primary,
-            ),
-            prefixIconConstraints: const BoxConstraints(
-              minWidth: 34,
-              minHeight: 0,
-            ),
-            suffixIcon: search.searchQuery.isEmpty
-                ? null
-                : IconButton(
-                    icon: const Icon(Icons.close_rounded, size: 16),
-                    onPressed: () {
-                      search.searchController.clear();
-                      search.closeSearch();
-                    },
-                  ),
-            border: InputBorder.none,
-            enabledBorder: InputBorder.none,
-            focusedBorder: InputBorder.none,
-            contentPadding: EdgeInsets.symmetric(vertical: inTitleBar ? 6 : 8),
-          ),
-          // The id comes from the screen rather than the router: under the
-          // title bar the field is built outside the chat route.
-          onChanged: (q) => search.syncInlineQuery(
-            q,
-            ref.read(chatProvider(charId)).value?.messages ?? const [],
-          ),
-        ),
-      ),
-    );
-    if (!inTitleBar) return field;
-    return Padding(
-      padding: const EdgeInsets.only(right: 6),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: context.cs.onSurface.withValues(alpha: 0.06),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: SizedBox(height: 30, child: Center(child: field)),
-      ),
-    );
-  }
-}
-
 /// The round glass button floating over the chat that jumps to the top or the
 /// bottom of the message list. One widget so the two jump buttons only differ
 /// in icon, direction and callback.
@@ -740,7 +690,7 @@ class _ChatScrollButton extends StatelessWidget {
           duration: const Duration(milliseconds: 180),
           curve: Curves.easeOutCubic,
           offset: visible ? Offset.zero : const Offset(0, 0.2),
-          child: GestureDetector(
+          child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
             onTap: onTap,
             child: Container(
               width: 44,
@@ -761,7 +711,7 @@ class _ChatScrollButton extends StatelessWidget {
               ),
               child: Icon(icon, color: context.cs.primary, size: 26),
             ),
-          ),
+          )),
         ),
       ),
     );
@@ -800,7 +750,7 @@ class _ChatBody extends ConsumerStatefulWidget {
     required this.keyboardHeight,
     this.onScrollDirection,
     this.virtualKeyboardSend = false,
-    this.enterToSend = true,
+    this.enterToSend = false,
     this.targetMessageId,
     this.isHeaderHidden = false,
     required this.blurIsFlutterSide,
@@ -855,6 +805,124 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   bool _showingHistoryRotation = false;
   final GlobalKey<ChatWebViewWidgetState> _webViewStateKey = GlobalKey();
 
+  /// Content already auto-translated per arriving message id, so a settled
+  /// turn is not translated again by a later rebuild — but a rewrite is.
+  final Map<String, String> _autoTranslatedMessages = {};
+
+  /// The per-message translate button. Display-only: the translation is
+  /// painted in the WebView and never reaches the message or the prompt.
+  late final MessageTranslationController _translations =
+      MessageTranslationController(
+        view: MessageTranslationView(
+          showPending: (id, original, label, deferred) =>
+              _webViewStateKey.currentState?.setTranslationPending(
+                id,
+                original,
+                label,
+                deferred: deferred,
+              ) ??
+              Future.value(false),
+          showTranslation: (id, original, text, deferred) =>
+              _webViewStateKey.currentState?.setTranslation(
+                id,
+                original,
+                text,
+                deferred: deferred,
+              ) ??
+              Future.value(),
+          showOriginal: (id) =>
+              _webViewStateKey.currentState?.clearTranslation(id) ??
+              Future.value(),
+        ),
+        onError: (error) {
+          if (!mounted) return;
+          GlazeToast.show(
+            context,
+            error is TranslationNotConfiguredException
+                ? 'translation_not_configured'.tr()
+                : 'translation_failed'.tr(args: [formatError(error)]),
+            isError: true,
+          );
+        },
+      );
+
+  void _onTranslateMessage(String id, String action, String text) {
+    final settings = ref.read(pipelineSettingsProvider).translation;
+    if (!settings.enabled) return;
+    // Claim the message so an automatic pass does not undo a manual choice.
+    _autoTranslatedMessages[id] = text;
+    final sessionId = widget.state.session?.id;
+    // The language the reader reads in: the one picked, or the interface's.
+    final target = settings.messageLanguage.isNotEmpty
+        ? settings.messageLanguage
+        : context.locale.languageCode;
+    unawaited(
+      _translations.handle(
+        id: id,
+        action: action,
+        text: text,
+        pendingLabel: 'translation_in_progress'.tr(),
+        translate: (text, token) => ref
+            .read(translationServiceProvider)
+            .translate(
+              text: text,
+              targetLanguageCode: target,
+              cancelToken: token,
+              sessionId: sessionId,
+              messageId: id,
+            ),
+      ),
+    );
+  }
+
+  /// Translates an arriving character message into the reader's language, once
+  /// the turn has settled. Display-only: the pending bubble names the phase,
+  /// then the translation is painted over the message and the stored text — and
+  /// the context the model continues from — stays original.
+  ///
+  /// Keyed by message id and content, not by a one-shot flag: a post-generation
+  /// stage (the Studio cleaner) can rewrite the message after the stream ends,
+  /// and the newer text is translated in turn. A manual translate marks the
+  /// message too, so an automatic pass never overrides a choice the reader made.
+  void _maybeAutoTranslateLastMessage(ChatState state) {
+    if (state.isGenerating || state.isPostGenRunning || state.isSendPending) {
+      return;
+    }
+    final settings = ref.read(pipelineSettingsProvider).translation;
+    if (!settings.enabled || !settings.autoTranslateCharacter) return;
+    final messages = state.messages;
+    if (messages.isEmpty) return;
+    final last = messages.last;
+    if (last.role != 'assistant' ||
+        last.isTyping ||
+        last.content.trim().isEmpty) {
+      return;
+    }
+    if (_autoTranslatedMessages[last.id] == last.content) return;
+    _autoTranslatedMessages[last.id] = last.content;
+    final target = settings.messageLanguage.isNotEmpty
+        ? settings.messageLanguage
+        : context.locale.languageCode;
+    unawaited(
+      _translations.handle(
+        id: last.id,
+        action: 'translate',
+        text: last.content,
+        pendingLabel: 'gen_phase_translating_character'.tr(),
+        translate: (text, token) => ref
+            .read(translationServiceProvider)
+            .translate(
+              text: text,
+              targetLanguageCode: target,
+              cancelToken: token,
+              sessionId: state.session?.id,
+              messageId: last.id,
+            ),
+        deferred: true,
+      ),
+    );
+  }
+
   /// Rects of the glass overlays (header + input bar elements) measured in
   /// WebView-local coordinates and mirrored into the WebView so the messages
   /// scrolling underneath get blurred (Flutter's BackdropFilter cannot
@@ -904,6 +972,11 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   @override
   void didUpdateWidget(covariant _ChatBody oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.state.session?.id != widget.state.session?.id) {
+      _translations.cancelAll();
+      _autoTranslatedMessages.clear();
+    }
+    _maybeAutoTranslateLastMessage(widget.state);
     if (oldWidget.drawerCtrl != widget.drawerCtrl) {
       _bindDrawerListenable();
     }
@@ -1061,9 +1134,8 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
     ImageViewer.show(context, imageProvider: provider);
   }
 
-  /// Saves/shares a generated image. The native share sheet on iOS/Android
-  /// exposes "Save Image"/"Save to Photos", which is the supported way to get
-  /// the image into the gallery without a dedicated gallery-saver dependency.
+  /// Saves a generated image to the public Glaze downloads folder
+  /// (`Downloads/Glaze/images`), with no share sheet in the way.
   Future<void> _downloadImage(String src) async {
     try {
       Uint8List bytes;
@@ -1100,22 +1172,13 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
       }
       if (bytes.isEmpty) return;
 
-      final tmpDir = await getTemporaryDirectory();
-      final tmpFile = File(
-        p.join(
-          tmpDir.path,
-          'glaze_image_${DateTime.now().millisecondsSinceEpoch}.$ext',
-        ),
+      final path = await FileExportService.saveBytesToGlaze(
+        bytes: bytes,
+        filename: 'glaze_image_${DateTime.now().millisecondsSinceEpoch}.$ext',
+        subfolder: 'images',
       );
-      await tmpFile.writeAsBytes(bytes);
-
-      await SharePlus.instance.share(
-        ShareParams(
-          files: [XFile(tmpFile.path)],
-          // Required on iPad so the share popover has an anchor rect.
-          sharePositionOrigin: const Rect.fromLTWH(0, 0, 1, 1),
-        ),
-      );
+      if (path.isEmpty) return;
+      if (mounted) GlazeToast.show(context, 'export_success'.tr());
     } catch (e) {
       if (mounted) {
         GlazeErrorDialog.show(context, e, prefix: 'settings_err_failed'.tr());
@@ -1138,7 +1201,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   }
 
   /// Options sheet for a generated/janitor image (Imagen UI, ported from
-  /// Glaze useMessageImageGen.js): Expand → fullscreen, Save → share/save,
+  /// Glaze useMessageImageGen.js): Expand → fullscreen, Save → Glaze folder,
   /// Regenerate → re-run image generation for the owning message. The
   /// Regenerate entry is hidden when the owning message can't be resolved in
   /// the current list (no messageId, or the message is already gone).
@@ -1326,10 +1389,87 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
     return false;
   }
 
+  /// The guard a quick reply runs before it sends or continues: the same
+  /// context check the composer's send makes, then the game-time seed.
+  Future<bool> _beforeQuickReply() async =>
+      _ensureContextFits() && await _maybeSeedGameTime();
+
+  /// Blocks a send the context window cannot carry: when the chat's preset
+  /// alone outgrows what the window leaves after the reply's reservation, the
+  /// history trim keeps no message — not even the one being sent — so the
+  /// request would go out without the chat. Shows the API settings' hint
+  /// instead and returns false so the caller aborts the send.
+  bool _ensureContextFits() {
+    // Studio builds the final prompt without the chat preset, from its own
+    // connection's window.
+    if (ref.read(studioFeatureEnabledProvider)) return true;
+    final api = ref.read(activeApiConfigProvider);
+    if (api == null) return true;
+    final preset = ref.read(
+      effectivePresetForChatProvider((
+        charId: widget.charId,
+        sessionId: widget.state.session?.id,
+      )),
+    );
+    if (preset == null) return true;
+    final fits = presetFitsContext(
+      presetTokens: presetPromptTokens(preset),
+      contextSize: api.contextSize,
+      maxTokens: api.maxTokens,
+    );
+    if (fits) return true;
+    GlazeBottomSheet.show<void>(
+      context,
+      title: 'preset_exceeds_context_title'.tr(),
+      child: Builder(
+        builder: (sheetContext) => Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.warning_amber_rounded,
+                size: 64,
+                color: sheetContext.cs.onSurfaceVariant.withValues(alpha: 0.5),
+              ),
+              const SizedBox(height: 16),
+              PresetFitWarningText(
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 16,
+                  color: sheetContext.cs.onSurface,
+                  height: 1.5,
+                ),
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () {
+                    Navigator.of(sheetContext, rootNavigator: true).pop();
+                    unawaited(
+                      showApiSettingsSheet(
+                        context,
+                        focusSection: ApiSettingsSection.context,
+                      ),
+                    );
+                  },
+                  child: Text('api_required_select'.tr()),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    return false;
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _keyboardSettleTimer?.cancel();
+    _translations.cancelAll();
     _blurRegistry.dispose();
     super.dispose();
   }
@@ -1793,6 +1933,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                         themeSyncKey: _chatWebViewThemeSyncKey(
                           preset,
                           preset.chatLayout,
+                          Theme.of(context).brightness,
                         ),
                         elementOpacity: preset.elementOpacity,
                         elementBlur: preset.elementBlur,
@@ -1847,6 +1988,11 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                 )
                                 .value ??
                             false,
+                        translationEnabled: ref.watch(
+                          pipelineSettingsProvider.select(
+                            (p) => p.translation.enabled,
+                          ),
+                        ),
                         messageActions: MessageActionsCallbacks(
                           onMessageContext:
                               (index, messageId, isUser, isSystem, content) {
@@ -1927,6 +2073,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                 .read(chatProvider(widget.charId).notifier)
                                 .rerunCleaner(id);
                           },
+                          onTranslateMessage: _onTranslateMessage,
                           onToggleHidden: (id) {
                             final idx = widget.state.messages.indexWhere(
                               (m) => m.id == id,
@@ -1994,6 +2141,8 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                   const [],
                             );
                           },
+                          onOutputLimitClick: (_) =>
+                              showOutputLimitSheet(context),
                         ),
                         editActions: EditActionsCallbacks(
                           onEditSave: (id, text) async {
@@ -2353,7 +2502,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                             height: widget.drawerCtrl.activeDrawerHeight,
                             child: ChatDrawerPanel(
                               charId: widget.charId,
-                              beforeGeneration: _maybeSeedGameTime,
+                              beforeGeneration: _beforeQuickReply,
                               onClose: () => widget.drawerCtrl.closeDrawer(),
                               disableEffects:
                                   batterySaver &&
@@ -2504,7 +2653,8 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                             enterToSend: widget.enterToSend,
                                             canSend: () =>
                                                 _ensurePersonaSelected() &&
-                                                _ensureApiSelected(),
+                                                _ensureApiSelected() &&
+                                                _ensureContextFits(),
                                             onSend: (text) async {
                                               if (text.trim().isEmpty) {
                                                 return false;
@@ -2642,8 +2792,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                                     widget.drawerCtrl
                                                         .toggleDrawer(context);
                                                   },
-                                            beforeGeneration:
-                                                _maybeSeedGameTime,
+                                            beforeGeneration: _beforeQuickReply,
                                             onImpersonate: (guidance) => ref
                                                 .read(
                                                   chatProvider(

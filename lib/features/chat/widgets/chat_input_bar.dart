@@ -11,13 +11,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/models/chat_message.dart' show maxMessageAttachments;
 import '../../../core/platform/clipboard_images.dart';
 import '../../../core/platform/haptics.dart';
+import '../../../core/state/db_provider.dart';
+import '../../../core/utils/error_format.dart';
 import '../../../core/utils/text_insert.dart';
+import '../../../shared/shell/desktop/desktop_layout_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/theme/theme_preset.dart';
 import '../../../shared/theme/theme_provider.dart';
 import '../../../shared/widgets/fullscreen_editor.dart';
 import '../../../shared/widgets/glass_surface.dart';
 import '../../../shared/widgets/glaze_toast.dart';
+import '../../../shared/widgets/swipe_tab_switcher.dart' show kSwipeDevices;
 import '../chat_provider.dart'
     show ImpersonationState, chatProvider, impersonationStateProvider;
 import '../composer_empty_action_provider.dart';
@@ -29,6 +33,9 @@ import '../state/chat_drawer_editing_provider.dart';
 import 'action_glyph.dart';
 import 'chat_blur_region_tracker.dart';
 import 'magic_drawer_catalog.dart';
+import '../../guides/guide_anchor.dart';
+import '../../translation/composer_translator.dart';
+import '../../translation/translation_service.dart';
 import 'magic_drawer_widgets.dart';
 
 Border _uiBorder(BuildContext context, ThemePreset preset) {
@@ -152,7 +159,7 @@ class ChatInputBar extends ConsumerStatefulWidget {
     this.onFullScreen,
     this.onImpersonate,
     this.virtualKeyboardSend = false,
-    this.enterToSend = true,
+    this.enterToSend = false,
     this.batterySaver = false,
     this.isDrawerOpen = false,
     this.focusNode,
@@ -209,6 +216,12 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
   /// back, and `ref` is off limits once the element is being unmounted.
   late final ComposerActionBridge _actionBridge;
 
+  /// The translate action's state: a request in flight, or a translation the
+  /// next tap can undo.
+  late final ComposerTranslator _draftTranslator = ComposerTranslator(
+    _controller,
+  )..addListener(_onDraftTranslatorChanged);
+
   @override
   void initState() {
     super.initState();
@@ -242,7 +255,47 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
       case ComposerAction.quote:
         final token = action.insertToken;
         if (token != null) _insertSurround(token);
+      case ComposerAction.translate:
+        unawaited(_translateDraft());
     }
+  }
+
+  bool get _translationEnabled =>
+      ref.read(pipelineSettingsProvider).translation.enabled;
+
+  void _onDraftTranslatorChanged() {
+    if (mounted) setState(() {});
+  }
+
+  /// Translates the draft into the roleplay's language, or puts the original
+  /// back. Only the text field changes — nothing is sent.
+  Future<void> _translateDraft() async {
+    if (!_translationEnabled) return;
+    await _draftTranslator.toggle(
+      translate: (text, token) => ref
+          .read(translationServiceProvider)
+          .translate(
+            text: text,
+            targetLanguageCode: ref
+                .read(pipelineSettingsProvider)
+                .translation
+                .inputLanguage,
+            cancelToken: token,
+          ),
+      onEmpty: () {
+        if (mounted) GlazeToast.show(context, 'translation_input_empty'.tr());
+      },
+      onError: (error) {
+        if (!mounted) return;
+        GlazeToast.show(
+          context,
+          error is TranslationNotConfiguredException
+              ? 'translation_not_configured'.tr()
+              : 'translation_failed'.tr(args: [formatError(error)]),
+          isError: true,
+        );
+      },
+    );
   }
 
   /// Wraps the caret / selection in a pair of [token] and brings the keyboard
@@ -414,11 +467,28 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     if (widget.focusNode != null &&
         widget.enterToSend &&
         event.logicalKey == LogicalKeyboardKey.enter &&
-        !HardwareKeyboard.instance.isShiftPressed) {
+        !HardwareKeyboard.instance.isShiftPressed &&
+        !_softKeyboardVisible) {
       _handleSend();
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
+  }
+
+  /// Whether an on-screen keyboard is up on a touch platform.
+  ///
+  /// Some soft keyboards (Samsung Keyboard) deliver their Enter as a synthetic
+  /// KEYCODE_ENTER rather than committing "\n", which reaches [onKeyEvent]
+  /// looking exactly like a hardware key. Enter-to-send is meant for physical
+  /// keyboards only, so while the IME is showing that Enter is left to the
+  /// field to insert a newline. Reads the raw view insets: the Scaffold strips
+  /// the bottom inset from the MediaQuery its body sees.
+  bool get _softKeyboardVisible {
+    if (defaultTargetPlatform != TargetPlatform.android &&
+        defaultTargetPlatform != TargetPlatform.iOS) {
+      return false;
+    }
+    return View.of(context).viewInsets.bottom > 0;
   }
 
   static bool _isPasteShortcut(KeyEvent event) {
@@ -514,6 +584,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     // holding a handler into a disposed State.
     _actionBridge.unregister(_runComposerAction);
     _debounce?.cancel();
+    _draftTranslator.dispose();
     _controller.dispose();
     _guidanceController.dispose();
     _internalFocusNode.dispose();
@@ -701,7 +772,9 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
       final button = _buildPinnedButton(pins[index], editing);
       if (button == null) continue;
       if (buttons.isNotEmpty) buttons.add(const SizedBox(width: 8));
-      buttons.add(button);
+      buttons.add(
+        GuideAnchor(id: GuideIds.chatPin(pins[index].encode()), child: button),
+      );
     }
     if (buttons.isEmpty) return const SizedBox.shrink();
 
@@ -1038,6 +1111,19 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
           glyph: action.glyph,
           onTap: () => _insertSurround(token),
         );
+      case ComposerAction.translate:
+        if (!ref.watch(
+          pipelineSettingsProvider.select((p) => p.translation.enabled),
+        )) {
+          return null;
+        }
+        // The glyph says what the tap does next: translate, or — while the
+        // field holds the translation — bring the original back.
+        return _ResolvedPin(
+          icon: _draftTranslator.canRestore ? Icons.undo : action.icon,
+          onTap: () => unawaited(_translateDraft()),
+          color: _draftTranslator.busy ? Colors.amber : null,
+        );
     }
   }
 
@@ -1077,7 +1163,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
                 // Guidance was only dismissable from whichever button had
                 // opened it — a composer action that may be pinned anywhere,
                 // or the drawer.
-                GestureDetector(
+                MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
                   onTap: widget.isEditingMessage ? null : _toggleGuidance,
                   behavior: HitTestBehavior.opaque,
                   child: Padding(
@@ -1087,7 +1173,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
                       size: 16,
                       color: accent.withValues(alpha: 0.7),
                     ),
-                  ),
+                  )),
                 ),
               ],
             ),
@@ -1378,11 +1464,17 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
         widget.isPostGenRunning;
     // Gated on the drawer being open as well as on edit mode: with the drawer
     // shut there is nowhere for a demoted button to land, nothing on screen to
-    // drag into the send button, and no pencil to explain the badges.
-    final editing = widget.isDrawerOpen && ref.watch(chatDrawerEditingProvider);
+    // drag into the send button, and no pencil to explain the badges. On desktop
+    // the drawer never opens as a bottom sheet — it lives in the right sidebar,
+    // which is always there — so [isDrawerOpen] stays false and the pencil there
+    // would otherwise never reach the row.
+    final editing =
+        (widget.isDrawerOpen || isDesktopLayout(context)) &&
+        ref.watch(chatDrawerEditingProvider);
 
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
+      supportedDevices: kSwipeDevices,
       onVerticalDragStart: (_) => _resetVerticalDrag(),
       onVerticalDragUpdate: _handleVerticalDragUpdate,
       onVerticalDragEnd: (_) => _handleVerticalDragEnd(context),
@@ -1401,83 +1493,93 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
               ),
               const SizedBox(height: 8),
             ],
-            Material(
-              color: Colors.transparent,
-              elevation: 0,
-              borderRadius: BorderRadius.circular(28),
-              child: _floatingChrome(
-                id: 'input-pill',
-                radius: 28,
-                child: GlassSurface(
-                  enableRipple: true,
-                  blurViaWebView: widget.blurViaWebView,
-                  backdropKey: widget.backdropKey,
-                  borderRadius: BorderRadius.circular(28),
-                  tint: context.cs.surface,
-                  border: _guidanceMode
-                      ? Border.all(
-                          color: Colors.orange.withValues(alpha: 0.3),
-                          width: preset.borderWidth.clamp(1.0, double.infinity),
-                        )
-                      : uiBorder,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      // The instruction is the pill's top half, over a hairline
-                      // and the message field — one block, the way the Vue
-                      // composer had it, rather than a card floating above it.
-                      if (_guidanceMode)
-                        _buildGuidanceField(scale, letterSpacing),
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(minHeight: 56),
-                        child: TextField(
-                          controller: _controller,
-                          focusNode: _effectiveFocusNode,
-                          contextMenuBuilder: _buildContextMenu,
-                          contentInsertionConfiguration:
-                              ContentInsertionConfiguration(
-                                onContentInserted: _handleInsertedContent,
-                              ),
-                          readOnly: widget.isEditingMessage || _isImpersonating,
-                          canRequestFocus: !widget.isEditingMessage,
-                          enableInteractiveSelection: !widget.isEditingMessage,
-                          showCursor: !widget.isEditingMessage,
-                          maxLines: 5,
-                          minLines: 1,
-                          textCapitalization: TextCapitalization.sentences,
-                          textInputAction: widget.virtualKeyboardSend
-                              ? TextInputAction.send
-                              : TextInputAction.newline,
-                          onSubmitted: widget.virtualKeyboardSend
-                              ? (_) => _handleSend()
-                              : null,
-                          style: TextStyle(
-                            fontSize: 16 * scale,
-                            color: textColor,
-                            letterSpacing: letterSpacing,
-                          ),
-                          decoration: InputDecoration(
-                            hintText: _guidanceMode
-                                ? 'chat_guidance_message_hint'.tr()
-                                : 'chat_placeholder'.tr(),
-                            hintStyle: TextStyle(
-                              color: secondaryColor,
+            GuideAnchor(
+              id: GuideIds.chatComposer,
+              child: Material(
+                color: Colors.transparent,
+                elevation: 0,
+                borderRadius: BorderRadius.circular(28),
+                child: _floatingChrome(
+                  id: 'input-pill',
+                  radius: 28,
+                  child: GlassSurface(
+                    enableRipple: true,
+                    blurViaWebView: widget.blurViaWebView,
+                    backdropKey: widget.backdropKey,
+                    borderRadius: BorderRadius.circular(28),
+                    tint: context.cs.surface,
+                    border: _guidanceMode
+                        ? Border.all(
+                            color: Colors.orange.withValues(alpha: 0.3),
+                            width: preset.borderWidth.clamp(
+                              1.0,
+                              double.infinity,
+                            ),
+                          )
+                        : uiBorder,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // The instruction is the pill's top half, over a hairline
+                        // and the message field — one block, the way the Vue
+                        // composer had it, rather than a card floating above it.
+                        if (_guidanceMode)
+                          _buildGuidanceField(scale, letterSpacing),
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(minHeight: 56),
+                          child: TextField(
+                            controller: _controller,
+                            focusNode: _effectiveFocusNode,
+                            contextMenuBuilder: _buildContextMenu,
+                            contentInsertionConfiguration:
+                                ContentInsertionConfiguration(
+                                  onContentInserted: _handleInsertedContent,
+                                ),
+                            readOnly:
+                                widget.isEditingMessage ||
+                                _isImpersonating ||
+                                _draftTranslator.busy,
+                            canRequestFocus: !widget.isEditingMessage,
+                            enableInteractiveSelection:
+                                !widget.isEditingMessage,
+                            showCursor: !widget.isEditingMessage,
+                            maxLines: 5,
+                            minLines: 1,
+                            textCapitalization: TextCapitalization.sentences,
+                            textInputAction: widget.virtualKeyboardSend
+                                ? TextInputAction.send
+                                : TextInputAction.newline,
+                            onSubmitted: widget.virtualKeyboardSend
+                                ? (_) => _handleSend()
+                                : null,
+                            style: TextStyle(
                               fontSize: 16 * scale,
+                              color: textColor,
                               letterSpacing: letterSpacing,
                             ),
-                            border: InputBorder.none,
-                            enabledBorder: InputBorder.none,
-                            focusedBorder: InputBorder.none,
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 18,
-                              vertical: 16,
+                            decoration: InputDecoration(
+                              hintText: _guidanceMode
+                                  ? 'chat_guidance_message_hint'.tr()
+                                  : 'chat_placeholder'.tr(),
+                              hintStyle: TextStyle(
+                                color: secondaryColor,
+                                fontSize: 16 * scale,
+                                letterSpacing: letterSpacing,
+                              ),
+                              border: InputBorder.none,
+                              enabledBorder: InputBorder.none,
+                              focusedBorder: InputBorder.none,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 18,
+                                vertical: 16,
+                              ),
+                              filled: false,
                             ),
-                            filled: false,
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -1491,10 +1593,13 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
                 // shoving the send button off the screen.
                 Expanded(child: _buildActionRow(editing)),
                 const SizedBox(width: 8),
-                _buildSendButton(
-                  isGenerating: isGenerating,
-                  hasContent: hasContent,
-                  editing: editing,
+                GuideAnchor(
+                  id: GuideIds.chatSend,
+                  child: _buildSendButton(
+                    isGenerating: isGenerating,
+                    hasContent: hasContent,
+                    editing: editing,
+                  ),
                 ),
               ],
             ),
@@ -1599,7 +1704,7 @@ class _AttachedImageThumb extends StatelessWidget {
           Positioned(
             top: 4,
             right: 4,
-            child: GestureDetector(
+            child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
               onTap: onRemove,
               child: Container(
                 width: 22,
@@ -1610,7 +1715,7 @@ class _AttachedImageThumb extends StatelessWidget {
                 ),
                 child: const Icon(Icons.close, color: Colors.white, size: 14),
               ),
-            ),
+            )),
           ),
         ],
       ),
@@ -1688,7 +1793,7 @@ class _CircleBtnState extends ConsumerState<_CircleBtn>
   Widget build(BuildContext context) {
     final preset = ref.watch(themeProvider.select((s) => s.activePreset));
     final floating = widget.blurRegionId != null;
-    final btn = GestureDetector(
+    final btn = MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: widget.onTap,
       onTapDown: (widget.onTap != null && !widget.batterySaver)
           ? (_) => _press.forward()
@@ -1723,7 +1828,7 @@ class _CircleBtnState extends ConsumerState<_CircleBtn>
             ),
           ),
         ),
-      ),
+      )),
     );
     final regionId = widget.blurRegionId;
     if (regionId == null || !widget.blurViaWebView) return btn;
@@ -1779,6 +1884,7 @@ class _SendBtnState extends State<_SendBtn>
   @override
   Widget build(BuildContext context) {
     return InkWell(
+      mouseCursor: SystemMouseCursors.click,
       customBorder: const CircleBorder(),
       onTap: widget.onTap,
       onTapDown: widget.batterySaver ? null : (_) => _press.forward(),

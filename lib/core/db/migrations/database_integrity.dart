@@ -111,7 +111,6 @@ extension _AppDatabaseIntegrityMigrations on AppDatabase {
     for (final table in const [
       'rewrite_operation_revisions',
       'rewrite_evidence_rows',
-      'llm_request_capture_rows',
     ]) {
       await customStatement(
         'CREATE TRIGGER IF NOT EXISTS ${table}_no_update '
@@ -119,6 +118,30 @@ extension _AppDatabaseIntegrityMigrations on AppDatabase {
         "SELECT RAISE(ABORT, '$table is immutable'); END",
       );
     }
+    await _createRequestCaptureImmutabilityTrigger();
+  }
+
+  /// Request captures are immutable except for one write: the main request and
+  /// the Studio shards are captured before the reply exists, and
+  /// `LlmRequestCaptureRepo.bindTurnMessageId` stamps the message id on them
+  /// once it does. Up to v140 the trigger rejected that too, so no turn was
+  /// ever bound. Dropped and recreated rather than `IF NOT EXISTS`, which
+  /// would keep the old body on databases that already have it.
+  Future<void> _createRequestCaptureImmutabilityTrigger() async {
+    const table = 'llm_request_capture_rows';
+    final unchanged = [
+      for (final column in llmRequestCaptureRows.$columns)
+        if (column.name != 'message_id')
+          'NEW.${column.name} IS OLD.${column.name}',
+    ].join(' AND ');
+    await customStatement('DROP TRIGGER IF EXISTS ${table}_no_update');
+    await customStatement(
+      'CREATE TRIGGER ${table}_no_update '
+      'BEFORE UPDATE ON $table '
+      'WHEN NOT (OLD.message_id IS NULL AND NEW.message_id IS NOT NULL '
+      'AND $unchanged) BEGIN '
+      "SELECT RAISE(ABORT, '$table is immutable'); END",
+    );
   }
 
   Future<void> _createLlmCallEventImmutabilityTrigger() async {

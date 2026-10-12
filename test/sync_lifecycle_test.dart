@@ -2870,6 +2870,112 @@ void main() {
     );
   });
 
+  Future<Map<String, dynamic>> cloudApiPreset(SyncWorld world) async {
+    final raw = world.cloud.files[cloudPath('api_presets', 'api_presets')]!;
+    final items = (jsonDecode(raw) as Map<String, dynamic>)['items'] as List;
+    return items.first as Map<String, dynamic>;
+  }
+
+  Future<SyncManifest> cloudManifestOf(SyncWorld world) async =>
+      SyncManifest.fromJson(
+        jsonDecode(world.cloud.files[cloudPath('manifest', 'manifest')]!)
+            as Map<String, dynamic>,
+      );
+
+  test('Turning key sync on uploads the keys, and a changed key too', () async {
+    final world = SyncWorld();
+    final prefs = await SharedPreferences.getInstance();
+    await world.apiConfigs.put(
+      const ApiConfig(id: 'api1', name: 'Test API', apiKey: 'sk-old'),
+    );
+
+    await world.engine.pushEntities(onProgress: (_) {});
+    expect((await cloudApiPreset(world))['apiKey'], '');
+
+    await prefs.setBool(SyncSerialization.includeApiKeysPrefKey, true);
+    await world.engine.pushEntities(onProgress: (_) {});
+    expect((await cloudApiPreset(world))['apiKey'], 'sk-old');
+    expect((await cloudManifestOf(world)).apiKeysIncluded, isTrue);
+
+    await world.apiConfigs.put(
+      const ApiConfig(id: 'api1', name: 'Test API', apiKey: 'sk-new'),
+    );
+    await world.engine.pushEntities(onProgress: (_) {});
+    expect((await cloudApiPreset(world))['apiKey'], 'sk-new');
+  });
+
+  test(
+    'Keys reach the cloud even when a pull accepted the stripped copy',
+    () async {
+      final world = SyncWorld();
+      final prefs = await SharedPreferences.getInstance();
+      await world.apiConfigs.put(
+        const ApiConfig(id: 'api1', name: 'Test API', apiKey: 'sk-secret'),
+      );
+      await world.engine.pushEntities(onProgress: (_) {});
+
+      await prefs.setBool(SyncSerialization.includeApiKeysPrefKey, true);
+      await world.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+      await world.engine.pushEntities(onProgress: (_) {});
+
+      expect((await cloudApiPreset(world))['apiKey'], 'sk-secret');
+    },
+  );
+
+  test('A push with key sync off keeps the cloud keys flag', () async {
+    final source = SyncWorld();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(SyncSerialization.includeApiKeysPrefKey, true);
+    await source.apiConfigs.put(
+      const ApiConfig(id: 'api1', name: 'Test API', apiKey: 'sk-secret'),
+    );
+    await source.engine.pushEntities(onProgress: (_) {});
+
+    final target = SyncWorld();
+    target.cloud.files.addAll(source.cloud.files);
+    await prefs.setBool(SyncSerialization.includeApiKeysPrefKey, false);
+    await target.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+    expect(target.apiConfigs.data['api1']?.apiKey, 'sk-secret');
+
+    await target.engine.pushEntities(onProgress: (_) {});
+    expect((await cloudApiPreset(target))['apiKey'], 'sk-secret');
+    expect((await cloudManifestOf(target)).apiKeysIncluded, isTrue);
+  });
+
+  test('Cloud round-trip carries the chat layout', () async {
+    final source = SyncWorld();
+    final sourcePrefs = await SharedPreferences.getInstance();
+    await sourcePrefs.setStringList('composer_pins_v1', [
+      'action:drawer',
+      'reply:look-around',
+    ]);
+    await sourcePrefs.setString('quick_replies_list_v1', '[]');
+    await source.engine.pushEntities(onProgress: (_) {});
+
+    SharedPreferences.setMockInitialValues({
+      'magic_drawer_items': ['stale'],
+    });
+    final target = SyncWorld();
+    target.cloud.files.addAll(source.cloud.files);
+    await target.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+
+    final targetPrefs = await SharedPreferences.getInstance();
+    expect(targetPrefs.getStringList('composer_pins_v1'), [
+      'action:drawer',
+      'reply:look-around',
+    ]);
+    expect(targetPrefs.getString('quick_replies_list_v1'), '[]');
+    expect(targetPrefs.getStringList('magic_drawer_items'), isNull);
+  });
+
+  test(
+    'An untouched chat layout leaves the local_storage hash alone',
+    () async {
+      final prefs = await SharedPreferences.getInstance();
+      expect(SyncSerialization.readChatLayout(prefs), isNull);
+    },
+  );
+
   test(
     'needsConflict returns false when hashes match (same data, different timestamps)',
     () async {

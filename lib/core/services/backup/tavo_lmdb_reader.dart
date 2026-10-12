@@ -1,500 +1,492 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-const Map<int, String> _typeNames = {
-  0x0000: '_meta',
-  0x0004: 'character',
-  0x0018: 'conversation',
-  0x001c: 'model_setting',
-  0x0024: 'endpoint',
-  0x0028: 'persona_ref',
-  0x0038: 'message',
-  0x0040: 'chat_theme',
-  0x0048: 'preset',
-  0x0058: 'ltm_settings',
-  0x0060: 'ltm',
-  0x0064: 'regex',
-  0x0068: 'regex_conversation_ref',
-  0x006c: 'lorebook_entry',
-  0x0080: 'lorebook',
-  0x0084: 'lorebook_character_ref',
-  0x00a0: 'ltm_conversation_ref',
-  0x00c0: 'conversation_settings',
-  0x00dc: 'ltm_settings_ref',
-  0x00e0: 'message_metadata',
-  0x00e4: 'vision_settings',
-  0x00e8: 'vision_conversation_ref',
-  0x00ec: 'ltm_personality',
-  0x00f0: '_unknown_f0',
-};
+/// Reader for the ObjectBox database inside a Tavo backup (`objectbox/data.mdb`).
+///
+/// ObjectBox keeps its data in LMDB and every object as a FlatBuffers table.
+/// Nothing here is hardcoded per entity: ObjectBox stores its own schema
+/// (entity names, property names, types and FlatBuffers slots) inside the
+/// database, so the reader decodes that first and then every object through
+/// it. A Tavo update that adds or moves a field changes the schema the file
+/// carries, not this code.
+///
+/// The LMDB file is walked as a B-tree from the newest meta page. Scanning
+/// every page instead would also pick up the copy-on-write leftovers LMDB keeps
+/// in its free pages — stale versions of edited objects and objects that were
+/// deleted.
+class TavoDatabase {
+  /// Objects per entity name, in id order. Each object maps the property name
+  /// to its decoded value; a property the object does not carry is absent.
+  final Map<String, List<Map<String, dynamic>>> entities;
 
-class _FieldDef {
-  final int index;
-  final String name;
-  final String type;
-  const _FieldDef(this.index, this.name, this.type);
+  /// Standalone ToMany relations, keyed `Entity.relation`, as source object id
+  /// to the ids of the objects it points at.
+  final Map<String, Map<int, List<int>>> relations;
+
+  const TavoDatabase({required this.entities, required this.relations});
+
+  List<Map<String, dynamic>> rows(String entity) =>
+      entities[entity] ?? const [];
+
+  List<int> related(String relation, int sourceId) =>
+      relations[relation]?[sourceId] ?? const [];
 }
 
-class TavoField {
-  final String type; // 'text' | 'json'
-  final dynamic data;
-  const TavoField(this.type, this.data);
-}
+TavoDatabase parseTavoObjectBox(Uint8List mdb) {
+  final lmdb = _Lmdb(mdb);
+  final records = lmdb.records();
 
-class TavoEntry {
-  final int entityId;
-  final List<TavoField> fields;
-  final Map<String, dynamic> structured;
-  int? timestamp;
-  int? characterId;
-  int? conversationId;
-
-  TavoEntry({
-    required this.entityId,
-    required this.fields,
-    required this.structured,
-  });
-}
-
-class TavoChatBlock {
-  final List<TavoEntry> messages;
-  final int? characterId;
-  TavoChatBlock({required this.messages, required this.characterId});
-}
-
-class TavoData {
-  final Map<String, List<TavoEntry>> categories;
-  final List<TavoChatBlock> chats;
-  TavoData({required this.categories, required this.chats});
-}
-
-const _characterFields = <_FieldDef>[
-  _FieldDef(1, 'name', 'string'),
-  _FieldDef(3, 'description', 'string'),
-  _FieldDef(4, 'scenario', 'string'),
-  _FieldDef(5, 'first_mes', 'string'),
-  _FieldDef(6, 'mes_example', 'string'),
-  _FieldDef(13, 'avatarPath', 'string'),
-  _FieldDef(14, 'personality', 'string'),
-  _FieldDef(15, 'system_prompt', 'string'),
-  _FieldDef(25, 'alternate_greetings', 'string'),
-  _FieldDef(27, 'source', 'string'),
-  _FieldDef(20, 'updatedAt', 'int64'),
-  _FieldDef(31, 'creationDate', 'int64'),
-  _FieldDef(32, 'modificationDate', 'int64'),
-  _FieldDef(34, 'sortIndex', 'int64'),
-];
-
-const _messageFields = <_FieldDef>[
-  _FieldDef(1, 'characterId', 'int64'),
-  _FieldDef(2, 'text', 'string'),
-  _FieldDef(3, 'conversationId', 'int64'),
-  _FieldDef(5, 'charName', 'string'),
-  _FieldDef(6, 'avatarPath', 'string'),
-  _FieldDef(7, 'timestamp', 'int64'),
-];
-
-const _conversationFields = <_FieldDef>[
-  _FieldDef(2, 'createdAt', 'int64'),
-  _FieldDef(3, 'updatedAt', 'int64'),
-];
-
-const _endpointFields = <_FieldDef>[
-  _FieldDef(1, 'name', 'string'),
-  _FieldDef(3, 'model', 'string'),
-  _FieldDef(4, 'protocol', 'string'),
-  _FieldDef(5, 'url', 'string'),
-  _FieldDef(13, 'params_json', 'string'),
-];
-
-const _presetFields = <_FieldDef>[
-  _FieldDef(1, 'name', 'string'),
-  _FieldDef(2, 'updatedAt', 'int64'),
-  _FieldDef(4, 'format_json', 'string'),
-  _FieldDef(5, 'prompts_json', 'string'),
-];
-
-const _personaFields = <_FieldDef>[
-  _FieldDef(1, 'avatarPath', 'string'),
-  _FieldDef(3, 'name', 'string'),
-];
-
-const _lorebookFields = <_FieldDef>[
-  _FieldDef(1, 'name', 'string'),
-  _FieldDef(3, 'updatedAt', 'int64'),
-];
-
-const _regexFields = <_FieldDef>[
-  _FieldDef(1, 'name', 'string'),
-  _FieldDef(4, 'rules_json', 'string'),
-];
-
-const _ltmSettingsFields = <_FieldDef>[
-  _FieldDef(1, 'summaryPrompt', 'string'),
-  _FieldDef(2, 'injectionPrompt', 'string'),
-  _FieldDef(3, 'injectionDepth', 'int64'),
-  _FieldDef(4, 'maxTokens', 'int64'),
-  _FieldDef(11, 'role', 'string'),
-];
-
-const _ltmFields = <_FieldDef>[
-  _FieldDef(1, 'conversationId', 'int64'),
-  _FieldDef(4, 'updatedAt', 'int64'),
-];
-
-const _structuredParsers = <String, List<_FieldDef>>{
-  'character': _characterFields,
-  'message': _messageFields,
-  'conversation': _conversationFields,
-  'endpoint': _endpointFields,
-  'preset': _presetFields,
-  'persona_ref': _personaFields,
-  'lorebook': _lorebookFields,
-  'regex': _regexFields,
-  'ltm_settings': _ltmSettingsFields,
-  'ltm': _ltmFields,
-};
-
-String? _readFieldString(Uint8List buf, int offset) {
-  if (offset + 4 > buf.length) return null;
-  final dv = ByteData.sublistView(buf);
-  final strOffset = dv.getUint32(offset, Endian.little);
-  if (strOffset < 4) return null;
-  final strAbs = offset + strOffset;
-  if (strAbs + 4 > buf.length) return null;
-  final slen = dv.getUint32(strAbs, Endian.little);
-  if (slen == 0) return '';
-  if (slen > 1000000 || strAbs + 4 + slen > buf.length) return null;
-  try {
-    final raw = Uint8List.sublistView(buf, strAbs + 4, strAbs + 4 + slen);
-    return _stripTrailingNulls(utf8.decode(raw, allowMalformed: true));
-  } catch (_) {
-    return null;
+  final schema = <int, _Entity>{};
+  for (final r in records) {
+    if (r.key.length != 8 || _u32be(r.key, 0) != 0) continue;
+    final entity = _Entity.tryParse(r.value);
+    if (entity != null) schema[entity.id] = entity;
   }
-}
 
-List<String>? _readFieldStringVector(Uint8List buf, int offset) {
-  if (offset + 4 > buf.length) return null;
-  final dv = ByteData.sublistView(buf);
-  final vecOffset = dv.getUint32(offset, Endian.little);
-  if (vecOffset < 4) return null;
-  final vecAbs = offset + vecOffset;
-  if (vecAbs + 4 > buf.length) return null;
-  final vlen = dv.getUint32(vecAbs, Endian.little);
-  if (vlen > 100000 || vecAbs + 4 + vlen * 4 > buf.length) return null;
-  final result = <String>[];
-  for (var i = 0; i < vlen; i++) {
-    final elemPos = vecAbs + 4 + i * 4;
-    if (elemPos + 4 > buf.length) break;
-    final elemOff = dv.getUint32(elemPos, Endian.little);
-    if (elemOff < 4) break;
-    final elemAbs = elemPos + elemOff;
-    if (elemAbs + 4 > buf.length) break;
-    final eslen = dv.getUint32(elemAbs, Endian.little);
-    if (elemAbs + 4 + eslen > buf.length) break;
-    try {
-      final raw = Uint8List.sublistView(buf, elemAbs + 4, elemAbs + 4 + eslen);
-      result.add(_stripTrailingNulls(utf8.decode(raw, allowMalformed: true)));
-    } catch (_) {
-      break;
+  final entities = <String, List<Map<String, dynamic>>>{};
+  final relationNames = <int, String>{};
+  for (final e in schema.values) {
+    entities[e.name] = [];
+    for (final rel in e.relations) {
+      relationNames[rel.id] = '${e.name}.${rel.name}';
     }
   }
-  return result;
-}
 
-int? _readFieldInt64(Uint8List buf, int offset) {
-  if (offset + 8 > buf.length) return null;
-  return ByteData.sublistView(buf).getInt64(offset, Endian.little);
-}
-
-int? _readFieldInt32(Uint8List buf, int offset) {
-  if (offset + 4 > buf.length) return null;
-  return ByteData.sublistView(buf).getInt32(offset, Endian.little);
-}
-
-double? _readFieldFloat64(Uint8List buf, int offset) {
-  if (offset + 8 > buf.length) return null;
-  return ByteData.sublistView(buf).getFloat64(offset, Endian.little);
-}
-
-bool? _readFieldBool(Uint8List buf, int offset) {
-  if (offset >= buf.length) return null;
-  return buf[offset] != 0;
-}
-
-String _stripTrailingNulls(String s) {
-  var end = s.length;
-  while (end > 0 && s.codeUnitAt(end - 1) == 0) {
-    end--;
-  }
-  return end == s.length ? s : s.substring(0, end);
-}
-
-Map<String, dynamic> _parseObjectBoxEntity(
-    Uint8List dataBuf, List<_FieldDef> fieldDefs) {
-  if (dataBuf.length < 8) return {};
-  final dv = ByteData.sublistView(dataBuf);
-
-  final rootOffset = dv.getUint32(0, Endian.little);
-  if (rootOffset < 4 || rootOffset >= dataBuf.length) return {};
-
-  final tableStart = rootOffset;
-  if (tableStart + 4 > dataBuf.length) return {};
-  final soffset = dv.getInt32(tableStart, Endian.little);
-  final vtableStart = tableStart - soffset;
-  if (vtableStart < 0 || vtableStart + 4 > dataBuf.length) return {};
-
-  final vtableSize = dv.getUint16(vtableStart, Endian.little);
-  if (vtableSize < 4 || vtableSize > dataBuf.length) return {};
-  final numFields = (vtableSize - 4) ~/ 2;
-
-  final offsets = <int>[];
-  for (var j = 0; j < numFields; j++) {
-    final offPos = vtableStart + 4 + j * 2;
-    if (offPos + 2 > dataBuf.length) break;
-    offsets.add(dv.getUint16(offPos, Endian.little));
-  }
-
-  final result = <String, dynamic>{};
-  for (final def in fieldDefs) {
-    if (def.index >= offsets.length) continue;
-    final fieldOffset = offsets[def.index];
-    if (fieldOffset == 0) continue;
-
-    final absPos = tableStart + fieldOffset;
-
-    dynamic val;
-    switch (def.type) {
-      case 'string':
-        val = _readFieldString(dataBuf, absPos);
-        break;
-      case 'string_vector':
-        val = _readFieldStringVector(dataBuf, absPos);
-        break;
-      case 'int64':
-        val = _readFieldInt64(dataBuf, absPos);
-        break;
-      case 'int32':
-        val = _readFieldInt32(dataBuf, absPos);
-        break;
-      case 'float64':
-        val = _readFieldFloat64(dataBuf, absPos);
-        break;
-      case 'bool':
-        val = _readFieldBool(dataBuf, absPos);
-        break;
-      default:
-        val = null;
-    }
-    if (val != null) {
-      result[def.name] = val;
+  final relations = <String, Map<int, List<int>>>{};
+  for (final r in records) {
+    final prefix = r.key.length >= 4 ? _u32be(r.key, 0) : 0;
+    final kind = prefix >> 24;
+    if (kind == 0x18 && r.key.length == 8) {
+      final entity = schema[(prefix & 0xffffff) >> 2];
+      if (entity == null) continue;
+      final row = entity.decode(r.value);
+      row.putIfAbsent('id', () => _u32be(r.key, 4));
+      entities[entity.name]!.add(row);
+    } else if (kind == 0x08 && r.key.length == 12 && prefix & 3 == 0) {
+      // Bit 1 marks the backlink copy of the same pair; the forward key
+      // alone carries every edge.
+      final name = relationNames[(prefix & 0xffffff) >> 2];
+      if (name == null) continue;
+      (relations[name] ??= {})
+          .putIfAbsent(_u32be(r.key, 4), () => [])
+          .add(_u32be(r.key, 8));
     }
   }
-  return result;
+
+  return TavoDatabase(entities: entities, relations: relations);
 }
 
-List<TavoField> _extractStringsAndJson(Uint8List buf) {
-  final items = <TavoField>[];
-  final len = buf.length;
-  var i = 0;
+int _u32be(Uint8List b, int o) =>
+    (b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3];
 
-  while (i < len) {
-    final b = buf[i];
-    final isPrintable = b >= 32 || b == 10 || b == 13 || b == 9;
-    if (isPrintable) {
-      final start = i;
-      while (i < len) {
-        final c = buf[i];
-        if (!(c >= 32 || c == 10 || c == 13 || c == 9)) break;
-        i++;
+class _Record {
+  final Uint8List key;
+  final Uint8List value;
+  const _Record(this.key, this.value);
+}
+
+/// Minimal read-only LMDB walker for the 64-bit file layout ObjectBox writes.
+class _Lmdb {
+  static const _magic = 0xBEEFC0DE;
+  static const _pageHeader = 16;
+  static const _pBranch = 0x01;
+  static const _pLeaf = 0x02;
+  static const _fBigData = 0x01;
+  static const _fSubData = 0x02;
+  static const _fDupData = 0x04;
+
+  final Uint8List _buf;
+  final ByteData _bd;
+  int _pageSize = 0;
+  int _root = -1;
+
+  /// Picks the newer of the two meta pages. Each holds the page size
+  /// (`mm_dbs[FREE].md_pad`), the main database root (`mm_dbs[MAIN].md_root`)
+  /// and the id of the transaction that wrote it.
+  _Lmdb(this._buf) : _bd = ByteData.sublistView(_buf) {
+    int? bestTxn;
+    // The page size is only known from a meta page, so the second one is
+    // looked for at every size LMDB can be built with.
+    for (final at in const [0, 4096, 8192, 16384, 32768, 65536]) {
+      final m = at + _pageHeader;
+      if (m + 136 > _buf.length) continue;
+      if (_bd.getUint32(m, Endian.little) != _magic) continue;
+      final psize = _bd.getUint32(m + 24, Endian.little);
+      if (at != 0 && at != psize) continue;
+      final txn = _bd.getUint64(m + 128, Endian.little);
+      if (bestTxn == null || txn > bestTxn) {
+        bestTxn = txn;
+        _pageSize = psize;
+        _root = _bd.getUint64(m + 112, Endian.little);
       }
-      try {
-        final slice = Uint8List.sublistView(buf, start, i);
-        final text = utf8.decode(slice, allowMalformed: true).trim();
-        if (text.length < 2) continue;
-
-        if (text.startsWith('[') || text.startsWith('{')) {
-          try {
-            final parsed = jsonDecode(text);
-            items.add(TavoField('json', parsed));
-            continue;
-          } catch (_) {}
-        }
-        if (!text.contains('�')) {
-          items.add(TavoField('text', text));
-        }
-      } catch (_) {}
-    } else {
-      i++;
+    }
+    if (bestTxn == null || _pageSize == 0) {
+      throw const FormatException('Not an LMDB file (no meta page).');
     }
   }
-  return items;
-}
 
-TavoData parseTavoLmdb(Uint8List buffer) {
-  final dv = ByteData.sublistView(buffer);
-  final bufLen = buffer.length;
-  const pageSize = 4096;
-
-  final categories = <String, Map<int, TavoEntry>>{};
-  for (final name in _typeNames.values) {
-    if (!name.startsWith('_')) categories[name] = <int, TavoEntry>{};
+  List<_Record> records() {
+    final out = <_Record>[];
+    // An empty database has no root page (P_INVALID, all bits set).
+    if (_root <= 1) return out;
+    _walk(_root, out, 0);
+    return out;
   }
 
-  for (var pOffset = 0; pOffset < bufLen; pOffset += pageSize) {
-    if (pOffset + 16 > bufLen) break;
-    final flags = dv.getUint16(pOffset + 10, Endian.little);
-    if ((flags & 0x02) != 0x02) continue;
-
-    final lower = dv.getUint16(pOffset + 12, Endian.little);
-    if (lower < 16 || lower > pageSize || pOffset + lower > bufLen) continue;
-
-    final numNodes = (lower - 16) ~/ 2;
-    if (numNodes <= 0 || numNodes > (pageSize - 16) ~/ 2) continue;
-
-    for (var i = 0; i < numNodes; i++) {
-      final nodePtrOff = pOffset + 16 + (i * 2);
-      if (nodePtrOff + 2 > bufLen) break;
-
-      final nodeOffset = dv.getUint16(nodePtrOff, Endian.little);
-      if (nodeOffset == 0 || nodeOffset < 16 || nodeOffset >= pageSize) {
-        continue;
-      }
-
-      final ptr = pOffset + nodeOffset;
-      if (ptr + 16 > bufLen) continue;
-
-      final mnDsize = dv.getUint32(ptr, Endian.little);
-      final mnFlags = dv.getUint16(ptr + 4, Endian.little);
-      final mnKsize = dv.getUint16(ptr + 6, Endian.little);
-
-      if (mnKsize < 8 || ptr + 8 + mnKsize > bufLen) continue;
-      if (buffer[ptr + 8] != 0x18) continue;
-
-      final typeId = (buffer[ptr + 10] << 8) | buffer[ptr + 11];
-      final typeName = _typeNames[typeId];
-      if (typeName == null || typeName.startsWith('_')) continue;
-
-      // entity_id is big-endian per JS (dv.getUint32(ptr + 12, false))
-      final entityId = dv.getUint32(ptr + 12, Endian.big);
-
-      Uint8List? dataBuffer;
-      final keyOffset = ptr + 8;
-      final dataOffset = keyOffset + mnKsize;
-
-      if (mnFlags == 0) {
-        if (dataOffset + mnDsize <= bufLen) {
-          dataBuffer = Uint8List.sublistView(
-              buffer, dataOffset, dataOffset + mnDsize);
-        }
-      } else if (mnFlags == 1) {
-        if (dataOffset + 4 <= bufLen) {
-          final pgno = dv.getUint32(dataOffset, Endian.little);
-          final ovfOffset = pgno * pageSize;
-          if (ovfOffset + 16 + mnDsize <= bufLen) {
-            dataBuffer = Uint8List.sublistView(
-                buffer, ovfOffset + 16, ovfOffset + 16 + mnDsize);
+  void _walk(int pgno, List<_Record> out, int depth) {
+    if (depth > 64) throw const FormatException('LMDB tree is too deep.');
+    final page = pgno * _pageSize;
+    if (page + _pageHeader > _buf.length) {
+      throw FormatException('LMDB page $pgno is out of range.');
+    }
+    final flags = _bd.getUint16(page + 10, Endian.little);
+    final lower = _bd.getUint16(page + 12, Endian.little);
+    final count = (lower - _pageHeader) >> 1;
+    for (var i = 0; i < count; i++) {
+      final node =
+          page + _bd.getUint16(page + _pageHeader + i * 2, Endian.little);
+      final lo = _bd.getUint16(node, Endian.little);
+      final hi = _bd.getUint16(node + 2, Endian.little);
+      final nodeFlags = _bd.getUint16(node + 4, Endian.little);
+      final ksize = _bd.getUint16(node + 6, Endian.little);
+      if (flags & _pBranch != 0) {
+        _walk(lo | (hi << 16) | (nodeFlags << 32), out, depth + 1);
+      } else if (flags & _pLeaf != 0) {
+        if (nodeFlags & (_fSubData | _fDupData) != 0) continue;
+        final key = Uint8List.sublistView(_buf, node + 8, node + 8 + ksize);
+        final dsize = lo | (hi << 16);
+        final dataAt = node + 8 + ksize;
+        Uint8List value;
+        if (nodeFlags & _fBigData != 0) {
+          final overflow =
+              _bd.getUint64(dataAt, Endian.little) * _pageSize + _pageHeader;
+          if (overflow + dsize > _buf.length) {
+            throw const FormatException('LMDB overflow page is out of range.');
           }
+          value = Uint8List.sublistView(_buf, overflow, overflow + dsize);
+        } else {
+          value = Uint8List.sublistView(_buf, dataAt, dataAt + dsize);
         }
-      }
-
-      if (dataBuffer != null && dataBuffer.isNotEmpty) {
-        final structured = _structuredParsers.containsKey(typeName)
-            ? _parseObjectBoxEntity(dataBuffer, _structuredParsers[typeName]!)
-            : <String, dynamic>{};
-        final fields = _extractStringsAndJson(dataBuffer);
-        final entry = TavoEntry(
-          entityId: entityId,
-          fields: fields,
-          structured: structured,
-        );
-
-        if (typeName == 'message') {
-          entry.timestamp = structured['timestamp'] as int?;
-          entry.characterId = structured['characterId'] as int?;
-          entry.conversationId = structured['conversationId'] as int?;
-        }
-
-        categories[typeName]![entityId] = entry;
+        out.add(_Record(key, value));
       }
     }
   }
+}
 
-  final flatCategories = <String, List<TavoEntry>>{
-    for (final e in categories.entries) e.key: e.value.values.toList(),
+/// Read helpers over one FlatBuffers buffer.
+class _Fb {
+  final Uint8List buf;
+  final ByteData bd;
+  _Fb(this.buf) : bd = ByteData.sublistView(buf);
+
+  int u8(int o) => buf[o];
+  int u16(int o) => bd.getUint16(o, Endian.little);
+  int u32(int o) => bd.getUint32(o, Endian.little);
+
+  int get root => u32(0);
+
+  /// Absolute offsets of the fields present in the table at [table], by
+  /// FlatBuffers field index.
+  Map<int, int> fields(int table) {
+    final vt = table - bd.getInt32(table, Endian.little);
+    final count = (u16(vt) - 4) >> 1;
+    final out = <int, int>{};
+    for (var i = 0; i < count; i++) {
+      final off = u16(vt + 4 + i * 2);
+      if (off != 0) out[i] = table + off;
+    }
+    return out;
+  }
+
+  /// Absolute offset of the field stored at vtable byte offset [slot], or
+  /// null when the table does not carry it.
+  int? slot(int table, int slot) {
+    final vt = table - bd.getInt32(table, Endian.little);
+    if (slot >= u16(vt)) return null;
+    final off = u16(vt + slot);
+    return off == 0 ? null : table + off;
+  }
+
+  int deref(int o) => o + u32(o);
+
+  String string(int o) {
+    final p = deref(o);
+    return utf8.decode(
+      Uint8List.sublistView(buf, p + 4, p + 4 + u32(p)),
+      allowMalformed: true,
+    );
+  }
+
+  /// Start and length of the vector referenced at [o].
+  (int, int) vector(int o) {
+    final p = deref(o);
+    return (p + 4, u32(p));
+  }
+
+  List<int> tables(int o) {
+    final (start, len) = vector(o);
+    return [for (var i = 0; i < len; i++) deref(start + i * 4)];
+  }
+}
+
+class _Property {
+  final String name;
+  final int type;
+  final int slot;
+  const _Property(this.name, this.type, this.slot);
+}
+
+class _Relation {
+  final int id;
+  final String name;
+  const _Relation(this.id, this.name);
+}
+
+class _Entity {
+  final int id;
+  final String name;
+  final List<_Property> properties;
+  final List<_Relation> relations;
+
+  const _Entity(this.id, this.name, this.properties, this.relations);
+
+  /// ObjectBox's internal schema record: entity id at field 1, name at 3,
+  /// properties at 4 and standalone relations at 10. A property keeps its
+  /// name at 6, type at 7 and FlatBuffers vtable offset at 8; a relation its
+  /// id at 0 and name at 4.
+  static _Entity? tryParse(Uint8List value) {
+    try {
+      final fb = _Fb(value);
+      final f = fb.fields(fb.root);
+      if (!f.containsKey(1) || !f.containsKey(3) || !f.containsKey(4)) {
+        return null;
+      }
+      final properties = <_Property>[];
+      for (final t in fb.tables(f[4]!)) {
+        final pf = fb.fields(t);
+        if (!pf.containsKey(6) || !pf.containsKey(7) || !pf.containsKey(8)) {
+          continue;
+        }
+        properties.add(
+          _Property(fb.string(pf[6]!), fb.u16(pf[7]!), fb.u16(pf[8]!)),
+        );
+      }
+      final relations = <_Relation>[];
+      if (f.containsKey(10)) {
+        for (final t in fb.tables(f[10]!)) {
+          final rf = fb.fields(t);
+          if (!rf.containsKey(0) || !rf.containsKey(4)) continue;
+          relations.add(_Relation(fb.u32(rf[0]!), fb.string(rf[4]!)));
+        }
+      }
+      return _Entity(fb.u32(f[1]!), fb.string(f[3]!), properties, relations);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Map<String, dynamic> decode(Uint8List value) {
+    final fb = _Fb(value);
+    final table = fb.root;
+    final row = <String, dynamic>{};
+    for (final p in properties) {
+      final at = fb.slot(table, p.slot);
+      if (at == null) continue;
+      try {
+        row[p.name] = _decodeValue(fb, at, p.type);
+      } catch (_) {
+        // One unreadable property should not cost the whole object.
+      }
+    }
+    return row;
+  }
+}
+
+/// ObjectBox `OBXPropertyType` values.
+dynamic _decodeValue(_Fb fb, int at, int type) {
+  final bd = fb.bd;
+  switch (type) {
+    case 1: // Bool
+      return fb.u8(at) != 0;
+    case 2: // Byte
+      return bd.getInt8(at);
+    case 3: // Short
+      return bd.getInt16(at, Endian.little);
+    case 4: // Char
+      return fb.u16(at);
+    case 5: // Int
+      return bd.getInt32(at, Endian.little);
+    case 6: // Long
+    case 10: // Date (ms)
+    case 11: // Relation (target id)
+    case 12: // DateNano
+      return bd.getInt64(at, Endian.little);
+    case 7: // Float
+      return bd.getFloat32(at, Endian.little);
+    case 8: // Double
+      return bd.getFloat64(at, Endian.little);
+    case 9: // String
+      return fb.string(at);
+    case 13: // Flex
+      final (start, len) = fb.vector(at);
+      if (len == 0) return null;
+      return decodeFlexBuffer(
+        Uint8List.sublistView(fb.buf, start, start + len),
+      );
+    case 23: // ByteVector
+      final (start, len) = fb.vector(at);
+      return Uint8List.fromList(fb.buf.sublist(start, start + len));
+    case 26: // IntVector
+      final (start, len) = fb.vector(at);
+      return [
+        for (var i = 0; i < len; i++) bd.getInt32(start + i * 4, Endian.little),
+      ];
+    case 27: // LongVector
+      final (start, len) = fb.vector(at);
+      return [
+        for (var i = 0; i < len; i++) bd.getInt64(start + i * 8, Endian.little),
+      ];
+    case 28: // FloatVector
+      final (start, len) = fb.vector(at);
+      return [
+        for (var i = 0; i < len; i++)
+          bd.getFloat32(start + i * 4, Endian.little),
+      ];
+    case 29: // DoubleVector
+      final (start, len) = fb.vector(at);
+      return [
+        for (var i = 0; i < len; i++)
+          bd.getFloat64(start + i * 8, Endian.little),
+      ];
+    case 30: // StringVector
+      final (start, len) = fb.vector(at);
+      return [for (var i = 0; i < len; i++) fb.string(start + i * 4)];
+    default:
+      return null;
+  }
+}
+
+/// Decodes a FlexBuffers value — ObjectBox's `Flex` property type, which Tavo
+/// uses for maps such as an endpoint's custom headers.
+dynamic decodeFlexBuffer(Uint8List buf) {
+  if (buf.length < 3) return null;
+  final r = _FlexReader(buf);
+  final rootWidth = buf[buf.length - 1];
+  final packed = buf[buf.length - 2];
+  return r.read(buf.length - 2 - rootWidth, rootWidth, packed);
+}
+
+class _FlexReader {
+  final Uint8List buf;
+  final ByteData bd;
+  _FlexReader(this.buf) : bd = ByteData.sublistView(buf);
+
+  int uint(int o, int w) => switch (w) {
+    1 => buf[o],
+    2 => bd.getUint16(o, Endian.little),
+    4 => bd.getUint32(o, Endian.little),
+    _ => bd.getUint64(o, Endian.little),
   };
 
-  final chats = _groupMessagesIntoChats(flatCategories);
-  return TavoData(categories: flatCategories, chats: chats);
-}
+  int sint(int o, int w) => switch (w) {
+    1 => bd.getInt8(o),
+    2 => bd.getInt16(o, Endian.little),
+    4 => bd.getInt32(o, Endian.little),
+    _ => bd.getInt64(o, Endian.little),
+  };
 
-List<TavoChatBlock> _groupMessagesIntoChats(
-    Map<String, List<TavoEntry>> categories) {
-  final chats = <TavoChatBlock>[];
-  final messages = categories['message'];
-  if (messages == null || messages.isEmpty) return chats;
+  double float(int o, int w) => w == 4
+      ? bd.getFloat32(o, Endian.little)
+      : bd.getFloat64(o, Endian.little);
 
-  final byConv = <int, List<TavoEntry>>{};
-  final orphansByChar = <int, List<TavoEntry>>{};
-
-  for (final msg in messages) {
-    final convId = msg.conversationId ?? msg.structured['conversationId'] as int?;
-    final charId = msg.characterId ?? msg.structured['characterId'] as int?;
-    if (convId != null && convId != 0) {
-      (byConv[convId] ??= []).add(msg);
-    } else if (charId != null && charId != 0) {
-      (orphansByChar[charId] ??= []).add(msg);
+  String key(int o) {
+    var end = o;
+    while (end < buf.length && buf[end] != 0) {
+      end++;
     }
+    return utf8.decode(
+      Uint8List.sublistView(buf, o, end),
+      allowMalformed: true,
+    );
   }
 
-  int sortKey(TavoEntry m) => m.timestamp ?? m.entityId;
-
-  for (final entry in byConv.entries) {
-    final convId = entry.key;
-    final msgs = entry.value;
-    msgs.sort((a, b) => sortKey(a).compareTo(sortKey(b)));
-
-    int? charId;
-    for (final m in msgs) {
-      final cid = m.characterId ?? m.structured['characterId'] as int?;
-      if (cid != null && cid != 0) {
-        charId = cid;
-        break;
-      }
+  /// Reads the value stored at [o] in a slot [parentWidth] bytes wide.
+  dynamic read(int o, int parentWidth, int packed) {
+    final type = packed >> 2;
+    final width = 1 << (packed & 3);
+    switch (type) {
+      case 0:
+        return null;
+      case 1:
+        return sint(o, parentWidth);
+      case 2:
+        return uint(o, parentWidth);
+      case 3:
+        return float(o, parentWidth);
+      case 26:
+        return uint(o, parentWidth) != 0;
     }
-    if (charId == null) {
-      final convList = categories['conversation'];
-      if (convList != null) {
-        final conv = convList.firstWhere(
-          (c) => c.entityId == convId,
-          orElse: () => TavoEntry(entityId: -1, fields: [], structured: {}),
+    final target = o - uint(o, parentWidth);
+    switch (type) {
+      case 4: // Key
+        return key(target);
+      case 5: // String
+        final len = uint(target - width, width);
+        return utf8.decode(
+          Uint8List.sublistView(buf, target, target + len),
+          allowMalformed: true,
         );
-        final convChars = conv.structured['characters'];
-        if (convChars is List) {
-          for (final v in convChars) {
-            final n = v is num ? v.toInt() : int.tryParse(v.toString()) ?? 0;
-            if (n != 0) {
-              charId = n;
-              break;
-            }
-          }
+      case 6:
+        return sint(target, width);
+      case 7:
+        return uint(target, width);
+      case 8:
+        return float(target, width);
+      case 9: // Map
+        final len = uint(target - width, width);
+        final keysAt = target - 3 * width;
+        final keys = keysAt - uint(keysAt, width);
+        final keyWidth = uint(target - 2 * width, width);
+        final map = <String, dynamic>{};
+        for (var i = 0; i < len; i++) {
+          final k = keys + i * keyWidth;
+          map[key(k - uint(k, keyWidth))] = read(
+            target + i * width,
+            width,
+            buf[target + len * width + i],
+          );
         }
-      }
+        return map;
+      case 10: // Vector
+        final len = uint(target - width, width);
+        return [
+          for (var i = 0; i < len; i++)
+            read(target + i * width, width, buf[target + len * width + i]),
+        ];
+      case 11: // VectorInt
+      case 12: // VectorUInt
+      case 13: // VectorFloat
+      case 14: // VectorKey
+      case 15: // VectorString (deprecated)
+      case 36: // VectorBool
+        final len = uint(target - width, width);
+        final elementType = switch (type) {
+          11 => 1,
+          12 => 2,
+          13 => 3,
+          14 => 4,
+          15 => 5,
+          _ => 26,
+        };
+        return [
+          for (var i = 0; i < len; i++)
+            read(target + i * width, width, (elementType << 2) | (packed & 3)),
+        ];
+      case 25: // Blob
+        final len = uint(target - width, width);
+        return Uint8List.fromList(buf.sublist(target, target + len));
+      default:
+        return null;
     }
-    if (charId != null && orphansByChar.containsKey(charId)) {
-      msgs.addAll(orphansByChar[charId]!);
-      orphansByChar.remove(charId);
-      msgs.sort((a, b) => sortKey(a).compareTo(sortKey(b)));
-    }
-
-    chats.add(TavoChatBlock(messages: msgs, characterId: charId));
   }
-
-  for (final entry in orphansByChar.entries) {
-    final msgs = entry.value;
-    msgs.sort((a, b) => sortKey(a).compareTo(sortKey(b)));
-    chats.add(TavoChatBlock(messages: msgs, characterId: entry.key));
-  }
-
-  return chats;
 }

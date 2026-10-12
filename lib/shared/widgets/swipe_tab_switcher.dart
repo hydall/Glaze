@@ -1,4 +1,15 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+
+/// Pointer kinds that may drive a swipe gesture. Mouse is left out: dragging
+/// with the mouse is for selecting text and grabbing handles, not for swiping.
+const Set<PointerDeviceKind> kSwipeDevices = {
+  PointerDeviceKind.touch,
+  PointerDeviceKind.stylus,
+  PointerDeviceKind.invertedStylus,
+  PointerDeviceKind.trackpad,
+  PointerDeviceKind.unknown,
+};
 
 /// Computes the tab index a horizontal swipe should land on, or `null` when the
 /// gesture is too weak or would run off the end of the tab range.
@@ -77,6 +88,7 @@ class _SwipeTabSwitcherState extends State<SwipeTabSwitcher> {
 
     return GestureDetector(
       behavior: widget.behavior,
+      supportedDevices: kSwipeDevices,
       onHorizontalDragStart: (_) => _distance = 0,
       onHorizontalDragUpdate: (d) => _distance += d.delta.dx,
       onHorizontalDragEnd: (details) {

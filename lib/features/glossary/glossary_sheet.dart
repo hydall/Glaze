@@ -9,6 +9,7 @@ import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/sheet_view.dart';
 import '../../shared/widgets/glass_surface.dart';
+import '../../shared/widgets/menu_group.dart';
 import '../settings/app_settings_provider.dart';
 import '../../shared/widgets/glaze_sheet.dart';
 import '../../shared/shell/desktop/sidebar_sheet_provider.dart';
@@ -299,51 +300,38 @@ class _GlossarySheetState extends ConsumerState<GlossarySheet> {
   }
 
   Widget _buildSearchBar(BuildContext context) {
-    return GlassSurface(
-      borderRadius: BorderRadius.circular(14),
-      border: Border.all(color: context.cs.outlineVariant),
-      child: Container(
-        height: 44,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        child: Row(
-          children: [
-            Icon(Icons.search, size: 18, color: context.cs.onSurfaceVariant),
-            const SizedBox(width: 8),
-            Expanded(
-              child: TextField(
-                controller: _searchCtrl,
-                onChanged: (v) => setState(() => _query = v),
-                decoration: InputDecoration(
-                  isCollapsed: true,
-                  border: InputBorder.none,
-                  hintText: _safeTr('search', fallback: 'Search...'),
-                  hintStyle: TextStyle(color: context.cs.onSurfaceVariant),
+    return TextField(
+      controller: _searchCtrl,
+      onChanged: (v) => setState(() => _query = v),
+      style: TextStyle(color: context.cs.onSurface, fontSize: 14),
+      decoration: InputDecoration(
+        hintText: _safeTr('search', fallback: 'Search...'),
+        hintStyle: TextStyle(
+          color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
+        ),
+        prefixIcon: Icon(
+          Icons.search,
+          size: 18,
+          color: context.cs.onSurfaceVariant,
+        ),
+        suffixIcon: _query.trim().isEmpty
+            ? null
+            : IconButton(
+                icon: Icon(
+                  Icons.close,
+                  size: 16,
+                  color: context.cs.onSurfaceVariant,
                 ),
-                style: TextStyle(fontSize: 15, color: context.cs.onSurface),
-              ),
-            ),
-            if (_query.trim().isNotEmpty)
-              GestureDetector(
-                onTap: () {
+                onPressed: () {
                   _searchCtrl.clear();
                   setState(() => _query = '');
                 },
-                child: Container(
-                  width: 22,
-                  height: 22,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.1),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    Icons.close,
-                    size: 14,
-                    color: context.cs.onSurfaceVariant,
-                  ),
-                ),
               ),
-          ],
-        ),
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(vertical: 10),
+        filled: true,
+        fillColor: Colors.white.withValues(alpha: 0.05),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
   }
@@ -379,8 +367,9 @@ class _GlossarySheetState extends ConsumerState<GlossarySheet> {
     List<GlossaryCategory> cats,
     EdgeInsets mediaPad,
   ) {
+    final flat = inSidebarPanel(context);
     return ListView(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 80).add(mediaPad),
+      padding: _listPadding(flat, top: 8).add(mediaPad),
       children: [
         for (final c in cats) ...[
           _CategoryCard(
@@ -391,7 +380,7 @@ class _GlossarySheetState extends ConsumerState<GlossarySheet> {
             countLabel: _safeTr('glossary_terms', fallback: 'terms'),
             onTap: () => _selectCategory(c),
           ),
-          const SizedBox(height: 8),
+          if (!flat) const SizedBox(height: 8),
         ],
       ],
     );
@@ -436,10 +425,11 @@ class _GlossarySheetState extends ConsumerState<GlossarySheet> {
         ),
       );
     }
+    final flat = inSidebarPanel(context);
     return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 80).add(mediaPad),
+      padding: _listPadding(flat, top: 8).add(mediaPad),
       itemCount: results.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 6),
+      separatorBuilder: (_, _) => SizedBox(height: flat ? 0 : 6),
       itemBuilder: (_, i) {
         final (term, catLabel) = results[i];
         final sub = term.alt != null ? '$catLabel · ${term.alt}' : catLabel;
@@ -458,10 +448,11 @@ class _GlossarySheetState extends ConsumerState<GlossarySheet> {
     EdgeInsets mediaPad,
   ) {
     final terms = _cat?.terms ?? const [];
+    final flat = inSidebarPanel(context);
     return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 80).add(mediaPad),
+      padding: _listPadding(flat, top: 12).add(mediaPad),
       itemCount: terms.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 6),
+      separatorBuilder: (_, _) => SizedBox(height: flat ? 0 : 6),
       itemBuilder: (_, i) {
         final t = terms[i];
         return _TermTile(
@@ -472,6 +463,12 @@ class _GlossarySheetState extends ConsumerState<GlossarySheet> {
       },
     );
   }
+
+  /// Padding of a list of cards — or, [flat] in a sidebar panel, of rows that
+  /// run edge to edge from right under the header.
+  EdgeInsets _listPadding(bool flat, {required double top}) => flat
+      ? const EdgeInsets.only(bottom: 80)
+      : EdgeInsets.fromLTRB(12, top, 12, 80);
 
   Widget _buildArticle(
     BuildContext context,
@@ -545,56 +542,54 @@ class _CategoryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GlassSurface(
-      borderRadius: BorderRadius.circular(16),
-      border: Border.all(color: context.cs.outlineVariant),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(
-              children: [
-                Container(
-                  width: 42,
-                  height: 42,
-                  decoration: BoxDecoration(
-                    color: colors.$1,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(icon, color: colors.$2, size: 22),
+    return _GlossaryRowSurface(
+      child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
+        onTap: onTap,
+        child: Padding(
+          padding: inSidebarPanel(context)
+              ? const EdgeInsets.symmetric(horizontal: 16, vertical: 14)
+              : const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: colors.$1,
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        label,
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: context.cs.onSurface,
-                        ),
+                child: Icon(icon, color: colors.$2, size: 22),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: context.cs.onSurface,
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '$count $countLabel',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: context.cs.onSurfaceVariant,
-                        ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '$count $countLabel',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: context.cs.onSurfaceVariant,
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-                Icon(
-                  Icons.chevron_right,
-                  color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
-                ),
-              ],
-            ),
+              ),
+              Icon(
+                Icons.chevron_right,
+                color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
+              ),
+            ],
           ),
         ),
       ),
@@ -611,51 +606,70 @@ class _TermTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GlassSurface(
-      borderRadius: BorderRadius.circular(14),
-      border: Border.all(color: context.cs.outlineVariant),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
+    return _GlossaryRowSurface(
+      radius: 14,
+      child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
+        onTap: onTap,
+        child: Padding(
+          padding: EdgeInsets.symmetric(
+            horizontal: inSidebarPanel(context) ? 16 : 14,
+            vertical: 12,
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: context.cs.onSurface,
+                      ),
+                    ),
+                    if (sub != null) ...[
+                      const SizedBox(height: 2),
                       Text(
-                        name,
+                        sub!,
                         style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: context.cs.onSurface,
+                          fontSize: 12,
+                          color: context.cs.onSurfaceVariant,
                         ),
                       ),
-                      if (sub != null) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          sub!,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: context.cs.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
                     ],
-                  ),
+                  ],
                 ),
-                Icon(
-                  Icons.chevron_right,
-                  color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
-                ),
-              ],
-            ),
+              ),
+              Icon(
+                Icons.chevron_right,
+                color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
+              ),
+            ],
           ),
         ),
       ),
+    );
+  }
+}
+
+/// The card a category or a term sits on — or, in a sidebar panel, a plain
+/// row of the panel: edge to edge, no rounding, only the rule under it.
+class _GlossaryRowSurface extends StatelessWidget {
+  final double radius;
+  final Widget child;
+
+  const _GlossaryRowSurface({this.radius = 16, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    if (inSidebarPanel(context)) return FlatGroupSurface(child: child);
+    return GlassSurface(
+      borderRadius: BorderRadius.circular(radius),
+      border: Border.all(color: context.cs.outlineVariant),
+      child: Material(color: Colors.transparent, child: child),
     );
   }
 }
@@ -788,7 +802,7 @@ class _LinkChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 2),
@@ -807,7 +821,7 @@ class _LinkChip extends StatelessWidget {
             height: 1.5,
           ),
         ),
-      ),
+      )),
     );
   }
 }

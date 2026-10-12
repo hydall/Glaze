@@ -36,7 +36,7 @@ class BlockLlmRunner {
   final BlockTransportPicker transportPicker;
 
   /// Fallback deadline when the connection carries no `firstChunkTimeoutMs`.
-  static const int fallbackTimeoutMs = 60000;
+  static const int fallbackTimeoutMs = 120000;
 
   /// Generates the block's raw text.
   ///
@@ -107,6 +107,11 @@ class BlockLlmRunner {
     });
 
     final completer = Completer<String>();
+    // On a timeout the transport reports the cancel through `onError`, and the
+    // run throws its own TimeoutException without awaiting this future. The
+    // error it carries is already accounted for; left alone, the zone reports
+    // it as uncaught.
+    completer.future.ignore();
     final buffer = StringBuffer();
 
     try {

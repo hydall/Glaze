@@ -63,7 +63,7 @@ class InspectorPlaque extends StatelessWidget {
       // paints every ripple behind it.
       child: Material(
         type: MaterialType.transparency,
-        child: onTap == null ? body : InkWell(onTap: onTap, child: body),
+        child: onTap == null ? body : InkWell(mouseCursor: SystemMouseCursors.click, onTap: onTap, child: body),
       ),
     );
   }

@@ -11,6 +11,7 @@ import '../../../core/models/chat_message.dart';
 import '../../../core/models/character.dart';
 import '../../../core/models/persona.dart';
 import '../../../core/llm/prompt/main_model_context_snapshot.dart';
+import '../../../core/state/active_regex_provider.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/utils/error_format.dart';
 import '../../image_gen/services/image_tag_markup.dart';
@@ -20,6 +21,7 @@ import '../models/extension_preset.dart';
 import '../models/info_block.dart';
 import '../models/extension_context_policy.dart';
 import 'blocks/block_llm_runner.dart';
+import 'blocks/context_item_builder.dart';
 import 'block_content_extractor.dart';
 import 'block_context_builder.dart';
 import 'ext_blocks_prompt_injection.dart';
@@ -82,6 +84,8 @@ class InfoBlockService {
     required String? persona,
     String? personaPrompt,
     required String? previousOutput,
+    Map<String, String> sessionVars = const {},
+    Map<String, String> globalVars = const {},
     ExtensionContextPolicy contextPolicy = const ExtensionContextPolicy(),
     MainModelContextSnapshot? mainModelContextSnapshot,
     Persona? personaModel,
@@ -108,16 +112,19 @@ class InfoBlockService {
     // block whose prompt already fixes the shape — has its whole reply stored,
     // which is what the image and JS types used to get from a type check.
     final resolvedTemplate = _resolveTemplate(blockConfig);
+    final personaDescription = personaModel?.prompt ?? personaPrompt;
     final systemContent = _buildSystemMessage(
       blockConfig: blockConfig,
       template: resolvedTemplate,
       character: character,
       persona: persona,
+      personaDescription: personaDescription,
     );
     final supplementalContent = _buildSupplementalMessage(
       blockConfig: blockConfig,
       character: character,
       persona: persona,
+      personaDescription: personaDescription,
       previousOutput: previousOutput,
       previousBlocks: previousBlocks,
     );
@@ -146,33 +153,70 @@ class InfoBlockService {
               .map((injection) => injection.toPromptMessage())
               .toList()
         : const <PromptMessage>[];
-    final assembly = const ExtensionContextAssembler().assemble(
-      policy: contextPolicy,
-      blockConfig: blockConfig,
-      chatMessages: contextMessages,
-      anchorMessageId: messageId,
-      character: character,
-      persona:
-          personaModel ??
-          (persona == null
-              ? null
-              : Persona(id: '', name: persona, prompt: personaPrompt)),
-      systemInstruction: systemContent,
-      supplementalInstruction: supplementalContent,
-      legacyUserContent: contextPolicy.legacyPromptSemantics
-          ? InfoBlockService.buildLegacyUserMessage(
-              blockConfig: blockConfig,
-              character: character,
-              persona: persona,
-              personaPrompt: personaModel?.prompt ?? personaPrompt,
-              contextMessages: legacyContextMessages,
-              previousOutput: previousOutput,
-              previousBlocks: previousBlocks,
-            )
-          : null,
-      runtimePromptMessages: runtimePromptMessages,
-      mainContextSnapshot: mainModelContextSnapshot,
-    );
+    final resolvedPersona =
+        personaModel ??
+        (persona == null
+            ? null
+            : Persona(id: '', name: persona, prompt: personaPrompt));
+
+    // An explicit context list is the original extension's own way of saying
+    // what to send; when the block carries one it is authoritative and the
+    // policy/snapshot assembly is skipped, exactly as in the original.
+    final hasContextItems = blockConfig.context.any((item) => !item.disabled);
+    var assembly = hasContextItems
+        ? await _assembleFromContextItems(
+            sessionId: sessionId,
+            messageId: messageId,
+            messages: messages,
+            blockConfig: blockConfig,
+            character: character,
+            persona: resolvedPersona,
+            sessionVars: sessionVars,
+            globalVars: globalVars,
+            systemInstruction: systemContent,
+            supplementalInstruction: supplementalContent,
+          )
+        : const ExtensionContextAssembler().assemble(
+            policy: contextPolicy,
+            blockConfig: blockConfig,
+            chatMessages: contextMessages,
+            anchorMessageId: messageId,
+            character: character,
+            persona: resolvedPersona,
+            systemInstruction: systemContent,
+            supplementalInstruction: supplementalContent,
+            legacyUserContent: contextPolicy.legacyPromptSemantics
+                ? InfoBlockService.buildLegacyUserMessage(
+                    blockConfig: blockConfig,
+                    character: character,
+                    persona: persona,
+                    personaPrompt: personaModel?.prompt ?? personaPrompt,
+                    contextMessages: legacyContextMessages,
+                    previousOutput: previousOutput,
+                    previousBlocks: previousBlocks,
+                  )
+                : null,
+            runtimePromptMessages: runtimePromptMessages,
+            mainContextSnapshot: mainModelContextSnapshot,
+          );
+
+    // A block whose context list produced nothing at all (every item empty)
+    // still owes the model its instructions, so fall back rather than send an
+    // empty request.
+    if (hasContextItems && assembly.messages.isEmpty) {
+      assembly = const ExtensionContextAssembler().assemble(
+        policy: contextPolicy,
+        blockConfig: blockConfig,
+        chatMessages: contextMessages,
+        anchorMessageId: messageId,
+        character: character,
+        persona: resolvedPersona,
+        systemInstruction: systemContent,
+        supplementalInstruction: supplementalContent,
+        runtimePromptMessages: runtimePromptMessages,
+        mainContextSnapshot: mainModelContextSnapshot,
+      );
+    }
     if (assembly.reconstructed && contextPolicy.useMainModelContext) {
       debugPrint(
         '[InfoBlockService] main context snapshot unavailable; '
@@ -273,8 +317,16 @@ class InfoBlockService {
   /// arguments. Used to expand `{{char}}` / `{{user}}` / `{{description}}`
   /// / `{{personality}}` / `{{scenario}}` in the LLM-bound prompt and in
   /// the post-LLM content (via [MacroExpander.expand]).
-  MacroContext _macroContext({Character? character, String? persona}) {
-    return MacroContext(character: character, persona: persona);
+  MacroContext _macroContext({
+    Character? character,
+    String? persona,
+    String? personaDescription,
+  }) {
+    return MacroContext(
+      character: character,
+      persona: persona,
+      personaDescription: personaDescription,
+    );
   }
 
   /// Loads up to [BlockConfig.previousBlocksCount] of this block's own prior
@@ -348,6 +400,66 @@ class InfoBlockService {
         .toList();
   }
 
+  /// Assembles the request from the block's explicit context list, the way the
+  /// original extension's Context Builder does.
+  ///
+  /// The block's own instructions stay the leading system message, the context
+  /// items become the middle messages (merged by role), and the supplemental
+  /// message keeps Glaze's per-block extras (context prompt, chained output).
+  Future<ExtensionContextAssembly> _assembleFromContextItems({
+    required String sessionId,
+    required String messageId,
+    required List<ChatMessage> messages,
+    required BlockConfig blockConfig,
+    required Character? character,
+    required Persona? persona,
+    required Map<String, String> sessionVars,
+    required Map<String, String> globalVars,
+    required String systemInstruction,
+    required String supplementalInstruction,
+  }) async {
+    final blocksByMessageId = await _loadBlocksByMessageId(sessionId);
+    final promptRegexes = await _ref.read(activeRegexesProvider.future);
+    final itemMessages = buildContextItemMessages(
+      blockConfig: blockConfig,
+      messages: messages,
+      anchorMessageId: messageId,
+      character: character,
+      persona: persona,
+      sessionVars: sessionVars,
+      globalVars: globalVars,
+      promptRegexes: promptRegexes,
+      blocksByMessageId: blocksByMessageId,
+    );
+    if (itemMessages.isEmpty) {
+      return const ExtensionContextAssembly(messages: [], reconstructed: true);
+    }
+    final assembled = <Map<String, dynamic>>[
+      if (systemInstruction.trim().isNotEmpty)
+        {'role': 'system', 'content': systemInstruction},
+      ...itemMessages,
+      if (supplementalInstruction.trim().isNotEmpty)
+        {'role': 'user', 'content': supplementalInstruction},
+    ];
+    return ExtensionContextAssembly(messages: assembled, reconstructed: true);
+  }
+
+  /// Every stored block of the session, keyed by the message that owns it —
+  /// the lookup the `previous_block` and `last_messages_by_block` items need.
+  Future<Map<String, List<InfoBlock>>> _loadBlocksByMessageId(
+    String sessionId,
+  ) async {
+    final blocks = await _ref
+        .read(infoBlocksRepoProvider)
+        .getBySessionId(sessionId);
+    final byMessage = <String, List<InfoBlock>>{};
+    for (final block in blocks) {
+      if (block.content.trim().isEmpty) continue;
+      (byMessage[block.messageId] ??= <InfoBlock>[]).add(block);
+    }
+    return byMessage;
+  }
+
   /// Returns the template sent to the LLM. Empty [blockConfig.template] means
   /// no XML wrapper — the full model reply is stored as-is.
   String _resolveTemplate(BlockConfig blockConfig) {
@@ -368,10 +480,15 @@ class InfoBlockService {
     required String template,
     Character? character,
     String? persona,
+    String? personaDescription,
   }) {
     final instructions = expand(
       blockConfig.prompt.trim(),
-      _macroContext(character: character, persona: persona),
+      _macroContext(
+        character: character,
+        persona: persona,
+        personaDescription: personaDescription,
+      ),
     );
 
     // No template means the block's prompt is the whole instruction. An image
@@ -422,6 +539,7 @@ class InfoBlockService {
     required BlockConfig blockConfig,
     required Character? character,
     required String? persona,
+    String? personaDescription,
     required String? previousOutput,
     List<InfoBlock> previousBlocks = const [],
   }) {
@@ -430,7 +548,11 @@ class InfoBlockService {
     if (blockConfig.contextSystemPrompt.isNotEmpty) {
       final sysPrompt = expand(
         blockConfig.contextSystemPrompt,
-        _macroContext(character: character, persona: persona),
+        _macroContext(
+          character: character,
+          persona: persona,
+          personaDescription: personaDescription,
+        ),
       );
       buffer.writeln(sysPrompt);
       buffer.writeln();
@@ -477,7 +599,11 @@ class InfoBlockService {
         ..writeln(
           expand(
             blockConfig.contextSystemPrompt,
-            MacroContext(character: character, persona: persona),
+            MacroContext(
+              character: character,
+              persona: persona,
+              personaDescription: personaPrompt,
+            ),
           ),
         )
         ..writeln();

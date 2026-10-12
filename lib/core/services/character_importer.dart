@@ -307,6 +307,7 @@ class CharacterImporter {
       description: data['description'] as String?,
       personality: data['personality'] as String?,
       scenario: data['scenario'] as String?,
+      appearance: _extractAppearance(data),
       firstMes: data['first_mes'] as String?,
       mesExample: data['mes_example'] as String?,
       systemPrompt: data['system_prompt'] as String?,
@@ -333,6 +334,18 @@ class CharacterImporter {
 
   Map<String, dynamic> _extractExtensions(Map<String, dynamic> data) {
     return extractExtensionsJson(data);
+  }
+
+  /// Appearance blurb. SillyTavern V2 has no dedicated field for it, so Glaze
+  /// stores it under `extensions.appearance`; a top-level key is accepted as
+  /// well for cards written by other tools.
+  String? _extractAppearance(Map<String, dynamic> data) {
+    final top = data['appearance'];
+    if (top is String && top.trim().isNotEmpty) return top;
+    final ext = data['extensions'] is Map ? data['extensions'] as Map : null;
+    final nested = ext?['appearance'];
+    if (nested is String && nested.trim().isNotEmpty) return nested;
+    return null;
   }
 
   String _extractDepthPrompt(Map<String, dynamic> data) {

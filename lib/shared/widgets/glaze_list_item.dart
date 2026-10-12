@@ -112,6 +112,7 @@ class GlazeListItem extends StatelessWidget {
         color: Colors.transparent,
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
+          mouseCursor: SystemMouseCursors.click,
           onTap: onTap,
           onLongPress: onLongPress,
           borderRadius: BorderRadius.circular(12),
@@ -189,6 +190,7 @@ class GlazeListMenuButton extends StatelessWidget {
         color: Colors.transparent,
         borderRadius: BorderRadius.circular(8),
         child: InkWell(
+          mouseCursor: SystemMouseCursors.click,
           onTap: onTap,
           borderRadius: BorderRadius.circular(8),
           child: SizedBox(

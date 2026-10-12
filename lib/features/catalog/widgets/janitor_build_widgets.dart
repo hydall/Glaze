@@ -62,6 +62,7 @@ class _ContextSourceTileState extends State<ContextSourceTile> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         InkWell(
+          mouseCursor: SystemMouseCursors.click,
           onTap: empty
               ? null
               : () {
@@ -170,6 +171,7 @@ class _DisclosureRowState extends State<DisclosureRow> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         InkWell(
+          mouseCursor: SystemMouseCursors.click,
           onTap: text.isEmpty
               ? null
               : () {

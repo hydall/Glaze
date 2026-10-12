@@ -15,6 +15,7 @@ import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_error_block.dart';
 import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
+import '../../../shared/widgets/glaze_text_field.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../character_list/character_import_persistence_provider.dart';
 import '../../settings/app_settings_provider.dart';
@@ -63,27 +64,10 @@ class _ImportUrlDialogState extends ConsumerState<ImportUrlDialog> {
               style: TextStyle(color: context.cs.onSurfaceVariant, fontSize: 14),
             ),
           ),
-          TextField(
+          GlazeTextField(
             controller: _controller,
             autofocus: true,
-            style: TextStyle(fontSize: 14, color: context.cs.onSurface),
-            decoration: InputDecoration(
-              hintText: 'https://...',
-              hintStyle: TextStyle(
-                color: context.cs.onSurfaceVariant,
-                fontSize: 14,
-              ),
-              filled: true,
-              fillColor: context.cs.surface,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 14,
-                vertical: 12,
-              ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
-              ),
-            ),
+            hint: 'https://...',
             enabled: !_loading,
             onSubmitted: (_) => _startExtraction(),
           ),

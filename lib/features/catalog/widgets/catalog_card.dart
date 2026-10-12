@@ -29,6 +29,7 @@ class _CatalogCardState extends ConsumerState<CatalogCard> {
     final dy = _hovered && !_pressed ? -4.0 : 0.0;
 
     return MouseRegion(
+      cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
       child: GestureDetector(

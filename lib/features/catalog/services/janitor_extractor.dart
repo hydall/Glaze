@@ -11,6 +11,7 @@ import '../catalog_models.dart';
 import '../catalog_provider.dart';
 import 'catalog_error_labels.dart';
 import 'janitor_field_diff.dart';
+import 'janitor_lore_budget.dart';
 import 'janitor_lorebook_rebuilder.dart';
 import 'greeting_normalizer.dart';
 import 'janitor_provider.dart';
@@ -189,17 +190,26 @@ class JanitorExtractor {
         trigger.extra,
       ].map((s) => s.trim()).where((s) => s.isNotEmpty).join('\n\n');
 
+      // JanitorAI drops whatever lore does not fit its per-prompt cap; the
+      // budget lets the capture notice and re-fire the trigger in pieces.
+      onPhase?.call('loading tokenizer');
+      final loreBudget = await JanitorLoreBudget.load();
+
       final capture = await proxy.captureGenerateAlpha(
         characterId: characterId,
         triggerText: triggerText,
         includeCard: trigger.card,
+        loreBudget: loreBudget,
         onPhase: onPhase,
       );
       final payload = capture.payload;
 
       onPhase?.call('separating');
       final rawCard = extractCard(payload);
-      final sep = separate(payload, rawCard, publicContents);
+      final separatedText = mergeLorebookTexts([
+        for (final p in [payload, ...capture.extraPasses])
+          separate(p, rawCard, publicContents).lorebookText,
+      ]);
 
       final name = extractCharName(payload).isNotEmpty
           ? extractCharName(payload)
@@ -210,13 +220,14 @@ class JanitorExtractor {
       // imported card and its lorebook stay portable. `{{user}}` is normally
       // already intact (the capture binds a persona named `{{user}}`);
       // [bakedUserName] is set only when that persona could not be created.
+      // The same pass drops JanitorAI's "created by … on janitorai.com" credit.
       final charNames = <String>{
         name,
         (meta?['name'] ?? '').toString(),
         (meta?['chat_name'] ?? '').toString(),
       }.where((n) => n.trim().isNotEmpty).toList();
       String macro(String text) => restoreMacros(
-            text,
+            stripJanitorCredit(text),
             charNames: charNames,
             userName: capture.bakedUserName,
           );
@@ -235,9 +246,13 @@ class JanitorExtractor {
           : PromptFields.fromPayload(probePayload, restore: macro);
       final cleanFields =
           definitionPublic ? PromptFields.fromMeta(meta) : null;
-      final separated = macro(sep.lorebookText);
+      final separated = macro(separatedText);
       final scan = scanInjectedFields(
         capture: PromptFields.fromPayload(payload, restore: macro),
+        extraCaptures: [
+          for (final p in capture.extraPasses)
+            PromptFields.fromPayload(p, restore: macro),
+        ],
         probe: probeFields,
         clean: cleanFields,
         publicContents: publicContents,

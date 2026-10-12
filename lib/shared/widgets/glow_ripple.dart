@@ -156,13 +156,14 @@ class _GlowInkWellState extends State<GlowInkWell>
       ),
     );
 
-    return GestureDetector(
+    final clickable = widget.onTap != null || widget.onLongPress != null;
+    return MouseRegion(cursor: clickable ? SystemMouseCursors.click : MouseCursor.defer, child: GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTapDown: _handleTapDown,
       onTap: widget.onTap,
       onLongPress: widget.onLongPress,
       child: inner,
-    );
+    ));
   }
 }
 

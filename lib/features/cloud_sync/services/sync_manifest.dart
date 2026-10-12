@@ -610,15 +610,24 @@ class SyncManifestBuilder implements SyncManifestProvider {
     int now,
     SyncManifest? cloudManifest,
   ) async {
+    final prefs = await SharedPreferences.getInstance();
     final singletons = <String, dynamic>{};
 
     final lorebooks = await _lorebookRepo.getAll()
       ..sort((a, b) => a.id.compareTo(b.id));
     singletons['lorebooks'] = lorebooks.map((l) => l.toJson()).toList();
 
+    // Keys count towards the hash only when they are synced. Otherwise a
+    // changed key, or turning the switch on, left the hash as it was and the
+    // push skipped the presets, so the keys never reached the cloud.
+    final includeApiKeys = SyncSerialization.includeApiKeys(prefs);
     final apiConfigs = await _apiRepo.getAll();
     singletons['api_presets'] = apiConfigs
-        .map((a) => a.copyWith(apiKey: '', embeddingApiKey: '').toJson())
+        .map(
+          (a) => includeApiKeys
+              ? a.toJson()
+              : a.copyWith(apiKey: '', embeddingApiKey: '').toJson(),
+        )
         .toList();
 
     final presets = await _presetRepo.getAll();
@@ -725,7 +734,6 @@ class SyncManifestBuilder implements SyncManifestProvider {
       );
     }
 
-    final prefs = await SharedPreferences.getInstance();
     final pipelineSettings = prefs.getString(
       SyncSerialization.pipelineSettingsKey,
     );
@@ -749,6 +757,7 @@ class SyncManifestBuilder implements SyncManifestProvider {
         globalRegexScripts: globalRegexScripts,
         studioRegexScripts: studioRegexScripts,
         appSettings: appSettings,
+        chatLayout: SyncSerialization.readChatLayout(prefs),
       );
       final hash = SyncSerialization.computeSyncHash(payload);
       final key = entryKey(type, type);

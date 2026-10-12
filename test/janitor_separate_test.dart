@@ -161,4 +161,32 @@ void main() {
       expect(restoreMacros(text, charNames: ['', '  ']), text);
     });
   });
+
+  group('stripJanitorCredit', () {
+    test('drops the credit on its own line', () {
+      final out = stripJanitorCredit(
+        'Aria is a knight.\n\ncreated by Some Author 2026© on janitorai.com\n\nShe is loyal.',
+      );
+      expect(out, 'Aria is a knight.\n\nShe is loyal.');
+    });
+
+    test('drops a decorated trailing credit', () {
+      final out = stripJanitorCredit(
+        'Aria is a knight.\n*(Created by xX_author_Xx 2026© on janitor.ai.com)*',
+      );
+      expect(out, 'Aria is a knight.');
+    });
+
+    test('drops an inline credit and keeps the rest of the line', () {
+      final out = stripJanitorCredit(
+        'Aria is a knight. created by Bob (c) 2025 on https://janitorai.com/ She is loyal.',
+      );
+      expect(out, 'Aria is a knight. She is loyal.');
+    });
+
+    test('leaves text without a credit untouched', () {
+      const text = 'Aria was created by the gods on Mount Olympus.\n\n\nEnd.';
+      expect(stripJanitorCredit(text), text);
+    });
+  });
 }

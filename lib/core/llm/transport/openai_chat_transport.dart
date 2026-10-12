@@ -283,6 +283,9 @@ class OpenAiChatTransport implements ChatTransport {
     var fullReasoning = '';
     var doneReceived = false;
     String? lastRawJsonPayload;
+    // Kept apart from the last payload: providers that report usage send it
+    // in a trailing chunk with no choices, after the one carrying the reason.
+    String? finishReason;
 
     Future<void> finishAfterCancel([Object? error, StackTrace? stack]) async {
       await subscription?.cancel();
@@ -333,6 +336,7 @@ class OpenAiChatTransport implements ChatTransport {
                       fullText: fullText,
                       fullReasoning: fullReasoning,
                       fallbackRawJsonPayload: lastRawJsonPayload,
+                      finishReason: finishReason,
                     ),
                   );
                   doneReceived = true;
@@ -347,6 +351,10 @@ class OpenAiChatTransport implements ChatTransport {
                 final json = jsonDecode(data) as Map<String, dynamic>;
                 final choice = json['choices']?[0];
                 final delta = choice?['delta'];
+                final reason = choice?['finish_reason'];
+                if (reason is String && reason.isNotEmpty) {
+                  finishReason = reason;
+                }
 
                 final contentDelta = delta?['content'] as String? ?? '';
                 // When omitReasoning is set, skip native reasoning_content so
@@ -409,6 +417,7 @@ class OpenAiChatTransport implements ChatTransport {
           fullText: fullText,
           fullReasoning: fullReasoning,
           fallbackRawJsonPayload: lastRawJsonPayload,
+          finishReason: finishReason,
         ),
       );
       return;
@@ -542,6 +551,7 @@ class OpenAiChatTransport implements ChatTransport {
     required String fullText,
     required String fullReasoning,
     String? fallbackRawJsonPayload,
+    String? finishReason,
   }) {
     if (fullText.isEmpty && fullReasoning.isEmpty) {
       return fallbackRawJsonPayload;
@@ -567,12 +577,17 @@ class OpenAiChatTransport implements ChatTransport {
             if (entry.key == 0) {
               choice.remove('delta');
               choice['message'] = message;
+              if (finishReason != null) choice['finish_reason'] = finishReason;
             }
             return choice;
           }).toList();
         } else {
           newChoices = [
-            {'index': 0, 'message': message, 'finish_reason': 'stop'},
+            {
+              'index': 0,
+              'message': message,
+              'finish_reason': ?finishReason,
+            },
           ];
         }
 
@@ -587,7 +602,7 @@ class OpenAiChatTransport implements ChatTransport {
     return jsonEncode({
       'object': 'chat.completion',
       'choices': [
-        {'index': 0, 'message': message, 'finish_reason': 'stop'},
+        {'index': 0, 'message': message, 'finish_reason': ?finishReason},
       ],
     });
   }

@@ -15,6 +15,7 @@ import '../../settings/widgets/connection_status.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_error_block.dart';
+import '../../../shared/widgets/glaze_switch.dart';
 import '../../../shared/widgets/help_tip.dart';
 import '../../../shared/widgets/menu_group.dart';
 import '../../../shared/widgets/sheet_view.dart';
@@ -170,20 +171,30 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
     final s = _settings;
 
     return SheetView(
+      // The title gives way to the switch, not the other way round: in a
+      // narrow sidebar panel the switch used to be pushed off the edge.
       titleWidget: Row(
         children: [
-          Text(
-            'section_image_gen'.tr(),
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+          Flexible(
+            child: Text(
+              'section_image_gen'.tr(),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+            ),
           ),
           const HelpTip(term: 'image-gen'),
-          const Spacer(),
-          Switch(
+        ],
+      ),
+      actions: [
+        SheetViewAction(
+          icon: GlazeSwitch(
             value: s.enabled,
             onChanged: (v) => _update(s.copyWith(enabled: v)),
           ),
-        ],
-      ),
+          onPressed: () => _update(s.copyWith(enabled: !s.enabled)),
+        ),
+      ],
       fitContent: false,
       scrollController: _scrollController,
       enableHeaderBlur: false,
@@ -274,6 +285,12 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
                 ),
               ],
             ),
+            ...buildCharacterAppearanceSection(
+              context: context,
+              settings: s,
+              maxReferences: providerMaxReferences(s),
+              onUpdate: _update,
+            ),
             if (providerMaxReferences(s) == 0)
               Container(
                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -358,6 +375,7 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
   /// the preset pill in the API settings screen.
   Widget _buildPresetSelector(ImageGenApiType selected) {
     return InkWell(
+      mouseCursor: SystemMouseCursors.click,
       onTap: _openApiTypeSelector,
       borderRadius: BorderRadius.circular(16),
       child: Container(

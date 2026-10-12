@@ -91,13 +91,13 @@ class AuxLlmClient {
   /// Resolves the post-cleaner timeout from settings.
   ///
   /// Uses the user-configured `postCleanerTimeoutMs` when set (> 0); otherwise
-  /// falls back to an explicit 60000 ms default. The old silent fallback to
+  /// falls back to an explicit 120000 ms default. The old silent fallback to
   /// `memoryPipeline.auxTimeoutMs` (a hidden field with no UI) was removed so
   /// the actual timeout is always visible and predictable.
   int resolveCleanerTimeout(PipelineSettings settings) {
     return settings.cleaner.postCleanerTimeoutMs > 0
         ? settings.cleaner.postCleanerTimeoutMs
-        : 60000;
+        : 120000;
   }
 
   /// Resolves the ledger LLM timeout from settings.
@@ -108,7 +108,7 @@ class AuxLlmClient {
   /// 2. `postCleanerTimeoutMs` (> 0) — the ledger shares the cleaner slot's
   ///    model/endpoint, so the user's cleaner-timeout setting also protects the
   ///    ledger call. The ledger has no dedicated UI timeout field.
-  /// 3. Explicit 60000 ms default (same as the cleaner).
+  /// 3. Explicit 120000 ms default (same as the cleaner).
   ///
   /// The old silent fallback to `memoryPipeline.auxTimeoutMs` (a hidden field
   /// with no UI) was removed so the timeout the user sets for the cleaner also
@@ -123,7 +123,7 @@ class AuxLlmClient {
     }
     final cleanerTimeout = settings.cleaner.postCleanerTimeoutMs;
     if (cleanerTimeout > 0) return cleanerTimeout;
-    return 60000;
+    return 120000;
   }
 
   /// Makes a single non-streaming LLM call and returns the raw text response.

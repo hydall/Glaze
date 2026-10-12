@@ -8,6 +8,7 @@ import 'glaze_action_button.dart';
 import 'glaze_bottom_sheet.dart';
 import 'glaze_list_item.dart';
 import 'list_controls.dart';
+import 'menu_group.dart';
 
 /// The one place a list of prompt presets is rendered, whether the reader is
 /// managing them (Memory Books / Summary settings) or just picking one.
@@ -466,60 +467,25 @@ class _PromptEditorState extends State<_PromptEditor> {
             ),
           ),
           const SizedBox(height: 16),
-          TextField(
-            key: const Key('memory_prompt_name_field'),
+          MenuFieldItem(
+            fieldKey: const Key('memory_prompt_name_field'),
+            label: 'label_name'.tr(),
             controller: _labelCtrl,
             onChanged: (_) => setState(() => _labelError = null),
-            style: TextStyle(color: context.cs.onSurface, fontSize: 14),
-            decoration: InputDecoration(
-              labelText: 'label_name'.tr(),
-              labelStyle: TextStyle(
-                color: context.cs.onSurfaceVariant,
-                fontSize: 12,
-              ),
-              errorText: _labelError,
-              filled: true,
-              fillColor: Colors.white.withValues(alpha: 0.05),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 10,
-              ),
-            ),
+            helper: _labelError,
+            helperIsError: true,
           ),
           const SizedBox(height: 12),
-          TextField(
-            key: const Key('memory_prompt_body_field'),
+          MenuFieldItem(
+            fieldKey: const Key('memory_prompt_body_field'),
+            label: 'memory_prompt_body'.tr(),
+            placeholder: 'memory_prompt_body_hint'.tr(),
             controller: _promptCtrl,
             onChanged: (_) => setState(() => _promptError = null),
             maxLines: 10,
             keyboardType: TextInputType.multiline,
-            textInputAction: TextInputAction.newline,
-            style: TextStyle(color: context.cs.onSurface, fontSize: 13),
-            decoration: InputDecoration(
-              labelText: 'memory_prompt_body'.tr(),
-              hintText: 'memory_prompt_body_hint'.tr(),
-              errorText: _promptError,
-              labelStyle: TextStyle(
-                color: context.cs.onSurfaceVariant,
-                fontSize: 12,
-              ),
-              hintStyle: TextStyle(
-                color: context.cs.onSurfaceVariant.withValues(alpha: 0.4),
-              ),
-              alignLabelWithHint: true,
-              filled: true,
-              fillColor: Colors.white.withValues(alpha: 0.05),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 10,
-              ),
-            ),
+            helper: _promptError,
+            helperIsError: true,
           ),
           const SizedBox(height: 16),
           Row(

@@ -39,6 +39,7 @@ class _CharacterFolderCardState extends State<CharacterFolderCard> {
     final shadowColor = Colors.black.withValues(alpha: _hovered ? 0.3 : 0.1);
 
     return MouseRegion(
+      cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
       child: GestureDetector(
@@ -230,7 +231,7 @@ class NewFolderCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       child: Container(
         decoration: BoxDecoration(
@@ -264,7 +265,7 @@ class NewFolderCard extends StatelessWidget {
           ),
         ),
       ),
-    );
+    ));
   }
 }
 

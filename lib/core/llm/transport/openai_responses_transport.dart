@@ -214,7 +214,10 @@ class OpenAiResponsesTransport implements ChatTransport {
               reasoning += delta;
               onUpdate?.call('', delta);
             }
-          } else if (type == 'response.completed') {
+          } else if (type == 'response.completed' ||
+              type == 'response.incomplete') {
+            // `incomplete` is how a reply cut off by `max_output_tokens`
+            // ends; its body carries the reason the chat warns about.
             final completed = event['response'];
             rawResponseJson = jsonEncode(completed ?? event);
           }

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../../core/llm/tokenizer.dart';
 import '../../../core/models/preset.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_switch.dart';
 
 IconData presetBlockRoleIcon(String role) {
   return switch (role) {
@@ -107,8 +108,16 @@ class PresetBlockRow extends StatelessWidget {
                 child: Row(
                   children: [
                     Expanded(
-                      child: Text(
-                        block.name,
+                      child: Text.rich(
+                        TextSpan(
+                          text: block.name,
+                          children: [
+                            if (block.content.contains('{{setvar::'))
+                              _macroBadge('set', context.cs.primary),
+                            if (block.content.contains('{{getvar::'))
+                              _macroBadge('get', _kGetvarGreen),
+                          ],
+                        ),
                         style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w500,
@@ -152,6 +161,7 @@ class PresetBlockRow extends StatelessWidget {
                 child: Material(
                   color: Colors.transparent,
                   child: InkWell(
+                    mouseCursor: SystemMouseCursors.click,
                     onTap: onEdit,
                     child: Icon(
                       Icons.edit_outlined,
@@ -172,10 +182,9 @@ class PresetBlockRow extends StatelessWidget {
                       : Transform.scale(
                           scale: 0.8,
                           alignment: Alignment.centerRight,
-                          child: Switch(
+                          child: GlazeSwitch(
                             value: block.enabled,
                             onChanged: onToggle,
-                            activeThumbColor: context.cs.primary,
                           ),
                         )),
             ),
@@ -211,6 +220,33 @@ class PresetBlockRow extends StatelessWidget {
       child: Tooltip(message: 'studio_move_block'.tr(), child: child),
     );
   }
+}
+
+const Color _kGetvarGreen = Color(0xFF4CAF50);
+
+/// Inline SET/GET chip after the block name, flagging blocks that write or
+/// read session variables via `{{setvar::}}` / `{{getvar::}}`.
+InlineSpan _macroBadge(String label, Color color) {
+  return WidgetSpan(
+    alignment: PlaceholderAlignment.middle,
+    child: Container(
+      margin: const EdgeInsets.only(left: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        label.toUpperCase(),
+        style: const TextStyle(
+          fontSize: 9,
+          fontWeight: FontWeight.w700,
+          color: Colors.white,
+          height: 1,
+        ),
+      ),
+    ),
+  );
 }
 
 Widget _systemBadge(BuildContext context) {

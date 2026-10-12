@@ -328,13 +328,13 @@ class AgentRunner {
   ///    per-agent override set at Studio build time.
   /// 2. [PipelineSettings.studioAgent.studioTimeoutMs] (>0, minimum 1000ms)
   ///    — global user setting from the Post-Building menu.
-  /// 3. hardcoded fallback: final generator 90s, trackers 60s.
+  /// 3. hardcoded fallback: 120s for every lane.
   int effectiveTimeoutMs(
     StudioAgent agent,
     bool isFinalResponse, [
     StudioTurnConfigSnapshot? turnConfig,
   ]) {
-    final fallback = isFinalResponse ? 90000 : 60000;
+    final fallback = 120000;
     final pipeline = turnConfig?.pipelineSettings ?? _readPipelineSettings();
     final slot = isFinalResponse
         ? pipeline.studioAgent.studioFinalTimeoutMs

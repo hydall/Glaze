@@ -239,6 +239,8 @@ class ChatMessageMapper {
       if (m.time != null && m.time!.isNotEmpty) 'gameTime': m.time,
       if (m.tokens != null) 'tokens': m.tokens,
       'isError': m.isError,
+      if (!m.isError && !m.isTyping && _hitOutputLimit(m))
+        'outputLimitHit': true,
       if (m.isTyping) 'isTyping': true,
       if (m.reasoning != null && m.reasoning!.isNotEmpty)
         'reasoning': m.reasoning,
@@ -271,6 +273,13 @@ class ChatMessageMapper {
       if (ctx.continuationTargetId != null && ctx.continuationTargetId == m.id)
         'isContinuing': true,
     };
+  }
+
+  /// The visible variation ran into the output-token cap. Stored per swipe, so
+  /// switching variations shows or hides the warning with them.
+  static bool _hitOutputLimit(ChatMessage m) {
+    if (m.swipeId < 0 || m.swipeId >= m.swipesMeta.length) return false;
+    return m.swipesMeta[m.swipeId]['outputLimitHit'] == true;
   }
 
   static List<Map<String, String>> _triggeredToJson(

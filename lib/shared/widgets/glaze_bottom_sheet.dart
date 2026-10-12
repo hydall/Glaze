@@ -4,11 +4,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'desktop_popup.dart';
 import '../shell/desktop/desktop_layout_provider.dart';
+import '../shell/desktop/sidebar_sheet_provider.dart';
 import '../../core/platform/haptics.dart';
 import '../theme/app_colors.dart';
 import '../../features/settings/app_settings_provider.dart';
 import 'glass_surface.dart';
+import 'glaze_action_button.dart';
 import 'glaze_sheet.dart';
+import 'glaze_text_field.dart';
+import 'menu_group.dart';
 import 'top_edge_blur.dart';
 
 // ── Data models ───────────────────────────────────────────────────────────────
@@ -156,6 +160,9 @@ class BottomSheetBigInfo {
   final IconData icon;
   final String description;
   final String? buttonText;
+
+  /// Glyph in front of [buttonText]; null keeps the default check mark.
+  final IconData? buttonIcon;
   final bool buttonDisabled;
   final VoidCallback? onButtonTap;
 
@@ -163,6 +170,7 @@ class BottomSheetBigInfo {
     required this.icon,
     required this.description,
     this.buttonText,
+    this.buttonIcon,
     this.buttonDisabled = false,
     this.onButtonTap,
   });
@@ -369,7 +377,8 @@ class GlazeBottomSheetFrame extends ConsumerWidget {
               : const BorderRadius.vertical(top: Radius.circular(24)),
           border: inWindow
               ? Border.all(color: context.cs.outlineVariant)
-              : Border(top: BorderSide(color: context.cs.outlineVariant)),
+              : glazeSheetBorder(context),
+          borderOnTop: true,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -626,7 +635,9 @@ class _GlazeBottomSheetContentState
               : const BorderRadius.vertical(top: Radius.circular(24)),
           border: inWindow
               ? Border.all(color: context.cs.outlineVariant)
-              : Border(top: BorderSide(color: context.cs.outlineVariant)),
+              : glazeSheetBorder(context),
+          // Over the content: the header's blur strip would paint it away.
+          borderOnTop: true,
           child: Stack(
             children: [
               TopEdgeBlur(
@@ -922,7 +933,7 @@ class _SheetSearchField extends StatelessWidget {
             duration: const Duration(milliseconds: 120),
             child: IgnorePointer(
               ignoring: !hasQuery,
-              child: GestureDetector(
+              child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
                 onTap: onClear,
                 behavior: HitTestBehavior.opaque,
                 child: Icon(
@@ -930,7 +941,7 @@ class _SheetSearchField extends StatelessWidget {
                   size: 18,
                   color: context.cs.onSurfaceVariant,
                 ),
-              ),
+              )),
             ),
           ),
           suffixIconConstraints: const BoxConstraints(
@@ -1172,7 +1183,7 @@ class _ItemRowState extends State<_ItemRow> {
   @override
   Widget build(BuildContext context) {
     final item = widget.item;
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTapDown: (_) => setState(() => _pressed = true),
       onTapCancel: () => setState(() => _pressed = false),
       onTap: () {
@@ -1217,7 +1228,7 @@ class _ItemRowState extends State<_ItemRow> {
                 mainAxisSize: MainAxisSize.min,
                 children: item.actions
                     .map(
-                      (a) => GestureDetector(
+                      (a) => MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
                         onTap: a.onTap,
                         child: Padding(
                           padding: const EdgeInsets.all(8),
@@ -1227,14 +1238,14 @@ class _ItemRowState extends State<_ItemRow> {
                             color: a.color ?? context.cs.onSurfaceVariant,
                           ),
                         ),
-                      ),
+                      )),
                     )
                     .toList(),
               ),
           ],
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -1329,6 +1340,7 @@ class _ItemCardRowState extends State<_ItemCardRow> {
       color: Colors.white.withValues(alpha: 0.06),
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
         onTap: () {
           Haptics.selectionClick();
           item.onTap();
@@ -1371,7 +1383,7 @@ class _ItemCardRowState extends State<_ItemCardRow> {
                   mainAxisSize: MainAxisSize.min,
                   children: item.actions
                       .map(
-                        (a) => GestureDetector(
+                        (a) => MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
                           onTap: a.onTap,
                           child: Padding(
                             padding: const EdgeInsets.all(8),
@@ -1381,7 +1393,7 @@ class _ItemCardRowState extends State<_ItemCardRow> {
                               color: a.color ?? context.cs.onSurfaceVariant,
                             ),
                           ),
-                        ),
+                        )),
                       )
                       .toList(),
                 ),
@@ -1461,11 +1473,15 @@ class GlazeSessionList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // In a sidebar panel the sessions are rows of the panel, edge to edge.
+    final flat = inSidebarPanel(context);
     return _SheetReveal(
       visible: _anyVisible(visible),
       animate: animateFilter,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        padding: flat
+            ? const EdgeInsets.only(bottom: 16)
+            : const EdgeInsets.fromLTRB(16, 0, 16, 16),
         child: Column(
           children: [
             for (int i = 0; i < items.length; i++)
@@ -1473,7 +1489,7 @@ class GlazeSessionList extends StatelessWidget {
                 visible: visible == null || visible![i],
                 animate: animateFilter,
                 child: Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
+                  padding: EdgeInsets.only(bottom: flat ? 0 : 10),
                   child: GlazeSessionRow(item: items[i]),
                 ),
               ),
@@ -1491,135 +1507,49 @@ class GlazeSessionRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final content = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: _buildContent(context),
+    );
+    // A row of a sidebar panel: no card, only the rule under it, and the open
+    // session marked by a bar down its edge as well as its dot.
+    if (inSidebarPanel(context)) {
+      return FlatGroupSurface(
+        color: item.isActive
+            ? context.cs.primary.withValues(alpha: 0.08)
+            : null,
+        accent: item.isActive ? context.cs.primary : null,
+        child: InkWell(mouseCursor: SystemMouseCursors.click, onTap: item.onTap, child: content),
+      );
+    }
     return Material(
       color: Colors.white.withValues(alpha: 0.06),
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
         onTap: item.onTap,
         borderRadius: BorderRadius.circular(16),
-        child: Container(
+        child: DecoratedBox(
           decoration: BoxDecoration(
             border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
             borderRadius: BorderRadius.circular(16),
           ),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Row(
+          child: content,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildContent(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        if (item.unread) ...[
-                          Container(
-                            width: 8,
-                            height: 8,
-                            decoration: BoxDecoration(
-                              color: context.cs.primary,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                        ],
-                        Flexible(
-                          child: Text(
-                            item.title,
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: item.unread
-                                  ? FontWeight.w700
-                                  : FontWeight.w600,
-                              color: context.cs.onSurface,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.chat_bubble_outline,
-                              size: 13,
-                              color: context.cs.onSurfaceVariant,
-                            ),
-                            const SizedBox(width: 3),
-                            Text(
-                              '${item.count}',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: context.cs.onSurfaceVariant,
-                              ),
-                            ),
-                            if (item.time.isNotEmpty) ...[
-                              Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 4,
-                                ),
-                                child: Text(
-                                  '·',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.bold,
-                                    color: context.cs.onSurfaceVariant
-                                        .withValues(alpha: 0.5),
-                                  ),
-                                ),
-                              ),
-                              Text(
-                                item.time,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: context.cs.onSurfaceVariant,
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 3),
-                    if (item.generating)
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.edit,
-                            size: 13,
-                            color: context.cs.onSurfaceVariant.withValues(
-                              alpha: 0.7,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            'model_typing'.tr(),
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontStyle: FontStyle.italic,
-                              color: context.cs.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                      )
-                    else
-                      Text(
-                        item.preview,
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: item.unread
-                              ? context.cs.onSurface
-                              : context.cs.onSurfaceVariant,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
               Row(
-                mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (item.isActive) ...[
+                  if (item.unread) ...[
                     Container(
                       width: 8,
                       height: 8,
@@ -1628,25 +1558,127 @@ class GlazeSessionRow extends StatelessWidget {
                         shape: BoxShape.circle,
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 6),
                   ],
-                  GestureDetector(
-                    onTap: item.onMore,
-                    child: Padding(
-                      padding: const EdgeInsets.all(4),
-                      child: Icon(
-                        Icons.more_vert,
-                        size: 20,
+                  Flexible(
+                    child: Text(
+                      item.title,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: item.unread
+                            ? FontWeight.w700
+                            : FontWeight.w600,
+                        color: context.cs.onSurface,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.chat_bubble_outline,
+                        size: 13,
                         color: context.cs.onSurfaceVariant,
                       ),
-                    ),
+                      const SizedBox(width: 3),
+                      Text(
+                        '${item.count}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: context.cs.onSurfaceVariant,
+                        ),
+                      ),
+                      if (item.time.isNotEmpty) ...[
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: Text(
+                            '·',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: context.cs.onSurfaceVariant.withValues(
+                                alpha: 0.5,
+                              ),
+                            ),
+                          ),
+                        ),
+                        Text(
+                          item.time,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: context.cs.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ],
               ),
+              const SizedBox(height: 3),
+              if (item.generating)
+                Row(
+                  children: [
+                    Icon(
+                      Icons.edit,
+                      size: 13,
+                      color: context.cs.onSurfaceVariant.withValues(alpha: 0.7),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'model_typing'.tr(),
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontStyle: FontStyle.italic,
+                        color: context.cs.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                )
+              else
+                Text(
+                  item.preview,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: item.unread
+                        ? context.cs.onSurface
+                        : context.cs.onSurfaceVariant,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
             ],
           ),
         ),
-      ),
+        const SizedBox(width: 12),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (item.isActive) ...[
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: context.cs.primary,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 8),
+            ],
+            MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
+              onTap: item.onMore,
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Icon(
+                  Icons.more_vert,
+                  size: 20,
+                  color: context.cs.onSurfaceVariant,
+                ),
+              ),
+            )),
+          ],
+        ),
+      ],
     );
   }
 }
@@ -1735,7 +1767,7 @@ class _CardRowState extends State<_CardRow> {
     final item = widget.item;
     final hasImage = item.imageUrl != null;
 
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTapDown: (_) => setState(() => _pressed = true),
       onTapUp: (_) {
         setState(() => _pressed = false);
@@ -1844,7 +1876,7 @@ class _CardRowState extends State<_CardRow> {
           ],
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -1945,7 +1977,7 @@ class _CardActions extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: actions
           .map(
-            (a) => GestureDetector(
+            (a) => MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
               onTap: a.onTap,
               child: Container(
                 margin: const EdgeInsets.only(bottom: 4),
@@ -1964,7 +1996,7 @@ class _CardActions extends StatelessWidget {
                       : (a.color ?? context.cs.onSurfaceVariant),
                 ),
               ),
-            ),
+            )),
           )
           .toList(),
     );
@@ -1999,12 +2031,12 @@ class _BigInfo extends StatelessWidget {
           ),
           if (info.buttonText != null) ...[
             const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: info.buttonDisabled ? null : info.onButtonTap,
-                child: Text(info.buttonText!),
-              ),
+            GlazeActionButton(
+              icon: info.buttonIcon ?? Icons.check_rounded,
+              label: info.buttonText!,
+              tone: GlazeActionTone.primary,
+              expand: true,
+              onTap: info.buttonDisabled ? null : info.onButtonTap,
             ),
           ],
         ],
@@ -2040,23 +2072,19 @@ class _InputSection extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       child: Column(
         children: [
-          TextField(
+          GlazeTextField(
             controller: controller,
             focusNode: focusNode,
-            style: TextStyle(color: context.cs.onSurface),
-            decoration: InputDecoration(
-              hintText: input.placeholder,
-              hintStyle: TextStyle(color: context.cs.onSurfaceVariant),
-            ),
+            hint: input.placeholder,
             onSubmitted: (_) => _confirm(context),
           ),
           const SizedBox(height: 10),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: () => _confirm(context),
-              child: Text(input.confirmLabel),
-            ),
+          GlazeActionButton(
+            icon: Icons.check_rounded,
+            label: input.confirmLabel,
+            tone: GlazeActionTone.primary,
+            expand: true,
+            onTap: () => _confirm(context),
           ),
         ],
       ),

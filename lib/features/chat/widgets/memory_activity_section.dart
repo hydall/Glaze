@@ -224,6 +224,7 @@ class _MemoryActivitySectionState extends State<MemoryActivitySection> {
           Material(
             color: Colors.transparent,
             child: InkWell(
+              mouseCursor: SystemMouseCursors.click,
               onTap: () {
                 setState(() {
                   if (expanded) {

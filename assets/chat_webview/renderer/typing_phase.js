@@ -1,7 +1,7 @@
 /* Typing-bubble phase label.
  *
  * The label under the pencil names the stage the generation is actually in —
- * "Building prompt…", "Waiting for the model…", "Generating…" — pushed from
+ * "Building prompt…", "Model is generating the reply…", "Generating…" — pushed from
  * Flutter through `bridge.setGenerationPhase()` as the run advances. The text
  * itself is localized on the Dart side; this module only owns how a new label
  * replaces the old one on screen.

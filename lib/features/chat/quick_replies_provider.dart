@@ -87,12 +87,12 @@ const List<QuickReply> _defaults = [
 ];
 
 class QuickRepliesNotifier extends AsyncNotifier<List<QuickReply>> {
-  static const _storageKey = 'quick_replies_list_v1';
+  static const storageKey = 'quick_replies_list_v1';
 
   @override
   Future<List<QuickReply>> build() async {
     final prefs = await ref.read(sharedPreferencesProvider.future);
-    final raw = prefs.getString(_storageKey);
+    final raw = prefs.getString(storageKey);
     if (raw == null || raw.isEmpty) {
       return List<QuickReply>.from(_defaults);
     }
@@ -121,7 +121,7 @@ class QuickRepliesNotifier extends AsyncNotifier<List<QuickReply>> {
   Future<void> _persist(List<QuickReply> items) async {
     final prefs = await ref.read(sharedPreferencesProvider.future);
     await prefs.setString(
-      _storageKey,
+      storageKey,
       jsonEncode(items.map((e) => e.toJson()).toList()),
     );
   }

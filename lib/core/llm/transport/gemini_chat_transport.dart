@@ -273,6 +273,7 @@ class GeminiChatTransport implements ChatTransport {
     var fullReasoning = '';
     Map<String, dynamic>? lastUsage;
     String? lastRawPayload;
+    String? finishReason;
     var anyDelta = false;
 
     final completer = Completer<void>();
@@ -309,6 +310,8 @@ class GeminiChatTransport implements ChatTransport {
             final json = jsonDecode(payload) as Map<String, dynamic>;
             final candidates = json['candidates'];
             if (candidates is List && candidates.isNotEmpty) {
+              final reason = candidates[0]['finishReason'];
+              if (reason is String) finishReason = reason;
               final content = candidates[0]['content'];
               final parts = content is Map ? content['parts'] : null;
               if (parts is List) {
@@ -371,6 +374,7 @@ class GeminiChatTransport implements ChatTransport {
         fullText: fullText,
         fullReasoning: fullReasoning,
         usage: lastUsage,
+        finishReason: finishReason,
         lastPayload: lastRawPayload,
       ),
     );
@@ -498,6 +502,7 @@ class GeminiChatTransport implements ChatTransport {
     required String fullText,
     required String fullReasoning,
     Map<String, dynamic>? usage,
+    String? finishReason,
     String? lastPayload,
   }) {
     final parts = <Map<String, dynamic>>[
@@ -508,7 +513,7 @@ class GeminiChatTransport implements ChatTransport {
       'candidates': [
         {
           'content': {'role': 'model', 'parts': parts},
-          'finishReason': 'STOP',
+          'finishReason': ?finishReason,
         },
       ],
       'usageMetadata': ?usage,

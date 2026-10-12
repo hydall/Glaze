@@ -166,6 +166,29 @@ void main() {
       expect(restored.references, isEmpty);
     });
 
+    test('round-trips the character-appearance source', () {
+      const settings = ImageGenSettings(
+        sendCharAvatar: true,
+        charAppearanceSource: CharacterAppearanceSource.description,
+      );
+      final restored = ImageGenSettingsCodec.fromJson(
+        ImageGenSettingsCodec.toJson(settings),
+      );
+
+      expect(
+        restored.charAppearanceSource,
+        CharacterAppearanceSource.description,
+      );
+      expect(restored, settings);
+    });
+
+    test('an old blob defaults the appearance source to the image', () {
+      expect(
+        ImageGenSettingsCodec.fromJson({}).charAppearanceSource,
+        CharacterAppearanceSource.image,
+      );
+    });
+
     test('round-trips the concurrent-generation toggle', () {
       const settings = ImageGenSettings(concurrentGeneration: true);
       final restored = ImageGenSettingsCodec.fromJson(

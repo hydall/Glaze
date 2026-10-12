@@ -28,11 +28,12 @@ import '../studio/studio_injection_points.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/folder_section.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../shared/widgets/glaze_fab.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_spinner.dart';
+import '../../shared/widgets/glaze_text_field.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/glass_surface.dart';
-import '../../shared/widgets/list_controls.dart';
 import '../../shared/widgets/menu_group.dart';
 import '../../shared/widgets/sheet_view.dart';
 
@@ -700,8 +701,8 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
       ),
       floatingActionButton: isEdit || desktop
           ? null
-          : GlazeActionChip(
-              icon: Icons.add,
+          : GlazeFab(
+              label: 'action_add_script'.tr(),
               tooltip: 'action_add_script'.tr(),
               onTap: () => _showAddMenu(context),
             ),
@@ -737,12 +738,19 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
       key: const ValueKey('regex-list'),
       builder: (innerContext) => ListView(
         key: const PageStorageKey('regex_list'),
-        padding: const EdgeInsets.fromLTRB(0, 20, 0, 16).add(
-          EdgeInsets.only(
-            top: MediaQuery.paddingOf(innerContext).top,
-            bottom: MediaQuery.paddingOf(innerContext).bottom,
-          ),
-        ),
+        // A sidebar panel starts its groups right under the header.
+        padding:
+            EdgeInsets.fromLTRB(
+              0,
+              inSidebarPanel(innerContext) ? 0 : 20,
+              0,
+              16,
+            ).add(
+              EdgeInsets.only(
+                top: MediaQuery.paddingOf(innerContext).top,
+                bottom: MediaQuery.paddingOf(innerContext).bottom,
+              ),
+            ),
         children: [
           if (studioEnabled)
             _buildAgentGroup(innerContext, studioRegexes)
@@ -861,7 +869,7 @@ class _PresetChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: GestureDetector(
+      child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
         onTap: onTap,
         child: Container(
           padding: const EdgeInsets.fromLTRB(10, 6, 12, 6),
@@ -903,7 +911,7 @@ class _PresetChip extends StatelessWidget {
             ],
           ),
         ),
-      ),
+      )),
     );
   }
 }
@@ -1187,12 +1195,13 @@ class _RegexEditViewState extends State<_RegexEditView> {
     final s = widget.script;
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(0, 20, 0, 80).add(
-        EdgeInsets.only(
-          top: MediaQuery.paddingOf(context).top,
-          bottom: MediaQuery.paddingOf(context).bottom,
-        ),
-      ),
+      padding: EdgeInsets.fromLTRB(0, inSidebarPanel(context) ? 0 : 20, 0, 80)
+          .add(
+            EdgeInsets.only(
+              top: MediaQuery.paddingOf(context).top,
+              bottom: MediaQuery.paddingOf(context).bottom,
+            ),
+          ),
       children: [
         if (widget.studioStages != null)
           MenuGroup(
@@ -1383,36 +1392,7 @@ class _CheckboxOption extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: () => onChanged(!value),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 22,
-              height: 22,
-              child: Checkbox(
-                value: value,
-                onChanged: (v) => onChanged(v ?? false),
-                activeColor: context.cs.primary,
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                visualDensity: VisualDensity.compact,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w500,
-                color: context.cs.onSurface,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    return MenuSwitchItem(label: label, value: value, onChanged: onChanged);
   }
 }
 
@@ -1446,21 +1426,12 @@ class _DepthInput extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 4),
-            TextField(
+            GlazeTextField(
               controller: controller,
               keyboardType: TextInputType.number,
-              style: TextStyle(fontSize: 15, color: context.cs.onSurface),
               onChanged: (v) => onChanged(int.tryParse(v)),
-              decoration: InputDecoration(
-                isDense: true,
-                border: InputBorder.none,
-                contentPadding: EdgeInsets.zero,
-                hintText: 'regex_unlimited_placeholder'.tr(),
-                hintStyle: TextStyle(
-                  color: context.cs.onSurfaceVariant.withValues(alpha: 0.4),
-                  fontSize: 15,
-                ),
-              ),
+              hint: 'regex_unlimited_placeholder'.tr(),
+              isDense: true,
             ),
           ],
         ),

@@ -115,7 +115,7 @@ class _FooterError extends StatelessWidget {
             style: const TextStyle(color: _kText50, fontSize: 13),
           ),
           const SizedBox(height: 12),
-          GestureDetector(
+          MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
             onTap: onRetry,
             child: Container(
               padding:
@@ -132,7 +132,7 @@ class _FooterError extends StatelessWidget {
                 ),
               ),
             ),
-          ),
+          )),
         ],
       ),
     );

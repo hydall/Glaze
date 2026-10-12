@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 
 import '../../core/platform/haptics.dart';
 import '../theme/app_colors.dart';
+import '../shell/desktop/sidebar_sheet_provider.dart';
 import '../shell/shell_header_provider.dart';
 import 'glass_surface.dart';
 import 'glow_ripple.dart';
@@ -11,6 +12,13 @@ import 'help_tip.dart';
 import 'glaze_switch.dart';
 
 enum MenuGroupHeaderVariant { standard, accentCaps }
+
+/// Whether menu groups at [context] drop their cards and run flat: inside a
+/// host that already frames them — a desktop window ([DetachedShellHost]'s
+/// chrome) or a right-sidebar panel. A card there reads as a card inside a
+/// card, so groups render as plain runs of rows with a rule under each.
+bool menuGroupsFlat(BuildContext context) =>
+    DetachedShellHost.drawsChrome(context) || inSidebarPanel(context);
 
 // ── Collapsible section ────────────────────────────────────────────────────────
 
@@ -32,11 +40,16 @@ class MenuCollapsibleSection extends StatefulWidget {
   final String? helpTerm;
   final List<Widget> children;
 
+  /// Opens the section on mount — for one whose rows are already in use, so
+  /// an active setting is never hidden behind the disclosure.
+  final bool initiallyExpanded;
+
   const MenuCollapsibleSection({
     super.key,
     required this.label,
     this.helpTerm,
     required this.children,
+    this.initiallyExpanded = false,
   });
 
   @override
@@ -44,16 +57,17 @@ class MenuCollapsibleSection extends StatefulWidget {
 }
 
 class _MenuCollapsibleSectionState extends State<MenuCollapsibleSection> {
-  bool _expanded = false;
+  late bool _expanded = widget.initiallyExpanded;
 
   @override
   Widget build(BuildContext context) {
-    final flat = DetachedShellHost.drawsChrome(context);
+    final flat = menuGroupsFlat(context);
     final radius = flat ? BorderRadius.zero : BorderRadius.circular(20);
     final content = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         InkWell(
+          mouseCursor: SystemMouseCursors.click,
           // Only the top corners round while the section is open: the card
           // continues past the header into its own content.
           borderRadius: _expanded
@@ -77,7 +91,7 @@ class _MenuCollapsibleSectionState extends State<MenuCollapsibleSection> {
       ],
     );
 
-    if (flat) return _FlatGroupSurface(child: content);
+    if (flat) return FlatGroupSurface(child: content);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       child: GlassSurface(
@@ -149,23 +163,47 @@ class _MenuCollapsibleSectionState extends State<MenuCollapsibleSection> {
 }
 
 /// A group's surface inside a host that draws its own frame (see
-/// [DetachedShellHost.drawsChrome]): the rule under it and the tap glow, but
-/// no glass. The window's own fill is already under it, and a second tint
-/// over that marked out a lighter band exactly as tall as the groups, with
-/// the bare window showing below the last one.
-class _FlatGroupSurface extends StatelessWidget {
+/// [menuGroupsFlat]): the rule under it and the tap glow, but no glass. The
+/// host's own fill is already under it, and a second tint over that marked
+/// out a lighter band exactly as tall as the groups, with the bare host
+/// showing below the last one.
+///
+/// Also the surface of a list card laid out flat in a sidebar panel, so a row
+/// of the list and a group of a settings screen read the same there.
+class FlatGroupSurface extends StatelessWidget {
   final Widget child;
 
-  const _FlatGroupSurface({required this.child});
+  /// Fill under the content, for a row that marks itself out (the active
+  /// one, say). Transparent by default.
+  final Color? color;
+
+  /// Bar down the leading edge, drawn over the content — what a card's accent
+  /// border says when there is no card. It stays visible over a row that
+  /// paints its own background (a cover image), where [color] would not.
+  final Color? accent;
+
+  const FlatGroupSurface({
+    super.key,
+    required this.child,
+    this.color,
+    this.accent,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final accent = this.accent;
     return GlowRippleOverlay(
       glowColor: context.cs.primary,
-      child: DecoratedBox(
+      child: Container(
         decoration: BoxDecoration(
+          color: color,
           border: Border(bottom: BorderSide(color: context.cs.outlineVariant)),
         ),
+        foregroundDecoration: accent == null || accent.a == 0
+            ? null
+            : BoxDecoration(
+                border: Border(left: BorderSide(color: accent, width: 3)),
+              ),
         // What a [GlassSurface] gives its content: a Material the rows' ink
         // lands on (the window's own sits under the screen's fill), and glass
         // inside that blurs on its own rather than joining the list's group.
@@ -274,12 +312,12 @@ class MenuGroup extends StatelessWidget {
       );
     }
 
-    // Inside the floating window the host already draws a frame, so a group
-    // that keeps its own card reads as a card inside a card. There it runs
-    // edge to edge — no side gutters, no left/right edges, no rounding — and
-    // only the rule under it separates one group from the next.
-    if (DetachedShellHost.drawsChrome(context)) {
-      return _FlatGroupSurface(child: body);
+    // Inside a window or a sidebar panel the host already draws a frame, so a
+    // group that keeps its own card reads as a card inside a card. There it
+    // runs edge to edge — no side gutters, no left/right edges, no rounding —
+    // and only the rule under it separates one group from the next.
+    if (menuGroupsFlat(context)) {
+      return FlatGroupSurface(child: body);
     }
 
     return Padding(
@@ -425,7 +463,7 @@ class _MenuItemState extends State<MenuItem> {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTapDown: (_) => setState(() => _pressed = true),
       onTapUp: (_) {
         setState(() => _pressed = false);
@@ -490,7 +528,7 @@ class _MenuItemState extends State<MenuItem> {
           ],
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -505,6 +543,9 @@ class MenuSwitchItem extends StatelessWidget {
   final bool value;
   final ValueChanged<bool> onChanged;
 
+  /// See [GlazeSwitch.activeColor].
+  final Color? activeColor;
+
   const MenuSwitchItem({
     super.key,
     required this.label,
@@ -514,6 +555,7 @@ class MenuSwitchItem extends StatelessWidget {
     this.onIncludedChanged,
     required this.value,
     required this.onChanged,
+    this.activeColor,
   }) : assert(
          (included == null) == (onIncludedChanged == null),
          'included and onIncludedChanged must be provided together',
@@ -522,6 +564,7 @@ class MenuSwitchItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return InkWell(
+      mouseCursor: SystemMouseCursors.click,
       onTap: included ?? true
           ? () {
               Haptics.selectionClick();
@@ -577,6 +620,7 @@ class MenuSwitchItem extends StatelessWidget {
             GlazeSwitch(
               value: value,
               onChanged: included ?? true ? onChanged : null,
+              activeColor: activeColor,
             ),
           ],
         ),
@@ -626,6 +670,10 @@ class MenuFieldItem extends StatelessWidget {
   /// ignored then.
   final bool expands;
 
+  /// Key placed on the internal [TextField] rather than on the item itself, so
+  /// a caller (or a widget test) can address the editable widget directly.
+  final Key? fieldKey;
+
   const MenuFieldItem({
     super.key,
     required this.label,
@@ -645,6 +693,7 @@ class MenuFieldItem extends StatelessWidget {
     this.helperIsError = false,
     this.onReset,
     this.expands = false,
+    this.fieldKey,
   });
 
   @override
@@ -660,6 +709,7 @@ class MenuFieldItem extends StatelessWidget {
         ],
         Expanded(
           child: TextField(
+            key: fieldKey,
             controller: controller,
             obscureText: obscure,
             keyboardType: keyboardType,
@@ -1089,7 +1139,7 @@ class _MenuScriptItemState extends State<MenuScriptItem> {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTapDown: (_) => setState(() => _pressed = true),
       onTapUp: (_) {
         setState(() => _pressed = false);
@@ -1155,7 +1205,7 @@ class _MenuScriptItemState extends State<MenuScriptItem> {
               ),
               materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
-            GestureDetector(
+            MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: () {
                 Haptics.selectionClick();
@@ -1169,11 +1219,11 @@ class _MenuScriptItemState extends State<MenuScriptItem> {
                   color: context.cs.onSurfaceVariant.withValues(alpha: 0.45),
                 ),
               ),
-            ),
+            )),
           ],
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -1214,6 +1264,7 @@ class MenuSelectorItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final isIncluded = included ?? true;
     return InkWell(
+      mouseCursor: SystemMouseCursors.click,
       onTap: isIncluded
           ? () {
               Haptics.selectionClick();
@@ -1329,6 +1380,7 @@ class _ResetToDefaultButton extends StatelessWidget {
     return Tooltip(
       message: 'reset_to_default'.tr(),
       child: InkResponse(
+        mouseCursor: SystemMouseCursors.click,
         onTap: () {
           Haptics.selectionClick();
           onPressed();

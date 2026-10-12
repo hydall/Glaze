@@ -10,12 +10,10 @@ import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_scaffold.dart';
 import '../../core/services/generation_notification_service.dart';
 import '../../core/services/onboarding_service.dart';
+import '../guides/guide_service.dart';
 import '../backup/backup_screen.dart';
-import '../../core/state/active_selection_provider.dart';
-import '../settings/api_list_provider.dart';
-import '../settings/api_settings_screen.dart';
+import '../glossary/glossary_sheet.dart';
 import '../settings/widgets/chat_layout_picker.dart';
-import '../personas/persona_list_screen.dart';
 import '../../shared/shell/desktop/desktop_layout_provider.dart';
 import 'onboarding_models.dart';
 import 'widgets/onboarding_desktop_wizard.dart';
@@ -26,14 +24,28 @@ import '../../shared/widgets/glaze_sheet.dart';
 // Flow widget
 // ---------------------------------------------------------------------------
 
-class OnboardingScreen extends ConsumerStatefulWidget {
+/// Onboarding is pushed on the root navigator, above the shell. The app's
+/// builder already provides a [DesktopScope] there; this one keeps the screen
+/// self-contained when it is built without it (tests). Everything opened from
+/// the flow (settings, persona list, glossary, the skip confirmation) reads it
+/// to open as a window instead of a bottom sheet.
+class OnboardingScreen extends StatelessWidget {
   const OnboardingScreen({super.key});
 
   @override
-  ConsumerState<OnboardingScreen> createState() => _OnboardingScreenState();
+  Widget build(BuildContext context) {
+    return const AppDesktopScope(child: _OnboardingFlow());
+  }
 }
 
-class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
+class _OnboardingFlow extends ConsumerStatefulWidget {
+  const _OnboardingFlow();
+
+  @override
+  ConsumerState<_OnboardingFlow> createState() => _OnboardingFlowState();
+}
+
+class _OnboardingFlowState extends ConsumerState<_OnboardingFlow> {
   int _currentSlide = 0;
   int _direction = 1;
 
@@ -45,28 +57,41 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   );
 
   /// Whether the reader has granted notifications on this slide. `null` until
-  /// they have answered — the button reads Skip until then, the way the API
-  /// and Persona slides do.
+  /// they have answered — the button reads Skip until then.
   bool? _notificationsGranted;
 
+  /// Whether the reader ever landed on the notifications slide. Tracked as a
+  /// high-water mark: reaching it and then stepping back still counts as
+  /// having seen the ask, so a later skip does not ask again (see
+  /// [shouldRequestNotificationsAfterSkip]).
+  bool _reachedNotificationsSlide = false;
+
+  /// The answer on the guides step. On until the reader says otherwise — the
+  /// same default [maybeShowGuide] falls back to when the step was skipped.
+  bool _guidesOn = true;
+
   bool get _isLastSlide => _currentSlide == _slides.length - 1;
+
+  bool get _isGreeter =>
+      _slides[_currentSlide].type == OnboardingSlideType.welcome;
+
+  int get _notificationsSlideIndex =>
+      _slides.indexWhere((s) => s.type == OnboardingSlideType.notifications);
+
+  /// High-water-marks the notifications slide. Called while the reader is
+  /// still standing on the current slide, so launching the skip from it — or
+  /// stepping off in either direction — counts as having seen the ask.
+  void _recordSlideVisit() {
+    final index = _notificationsSlideIndex;
+    if (index != -1 && _currentSlide >= index) {
+      _reachedNotificationsSlide = true;
+    }
+  }
 
   String get _buttonLabel {
     if (_isLastSlide) return 'onboarding_btn_start'.tr();
     switch (_slides[_currentSlide].type) {
       case OnboardingSlideType.dataImport:
-        return 'onboarding_btn_skip'.tr();
-      case OnboardingSlideType.persona:
-        final personaId = ref.watch(activePersonaIdProvider);
-        if (personaId != null) {
-          return 'onboarding_btn_next'.tr();
-        }
-        return 'onboarding_btn_skip'.tr();
-      case OnboardingSlideType.api:
-        final apiConfig = ref.watch(activeApiConfigProvider);
-        if (apiConfig != null && apiConfig.apiKey.isNotEmpty) {
-          return 'onboarding_btn_next'.tr();
-        }
         return 'onboarding_btn_skip'.tr();
       case OnboardingSlideType.layout:
         return 'onboarding_btn_next'.tr();
@@ -80,6 +105,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   }
 
   void _next() {
+    _recordSlideVisit();
     if (_isLastSlide) {
       _finish();
     } else {
@@ -91,6 +117,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   }
 
   void _prev() {
+    _recordSlideVisit();
     if (_currentSlide > 0) {
       setState(() {
         _direction = -1;
@@ -99,13 +126,30 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     }
   }
 
-  Future<void> _finish() async {
+  Future<void> _finish({bool skipped = false}) async {
     await markOnboardingComplete();
+    if (skipped) await _requestPermissionAfterSkip();
     if (mounted) Navigator.of(context).pop();
+  }
+
+  /// The safety net for a reader who skipped the flow before the notifications
+  /// slide: ask on the way out, unless they already had their chance.
+  Future<void> _requestPermissionAfterSkip() async {
+    if (!shouldRequestNotificationsAfterSkip(
+      notificationsNeedPermission:
+          GenerationNotificationService.instance.notificationsNeedPermission,
+      reachedNotificationsSlide: _reachedNotificationsSlide,
+    )) {
+      return;
+    }
+    await GenerationNotificationService.instance
+        .requestNotificationPermission();
   }
 
   /// Confirmation bottom sheet for skipping the whole onboarding flow.
   void _confirmSkipOnboarding() {
+    // Skipping straight from the notifications slide is still having seen it.
+    _recordSlideVisit();
     GlazeBottomSheet.show<void>(
       context,
       title: 'onboarding_skip_confirm_title'.tr(),
@@ -113,7 +157,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
         onCancel: () => Navigator.of(context, rootNavigator: true).pop(),
         onConfirm: () {
           Navigator.of(context, rootNavigator: true).pop();
-          _finish();
+          _finish(skipped: true);
         },
       ),
     );
@@ -128,6 +172,18 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     if (_slides.any((s) => s.type == OnboardingSlideType.notifications)) {
       unawaited(_loadNotificationState());
     }
+    unawaited(_loadGuidesState());
+  }
+
+  /// A replayed onboarding shows the answer given the first time.
+  Future<void> _loadGuidesState() async {
+    final enabled = await guidesEnabled();
+    if (mounted && enabled != _guidesOn) setState(() => _guidesOn = enabled);
+  }
+
+  void _setGuides(bool enabled) {
+    setState(() => _guidesOn = enabled);
+    unawaited(setGuidesEnabled(enabled));
   }
 
   Future<void> _loadNotificationState() async {
@@ -157,16 +213,9 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     );
   }
 
-  /// Onboarding is pushed on the root navigator, above the shell, so there is
-  /// no `DesktopScope` to read here — apply the shell's own rule directly
-  /// (see `DesktopShell.build`).
-  bool _isDesktop(BuildContext context) =>
-      isDesktopViewportSize(MediaQuery.sizeOf(context)) &&
-      !ref.watch(forceMobileLayoutProvider);
-
   @override
   Widget build(BuildContext context) {
-    if (_isDesktop(context)) return _buildDesktop(context);
+    if (isDesktopLayout(context)) return _buildDesktop(context);
 
     final topPad = MediaQuery.of(context).padding.top;
     final bottomPad = MediaQuery.of(context).padding.bottom;
@@ -179,132 +228,173 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       body: ColoredBox(
         color: const Color(0xFF0D0D0E),
         child: Stack(
-        children: [
-          // ── Scrollable content ──
-          Positioned.fill(
-            child: SingleChildScrollView(
-              padding: EdgeInsets.only(
-                top: topPad + 84,
-                bottom: 120 + bottomPad,
-                left: 24,
-                right: 24,
+          children: [
+            // ── Scrollable content ──
+            Positioned.fill(
+              child: SingleChildScrollView(
+                padding: EdgeInsets.only(
+                  top: topPad + 120,
+                  bottom: 120 + bottomPad,
+                  left: 24,
+                  right: 24,
+                ),
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 320),
+                  switchInCurve: Curves.easeOutCubic,
+                  switchOutCurve: Curves.easeInCubic,
+                  layoutBuilder: (currentChild, previousChildren) {
+                    return Stack(
+                      alignment: Alignment.topCenter,
+                      children: <Widget>[...previousChildren, ?currentChild],
+                    );
+                  },
+                  transitionBuilder: (child, anim) {
+                    final dir = (child.key == ValueKey(_currentSlide))
+                        ? _direction
+                        : -_direction;
+                    return FadeTransition(
+                      opacity: anim,
+                      child: SlideTransition(
+                        position: Tween(
+                          begin: Offset(0.06 * dir, 0),
+                          end: Offset.zero,
+                        ).animate(anim),
+                        child: child,
+                      ),
+                    );
+                  },
+                  child: KeyedSubtree(
+                    key: ValueKey(_currentSlide),
+                    child: _buildSlide(_slides[_currentSlide]),
+                  ),
+                ),
               ),
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 320),
-                switchInCurve: Curves.easeOutCubic,
-                switchOutCurve: Curves.easeInCubic,
-                layoutBuilder: (currentChild, previousChildren) {
-                  return Stack(
-                    alignment: Alignment.topCenter,
-                    children: <Widget>[...previousChildren, ?currentChild],
-                  );
-                },
-                transitionBuilder: (child, anim) {
-                  final dir = (child.key == ValueKey(_currentSlide))
-                      ? _direction
-                      : -_direction;
-                  return FadeTransition(
-                    opacity: anim,
-                    child: SlideTransition(
-                      position: Tween(
-                        begin: Offset(0.06 * dir, 0),
-                        end: Offset.zero,
-                      ).animate(anim),
-                      child: child,
+            ),
+
+            // ── Greeter (first slide) ──
+            // Kept mounted for the whole flow so coming back to it shows the
+            // settled greeting instead of replaying the splash hand-off.
+            Positioned.fill(
+              child: IgnorePointer(
+                ignoring: !_isGreeter,
+                child: AnimatedSlide(
+                  duration: const Duration(milliseconds: 320),
+                  curve: Curves.easeOutCubic,
+                  offset: _isGreeter ? Offset.zero : const Offset(-0.06, 0),
+                  child: AnimatedOpacity(
+                    duration: const Duration(milliseconds: 320),
+                    curve: Curves.easeOutCubic,
+                    opacity: _isGreeter ? 1 : 0,
+                    child: OnboardingGreeter(
+                      title: _slides.first.title.tr(),
+                      subtitle: _slides.first.desc?.tr(),
                     ),
-                  );
-                },
-                child: KeyedSubtree(
-                  key: ValueKey(_currentSlide),
-                  child: _buildSlide(_slides[_currentSlide]),
-                ),
-              ),
-            ),
-          ),
-
-          // ── Header gradient ──
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: IgnorePointer(
-              child: Container(
-                height: topPad + 84,
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Color(0x66000000), Colors.transparent],
                   ),
                 ),
               ),
             ),
-          ),
 
-          // ── Stories progress bar ──
-          Positioned(
-            top: topPad + 16,
-            left: 20,
-            right: 20,
-            child: OnboardingStoriesBar(
-              total: _slides.length,
-              current: _currentSlide,
-            ),
-          ),
-
-          // ── Back button ──
-          if (_currentSlide > 0)
+            // ── Header backdrop ──
+            // Opaque under the step title so scrolled content does not run
+            // through it, fading out below.
             Positioned(
-              top: topPad + 36,
+              top: 0,
+              left: 0,
+              right: 0,
+              child: IgnorePointer(
+                child: Container(
+                  height: topPad + 124,
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      stops: [0, 0.8, 1],
+                      colors: [
+                        Color(0xFF0D0D0E),
+                        Color(0xF20D0D0E),
+                        Color(0x000D0D0E),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
+            // ── Step title, at the top ──
+            Positioned(
+              top: topPad + 12,
+              left: 20,
+              right: 20,
+              height: 32,
+              child: _buildHeaderTitle(),
+            ),
+
+            // ── Stories progress bar, under the title ──
+            Positioned(
+              top: topPad + 56,
+              left: 20,
+              right: 20,
+              child: OnboardingStoriesBar(
+                total: _slides.length,
+                current: _currentSlide,
+              ),
+            ),
+
+            // ── Buttons under the progress bar: back on the left, skip
+            // onboarding on the right ──
+            Positioned(
+              top: topPad + 72,
               left: 12,
-              child: OnboardingGlassBackButton(onTap: _prev),
-            ),
-
-          // ── Skip onboarding (top-right) ──
-          if (!_isLastSlide)
-            Positioned(
-              top: topPad + 36,
               right: 12,
-              child: OnboardingSkipButton(onTap: _confirmSkipOnboarding),
+              height: 40,
+              child: Row(
+                children: [
+                  if (_currentSlide > 0)
+                    OnboardingGlassBackButton(onTap: _prev),
+                  const Spacer(),
+                  if (!_isLastSlide)
+                    OnboardingSkipButton(onTap: _confirmSkipOnboarding),
+                ],
+              ),
             ),
 
-          // ── Footer gradient ──
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: IgnorePointer(
-              child: Container(
-                height: 120 + bottomPad,
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.bottomCenter,
-                    end: Alignment.topCenter,
-                    colors: [Color(0x80000000), Colors.transparent],
+            // ── Footer gradient ──
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: IgnorePointer(
+                child: Container(
+                  height: 120 + bottomPad,
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.bottomCenter,
+                      end: Alignment.topCenter,
+                      colors: [Color(0x80000000), Colors.transparent],
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
 
-          // ── Footer button ──
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
-                child: OnboardingPrimaryButton(
-                  label: _buttonLabel,
-                  onTap: _next,
+            // ── Footer button ──
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: SafeArea(
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
+                  child: OnboardingPrimaryButton(
+                    label: _buttonLabel,
+                    onTap: _next,
+                  ),
                 ),
               ),
             ),
-          ),
-        ],
-      ),
+          ],
+        ),
       ),
     );
   }
@@ -320,40 +410,67 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       body: ColoredBox(
         color: const Color(0xFF0D0D0E),
         child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 320),
-        switchInCurve: Curves.easeOutCubic,
-        switchOutCurve: Curves.easeInCubic,
-        transitionBuilder: (child, anim) {
-          final dir = (child.key == ValueKey(_currentSlide))
-              ? _direction
-              : -_direction;
-          return FadeTransition(
-            opacity: anim,
-            child: SlideTransition(
-              position: Tween(
-                begin: Offset(0.04 * dir, 0),
-                end: Offset.zero,
-              ).animate(anim),
-              child: child,
+          duration: const Duration(milliseconds: 320),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          transitionBuilder: (child, anim) {
+            final dir = (child.key == ValueKey(_currentSlide))
+                ? _direction
+                : -_direction;
+            return FadeTransition(
+              opacity: anim,
+              child: SlideTransition(
+                position: Tween(
+                  begin: Offset(0.04 * dir, 0),
+                  end: Offset.zero,
+                ).animate(anim),
+                child: child,
+              ),
+            );
+          },
+          child: KeyedSubtree(
+            key: ValueKey(_currentSlide),
+            child: OnboardingDesktopWizard(
+              slideIndex: _currentSlide,
+              slideCount: _slides.length,
+              icon: _slideIcon(slide),
+              title: slide.title,
+              description: slide.desc,
+              body: _slideBody(slide),
+              buttonLabel: _buttonLabel,
+              onNext: _next,
+              onBack: _currentSlide > 0 ? _prev : null,
+              onSkip: _isLastSlide ? null : _confirmSkipOnboarding,
             ),
-          );
-        },
-        child: KeyedSubtree(
-          key: ValueKey(_currentSlide),
-          child: OnboardingDesktopWizard(
-            slideIndex: _currentSlide,
-            slideCount: _slides.length,
-            icon: _slideIcon(slide),
-            title: slide.title,
-            description: slide.desc,
-            body: _slideBody(slide),
-            buttonLabel: _buttonLabel,
-            onNext: _next,
-            onBack: _currentSlide > 0 ? _prev : null,
-            onSkip: _isLastSlide ? null : _confirmSkipOnboarding,
           ),
         ),
       ),
+    );
+  }
+
+  /// The current step's title, above the progress bar. The
+  /// greeter carries its own big greeting, so the header stays empty there.
+  Widget _buildHeaderTitle() {
+    final slide = _slides[_currentSlide];
+    final title = slide.type == OnboardingSlideType.welcome
+        ? ''
+        : slide.title.tr().replaceAll('\n', ' ');
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 220),
+      layoutBuilder: (currentChild, previousChildren) => Stack(
+        alignment: Alignment.centerLeft,
+        children: <Widget>[...previousChildren, ?currentChild],
+      ),
+      child: Text(
+        title,
+        key: ValueKey(_currentSlide),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          fontSize: 20,
+          fontWeight: FontWeight.w800,
+          color: Colors.white,
+        ),
       ),
     );
   }
@@ -373,19 +490,12 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
           sub: 'onboarding_action_restore_sub'.tr(),
           onTap: () => _openSheet(const BackupScreen(fromOnboarding: true)),
         );
-      case OnboardingSlideType.api:
+      case OnboardingSlideType.glossary:
         return (
-          icon: Icons.settings_outlined,
-          title: 'onboarding_action_configure_api'.tr(),
-          sub: 'onboarding_action_configure_sub'.tr(),
-          onTap: () => _openSheet(const ApiSettingsScreen(startExpanded: true)),
-        );
-      case OnboardingSlideType.persona:
-        return (
-          icon: Icons.person_add_outlined,
-          title: 'onboarding_action_setup_persona'.tr(),
-          sub: 'onboarding_action_setup_sub'.tr(),
-          onTap: () => _openSheet(const PersonaListScreen()),
+          icon: Icons.menu_book_outlined,
+          title: 'onboarding_action_open_glossary'.tr(),
+          sub: 'onboarding_action_open_glossary_sub'.tr(),
+          onTap: () => unawaited(GlossarySheet.show(context)),
         );
       case OnboardingSlideType.notifications:
         return (
@@ -406,7 +516,6 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   /// The info blocks a slide lists, when it lists any.
   List<OnboardingInfoBlock>? _slideBlocks(OnboardingSlideData slide) {
     return switch (slide.type) {
-      OnboardingSlideType.welcome => onboardingIntroContent,
       OnboardingSlideType.features => onboardingFeaturesContent,
       _ => null,
     };
@@ -415,11 +524,13 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   Widget _buildSlide(OnboardingSlideData slide) {
     switch (slide.type) {
       case OnboardingSlideType.welcome:
+        // Drawn by the full-screen greeter layer, which needs the screen's
+        // centre rather than this scroll view's.
+        return const SizedBox.shrink();
       case OnboardingSlideType.features:
-        return _buildBlocksSlide(slide.title, _slideBlocks(slide)!);
+        return OnboardingFeatureGrid(blocks: _slideBlocks(slide)!);
+      case OnboardingSlideType.glossary:
       case OnboardingSlideType.dataImport:
-      case OnboardingSlideType.api:
-      case OnboardingSlideType.persona:
       case OnboardingSlideType.notifications:
         final action = _slideAction(slide)!;
         return _buildActionSlide(
@@ -431,6 +542,12 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
         );
       case OnboardingSlideType.layout:
         return _buildLayoutSlide(slide);
+      case OnboardingSlideType.guides:
+        return _buildCenteredSlide(
+          slide,
+          fallbackIcon: Icons.school_outlined,
+          child: _buildGuidesChoice(),
+        );
       case OnboardingSlideType.allSet:
         return _buildStandardSlide(slide);
     }
@@ -440,19 +557,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   /// offers below its title and description.
   Widget? _slideBody(OnboardingSlideData slide) {
     final blocks = _slideBlocks(slide);
-    if (blocks != null) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: blocks
-            .map(
-              (b) => Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: OnboardingIntroBlockCard(block: b),
-              ),
-            )
-            .toList(),
-      );
-    }
+    if (blocks != null) return OnboardingFeatureGrid(blocks: blocks);
     final action = _slideAction(slide);
     if (action != null) {
       return OnboardingClickableBlock(
@@ -463,61 +568,31 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       );
     }
     if (slide.type == OnboardingSlideType.layout) return _buildLayoutPicker();
+    if (slide.type == OnboardingSlideType.guides) return _buildGuidesChoice();
     return null;
   }
 
   /// Icon shown in the wizard's visual pane. Welcome and Features carry no
-  /// icon of their own, so they borrow their first block's — the same
-  /// fallback the Vue wizard used (`slides[i].icon || introContent[0].icon`).
+  /// icon of their own: Features borrows its first block's, Welcome falls
+  /// through to the same layers icon.
   IconData _slideIcon(OnboardingSlideData slide) =>
       slide.icon ?? _slideBlocks(slide)?.first.icon ?? Icons.layers_outlined;
 
-  /// Welcome / Features — title + list of info blocks
-  Widget _buildBlocksSlide(String title, List<OnboardingInfoBlock> blocks) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title.tr(),
-          style: const TextStyle(
-            fontSize: 32,
-            fontWeight: FontWeight.w800,
-            color: Colors.white,
-            height: 1.2,
-          ),
-        ),
-        const SizedBox(height: 16),
-        ...blocks.map(
-          (b) => Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: OnboardingIntroBlockCard(block: b),
-          ),
-        ),
-      ],
-    );
-  }
-
-  /// Standard centered slide — icon + title + description
-  Widget _buildStandardSlide(OnboardingSlideData slide) {
+  /// Centred slide — icon + description, then [child]. The title lives in
+  /// the header.
+  Widget _buildCenteredSlide(
+    OnboardingSlideData slide, {
+    required IconData fallbackIcon,
+    Widget? child,
+  }) {
     return SizedBox(
       width: double.infinity,
       child: Column(
         children: [
-          const SizedBox(height: 40),
-          OnboardingIconBubble(icon: slide.icon ?? Icons.check),
-          const SizedBox(height: 24),
-          Text(
-            slide.title.tr(),
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 28,
-              fontWeight: FontWeight.w800,
-              color: Colors.white,
-              height: 1.3,
-            ),
-          ),
+          const SizedBox(height: 32),
+          OnboardingIconBubble(icon: slide.icon ?? fallbackIcon),
           if (slide.desc != null) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: 24),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: Text(
@@ -531,10 +606,15 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
               ),
             ),
           ],
+          if (child != null) ...[const SizedBox(height: 24), child],
         ],
       ),
     );
   }
+
+  /// Standard slide — icon + description
+  Widget _buildStandardSlide(OnboardingSlideData slide) =>
+      _buildCenteredSlide(slide, fallbackIcon: Icons.check);
 
   /// Standard slide + clickable action card
   Widget _buildActionSlide({
@@ -544,91 +624,25 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     required String actionSub,
     required VoidCallback onAction,
   }) {
-    return SizedBox(
-      width: double.infinity,
-      child: Column(
-        children: [
-          const SizedBox(height: 40),
-          OnboardingIconBubble(icon: slide.icon ?? Icons.settings),
-          const SizedBox(height: 24),
-          Text(
-            slide.title.tr(),
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 28,
-              fontWeight: FontWeight.w800,
-              color: Colors.white,
-              height: 1.3,
-            ),
-          ),
-          if (slide.desc != null) ...[
-            const SizedBox(height: 12),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Text(
-                slide.desc!.tr(),
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 16,
-                  color: context.cs.onSurfaceVariant,
-                  height: 1.5,
-                ),
-              ),
-            ),
-          ],
-          const SizedBox(height: 24),
-          OnboardingClickableBlock(
-            icon: actionIcon,
-            title: actionTitle,
-            subtitle: actionSub,
-            onTap: onAction,
-          ),
-        ],
+    return _buildCenteredSlide(
+      slide,
+      fallbackIcon: Icons.settings,
+      child: OnboardingClickableBlock(
+        icon: actionIcon,
+        title: actionTitle,
+        subtitle: actionSub,
+        onTap: onAction,
       ),
     );
   }
 
   /// Chat layout picker slide — inline `default` / `bubble` thumbnails reused
   /// from the theme editor's layout picker.
-  Widget _buildLayoutSlide(OnboardingSlideData slide) {
-    return SizedBox(
-      width: double.infinity,
-      child: Column(
-        children: [
-          const SizedBox(height: 40),
-          OnboardingIconBubble(icon: slide.icon ?? Icons.view_quilt_outlined),
-          const SizedBox(height: 24),
-          Text(
-            slide.title.tr(),
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 28,
-              fontWeight: FontWeight.w800,
-              color: Colors.white,
-              height: 1.3,
-            ),
-          ),
-          if (slide.desc != null) ...[
-            const SizedBox(height: 12),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Text(
-                slide.desc!.tr(),
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 16,
-                  color: context.cs.onSurfaceVariant,
-                  height: 1.5,
-                ),
-              ),
-            ),
-          ],
-          const SizedBox(height: 24),
-          _buildLayoutPicker(),
-        ],
-      ),
-    );
-  }
+  Widget _buildLayoutSlide(OnboardingSlideData slide) => _buildCenteredSlide(
+    slide,
+    fallbackIcon: Icons.view_quilt_outlined,
+    child: _buildLayoutPicker(),
+  );
 
   /// The `default` / `bubble` thumbnails, shared by the phone slide and the
   /// desktop wizard's content pane.
@@ -657,6 +671,36 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
             onTap: () => _setChatLayout('bubble'),
             child: const LayoutMiniPreview(layout: 'bubble'),
           ),
+        ),
+      ],
+    );
+  }
+
+  /// "Turn on interactive guides?" — yes, or no with a pointer to where the
+  /// guides stay available. Shared by the phone slide and the desktop wizard.
+  Widget _buildGuidesChoice() {
+    return Column(
+      children: [
+        OnboardingChoiceCard(
+          icon: Icons.school_outlined,
+          title: 'onboarding_guides_yes'.tr(),
+          subtitle: 'onboarding_guides_yes_sub'.tr(),
+          selected: _guidesOn,
+          onTap: () => _setGuides(true),
+        ),
+        const SizedBox(height: 10),
+        OnboardingChoiceCard(
+          icon: Icons.explore_off_outlined,
+          title: 'onboarding_guides_no'.tr(),
+          subtitle: 'onboarding_guides_no_sub'.tr(),
+          selected: !_guidesOn,
+          onTap: () => _setGuides(false),
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'onboarding_guides_note'.tr(),
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 14, color: context.cs.onSurfaceVariant),
         ),
       ],
     );

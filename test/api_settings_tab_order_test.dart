@@ -11,7 +11,7 @@ void main() {
   ).readAsStringSync();
 
   test('the strip reads LLM, Agents, Embeddings', () {
-    final llm = screen.indexOf("label: 'LLM'");
+    final llm = screen.indexOf("label: 'tab_llm'.tr()");
     final agents = screen.indexOf("label: 'studio_agents'.tr()");
     final embeddings = screen.indexOf("label: 'tab_embeddings'.tr()");
     expect(llm, greaterThan(-1));
@@ -28,12 +28,11 @@ void main() {
   });
 
   test('a deep link at the MemoryBook slot opens the Agents tab', () {
-    expect(
-      screen,
-      contains(
-        '_tab = widget.focusSection == ApiSettingsSection.memoryBook ? 1 : 0;',
-      ),
-    );
+    expect(screen, contains('ApiSettingsSection.memoryBook => 1,'));
+  });
+
+  test('a deep link at the embeddings opens the Embeddings tab', () {
+    expect(screen, contains('ApiSettingsSection.embeddings => 2,'));
   });
 
   test('each tab scrolls its own list', () {

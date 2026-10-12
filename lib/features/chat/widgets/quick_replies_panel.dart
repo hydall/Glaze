@@ -5,9 +5,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/platform/haptics.dart';
+import '../../../core/state/db_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/glaze_text_field.dart';
 import '../../../shared/widgets/glass_surface.dart';
 import '../chat_provider.dart';
 import '../composer_pins_provider.dart';
@@ -187,6 +189,9 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
     final pins = ref.watch(composerPinsProvider).value ?? const <ComposerPin>[];
     final hiddenIds =
         ref.watch(hiddenComposerActionsProvider).value ?? const <String>{};
+    final translationEnabled = ref.watch(
+      pipelineSettingsProvider.select((p) => p.translation.enabled),
+    );
 
     // Anything pinned to the composer's row is dropped from the grid: the two
     // must never offer the same button twice. The stored order is untouched, so
@@ -201,7 +206,8 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
     final actions = [
       for (final action in ComposerAction.demotable)
         if (!pins.contains(ComposerPin.action(action)) &&
-            !hiddenIds.contains(action.id))
+            !hiddenIds.contains(action.id) &&
+            (action != ComposerAction.translate || translationEnabled))
           action,
     ];
     final replies = [
@@ -485,15 +491,12 @@ class _QuickReplyEditFormState extends State<_QuickReplyEditForm> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          TextField(
+          GlazeTextField(
             controller: _labelCtrl,
             autofocus: widget.isNew,
             textInputAction: TextInputAction.next,
-            decoration: InputDecoration(
-              labelText: 'label_block_name'.tr(),
-              hintText: 'placeholder_block_name'.tr(),
-              border: const OutlineInputBorder(),
-            ),
+            label: 'label_block_name'.tr(),
+            hint: 'placeholder_block_name'.tr(),
           ),
           const SizedBox(height: 12),
           _IconPicker(
@@ -507,15 +510,11 @@ class _QuickReplyEditFormState extends State<_QuickReplyEditForm> {
           if (widget.builtIn)
             _BuiltInNote(text: 'quick_reply_builtin_note'.tr())
           else
-            TextField(
+            GlazeTextField(
               controller: _textCtrl,
               maxLines: 4,
-              minLines: 2,
-              decoration: InputDecoration(
-                labelText: 'label_content'.tr(),
-                hintText: 'placeholder_prompt_text'.tr(),
-                border: const OutlineInputBorder(),
-              ),
+              label: 'label_content'.tr(),
+              hint: 'placeholder_prompt_text'.tr(),
             ),
           const SizedBox(height: 20),
           Row(
@@ -747,6 +746,7 @@ class _AddSheetRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return InkWell(
+      mouseCursor: SystemMouseCursors.click,
       onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),

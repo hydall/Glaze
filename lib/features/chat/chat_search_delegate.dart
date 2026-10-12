@@ -43,8 +43,21 @@ class ChatSearchDelegate extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Desktop header: the search icon swaps the character block for the field.
+  /// Highlighting still follows the query (see [syncInlineQuery]); this only
+  /// says whether the field is shown.
+  bool _inlineOpen = false;
+  bool get inlineOpen => _inlineOpen;
+
+  void openInline() {
+    if (_inlineOpen) return;
+    _inlineOpen = true;
+    notifyListeners();
+  }
+
   void closeSearch() {
     searchController.clear();
+    _inlineOpen = false;
     _showSearch = false;
     _searchQuery = '';
     _searchMatches = [];

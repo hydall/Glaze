@@ -82,6 +82,7 @@ class _ConnectionStatusState extends State<ConnectionStatus> {
                 color: Colors.transparent,
                 borderRadius: BorderRadius.circular(999),
                 child: InkWell(
+                  mouseCursor: SystemMouseCursors.click,
                   borderRadius: BorderRadius.circular(999),
                   onTap: widget.onRetry,
                   child: Padding(
@@ -163,14 +164,14 @@ class _ConnectionStatusState extends State<ConnectionStatus> {
                                       letterSpacing: 1,
                                     ),
                                   ),
-                                  GestureDetector(
+                                  MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
                                     onTap: _copyError,
                                     child: const Icon(
                                       Icons.copy,
                                       size: 14,
                                       color: Color(0xFFFF3B30),
                                     ),
-                                  ),
+                                  )),
                                 ],
                               ),
                             ),

@@ -2,6 +2,7 @@ import '../db/repositories/embedding_repo.dart';
 import '../models/chat_message.dart';
 import '../utils/cast_helpers.dart';
 import 'embedding_service.dart';
+import 'transport/llm_capture_context.dart';
 
 /// Indexes raw chat-message content into the `embeddings` table under
 /// `sourceType: 'chat_message'`. Each chunk is [chunkSize] consecutive
@@ -102,6 +103,11 @@ class ChatMessageEmbeddingService {
     }
     if (chunks.isEmpty) return;
 
+    // One capture group per pass, one call id per chunk (see
+    // LorebookEmbeddingService.indexLorebookEntries).
+    final runId =
+        'embedding.chat_index:$sessionId:'
+        '${DateTime.now().millisecondsSinceEpoch}';
     for (final chunk in chunks) {
       final entryId = '${sessionId}_${chunk.index}';
       final textHash = computeHash(chunk.text);
@@ -115,9 +121,16 @@ class ChatMessageEmbeddingService {
           continue;
         }
 
-        final embedded = await _embeddingService.getEmbeddingsWithChunks([
-          chunk.text,
-        ], config);
+        final embedded = await _embeddingService.getEmbeddingsWithChunks(
+          [chunk.text],
+          config,
+          captureContext: LlmCaptureContext(
+            stage: 'embedding.chat_index',
+            sessionId: sessionId,
+            pipelineRunId: runId,
+            callId: '$runId:${chunk.index}',
+          ),
+        );
         final vectors = embedded.map((c) => c.vector).toList();
         if (vectors.isEmpty) continue;
 

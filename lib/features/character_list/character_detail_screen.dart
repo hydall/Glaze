@@ -36,6 +36,7 @@ import '../../shared/theme/theme_preset.dart';
 import '../../shared/theme/theme_provider.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../shared/widgets/glaze_fab.dart';
 import '../../shared/widgets/glaze_tab_bar.dart';
 import '../../shared/widgets/swipe_tab_switcher.dart';
 import '../../shared/widgets/tab_slide_switcher.dart';
@@ -1001,38 +1002,11 @@ class _ChatFab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return GlazeFab(
+      icon: Icons.chat_bubble_rounded,
+      label: 'btn_open_chat'.tr(),
+      tooltip: 'btn_open_chat'.tr(),
       onTap: onTap,
-      child: Container(
-        height: 48,
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        decoration: BoxDecoration(
-          color: context.cs.primary,
-          borderRadius: BorderRadius.circular(24),
-          boxShadow: const [
-            BoxShadow(blurRadius: 16, color: Color(0x80000000)),
-          ],
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(
-              Icons.chat_bubble_rounded,
-              color: Colors.white,
-              size: 18,
-            ),
-            const SizedBox(width: 8),
-            Text(
-              'btn_open_chat'.tr(),
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w700,
-                fontSize: 15,
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }
@@ -1045,45 +1019,14 @@ class _ImportFab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: importing ? null : onTap,
-      child: Container(
-        height: 48,
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        decoration: BoxDecoration(
-          color: importing
-              ? context.cs.primary.withValues(alpha: 0.5)
-              : context.cs.primary,
-          borderRadius: BorderRadius.circular(24),
-          boxShadow: const [
-            BoxShadow(blurRadius: 16, color: Color(0x80000000)),
-          ],
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (importing)
-              const SizedBox(
-                width: 18,
-                height: 18,
-                child: GlazeSpinner(color: Colors.white),
-              )
-            else
-              const Icon(Icons.download_rounded, color: Colors.white, size: 20),
-            const SizedBox(width: 8),
-            Text(
-              importing && phase != null && phase!.isNotEmpty
-                  ? phase!
-                  : 'catalog_import'.tr(),
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w700,
-                fontSize: 15,
-              ),
-            ),
-          ],
-        ),
-      ),
+    return GlazeFab(
+      icon: Icons.download_rounded,
+      label: importing && phase != null && phase!.isNotEmpty
+          ? phase!
+          : 'catalog_import'.tr(),
+      tooltip: 'catalog_import'.tr(),
+      busy: importing,
+      onTap: onTap,
     );
   }
 }
@@ -1129,7 +1072,7 @@ class _DetailHeaderButtonState extends ConsumerState<_DetailHeaderButton>
   @override
   Widget build(BuildContext context) {
     final preset = ref.watch(themeProvider.select((s) => s.activePreset));
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: widget.onTap,
       onTapDown: widget.onTap != null ? (_) => _press.forward() : null,
       onTapUp: widget.onTap != null ? (_) => _press.reverse() : null,
@@ -1149,7 +1092,7 @@ class _DetailHeaderButtonState extends ConsumerState<_DetailHeaderButton>
           ),
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -1190,7 +1133,7 @@ class _HeroSection extends StatelessWidget {
     return SizedBox(
       height: 310,
       width: double.infinity,
-      child: GestureDetector(
+      child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
         onTap: () {
           ImageProvider? provider;
           if (previewAvatarUrl != null && previewAvatarUrl!.isNotEmpty) {
@@ -1249,7 +1192,7 @@ class _HeroSection extends StatelessWidget {
           ],
         ),
       ),
-    );
+    ));
   }
 
   Widget _buildAuthorLabel(BuildContext context) {
@@ -1265,11 +1208,11 @@ class _HeroSection extends StatelessWidget {
       ),
     );
     if (!hasLink) return label;
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: () => onOpenAuthor!(authorUrl!),
       behavior: HitTestBehavior.opaque,
       child: label,
-    );
+    ));
   }
 
   Widget _buildImage() {
@@ -1803,6 +1746,11 @@ class _PromptsTabState extends State<_PromptsTab> {
       ),
       (key: 'scenario', label: 'label_scenario'.tr(), text: c.scenario ?? ''),
       (
+        key: 'appearance',
+        label: 'label_appearance'.tr(),
+        text: c.appearance ?? '',
+      ),
+      (
         key: 'mesExample',
         label: 'label_mes_example'.tr(),
         text: c.mesExample ?? '',
@@ -2064,7 +2012,7 @@ class _AccordionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onToggle,
       behavior: HitTestBehavior.opaque,
       child: Padding(
@@ -2117,7 +2065,7 @@ class _AccordionHeader extends StatelessWidget {
           ],
         ),
       ),
-    );
+    ));
   }
 }
 

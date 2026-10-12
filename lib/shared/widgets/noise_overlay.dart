@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
 /// Film-grain overlay: a grid of square cells (cell size grows with the
@@ -116,11 +117,21 @@ abstract final class _NoiseTileCache {
   static final Map<String, Set<VoidCallback>> _waiters = {};
 
   /// Same cell-size curve as the original per-size painter: one logical px
-  /// for small chips, up to 10 for full-screen surfaces.
+  /// for small chips, up to 10 for full-screen surfaces. The curve was tuned
+  /// for phone screens; a desktop window is several times larger, so the
+  /// cells hit the 10px cap and the grain turns into visible blocks. Desktop
+  /// keeps the cells fine instead — the tile shader costs the same either way.
   static int stepFor(Size size) {
     final pixels = size.width * size.height;
-    return (pixels / 50000).ceil().clamp(1, 10);
+    return (pixels / 50000).ceil().clamp(1, _isDesktop ? 2 : 10);
   }
+
+  static bool get _isDesktop => switch (defaultTargetPlatform) {
+    TargetPlatform.windows ||
+    TargetPlatform.linux ||
+    TargetPlatform.macOS => true,
+    _ => false,
+  };
 
   static ui.Image? get({
     required Color tint,

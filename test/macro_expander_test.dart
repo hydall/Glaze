@@ -25,6 +25,16 @@ void main() {
       expect(expand('Greetings, {{user}}.', ctx), 'Greetings, Иван.');
     });
 
+    test('replaces {{persona}} with the persona description', () {
+      const ctx = MacroContext(persona: 'Иван', personaDescription: 'tall');
+      expect(expand('{{user}}: {{persona}}', ctx), 'Иван: tall');
+    });
+
+    test('{{persona}} without a description expands to empty', () {
+      const ctx = MacroContext(persona: 'Иван');
+      expect(expand('[{{persona}}]', ctx), '[]');
+    });
+
     test('replaces {{description}} with character description', () {
       final ctx = MacroContext(
         character: _character(description: 'stern, clever'),

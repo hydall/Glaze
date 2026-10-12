@@ -21,6 +21,8 @@ import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../chat/widgets/chat_stats_sheet.dart';
 import '../chat/widgets/magic_drawer_widgets.dart' show MagicCardBadge;
 import '../extensions/widgets/ext_blocks_settings_sheet.dart';
+import '../guides/guide_anchor.dart';
+import '../guides/guide_service.dart';
 import '../image_gen/widgets/image_gen_sheet.dart';
 import '../personas/persona_list_provider.dart';
 import '../presets/preset_image.dart';
@@ -134,13 +136,25 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
   @override
   ShellHeaderConfig buildShellHeader() => ShellHeaderConfig(
     title: 'tab_tools'.tr(),
-    actions: [_HeaderEditToggle(editing: _editing, onTap: _toggleEditing)],
+    actions: [
+      GuideAnchor(
+        id: GuideIds.toolsEdit,
+        child: _HeaderEditToggle(editing: _editing, onTap: _toggleEditing),
+      ),
+    ],
   );
 
   @override
   void initState() {
     super.initState();
     _loadLayout();
+    // The desktop sidebar hub is always on screen; it is covered by the
+    // desktop tour, which the Characters screen starts.
+    if (!widget.inSidebar) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) maybeShowGuide(context, AppGuide.tools);
+      });
+    }
   }
 
   @override
@@ -358,26 +372,73 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
 
     final tiles = _visibleTiles();
 
+    final list = ListView(
+      controller: _scrollController,
+      padding: EdgeInsets.fromLTRB(16, topPad + 16, 16, bottomPad),
+      children: _loading
+          ? const [
+              SizedBox(
+                height: 200,
+                child: Center(child: CircularProgressIndicator()),
+              ),
+            ]
+          : _buildRows(
+              context,
+              tiles,
+              personaInfo,
+              resolvedAvatar,
+              presetName,
+              presetImage,
+            ),
+    );
+
     return Scaffold(
       backgroundColor: Colors.transparent,
-      body: ListView(
-        controller: _scrollController,
-        padding: EdgeInsets.fromLTRB(16, topPad + 16, 16, bottomPad),
-        children: _loading
-            ? const [
-                SizedBox(
-                  height: 200,
-                  child: Center(child: CircularProgressIndicator()),
-                ),
-              ]
-            : _buildRows(
-                context,
-                tiles,
-                personaInfo,
-                resolvedAvatar,
-                presetName,
-                presetImage,
+      // The sidebar has no shell header, so the hub carries its own title row.
+      // It sits at the height of the Characters tab's search strip so the two
+      // columns' leading strips line up.
+      body: widget.inSidebar
+          ? Column(
+              children: [
+                _buildSidebarHeader(context),
+                Expanded(child: list),
+              ],
+            )
+          : list,
+    );
+  }
+
+  /// Height of the desktop sidebar hub's header, matching the Characters tab's
+  /// search strip ([_CharacterListScreenState._kSearchStripBlock]).
+  static const double _kSidebarHeaderHeight = 41.0;
+
+  /// Title row of the hub when hosted in the desktop right sidebar: the Tools
+  /// label and the same edit toggle the shell header carries on the route.
+  Widget _buildSidebarHeader(BuildContext context) {
+    return Container(
+      height: _kSidebarHeaderHeight,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: context.cs.outlineVariant)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              'tab_tools'.tr(),
+              style: TextStyle(
+                color: context.cs.onSurface,
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
               ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          GuideAnchor(
+            id: GuideIds.toolsEdit,
+            child: _HeaderEditToggle(editing: _editing, onTap: _toggleEditing),
+          ),
+        ],
       ),
     );
   }
@@ -395,13 +456,16 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
     final rows = <Widget>[];
     final pendingSmall = <ToolsTileDef>[];
 
-    Widget tileFor(ToolsTileDef def) => _buildTile(
-      context,
-      def,
-      personaInfo,
-      resolvedAvatar,
-      presetName,
-      presetImage,
+    Widget tileFor(ToolsTileDef def) => GuideAnchor(
+      id: GuideIds.toolsTile(def.id),
+      child: _buildTile(
+        context,
+        def,
+        personaInfo,
+        resolvedAvatar,
+        presetName,
+        presetImage,
+      ),
     );
 
     void flushSmallRow() {
@@ -528,7 +592,7 @@ class _HeaderEditToggle extends StatelessWidget {
         button: true,
         toggled: editing,
         label: label,
-        child: GestureDetector(
+        child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
           onTap: onTap,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 200),
@@ -553,7 +617,7 @@ class _HeaderEditToggle extends StatelessWidget {
                   : context.cs.onSurface.withValues(alpha: 0.55),
             ),
           ),
-        ),
+        )),
       ),
     );
   }
@@ -1028,6 +1092,7 @@ class _ToolsAddList extends StatelessWidget {
       children: [
         for (final item in items)
           InkWell(
+            mouseCursor: SystemMouseCursors.click,
             onTap: () => onSelect(item),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),

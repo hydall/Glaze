@@ -38,6 +38,7 @@ class _ManifestEntryRowState extends State<ManifestEntryRow> {
         borderRadius: BorderRadius.circular(8),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
+          mouseCursor: SystemMouseCursors.click,
           onTap: () => setState(() => _expanded = !_expanded),
           child: IntrinsicHeight(
             child: Row(

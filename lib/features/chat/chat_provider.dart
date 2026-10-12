@@ -15,6 +15,7 @@ import '../../core/utils/time_helpers.dart';
 import '../../core/state/db_provider.dart';
 import '../../core/state/persona_resolution.dart';
 import '../chat_history/chat_history_provider.dart';
+import '../translation/translation_service.dart';
 import 'abort_handler.dart';
 import 'chat_session_service.dart';
 import 'chat_state.dart';
@@ -490,6 +491,20 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     final sendPendingToken = ++_sendPendingSeq;
 
     try {
+      // Auto-translation rewrites the outgoing text *before* it is stored, so
+      // the model, the saved history and the context all get the translation
+      // rather than the original. A failure keeps the original text.
+      final translation = ref.read(pipelineSettingsProvider).translation;
+      var outgoingText = text;
+      if (translation.enabled &&
+          translation.autoTranslateUser &&
+          text.trim().isNotEmpty) {
+        outgoingText = await _autoTranslateOutgoing(
+          text,
+          translation.inputLanguage,
+          sessionId: current.session!.id,
+        );
+      }
       // Stamp the message with the persona that sent it. The id is what the
       // chat resolves against later (a renamed persona keeps naming its old
       // messages correctly, a deleted one falls back to the letter avatar);
@@ -524,9 +539,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       final userMsg = ChatMessage(
         id: generateId(),
         role: 'user',
-        content: text,
+        content: outgoingText,
         timestamp: DateTime.now().millisecondsSinceEpoch,
-        tokens: estimateTokens(text),
+        tokens: estimateTokens(outgoingText),
         imagePath: attachments.imagePath,
         extraImagePaths: attachments.extraImagePaths,
         personaId: sendingPersona?.id,
@@ -705,6 +720,38 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           !settled.isPostGenRunning) {
         setGenerationPhase(ref, arg, GenerationPhase.idle);
       }
+    }
+  }
+
+  /// Rewrites an outgoing message into [targetLanguageCode] before it is sent,
+  /// so the model and the stored history receive the translation.
+  ///
+  /// Raises the typing bubble and names the phase while it runs — the send has
+  /// not reached the pipeline yet, so nothing else would show the reader that
+  /// work is happening. A failed or empty translation quietly returns the
+  /// original text; a message must never be lost to a translator outage.
+  Future<String> _autoTranslateOutgoing(
+    String text,
+    String targetLanguageCode, {
+    required String sessionId,
+  }) async {
+    setGenerationPhase(ref, arg, GenerationPhase.translatingUser);
+    final before = state.value;
+    if (before != null && before.session?.id == sessionId) {
+      state = AsyncData(before.copyWith(isSendPending: true));
+    }
+    try {
+      final translated = await ref
+          .read(translationServiceProvider)
+          .translate(
+            text: text,
+            targetLanguageCode: targetLanguageCode,
+            sessionId: sessionId,
+          );
+      return translated.trim().isEmpty ? text : translated;
+    } catch (e) {
+      debugPrint('[ChatNotifier] auto-translate outgoing failed: $e');
+      return text;
     }
   }
 

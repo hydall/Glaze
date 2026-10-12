@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/services/generation_notification_service.dart';
 import 'package:glaze_flutter/core/services/notifications/message_notification_presenter.dart';
+import 'package:glaze_flutter/core/services/onboarding_service.dart';
 import 'package:glaze_flutter/features/onboarding/onboarding_models.dart';
 
 /// The notification permission used to be asked for from
@@ -54,5 +55,41 @@ void main() {
       MessageNotificationPresenter.promptsForPermission,
       reason: 'every platform this runs on also supports notifications',
     );
+  });
+
+  group('permission after skipping the flow', () {
+    test('asks when the reader skipped before the notifications slide', () {
+      expect(
+        shouldRequestNotificationsAfterSkip(
+          notificationsNeedPermission: true,
+          reachedNotificationsSlide: false,
+        ),
+        isTrue,
+        reason: 'the slide is the only ask, so skipping past it must not '
+            'leave notifications permanently silent',
+      );
+    });
+
+    test('does not ask again once the slide was reached', () {
+      expect(
+        shouldRequestNotificationsAfterSkip(
+          notificationsNeedPermission: true,
+          reachedNotificationsSlide: true,
+        ),
+        isFalse,
+        reason: 'reaching the slide is the reader answering — declining by '
+            'skipping past it, or granting outright',
+      );
+    });
+
+    test('a platform with nothing to ask for never asks on skip', () {
+      expect(
+        shouldRequestNotificationsAfterSkip(
+          notificationsNeedPermission: false,
+          reachedNotificationsSlide: false,
+        ),
+        isFalse,
+      );
+    });
   });
 }

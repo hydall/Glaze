@@ -4,8 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/character.dart';
 import '../../../core/state/character_provider.dart';
-import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/glaze_fab.dart';
 import '../../../shared/widgets/sheet_view.dart';
 import 'character_card.dart';
 import '../../../shared/widgets/glaze_sheet.dart';
@@ -169,34 +169,10 @@ class _AddVariationFab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return GlazeFab(
+      label: 'variation_add'.tr(),
+      tooltip: 'variation_add'.tr(),
       onTap: onTap,
-      child: Container(
-        height: 48,
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        decoration: BoxDecoration(
-          color: context.cs.primary,
-          borderRadius: BorderRadius.circular(24),
-          boxShadow: const [
-            BoxShadow(blurRadius: 16, color: Color(0x80000000)),
-          ],
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.add_rounded, color: Colors.white, size: 20),
-            const SizedBox(width: 8),
-            Text(
-              'variation_add'.tr(),
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w700,
-                fontSize: 15,
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

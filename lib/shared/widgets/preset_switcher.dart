@@ -420,7 +420,7 @@ class PresetPill extends StatelessWidget {
   Widget build(BuildContext context) {
     final enabled = onTap != null;
     final color = enabled ? context.cs.primary : context.cs.onSurfaceVariant;
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       child: Container(
         height: 32,
@@ -451,6 +451,6 @@ class PresetPill extends StatelessWidget {
           ],
         ),
       ),
-    );
+    ));
   }
 }

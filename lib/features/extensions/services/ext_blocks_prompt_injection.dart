@@ -46,7 +46,10 @@ class ExtBlocksPromptInjection {
     if (personaId == null) return MacroContext.empty;
     final personas = _ref.read(personaListProvider).value ?? const [];
     final persona = personas.where((p) => p.id == personaId).firstOrNull;
-    return MacroContext(persona: persona?.name);
+    return MacroContext(
+      persona: persona?.name,
+      personaDescription: persona?.prompt,
+    );
   }
 
   Future<List<ChatMessage>> injectIntoHistory({

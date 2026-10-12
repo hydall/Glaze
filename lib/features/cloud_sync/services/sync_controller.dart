@@ -22,12 +22,18 @@ import '../../settings/app_settings_provider.dart';
 import '../../card_rewrite/card_rewriter_recovery_view_service.dart';
 import '../../chat/chat_provider.dart';
 import '../../chat/chat_session_service.dart';
+import '../../chat/composer_empty_action_provider.dart';
+import '../../chat/composer_pins_provider.dart';
+import '../../chat/hidden_composer_actions_provider.dart';
+import '../../chat/quick_replies_provider.dart';
 import '../../chat/services/collector_view_service.dart';
 import '../../chat/services/reconciler_view_service.dart';
+import '../../chat/state/magic_drawer_stats_cache.dart';
 import '../../chat_history/chat_history_provider.dart';
 import '../sync_provider.dart';
 import '../sync_models.dart';
 import 'sync_engine.dart';
+import 'sync_serialization.dart';
 import 'sync_service.dart';
 import 'sync_conflict.dart';
 
@@ -58,16 +64,16 @@ class SyncController {
 
   Future<void> loadIncludeApiKeys() async {
     final prefs = await _ref.read(sharedPreferencesProvider.future);
-    final raw = prefs.get('gz_sync_include_api_keys');
-    _syncIncludeApiKeys = raw is bool ? raw : false;
+    _syncIncludeApiKeys = SyncSerialization.includeApiKeys(prefs);
   }
 
   Future<void> setIncludeApiKeys(bool val) async {
     final prefs = await _ref.read(sharedPreferencesProvider.future);
-    if (prefs.get('gz_sync_include_api_keys') is! bool) {
-      await prefs.remove('gz_sync_include_api_keys');
+    const key = SyncSerialization.includeApiKeysPrefKey;
+    if (prefs.get(key) is! bool) {
+      await prefs.remove(key);
     }
-    await prefs.setBool('gz_sync_include_api_keys', val);
+    await prefs.setBool(key, val);
     _syncIncludeApiKeys = val;
   }
 
@@ -393,6 +399,12 @@ class SyncController {
     _ref.invalidate(studioPresetListProvider);
     _ref.invalidate(globalRegexProvider);
     _ref.invalidate(studioRegexProvider);
+    // The chat layout lives in preferences read once into these notifiers.
+    _ref.invalidate(composerPinsProvider);
+    _ref.invalidate(hiddenComposerActionsProvider);
+    _ref.invalidate(composerEmptyActionProvider);
+    _ref.invalidate(quickRepliesProvider);
+    _ref.invalidate(magicDrawerLayoutCacheProvider);
     unawaited(_ref.read(sessionLorebookEmbeddingWorkerProvider).drain());
     await _ref.read(themeProvider.notifier).reload();
 

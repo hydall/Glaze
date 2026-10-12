@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
-import '../../../shared/theme/app_colors.dart';
-import '../../../shared/widgets/glaze_spinner.dart';
+import '../../../shared/widgets/filter_sheet.dart';
+import '../../../shared/widgets/menu_group.dart';
 import '../catalog_models.dart';
 import '../services/janitor_provider.dart';
 
@@ -139,195 +139,77 @@ class _JanitorBlockedContentSectionState
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Header
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            _SectionLabel('catalog_blocked_tags'.tr()),
-            if (_selectedCount > 0)
-              GestureDetector(
-                onTap: widget.onClear,
-                child: Text(
-                  'catalog_clear_tags'.tr(
-                    namedArgs: {'count': '$_selectedCount'},
-                  ),
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: context.cs.primary,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-          ],
-        ),
-        const SizedBox(height: 12),
-
-        // Selected chips (blocked tags + keywords)
-        if (_selectedCount > 0)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Container(
-              padding: const EdgeInsets.only(bottom: 12),
-              decoration: BoxDecoration(
-                border: Border(
-                  bottom: BorderSide(
-                    color: Colors.white.withValues(alpha: 0.06),
-                  ),
-                ),
-              ),
-              child: Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  for (final id in widget.blockedTagIds)
-                    _selectedChip(_tagName(id), () => widget.onToggleTag(id)),
-                  for (final k in widget.blockedKeywords)
-                    _selectedChip(k, () => widget.onRemoveKeyword(k)),
-                ],
-              ),
-            ),
-          ),
-
-        // Input
-        Container(
-          height: 40,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.07),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-          ),
-          child: TextField(
-            controller: _controller,
-            style: const TextStyle(fontSize: 14, color: Colors.white),
-            textInputAction: TextInputAction.done,
-            decoration: InputDecoration(
-              hintText: 'catalog_blocked_search'.tr(),
-              hintStyle: TextStyle(color: context.cs.onSurfaceVariant),
-              border: InputBorder.none,
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              isDense: true,
-              suffixIcon: _loading
-                  ? const Padding(
-                      padding: EdgeInsets.all(11),
-                      child: SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: GlazeSpinner(),
+    return MenuGroup(
+      header: 'catalog_blocked_tags'.tr(),
+      headerVariant: MenuGroupHeaderVariant.accentCaps,
+      headerTrailing: _selectedCount > 0
+          ? FilterClearButton(count: _selectedCount, onTap: widget.onClear)
+          : null,
+      items: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Blocked tags and keywords, indistinguishable on purpose.
+              if (_selectedCount > 0) ...[
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    for (final id in widget.blockedTagIds)
+                      FilterTagChip(
+                        label: _tagName(id),
+                        selected: true,
+                        onTap: () => widget.onToggleTag(id),
                       ),
-                    )
-                  : null,
-            ),
-            onChanged: _onChanged,
-            onSubmitted: _addKeyword,
-          ),
-        ),
-
-        // Suggestions
-        if (_query.isNotEmpty) ...[
-          const SizedBox(height: 10),
-          ..._tagMatches.map(
-            (t) => _suggestionRow(
-              icon: Icons.sell_outlined,
-              label: t.name,
-              onTap: () => _toggleTag(t.id!),
-            ),
-          ),
-          ..._keywordMatches.map(
-            (k) => _suggestionRow(
-              icon: Icons.sell_outlined,
-              label: k,
-              onTap: () => _addKeyword(k),
-            ),
-          ),
-          // Always offer blocking the raw text as a keyword.
-          if (!widget.blockedKeywords.contains(_query))
-            _suggestionRow(
-              icon: Icons.add,
-              label: 'catalog_blocked_add_keyword'.tr(
-                namedArgs: {'keyword': _query},
-              ),
-              onTap: () => _addKeyword(_query),
-            ),
-        ],
-      ],
-    );
-  }
-
-  Widget _suggestionRow({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-        child: Row(
-          children: [
-            Icon(icon, size: 16, color: context.cs.onSurfaceVariant),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: Colors.white.withValues(alpha: 0.85),
+                    for (final k in widget.blockedKeywords)
+                      FilterTagChip(
+                        label: k,
+                        selected: true,
+                        onTap: () => widget.onRemoveKeyword(k),
+                      ),
+                  ],
                 ),
+                const SizedBox(height: 12),
+              ],
+              FilterSearchField(
+                controller: _controller,
+                hint: 'catalog_blocked_search'.tr(),
+                loading: _loading,
+                onChanged: _onChanged,
+                onClear: _reset,
+                onSubmitted: _addKeyword,
               ),
-            ),
-          ],
+              if (_query.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    // Always offer blocking the raw text as a keyword.
+                    if (!widget.blockedKeywords.contains(_query))
+                      FilterTagChip(
+                        label: 'catalog_blocked_add_keyword'.tr(
+                          namedArgs: {'keyword': _query},
+                        ),
+                        icon: Icons.block_rounded,
+                        onTap: () => _addKeyword(_query),
+                      ),
+                    for (final t in _tagMatches)
+                      FilterTagChip(
+                        label: t.name,
+                        onTap: () => _toggleTag(t.id!),
+                      ),
+                    for (final k in _keywordMatches)
+                      FilterTagChip(label: k, onTap: () => _addKeyword(k)),
+                  ],
+                ),
+              ],
+            ],
+          ),
         ),
-      ),
-    );
-  }
-
-  Widget _selectedChip(String label, VoidCallback onRemove) {
-    return GestureDetector(
-      onTap: onRemove,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: context.cs.primary),
-          color: context.cs.primary.withValues(alpha: 0.2),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              label,
-              style: const TextStyle(fontSize: 12, color: Colors.white),
-            ),
-            const SizedBox(width: 5),
-            const Icon(Icons.close, size: 10, color: Colors.white),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SectionLabel extends StatelessWidget {
-  final String text;
-  const _SectionLabel(this.text);
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      text.toUpperCase(),
-      style: TextStyle(
-        fontSize: 12,
-        fontWeight: FontWeight.w600,
-        color: context.cs.onSurfaceVariant,
-        letterSpacing: 0.6,
-      ),
+      ],
     );
   }
 }

@@ -35,7 +35,7 @@ abstract class ApiConfig with _$ApiConfig {
     @Default(0) int topK,
     @Default(0.0) double frequencyPenalty,
     @Default(0.0) double presencePenalty,
-    @Default(true) bool stream,
+    @Default(false) bool stream,
     @Default('medium') String reasoningEffort,
     @Default(false) bool requestReasoning,
     @Default(false) bool useResponsesApi,
@@ -80,7 +80,7 @@ abstract class ApiConfig with _$ApiConfig {
     @Default('') String noAssistantUserPrefix,
     @Default('') String noAssistantCharPrefix,
     @Default('assistant') String noAssistantSquashRole,
-    @Default(60000) int firstChunkTimeoutMs,
+    @Default(120000) int firstChunkTimeoutMs,
 
     /// Send the leading run of system blocks in the provider's own field —
     /// Gemini's `system_instruction`, Anthropic's `system`. When off it stays
@@ -122,6 +122,16 @@ Map<String, dynamic> _normalizeApiConfigJson(Map<String, dynamic> json) {
   }
   return normalized;
 }
+
+/// [maxTokens] capped at [contextSize].
+///
+/// The reply is carved out of the context window, so a completion budget larger
+/// than the window leaves the prompt nothing at all: the history trim keeps no
+/// message, and the provider rejects `prompt + max_tokens > context` anyway. A
+/// non-positive [contextSize] is left alone rather than dragging the reply
+/// budget down to zero with it.
+int clampMaxOutputTokens(int maxTokens, int contextSize) =>
+    contextSize > 0 && maxTokens > contextSize ? contextSize : maxTokens;
 
 extension ApiConfigContextX on ApiConfig {
   /// Every field that changes which messages survive into the prompt.

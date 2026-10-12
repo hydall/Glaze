@@ -10,6 +10,7 @@ import '../../shared/theme/app_colors.dart';
 import '../../shared/utils/time_formatter.dart';
 import '../../shared/utils/avatar_image.dart';
 import '../../shared/widgets/glass_surface.dart';
+import '../../shared/widgets/glaze_action_button.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../core/models/character.dart';
 import '../../core/state/character_provider.dart'
@@ -30,8 +31,21 @@ import '../settings/app_settings_provider.dart';
 import 'chat_history_actions.dart';
 import 'chat_history_provider.dart';
 import 'chat_history_selection_provider.dart';
+import 'widgets/empty_chats_illustration.dart';
 import 'widgets/message_preview_text.dart';
 import 'widgets/typing_dots.dart';
+
+/// Hover outline for a top-level dialog row — the same hairline the grouped
+/// card draws around its sessions.
+final BoxBorder _hoverOutline = Border.all(
+  color: Colors.white.withValues(alpha: 0.1),
+);
+
+/// Inset of [_hoverOutline] so its rounded corners clear the sidebar's edge.
+const EdgeInsets _hoverOutlineInset = EdgeInsets.symmetric(
+  horizontal: 8,
+  vertical: 2,
+);
 
 class ChatHistoryList extends ConsumerStatefulWidget {
   final bool collapsed;
@@ -169,32 +183,65 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
   }
 
   Widget _buildEmptyState() {
+    final searching = widget.searchQuery.isNotEmpty;
     return Padding(
       padding: EdgeInsets.only(top: widget.topPadding),
       child: Center(
         child: widget.collapsed
             ? Icon(
-                Icons.chat_bubble_outline,
+                searching
+                    ? Icons.search_off_rounded
+                    : Icons.chat_bubble_outline,
                 size: 24,
                 color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
               )
-            : Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.chat_bubble_outline,
-                    size: 48,
-                    color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'no_dialogs'.tr(),
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: context.cs.onSurfaceVariant,
+            : SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 32),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (searching)
+                      Icon(
+                        Icons.search_off_rounded,
+                        size: 48,
+                        color: context.cs.onSurfaceVariant.withValues(
+                          alpha: 0.5,
+                        ),
+                      )
+                    else
+                      const EmptyChatsIllustration(),
+                    SizedBox(height: searching ? 12 : 20),
+                    Text(
+                      searching
+                          ? 'search_no_results'.tr()
+                          : 'chats_empty_title'.tr(),
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: searching ? 15 : 18,
+                        fontWeight: FontWeight.w600,
+                        color: context.cs.onSurface,
+                      ),
                     ),
-                  ),
-                ],
+                    if (!searching) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        'chats_empty_hint'.tr(),
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: context.cs.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      GlazeActionButton(
+                        icon: Icons.person_search_outlined,
+                        label: 'chats_empty_cta'.tr(),
+                        tone: GlazeActionTone.primary,
+                        onTap: () => context.go('/characters'),
+                      ),
+                    ],
+                  ],
+                ),
               ),
       ),
     );
@@ -517,7 +564,7 @@ class _SessionTileState extends ConsumerState<_SessionTile>
     bool generating,
     bool unread,
   ) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () =>
           context.go('/chat/${info.characterId}?session=${info.sessionIndex}'),
@@ -543,7 +590,7 @@ class _SessionTileState extends ConsumerState<_SessionTile>
             ],
           ),
         ),
-      ),
+      )),
     );
   }
 
@@ -563,6 +610,9 @@ class _SessionTileState extends ConsumerState<_SessionTile>
       // list's `@contextmenu.prevent="openActions(chat)"`.
       onSecondaryTap: _handleContextGesture,
       child: HoverGlow(
+        borderRadius: BorderRadius.circular(12),
+        hoverBorder: _hoverOutline,
+        borderInset: _hoverOutlineInset,
         child: Container(
           height: 72,
           padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -794,9 +844,7 @@ class _SessionTileState extends ConsumerState<_SessionTile>
     if (selected) {
       return BoxDecoration(
         color: context.cs.primary.withValues(alpha: 0.12),
-        border: Border(
-          left: BorderSide(color: context.cs.primary, width: 3),
-        ),
+        border: Border(left: BorderSide(color: context.cs.primary, width: 3)),
       );
     }
     if (!unread) return null;
@@ -898,6 +946,9 @@ class _GroupHeader extends ConsumerWidget {
       onLongPress: () => _showGroupActions(context, ref, latest),
       onSecondaryTap: () => _showGroupActions(context, ref, latest),
       child: HoverGlow(
+        borderRadius: BorderRadius.circular(12),
+        hoverBorder: _hoverOutline,
+        borderInset: _hoverOutlineInset,
         child: Container(
           height: 72,
           padding: const EdgeInsets.symmetric(horizontal: 16),

@@ -6,6 +6,7 @@ import '../../../core/llm/tokenizer.dart';
 import '../../../core/models/studio_config.dart';
 import '../../../core/models/studio_preset_block_groups.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_switch.dart';
 import '../../presets/widgets/preset_block_row.dart';
 
 /// Short, badge-sized name of a controller spec (`Continuity Controller` →
@@ -88,10 +89,9 @@ class StudioBlockRow extends StatelessWidget {
       trailingWidget = Transform.scale(
         scale: 0.8,
         alignment: Alignment.centerRight,
-        child: Switch(
+        child: GlazeSwitch(
           value: block.enabled,
           onChanged: block.locked ? null : onToggle,
-          activeThumbColor: context.cs.primary,
         ),
       );
     } else {
@@ -110,6 +110,7 @@ class StudioBlockRow extends StatelessWidget {
       child: Opacity(
         opacity: block.enabled ? 1.0 : 0.5,
         child: InkWell(
+          mouseCursor: SystemMouseCursors.click,
           onTap: onEdit,
           onLongPress: onLongPress,
           child: Row(
@@ -213,6 +214,7 @@ class StudioBlockRow extends StatelessWidget {
                 child: Material(
                   color: Colors.transparent,
                   child: InkWell(
+                    mouseCursor: SystemMouseCursors.click,
                     onTap: onEdit,
                     child: Icon(
                       Icons.edit_outlined,
@@ -329,6 +331,7 @@ class StudioBlockSectionHeader extends StatelessWidget {
         ),
       ),
       child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
         onTap: onToggle,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
@@ -408,6 +411,7 @@ class StudioFactCheckerRow extends StatelessWidget {
       child: Opacity(
         opacity: block.enabled ? 1.0 : 0.5,
         child: InkWell(
+          mouseCursor: SystemMouseCursors.click,
           onTap: onEdit,
           child: Row(
             children: [
@@ -455,6 +459,7 @@ class StudioFactCheckerRow extends StatelessWidget {
                 child: Material(
                   color: Colors.transparent,
                   child: InkWell(
+                    mouseCursor: SystemMouseCursors.click,
                     onTap: onEdit,
                     child: Icon(
                       Icons.edit_outlined,
@@ -469,11 +474,7 @@ class StudioFactCheckerRow extends StatelessWidget {
                 child: Transform.scale(
                   scale: 0.8,
                   alignment: Alignment.centerRight,
-                  child: Switch(
-                    value: block.enabled,
-                    onChanged: onToggle,
-                    activeThumbColor: context.cs.primary,
-                  ),
+                  child: GlazeSwitch(value: block.enabled, onChanged: onToggle),
                 ),
               ),
             ],
@@ -619,6 +620,7 @@ class _StudioBlockGroupRowState extends State<StudioBlockGroupRow> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             InkWell(
+              mouseCursor: SystemMouseCursors.click,
               onTap: () => setState(() => _expanded = !_expanded),
               onLongPress: () => widget.onDeleteGroup(group),
               child: Row(
@@ -680,7 +682,7 @@ class _StudioBlockGroupRowState extends State<StudioBlockGroupRow> {
                       ),
                     ),
                   ),
-                  Switch.adaptive(
+                  GlazeSwitch(
                     value: header.enabled,
                     onChanged: widget.onToggleGroup,
                   ),
@@ -690,6 +692,7 @@ class _StudioBlockGroupRowState extends State<StudioBlockGroupRow> {
                     child: Material(
                       color: Colors.transparent,
                       child: InkWell(
+                        mouseCursor: SystemMouseCursors.click,
                         onTap: () => widget.onDeleteGroup(group),
                         borderRadius: BorderRadius.circular(20),
                         child: Icon(

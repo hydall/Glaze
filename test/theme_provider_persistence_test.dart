@@ -151,5 +151,11 @@ class _FakeThemePresetStore implements ThemePresetStore {
   Future<void> setActive(String id) async {}
 
   @override
+  Future<ThemeSlots?> loadSlots() async => null;
+
+  @override
+  Future<void> saveSlots(ThemeSlots slots) async {}
+
+  @override
   Future<ThemePreset> importFromFile(String path) => throw UnimplementedError();
 }

@@ -31,6 +31,30 @@ class DesktopScope extends InheritedWidget {
 
 bool isDesktopLayout(BuildContext context) => DesktopScope.isDesktopOf(context);
 
+/// App-wide [DesktopScope], provided above the router by the app's builder.
+///
+/// The shell provides its own scope around its columns, but everything on the
+/// root navigator sits above it — dialogs, sheet windows, pages pushed with
+/// `rootNavigator: true`, onboarding. Without this they read "not desktop", so
+/// a sheet opened from one of them slid up as a bottom sheet instead of opening
+/// as a window. Uses the shell's own rule (see `DesktopShell.build`), so both
+/// scopes always agree.
+class AppDesktopScope extends ConsumerWidget {
+  final Widget child;
+
+  const AppDesktopScope({super.key, required this.child});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return DesktopScope(
+      isDesktop:
+          isDesktopViewportSize(MediaQuery.sizeOf(context)) &&
+          !ref.watch(forceMobileLayoutProvider),
+      child: child,
+    );
+  }
+}
+
 /// Width at which the app switches to its desktop layout.
 const double kDesktopWidthBreakpoint = 768;
 

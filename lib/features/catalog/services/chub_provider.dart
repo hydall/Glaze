@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import 'catalog_http.dart';
 import 'greeting_normalizer.dart';
 import '../catalog_models.dart';
@@ -39,9 +41,102 @@ void resetChubTagCache() {
   _chubTagsFetched = false;
 }
 
+/// How many of the most-used tags the filter sheet offers up front. Anything
+/// past this is still one search away through [fetchChubTagSuggestions].
+const _chubTagListSize = 500;
+
+/// The most-used Chub tags, for the filter sheet's chip grid.
+///
+/// Read from chub.ai's own tag index (`POST /tags`), which knows every tag and
+/// how many public cards carry it. The index used to be guessed by sampling
+/// ~1600 search results and counting their topics, which missed every tag that
+/// happened not to appear on those cards and took eight sequential requests.
+/// That sampling stays as a fallback for when the index answers with nothing.
+///
+/// Tags stay name-only (no id): Chub filters by topic *name*, so the selection
+/// has to land in [CatalogFilters.tagNames].
 Future<List<CatalogTag>> fetchChubTags({String? apiKey}) async {
   if (_chubTagsFetched) return _cachedChubTags;
 
+  var tags = <CatalogTag>[];
+  try {
+    tags = await _queryChubTags(limit: _chubTagListSize, apiKey: apiKey);
+  } catch (_) {}
+  if (tags.isEmpty) tags = await _sampleChubTags(apiKey: apiKey);
+
+  if (tags.isNotEmpty) {
+    _cachedChubTags = tags;
+    _chubTagsFetched = true;
+  }
+  return _cachedChubTags;
+}
+
+/// Tag names matching [query], most-used first, for the filter sheet's search.
+/// Resolves to an empty list on any failure, as the sheet expects.
+Future<List<String>> fetchChubTagSuggestions(
+  String query, {
+  String? apiKey,
+}) async {
+  final q = query.trim();
+  if (q.isEmpty) return const [];
+  try {
+    final tags = await _queryChubTags(search: q, limit: 40, apiKey: apiKey);
+    return [for (final t in tags) t.name];
+  } catch (_) {
+    return const [];
+  }
+}
+
+/// One call to chub.ai's tag index. NSFW/NSFL tags are included on purpose:
+/// the content toggles decide which *cards* come back, not which tags exist.
+Future<List<CatalogTag>> _queryChubTags({
+  String? search,
+  required int limit,
+  String? apiKey,
+}) async {
+  final data = await catalogPost(
+    '$_apiBase/tags',
+    {
+      'search': ?search,
+      'limit': limit,
+      'sort': 'n_projects',
+      'nsfw': true,
+      'nsfl': true,
+    },
+    chubHeaders(apiKey: apiKey),
+  );
+  return parseChubTags(data);
+}
+
+/// Maps a `POST /tags` response onto name-only [CatalogTag]s, most-used first.
+///
+/// Names are lowercased and de-duplicated: chub.ai matches `topics` without
+/// regard to case, and a saved filter from the sampled index is lowercase too.
+@visibleForTesting
+List<CatalogTag> parseChubTags(Map<String, dynamic> data) {
+  final raw = (data['tags'] as List?) ?? const [];
+  final entries = <({String name, int count})>[];
+  final seen = <String>{};
+  for (final t in raw) {
+    if (t is! Map) continue;
+    final name = ((t['name'] ?? t['title'] ?? '') as String).trim().toLowerCase();
+    if (name.isEmpty || !seen.add(name)) continue;
+    final count =
+        (t['non_private_projects_count'] ?? t['total_projects_count'] ?? 0)
+            as int;
+    entries.add((name: name, count: count));
+  }
+  // Stable sort, so the server's order breaks ties.
+  final indexed = entries.indexed.toList()
+    ..sort((a, b) {
+      final byCount = b.$2.count.compareTo(a.$2.count);
+      return byCount != 0 ? byCount : a.$1.compareTo(b.$1);
+    });
+  return [for (final e in indexed) CatalogTag(name: e.$2.name)];
+}
+
+/// Fallback index: counts the topics on a few pages of search results.
+Future<List<CatalogTag>> _sampleChubTags({String? apiKey}) async {
   try {
     final sortOrders = ['download_count', 'id', 'star_count', 'default'];
     const pagesPerSort = 2;
@@ -74,17 +169,15 @@ Future<List<CatalogTag>> fetchChubTags({String? apiKey}) async {
       }
     }
 
-    _cachedChubTags = tagCounts.entries
+    return tagCounts.entries
         .toList()
         .sorted((a, b) => b.value.compareTo(a.value))
-        .take(600)
+        .take(_chubTagListSize)
         .map((e) => CatalogTag(name: e.key))
         .toList();
-
-    _chubTagsFetched = true;
-  } catch (_) {}
-
-  return _cachedChubTags;
+  } catch (_) {
+    return const [];
+  }
 }
 
 Future<CatalogSearchResult> chubSearch({
@@ -94,6 +187,7 @@ Future<CatalogSearchResult> chubSearch({
   CatalogFilters filters = const CatalogFilters(),
   String? apiKey,
   bool accountNsfl = false,
+  String? username,
 }) async {
   // "Timeline" is chub.ai's account-scoped recommendation feed, served from a
   // separate endpoint that pages by number and ignores the free-text query and
@@ -122,6 +216,11 @@ Future<CatalogSearchResult> chubSearch({
   );
   if (sortEntry.maxDaysAgo != null) params.write('&max_days_ago=${sortEntry.maxDaysAgo}');
   if (query.isNotEmpty) params.write('&search=${Uri.encodeComponent(query)}');
+  // Narrows the search to one creator — the request chub.ai's own user page
+  // makes for the characters grid.
+  if (username != null && username.isNotEmpty) {
+    params.write('&username=${Uri.encodeComponent(username)}');
+  }
   if (filters.maxTokens < 100000) params.write('&max_tokens=${filters.maxTokens}');
 
   final includeTags = filters.tagNames;
@@ -189,6 +288,20 @@ Future<CatalogSearchResult> _chubTimeline({
     total: nodes.length,
     hasMore: nodes.isNotEmpty,
   );
+}
+
+/// [username]'s public profile (`/api/users/{username}`): display name, avatar,
+/// bio and follower count. The payload also embeds a page of the user's
+/// projects, which is ignored — the grid comes from [chubSearch], which pages.
+Future<Map<String, dynamic>> chubFetchUser(
+  String username, {
+  String? apiKey,
+}) async {
+  final data = await catalogGet(
+    '$_apiBase/api/users/${Uri.encodeComponent(username)}',
+    chubHeaders(apiKey: apiKey),
+  );
+  return (data['node'] ?? data) as Map<String, dynamic>;
 }
 
 Future<DownloadedCharacter> chubGetCharacter(

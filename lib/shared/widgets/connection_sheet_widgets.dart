@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
+import 'glaze_switch.dart';
 
 /// Shared building blocks for the "connections" bottom sheets
 /// (persona / preset / lorebook). Extracted from the previously duplicated
@@ -59,7 +60,8 @@ class ConnectionSection extends StatelessWidget {
   }
 }
 
-/// A labelled row with a trailing [Switch] (e.g. the "global enabled" toggle).
+/// A labelled row with a trailing [GlazeSwitch] (e.g. the "global enabled"
+/// toggle).
 class ConnectionToggleRow extends StatelessWidget {
   final String label;
   final bool value;
@@ -83,11 +85,7 @@ class ConnectionToggleRow extends StatelessWidget {
             style: TextStyle(fontSize: 14, color: context.cs.onSurface),
           ),
         ),
-        Switch(
-          value: value,
-          onChanged: onChanged,
-          activeThumbColor: context.cs.primary,
-        ),
+        GlazeSwitch(value: value, onChanged: onChanged),
       ],
     );
   }

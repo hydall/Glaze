@@ -11,6 +11,7 @@ import '../../../core/state/db_provider.dart';
 import '../../../core/utils/time_helpers.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/generic_editor.dart';
+import '../../../shared/widgets/glaze_switch.dart';
 import '../../../shared/widgets/list_controls.dart';
 import '../../../shared/widgets/menu_group.dart';
 import '../../../shared/widgets/sheet_view.dart';
@@ -300,13 +301,12 @@ class _AuthorsNoteSheetState extends ConsumerState<AuthorsNoteSheet> {
       actions: _hasSession
           ? [
               SheetViewAction(
-                icon: Switch(
+                icon: GlazeSwitch(
                   value: _enabled,
                   onChanged: (v) {
                     setState(() => _enabled = v);
                     _setEnabled(v);
                   },
-                  activeThumbColor: context.cs.primary,
                 ),
                 onPressed: () {
                   setState(() => _enabled = !_enabled);

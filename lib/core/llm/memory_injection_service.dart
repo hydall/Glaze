@@ -281,6 +281,7 @@ class MemoryInjectionService {
         currentText,
         embeddingConfig,
         gs,
+        sessionId: sessionId,
         shouldAbort: shouldAbort,
         cancelToken: cancelToken,
       );

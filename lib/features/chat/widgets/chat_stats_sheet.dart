@@ -647,7 +647,7 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        GestureDetector(
+        MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
           onTap: () => setState(() => _showChatDropdown = !_showChatDropdown),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -699,7 +699,7 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
                 ),
               ],
             ),
-          ),
+          )),
         ),
         AnimatedCrossFade(
           firstChild: const SizedBox(height: 0, width: double.infinity),
@@ -752,6 +752,7 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
                           ),
                         );
                         return InkWell(
+                          mouseCursor: SystemMouseCursors.click,
                           onTap: () {
                             setState(() {
                               _selectedSessionId = session.id;
@@ -835,7 +836,7 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        GestureDetector(
+        MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
           onTap: () => setState(() => _showCharDropdown = !_showCharDropdown),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -885,7 +886,7 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
                 ),
               ],
             ),
-          ),
+          )),
         ),
         AnimatedCrossFade(
           firstChild: const SizedBox(height: 0, width: double.infinity),
@@ -930,6 +931,7 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
                           ),
                         );
                         return InkWell(
+                          mouseCursor: SystemMouseCursors.click,
                           onTap: () {
                             setState(() {
                               _selectedCharId = char.id;

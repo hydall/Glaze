@@ -133,7 +133,8 @@ flutter analyze 2>&1 | Tee-Object -FilePath analyze_full.txt -Encoding UTF8; Get
 
 ### Theme
 - Material 3 with `colorSchemeSeed`
-- Light, dark, and system theme modes are supported; each theme preset can also select its preferred mode
+- Each theme preset has a manually set type (`themeMode`: dark / light / same as device) that sets its brightness
+- "Follow device theme" (settings → Appearance) swaps between two user-picked presets as the device goes light or dark
 - Colors in `lib/shared/theme/app_colors.dart`
 - Theme in `lib/shared/theme/app_theme.dart`
 

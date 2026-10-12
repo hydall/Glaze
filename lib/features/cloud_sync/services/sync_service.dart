@@ -224,7 +224,7 @@ class SyncService {
 
   Future<void> fullPush({
     void Function(SyncProgress)? onProgress,
-    bool includeApiKeys = false,
+    bool? includeApiKeys,
   }) async {
     if (_operationInProgress) {
       throw StateError('Sync operation already in progress');
@@ -300,7 +300,7 @@ class SyncService {
 
   Future<void> fullSync({
     void Function(SyncProgress)? onProgress,
-    bool includeApiKeys = false,
+    bool? includeApiKeys,
   }) async {
     await fullPush(onProgress: onProgress, includeApiKeys: includeApiKeys);
     if (_status != SyncStatus.error) {

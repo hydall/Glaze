@@ -118,9 +118,11 @@ class SyncEngine {
 
   Future<void> pushEntities({
     required void Function(SyncProgress) onProgress,
-    bool includeApiKeys = false,
+    bool? includeApiKeys,
   }) async {
-    _includeApiKeys = includeApiKeys;
+    _includeApiKeys =
+        includeApiKeys ??
+        SyncSerialization.includeApiKeys(await SharedPreferences.getInstance());
     await _adapter.ensureFolder(cloudBase);
     await _adapter.ensureFolder('$cloudBase/characters');
     await _adapter.ensureFolder('$cloudBase/personas');
@@ -192,9 +194,17 @@ class SyncEngine {
     final tasks = <Future<void> Function()>[];
     var processed = 0;
     final hashSkippedKeys = <String>[];
+    var apiPresetsPushed = false;
 
     for (final entry in entries) {
       final cloudEntry = cloudManifest?.entries[entry.key];
+      // The cloud copy was written without keys, but keys are wanted now.
+      // The hashes can still agree (a pull accepted the stripped copy as
+      // equal), so the hash alone must not skip the upload.
+      final apiKeysMissing =
+          entry.type == 'api_presets' &&
+          _includeApiKeys &&
+          cloudManifest?.apiKeysIncluded != true;
 
       if (entry.deleted) {
         if (cloudEntry != null && !cloudEntry.deleted) {
@@ -224,7 +234,8 @@ class SyncEngine {
       // hash-matching entry was re-uploaded because file existence could not be
       // confirmed — producing a full-cloud re-push with no duplicates. See the
       // empty-body fall-through that this replaces.
-      if (cloudEntry != null &&
+      if (!apiKeysMissing &&
+          cloudEntry != null &&
           !cloudEntry.deleted &&
           cloudEntry.hash == entry.hash) {
         final listingVerifiedMissing =
@@ -241,6 +252,7 @@ class SyncEngine {
         }
       }
 
+      if (entry.type == 'api_presets') apiPresetsPushed = true;
       tasks.add(() async {
         processed++;
         onProgress(
@@ -286,7 +298,12 @@ class SyncEngine {
       version: SyncManifest.currentVersion,
       lastSync: DateTime.now().millisecondsSinceEpoch,
       entries: cleanedEntries,
-      apiKeysIncluded: _includeApiKeys,
+      // The flag describes the presets file in the cloud. A push that left
+      // that file alone must not relabel it — a device with the switch off
+      // would otherwise mark another device's keys as absent.
+      apiKeysIncluded: apiPresetsPushed || cloudManifest == null
+          ? _includeApiKeys
+          : cloudManifest.apiKeysIncluded,
     );
     final manifestJson = jsonEncode(
       updatedManifest.toJson(includeLocalState: false),
@@ -520,10 +537,7 @@ class SyncEngine {
     // particular, this preserves additive local entities (such as Loom
     // presets) absent from an older cloud manifest.
     if (pushLocalChanges) {
-      await pushEntities(
-        onProgress: onProgress,
-        includeApiKeys: _includeApiKeys,
-      );
+      await pushEntities(onProgress: onProgress);
     }
 
     await _clearPendingPullManifest();
@@ -1523,6 +1537,7 @@ class SyncEngine {
       globalRegexScripts: globalRegexScripts,
       studioRegexScripts: studioRegexScripts,
       appSettings: appSettings,
+      chatLayout: SyncSerialization.readChatLayout(prefs),
     );
   }
 
@@ -1565,6 +1580,15 @@ class SyncEngine {
       await AppSettingsPreferences.applyPartial(
         prefs,
         Map<String, dynamic>.from(rawAppSettings),
+      );
+    }
+    // Absent from payloads written before the layout was synced; those leave
+    // the local layout alone.
+    final rawChatLayout = data[SyncSerialization.chatLayoutKey];
+    if (rawChatLayout is Map) {
+      await SyncSerialization.applyChatLayout(
+        prefs,
+        Map<String, dynamic>.from(rawChatLayout),
       );
     }
   }

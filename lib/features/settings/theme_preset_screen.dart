@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 
+import 'package:dynamic_color/dynamic_color.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -12,14 +13,17 @@ import '../../../core/platform/wallpaper.dart';
 import '../../../core/services/file_export_service.dart';
 import '../../../shared/shell/desktop/desktop_floating_provider.dart';
 import '../../../shared/shell/nav_height_provider.dart';
+import '../../../shared/shell/shell_header_provider.dart';
 import '../../../shared/state/preset_sort.dart';
 import '../../../shared/theme/built_in_themes.dart';
 import '../../../shared/theme/theme_font_provider.dart';
 import '../../../shared/theme/theme_preset.dart';
 import '../../../shared/theme/theme_provider.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/theme/app_theme.dart';
 import '../../../shared/widgets/glass_surface.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/glaze_fab.dart';
 import '../../../shared/widgets/glaze_scaffold.dart';
 import '../../../shared/widgets/glaze_tab_bar.dart';
 import '../../../shared/widgets/swipe_tab_switcher.dart';
@@ -29,6 +33,9 @@ import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/list_controls.dart';
 import 'theme_editor_screen.dart';
 import 'theme_preset_sort.dart';
+
+/// Height of the pill [GlazeTabBar] floating over the lists.
+const double _kTabBarHeight = 42;
 
 class ThemePresetScreen extends ConsumerStatefulWidget {
   const ThemePresetScreen({super.key});
@@ -52,51 +59,65 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
   Widget build(BuildContext context) {
     final theme = ref.watch(themeProvider);
     final bottomPad = ref.watch(navHeightProvider) + 20;
+    // The lists run under the shell header and the tab strip, the way the
+    // preset SheetView's list runs under its header: both are glass, so the
+    // cards stay visible (blurred) behind them as they scroll past. Inside a
+    // desktop window the window's title bar is the header and nothing is
+    // reserved for one here (see GlazeScaffold).
+    final headerBottom = DetachedShellHost.drawsChrome(context)
+        ? 0.0
+        : MediaQuery.paddingOf(context).top + 66;
+    final tabBarTop = headerBottom + 12;
+    final listTop = tabBarTop + _kTabBarHeight + 12;
 
     return GlazeScaffold(
       title: 'theme_presets'.tr(),
       useShellHeader: true,
       headerBranchIndex: 3,
+      extendBodyBehindHeader: true,
       onBack: () => Navigator.pop(context),
       body: Stack(
         children: [
-          Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                child: GlazeTabBar(
-                  tabs: [
-                    GlazeTabItem(
-                      label: 'theme_tab_my'.tr(),
-                      icon: Icons.palette_outlined,
-                    ),
-                    GlazeTabItem(
-                      label: 'theme_tab_built_in'.tr(),
-                      icon: Icons.auto_awesome_outlined,
+          Positioned.fill(
+            child: SwipeTabSwitcher(
+              index: _activeTab,
+              length: 2,
+              onChanged: (i) => setState(() => _activeTab = i),
+              child: TabSlideSwitcher(
+                index: _activeTab,
+                child: IndexedStack(
+                  index: _activeTab,
+                  children: [
+                    _buildMyThemesList(context, theme, listTop, bottomPad),
+                    _buildBuiltInList(
+                      context,
+                      theme.activePreset,
+                      listTop,
+                      bottomPad,
                     ),
                   ],
-                  activeIndex: _activeTab,
-                  onChanged: (i) => setState(() => _activeTab = i),
                 ),
               ),
-              Expanded(
-                child: SwipeTabSwitcher(
-                  index: _activeTab,
-                  length: 2,
-                  onChanged: (i) => setState(() => _activeTab = i),
-                  child: TabSlideSwitcher(
-                    index: _activeTab,
-                    child: IndexedStack(
-                      index: _activeTab,
-                      children: [
-                        _buildMyThemesList(context, theme, bottomPad),
-                        _buildBuiltInList(context, theme.activePreset, bottomPad),
-                      ],
-                    ),
-                  ),
+            ),
+          ),
+          Positioned(
+            top: tabBarTop,
+            left: 16,
+            right: 16,
+            child: GlazeTabBar(
+              tabs: [
+                GlazeTabItem(
+                  label: 'theme_tab_my'.tr(),
+                  icon: Icons.palette_outlined,
                 ),
-              ),
-            ],
+                GlazeTabItem(
+                  label: 'theme_tab_built_in'.tr(),
+                  icon: Icons.auto_awesome_outlined,
+                ),
+              ],
+              activeIndex: _activeTab,
+              onChanged: (i) => setState(() => _activeTab = i),
+            ),
           ),
           // The add/import FAB only applies to the user's own theme list.
           if (_activeTab == 0)
@@ -113,6 +134,7 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
   Widget _buildMyThemesList(
     BuildContext context,
     ThemeSettings theme,
+    double padTop,
     double padBottom,
   ) {
     final activeId = theme.activePreset.id;
@@ -120,7 +142,7 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
         ref.watch(themePresetSortProvider).value ?? const PresetSortState();
     final presets = sortThemePresets(theme.presets, sortState);
     return ListView(
-      padding: EdgeInsets.only(bottom: padBottom + 60),
+      padding: EdgeInsets.only(top: padTop, bottom: padBottom + 60),
       children: [
         _buildFontToggle(context),
         Padding(
@@ -158,6 +180,10 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
             p,
             p.id == activeId,
             theme.activePreset,
+            inLightSlot: theme.followSystem &&
+                p.id == theme.slotPreset(Brightness.light).id,
+            inDarkSlot: theme.followSystem &&
+                p.id == theme.slotPreset(Brightness.dark).id,
           ),
         ),
       ],
@@ -167,14 +193,18 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
   Widget _buildBuiltInList(
     BuildContext context,
     ThemePreset activePreset,
+    double topPad,
     double bottomPad,
   ) {
     final catalog = ref.watch(builtInThemesProvider);
     if (catalog.isEmpty) {
-      return _buildBuiltInEmptyState(context);
+      return Padding(
+        padding: EdgeInsets.only(top: topPad),
+        child: _buildBuiltInEmptyState(context),
+      );
     }
     return ListView(
-      padding: EdgeInsets.only(top: 8, bottom: bottomPad + 60),
+      padding: EdgeInsets.only(top: topPad, bottom: bottomPad + 60),
       children: [
         ...catalog.map(
           (p) => _buildPresetTile(
@@ -318,9 +348,60 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
     bool isActive,
     ThemePreset activePreset, {
     bool catalog = false,
+    bool inLightSlot = false,
+    bool inDarkSlot = false,
+  }) {
+    // Material You's stored accent is only a placeholder; show the color the
+    // theme really renders with (system dynamic palette / seeded fallback).
+    if (preset.isMaterialYou) {
+      return DynamicColorBuilder(
+        builder: (lightDynamic, darkDynamic) {
+          // Built-ins follow the device while the slots do, else stay dark
+          // (see ThemeSettings.brightness).
+          final theme = ref.read(themeProvider);
+          final isDark =
+              !theme.followSystem ||
+              theme.platformBrightness == Brightness.dark;
+          return _buildPresetTileContent(
+            context,
+            preset,
+            isActive,
+            activePreset,
+            accent: materialYouAccent(
+              lightDynamic: lightDynamic,
+              darkDynamic: darkDynamic,
+              isDark: isDark,
+            ),
+            catalog: catalog,
+            inLightSlot: inLightSlot,
+            inDarkSlot: inDarkSlot,
+          );
+        },
+      );
+    }
+    return _buildPresetTileContent(
+      context,
+      preset,
+      isActive,
+      activePreset,
+      accent: preset.accent,
+      catalog: catalog,
+      inLightSlot: inLightSlot,
+      inDarkSlot: inDarkSlot,
+    );
+  }
+
+  Widget _buildPresetTileContent(
+    BuildContext context,
+    ThemePreset preset,
+    bool isActive,
+    ThemePreset activePreset, {
+    required Color accent,
+    bool catalog = false,
+    bool inLightSlot = false,
+    bool inDarkSlot = false,
   }) {
     final cs = context.cs;
-    final accent = preset.accent;
     final bgBytes = _decodeBgImage(preset);
     final hasImage = bgBytes != null;
 
@@ -418,8 +499,29 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
                   ],
                 ),
               ),
+              // The device modes this theme is set for.
+              if (inLightSlot)
+                Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: Icon(
+                    Icons.light_mode_rounded,
+                    size: 18,
+                    color: labelColor,
+                    shadows: textShadows,
+                  ),
+                ),
+              if (inDarkSlot)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: Icon(
+                    Icons.dark_mode_rounded,
+                    size: 18,
+                    color: labelColor,
+                    shadows: textShadows,
+                  ),
+                ),
               if (catalog)
-                GestureDetector(
+                MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
                   onTap: () => _installBuiltIn(preset),
                   child: Container(
                     width: 32,
@@ -438,9 +540,9 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
                       color: Colors.white,
                     ),
                   ),
-                )
+                ))
               else if (preset.id != 'default')
-                GestureDetector(
+                MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
                   onTap: () =>
                       _showPresetActions(context, preset, isActive),
                   child: Container(
@@ -460,7 +562,7 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
                       color: Colors.white,
                     ),
                   ),
-                ),
+                )),
             ],
           ),
         ),
@@ -523,6 +625,7 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
             Material(
               color: Colors.transparent,
               child: InkWell(
+                mouseCursor: SystemMouseCursors.click,
                 onTap: catalog
                     ? () => _installBuiltIn(preset)
                     : (isActive ? null : () => _selectPreset(preset)),
@@ -639,7 +742,7 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
 
   Future<void> _openThemeEditor(ThemePreset preset, {required bool isActive}) async {
     if (!isActive) {
-      _applyPreset(preset);
+      await ref.read(themeProvider.notifier).applyPreset(preset);
     }
     if (!mounted) return;
     await _pushThemeEditor();
@@ -712,14 +815,10 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
     }
   }
 
-  void _applyPreset(ThemePreset preset) {
-    ref.read(themeProvider.notifier).applyPreset(preset);
-  }
-
   /// Applies a preset from a direct tap. For Material You, also offers the
   /// wallpaper-background permission prompt (Android only).
   Future<void> _selectPreset(ThemePreset preset) async {
-    _applyPreset(preset);
+    await ref.read(themeProvider.notifier).applyPreset(preset);
     if (preset.isMaterialYou) {
       await _promptWallpaperPermissionIfNeeded();
     }
@@ -797,38 +896,10 @@ class _ThemeFab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return GlazeFab(
+      label: 'action_add'.tr(),
+      tooltip: 'action_add'.tr(),
       onTap: onTap,
-      child: Container(
-        height: 48,
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        decoration: BoxDecoration(
-          color: context.cs.primary,
-          borderRadius: BorderRadius.circular(24),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.3),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.add_rounded, color: Colors.white, size: 24),
-            const SizedBox(width: 8),
-            Text(
-              'action_add'.tr(),
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

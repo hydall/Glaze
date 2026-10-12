@@ -66,6 +66,7 @@ const Map<String, HandlerSpec> bridgeHandlers = {
   'onRegenerate': HandlerSpec(HandlerKind.idStringPair),
   'onChangeGreeting': HandlerSpec(HandlerKind.idIntPair),
   'onRerunCleaner': HandlerSpec(HandlerKind.stringArg),
+  'onTranslateMessage': HandlerSpec(HandlerKind.jsonObject),
   'onSelectionAction': HandlerSpec(HandlerKind.jsonObject),
   // Edit
   'onEditSave': HandlerSpec(HandlerKind.idStringPair),
@@ -78,6 +79,7 @@ const Map<String, HandlerSpec> bridgeHandlers = {
   'onToggleImageHidden': HandlerSpec(HandlerKind.stringArg),
   'onSelectionChange': HandlerSpec(HandlerKind.idList),
   'onInjectClick': HandlerSpec(HandlerKind.stringArg),
+  'onOutputLimitClick': HandlerSpec(HandlerKind.stringArg),
   // Image generation
   'onImgRetry': HandlerSpec(HandlerKind.imageAction),
   'onImgEnableRetry': HandlerSpec(HandlerKind.imageAction),

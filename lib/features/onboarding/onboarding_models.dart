@@ -8,11 +8,11 @@ import 'package:flutter/material.dart';
 enum OnboardingSlideType {
   welcome,
   features,
+  glossary,
   dataImport,
-  api,
-  persona,
   layout,
   notifications,
+  guides,
   allSet,
 }
 
@@ -54,8 +54,7 @@ List<OnboardingSlideData> buildOnboardingSlides({
   required bool includeNotifications,
 }) => <OnboardingSlideData>[
   for (final slide in _allOnboardingSlides)
-    if (slide.type != OnboardingSlideType.notifications ||
-        includeNotifications)
+    if (slide.type != OnboardingSlideType.notifications || includeNotifications)
       slide,
 ];
 
@@ -63,10 +62,19 @@ const _allOnboardingSlides = <OnboardingSlideData>[
   OnboardingSlideData(
     type: OnboardingSlideType.welcome,
     title: 'onboarding_welcome_title',
+    desc: 'onboarding_welcome_desc',
   ),
   OnboardingSlideData(
     type: OnboardingSlideType.features,
     title: 'onboarding_features_title',
+  ),
+  // Its own slide rather than a block on Features: as one line in that list
+  // it went unread, and the questions it answers kept arriving at support.
+  OnboardingSlideData(
+    type: OnboardingSlideType.glossary,
+    title: 'onboarding_feature_glossary_title',
+    desc: 'onboarding_glossary_slide_desc',
+    icon: Icons.menu_book_outlined,
   ),
   OnboardingSlideData(
     type: OnboardingSlideType.dataImport,
@@ -74,18 +82,9 @@ const _allOnboardingSlides = <OnboardingSlideData>[
     desc: 'onboarding_import_slide_desc',
     icon: Icons.download_rounded,
   ),
-  OnboardingSlideData(
-    type: OnboardingSlideType.api,
-    title: 'onboarding_api_title',
-    desc: 'onboarding_preset_slide_desc',
-    icon: Icons.dns_outlined,
-  ),
-  OnboardingSlideData(
-    type: OnboardingSlideType.persona,
-    title: 'onboarding_persona_title',
-    desc: 'onboarding_persona_slide_desc',
-    icon: Icons.person_outline_rounded,
-  ),
+  // API, persona and preset used to be set up here. They moved to the Tools
+  // tab's guide, which shows the real screens they live on instead of a
+  // one-off copy of them that the reader never saw again.
   OnboardingSlideData(
     type: OnboardingSlideType.layout,
     title: 'onboarding_layout_title',
@@ -98,6 +97,14 @@ const _allOnboardingSlides = <OnboardingSlideData>[
     desc: 'onboarding_notifications_slide_desc',
     icon: Icons.notifications_active_outlined,
   ),
+  // Last before the finish: the guides it offers start right after it, on the
+  // tabs the reader is about to land on.
+  OnboardingSlideData(
+    type: OnboardingSlideType.guides,
+    title: 'onboarding_guides_title',
+    desc: 'onboarding_guides_desc',
+    icon: Icons.school_outlined,
+  ),
   OnboardingSlideData(
     type: OnboardingSlideType.allSet,
     title: 'onboarding_allset_title',
@@ -106,11 +113,11 @@ const _allOnboardingSlides = <OnboardingSlideData>[
   ),
 ];
 
-const onboardingIntroContent = <OnboardingInfoBlock>[
+const onboardingFeaturesContent = <OnboardingInfoBlock>[
   OnboardingInfoBlock(
     icon: Icons.layers_outlined,
-    title: 'onboarding_feature_roleplay_title',
-    desc: 'onboarding_feature_roleplay_desc',
+    title: 'onboarding_feature_friendly_title',
+    desc: 'onboarding_feature_friendly_desc',
   ),
   OnboardingInfoBlock(
     icon: Icons.link_rounded,
@@ -122,26 +129,15 @@ const onboardingIntroContent = <OnboardingInfoBlock>[
     title: 'onboarding_feature_privacy_title',
     desc: 'onboarding_feature_privacy_desc',
   ),
-];
-
-const onboardingFeaturesContent = <OnboardingInfoBlock>[
-  // First on the slide on purpose: the chat drawer is the one feature a new
-  // user cannot stumble into from the menu, and the Actions tab in particular
-  // is invisible until someone says it is there.
   OnboardingInfoBlock(
-    icon: Icons.bolt_outlined,
-    title: 'onboarding_feature_drawer_title',
-    desc: 'onboarding_feature_drawer_desc',
+    icon: Icons.travel_explore_rounded,
+    title: 'onboarding_feature_catalog_title',
+    desc: 'onboarding_feature_catalog_desc',
   ),
   OnboardingInfoBlock(
     icon: Icons.image_outlined,
     title: 'onboarding_feature_imggen_title',
     desc: 'onboarding_feature_imggen_desc',
-  ),
-  OnboardingInfoBlock(
-    icon: Icons.menu_book_outlined,
-    title: 'onboarding_feature_glossary_title',
-    desc: 'onboarding_feature_glossary_desc',
   ),
   OnboardingInfoBlock(
     icon: Icons.palette_outlined,

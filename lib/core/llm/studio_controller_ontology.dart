@@ -60,7 +60,7 @@ class StudioControllerOntology {
       refreshPolicy: 'turn',
       temperature: 0.3,
       maxTokens: 1600,
-      timeoutMs: 60000,
+      timeoutMs: 120000,
       requiresSpecId: 'ledger',
     ),
     StudioControllerSpec(
@@ -77,7 +77,7 @@ class StudioControllerOntology {
       refreshPolicy: 'turn',
       temperature: 0.3,
       maxTokens: 1400,
-      timeoutMs: 60000,
+      timeoutMs: 120000,
     ),
     StudioControllerSpec(
       id: 'dialogue',
@@ -93,7 +93,7 @@ class StudioControllerOntology {
       refreshPolicy: 'turn',
       temperature: 0.3,
       maxTokens: 1200,
-      timeoutMs: 60000,
+      timeoutMs: 120000,
     ),
     StudioControllerSpec(
       id: 'guard_ru',
@@ -109,7 +109,7 @@ class StudioControllerOntology {
       refreshPolicy: 'turn',
       temperature: 0.2,
       maxTokens: 1400,
-      timeoutMs: 60000,
+      timeoutMs: 120000,
     ),
     StudioControllerSpec(
       id: 'guard_en',
@@ -125,7 +125,7 @@ class StudioControllerOntology {
       refreshPolicy: 'turn',
       temperature: 0.2,
       maxTokens: 1400,
-      timeoutMs: 60000,
+      timeoutMs: 120000,
     ),
     StudioControllerSpec(
       id: 'world',
@@ -141,7 +141,7 @@ class StudioControllerOntology {
       refreshPolicy: 'turn',
       temperature: 0.3,
       maxTokens: 1200,
-      timeoutMs: 60000,
+      timeoutMs: 120000,
     ),
     StudioControllerSpec(
       id: 'meta',
@@ -158,7 +158,7 @@ class StudioControllerOntology {
       refreshPolicy: 'turn',
       temperature: 0.2,
       maxTokens: 1200,
-      timeoutMs: 60000,
+      timeoutMs: 120000,
     ),
     StudioControllerSpec(
       id: 'final',
@@ -172,7 +172,7 @@ class StudioControllerOntology {
       refreshPolicy: 'turn',
       temperature: 0.8,
       maxTokens: 8000,
-      timeoutMs: 90000,
+      timeoutMs: 120000,
       isFinal: true,
       lockedOn: true,
     ),
@@ -186,7 +186,7 @@ class StudioControllerOntology {
       refreshPolicy: 'turn',
       temperature: 0.3,
       maxTokens: 8000,
-      timeoutMs: 90000,
+      timeoutMs: 120000,
       phase: 'post_processing',
     ),
     StudioControllerSpec(
@@ -199,7 +199,7 @@ class StudioControllerOntology {
       refreshPolicy: 'turn',
       temperature: 0.2,
       maxTokens: 1600,
-      timeoutMs: 60000,
+      timeoutMs: 120000,
       phase: 'post_processing',
     ),
   ];

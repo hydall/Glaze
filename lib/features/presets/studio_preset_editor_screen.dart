@@ -17,6 +17,7 @@ import '../../core/utils/id_generator.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_spinner.dart';
+import '../../shared/widgets/glaze_text_field.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/folder_name_dialog.dart';
 import '../settings/app_settings_provider.dart';
@@ -538,19 +539,17 @@ class StudioPresetEditorBodyState
             child: Row(
               children: [
                 Expanded(
-                  child: TextField(
+                  child: GlazeTextField(
                     controller: _reasoningStartCtrl,
-                    style: TextStyle(color: context.cs.onSurface),
-                    decoration: _tagInputDecoration('start tag'),
+                    hint: 'start tag',
                     onChanged: (v) => _updateReasoningTags(start: v),
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: TextField(
+                  child: GlazeTextField(
                     controller: _reasoningEndCtrl,
-                    style: TextStyle(color: context.cs.onSurface),
-                    decoration: _tagInputDecoration('end tag'),
+                    hint: 'end tag',
                     onChanged: (v) => _updateReasoningTags(end: v),
                   ),
                 ),
@@ -558,29 +557,6 @@ class StudioPresetEditorBodyState
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  InputDecoration _tagInputDecoration(String hint) {
-    return InputDecoration(
-      hintText: hint,
-      hintStyle: TextStyle(
-        color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
-      ),
-      filled: true,
-      fillColor: Colors.white.withValues(alpha: 0.04),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(10),
-        borderSide: BorderSide(color: context.cs.outline),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(10),
-        borderSide: BorderSide(color: context.cs.outline),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(10),
-        borderSide: BorderSide(color: context.cs.primary),
       ),
     );
   }

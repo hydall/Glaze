@@ -193,11 +193,17 @@ Map<String, dynamic> _buildV2Data(
     data['fav'] = true;
   }
 
-  if (character.extensions.isNotEmpty) {
+  final hasDepthPrompt =
+      character.depthPrompt.isNotEmpty ||
+      character.depthPromptDepth != 4 ||
+      character.depthPromptRole != 'system';
+  final appearance = (character.appearance ?? '').trim();
+
+  if (character.extensions.isNotEmpty ||
+      hasDepthPrompt ||
+      appearance.isNotEmpty) {
     final extCopy = Map<String, dynamic>.from(character.extensions);
-    if (character.depthPrompt.isNotEmpty ||
-        character.depthPromptDepth != 4 ||
-        character.depthPromptRole != 'system') {
+    if (hasDepthPrompt) {
       extCopy['depth_prompt'] = {
         'prompt': character.depthPrompt,
         'depth': character.depthPromptDepth,
@@ -207,19 +213,13 @@ Map<String, dynamic> _buildV2Data(
     if (character.world != null) {
       extCopy['world'] = character.world;
     }
-    data['extensions'] = extCopy;
-  } else {
-    if (character.depthPrompt.isNotEmpty ||
-        character.depthPromptDepth != 4 ||
-        character.depthPromptRole != 'system') {
-      data['extensions'] = {
-        'depth_prompt': {
-          'prompt': character.depthPrompt,
-          'depth': character.depthPromptDepth,
-          'role': character.depthPromptRole,
-        },
-      };
+    // SillyTavern V2 has no appearance field, so it travels in extensions.
+    if (appearance.isNotEmpty) {
+      extCopy['appearance'] = appearance;
+    } else {
+      extCopy.remove('appearance');
     }
+    data['extensions'] = extCopy;
   }
 
   data['character_version'] = character.characterVersion;

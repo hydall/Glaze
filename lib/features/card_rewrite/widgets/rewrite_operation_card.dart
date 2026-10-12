@@ -91,6 +91,7 @@ class RewriteOperationCard extends StatelessWidget {
       ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
         onTap: onTap,
         borderRadius: BorderRadius.circular(14),
         child: Padding(
@@ -486,6 +487,7 @@ class RewriteOperationRailTile extends StatelessWidget {
       _ => cs.onSurfaceVariant,
     };
     return InkWell(
+      mouseCursor: SystemMouseCursors.click,
       onTap: onTap,
       borderRadius: BorderRadius.circular(10),
       child: Container(

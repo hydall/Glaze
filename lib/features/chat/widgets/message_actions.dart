@@ -67,8 +67,15 @@ void showMessageContextMenu({
                 state.isPostGenRunning) {
               return;
             }
-            ref.read(editingMessageIdProvider(charId).notifier).state =
-                messageId;
+            final editing = ref.read(editingMessageIdProvider(charId).notifier);
+            // Already pointed at this message means the tap is not changing the
+            // value, and a same-value write notifies nobody — so the WebView
+            // never gets another `startEdit`. That is the "tap edit again does
+            // nothing" report: the editor UI was lost (keyboard dismissed, list
+            // re-rendered) while the provider stayed set. Cycle through null so
+            // the listener stops the stale session and opens a fresh editor.
+            if (editing.state == messageId) editing.state = null;
+            editing.state = messageId;
           },
         ),
       if ((!isUser && isLast && !isGenerating) || isError)

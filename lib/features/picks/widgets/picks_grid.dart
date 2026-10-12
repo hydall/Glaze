@@ -402,7 +402,7 @@ class _FolderCardState extends State<_FolderCard> {
       child: MouseRegion(
         onEnter: (_) => setState(() => _hovered = true),
         onExit: (_) => setState(() => _hovered = false),
-        child: GestureDetector(
+        child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
           onTap: widget.onTap,
           onTapDown: (_) => setState(() => _pressed = true),
           onTapUp: (_) => setState(() => _pressed = false),
@@ -475,7 +475,7 @@ class _FolderCardState extends State<_FolderCard> {
               ),
             ),
           ),
-        ),
+        )),
       ),
     );
   }
@@ -649,7 +649,7 @@ class _PicksCharacterCardState extends ConsumerState<_PicksCharacterCard> {
       child: MouseRegion(
         onEnter: (_) => setState(() => _hovered = true),
         onExit: (_) => setState(() => _hovered = false),
-        child: GestureDetector(
+        child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
           onTap: _openDetail,
           onTapDown: (_) => setState(() => _pressed = true),
           onTapUp: (_) => setState(() => _pressed = false),
@@ -747,7 +747,7 @@ class _PicksCharacterCardState extends ConsumerState<_PicksCharacterCard> {
               ),
             ),
           ),
-        ),
+        )),
       ),
     );
   }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -6,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'app.dart';
 import 'core/app_runtime.dart';
 import 'core/debug/perf_debug.dart';
+import 'core/diagnostics/app_log.dart';
 import 'core/platform/desktop_window.dart';
 import 'core/services/dev_mode_flag_migration.dart';
 import 'core/services/preset_seeder.dart';
@@ -17,6 +20,9 @@ final appRestartKey = GlobalKey();
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   AppRuntime.markStarted();
+  // First, so the startup steps below are already captured if they fail.
+  AppLog.install();
+  unawaited(AppLog.start());
   PerfDebug.installFrameLoggerIfEnabled();
   try {
     await migrateLegacyWindowsPreferences();

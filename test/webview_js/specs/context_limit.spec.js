@@ -115,3 +115,36 @@ test('a boundary this chat has no message for draws nothing', async ({
   await page.evaluate(() => window.bridge.setContextWindowStart('m4'));
   expect(await marked(page)).toEqual(['m4']);
 });
+
+test('a prompt with no room for the chat draws the rule under the newest message', async ({
+  page,
+}) => {
+  await boot(page);
+  await render(page);
+  await page.evaluate(() => window.bridge.setContextWindowStart('m4', true));
+
+  expect(await marked(page)).toEqual(['m4']);
+  // Last child: everything above it, the newest message included, is out.
+  expect(
+    await page.evaluate(
+      () =>
+        document.querySelector('.message-section[data-message-id="m4"]')
+          .lastElementChild.className,
+    ),
+  ).toBe('context-limit-marker after');
+
+  // Room again: the rule goes back above the oldest kept message.
+  await page.evaluate(() => window.bridge.setContextWindowStart('m3'));
+  expect(await marked(page)).toEqual(['m3']);
+
+  // And a re-render keeps the placement without another push.
+  await page.evaluate(() => window.bridge.setContextWindowStart('m4', true));
+  await render(page);
+  expect(
+    await page.evaluate(
+      () =>
+        document.querySelector('.message-section[data-message-id="m4"]')
+          .lastElementChild.className,
+    ),
+  ).toBe('context-limit-marker after');
+});

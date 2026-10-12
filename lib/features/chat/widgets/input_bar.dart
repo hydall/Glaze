@@ -107,7 +107,7 @@ class _InputBarState extends State<InputBar> {
                     _CircleBtn(icon: Icons.fullscreen_rounded, batterySaver: widget.batterySaver),
                   ],
                 ),
-                GestureDetector(
+                MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
                   onTap: widget.isGenerating ? widget.onStop : _handleSend,
                   child: Container(
                     height: 40,
@@ -136,7 +136,7 @@ class _InputBarState extends State<InputBar> {
                         ),
                       ],
                     ),
-                  ),
+                  )),
                 ),
               ],
             ),
@@ -164,7 +164,7 @@ class _CircleBtn extends StatelessWidget {
       ),
       child: Center(child: Icon(icon, color: context.cs.primary, size: 20)),
     );
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(20),
@@ -174,7 +174,7 @@ class _CircleBtn extends StatelessWidget {
                 filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
                 child: container,
               ),
-      ),
+      )),
     );
   }
 }

@@ -76,6 +76,15 @@ Future<ProviderContainer> _openChat(int count) async {
 /// What the chat would draw the rule at, given [breakdown] as the last
 /// calculated prompt.
 String? _marker(ProviderContainer container, TokenBreakdown breakdown) {
+  final boundary = _boundary(container, breakdown);
+  expect(boundary?.afterMessage ?? false, isFalse);
+  return boundary?.messageId;
+}
+
+ContextWindowBoundary? _boundary(
+  ProviderContainer container,
+  TokenBreakdown breakdown,
+) {
   container.read(cachedTokenBreakdownProvider('c1').notifier).state = breakdown;
   return container.read(contextWindowStartProvider('c1'));
 }
@@ -204,6 +213,27 @@ void main() {
       expect(breakdown.windowStartMessageId, isNotNull);
       expect(_marker(container, breakdown), isNull);
     });
+
+    test(
+      'a window with no room for the chat draws the rule under it',
+      () async {
+        // Max Output Tokens as large as the context size: the prompt keeps no
+        // message at all, so the whole chat is past the limit.
+        final container = await _openChat(10);
+        final breakdown = _run(
+          _history(10),
+          mode: HistoryTrimMode.sliding,
+          contextSize: 1000,
+        );
+
+        expect(breakdown.trimmedHistory, isEmpty);
+        expect(breakdown.cutoffIndex, 10);
+        expect(
+          _boundary(container, breakdown),
+          const ContextWindowBoundary('m9', afterMessage: true),
+        );
+      },
+    );
 
     test('no calculated prompt yet means no rule', () async {
       final container = await _openChat(80);

@@ -464,7 +464,7 @@ class GlazePillButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
       onTap: onTap,
       child: Container(
         height: 36,
@@ -490,6 +490,6 @@ class GlazePillButton extends StatelessWidget {
           ],
         ),
       ),
-    );
+    ));
   }
 }

@@ -61,6 +61,13 @@ class ApiSlotGroup extends ConsumerStatefulWidget {
   /// parameters, a generation limit, anything the slot owns by itself.
   final List<Widget> trailingItems;
 
+  /// Rows placed above the connection — an on/off switch for the slot.
+  final List<Widget> leadingItems;
+
+  /// False hides the connection and model rows, leaving the leading and
+  /// trailing ones: a slot switched off has nothing to bind.
+  final bool showSlotRows;
+
   const ApiSlotGroup({
     super.key,
     required this.header,
@@ -69,6 +76,8 @@ class ApiSlotGroup extends ConsumerStatefulWidget {
     required this.onApiConfigChanged,
     required this.modelRows,
     this.trailingItems = const [],
+    this.leadingItems = const [],
+    this.showSlotRows = true,
   });
 
   @override
@@ -76,7 +85,8 @@ class ApiSlotGroup extends ConsumerStatefulWidget {
 }
 
 class _ApiSlotGroupState extends ConsumerState<ApiSlotGroup> {
-  /// Fetched model ids keyed by `'<cacheTag>:<apiConfigId>|<endpoint>|<model>'`.
+  /// Fetched model ids keyed by
+  /// `'<cacheTag>:<apiConfigId>|<endpoint>|<apiKey>|<model>'`.
   final Map<String, List<String>> _fetchedModels = {};
 
   /// Cache keys currently in flight, so a second tap does not refetch.
@@ -89,20 +99,23 @@ class _ApiSlotGroupState extends ConsumerState<ApiSlotGroup> {
       header: widget.header,
       description: widget.description,
       items: [
-        MenuSelectorItem(
-          label: 'studio_slot_api'.tr(),
-          currentValue: _apiName(configs, widget.apiConfigId),
-          onTap: () => _pickApiConfig(configs),
-        ),
-        for (final row in widget.modelRows)
+        ...widget.leadingItems,
+        if (widget.showSlotRows) ...[
           MenuSelectorItem(
-            label: row.label ?? 'studio_slot_model'.tr(),
-            description: row.description,
-            currentValue: row.value.isEmpty
-                ? 'studio_slot_model_auto'.tr()
-                : row.value,
-            onTap: () => _openModelSelector(row),
+            label: 'studio_slot_api'.tr(),
+            currentValue: _apiName(configs, widget.apiConfigId),
+            onTap: () => _pickApiConfig(configs),
           ),
+          for (final row in widget.modelRows)
+            MenuSelectorItem(
+              label: row.label ?? 'studio_slot_model'.tr(),
+              description: row.description,
+              currentValue: row.value.isEmpty
+                  ? 'studio_slot_model_auto'.tr()
+                  : row.value,
+              onTap: () => _openModelSelector(row),
+            ),
+        ],
         ...widget.trailingItems,
       ],
     );
@@ -162,11 +175,13 @@ class _ApiSlotGroupState extends ConsumerState<ApiSlotGroup> {
     return ref.read(activeApiConfigProvider);
   }
 
+  /// A new endpoint or key may list different models, so either one changing
+  /// leaves the old list behind.
   String _cacheKey(String cacheTag, List<ApiConfig> configs) {
     final config = _slotApiConfig(configs);
     final identity = config == null
         ? widget.apiConfigId
-        : '${config.id}|${config.endpoint}|${config.model}';
+        : '${config.id}|${config.endpoint}|${config.apiKey}|${config.model}';
     return '$cacheTag:$identity';
   }
 
@@ -206,12 +221,10 @@ class _ApiSlotGroupState extends ConsumerState<ApiSlotGroup> {
       await _fetchModels(cacheKey, configs);
       if (!mounted) return;
     }
-    final models =
-        <String>{
-          ...?_fetchedModels[cacheKey],
-          if (row.value.isNotEmpty) row.value,
-        }.toList()
-          ..sort();
+    final models = <String>{
+      ...?_fetchedModels[cacheKey],
+      if (row.value.isNotEmpty) row.value,
+    }.toList()..sort();
     // "Automatic" is always offered, even when the fetch came back empty —
     // otherwise a slot pointed at a stale model id could never be reset.
     final items = <BottomSheetItem>[

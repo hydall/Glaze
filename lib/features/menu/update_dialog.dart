@@ -6,6 +6,7 @@ import '../../core/services/update_check_service.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glaze_action_button.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../shared/widgets/menu_group.dart';
 
 /// Outcome of the update sheet. [dontRemind] reflects the "don't remind me
 /// about this build" toggle and is independent of which button closed it.
@@ -182,42 +183,10 @@ class _DontRemindToggle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs = context.cs;
-    return Material(
-      color: Colors.white.withValues(alpha: 0.06),
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        onTap: () => onChanged(!value),
-        borderRadius: BorderRadius.circular(14),
-        child: Container(
-          decoration: BoxDecoration(
-            border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-            borderRadius: BorderRadius.circular(14),
-          ),
-          padding: const EdgeInsets.fromLTRB(12, 6, 16, 6),
-          child: Row(
-            children: [
-              SizedBox(
-                width: 24,
-                height: 24,
-                child: Checkbox(
-                  value: value,
-                  visualDensity: VisualDensity.compact,
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  onChanged: (v) => onChanged(v ?? false),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  'update_dont_remind'.tr(),
-                  style: TextStyle(fontSize: 14, color: cs.onSurface),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    return MenuSwitchItem(
+      label: 'update_dont_remind'.tr(),
+      value: value,
+      onChanged: onChanged,
     );
   }
 }

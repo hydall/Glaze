@@ -24,6 +24,7 @@ import 'catalog_card_grid.dart';
 import 'catalog_controls.dart';
 import 'catalog_detail_launcher.dart';
 import 'catalog_onboarding_sheet.dart';
+import 'janitor_session_expired_state.dart';
 import '../../../shared/widgets/glaze_sheet.dart';
 
 class CatalogGrid extends ConsumerWidget {
@@ -90,7 +91,9 @@ class CatalogGrid extends ConsumerWidget {
                 },
               ),
             ),
-          if (state.error != null)
+          if (state.error != null && state.janitorSessionExpired)
+            const SliverToBoxAdapter(child: JanitorSessionExpiredState())
+          else if (state.error != null)
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.all(32),
@@ -511,7 +514,7 @@ class _ActiveTagsRow extends StatelessWidget {
           itemBuilder: (context, index) {
             final name = names[index];
             final isNsfw = name.toUpperCase() == 'NSFW';
-            return GestureDetector(
+            return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
               onTap: () => _removeFilter(name),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -550,7 +553,7 @@ class _ActiveTagsRow extends StatelessWidget {
                   ],
                 ),
               ),
-            );
+            ));
           },
         ),
       ),

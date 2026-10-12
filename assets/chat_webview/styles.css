@@ -796,6 +796,36 @@
   user-select: none;
 }
 
+/* Output-token cap warning: the reply was cut off by Max Tokens. Sits under
+   the body, above the footer, in the same chip shape as the game clock. */
+.msg-output-limit {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-start;
+  margin-top: 6px;
+  padding: 3px 10px;
+  border-radius: 8px;
+  font-size: 0.78em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #ffb340;
+  background-color: rgba(255, 159, 10, 0.14);
+  border: 1px solid rgba(255, 159, 10, 0.35);
+  font-family: inherit;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.msg-output-limit:active { background-color: rgba(255, 159, 10, 0.24); }
+.msg-output-limit svg {
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
+  flex-shrink: 0;
+}
+.message-section.user .msg-output-limit { align-self: flex-end; }
+
 .msg-studio-outputs {
   display: flex;
   flex-direction: column;
@@ -1112,6 +1142,71 @@
 }
 .msg-actions-btn svg { width: 20px; height: 20px; fill: currentColor; }
 
+/* Menu button plus, while translation is on, the translate button on its left.
+   One grid cell, so the footer keeps its three columns. */
+.msg-trailing-actions {
+  grid-column: 3;
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Display-only translation (Bridge.setTranslation*). Hidden unless switched on,
+   and on bubbles that are still streaming or failed. */
+.msg-translate-btn {
+  display: none;
+  padding: 4px;
+  cursor: pointer;
+  color: var(--text-gray);
+  width: 28px;
+  height: 28px;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
+  backdrop-filter: blur(var(--element-blur, 12px));
+  -webkit-backdrop-filter: blur(var(--element-blur, 12px));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 50%;
+}
+.translation-enabled .msg-translate-btn { display: flex; }
+.translation-enabled .message-section.error .msg-translate-btn,
+.translation-enabled .message-section[data-message-id="__streaming__"] .msg-translate-btn,
+.translation-enabled .message-section:has(.typing-container:not(.translation-typing)) .msg-translate-btn,
+.message-section.selection-mode .msg-translate-btn { display: none; }
+.msg-translate-btn svg { width: 18px; height: 18px; fill: currentColor; }
+.msg-translate-btn .original-icon { display: none; }
+.message-section.translated .msg-translate-btn {
+  color: var(--vk-blue);
+  border-color: rgba(var(--primary-rgb, 121, 150, 206), 0.55);
+}
+.message-section.translated .msg-translate-btn .translate-icon { display: none; }
+.message-section.translated .msg-translate-btn .original-icon { display: block; }
+.message-section.translating .msg-translate-btn {
+  color: var(--vk-blue);
+  animation: translate-pulse 1.2s ease-in-out infinite;
+}
+@keyframes translate-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+/* Cross-fade between the original and the translation. Keep the fade-out's
+   duration in sync with TRANSLATION_FADE_OUT_MS in chat_bridge_controller.js. */
+.msg-body.translation-fade-out { animation: translation-fade-out 0.14s ease-in both; }
+.msg-body.translation-fade-in { animation: translation-fade-in 0.22s ease-out both; }
+@keyframes translation-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes translation-fade-in { from { opacity: 0; } to { opacity: 1; } }
+.battery-saver .msg-translate-btn,
+.battery-saver .msg-body.translation-fade-out,
+.battery-saver .msg-body.translation-fade-in { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  .message-section.translating .msg-translate-btn,
+  .msg-body.translation-fade-out,
+  .msg-body.translation-fade-in { animation: none; }
+}
+
 .stop-btn {
   background: none;
   border: none;
@@ -1137,6 +1232,7 @@
 .msg-guided-swipe-btn,
 .msg-rerun-cleaner,
 .msg-actions-btn,
+.msg-translate-btn,
 .stop-btn,
 .msg-lb-trigger-menu {
   -webkit-tap-highlight-color: transparent;
@@ -1149,6 +1245,7 @@
 .msg-guided-swipe-btn:active,
 .msg-rerun-cleaner:active,
 .msg-actions-btn:active,
+.msg-translate-btn:active,
 .stop-btn:active,
 .msg-lb-trigger-menu:active {
   transform: scale(0.88);
@@ -1177,7 +1274,9 @@
 }
 .edit-textarea:focus { border-color: var(--primary-color, #C42A4A); }
 .message-section.editing .msg-reasoning,
-.message-section.editing .msg-studio-outputs { display: none !important; }
+.message-section.editing .msg-studio-outputs,
+.message-section.editing .msg-image-attachment,
+.message-section.editing .msg-body > .bubble-meta { display: none !important; }
 
 .edit-buttons {
   display: flex;
@@ -1630,7 +1729,7 @@
   margin-right: 0;
 }
 .message-section.layout-bubble.msg-hidden .msg-body { opacity: 0.45; }
-.message-section.layout-bubble .msg-actions-btn { margin-left: auto; }
+.message-section.layout-bubble .msg-trailing-actions { margin-left: auto; }
 
 /* ============================================================
  * Default layout (chat-log style: avatar + name + full-width body)
@@ -1704,6 +1803,7 @@
 .message-section.native-lite .msg-guided-swipe-btn,
 .message-section.native-lite .msg-rerun-cleaner,
 .message-section.native-lite .msg-actions-btn,
+.message-section.native-lite .msg-translate-btn,
 .message-section.native-lite .edit-btn,
 .message-section.native-lite .msg-guidance-block {
   backdrop-filter: none !important;
@@ -1879,6 +1979,10 @@
   gap: 12px;
   margin: 0 0 10px;
   user-select: none;
+}
+/* Under the newest message: the prompt carries none of the chat. */
+.context-limit-marker.after {
+  margin: 10px 0 0;
 }
 .context-limit-marker .date-separator-line {
   background: rgba(224, 160, 48, 0.35);

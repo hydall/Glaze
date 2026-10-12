@@ -69,6 +69,7 @@ class _GlazeExpansionTileState extends State<GlazeExpansionTile> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         InkWell(
+          mouseCursor: SystemMouseCursors.click,
           onTap: _toggle,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
