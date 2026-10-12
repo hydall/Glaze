@@ -22,7 +22,7 @@ window.GLAZE = {
     ],
   },
 
-  devVersion: '0.8.1',
+  devVersion: '0.8.2',
 
   // Where the Download page's Nightly channel looks for builds.
   nightly: { workflow: 'build-branch.yml', branch: 'nightly' },
@@ -465,6 +465,19 @@ window.GLAZE = {
   // languages it is written in; any other shows the first one with a notice.
   articles: [
     {
+      slug: '0.8.2',
+      kind: 'changelog',
+      date: '2026-10-12',
+      author: 'hydall',
+      langs: ['ru', 'en'],
+      download: 'v0.8.2',
+      title: { ru: 'Glaze beta 0.8.2', en: 'Glaze beta 0.8.2' },
+      lead: {
+        ru: 'Перевод сообщений, гиды по приложению, импорт бэкапа Tavo, журналы сбоев, тема устройства, страницы авторов в каталоге и очень много исправлений.',
+        en: 'Message translation, in-app guides, Tavo backup import, crash logs, a device theme, creator pages in the catalog and a great many fixes.',
+      },
+    },
+    {
       slug: '0.8.1',
       kind: 'changelog',
       date: '2026-10-07',
@@ -559,9 +572,72 @@ window.GLAZE = {
       ],
     },
     {
+      version: '0.8.2',
+      date: '2026-10-12',
+      status: 'latest',
+      channel: 'beta',
+      tag: 'v0.8.2',
+      article: '0.8.2',
+      title: { ru: 'Перевод и гиды', en: 'Translation and guides' },
+      groups: [
+        {
+          title: { ru: 'Новое', en: 'New' },
+          items: {
+            ru: [
+              'Перевод сообщений и черновика: модель чата, DeepL, Google, Яндекс или LibreTranslate, автоперевод',
+              'Гиды по экранам и переделанное вступление со слайдом глоссария и выбором пресета',
+              'Группа «Помощь» в «Ещё»',
+              'Импорт бэкапа Tavo (.tbk)',
+              'Журналы и отчёты о сбоях на устройстве',
+              'Поле «Внешность» у персонажа для генерации картинок без референсов',
+              'Страницы авторов JanitorAI и Chub, новый лист фильтров и полный индекс тегов Chub',
+              'Тема устройства: тип темы и отдельные темы для светлого и тёмного режима',
+              'Настройки лорбука над записями и автоиндексация векторов',
+            ],
+            en: [
+              'Message and draft translation: the chat model, DeepL, Google, Yandex or LibreTranslate, with auto-translation',
+              'Screen guides and a reworked onboarding with a glossary slide and a preset pick',
+              'A Help group in More',
+              'Tavo backup import (.tbk)',
+              'On-device logs and crash reports',
+              'A character Appearance field for image generation without references',
+              'JanitorAI and Chub creator pages, a new filter sheet and Chub\'s full tag index',
+              'Device theme: a theme type and separate themes for light and dark mode',
+              'Lorebook settings above the entries and vector auto-indexing',
+            ],
+          },
+        },
+        {
+          title: { ru: 'Исправления', en: 'Fixes' },
+          items: {
+            ru: [
+              'Предупреждение об упоре в лимит токенов ответа и проверка бюджета контекста',
+              'Редактирование сообщения больше не залипает, вложения не пропадают',
+              'Enter для отправки только с физической клавиатуры и выключен по умолчанию',
+              'Синхронизация API-ключей и раскладки чата',
+              'Стриминг выключен для новых подключений, таймауты генерации — 120 секунд',
+              'Лимит JanitorAI в 120k токенов на лорбук обходится в свежих чатах, повторный вход при 401',
+              'Shino: план ответа не протекает в ответ',
+              'Курсор, колесо мыши, сайдбар и окна на ПК',
+            ],
+            en: [
+              'A warning when a reply hits the output token cap, and a context budget check',
+              'Message edits no longer get stuck, and attachments survive them',
+              'Enter to send only from a physical keyboard, off by default',
+              'API keys and the chat layout sync',
+              'Streaming off for new connections, 120-second generation timeouts',
+              'JanitorAI\'s 120k-token lorebook cap worked around in fresh chats, a re-login on 401',
+              'Shino: the reply plan no longer leaks into the reply',
+              'Desktop cursor, mouse wheel, sidebar and windows',
+            ],
+          },
+        },
+      ],
+    },
+    {
       version: '0.8.1',
       date: '2026-10-07',
-      status: 'latest',
+      status: 'released',
       channel: 'beta',
       tag: 'v0.8.1',
       article: '0.8.1',
