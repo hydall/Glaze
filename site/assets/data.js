@@ -9,16 +9,16 @@ window.GLAZE = {
 
   // Shown until the GitHub API answers (or when it is rate-limited).
   fallbackRelease: {
-    tag: 'v0.8.1',
-    date: '2026-10-07',
+    tag: 'v0.8.2',
+    date: '2026-10-12',
     assets: [
-      { name: 'v0.8.1.apk', size: 100391057 },
-      { name: 'v0.8.1-arm64-v8a.apk', size: 54456464 },
-      { name: 'v0.8.1-armeabi-v7a.apk', size: 53435642 },
-      { name: 'v0.8.1.ipa', size: 24985869 },
-      { name: 'v0.8.1-windows.zip', size: 27843202 },
-      { name: 'v0.8.1-linux.pkg.tar.zst', size: 24956579 },
-      { name: 'v0.8.1-linux.tar.zst', size: 23830636 },
+      { name: 'v0.8.2.apk', size: 101287499 },
+      { name: 'v0.8.2-arm64-v8a.apk', size: 54877770 },
+      { name: 'v0.8.2-armeabi-v7a.apk', size: 53938868 },
+      { name: 'v0.8.2.ipa', size: 25207852 },
+      { name: 'v0.8.2-windows.zip', size: 28044503 },
+      { name: 'v0.8.2-linux.pkg.tar.zst', size: 25147219 },
+      { name: 'v0.8.2-linux.tar.zst', size: 24028176 },
     ],
   },
 
@@ -125,7 +125,7 @@ window.GLAZE = {
       },
       dl_all: 'Все релизы',
       dl_loading: 'Загружаем данные релиза…',
-      dl_api_failed: 'Не удалось связаться с GitHub. Показаны ссылки на v0.8.1.',
+      dl_api_failed: 'Не удалось связаться с GitHub. Показаны ссылки на v0.8.2.',
       dl_missing: 'В этом релизе нет',
       dl_how: {
         android: 'Скачайте APK и откройте его. Разрешите установку из этого источника, если система спросит. Есть универсальная сборка, а также отдельные под arm64 и arm32.',
@@ -267,7 +267,7 @@ window.GLAZE = {
       },
       dl_all: 'All releases',
       dl_loading: 'Loading release data…',
-      dl_api_failed: 'Could not reach GitHub. Showing links for v0.8.1.',
+      dl_api_failed: 'Could not reach GitHub. Showing links for v0.8.2.',
       dl_missing: 'Not in this release',
       dl_how: {
         android: 'Download the APK and open it. Allow installs from this source if the system asks. There is a universal build, plus separate arm64 and arm32 ones.',
