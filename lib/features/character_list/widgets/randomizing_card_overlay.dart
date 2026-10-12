@@ -1500,6 +1500,7 @@ class _CardBackState extends State<_CardBack> {
       (label: 'label_description'.tr(), text: _c.description ?? ''),
       (label: 'label_personality'.tr(), text: _c.personality ?? ''),
       (label: 'label_scenario'.tr(), text: _c.scenario ?? ''),
+      (label: 'label_appearance'.tr(), text: _c.appearance ?? ''),
       (label: 'label_mes_example'.tr(), text: _c.mesExample ?? ''),
       (label: 'role_system'.tr(), text: _c.systemPrompt ?? ''),
       (label: 'role_system'.tr(), text: _c.postHistoryInstructions ?? ''),

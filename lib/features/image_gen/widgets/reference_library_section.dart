@@ -6,8 +6,79 @@ import '../../../shared/widgets/menu_group.dart';
 import '../image_gen_models.dart';
 import 'rows.dart' as rows;
 
-/// Reference sections of the image-gen sheet: avatars, the shared reference
-/// library and the prompt options that travel with references.
+/// Character appearance section of the image-gen sheet.
+///
+/// The character can travel as a reference image or as the appearance text
+/// written in its card. The image option only exists for models that accept
+/// references ([maxReferences] > 0); a model without them can only send the
+/// text.
+List<Widget> buildCharacterAppearanceSection({
+  required BuildContext context,
+  required ImageGenSettings settings,
+  required int maxReferences,
+  required ValueChanged<ImageGenSettings> onUpdate,
+}) {
+  final supportsImage = maxReferences > 0;
+  final effectiveSource = supportsImage
+      ? settings.charAppearanceSource
+      : CharacterAppearanceSource.description;
+  final items = <CharacterAppearanceSource>[
+    if (supportsImage) CharacterAppearanceSource.image,
+    CharacterAppearanceSource.description,
+  ];
+
+  return [
+    MenuGroup(
+      header: 'imggen_char_appearance'.tr(),
+      items: [
+        MenuSwitchItem(
+          label: 'imggen_send_char_avatar'.tr(),
+          description: supportsImage
+              ? 'imggen_send_char_avatar_desc'.tr()
+              : 'imggen_send_char_desc_only'.tr(),
+          value: settings.sendCharAvatar,
+          onChanged: (v) => onUpdate(settings.copyWith(sendCharAvatar: v)),
+        ),
+        if (settings.sendCharAvatar)
+          MenuSelectorItem(
+            label: 'imggen_char_source'.tr(),
+            currentValue: _charSourceLabel(effectiveSource),
+            onTap: () => rows.showImageGenOptions<CharacterAppearanceSource>(
+              context,
+              title: 'imggen_char_source'.tr(),
+              items: items,
+              labelBuilder: _charSourceLabel,
+              isSelected: (v) => effectiveSource == v,
+              onSelected: (v) =>
+                  onUpdate(settings.copyWith(charAppearanceSource: v)),
+            ),
+          ),
+        if (settings.sendCharAvatar &&
+            effectiveSource == CharacterAppearanceSource.description)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Text(
+              'imggen_char_source_hint'.tr(),
+              style: TextStyle(
+                fontSize: 12,
+                color: context.cs.onSurfaceVariant,
+              ),
+            ),
+          ),
+      ],
+    ),
+  ];
+}
+
+String _charSourceLabel(CharacterAppearanceSource source) =>
+    switch (source) {
+      CharacterAppearanceSource.image => 'imggen_char_source_image'.tr(),
+      CharacterAppearanceSource.description =>
+        'imggen_char_source_description'.tr(),
+    };
+
+/// Reference sections of the image-gen sheet: the shared reference library and
+/// the prompt options that travel with references.
 ///
 /// The library is one list for every provider — the number of images actually
 /// sent is capped per model ([maxReferences]), following the single reference
@@ -31,12 +102,6 @@ List<Widget> buildReferenceSections({
     MenuGroup(
       header: 'imggen_refs'.tr(),
       items: [
-        MenuSwitchItem(
-          label: 'imggen_send_char_avatar'.tr(),
-          description: 'imggen_send_char_avatar_desc'.tr(),
-          value: settings.sendCharAvatar,
-          onChanged: (v) => onUpdate(settings.copyWith(sendCharAvatar: v)),
-        ),
         MenuSwitchItem(
           label: 'imggen_send_user_avatar'.tr(),
           description: 'imggen_send_user_avatar_desc'.tr(),

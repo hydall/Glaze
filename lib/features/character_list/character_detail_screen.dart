@@ -1746,6 +1746,11 @@ class _PromptsTabState extends State<_PromptsTab> {
       ),
       (key: 'scenario', label: 'label_scenario'.tr(), text: c.scenario ?? ''),
       (
+        key: 'appearance',
+        label: 'label_appearance'.tr(),
+        text: c.appearance ?? '',
+      ),
+      (
         key: 'mesExample',
         label: 'label_mes_example'.tr(),
         text: c.mesExample ?? '',

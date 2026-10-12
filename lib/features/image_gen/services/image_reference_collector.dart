@@ -48,7 +48,7 @@ class ImageReferenceCollector {
 
     final refs = <Map<String, String>>[];
 
-    if (settings.sendCharAvatar && character?.avatarPath != null) {
+    if (settings.sendsCharAvatarImage && character?.avatarPath != null) {
       final entry = await _fromFile(
         character!.avatarPath!,
         name: character.name,

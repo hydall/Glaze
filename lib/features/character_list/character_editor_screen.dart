@@ -77,6 +77,7 @@ class _CharacterEditorScreenState extends ConsumerState<CharacterEditorScreen> {
         'description': '',
         'personality': '',
         'scenario': '',
+        'appearance': '',
         'first_mes': '',
         'alternate_greetings': <String>[],
         'mes_example': '',
@@ -118,6 +119,7 @@ class _CharacterEditorScreenState extends ConsumerState<CharacterEditorScreen> {
         'description': char.description ?? '',
         'personality': char.personality ?? '',
         'scenario': char.scenario ?? '',
+        'appearance': char.appearance ?? '',
         'first_mes': char.firstMes ?? '',
         'alternate_greetings': List<String>.from(char.alternateGreetings),
         'mes_example': char.mesExample ?? '',
@@ -235,6 +237,9 @@ class _CharacterEditorScreenState extends ConsumerState<CharacterEditorScreen> {
             scenario: (item['scenario'] as String?)?.trim().isEmpty ?? true
                 ? null
                 : (item['scenario'] as String).trim(),
+            appearance: (item['appearance'] as String?)?.trim().isEmpty ?? true
+                ? null
+                : (item['appearance'] as String).trim(),
             firstMes: (item['first_mes'] as String?)?.trim().isEmpty ?? true
                 ? null
                 : (item['first_mes'] as String).trim(),
@@ -288,6 +293,9 @@ class _CharacterEditorScreenState extends ConsumerState<CharacterEditorScreen> {
             scenario: (item['scenario'] as String?)?.trim().isEmpty ?? true
                 ? null
                 : (item['scenario'] as String).trim(),
+            appearance: (item['appearance'] as String?)?.trim().isEmpty ?? true
+                ? null
+                : (item['appearance'] as String).trim(),
             firstMes: (item['first_mes'] as String?)?.trim().isEmpty ?? true
                 ? null
                 : (item['first_mes'] as String).trim(),
@@ -366,6 +374,9 @@ class _CharacterEditorScreenState extends ConsumerState<CharacterEditorScreen> {
       ext.remove('depth_prompt');
     }
     if ((item['world'] as String?)?.isEmpty ?? true) ext.remove('world');
+    if ((item['appearance'] as String?)?.trim().isEmpty ?? true) {
+      ext.remove('appearance');
+    }
     return ext;
   }
 
@@ -376,6 +387,7 @@ class _CharacterEditorScreenState extends ConsumerState<CharacterEditorScreen> {
     'description' => 'label_description'.tr(),
     'personality' => 'label_personality'.tr(),
     'scenario' => 'label_scenario'.tr(),
+    'appearance' => 'label_appearance'.tr(),
     'first_mes' => 'label_first_mes'.tr(),
     'mes_example' => 'label_mes_example'.tr(),
     'system_prompt' => 'label_char_prompt'.tr().replaceAll(
@@ -455,6 +467,13 @@ class _CharacterEditorScreenState extends ConsumerState<CharacterEditorScreen> {
             label: 'label_scenario'.tr(),
             type: 'textarea',
             rows: 4,
+            expandable: true,
+          ),
+          GenericEditorField(
+            key: 'appearance',
+            label: 'label_appearance'.tr(),
+            type: 'textarea',
+            rows: 3,
             expandable: true,
           ),
         ],

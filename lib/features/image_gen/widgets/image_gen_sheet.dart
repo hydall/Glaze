@@ -285,6 +285,12 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
                 ),
               ],
             ),
+            ...buildCharacterAppearanceSection(
+              context: context,
+              settings: s,
+              maxReferences: providerMaxReferences(s),
+              onUpdate: _update,
+            ),
             if (providerMaxReferences(s) == 0)
               Container(
                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),

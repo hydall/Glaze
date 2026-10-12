@@ -35,6 +35,19 @@ extension ImageGenApiTypeLabel on ImageGenApiType {
   };
 }
 
+/// Where the character appearance attached to a generation comes from.
+///
+/// Models that accept reference images send the avatar; models that do not
+/// (or the user's choice) send the appearance text written in the character
+/// card instead.
+enum CharacterAppearanceSource {
+  /// The character avatar travels as a reference image.
+  image,
+
+  /// The appearance text of the character card travels in the prompt.
+  description,
+}
+
 /// How the character / persona appearance descriptions reach a Naistera
 /// prompt.
 ///
@@ -323,6 +336,8 @@ abstract class ImageGenSettings with _$ImageGenSettings {
     @Default(ComfyUiImageSettings()) ComfyUiImageSettings comfyui,
     // Reference handling — shared by every provider that accepts references.
     @Default(false) bool sendCharAvatar,
+    @Default(CharacterAppearanceSource.image)
+    CharacterAppearanceSource charAppearanceSource,
     @Default(false) bool sendUserAvatar,
     @Default([]) List<ReferenceImage> references,
     @Default(true) bool sendRefDescriptions,
@@ -345,6 +360,15 @@ abstract class ImageGenSettings with _$ImageGenSettings {
     final raw = refInstruction.trim();
     return raw.isEmpty ? defaultReferenceInstruction : raw;
   }
+
+  /// Whether the character avatar is attached as a reference image.
+  bool get sendsCharAvatarImage =>
+      sendCharAvatar && charAppearanceSource == CharacterAppearanceSource.image;
+
+  /// Whether the character's appearance text is appended to the prompt.
+  bool get sendsCharAppearanceText =>
+      sendCharAvatar &&
+      charAppearanceSource == CharacterAppearanceSource.description;
 
   /// Reference support of the selected Naistera model: the fetched catalog
   /// when it knows the model, the shipped deny-list otherwise.
