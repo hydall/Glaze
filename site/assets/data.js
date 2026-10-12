@@ -473,8 +473,8 @@ window.GLAZE = {
       download: 'v0.8.2',
       title: { ru: 'Glaze beta 0.8.2', en: 'Glaze beta 0.8.2' },
       lead: {
-        ru: 'Перевод сообщений, гиды по приложению, импорт бэкапа Tavo, журналы сбоев, тема устройства, страницы авторов в каталоге и очень много исправлений.',
-        en: 'Message translation, in-app guides, Tavo backup import, crash logs, a device theme, creator pages in the catalog and a great many fixes.',
+        ru: 'Перевод сообщений, гиды по экранам, предупреждение о лимите токенов, поле «Внешность» для картинок, страницы авторов, автоиндексация лорбуков, импорт из Tavo и журналы сбоев.',
+        en: 'Message translation, screen guides, a token-cap warning, an Appearance field for images, creator pages, lorebook auto-indexing, Tavo import and crash logs.',
       },
     },
     {
