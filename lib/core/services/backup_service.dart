@@ -41,8 +41,9 @@ class BackupService {
   BackupService(this._db, ImageStorageService _imageStorage)
       : _imageStorage = _imageStorage;
 
-  Future<String> exportBackup() =>
-      BackupExporter(_db, _imageStorage).export();
+  Future<String> exportBackup({bool includeApiKeys = true}) =>
+      BackupExporter(_db, _imageStorage, includeApiKeys: includeApiKeys)
+          .export();
 
   /// Cancels an in-flight import. The importer checks the flag at every
   /// major stage (before each table wipe and between batches).

@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../db/app_db.dart';
 import '../file_export_service.dart';
 import '../image_storage_service.dart';
+import 'backup_secrets.dart';
 
 class BackupExporter {
   // Schema version history:
@@ -103,7 +104,10 @@ class BackupExporter {
   final AppDatabase _db;
   final ImageStorageService _imageStorage;
 
-  BackupExporter(this._db, this._imageStorage);
+  /// False leaves out everything listed in [BackupSecrets].
+  final bool includeApiKeys;
+
+  BackupExporter(this._db, this._imageStorage, {this.includeApiKeys = true});
 
   Future<String> export() async {
     final tempFile = await buildArchive(Directory.systemTemp);
@@ -167,6 +171,7 @@ class BackupExporter {
       'schemaVersion': schemaVersion,
       'exportedAt': DateTime.now().toIso8601String(),
       'tables': tableNames,
+      BackupSecrets.manifestFlag: includeApiKeys,
     };
     final manifestBytes = utf8.encode(jsonEncode(manifest));
     encoder.addArchiveFile(ArchiveFile.bytes('manifest.json', manifestBytes));
@@ -186,7 +191,11 @@ class BackupExporter {
       final value = prefs.get(key);
       if (value != null) prefsMap[key] = value;
     }
-    final prefsBytes = utf8.encode(jsonEncode(prefsMap));
+    final prefsBytes = utf8.encode(
+      jsonEncode(
+        includeApiKeys ? prefsMap : BackupSecrets.stripPrefs(prefsMap),
+      ),
+    );
     encoder.addArchiveFile(ArchiveFile.bytes('preferences.json', prefsBytes));
 
     // 4. avatars/characters/<id>.png and avatars/personas/<id>.png —
@@ -271,7 +280,10 @@ class BackupExporter {
         if (rows.isEmpty) break;
         for (final row in rows) {
           try {
-            sink.add(utf8.encode(jsonEncode(row.data)));
+            final data = includeApiKeys
+                ? row.data
+                : BackupSecrets.stripRow(tableName, row.data);
+            sink.add(utf8.encode(jsonEncode(data)));
             sink.add(const [0x0A]); // '\n'
           } catch (_) {
             // skip unserializable rows

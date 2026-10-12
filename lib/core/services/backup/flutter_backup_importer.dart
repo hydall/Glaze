@@ -16,6 +16,7 @@ import '../image_storage_service.dart';
 import 'archive_stream.dart';
 import 'backup_cancel.dart';
 import 'backup_helpers.dart';
+import 'backup_secrets.dart';
 
 class FlutterBackupImporter extends BackupHelpers {
   static const int _batchSize = 500;
@@ -87,6 +88,7 @@ class FlutterBackupImporter extends BackupHelpers {
             as Map<String, dynamic>;
     manifestEntry.clear();
     final schemaVersion = manifestJson['schemaVersion'] as int? ?? 0;
+    final keysStripped = manifestJson[BackupSecrets.manifestFlag] == false;
     // Minimum supported schemaVersion is 2 (initial ZIP format).
     // v3 added extension_presets and info_blocks — older backups simply won't
     // have those JSONL files, leaving the tables empty after import (fine).
@@ -180,6 +182,10 @@ class FlutterBackupImporter extends BackupHelpers {
       return byRank != 0 ? byRank : a.name.compareTo(b.name);
     });
 
+    final localSecrets = keysStripped
+        ? await _readLocalTableSecrets()
+        : const <String, List<Map<String, Object?>>>{};
+
     onProgress?.call('Importing tables...');
     await db.customStatement('PRAGMA foreign_keys = OFF');
     try {
@@ -202,6 +208,7 @@ class FlutterBackupImporter extends BackupHelpers {
       if (schemaVersion < 13) {
         await _clearLegacyCollectorCadence();
       }
+      await _refillTableSecrets(localSecrets);
       await db.applyLegacyStudioRuntimePayloads(_legacyStudioRuntimeRows);
       if (schemaVersion >= 11) await _rebuildSessionLorebookEmbeddingQueue();
     } finally {
@@ -217,7 +224,45 @@ class FlutterBackupImporter extends BackupHelpers {
     await _restoreGalleryFromZip(galleryFiles);
 
     onProgress?.call('Restoring settings...');
-    await _restorePreferences(archive);
+    await _restorePreferences(archive, keysStripped: keysStripped);
+  }
+
+  /// The device's credentials, keyed by table, captured before a keyless
+  /// backup replaces the tables that hold them.
+  Future<Map<String, List<Map<String, Object?>>>>
+  _readLocalTableSecrets() async {
+    final out = <String, List<Map<String, Object?>>>{};
+    for (final entry in BackupSecrets.tableColumns.entries) {
+      final rows = await db
+          .customSelect(
+            'SELECT config_id, ${entry.value.join(', ')} '
+            'FROM ${entry.key}',
+          )
+          .get();
+      out[entry.key] = rows.map((r) => r.data).toList();
+    }
+    return out;
+  }
+
+  /// Puts the device's credentials back into restored rows the backup left
+  /// without them. Rows are matched by `config_id`; a key the backup does
+  /// carry is never overwritten.
+  Future<void> _refillTableSecrets(
+    Map<String, List<Map<String, Object?>>> local,
+  ) async {
+    for (final entry in local.entries) {
+      for (final row in entry.value) {
+        for (final column in BackupSecrets.tableColumns[entry.key]!) {
+          final value = row[column];
+          if (value is! String || value.isEmpty) continue;
+          await db.customStatement(
+            'UPDATE ${entry.key} SET $column = ? '
+            "WHERE config_id = ? AND ($column IS NULL OR $column = '')",
+            [value, row['config_id']],
+          );
+        }
+      }
+    }
   }
 
   Future<void> _clearAgentOpsStateMissingFromLegacyBackup() =>
@@ -256,7 +301,13 @@ class FlutterBackupImporter extends BackupHelpers {
   /// Restores all SharedPreferences from [preferences.json] inside the ZIP.
   /// Keys are written as-is; missing file is silently ignored (v1 legacy or
   /// older backups that pre-date the preferences export).
-  Future<void> _restorePreferences(Archive archive) async {
+  ///
+  /// With [keysStripped] the archive's blanked secret fields inside JSON
+  /// preferences are filled from the values already on the device.
+  Future<void> _restorePreferences(
+    Archive archive, {
+    bool keysStripped = false,
+  }) async {
     final matches = archive.files
         .where((f) => f.isFile && f.name == 'preferences.json')
         .toList();
@@ -277,7 +328,9 @@ class FlutterBackupImporter extends BackupHelpers {
     final prefs = await SharedPreferences.getInstance();
     for (final entry in map.entries) {
       final key = entry.key;
-      final value = entry.value;
+      final value = keysStripped
+          ? BackupSecrets.refillPref(entry.value, prefs.get(key))
+          : entry.value;
       try {
         if (value is bool) {
           await prefs.setBool(key, value);
