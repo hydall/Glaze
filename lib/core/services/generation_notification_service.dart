@@ -415,7 +415,8 @@ class GenerationNotificationService {
       _presenter.isSupported && MessageNotificationPresenter.promptsForPermission;
 
   /// Shows the OS permission dialog. Called from the onboarding slide that
-  /// explains what notifications are for — never at startup (see
+  /// explains what notifications are for, and from the skip handler when the
+  /// reader never reached that slide — never at startup (see
   /// [MessageNotificationPresenter.requestPermission]).
   Future<bool> requestNotificationPermission() async {
     if (!_presenter.isSupported) return false;

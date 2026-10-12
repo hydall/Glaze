@@ -60,6 +60,12 @@ class _OnboardingFlowState extends ConsumerState<_OnboardingFlow> {
   /// they have answered — the button reads Skip until then.
   bool? _notificationsGranted;
 
+  /// Whether the reader ever landed on the notifications slide. Tracked as a
+  /// high-water mark: reaching it and then stepping back still counts as
+  /// having seen the ask, so a later skip does not ask again (see
+  /// [shouldRequestNotificationsAfterSkip]).
+  bool _reachedNotificationsSlide = false;
+
   /// The answer on the guides step. On until the reader says otherwise — the
   /// same default [maybeShowGuide] falls back to when the step was skipped.
   bool _guidesOn = true;
@@ -68,6 +74,19 @@ class _OnboardingFlowState extends ConsumerState<_OnboardingFlow> {
 
   bool get _isGreeter =>
       _slides[_currentSlide].type == OnboardingSlideType.welcome;
+
+  int get _notificationsSlideIndex =>
+      _slides.indexWhere((s) => s.type == OnboardingSlideType.notifications);
+
+  /// High-water-marks the notifications slide. Called while the reader is
+  /// still standing on the current slide, so launching the skip from it — or
+  /// stepping off in either direction — counts as having seen the ask.
+  void _recordSlideVisit() {
+    final index = _notificationsSlideIndex;
+    if (index != -1 && _currentSlide >= index) {
+      _reachedNotificationsSlide = true;
+    }
+  }
 
   String get _buttonLabel {
     if (_isLastSlide) return 'onboarding_btn_start'.tr();
@@ -86,6 +105,7 @@ class _OnboardingFlowState extends ConsumerState<_OnboardingFlow> {
   }
 
   void _next() {
+    _recordSlideVisit();
     if (_isLastSlide) {
       _finish();
     } else {
@@ -97,6 +117,7 @@ class _OnboardingFlowState extends ConsumerState<_OnboardingFlow> {
   }
 
   void _prev() {
+    _recordSlideVisit();
     if (_currentSlide > 0) {
       setState(() {
         _direction = -1;
@@ -105,13 +126,30 @@ class _OnboardingFlowState extends ConsumerState<_OnboardingFlow> {
     }
   }
 
-  Future<void> _finish() async {
+  Future<void> _finish({bool skipped = false}) async {
     await markOnboardingComplete();
+    if (skipped) await _requestPermissionAfterSkip();
     if (mounted) Navigator.of(context).pop();
+  }
+
+  /// The safety net for a reader who skipped the flow before the notifications
+  /// slide: ask on the way out, unless they already had their chance.
+  Future<void> _requestPermissionAfterSkip() async {
+    if (!shouldRequestNotificationsAfterSkip(
+      notificationsNeedPermission:
+          GenerationNotificationService.instance.notificationsNeedPermission,
+      reachedNotificationsSlide: _reachedNotificationsSlide,
+    )) {
+      return;
+    }
+    await GenerationNotificationService.instance
+        .requestNotificationPermission();
   }
 
   /// Confirmation bottom sheet for skipping the whole onboarding flow.
   void _confirmSkipOnboarding() {
+    // Skipping straight from the notifications slide is still having seen it.
+    _recordSlideVisit();
     GlazeBottomSheet.show<void>(
       context,
       title: 'onboarding_skip_confirm_title'.tr(),
@@ -119,7 +157,7 @@ class _OnboardingFlowState extends ConsumerState<_OnboardingFlow> {
         onCancel: () => Navigator.of(context, rootNavigator: true).pop(),
         onConfirm: () {
           Navigator.of(context, rootNavigator: true).pop();
-          _finish();
+          _finish(skipped: true);
         },
       ),
     );

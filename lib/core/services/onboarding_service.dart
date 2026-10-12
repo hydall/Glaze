@@ -22,6 +22,20 @@ Future<void> resetOnboarding([SharedPreferences? prefs]) async {
   await prefs.setBool(_onboardingCompleteKey, false);
 }
 
+/// Whether skipping the whole onboarding should still put the OS permission
+/// dialog in front of the reader.
+///
+/// The notification ask lives on an onboarding slide, so a reader who skips the
+/// flow before reaching it never gets asked and notifications stay silent. The
+/// fallback is to ask anyway on the way out — but only for someone who never
+/// saw the slide: a reader who reached it and then skipped has already answered
+/// (or deliberately declined), and asking again would be the "dialog out of
+/// nowhere" the slide exists to avoid.
+bool shouldRequestNotificationsAfterSkip({
+  required bool notificationsNeedPermission,
+  required bool reachedNotificationsSlide,
+}) => notificationsNeedPermission && !reachedNotificationsSlide;
+
 Future<void> checkAndShowOnboarding(BuildContext context) async {
   if (await isOnboardingComplete()) return;
   if (!context.mounted) return;
