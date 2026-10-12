@@ -101,7 +101,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 140;
+  int get schemaVersion => 141;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -139,9 +139,10 @@ class AppDatabase extends _$AppDatabase {
       await _upgradeV137(m, from);
       await _upgradeV138(m, from);
       await _upgradeV139(m, from);
-      // v140 has no step of its own: it brings databases already at v139
-      // through this pass, which restores the indexes and triggers their
-      // earlier upgrades missed.
+      // v140 and v141 have no step of their own: they bring databases already
+      // at the previous version through this pass. v140 restores the indexes
+      // and triggers their earlier upgrades missed; v141 replaces the request
+      // capture trigger with one that lets a turn be bound to its message.
       await _ensureSchemaIntegrity();
     },
   );
