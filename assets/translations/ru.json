@@ -1510,6 +1510,7 @@
   "catalog_janitor_session_expired_title": "Сессия Janitor.AI истекла",
   "catalog_janitor_session_expired": "Перезайдите в аккаунт Janitor, чтобы импортировать персонажа. Сохранённая сессия больше не принимается, поэтому захват не запустится.",
   "catalog_janitor_session_expired_login": "Перезайти",
+  "catalog_janitor_browse_session_expired": "Janitor.AI отклоняет сохранённую сессию (401), поэтому каталог не загружается. Чаще всего так бывает при VPN — перезайдите в аккаунт.",
   "catalog_datacat_card_phase": "Читаю карточку из DataCat…",
   "catalog_datacat_anonymous_fallback": "Персонаж недоступен анонимным пользователям, переключаемся на datacat...",
   "catalog_import": "Импортировать в библиотеку",

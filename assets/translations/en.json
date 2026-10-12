@@ -1451,6 +1451,7 @@
   "catalog_janitor_session_expired_title": "Janitor.AI session expired",
   "catalog_janitor_session_expired": "Log into your Janitor.AI account again to import this character. The stored session is no longer accepted, so the capture cannot run.",
   "catalog_janitor_session_expired_login": "Log in again",
+  "catalog_janitor_browse_session_expired": "Janitor.AI rejects the saved session (401), so the catalog can't load. This happens most often behind a VPN — log into your account again.",
   "catalog_datacat_card_phase": "Reading the card from DataCat…",
   "catalog_datacat_anonymous_fallback": "Character is unaccessible for anonymous users, fallbacking to datacat...",
   "catalog_import": "Import to library",
