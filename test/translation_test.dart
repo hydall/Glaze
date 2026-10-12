@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/widgets.dart';
@@ -7,10 +8,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/models/pipeline_settings.dart';
 import 'package:glaze_flutter/core/models/translation_settings.dart';
+import 'package:glaze_flutter/core/services/memory_prompt_presets.dart';
+import 'package:glaze_flutter/core/services/translation_prompt_presets.dart';
 import 'package:glaze_flutter/features/chat/composer_pins_provider.dart';
 import 'package:glaze_flutter/features/translation/composer_translator.dart';
+import 'package:glaze_flutter/features/translation/machine_translation_client.dart';
 import 'package:glaze_flutter/features/translation/message_translation_controller.dart';
 import 'package:glaze_flutter/features/translation/translation_languages.dart';
+import 'package:glaze_flutter/features/translation/translation_providers.dart';
 import 'package:glaze_flutter/features/translation/translation_service.dart';
 
 void main() {
@@ -133,11 +138,11 @@ void main() {
       acceptPending = true;
       controller = MessageTranslationController(
         view: MessageTranslationView(
-          showPending: (id, original, label) async {
+          showPending: (id, original, label, deferred) async {
             calls.add('pending:$id:$original:$label');
             return acceptPending;
           },
-          showTranslation: (id, original, text) async =>
+          showTranslation: (id, original, text, deferred) async =>
               calls.add('show:$id:$original:$text'),
           showOriginal: (id) async => calls.add('original:$id'),
         ),
@@ -303,4 +308,218 @@ void main() {
       isNot(contains(ComposerPin.action(ComposerAction.translate))),
     );
   });
+
+  group('translation prompt presets', () {
+    test('an empty template resolves to the built-in default', () {
+      final prompt = TranslationPromptPresets.resolve('', 'Russian');
+      expect(prompt, contains('Russian'));
+      expect(prompt.toLowerCase(), contains('do not explain'));
+      expect(
+        prompt,
+        isNot(contains(TranslationPromptPresets.languagePlaceholder)),
+      );
+      expect(
+        TranslationPromptPresets.match('')?.key,
+        TranslationPromptPresets.fallbackKey,
+      );
+    });
+
+    test('a custom template is used as written', () {
+      const custom = 'Translate into {{language}}. Say nothing else.';
+      expect(
+        TranslationPromptPresets.resolve(custom, 'French'),
+        'Translate into French. Say nothing else.',
+      );
+      expect(TranslationPromptPresets.match(custom), isNull);
+      expect(
+        TranslationPromptPresets.match(custom, const [
+          MemoryPromptPreset(key: 'k', label: 'Mine', prompt: custom),
+        ])?.label,
+        'Mine',
+      );
+    });
+
+    test('the request carries the template it is given', () {
+      final messages = buildTranslationMessages(
+        'Hello',
+        resolveTranslationLanguage('ru'),
+        template: 'Only {{language}}, nothing else.',
+      );
+      expect(messages[0]['content'], 'Only Russian, nothing else.');
+      expect(messages[1], {'role': 'user', 'content': 'Hello'});
+    });
+  });
+
+  group('translation provider', () {
+    test('unknown ids fall back to the LLM', () {
+      expect(TranslationProvider.fromId('nope'), TranslationProvider.llm);
+      expect(TranslationProvider.fromId(null), TranslationProvider.llm);
+      expect(TranslationProvider.fromId('deepl'), TranslationProvider.deepl);
+    });
+
+    test('the automatic toggles default off', () {
+      const settings = TranslationSettings();
+      expect(settings.provider, 'llm');
+      expect(settings.autoTranslateUser, isFalse);
+      expect(settings.autoTranslateCharacter, isFalse);
+    });
+
+    test('the new fields survive the pipeline JSON', () {
+      const settings = PipelineSettings(
+        translation: TranslationSettings(
+          enabled: true,
+          provider: 'deepl',
+          translatorApiKey: 'secret',
+          translatorEndpoint: 'https://api.deepl.com/v2/translate',
+          autoTranslateUser: true,
+          autoTranslateCharacter: true,
+        ),
+      );
+      final stored = jsonDecode(jsonEncode(settings.toJson()));
+      final roundTripped = PipelineSettings.fromJson(
+        stored as Map<String, dynamic>,
+      );
+      expect(roundTripped, settings);
+      expect(roundTripped.translation.translatorApiKey, 'secret');
+    });
+  });
+
+  group('machine translation', () {
+    late _RecordingAdapter adapter;
+    late MachineTranslationClient client;
+
+    setUp(() {
+      adapter = _RecordingAdapter();
+      client = MachineTranslationClient(
+        dio: Dio()..httpClientAdapter = adapter,
+      );
+    });
+
+    test('DeepL is asked to treat the text as HTML', () async {
+      adapter.reply = '{"translations":[{"text":"Привет"}]}';
+      final result = await client.translate(
+        provider: TranslationProvider.deepl,
+        text: '<b>Hello</b> & <i>hi</i>',
+        target: resolveTranslationLanguage('ru'),
+        apiKey: 'k',
+        endpoint: '',
+        folderId: '',
+      );
+      expect(result, 'Привет');
+      final request = adapter.requests.single;
+      expect(request.uri.toString(), 'https://api-free.deepl.com/v2/translate');
+      expect(request.headers['Authorization'], 'DeepL-Auth-Key k');
+      expect(request.data['tag_handling'], 'html');
+      expect(request.data['target_lang'], 'RU');
+      // The markup goes out untouched — no escaping before it is sent.
+      expect(request.data['text'], ['<b>Hello</b> & <i>hi</i>']);
+    });
+
+    test('Google carries the key in the query and decodes entities', () async {
+      adapter.reply =
+          '{"data":{"translations":[{"translatedText":"&quot;Hi&quot; &amp; bye"}]}}';
+      final result = await client.translate(
+        provider: TranslationProvider.google,
+        text: 'Hi & bye',
+        target: resolveTranslationLanguage('fr'),
+        apiKey: 'gkey',
+        endpoint: '',
+        folderId: '',
+      );
+      expect(result, '"Hi" & bye');
+      final request = adapter.requests.single;
+      expect(request.queryParameters['key'], 'gkey');
+      expect(request.data['format'], 'html');
+    });
+
+    test('Yandex sends the folder id and HTML format', () async {
+      adapter.reply = '{"translations":[{"text":"Hola"}]}';
+      final result = await client.translate(
+        provider: TranslationProvider.yandex,
+        text: 'Hello',
+        target: resolveTranslationLanguage('es'),
+        apiKey: 'ykey',
+        endpoint: '',
+        folderId: 'folder-1',
+      );
+      expect(result, 'Hola');
+      final request = adapter.requests.single;
+      expect(request.headers['Authorization'], 'Api-Key ykey');
+      expect(request.data['format'], 'HTML');
+      expect(request.data['folderId'], 'folder-1');
+    });
+
+    test('LibreTranslate gets /translate appended once', () async {
+      adapter.reply = '{"translatedText":"Hallo"}';
+      final result = await client.translate(
+        provider: TranslationProvider.libretranslate,
+        text: 'Hello',
+        target: resolveTranslationLanguage('de'),
+        apiKey: '',
+        endpoint: 'https://libre.example.com/',
+        folderId: '',
+      );
+      expect(result, 'Hallo');
+      expect(
+        adapter.requests.single.uri.toString(),
+        'https://libre.example.com/translate',
+      );
+      expect(adapter.requests.single.data['format'], 'html');
+    });
+
+    test('a missing key is refused before the network', () async {
+      await expectLater(
+        client.translate(
+          provider: TranslationProvider.deepl,
+          text: 'Hello',
+          target: resolveTranslationLanguage('ru'),
+          apiKey: '  ',
+          endpoint: '',
+          folderId: '',
+        ),
+        throwsA(isA<MachineTranslationException>()),
+      );
+      expect(adapter.requests, isEmpty);
+    });
+
+    test('an empty answer is an error, not an empty translation', () async {
+      adapter.reply = '{"translations":[{"text":"   "}]}';
+      await expectLater(
+        client.translate(
+          provider: TranslationProvider.deepl,
+          text: 'Hello',
+          target: resolveTranslationLanguage('ru'),
+          apiKey: 'k',
+          endpoint: '',
+          folderId: '',
+        ),
+        throwsA(isA<MachineTranslationException>()),
+      );
+    });
+  });
+}
+
+/// A Dio adapter that records the request and answers with a canned body.
+class _RecordingAdapter implements HttpClientAdapter {
+  final List<RequestOptions> requests = [];
+  String reply = '{}';
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    requests.add(options);
+    return ResponseBody.fromString(
+      reply,
+      200,
+      headers: {
+        Headers.contentTypeHeader: [Headers.jsonContentType],
+      },
+    );
+  }
+
+  @override
+  void close({bool force = false}) {}
 }

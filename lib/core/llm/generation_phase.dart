@@ -12,6 +12,12 @@ enum GenerationPhase {
   /// Reading character, persona, API config, history and summary.
   preparing,
 
+  /// Auto-translating an outgoing message before it is stored and sent.
+  translatingUser,
+
+  /// Auto-translating a received message before it is shown.
+  translatingCharacter,
+
   /// Memory candidates, lorebook vector search and raw-message recall —
   /// the three retrieval futures `collectGenerationContext` awaits together.
   retrieving,
@@ -44,6 +50,8 @@ enum GenerationPhase {
   String get translationKey => switch (this) {
     GenerationPhase.idle => 'gen_phase_streaming',
     GenerationPhase.preparing => 'gen_phase_preparing',
+    GenerationPhase.translatingUser => 'gen_phase_translating_user',
+    GenerationPhase.translatingCharacter => 'gen_phase_translating_character',
     GenerationPhase.retrieving => 'gen_phase_retrieving',
     GenerationPhase.prompt => 'gen_phase_prompt',
     GenerationPhase.agents => 'gen_phase_agents',

@@ -4,10 +4,23 @@ import 'package:dio/dio.dart';
 /// lifecycle can be tested without one.
 class MessageTranslationView {
   /// Shows the translating bubble; false when the message no longer shows the
-  /// text the tap carried, in which case nothing is sent.
-  final Future<bool> Function(String id, String original, String label)
+  /// text the tap carried, in which case nothing is sent. [deferred] is set by
+  /// an automatic translation, whose text arrives while the WebView may not
+  /// have painted the message yet — the entry is then kept and painted once
+  /// the bubble matches instead of being refused outright.
+  final Future<bool> Function(
+    String id,
+    String original,
+    String label,
+    bool deferred,
+  )
   showPending;
-  final Future<void> Function(String id, String original, String text)
+  final Future<void> Function(
+    String id,
+    String original,
+    String text,
+    bool deferred,
+  )
   showTranslation;
   final Future<void> Function(String id) showOriginal;
 
@@ -49,6 +62,7 @@ class MessageTranslationController {
     required String text,
     required String pendingLabel,
     required MessageTranslator translate,
+    bool deferred = false,
   }) async {
     if (action != 'translate') {
       _jobs.remove(id)?.cancel('Translation dismissed');
@@ -60,11 +74,11 @@ class MessageTranslationController {
     final token = CancelToken();
     _jobs[id] = token;
     try {
-      if (!await view.showPending(id, text, pendingLabel)) return;
+      if (!await view.showPending(id, text, pendingLabel, deferred)) return;
       if (token.isCancelled || epoch != _epoch) return;
       final translated = await translate(text, token);
       if (token.isCancelled || epoch != _epoch) return;
-      await view.showTranslation(id, text, translated);
+      await view.showTranslation(id, text, translated, deferred);
     } catch (error) {
       if (token.isCancelled || epoch != _epoch) return;
       await view.showOriginal(id);

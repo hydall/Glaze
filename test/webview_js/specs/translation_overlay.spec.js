@@ -154,6 +154,27 @@ test('the translation cross-fades in', async ({ page }) => {
   expect(leftover).toBe(false);
 });
 
+test('a translation stored before the bubble renders paints when it arrives', async ({ page }) => {
+  await page.goto('/assets/chat_webview/index.html');
+  await page.waitForFunction(() => !!window.bridge);
+  await page.evaluate(() => {
+    window.bridge.setMessageSettings(JSON.stringify({ batterySaver: true, translationEnabled: true }));
+    // The auto-translation of an arriving message races the sync that appends
+    // it: the result is kept now and painted once the section exists.
+    window.bridge.setTranslation(JSON.stringify({ id: 'c1', original: 'Hello there', text: 'Привет' }));
+    window.bridge.setMessages(JSON.stringify([{
+      id: 'c1', role: 'char', text: 'Hello there',
+      timestamp: 1767225600000, isUser: false, isAssistant: true,
+      isSystem: false, isError: false, isHidden: false, isTyping: false,
+      isGenerating: false, isPostGenRunning: false, isLast: true,
+    }]));
+  });
+  await page.waitForTimeout(200);
+  const state = await read(page);
+  expect(state.shown).toBe('Привет');
+  expect(state.rawText).toBe('Hello there');
+});
+
 test('turning translation off restores every original', async ({ page }) => {
   await openChat(page);
   await page.evaluate(() => {

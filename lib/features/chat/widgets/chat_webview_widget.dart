@@ -1499,16 +1499,31 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
   }
 
   /// Display-only translation: see [ChatBridgeController.setTranslationPending].
-  Future<bool> setTranslationPending(String id, String original, String label) {
+  Future<bool> setTranslationPending(
+    String id,
+    String original,
+    String label, {
+    bool deferred = false,
+  }) {
     final bridge = _bridge;
     if (bridge == null || !_ready) return Future.value(false);
-    return bridge.setTranslationPending(id, original, label);
+    return bridge.setTranslationPending(
+      id,
+      original,
+      label,
+      deferred: deferred,
+    );
   }
 
-  Future<void> setTranslation(String id, String original, String text) {
+  Future<void> setTranslation(
+    String id,
+    String original,
+    String text, {
+    bool deferred = false,
+  }) {
     final bridge = _bridge;
     if (bridge == null || !_ready) return Future.value();
-    return bridge.setTranslation(id, original, text);
+    return bridge.setTranslation(id, original, text, deferred: deferred);
   }
 
   Future<void> clearTranslation(String id) {

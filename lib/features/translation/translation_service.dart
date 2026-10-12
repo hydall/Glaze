@@ -7,20 +7,23 @@ import '../../core/llm/aux_llm_client.dart';
 import '../../core/llm/transport/llm_capture_context.dart';
 import '../../core/models/api_config.dart';
 import '../../core/models/translation_settings.dart';
+import '../../core/services/translation_prompt_presets.dart';
 import '../../core/state/db_provider.dart';
 import '../settings/api_list_provider.dart';
+import 'machine_translation_client.dart';
 import 'translation_languages.dart';
+import 'translation_providers.dart';
 
 final translationServiceProvider = Provider<TranslationService>(
   (ref) => TranslationService(ref),
 );
 
-/// Thrown when translation is asked for with no usable connection behind it.
+/// Thrown when translation is asked for with no usable engine behind it.
 class TranslationNotConfiguredException implements Exception {
   const TranslationNotConfiguredException();
 
   @override
-  String toString() => 'No chat API connection for translation';
+  String toString() => 'No translation engine configured';
 }
 
 /// Floor for the output cap. Matches the transports' own fallback, so asking
@@ -28,17 +31,25 @@ class TranslationNotConfiguredException implements Exception {
 /// longer than it went out — Russian runs well past English in tokens.
 const int kTranslationMinMaxTokens = 4096;
 
-/// Translates text on the connection bound in the Agents tab.
+/// Translates text on whichever engine the Agents tab binds.
 ///
-/// This is a side channel and nothing else: it sends the one text it is handed
-/// and returns the result. It never reads or writes chat history, never goes
-/// through the prompt builder, and its output is never stored — callers only
-/// paint it on screen or put it back into the composer for the user to edit.
+/// For the per-message button and the composer action this is a side channel
+/// and nothing else: it sends the one text it is handed and returns the result.
+/// It never reads or writes chat history, never goes through the prompt
+/// builder, and its output is only painted on screen or put back into the
+/// composer for the user to edit. The two automatic toggles call it from the
+/// send path and the post-generation path, where the caller decides what to do
+/// with the result.
 class TranslationService {
   final Ref _ref;
   final AuxLlmClient llm;
+  final MachineTranslationClient machine;
 
-  TranslationService(this._ref, {this.llm = const AuxLlmClient()});
+  TranslationService(
+    this._ref, {
+    this.llm = const AuxLlmClient(),
+    MachineTranslationClient? machine,
+  }) : machine = machine ?? MachineTranslationClient();
 
   Future<String> translate({
     required String text,
@@ -48,9 +59,40 @@ class TranslationService {
     String? messageId,
   }) async {
     final settings = _ref.read(pipelineSettingsProvider).translation;
+    final language = resolveTranslationLanguage(targetLanguageCode);
+    final provider = TranslationProvider.fromId(settings.provider);
+
+    if (provider == TranslationProvider.llm) {
+      return _translateWithLlm(
+        settings: settings,
+        text: text,
+        language: language,
+        cancelToken: cancelToken,
+        sessionId: sessionId,
+        messageId: messageId,
+      );
+    }
+    return machine.translate(
+      provider: provider,
+      text: text,
+      target: language,
+      apiKey: settings.translatorApiKey,
+      endpoint: settings.translatorEndpoint,
+      folderId: settings.translatorFolderId,
+      cancelToken: cancelToken,
+    );
+  }
+
+  Future<String> _translateWithLlm({
+    required TranslationSettings settings,
+    required String text,
+    required TranslationLanguage language,
+    CancelToken? cancelToken,
+    String? sessionId,
+    String? messageId,
+  }) async {
     final config = await _resolveConfig(settings);
     if (config == null) throw const TranslationNotConfiguredException();
-    final language = resolveTranslationLanguage(targetLanguageCode);
 
     final raw = await llm.callOnce(
       config: AuxApiConfig(
@@ -62,7 +104,11 @@ class TranslationService {
         omitTemperature: config.omitTemperature,
         extraRequestParameters: config.extraRequestParameters,
       ),
-      messages: buildTranslationMessages(text, language),
+      messages: buildTranslationMessages(
+        text,
+        language,
+        template: settings.prompt,
+      ),
       maxTokens: math.max(config.maxTokens, kTranslationMinMaxTokens),
       temperature: 0.3,
       timeoutMs: config.firstChunkTimeoutMs,
@@ -109,23 +155,17 @@ ApiConfig? resolveTranslationConfig(
   return model.isEmpty ? config : config.copyWith(model: model);
 }
 
-/// The request: a fixed system instruction and the text as the only user
-/// turn. Nothing from the chat goes along with it.
+/// The request: a system instruction and the text as the only user turn.
+/// Nothing from the chat goes along with it. [template] is the reader's own
+/// instruction; empty means the built-in default.
 List<Map<String, String>> buildTranslationMessages(
   String text,
-  TranslationLanguage language,
-) => [
+  TranslationLanguage language, {
+  String template = '',
+}) => [
   {
     'role': 'system',
-    'content':
-        'You are a literary translator for roleplay fiction. Translate the '
-        "user's entire message into ${language.englishName}. Preserve the "
-        'meaning, tone, character voices, dialogue, profanity, names, '
-        'paragraph breaks, Markdown, HTML tags and their attributes, and any '
-        'text in square or curly brackets exactly as structure. Translate '
-        'idioms by meaning. Do not summarize, censor, explain or add '
-        'anything. If the text is already in ${language.englishName}, return '
-        'it unchanged. Reply with the translation only.',
+    'content': TranslationPromptPresets.resolve(template, language.englishName),
   },
   {'role': 'user', 'content': text},
 ];

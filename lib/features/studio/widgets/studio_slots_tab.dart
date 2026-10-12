@@ -11,13 +11,19 @@ import '../../../core/models/pipeline_settings.dart';
 import '../../../core/models/studio_config.dart';
 import '../../../core/models/studio_pipeline_overrides.dart';
 import '../../../core/models/translation_settings.dart';
+import '../../../core/services/memory_prompt_presets.dart';
+import '../../../core/services/translation_prompt_presets.dart';
 import '../../../core/state/active_studio_preset_provider.dart';
 import '../../../core/state/db_provider.dart';
+import '../../../core/state/translation_prompt_providers.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/menu_group.dart';
+import '../../chat/widgets/custom_prompt_manager_sheet.dart';
 import '../../settings/api_list_provider.dart';
 import '../../settings/widgets/api_slot_group.dart';
 import '../../translation/translation_languages.dart';
+import '../../translation/translation_providers.dart';
 import '../../../shared/widgets/list_controls.dart';
 import '../studio_availability.dart';
 import '../studio_injection_points.dart';
@@ -119,109 +125,11 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
           onModelChanged: (value) =>
               _saveMemoryBookApi((api) => api.copyWith(generationModel: value)),
         ),
-        _translationSlot(context, pipeline.translation),
-      ],
-    );
-  }
-
-  /// Display-only translation. The switch gates everything — the connection
-  /// rows here, the translate button on messages and the composer action — so
-  /// nothing about translation shows until it is turned on.
-  Widget _translationSlot(BuildContext context, TranslationSettings settings) {
-    final enabled = settings.enabled;
-    return AnimatedSize(
-      duration: const Duration(milliseconds: 220),
-      curve: Curves.easeOutCubic,
-      alignment: Alignment.topCenter,
-      child: ApiSlotGroup(
-        key: const ValueKey('studio-slot-translation'),
-        header: 'translation_slot_title'.tr(),
-        description: 'translation_slot_desc'.tr(),
-        leadingItems: [
-          MenuSwitchItem(
-            label: 'translation_enable'.tr(),
-            description: 'translation_enable_desc'.tr(),
-            value: enabled,
-            onChanged: (value) =>
-                _saveTranslation((t) => t.copyWith(enabled: value)),
-          ),
-        ],
-        showSlotRows: enabled,
-        apiConfigId: settings.apiConfigId,
-        onApiConfigChanged: (id) => _saveTranslation(
-          // A model picked against the previous connection would not resolve
-          // on the new one.
-          (t) => t.copyWith(apiConfigId: id, model: ''),
+        _TranslationSlotPanel(
+          settings: pipeline.translation,
+          onChanged: _saveTranslation,
         ),
-        modelRows: [
-          ApiSlotModelRow(
-            value: settings.model,
-            onChanged: (value) =>
-                _saveTranslation((t) => t.copyWith(model: value)),
-          ),
-        ],
-        trailingItems: [
-          if (enabled) ...[
-            MenuSelectorItem(
-              label: 'translation_message_language'.tr(),
-              description: 'translation_message_language_desc'.tr(),
-              currentValue: settings.messageLanguage.isEmpty
-                  ? 'translation_language_interface'.tr()
-                  : resolveTranslationLanguage(
-                      settings.messageLanguage,
-                    ).nativeName,
-              onTap: () => _pickLanguage(
-                title: 'translation_message_language'.tr(),
-                current: settings.messageLanguage,
-                allowInterface: true,
-                onSelect: (code) =>
-                    _saveTranslation((t) => t.copyWith(messageLanguage: code)),
-              ),
-            ),
-            MenuSelectorItem(
-              label: 'translation_input_language'.tr(),
-              description: 'translation_input_language_desc'.tr(),
-              currentValue: resolveTranslationLanguage(
-                settings.inputLanguage,
-              ).nativeName,
-              onTap: () => _pickLanguage(
-                title: 'translation_input_language'.tr(),
-                current: settings.inputLanguage,
-                allowInterface: false,
-                onSelect: (code) =>
-                    _saveTranslation((t) => t.copyWith(inputLanguage: code)),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  void _pickLanguage({
-    required String title,
-    required String current,
-    required bool allowInterface,
-    required ValueChanged<String> onSelect,
-  }) {
-    showGlazePickerSheet(
-      context,
-      title: title,
-      items: [
-        if (allowInterface)
-          GlazePickerItem(
-            label: 'translation_language_interface'.tr(),
-            isActive: current.isEmpty,
-            value: '',
-          ),
-        for (final language in kTranslationLanguages)
-          GlazePickerItem(
-            label: language.nativeName,
-            isActive: language.code == current,
-            value: language.code,
-          ),
       ],
-      onSelect: (value) => onSelect(value as String),
     );
   }
 
@@ -497,5 +405,323 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
       case StudioSlot.finalGenerator:
         await _savePipeline((p) => updated.applyTo(p, slot));
     }
+  }
+}
+
+/// The translation slot: one engine (the LLM or a machine-translation
+/// service), the languages it targets, and the two automatic toggles.
+///
+/// Stateful because the machine-translation key, its endpoint and the prompt
+/// are plain text rows that write through as the reader types. The header and
+/// the enable switch stay put; everything below them folds away while the
+/// feature is off.
+class _TranslationSlotPanel extends ConsumerStatefulWidget {
+  final TranslationSettings settings;
+  final void Function(TranslationSettings Function(TranslationSettings))
+  onChanged;
+
+  const _TranslationSlotPanel({
+    required this.settings,
+    required this.onChanged,
+  });
+
+  @override
+  ConsumerState<_TranslationSlotPanel> createState() =>
+      _TranslationSlotPanelState();
+}
+
+class _TranslationSlotPanelState extends ConsumerState<_TranslationSlotPanel> {
+  late final TextEditingController _apiKey;
+  late final TextEditingController _endpoint;
+  late final TextEditingController _folderId;
+  late final TextEditingController _prompt;
+
+  /// The settings the controllers were last written from, so an external
+  /// change can be told from the reader's own typing.
+  late TranslationSettings _last;
+
+  TranslationSettings get _s => widget.settings;
+
+  @override
+  void initState() {
+    super.initState();
+    _apiKey = TextEditingController(text: _s.translatorApiKey);
+    _endpoint = TextEditingController(text: _s.translatorEndpoint);
+    _folderId = TextEditingController(text: _s.translatorFolderId);
+    _prompt = TextEditingController(text: _s.prompt);
+    _last = _s;
+  }
+
+  @override
+  void didUpdateWidget(covariant _TranslationSlotPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _sync(_apiKey, _s.translatorApiKey, _last.translatorApiKey);
+    _sync(_endpoint, _s.translatorEndpoint, _last.translatorEndpoint);
+    _sync(_folderId, _s.translatorFolderId, _last.translatorFolderId);
+    _sync(_prompt, _s.prompt, _last.prompt);
+    _last = _s;
+  }
+
+  /// Adopts an externally changed value, but never fights the reader mid-edit:
+  /// a controller that already holds the new value is left alone.
+  static void _sync(
+    TextEditingController controller,
+    String next,
+    String previous,
+  ) {
+    if (next != previous && next != controller.text) controller.text = next;
+  }
+
+  @override
+  void dispose() {
+    _apiKey.dispose();
+    _endpoint.dispose();
+    _folderId.dispose();
+    _prompt.dispose();
+    super.dispose();
+  }
+
+  void _emit(TranslationSettings Function(TranslationSettings) mutate) =>
+      widget.onChanged(mutate);
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = TranslationProvider.fromId(_s.provider);
+    final enabled = _s.enabled;
+    final isLlm = provider == TranslationProvider.llm;
+    final custom =
+        ref.watch(translationCustomPromptsProvider).value ?? const [];
+
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      alignment: Alignment.topCenter,
+      child: ApiSlotGroup(
+        key: const ValueKey('studio-slot-translation'),
+        header: 'translation_slot_title'.tr(),
+        description: 'translation_slot_desc'.tr(),
+        leadingItems: [
+          MenuSwitchItem(
+            label: 'translation_enable'.tr(),
+            description: 'translation_enable_desc'.tr(),
+            value: enabled,
+            onChanged: (value) => _emit((t) => t.copyWith(enabled: value)),
+          ),
+          if (enabled)
+            MenuSelectorItem(
+              label: 'translation_provider'.tr(),
+              description: 'translation_provider_desc'.tr(),
+              currentValue: provider.labelKey.tr(),
+              onTap: () => _pickProvider(provider),
+            ),
+        ],
+        // The connection and model rows belong to the LLM engine alone; a
+        // machine service is configured by its own key and endpoint below.
+        showSlotRows: enabled && isLlm,
+        apiConfigId: _s.apiConfigId,
+        onApiConfigChanged: (id) => _emit(
+          // A model picked against the previous connection would not resolve
+          // on the new one.
+          (t) => t.copyWith(apiConfigId: id, model: ''),
+        ),
+        modelRows: [
+          ApiSlotModelRow(
+            value: _s.model,
+            onChanged: (value) => _emit((t) => t.copyWith(model: value)),
+          ),
+        ],
+        trailingItems: enabled
+            ? [
+                if (isLlm) ..._llmItems(custom) else ..._machineItems(provider),
+                MenuSelectorItem(
+                  label: 'translation_message_language'.tr(),
+                  description: 'translation_message_language_desc'.tr(),
+                  currentValue: _s.messageLanguage.isEmpty
+                      ? 'translation_language_interface'.tr()
+                      : resolveTranslationLanguage(
+                          _s.messageLanguage,
+                        ).nativeName,
+                  onTap: () => _pickLanguage(
+                    title: 'translation_message_language'.tr(),
+                    current: _s.messageLanguage,
+                    allowInterface: true,
+                    onSelect: (code) =>
+                        _emit((t) => t.copyWith(messageLanguage: code)),
+                  ),
+                ),
+                MenuSelectorItem(
+                  label: 'translation_input_language'.tr(),
+                  description: 'translation_input_language_desc'.tr(),
+                  currentValue: resolveTranslationLanguage(
+                    _s.inputLanguage,
+                  ).nativeName,
+                  onTap: () => _pickLanguage(
+                    title: 'translation_input_language'.tr(),
+                    current: _s.inputLanguage,
+                    allowInterface: false,
+                    onSelect: (code) =>
+                        _emit((t) => t.copyWith(inputLanguage: code)),
+                  ),
+                ),
+                MenuSwitchItem(
+                  label: 'translation_auto_user'.tr(),
+                  description: 'translation_auto_user_desc'.tr(),
+                  value: _s.autoTranslateUser,
+                  onChanged: (value) =>
+                      _emit((t) => t.copyWith(autoTranslateUser: value)),
+                ),
+                MenuSwitchItem(
+                  label: 'translation_auto_character'.tr(),
+                  description: 'translation_auto_character_desc'.tr(),
+                  value: _s.autoTranslateCharacter,
+                  onChanged: (value) =>
+                      _emit((t) => t.copyWith(autoTranslateCharacter: value)),
+                ),
+              ]
+            : const [],
+      ),
+    );
+  }
+
+  List<Widget> _llmItems(List<MemoryPromptPreset> custom) {
+    final preset = TranslationPromptPresets.match(_s.prompt, custom);
+    return [
+      MenuSelectorItem(
+        label: 'translation_prompt_preset'.tr(),
+        description: 'translation_prompt_preset_desc'.tr(),
+        currentValue: preset?.label ?? 'summary_prompt_preset_custom'.tr(),
+        onTap: () => showPromptPresetPicker(
+          context,
+          title: 'translation_prompt_preset'.tr(),
+          builtIn: TranslationPromptPresets.builtIn,
+          custom: custom,
+          activeKey: preset?.key,
+          onPick: (picked) {
+            _prompt.text = picked.prompt;
+            _emit((t) => t.copyWith(prompt: picked.prompt));
+          },
+        ),
+      ),
+      MenuItem(
+        icon: Icons.edit_note_rounded,
+        label: 'translation_prompt_manage'.tr(),
+        subtitle: 'translation_prompt_manage_desc'.tr(),
+        onTap: _managePrompts,
+      ),
+      MenuFieldItem(
+        label: 'translation_prompt'.tr(),
+        description: 'translation_prompt_desc'.tr(),
+        controller: _prompt,
+        placeholder: TranslationPromptPresets.builtIn.first.prompt,
+        maxLines: 6,
+        keyboardType: TextInputType.multiline,
+        onChanged: (value) => _emit((t) => t.copyWith(prompt: value)),
+        onReset: _s.prompt.trim().isEmpty
+            ? null
+            : () {
+                _prompt.text = '';
+                _emit((t) => t.copyWith(prompt: ''));
+              },
+      ),
+    ];
+  }
+
+  List<Widget> _machineItems(TranslationProvider provider) {
+    return [
+      MenuFieldItem(
+        label: 'translation_translator_key'.tr(),
+        description: 'translation_translator_key_desc'.tr(),
+        controller: _apiKey,
+        obscure: true,
+        placeholder: 'translation_translator_key_hint'.tr(),
+        onChanged: (value) => _emit((t) => t.copyWith(translatorApiKey: value)),
+      ),
+      MenuFieldItem(
+        label: 'translation_translator_endpoint'.tr(),
+        description: 'translation_translator_endpoint_desc'.tr(),
+        controller: _endpoint,
+        placeholder: provider.defaultEndpoint.isEmpty
+            ? 'translation_translator_endpoint_hint'.tr()
+            : provider.defaultEndpoint,
+        maxLines: 1,
+        onChanged: (value) =>
+            _emit((t) => t.copyWith(translatorEndpoint: value)),
+      ),
+      if (provider.needsFolderId)
+        MenuFieldItem(
+          label: 'translation_translator_folder'.tr(),
+          description: 'translation_translator_folder_desc'.tr(),
+          controller: _folderId,
+          onChanged: (value) =>
+              _emit((t) => t.copyWith(translatorFolderId: value)),
+        ),
+    ];
+  }
+
+  Future<void> _pickProvider(TranslationProvider current) {
+    return GlazeBottomSheet.show<void>(
+      context,
+      title: 'translation_provider'.tr(),
+      items: [
+        for (final provider in TranslationProvider.values)
+          BottomSheetItem(
+            label: provider.labelKey.tr(),
+            icon: provider == current
+                ? Icons.radio_button_checked
+                : Icons.radio_button_off,
+            iconColor: provider == current
+                ? Theme.of(context).colorScheme.primary
+                : Theme.of(context).colorScheme.onSurfaceVariant,
+            onTap: () {
+              Navigator.of(context, rootNavigator: true).pop();
+              _emit((t) => t.copyWith(provider: provider.id));
+            },
+          ),
+      ],
+    );
+  }
+
+  Future<void> _managePrompts() async {
+    final custom =
+        ref.read(translationCustomPromptsProvider).value ??
+        const <MemoryPromptPreset>[];
+    final result = await GlazeBottomSheet.show<List<MemoryPromptPreset>>(
+      context,
+      title: 'translation_prompt_manage'.tr(),
+      child: CustomPromptManagerSheet(
+        customPrompts: custom,
+        builtIn: TranslationPromptPresets.builtIn,
+        title: 'translation_prompt_preset'.tr(),
+      ),
+    );
+    if (!mounted || result == null) return;
+    await ref.read(translationCustomPromptsProvider.notifier).save(result);
+  }
+
+  void _pickLanguage({
+    required String title,
+    required String current,
+    required bool allowInterface,
+    required ValueChanged<String> onSelect,
+  }) {
+    showGlazePickerSheet(
+      context,
+      title: title,
+      items: [
+        if (allowInterface)
+          GlazePickerItem(
+            label: 'translation_language_interface'.tr(),
+            isActive: current.isEmpty,
+            value: '',
+          ),
+        for (final language in kTranslationLanguages)
+          GlazePickerItem(
+            label: language.nativeName,
+            isActive: language.code == current,
+            value: language.code,
+          ),
+      ],
+      onSelect: (value) => onSelect(value as String),
+    );
   }
 }

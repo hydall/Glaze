@@ -808,39 +808,52 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   bool _showingHistoryRotation = false;
   final GlobalKey<ChatWebViewWidgetState> _webViewStateKey = GlobalKey();
 
+  /// Content already auto-translated per arriving message id, so a settled
+  /// turn is not translated again by a later rebuild — but a rewrite is.
+  final Map<String, String> _autoTranslatedMessages = {};
+
   /// The per-message translate button. Display-only: the translation is
   /// painted in the WebView and never reaches the message or the prompt.
-  late final MessageTranslationController
-  _translations = MessageTranslationController(
-    view: MessageTranslationView(
-      showPending: (id, original, label) =>
-          _webViewStateKey.currentState?.setTranslationPending(
-            id,
-            original,
-            label,
-          ) ??
-          Future.value(false),
-      showTranslation: (id, original, text) =>
-          _webViewStateKey.currentState?.setTranslation(id, original, text) ??
-          Future.value(),
-      showOriginal: (id) =>
-          _webViewStateKey.currentState?.clearTranslation(id) ?? Future.value(),
-    ),
-    onError: (error) {
-      if (!mounted) return;
-      GlazeToast.show(
-        context,
-        error is TranslationNotConfiguredException
-            ? 'translation_not_configured'.tr()
-            : 'translation_failed'.tr(args: [formatError(error)]),
-        isError: true,
+  late final MessageTranslationController _translations =
+      MessageTranslationController(
+        view: MessageTranslationView(
+          showPending: (id, original, label, deferred) =>
+              _webViewStateKey.currentState?.setTranslationPending(
+                id,
+                original,
+                label,
+                deferred: deferred,
+              ) ??
+              Future.value(false),
+          showTranslation: (id, original, text, deferred) =>
+              _webViewStateKey.currentState?.setTranslation(
+                id,
+                original,
+                text,
+                deferred: deferred,
+              ) ??
+              Future.value(),
+          showOriginal: (id) =>
+              _webViewStateKey.currentState?.clearTranslation(id) ??
+              Future.value(),
+        ),
+        onError: (error) {
+          if (!mounted) return;
+          GlazeToast.show(
+            context,
+            error is TranslationNotConfiguredException
+                ? 'translation_not_configured'.tr()
+                : 'translation_failed'.tr(args: [formatError(error)]),
+            isError: true,
+          );
+        },
       );
-    },
-  );
 
   void _onTranslateMessage(String id, String action, String text) {
     final settings = ref.read(pipelineSettingsProvider).translation;
     if (!settings.enabled) return;
+    // Claim the message so an automatic pass does not undo a manual choice.
+    _autoTranslatedMessages[id] = text;
     final sessionId = widget.state.session?.id;
     // The language the reader reads in: the one picked, or the interface's.
     final target = settings.messageLanguage.isNotEmpty
@@ -861,6 +874,54 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
               sessionId: sessionId,
               messageId: id,
             ),
+      ),
+    );
+  }
+
+  /// Translates an arriving character message into the reader's language, once
+  /// the turn has settled. Display-only: the pending bubble names the phase,
+  /// then the translation is painted over the message and the stored text — and
+  /// the context the model continues from — stays original.
+  ///
+  /// Keyed by message id and content, not by a one-shot flag: a post-generation
+  /// stage (the Studio cleaner) can rewrite the message after the stream ends,
+  /// and the newer text is translated in turn. A manual translate marks the
+  /// message too, so an automatic pass never overrides a choice the reader made.
+  void _maybeAutoTranslateLastMessage(ChatState state) {
+    if (state.isGenerating || state.isPostGenRunning || state.isSendPending) {
+      return;
+    }
+    final settings = ref.read(pipelineSettingsProvider).translation;
+    if (!settings.enabled || !settings.autoTranslateCharacter) return;
+    final messages = state.messages;
+    if (messages.isEmpty) return;
+    final last = messages.last;
+    if (last.role != 'assistant' ||
+        last.isTyping ||
+        last.content.trim().isEmpty) {
+      return;
+    }
+    if (_autoTranslatedMessages[last.id] == last.content) return;
+    _autoTranslatedMessages[last.id] = last.content;
+    final target = settings.messageLanguage.isNotEmpty
+        ? settings.messageLanguage
+        : context.locale.languageCode;
+    unawaited(
+      _translations.handle(
+        id: last.id,
+        action: 'translate',
+        text: last.content,
+        pendingLabel: 'gen_phase_translating_character'.tr(),
+        translate: (text, token) => ref
+            .read(translationServiceProvider)
+            .translate(
+              text: text,
+              targetLanguageCode: target,
+              cancelToken: token,
+              sessionId: state.session?.id,
+              messageId: last.id,
+            ),
+        deferred: true,
       ),
     );
   }
@@ -916,7 +977,9 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
     super.didUpdateWidget(oldWidget);
     if (oldWidget.state.session?.id != widget.state.session?.id) {
       _translations.cancelAll();
+      _autoTranslatedMessages.clear();
     }
+    _maybeAutoTranslateLastMessage(widget.state);
     if (oldWidget.drawerCtrl != widget.drawerCtrl) {
       _bindDrawerListenable();
     }

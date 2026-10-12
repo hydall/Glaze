@@ -826,16 +826,20 @@ class ChatBridgeController {
   // the WebView paints the translation over it and puts it back on request.
 
   /// Shows the translating bubble. False when the message no longer shows
-  /// [original] (or the WebView is gone), so no request should be sent.
+  /// [original] (or the WebView is gone), so no request should be sent. With
+  /// [deferred], a message the WebView has not painted yet is not a refusal:
+  /// the entry is kept and painted once it matches.
   Future<bool> setTranslationPending(
     String id,
     String original,
-    String label,
-  ) async {
+    String label, {
+    bool deferred = false,
+  }) async {
     final payload = jsonEncode({
       'id': id,
       'original': original,
       'label': label,
+      if (deferred) 'deferred': true,
     });
     final result = await evalJsWithResult(
       'window.bridge?.setTranslationPending(${escapeJsonStr(payload)})',
@@ -843,11 +847,20 @@ class ChatBridgeController {
     return result == true;
   }
 
-  Future<void> setTranslation(String id, String original, String text) =>
-      callJs(
-        'setTranslation',
-        jsonEncode({'id': id, 'original': original, 'text': text}),
-      );
+  Future<void> setTranslation(
+    String id,
+    String original,
+    String text, {
+    bool deferred = false,
+  }) => callJs(
+    'setTranslation',
+    jsonEncode({
+      'id': id,
+      'original': original,
+      'text': text,
+      if (deferred) 'deferred': true,
+    }),
+  );
 
   Future<void> clearTranslation(String id) => callJs('clearTranslation', id);
   Future<void> setSelectionMode(bool enabled) =>

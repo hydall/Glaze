@@ -792,25 +792,38 @@ export class Bridge {
   }
 
   /* Shows the "translating" typing bubble on [id]. Refused (false) when the
-   * message no longer shows [original] — a swipe or edit landed meanwhile. */
+   * message no longer shows [original] — a swipe or edit landed meanwhile. A
+   * section that has not rendered yet is not a refusal: the entry is kept and
+   * painted when the bubble appears (auto-translation of an arriving message
+   * races the sync that appends it). */
   setTranslationPending(payloadJson) {
-    const { id, original, label } = JSON.parse(payloadJson);
+    const { id, original, label, deferred } = JSON.parse(payloadJson);
     const section = this._translationSection(id);
-    if (!section || section.dataset.rawText !== original) return false;
+    if (section && section.dataset.rawText !== original && !deferred) return false;
     this._translations.set(id, { original, text: null, label: label || '' });
-    this._fadeTranslation(section);
+    if (section) this._fadeTranslation(section);
     return true;
   }
 
   setTranslation(payloadJson) {
-    const { id, original, text } = JSON.parse(payloadJson);
+    const { id, original, text, deferred } = JSON.parse(payloadJson);
+    if (!text) {
+      this.clearTranslation(id);
+      return false;
+    }
     const section = this._translationSection(id);
-    if (!section || section.dataset.rawText !== original || !text) {
+    if (section && section.dataset.rawText !== original) {
+      if (deferred) {
+        // The section has not caught up yet; keep the result so it paints once
+        // it matches, instead of dropping a finished auto-translation.
+        this._translations.set(id, { original, text, label: '' });
+        return true;
+      }
       this.clearTranslation(id);
       return false;
     }
     this._translations.set(id, { original, text, label: '' });
-    this._fadeTranslation(section);
+    if (section) this._fadeTranslation(section);
     return true;
   }
 
