@@ -9,13 +9,15 @@
 ///
 /// Around the history the prompt is merged the way Vue's forced
 /// `mergePrompts` did: each run of non-assistant preset blocks collapses into
-/// one `system` message, assistant blocks (a prefill, say) stay on their own.
+/// one message of the preset's merge role, assistant blocks (a prefill, say)
+/// stay on their own.
 ///
-/// It is an **API-connection** setting, offered for custom chat-completion
-/// endpoints only — like prompt post-processing, the shape a request must
-/// have is a property of the endpoint.
+/// It is a **preset** setting, as it was in Vue: the prompt shape belongs with
+/// the prompt.
 ///
 /// **Deviations from Vue.**
+/// - Prefixes and the stop string go through macros, so `{{user}}:` stops on
+///   the persona's name rather than on the literal text.
 /// - Depth injections (author's note, depth lorebook entries) that sit inside
 ///   the history are kept, inline and unprefixed, at their depth. Vue dropped
 ///   them altogether, which silently lost the author's note.
@@ -24,12 +26,11 @@
 ///   the same way, by flattening the content to a string.
 library;
 
-import '../../models/api_config.dart';
+import '../../models/preset.dart';
 import '../history_assembler.dart' show PromptMessage;
-import '../transport/llm_protocol.dart';
+import '../macro_engine.dart';
 
-/// Values offered for [ApiConfig.noAssistantSquashRole]. `none` turns the
-/// squash off.
+/// Values offered for [Preset.squashRole]. `none` turns the squash off.
 class NoAssistantSquashRole {
   const NoAssistantSquashRole._();
 
@@ -39,17 +40,33 @@ class NoAssistantSquashRole {
 
   static const List<String> all = [assistant, user, none];
 
-  /// Anything unrecognised falls back to [assistant], Vue's default.
-  static String normalize(String? value) =>
-      all.contains(value) ? value! : assistant;
+  /// Vue offered `system`, which no history message carries — the same as
+  /// [none]. Anything else unrecognised falls back to [assistant], Vue's
+  /// default.
+  static String normalize(String? value) {
+    if (value == 'system') return none;
+    return all.contains(value) ? value! : assistant;
+  }
 }
 
-/// The NoAssistant settings of one connection, resolved for a request.
+/// Values offered for [Preset.mergeRole].
+class NoAssistantMergeRole {
+  const NoAssistantMergeRole._();
+
+  static const List<String> all = ['system', 'user', 'assistant'];
+
+  /// Anything unrecognised falls back to `system`, Vue's default.
+  static String normalize(String? value) =>
+      all.contains(value) ? value! : 'system';
+}
+
+/// The NoAssistant settings of one preset, resolved for a request.
 class NoAssistantOptions {
   const NoAssistantOptions({
     this.userPrefix = '',
     this.charPrefix = '',
     this.squashRole = NoAssistantSquashRole.assistant,
+    this.mergeRole = 'system',
     this.stopString = '',
   });
 
@@ -63,27 +80,40 @@ class NoAssistantOptions {
   /// the prefixes go on — see [NoAssistantSquashRole].
   final String squashRole;
 
-  /// Sent as the request's `stop` parameter; empty sends none.
+  /// Role of each merged run of preset blocks around the history.
+  final String mergeRole;
+
+  /// Sent as the request's stop sequence; empty sends none.
   final String stopString;
 
-  /// The options [config] asks for, or null when the mode is off — or when
-  /// the connection is not a custom endpoint, which is the only protocol the
-  /// settings screen offers it for.
-  static NoAssistantOptions? of(ApiConfig config) {
-    if (!config.noAssistant) return null;
-    if (config.protocol != LlmProtocol.customChatCompletion) return null;
-    return NoAssistantOptions(
-      userPrefix: config.noAssistantUserPrefix,
-      charPrefix: config.noAssistantCharPrefix,
-      squashRole: NoAssistantSquashRole.normalize(config.noAssistantSquashRole),
-      stopString: config.noAssistantStopString,
-    );
-  }
+  /// The `stop` list for a request.
+  List<String> get stop => stopString.isEmpty ? const [] : [stopString];
 
-  /// The `stop` sequences [config] adds to a request.
-  static List<String> stopFor(ApiConfig config) {
-    final stop = of(config)?.stopString ?? '';
-    return stop.isEmpty ? const [] : [stop];
+  /// The options [preset] asks for, or null when the mode is off. Prefixes
+  /// and the stop string are macro-expanded with [charName] and [userName]:
+  /// a stop string of `{{user}}:` has to match the name the model actually
+  /// writes.
+  static NoAssistantOptions? of(
+    Preset? preset, {
+    required String charName,
+    required String userName,
+  }) {
+    if (preset == null || !preset.noAssistant) return null;
+    final ctx = MacroContext(
+      charName: charName,
+      userName: userName,
+      charId: '',
+      sessionId: '',
+    );
+    String expand(String text) =>
+        text.contains('{{') ? replaceMacros(text, ctx).text : text;
+    return NoAssistantOptions(
+      userPrefix: expand(preset.userPrefix),
+      charPrefix: expand(preset.charPrefix),
+      squashRole: NoAssistantSquashRole.normalize(preset.squashRole),
+      mergeRole: NoAssistantMergeRole.normalize(preset.mergeRole),
+      stopString: expand(preset.stopString),
+    );
   }
 }
 
@@ -95,13 +125,13 @@ const String noAssistantHistoryBlockId = 'chat_history';
 /// The history span runs from the first history message to the last one;
 /// whatever the builder injected between them (depth blocks) is folded into
 /// the combined message with it. Blocks before and after the span are merged
-/// into `system` runs. [messages] is never mutated.
+/// into [NoAssistantOptions.mergeRole] runs. [messages] is never mutated.
 List<PromptMessage> applyNoAssistant(
   List<PromptMessage> messages,
   NoAssistantOptions options,
 ) {
   final first = messages.indexWhere((m) => m.isHistory);
-  if (first < 0) return _mergeBlocks(messages);
+  if (first < 0) return _mergeBlocks(messages, options.mergeRole);
   final last = messages.lastIndexWhere((m) => m.isHistory);
 
   final history = _buildHistoryContent(
@@ -109,7 +139,7 @@ List<PromptMessage> applyNoAssistant(
     options,
   );
   return [
-    ..._mergeBlocks(messages.sublist(0, first)),
+    ..._mergeBlocks(messages.sublist(0, first), options.mergeRole),
     if (history.isNotEmpty)
       PromptMessage(
         role: 'assistant',
@@ -118,14 +148,14 @@ List<PromptMessage> applyNoAssistant(
         blockName: 'chat_history',
         isHistory: true,
       ),
-    ..._mergeBlocks(messages.sublist(last + 1)),
+    ..._mergeBlocks(messages.sublist(last + 1), options.mergeRole),
   ];
 }
 
 /// Vue's forced `mergePrompts`: consecutive non-assistant blocks become one
-/// `system` message joined by newlines; an assistant block ends the run and
+/// [mergeRole] message joined by newlines; an assistant block ends the run and
 /// passes through untouched.
-List<PromptMessage> _mergeBlocks(List<PromptMessage> blocks) {
+List<PromptMessage> _mergeBlocks(List<PromptMessage> blocks, String mergeRole) {
   final out = <PromptMessage>[];
   final run = <PromptMessage>[];
 
@@ -137,7 +167,7 @@ List<PromptMessage> _mergeBlocks(List<PromptMessage> blocks) {
     if (parts.isNotEmpty || run.any((m) => m.sendEmptyBlock)) {
       out.add(
         PromptMessage(
-          role: 'system',
+          role: mergeRole,
           content: parts.join('\n'),
           blockName: 'merged prompt',
           isLorebook: run.any((m) => m.isLorebook),

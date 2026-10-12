@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../shared/shell/desktop/sidebar_sheet_provider.dart';
 import '../../core/llm/converters/reasoning_effort.dart';
-import '../../core/llm/converters/no_assistant.dart';
 import '../../core/llm/converters/prompt_post_processing.dart';
 import '../../core/llm/model_fetcher.dart';
 import '../../core/llm/transport/endpoint_normalizer.dart';
@@ -139,9 +138,6 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   final _embModelCtrl = TextEditingController();
   final _embChunkTokensCtrl = TextEditingController();
   final _embRequestsPerMinuteCtrl = TextEditingController();
-  final _noAssistantStopCtrl = TextEditingController();
-  final _noAssistantUserPrefixCtrl = TextEditingController();
-  final _noAssistantCharPrefixCtrl = TextEditingController();
 
   // Non-text form state
   double _temperature = 0.7;
@@ -206,8 +202,6 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
 
   String _sessionIdMode = 'openrouter';
   String _promptPostProcessing = PromptPostProcessing.none;
-  bool _noAssistant = false;
-  String _noAssistantSquashRole = NoAssistantSquashRole.assistant;
   String _protocol = LlmProtocol.openai;
   List<ExtraRequestParameter> _extraRequestParameters = const [];
 
@@ -257,9 +251,6 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     _embModelCtrl,
     _embChunkTokensCtrl,
     _embRequestsPerMinuteCtrl,
-    _noAssistantStopCtrl,
-    _noAssistantUserPrefixCtrl,
-    _noAssistantCharPrefixCtrl,
   ];
 
   @override
@@ -463,9 +454,6 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     _contextSizeCtrl.text = draft.contextSize;
     _firstChunkTimeoutCtrl.text = draft.firstChunkTimeoutSeconds;
     _reasoningHistoryCountCtrl.text = draft.reasoningHistoryCount;
-    _noAssistantStopCtrl.text = values.noAssistantStopString;
-    _noAssistantUserPrefixCtrl.text = values.noAssistantUserPrefix;
-    _noAssistantCharPrefixCtrl.text = values.noAssistantCharPrefix;
 
     setState(() {
       _temperature = values.temperature;
@@ -496,8 +484,6 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       _historyTrimStepPercent = values.historyTrimStepPercent;
       _sessionIdMode = values.sessionIdMode;
       _promptPostProcessing = values.promptPostProcessing;
-      _noAssistant = values.noAssistant;
-      _noAssistantSquashRole = values.noAssistantSquashRole;
       _protocol = values.protocol;
       _extraRequestParameters = values.extraRequestParameters;
       _fetchedModels = [];
@@ -582,11 +568,6 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
         historyTrimStepPercent: _historyTrimStepPercent,
         sessionIdMode: _sessionIdMode,
         promptPostProcessing: _promptPostProcessing,
-        noAssistant: _noAssistant,
-        noAssistantStopString: _noAssistantStopCtrl.text,
-        noAssistantUserPrefix: _noAssistantUserPrefixCtrl.text,
-        noAssistantCharPrefix: _noAssistantCharPrefixCtrl.text,
-        noAssistantSquashRole: _noAssistantSquashRole,
         protocol: _protocol,
         extraRequestParameters: _extraRequestParameters,
       ),
@@ -1598,45 +1579,6 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
           currentValue: _promptPostProcessingLabel(_promptPostProcessing),
           onTap: _openPromptPostProcessingSelector,
         ),
-        // NoAssistant reshapes the prompt before post-processing runs, so the
-        // two sit together. Ported from the legacy Vue preset option.
-        MenuSwitchItem(
-          label: 'label_no_assistant'.tr(),
-          helpTerm: 'preset-noassistant',
-          description: 'desc_no_assistant'.tr(),
-          value: _noAssistant,
-          onChanged: (v) {
-            setState(() => _noAssistant = v);
-            _scheduleSave();
-          },
-        ),
-        if (_noAssistant) ...[
-          MenuFieldItem(
-            label: 'label_stop_string'.tr(),
-            helpTerm: 'preset-stopstring',
-            description: 'desc_stop_string'.tr(),
-            controller: _noAssistantStopCtrl,
-            placeholder: 'User:',
-          ),
-          MenuFieldItem(
-            label: 'label_user_prefix'.tr(),
-            description: 'desc_user_prefix'.tr(),
-            controller: _noAssistantUserPrefixCtrl,
-            placeholder: 'User: ',
-          ),
-          MenuFieldItem(
-            label: 'label_char_prefix'.tr(),
-            description: 'desc_char_prefix'.tr(),
-            controller: _noAssistantCharPrefixCtrl,
-            placeholder: 'Assistant: ',
-          ),
-          MenuSelectorItem(
-            label: 'label_squash_role'.tr(),
-            description: 'desc_squash_role'.tr(),
-            currentValue: _noAssistantSquashRoleLabel(_noAssistantSquashRole),
-            onTap: _openNoAssistantSquashRoleSelector,
-          ),
-        ],
       ],
     );
   }
@@ -2491,30 +2433,6 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
 
   String _promptPostProcessingLabel(String mode) =>
       'prompt_post_processing_${PromptPostProcessing.baseOf(mode)}'.tr();
-
-  String _noAssistantSquashRoleLabel(String role) => switch (role) {
-    NoAssistantSquashRole.none => 'no_assistant_squash_none'.tr(),
-    _ => 'role_$role'.tr(),
-  };
-
-  void _openNoAssistantSquashRoleSelector() {
-    GlazeBottomSheet.show<void>(
-      context,
-      title: 'label_squash_role'.tr(),
-      items: NoAssistantSquashRole.all.map((role) {
-        return BottomSheetItem(
-          label: _noAssistantSquashRoleLabel(role),
-          icon: role == _noAssistantSquashRole ? Icons.check : null,
-          iconColor: context.cs.primary,
-          onTap: () {
-            Navigator.of(context, rootNavigator: true).pop();
-            setState(() => _noAssistantSquashRole = role);
-            _scheduleSave();
-          },
-        );
-      }).toList(),
-    );
-  }
 
   void _openPromptPostProcessingSelector() {
     final current = PromptPostProcessing.baseOf(_promptPostProcessing);

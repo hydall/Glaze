@@ -279,10 +279,15 @@ class StreamGenerationService {
       final hasInlineTags =
           reasoningTagStart.isNotEmpty && reasoningTagEnd.isNotEmpty;
 
+      final noAssistant = NoAssistantOptions.of(
+        preset,
+        charName: inputs.character.name,
+        userName: inputs.persona?.name ?? 'User',
+      );
       final apiMessages = buildApiMessages(
         promptResult.messages,
         reasoningHistoryCount: apiConfig.reasoningHistoryCount,
-        noAssistant: NoAssistantOptions.of(apiConfig),
+        noAssistant: noAssistant,
       );
       final previousApiMessages = _lastRequestsBySession[session.id];
       _rememberRequest(session.id, apiMessages);
@@ -764,6 +769,7 @@ class StreamGenerationService {
         previousMessages: previousApiMessages,
         charName: inputs.character.name,
         userName: inputs.persona?.name ?? 'User',
+        stop: noAssistant?.stop ?? const [],
         captureContext: captureContext,
       );
       _phase(GenerationPhase.waiting);

@@ -99,6 +99,7 @@ class PromptPreviewScreen extends ConsumerStatefulWidget {
 class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
   PromptResult? _result;
   ApiConfig? _apiConfig;
+  NoAssistantOptions? _noAssistant;
   String? _sessionId;
   String? _charName;
   String? _userName;
@@ -148,6 +149,11 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
       _sessionId = session.id;
       _charName = payload.character.name;
       _userName = payload.persona?.name ?? 'User';
+      _noAssistant = NoAssistantOptions.of(
+        payload.preset,
+        charName: _charName!,
+        userName: _userName!,
+      );
 
       final result = await buildPromptInIsolate(
         payload,
@@ -161,9 +167,7 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
           _result = result;
           // NoAssistant runs before post-processing on the live path too
           // (`buildApiMessages`), so the rows show the combined history block.
-          final noAssistant = _apiConfig == null
-              ? null
-              : NoAssistantOptions.of(_apiConfig!);
+          final noAssistant = _noAssistant;
           _previewMessages = buildPreviewMessages(
             noAssistant == null
                 ? result.messages
@@ -448,7 +452,7 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
       final apiMessages = buildPreviewApiMessages(
         _result!.messages,
         reasoningHistoryCount: cfg.reasoningHistoryCount,
-        noAssistant: NoAssistantOptions.of(cfg),
+        noAssistant: _noAssistant,
       );
 
       // The live path applies post-processing in the transport decorator; the
@@ -461,6 +465,7 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
           sessionId: _sessionId,
           charName: _charName,
           userName: _userName,
+          stop: _noAssistant?.stop ?? const [],
         ),
       );
       _requestTokens = countRequestTokens(request.messages);

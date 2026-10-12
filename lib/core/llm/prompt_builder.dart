@@ -999,7 +999,11 @@ PromptResult _assembleMessages({
               buildApiMessages(
                 finalMessagesWithRegex,
                 reasoningHistoryCount: payload.apiConfig.reasoningHistoryCount,
-                noAssistant: NoAssistantOptions.of(payload.apiConfig),
+                noAssistant: NoAssistantOptions.of(
+                  payload.preset,
+                  charName: char.name,
+                  userName: persona?.name ?? 'User',
+                ),
               ),
             ),
           ),

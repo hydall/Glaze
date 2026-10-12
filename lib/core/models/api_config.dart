@@ -72,14 +72,6 @@ abstract class ApiConfig with _$ApiConfig {
     /// `lib/core/llm/converters/prompt_post_processing.dart` for the modes.
     @Default('none') String promptPostProcessing,
 
-    /// NoAssistant mode — the whole chat history goes out as one assistant
-    /// message with speaker prefixes. Custom endpoints only; see
-    /// `lib/core/llm/converters/no_assistant.dart`.
-    @Default(false) bool noAssistant,
-    @Default('') String noAssistantStopString,
-    @Default('') String noAssistantUserPrefix,
-    @Default('') String noAssistantCharPrefix,
-    @Default('assistant') String noAssistantSquashRole,
     @Default(120000) int firstChunkTimeoutMs,
 
     /// Send the leading run of system blocks in the provider's own field —

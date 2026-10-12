@@ -4,7 +4,10 @@ import 'package:glaze_flutter/core/llm/history_assembler.dart';
 import 'package:glaze_flutter/core/llm/transport/chat_transport_request.dart';
 import 'package:glaze_flutter/core/llm/transport/llm_protocol.dart';
 import 'package:glaze_flutter/core/llm/transport/openai_chat_transport.dart';
+import 'package:glaze_flutter/core/llm/transport/anthropic_chat_transport.dart';
+import 'package:glaze_flutter/core/llm/transport/gemini_chat_transport.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
+import 'package:glaze_flutter/core/models/preset.dart';
 
 PromptMessage _block(String role, String content) =>
     PromptMessage(role: role, content: content);
@@ -164,44 +167,79 @@ void main() {
   });
 
   group('NoAssistantOptions.of', () {
-    const custom = ApiConfig(
-      id: 'c',
-      protocol: LlmProtocol.customChatCompletion,
+    const preset = Preset(
+      id: 'p',
+      name: 'P',
       noAssistant: true,
-      noAssistantUserPrefix: 'U: ',
-      noAssistantCharPrefix: 'C: ',
-      noAssistantSquashRole: 'bogus',
-      noAssistantStopString: 'U:',
+      userPrefix: '{{user}}: ',
+      charPrefix: '{{char}}: ',
+      squashRole: 'bogus',
+      mergeRole: 'bogus',
+      stopString: '\n{{user}}:',
     );
 
-    test('is null when the mode is off', () {
+    NoAssistantOptions? of(Preset? preset) =>
+        NoAssistantOptions.of(preset, charName: 'Alice', userName: 'Bob');
+
+    test('is null when the mode is off or there is no preset', () {
+      expect(of(preset.copyWith(noAssistant: false)), isNull);
+      expect(of(null), isNull);
+    });
+
+    test('expands macros in the prefixes and the stop string', () {
+      final options = of(preset)!;
+      expect(options.userPrefix, 'Bob: ');
+      expect(options.charPrefix, 'Alice: ');
+      expect(options.stopString, '\nBob:');
+      expect(options.stop, ['\nBob:']);
+    });
+
+    test('normalizes the roles', () {
+      final options = of(preset)!;
+      expect(options.squashRole, NoAssistantSquashRole.assistant);
+      expect(options.mergeRole, 'system');
+      // Vue offered `system`, which squashed nothing.
       expect(
-        NoAssistantOptions.of(custom.copyWith(noAssistant: false)),
-        isNull,
+        of(preset.copyWith(squashRole: 'system'))!.squashRole,
+        NoAssistantSquashRole.none,
       );
     });
 
-    test('is null for every protocol but a custom endpoint', () {
-      for (final protocol in [
-        LlmProtocol.openai,
-        LlmProtocol.openrouter,
-        LlmProtocol.anthropic,
-        LlmProtocol.gemini,
-      ]) {
-        expect(
-          NoAssistantOptions.of(custom.copyWith(protocol: protocol)),
-          isNull,
-          reason: protocol,
-        );
-      }
+    test('an empty stop string sends no stop', () {
+      expect(of(preset.copyWith(stopString: ''))!.stop, isEmpty);
     });
+  });
 
-    test('reads the connection and normalizes the squash role', () {
-      final options = NoAssistantOptions.of(custom)!;
-      expect(options.userPrefix, 'U: ');
-      expect(options.charPrefix, 'C: ');
-      expect(options.squashRole, NoAssistantSquashRole.assistant);
-      expect(options.stopString, 'U:');
+  group('merge role', () {
+    test('merged preset blocks take the preset merge role', () {
+      final out = applyNoAssistant([
+        _block('system', 'Main'),
+        _block('user', 'Card'),
+        _history('user', 'Hi'),
+      ], const NoAssistantOptions(mergeRole: 'user'));
+      expect(_shape(out), [('user', 'Main\nCard'), ('assistant', 'Hi')]);
+    });
+  });
+
+  group('Preset JSON', () {
+    test('reads the Vue keys and their defaults', () {
+      final preset = Preset.fromJson({
+        'id': 'p',
+        'name': 'P',
+        'noAssistant': true,
+        'stopString': 'User:',
+        'userPrefix': 'User: ',
+        'charPrefix': 'Char: ',
+        'squashRole': '',
+        'mergeRole': '',
+      });
+      expect(preset.noAssistant, isTrue);
+      expect(preset.stopString, 'User:');
+      expect(preset.userPrefix, 'User: ');
+      expect(preset.charPrefix, 'Char: ');
+      expect(preset.squashRole, 'assistant');
+      expect(preset.mergeRole, 'system');
+      expect(Preset.fromJson(preset.toJson()), preset);
     });
   });
 
@@ -220,40 +258,46 @@ void main() {
   });
 
   group('stop string', () {
-    const config = ApiConfig(
-      id: 'c',
-      protocol: LlmProtocol.customChatCompletion,
-      noAssistant: true,
-      noAssistantStopString: 'User:',
+    const options = NoAssistantOptions(stopString: 'Bob:');
+
+    ChatTransportRequest request() => ChatTransportRequest.fromApiConfig(
+      const ApiConfig(id: 'c', protocol: LlmProtocol.customChatCompletion),
+      messages: const [],
+      stop: options.stop,
     );
 
-    Map<String, dynamic> bodyFor(ApiConfig config) =>
+    test('goes out as the stop parameter of every protocol that has one', () {
+      expect(
         OpenAiChatTransport.buildBody(
-          ChatTransportRequest.fromApiConfig(config, messages: const []),
+          request(),
           protocol: LlmProtocol.customChatCompletion,
-        );
-
-    test('goes out as the stop parameter', () {
-      expect(bodyFor(config)['stop'], ['User:']);
+        )['stop'],
+        ['Bob:'],
+      );
+      expect(
+        AnthropicChatTransport.buildRequest(request()).body['stop_sequences'],
+        ['Bob:'],
+      );
+      expect(
+        (GeminiChatTransport.buildRequest(request()).body['generationConfig']
+            as Map)['stopSequences'],
+        ['Bob:'],
+      );
     });
 
-    test('is omitted when empty or when the mode is off', () {
-      expect(
-        bodyFor(config.copyWith(noAssistantStopString: '')),
-        isNot(contains('stop')),
+    test('is omitted when empty', () {
+      final body = OpenAiChatTransport.buildBody(
+        ChatTransportRequest.fromApiConfig(
+          const ApiConfig(id: 'c'),
+          messages: const [],
+        ),
+        protocol: LlmProtocol.customChatCompletion,
       );
-      expect(
-        bodyFor(config.copyWith(noAssistant: false)),
-        isNot(contains('stop')),
-      );
+      expect(body, isNot(contains('stop')));
     });
 
     test('survives a message rewrite', () {
-      final request = ChatTransportRequest.fromApiConfig(
-        config,
-        messages: const [],
-      ).withMessages(const []);
-      expect(request.stop, ['User:']);
+      expect(request().withMessages(const []).stop, ['Bob:']);
     });
   });
 }

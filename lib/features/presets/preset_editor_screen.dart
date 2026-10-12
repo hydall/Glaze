@@ -4,6 +4,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/llm/converters/no_assistant.dart';
 import '../../core/llm/tokenizer.dart';
 import '../../core/models/preset.dart';
 import '../../core/models/preset_block_groups.dart';
@@ -230,6 +231,22 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
   late final _impersonationPromptCtrl = TextEditingController(
     text: widget.preset?.impersonationPrompt ?? '',
   );
+  late bool _noAssistant = widget.preset?.noAssistant ?? false;
+  late String _mergeRole = NoAssistantMergeRole.normalize(
+    widget.preset?.mergeRole,
+  );
+  late String _squashRole = NoAssistantSquashRole.normalize(
+    widget.preset?.squashRole,
+  );
+  late final _stopStringCtrl = TextEditingController(
+    text: widget.preset?.stopString ?? '',
+  );
+  late final _userPrefixCtrl = TextEditingController(
+    text: widget.preset?.userPrefix ?? '',
+  );
+  late final _charPrefixCtrl = TextEditingController(
+    text: widget.preset?.charPrefix ?? '',
+  );
   bool _showAdvanced = false;
   int? _expandedBlockIndex;
 
@@ -258,6 +275,9 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
     _reasoningStartCtrl.addListener(_scheduleSave);
     _reasoningEndCtrl.addListener(_scheduleSave);
     _impersonationPromptCtrl.addListener(_scheduleSave);
+    _stopStringCtrl.addListener(_scheduleSave);
+    _userPrefixCtrl.addListener(_scheduleSave);
+    _charPrefixCtrl.addListener(_scheduleSave);
   }
 
   @override
@@ -296,6 +316,9 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
     _reasoningStartCtrl.dispose();
     _reasoningEndCtrl.dispose();
     _impersonationPromptCtrl.dispose();
+    _stopStringCtrl.dispose();
+    _userPrefixCtrl.dispose();
+    _charPrefixCtrl.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -326,6 +349,13 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
           ? null
           : _impersonationPromptCtrl.text,
       summaryPrompt: widget.preset?.summaryPrompt,
+      // Prefixes are kept verbatim: the trailing space in `User: ` matters.
+      noAssistant: _noAssistant,
+      mergeRole: _mergeRole,
+      stopString: _stopStringCtrl.text,
+      userPrefix: _userPrefixCtrl.text,
+      charPrefix: _charPrefixCtrl.text,
+      squashRole: _squashRole,
       createdAt: _createdAt,
     );
     await ref.read(presetListProvider.notifier).updatePreset(presetToSave);
@@ -1006,6 +1036,8 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
                 ),
               ],
               const SizedBox(height: 20),
+              ..._buildNoAssistantSection(),
+              const SizedBox(height: 20),
               _SectionLabel('section_impersonation'.tr()),
               const SizedBox(height: 8),
               Text(
@@ -1026,6 +1058,127 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
           ),
         ),
       ),
+    );
+  }
+
+  /// The Vue preset's "Prompt Postprocessing" group: NoAssistant and the
+  /// settings it reads.
+  List<Widget> _buildNoAssistantSection() {
+    return [
+      _SectionLabel('section_postprocessing'.tr()),
+      const SizedBox(height: 8),
+      _SettingsToggle(
+        label: 'label_no_assistant'.tr(),
+        description: 'desc_no_assistant'.tr(),
+        value: _noAssistant,
+        helpTerm: 'preset-noassistant',
+        onChanged: (v) {
+          setState(() => _noAssistant = v);
+          _scheduleSave();
+        },
+      ),
+      if (_noAssistant) ...[
+        const SizedBox(height: 12),
+        _SettingsSelector(
+          label: 'label_merge_role'.tr(),
+          description: 'desc_merge_role'.tr(),
+          value: 'role_$_mergeRole'.tr(),
+          onTap: () => _pickRole(
+            title: 'label_merge_role'.tr(),
+            roles: NoAssistantMergeRole.all,
+            current: _mergeRole,
+            label: (role) => 'role_$role'.tr(),
+            onPicked: (role) => _mergeRole = role,
+          ),
+        ),
+        const SizedBox(height: 12),
+        _labeledField(
+          label: 'label_stop_string'.tr(),
+          description: 'desc_stop_string'.tr(),
+          helpTerm: 'preset-stopstring',
+          controller: _stopStringCtrl,
+          hint: '{{user}}:',
+        ),
+        const SizedBox(height: 12),
+        _labeledField(
+          label: 'label_user_prefix'.tr(),
+          description: 'desc_user_prefix'.tr(),
+          controller: _userPrefixCtrl,
+          hint: '{{user}}: ',
+        ),
+        const SizedBox(height: 12),
+        _labeledField(
+          label: 'label_char_prefix'.tr(),
+          description: 'desc_char_prefix'.tr(),
+          controller: _charPrefixCtrl,
+          hint: '{{char}}: ',
+        ),
+        const SizedBox(height: 12),
+        _SettingsSelector(
+          label: 'label_squash_role'.tr(),
+          description: 'desc_squash_role'.tr(),
+          value: _squashRoleLabel(_squashRole),
+          onTap: () => _pickRole(
+            title: 'label_squash_role'.tr(),
+            roles: NoAssistantSquashRole.all,
+            current: _squashRole,
+            label: _squashRoleLabel,
+            onPicked: (role) => _squashRole = role,
+          ),
+        ),
+      ],
+    ];
+  }
+
+  String _squashRoleLabel(String role) => switch (role) {
+    NoAssistantSquashRole.none => 'no_assistant_squash_none'.tr(),
+    _ => 'role_$role'.tr(),
+  };
+
+  void _pickRole({
+    required String title,
+    required List<String> roles,
+    required String current,
+    required String Function(String role) label,
+    required void Function(String role) onPicked,
+  }) {
+    GlazeBottomSheet.show<void>(
+      context,
+      title: title,
+      items: [
+        for (final role in roles)
+          BottomSheetItem(
+            label: label(role),
+            icon: role == current ? Icons.check : null,
+            iconColor: context.cs.primary,
+            onTap: () {
+              Navigator.of(context, rootNavigator: true).pop();
+              setState(() => onPicked(role));
+              _scheduleSave();
+            },
+          ),
+      ],
+    );
+  }
+
+  Widget _labeledField({
+    required String label,
+    required String description,
+    required TextEditingController controller,
+    required String hint,
+    String? helpTerm,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _SettingsCaption(
+          label: label,
+          description: description,
+          helpTerm: helpTerm,
+        ),
+        const SizedBox(height: 8),
+        GlazeTextField(controller: controller, hint: hint),
+      ],
     );
   }
 
@@ -1381,6 +1534,13 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
           ? null
           : _impersonationPromptCtrl.text,
       summaryPrompt: widget.preset?.summaryPrompt,
+      // Prefixes are kept verbatim: the trailing space in `User: ` matters.
+      noAssistant: _noAssistant,
+      mergeRole: _mergeRole,
+      stopString: _stopStringCtrl.text,
+      userPrefix: _userPrefixCtrl.text,
+      charPrefix: _charPrefixCtrl.text,
+      squashRole: _squashRole,
       createdAt: _createdAt,
     );
   }
@@ -1483,38 +1643,98 @@ class _SettingsToggle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: _SettingsCaption(
+            label: label,
+            description: description,
+            helpTerm: helpTerm,
+          ),
+        ),
+        GlazeSwitch(value: value, onChanged: onChanged),
+      ],
+    );
+  }
+}
+
+// ─── _SettingsSelector ───────────────────────────────────────────────────────
+
+/// A setting picked from a sheet: caption on the left, current value and a
+/// chevron on the right.
+class _SettingsSelector extends StatelessWidget {
+  final String label;
+  final String description;
+  final String value;
+  final VoidCallback onTap;
+
+  const _SettingsSelector({
+    required this.label,
+    required this.description,
+    required this.value,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      mouseCursor: SystemMouseCursors.click,
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Row(
+        children: [
+          Expanded(
+            child: _SettingsCaption(label: label, description: description),
+          ),
+          const SizedBox(width: 12),
+          Text(
+            value,
+            style: TextStyle(fontSize: 14, color: context.cs.primary),
+          ),
+          Icon(Icons.chevron_right, color: context.cs.onSurfaceVariant),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── _SettingsCaption ────────────────────────────────────────────────────────
+
+class _SettingsCaption extends StatelessWidget {
+  final String label;
+  final String description;
+  final String? helpTerm;
+
+  const _SettingsCaption({
+    required this.label,
+    required this.description,
+    this.helpTerm,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     final labelWidget = Text(
       label,
       style: TextStyle(fontSize: 14, color: context.cs.onSurface),
     );
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        if (helpTerm != null)
+          Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              if (helpTerm != null)
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    labelWidget,
-                    HelpTip(term: helpTerm!),
-                  ],
-                )
-              else
-                labelWidget,
-              const SizedBox(height: 2),
-              Text(
-                description,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: context.cs.onSurfaceVariant,
-                ),
-              ),
+              labelWidget,
+              HelpTip(term: helpTerm!),
             ],
-          ),
+          )
+        else
+          labelWidget,
+        const SizedBox(height: 2),
+        Text(
+          description,
+          style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant),
         ),
-        GlazeSwitch(value: value, onChanged: onChanged),
       ],
     );
   }

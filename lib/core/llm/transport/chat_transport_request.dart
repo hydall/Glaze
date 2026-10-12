@@ -1,6 +1,5 @@
 import '../../models/extra_request_parameter.dart';
 import '../../models/api_config.dart';
-import '../converters/no_assistant.dart';
 import 'llm_capture_context.dart';
 
 /// Provider-neutral input for [ChatTransport.stream].
@@ -72,8 +71,9 @@ class ChatTransportRequest {
   final String? charName;
   final String? userName;
 
-  /// `stop` sequences. Only the Chat Completions body sends them; today the
-  /// one source is the NoAssistant stop string of a custom connection.
+  /// Stop sequences, sent as `stop` / `stop_sequences` / `stopSequences`; the
+  /// Responses API has no such field. Today the one source is the stop string
+  /// of a NoAssistant preset.
   final List<String> stop;
 
   /// Optional tool definitions for native tool-call support (OpenAI format).
@@ -173,6 +173,7 @@ class ChatTransportRequest {
     String? toolChoice,
     String? charName,
     String? userName,
+    List<String> stop = const [],
     LlmCaptureContext? captureContext,
   }) => ChatTransportRequest(
     endpoint: apiConfig.endpoint,
@@ -206,7 +207,7 @@ class ChatTransportRequest {
     promptPostProcessing: apiConfig.promptPostProcessing,
     charName: charName,
     userName: userName,
-    stop: NoAssistantOptions.stopFor(apiConfig),
+    stop: stop,
     tools: tools,
     toolChoice: toolChoice,
     useSystemInstruction: apiConfig.useSystemInstruction,
