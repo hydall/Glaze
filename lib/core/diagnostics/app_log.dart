@@ -9,9 +9,9 @@ import 'package:path/path.dart' as p;
 import '../constants/app_version.dart';
 import '../constants/build_channel.dart';
 import 'crash_detector.dart';
+import 'device_profile.dart';
 import 'diagnostics_store.dart';
 import 'log_redactor.dart';
-import 'native_diagnostics.dart';
 import 'session_tracker.dart';
 
 enum LogLevel {
@@ -187,7 +187,7 @@ abstract final class AppLog {
 
   /// Environment block shared by the session header and crash reports.
   static Future<String> describeEnvironment() async {
-    final device = await NativeDiagnostics.deviceDescription();
+    final device = await DeviceProfile.collect();
     final mode = kReleaseMode
         ? 'release'
         : kProfileMode
@@ -198,8 +198,7 @@ abstract final class AppLog {
       if (buildCommit.isNotEmpty) 'Commit: $buildCommit',
       if (buildDate.isNotEmpty || buildBranch.isNotEmpty)
         'Build:  $buildDate $buildBranch'.trimRight(),
-      'OS:     ${Platform.operatingSystem} ${Platform.operatingSystemVersion}',
-      if (device != null) 'Device: $device',
+      ...device.lines,
       'Locale: ${Platform.localeName}',
       'Dart:   ${Platform.version.split(' ').first}',
     ].join('\n');

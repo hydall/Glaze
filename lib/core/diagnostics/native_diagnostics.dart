@@ -94,17 +94,13 @@ abstract final class NativeDiagnostics {
     }
   }
 
-  /// Manufacturer, model and Android version — the first thing anyone asks
-  /// about a crash, and nothing `dart:io` can tell.
-  static Future<String?> deviceDescription() async {
+  /// Model, Android version, SoC and memory — the first things anyone asks
+  /// about a crash, and nothing `dart:io` can tell. `DeviceProfile` turns it
+  /// into report lines.
+  static Future<Map<String, Object?>?> deviceInfo() async {
     if (!Platform.isAndroid) return null;
     try {
-      final info = await _channel.invokeMapMethod<String, Object?>(
-        'deviceInfo',
-      );
-      if (info == null) return null;
-      return '${info['manufacturer']} ${info['model']} · Android '
-          '${info['release']} (SDK ${info['sdk']}) · ${info['abis']}';
+      return await _channel.invokeMapMethod<String, Object?>('deviceInfo');
     } catch (_) {
       return null;
     }

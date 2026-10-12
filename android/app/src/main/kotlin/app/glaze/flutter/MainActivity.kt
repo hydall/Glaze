@@ -68,7 +68,7 @@ class MainActivity : FlutterActivity() {
             when (call.method) {
                 "lastExit" -> result.success(CrashDiagnostics.lastExit(this))
                 "takeJavaCrash" -> result.success(CrashDiagnostics.takeJavaCrash(this))
-                "deviceInfo" -> result.success(CrashDiagnostics.deviceInfo())
+                "deviceInfo" -> result.success(CrashDiagnostics.deviceInfo(this))
                 else -> result.notImplemented()
             }
         }

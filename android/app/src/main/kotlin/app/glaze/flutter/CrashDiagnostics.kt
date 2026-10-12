@@ -72,13 +72,34 @@ object CrashDiagnostics {
         }
     }
 
-    fun deviceInfo(): Map<String, Any?> = mapOf(
-        "manufacturer" to Build.MANUFACTURER,
-        "model" to Build.MODEL,
-        "release" to Build.VERSION.RELEASE,
-        "sdk" to Build.VERSION.SDK_INT,
-        "abis" to Build.SUPPORTED_ABIS.joinToString(","),
-    )
+    /// What the device is and what it has to work with. Memory is the whole
+    /// point for LOW_MEMORY reports: total RAM, what was free at launch, and
+    /// the heap limit Android grants this app.
+    fun deviceInfo(context: Context): Map<String, Any?> {
+        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+        val memory = ActivityManager.MemoryInfo().also { am?.getMemoryInfo(it) }
+        val socOk = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+        return mapOf(
+            "manufacturer" to Build.MANUFACTURER,
+            "brand" to Build.BRAND,
+            "model" to Build.MODEL,
+            "device" to Build.DEVICE,
+            "release" to Build.VERSION.RELEASE,
+            "sdk" to Build.VERSION.SDK_INT,
+            "securityPatch" to Build.VERSION.SECURITY_PATCH,
+            "abis" to Build.SUPPORTED_ABIS.joinToString(","),
+            "hardware" to Build.HARDWARE,
+            "socManufacturer" to if (socOk) Build.SOC_MANUFACTURER else null,
+            "socModel" to if (socOk) Build.SOC_MODEL else null,
+            "cores" to Runtime.getRuntime().availableProcessors(),
+            "totalMem" to if (am != null) memory.totalMem else null,
+            "availMem" to if (am != null) memory.availMem else null,
+            "lowMemThreshold" to if (am != null) memory.threshold else null,
+            // The manifest does not ask for largeHeap, so this is the limit.
+            "heapMb" to am?.memoryClass,
+            "lowRamDevice" to am?.isLowRamDevice,
+        )
+    }
 
     /// ANR traces are text; a native crash's trace is a binary tombstone that
     /// would only be noise in a text report.
