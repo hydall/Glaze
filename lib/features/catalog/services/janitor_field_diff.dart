@@ -201,8 +201,12 @@ List<String> _residue(String after, String before) {
 /// the scenario is not handed back as closed-lorebook material. [existing] is
 /// whatever the separator already isolated — text already in there is not
 /// reported a second time.
+///
+/// [extraCaptures] are the follow-up passes of a trigger that hit the
+/// lorebook cap; each is diffed against the same [probe] as [capture].
 InjectionScan scanInjectedFields({
   required PromptFields capture,
+  List<PromptFields> extraCaptures = const [],
   PromptFields? probe,
   PromptFields? clean,
   List<String> publicContents = const [],
@@ -228,9 +232,15 @@ InjectionScan scanInjectedFields({
 
   for (final field in InjectionField.values) {
     final after = capture[field];
-    if (after.trim().isEmpty) continue;
     // Pass one — what the trigger fired, whatever field it landed in.
-    if (probe != null) collect(field, after, probe[field]);
+    if (probe != null) {
+      for (final pass in [capture, ...extraCaptures]) {
+        if (pass[field].trim().isNotEmpty) {
+          collect(field, pass[field], probe[field]);
+        }
+      }
+    }
+    if (after.trim().isEmpty) continue;
     // Pass two — what is always on. An empty clean field is not a baseline: it
     // means the catalog withholds that field, and treating "" as "nothing was
     // there before" would report the entire field as injected lore.

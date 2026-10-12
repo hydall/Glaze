@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:math';
 
@@ -7,6 +8,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import '../../chat/bridge/chat_webview_environment.dart';
 import 'cf_challenge_service.dart';
+import 'janitor_lore_budget.dart';
 import 'janitor_separate.dart';
 import 'janitor_session.dart';
 
@@ -473,16 +475,30 @@ class JanitorCaptureResult {
   /// diffing it against itself would say nothing.
   final Map<String, dynamic>? probePayload;
 
+  /// Payloads of the follow-up passes run when [payload] hit JanitorAI's
+  /// lorebook cap: the trigger re-sent in pieces, each in a chat of its own,
+  /// so every piece gets the whole budget. Their lore is [payload]'s
+  /// complement, overlapping it wherever a piece fired the same entries.
+  final List<Map<String, dynamic>> extraPasses;
+
   final List<String> greetings;
   final String? bakedUserName;
 
   const JanitorCaptureResult({
     required this.payload,
     this.probePayload,
+    this.extraPasses = const [],
     this.greetings = const [],
     this.bakedUserName,
   });
 }
+
+/// What one `__glazeSend` produced — see `JanitorWebViewProxy._captureOneSend`.
+typedef _SendResult = ({
+  Map<String, dynamic>? payload,
+  String? problem,
+  JanitorRefusedException? refusal,
+});
 
 /// Thrown when the proxy could not obtain a CF-cleared response.
 class JanitorCfException implements Exception {
@@ -718,20 +734,39 @@ class JanitorWebViewProxy {
   /// The run is serialized on purpose: it mutates shared account state (selected
   /// proxy preset, generation settings, persona), so two captures overlapping
   /// would restore each other's snapshots and leave the account misconfigured.
+  ///
+  /// With a [loreBudget], a trigger whose captured lore reached JanitorAI's
+  /// lorebook cap is split and re-sent piece by piece, each piece in a fresh
+  /// chat — re-sending in the same chat would keep the earlier message in the
+  /// scan window and hit the same cap. See [JanitorCaptureResult.extraPasses].
   Future<JanitorCaptureResult> captureGenerateAlpha({
     required String characterId,
     String triggerText = '',
     bool includeCard = true,
+    JanitorLoreBudget? loreBudget,
     void Function(String phase)? onPhase,
   }) =>
       _enqueue(
-        () => _captureLocked(characterId, triggerText, includeCard, onPhase),
+        () => _captureLocked(
+          characterId,
+          triggerText,
+          includeCard,
+          loreBudget,
+          onPhase,
+        ),
       );
+
+  /// Most follow-up passes one capture runs after hitting the lorebook cap.
+  /// Each is a chat of its own, the better part of a minute; past this many the
+  /// book is either enormous or its always-on entries alone fill the budget,
+  /// and neither is fixed by cutting the trigger finer.
+  static const int _maxSplitPasses = 16;
 
   Future<JanitorCaptureResult> _captureLocked(
     String characterId,
     String triggerText,
     bool includeCard,
+    JanitorLoreBudget? loreBudget,
     void Function(String phase)? onPhase,
   ) async {
     void phase(String p) {
@@ -756,7 +791,6 @@ class JanitorWebViewProxy {
     // prompt — the send just runs on Janitor's own model.
     phase('configuring proxy');
     final apiSettingsSnapshot = await _enterExtractionMode();
-    String? chatId;
     String? personaId;
     String? bakedUserName;
     Map<String, dynamic>? profileNameSnapshot;
@@ -789,32 +823,11 @@ class JanitorWebViewProxy {
             '${bakedUserName ?? 'unknown'}');
       }
 
-      // 3) Create a fresh chat for this character, bound to that persona.
-      phase('creating chat');
-      final chatBody = await _fetchLocked(
-        'https://janitorai.com/hampter/chats',
-        method: 'POST',
-        body: jsonEncode({
-          'character_id': characterId,
-          'persona_id': ?personaId,
-        }),
-      );
-      final chatJson = jsonDecode(chatBody);
-      chatId = (chatJson is Map ? chatJson['id'] : null)?.toString();
-      if (chatId == null || chatId.isEmpty) {
-        throw Exception('Could not create chat (no id in response).');
-      }
-
-      // 4) The chat's embedded character carries the greetings verbatim even when
-      //    the character endpoint withholds them for a closed card, so read them
-      //    here rather than reconstructing them from the prompt.
-      final greetings = await _fetchChatGreetings(chatId);
-
       final controller = _controller;
       if (controller == null) throw Exception('WebView not available.');
 
-      // 5) Install the capture hook at document start, then open the chat.
-      phase('opening chat');
+      // 3) Install the capture hook at document start; it re-injects on every
+      //    chat page the passes below open.
       await controller.removeAllUserScripts();
       await controller.addUserScript(
         userScript: UserScript(
@@ -823,53 +836,36 @@ class JanitorWebViewProxy {
         ),
       );
       try {
-        _loadStop = Completer<void>();
-        await controller.loadUrl(
-          urlRequest: URLRequest(
-            url: WebUri('https://janitorai.com/chats/$chatId'),
-          ),
-        );
-        await _awaitLoad();
-        await _waitForClearance();
+        // 4) First chat: send "." → capture the card, then the card (+ the
+        //    selected context) → maximise lorebook triggers.
+        late final List<String> greetings;
+        late final _SendResult dot;
+        late final _SendResult full;
+        late final String trigger;
+        await _inFreshChat(characterId, personaId, phase, (chatId) async {
+          // The chat's embedded character carries the greetings verbatim even
+          // when the character endpoint withholds them for a closed card, so
+          // read them here rather than reconstructing them from the prompt.
+          greetings = await _fetchChatGreetings(chatId);
 
-        // JanitorAI caches the selected proxy preset in its client store, so the
-        // dummy preset switched in by _enterExtractionMode() above may not take
-        // effect on the first chat load — the captured `/generateAlpha` would
-        // then run against the previous (e.g. JLLM) preset and lose its wrappers.
-        // Reload the chat page once to force the new preset to take effect before
-        // triggering. The AT_DOCUMENT_START capture hook re-injects on reload.
-        phase('reloading for preset');
-        _loadStop = Completer<void>();
-        await controller.reload();
-        await _awaitLoad();
-        await _waitForClearance();
+          phase('triggering (card)');
+          dot = await _captureOneSend('.', const Duration(seconds: 60));
+          // A refusal applies to the character, not to this particular
+          // message — the second send would be refused identically, so stop.
+          if (dot.refusal != null) {
+            throw _refusalError(characterId, dot.refusal!);
+          }
+          final card = dot.payload != null ? extractCard(dot.payload!) : '';
 
-        // Wait for the React chat app to actually mount its composer instead of
-        // sleeping a constant: hydration takes as long as the device and the
-        // network make it take.
-        phase('waiting for chat UI');
-        if (!await _waitForComposer(const Duration(seconds: 60))) {
-          _log('composer never appeared — sending anyway');
-        }
-
-        // 6) Send "." → capture the card.
-        phase('triggering (card)');
-        final dot = await _captureOneSend('.', const Duration(seconds: 60));
-        // A refusal applies to the character, not to this particular message —
-        // the second send would be refused identically, so stop here.
-        if (dot.refusal != null) throw _refusalError(characterId, dot.refusal!);
-        final card = dot.payload != null ? extractCard(dot.payload!) : '';
-
-        // 7) Send card (+ the selected context) → maximise lorebook triggers.
-        final parts = <String>[
-          if (includeCard && card.isNotEmpty) card,
-          if (triggerText.trim().isNotEmpty) triggerText.trim(),
-        ];
-        final trigger = parts.isEmpty ? '.' : parts.join('\n\n');
-        phase('triggering (lorebook)');
-        await _resetCapture();
-        final full =
-            await _captureOneSend(trigger, const Duration(seconds: 120));
+          final parts = <String>[
+            if (includeCard && card.isNotEmpty) card,
+            if (triggerText.trim().isNotEmpty) triggerText.trim(),
+          ];
+          trigger = parts.isEmpty ? '.' : parts.join('\n\n');
+          phase('triggering (lorebook)');
+          await _resetCapture();
+          full = await _captureOneSend(trigger, const Duration(seconds: 120));
+        });
         final result = full.payload ?? dot.payload;
         if (result == null) {
           final refusal = full.refusal ?? dot.refusal;
@@ -879,6 +875,22 @@ class JanitorWebViewProxy {
               dot.problem ??
               'Timed out waiting for a generateAlpha capture.');
         }
+
+        // 5) The lore that came back hit JanitorAI's cap: entries the trigger
+        //    fired past it were dropped. Re-send the trigger in pieces until
+        //    every piece fits.
+        final extraPasses = full.payload != null && loreBudget != null
+            ? await _splitPasses(
+                characterId: characterId,
+                personaId: personaId,
+                trigger: trigger,
+                first: full.payload!,
+                probe: dot.payload,
+                budget: loreBudget,
+                phase: phase,
+              )
+            : const <Map<String, dynamic>>[];
+
         phase('captured');
         return JanitorCaptureResult(
           payload: result,
@@ -886,6 +898,7 @@ class JanitorWebViewProxy {
           // trigger send produced nothing we fell back to the probe's own
           // payload above, and it cannot be both sides of the diff.
           probePayload: full.payload != null ? dot.payload : null,
+          extraPasses: extraPasses,
           greetings: greetings,
           bakedUserName: bakedUserName,
         );
@@ -895,13 +908,10 @@ class JanitorWebViewProxy {
         } catch (_) {}
       }
     } finally {
-      // Clean up everything the capture created, in dependency order: the chat
-      // references the persona, the persona outlives neither. Each step is
-      // best-effort — a failure here must not mask the capture's own result.
-      if (chatId != null) {
-        phase('deleting chat');
-        await _deleteChat(chatId);
-      }
+      // Clean up everything the capture created, in dependency order: the
+      // persona outlives none of the chats (each pass deletes its own). Each
+      // step is best-effort — a failure here must not mask the capture's own
+      // result.
       if (personaId != null) {
         await _deletePersona(personaId);
       }
@@ -912,6 +922,134 @@ class JanitorWebViewProxy {
         phase('restoring settings');
         await _restoreProfile(apiSettingsSnapshot);
       }
+    }
+  }
+
+  /// Re-sends [trigger] in pieces after [first] came back at the lorebook cap,
+  /// each piece in a fresh chat so it is the only message JanitorAI scans. A
+  /// piece that is still at the cap is split again, until the pieces fit,
+  /// cannot be cut any finer, or [_maxSplitPasses] runs out. Returns every
+  /// payload the pieces produced.
+  ///
+  /// Nothing is split when the [probe] alone is at the cap: those are always-on
+  /// entries, and they fill every chat whatever the trigger says.
+  Future<List<Map<String, dynamic>>> _splitPasses({
+    required String characterId,
+    required String? personaId,
+    required String trigger,
+    required Map<String, dynamic> first,
+    required Map<String, dynamic>? probe,
+    required JanitorLoreBudget budget,
+    required void Function(String) phase,
+  }) async {
+    final firstTokens = budget.loreTokens(first, probe: probe);
+    _log('lore ${firstTokens}t of $janitorLoreTokenCap'
+        '${budget.exact ? '' : ' (estimated)'}');
+    if (!budget.isSaturated(first, probe: probe)) return const [];
+    if (probe != null && budget.isSaturated(probe)) {
+      _log('the "." probe alone fills the lorebook cap — not splitting');
+      return const [];
+    }
+    final queue = Queue<String>.of(splitTrigger(trigger));
+    if (queue.length < 2) return const [];
+
+    final payloads = <Map<String, dynamic>>[];
+    var pass = 0;
+    while (queue.isNotEmpty && pass < _maxSplitPasses) {
+      final piece = queue.removeFirst();
+      pass++;
+      final label = 'pass ${pass + 1}/${pass + 1 + queue.length}';
+      final sent = await _inFreshChat(characterId, personaId, phase, (_) async {
+        phase('triggering (lorebook, $label)');
+        await _resetCapture();
+        return _captureOneSend(piece, const Duration(seconds: 120));
+      });
+      if (sent.refusal != null) {
+        throw _refusalError(characterId, sent.refusal!);
+      }
+      final payload = sent.payload;
+      if (payload == null) {
+        // One lost piece costs the entries only it fires; the rest are still
+        // worth keeping, so it does not fail the capture.
+        _log('$label captured nothing: ${sent.problem}');
+        continue;
+      }
+      payloads.add(payload);
+      if (budget.isSaturated(payload, probe: probe)) {
+        final halves = splitTrigger(piece);
+        if (halves.length > 1) {
+          queue.addAll(halves);
+        } else {
+          _log('$label is at the cap and cannot be split further');
+        }
+      }
+    }
+    if (queue.isNotEmpty) {
+      _log('split pass limit reached — ${queue.length} pieces never sent');
+    }
+    return payloads;
+  }
+
+  /// Creates a chat for [characterId] bound to [personaId], opens it in the
+  /// WebView with the capture hook live and the composer ready, runs [body]
+  /// against it and deletes the chat again, whatever [body] did.
+  Future<T> _inFreshChat<T>(
+    String characterId,
+    String? personaId,
+    void Function(String) phase,
+    Future<T> Function(String chatId) body,
+  ) async {
+    final controller = _controller;
+    if (controller == null) throw Exception('WebView not available.');
+
+    phase('creating chat');
+    final chatBody = await _fetchLocked(
+      'https://janitorai.com/hampter/chats',
+      method: 'POST',
+      body: jsonEncode({
+        'character_id': characterId,
+        'persona_id': ?personaId,
+      }),
+    );
+    final chatJson = jsonDecode(chatBody);
+    final chatId = (chatJson is Map ? chatJson['id'] : null)?.toString();
+    if (chatId == null || chatId.isEmpty) {
+      throw Exception('Could not create chat (no id in response).');
+    }
+    try {
+      phase('opening chat');
+      _loadStop = Completer<void>();
+      await controller.loadUrl(
+        urlRequest: URLRequest(
+          url: WebUri('https://janitorai.com/chats/$chatId'),
+        ),
+      );
+      await _awaitLoad();
+      await _waitForClearance();
+
+      // JanitorAI caches the selected proxy preset in its client store, so the
+      // dummy preset switched in by _enterExtractionMode() may not take effect
+      // on the first chat load — the captured `/generateAlpha` would then run
+      // against the previous (e.g. JLLM) preset and lose its wrappers. Reload
+      // the chat page once to force the new preset to take effect before
+      // triggering. The AT_DOCUMENT_START capture hook re-injects on reload.
+      phase('reloading for preset');
+      _loadStop = Completer<void>();
+      await controller.reload();
+      await _awaitLoad();
+      await _waitForClearance();
+
+      // Wait for the React chat app to actually mount its composer instead of
+      // sleeping a constant: hydration takes as long as the device and the
+      // network make it take.
+      phase('waiting for chat UI');
+      if (!await _waitForComposer(const Duration(seconds: 60))) {
+        _log('composer never appeared — sending anyway');
+      }
+      return await body(chatId);
+    } finally {
+      phase('deleting chat');
+      await _deleteChat(chatId);
     }
   }
 
@@ -1407,12 +1545,7 @@ class JanitorWebViewProxy {
   /// [refusal] is set when `/generateAlpha` came back with an HTTP error. That
   /// is a final answer, so the poll stops there rather than sitting out the rest
   /// of its timeout waiting for a payload that will never arrive.
-  Future<
-      ({
-        Map<String, dynamic>? payload,
-        String? problem,
-        JanitorRefusedException? refusal,
-      })> _captureOneSend(
+  Future<_SendResult> _captureOneSend(
     String text,
     Duration timeout,
   ) async {

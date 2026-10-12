@@ -69,8 +69,9 @@ final _exampleBlock = RegExp(
 
 /// Removes leading bracketed jailbreak/system prefix and the
 /// `<...Persona>` / `<Scenario>` / `<Example>` blocks. Returns the stripped
-/// text plus the removed blocks (labelled).
-({String out, List<RemovedBlock> removed}) _stripWrappers(String text) {
+/// text plus the removed blocks (labelled). Public for the lore budget
+/// ([janitor_lore_budget.dart]), which measures both sides of the split.
+({String out, List<RemovedBlock> removed}) stripWrappers(String text) {
   final removed = <RemovedBlock>[];
   var out = text;
 
@@ -195,6 +196,21 @@ List<String> splitEntries(String text) => text
     .map((b) => b.trim())
     .where((b) => b.isNotEmpty)
     .toList();
+
+/// Joins the lorebook text isolated from several captures into one, each entry
+/// block once, in the order it was first seen. Passes of a split trigger fire
+/// overlapping sets of entries, and the server assembles an entry identically
+/// whichever pass fired it, so a block-level match is enough.
+String mergeLorebookTexts(Iterable<String> texts) {
+  final seen = <String>{};
+  final blocks = <String>[];
+  for (final text in texts) {
+    for (final block in splitEntries(text)) {
+      if (seen.add(_norm(block))) blocks.add(block);
+    }
+  }
+  return blocks.join('\n\n');
+}
 
 /// Pulls the character-card text (inner of `<{{char}}'s Persona>`, NOT the user
 /// persona). Returns '' when absent.
@@ -325,7 +341,7 @@ SeparationResult separate(
   List<String> publicContents = const [],
 ]) {
   final systemContent = getSystemContent(payload);
-  final a = _stripWrappers(systemContent);
+  final a = stripWrappers(systemContent);
   final b = _subtractKnownCard(a.out, knownCard);
   final c = _stripPublicEntries(b.out, publicContents);
   final lorebookText = _tidy(c.out);
