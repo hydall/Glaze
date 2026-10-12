@@ -31,6 +31,7 @@ import 'services/impersonation_service.dart';
 import 'state/chat_session_write_queue.dart';
 import 'state/generation_phase_provider.dart';
 import '../extensions/services/extension_post_gen_service.dart';
+import '../../core/plugins/plugin_hooks.dart';
 
 final chatProvider =
     AsyncNotifierProvider.family<ChatNotifier, ChatState, String>(
@@ -495,12 +496,24 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       // the model, the saved history and the context all get the translation
       // rather than the original. A failure keeps the original text.
       final translation = ref.read(pipelineSettingsProvider).translation;
-      var outgoingText = text;
+      // Plugins see the text exactly as typed, before translation, and may
+      // rewrite it or cancel the send (`input:beforeSend`). The runtime shows
+      // the plugin's reason; a rejected send puts the text back in the
+      // composer.
+      final pluginHooks = ref.read(pluginHookRegistryProvider).forChat(arg);
+      var hookedText = text;
+      if (pluginHooks != null) {
+        final hook = await pluginHooks.beforeSend(text, source: 'ui');
+        if (!ref.mounted || hook.cancelled) return;
+        hookedText = hook.text;
+        if (hookedText.trim().isEmpty && imageDataUrls.isEmpty) return;
+      }
+      var outgoingText = hookedText;
       if (translation.enabled &&
           translation.autoTranslateUser &&
-          text.trim().isNotEmpty) {
+          hookedText.trim().isNotEmpty) {
         outgoingText = await _autoTranslateOutgoing(
-          text,
+          hookedText,
           translation.inputLanguage,
           sessionId: current.session!.id,
         );
@@ -650,6 +663,11 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       // generation pipeline starts immediately, the post-gen service runs
       // the chain in the background and persists its own InfoBlocks.
       unawaited(_dispatchAfterUserBlocks(updatedSession));
+      pluginHooks?.notify('input:afterSend', {
+        'chatId': updatedSession.id,
+        'source': 'ui',
+        'text': outgoingText,
+      });
 
       try {
         // Commit the exact visible green/blue swipe, never whichever Ledger

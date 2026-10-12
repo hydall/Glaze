@@ -8,6 +8,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../plugins/screens/plugins_screen.dart';
 import '../../shared/shell/desktop/desktop_layout_provider.dart';
 import '../../shared/shell/desktop/desktop_glossary_popup.dart';
 import '../../shared/shell/desktop/desktop_floating_provider.dart';
@@ -292,6 +293,12 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with ShellHeaderMixin {
                         label: 'menu_third_party_providers'.tr(),
                         subtitle: 'menu_third_party_providers_hint'.tr(),
                         onTap: () => openThirdPartyProvidersScreen(context),
+                      ),
+                      MenuItem(
+                        icon: Icons.widgets_outlined,
+                        label: 'menu_plugins'.tr(),
+                        subtitle: 'menu_plugins_hint'.tr(),
+                        onTap: () => openPluginsScreen(context),
                       ),
                     ],
                   ),

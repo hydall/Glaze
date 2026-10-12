@@ -30,6 +30,7 @@ import '../../extensions/models/extension_preset.dart';
 import '../../extensions/models/extensions_settings.dart';
 import '../../extensions/providers/extension_presets_provider.dart';
 import '../../extensions/providers/extensions_settings_provider.dart';
+import '../../plugins/widgets/plugin_action_cards.dart';
 
 class MagicDrawerPanel extends ConsumerStatefulWidget {
   final String charId;
@@ -597,6 +598,17 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
             ),
           );
         }),
+        // Sidebar actions of enabled plugins.
+        ...pluginActionCards(
+          context,
+          ref,
+          charId: widget.charId,
+          kind: PluginActionKind.sidebar,
+          itemWidth: itemWidth,
+          listRow: list,
+          editing: widget.editing,
+          beforeRun: widget.onClose,
+        ),
         // The add tile is always the last cell rather than a header
         // button revealed by edit mode: a "+" sitting in the grid is
         // how a new user finds out the row is theirs to change.

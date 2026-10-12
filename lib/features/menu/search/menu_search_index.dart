@@ -6,6 +6,7 @@ import '../../../core/platform/haptics.dart';
 import '../../../core/platform/system_settings.dart';
 import '../../../shared/shell/desktop/desktop_floating_provider.dart';
 import '../../catalog/widgets/third_party_providers_screen.dart';
+import '../../plugins/screens/plugins_screen.dart';
 import '../../guides/widgets/guides_list_sheet.dart';
 import '../menu_actions.dart';
 import 'menu_search_entry.dart';
@@ -298,6 +299,14 @@ List<MenuSearchEntry> _menuEntries() {
         'провайдеры',
       ],
       open: (context) => openThirdPartyProvidersScreen(context),
+    ),
+    MenuSearchEntry(
+      title: 'menu_plugins'.tr(),
+      description: 'menu_plugins_hint'.tr(),
+      breadcrumb: more,
+      icon: Icons.widgets_outlined,
+      keywords: const ['plugins', 'tavo', 'tpg', 'плагины', 'расширения'],
+      open: (context) => openPluginsScreen(context),
     ),
     MenuSearchEntry(
       title: 'menu_backups'.tr(),

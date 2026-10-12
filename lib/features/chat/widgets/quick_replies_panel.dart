@@ -20,6 +20,7 @@ import 'action_glyph.dart';
 import 'drawer_panel_scaffold.dart';
 import 'magic_drawer_models.dart';
 import 'magic_drawer_widgets.dart';
+import '../../plugins/widgets/plugin_action_cards.dart';
 
 class QuickRepliesPanel extends ConsumerStatefulWidget {
   final String charId;
@@ -383,6 +384,17 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
                         );
                       },
                     ),
+                  // Input actions of enabled plugins (Tavo's "+" menu).
+                  ...pluginActionCards(
+                    context,
+                    ref,
+                    charId: widget.charId,
+                    kind: PluginActionKind.input,
+                    itemWidth: itemWidth,
+                    listRow: list,
+                    editing: widget.editing,
+                    beforeRun: widget.onClose,
+                  ),
                   // Always last, never gated on edit mode: the "+" in the grid
                   // is how a new user learns this tab is theirs to fill.
                   SizedBox(

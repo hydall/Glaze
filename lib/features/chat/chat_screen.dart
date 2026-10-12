@@ -87,6 +87,7 @@ import '../../core/models/chat_message.dart';
 import '../../core/state/db_provider.dart';
 import 'widgets/session_lifecycle_tracker.dart';
 import '../../shared/widgets/glaze_sheet.dart';
+import '../plugins/runtime/plugin_chat_host.dart';
 
 String _chatWebViewThemeSyncKey(
   ThemePreset preset,
@@ -456,7 +457,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       },
     );
 
-    return SessionLifecycleTracker(
+    // Plugins run inside this chat's WebView; the host starts them once the
+    // bridge is up and feeds them chat/message events.
+    final tracked = SessionLifecycleTracker(
       charId: charId,
       // Chat is always reached via `context.go('/chat/...')`, which replaces the
       // navigation stack — so a real pop has nothing beneath it and the OS would
@@ -600,6 +603,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
               ],
         body: body,
       ),
+    );
+    return PluginChatHost(
+      key: ValueKey('plugins-$charId'),
+      charId: charId,
+      child: tracked,
     );
   }
 

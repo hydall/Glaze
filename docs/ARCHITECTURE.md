@@ -1621,6 +1621,48 @@ the message header.
 
 ---
 
+## 9.1 Plugins (Tavo `.tpg` format)
+
+Glaze installs Tavo plugins (zip packages with a `manifest.json`, spec v1 and
+v2) and runs them in the chat WebView. Code lives in `lib/features/plugins/`
+and `assets/chat_webview/plugins/`.
+
+**Storage.** Packages are unpacked to `<data>/plugins/<id>/`; `registry.json`
+in that folder holds install order, the enabled flag and saved settings.
+Plugin-owned data (the `localStorage` shim, `tavo.file.*`) lives in
+`<data>/plugin_data/<id>/`. `tavo.variable` chat scope is stored in
+`ChatSession.sessionVars['__tavo_variables']`, global scope in
+`plugin_data/_global_variables.json` — both separate from `glaze.*` variables.
+
+**Isolation.** Unlike Tavo, which runs plugin code in the chat page itself,
+every entry script and every `/chat` HTML fragment runs in its own
+`sandbox="allow-scripts"` iframe (null origin). `plugin_host.js` maps each frame
+window to its plugin and stamps that id on every call it forwards to the
+`tavoBridge` handler, so a plugin cannot speak for another. `TavoBridgeService`
+rejects disabled plugins and methods whose manifest permission
+(`input`, `message`, `generate`, `variable`, `file`) is missing; the SDK
+(`tavo_sdk.js`) only exposes granted methods. Fragment frames cover the page but
+are clipped (`clip-path`) to the boxes the plugin draws, so the chat keeps its
+taps. Package scripts, CSS and assets (`/plugins/<id>/…`) are inlined by
+`plugin_html_inliner.dart`, since a null-origin frame cannot fetch them.
+
+**Hooks.** `PluginChatHost` (wraps the chat screen) starts the runtime once the
+chat bridge is published and registers a `PluginHookRunner` in
+`pluginHookRegistryProvider`; core chat code only sees that port.
+- `input:beforeSend` — `ChatNotifier._sendMessage`, before auto-translation;
+  may rewrite or cancel.
+- `generation:prepare` — `StreamGenerationService.run`, on a copy of the
+  session passed to prompt collection only; never persisted.
+- `input:afterSend`, `chat:opened|closed`, `message:added|updated|deleted`
+  (diffed from settled `ChatState`) — notifications.
+- Input actions appear in the drawer's Actions tab, sidebar actions in Tools.
+- `tavo.plugin.emit(name, detail)` is a Glaze extension that delivers to the
+  plugin's other frames.
+
+**Not supported yet:** `/messages` fragments, last-message actions, file
+processors, `generation:success|error|cancelled`, write APIs for
+characters/lorebooks/regex/presets, `tavo.tts`, `tavo.image`.
+
 ## 10. Known Design Issues
 
 Open issues:

@@ -26,6 +26,7 @@ import '../chat_provider.dart'
     show ImpersonationState, chatProvider, impersonationStateProvider;
 import '../composer_empty_action_provider.dart';
 import '../composer_pins_provider.dart';
+import '../composer_text_bridge.dart';
 import '../hidden_composer_actions_provider.dart';
 import '../quick_replies_provider.dart';
 import '../services/drawer_item_launcher.dart';
@@ -215,6 +216,19 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
   /// Held rather than looked up on demand: `dispose` has to hand the bridge
   /// back, and `ref` is off limits once the element is being unmounted.
   late final ComposerActionBridge _actionBridge;
+  late final ComposerTextBridge _textBridge;
+  // `tavo.input.*` for plugins: read, replace and send the composer's text.
+  late final ComposerTextAccess _textAccess = ComposerTextAccess(
+    read: () => _controller.text,
+    write: (text) {
+      if (!mounted) return;
+      _controller.value = TextEditingValue(
+        text: text,
+        selection: TextSelection.collapsed(offset: text.length),
+      );
+    },
+    send: () async => mounted && await _handleSend(),
+  );
 
   /// The translate action's state: a request in flight, or a translation the
   /// next tap can undo.
@@ -237,6 +251,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     // its Actions grid. Hand it a way in.
     _actionBridge = ref.read(composerActionBridgeProvider)
       ..register(_runComposerAction);
+    _textBridge = ref.read(composerTextBridgeProvider)..register(_textAccess);
   }
 
   /// Runs a composer-owned action asked for from the drawer's Actions tab.
@@ -583,6 +598,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     // and can mount the replacement before this runs — cannot leave the drawer
     // holding a handler into a disposed State.
     _actionBridge.unregister(_runComposerAction);
+    _textBridge.unregister(_textAccess);
     _debounce?.cancel();
     _draftTranslator.dispose();
     _controller.dispose();
@@ -650,13 +666,13 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     });
   }
 
-  Future<void> _handleSend() async {
-    if (widget.isEditingMessage || _isDispatchingSend) return;
+  Future<bool> _handleSend() async {
+    if (widget.isEditingMessage || _isDispatchingSend) return false;
     final text = _controller.text;
-    if (text.trim().isEmpty && _attachments.isEmpty) return;
+    if (text.trim().isEmpty && _attachments.isEmpty) return false;
     // Prerequisites (e.g. a selected provider) failed: keep the composed text
     // and attachments so nothing is lost while the host shows its modal.
-    if (widget.canSend != null && !widget.canSend!()) return;
+    if (widget.canSend != null && !widget.canSend!()) return false;
     final attachments = List<ClipboardImage>.unmodifiable(_attachments);
     final guidance = _guidanceMode && _guidanceController.text.trim().isNotEmpty
         ? _guidanceController.text.trim()
@@ -694,12 +710,13 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     } finally {
       _isDispatchingSend = false;
     }
-    if (!mounted || accepted) return;
+    if (!mounted || accepted) return accepted;
     _restoreComposedPayload(
       text: text,
       guidance: guidance,
       attachments: attachments,
     );
+    return false;
   }
 
   void _clearComposedPayload() {

@@ -212,6 +212,7 @@ When editing files matching a pattern below, READ the corresponding rule file FI
 | Class/file organization, decomposition | `docs/CODE_STYLE.md` |
 | Any screen, sheet or dialog — which widget to reach for | `docs/UI_KIT.md` |
 | JS extension bridge (`glaze.*`), panel iframe, headless engine, capability permissions, periodic/afterUser triggers, `executeCommand`, audio, connection profiles | `docs/ARCHITECTURE.md` § 9 + `docs/INVARIANTS.md` (INV-EG1–8, INV-JS1–6) |
+| Tavo plugins (`.tpg`), `tavo.*` bridge, plugin frames and hooks — `lib/features/plugins/`, `assets/chat_webview/plugins/` | `docs/ARCHITECTURE.md` § 9.1 |
 | Variable storage (`chat` / `character` / `global` / `message` scopes) | `docs/rules/database.md` (atomic repo methods) |
 | Build channels, dev-mode / watermark defaults, `--dart-define` wiring | `docs/RELEASE_CHANNELS.md` |
 

@@ -420,6 +420,31 @@ class ChatBridgeController {
   )?
   onPanelEvent;
 
+  /// Plugin runtime entry point for `tavo.*` calls relayed by
+  /// `assets/chat_webview/plugins/plugin_host.js`. The host stamps the
+  /// calling plugin's id on each request; null while no plugin runtime is
+  /// attached to this chat.
+  Future<Map<String, dynamic>> Function(Map<String, dynamic> request)?
+  onTavoRequest;
+
+  /// Awaits a JS function body with [arguments] bound as parameters and
+  /// returns its resolved value. Null when the page is gone or the body threw.
+  Future<Object?> callAsyncJs(
+    String functionBody, {
+    Map<String, dynamic> arguments = const {},
+    Duration timeout = const Duration(seconds: 60),
+  }) async {
+    try {
+      final result = await _controller
+          .callAsyncJavaScript(functionBody: functionBody, arguments: arguments)
+          .timeout(timeout);
+      if (result == null || result.error != null) return null;
+      return result.value;
+    } on MissingPluginException {
+      return null;
+    }
+  }
+
   /// Register JS handlers for every callback declared on this host. The
   /// declarations live in [bridgeHandlers] (data-driven) so the actual
   /// dispatch table is short and auditable.
@@ -433,6 +458,24 @@ class ChatBridgeController {
             _dispatch(name, spec, data.args),
       );
     }
+    _controller.addJavaScriptHandler(
+      handlerName: 'tavoBridge',
+      callback: (JavaScriptHandlerFunctionData data) async {
+        final args = data.args;
+        final raw = args.isNotEmpty ? args.first : null;
+        final handler = onTavoRequest;
+        if (handler == null || raw is! Map) {
+          return const {
+            'ok': false,
+            'error': {
+              'code': 'runtime_unavailable',
+              'message': 'Plugins are not running in this chat',
+            },
+          };
+        }
+        return handler(Map<String, dynamic>.from(raw));
+      },
+    );
     _controller.addJavaScriptHandler(
       handlerName: 'glazeBridge',
       callback: (JavaScriptHandlerFunctionData data) async {
