@@ -16,6 +16,7 @@ class InstalledPlugin {
     this.networkHosts,
     this.localNetwork = false,
     this.hubSlug,
+    this.foundInCode = const {},
   });
 
   final PluginManifest manifest;
@@ -47,6 +48,10 @@ class InstalledPlugin {
   /// The plugin's page on Tavo's hub when it was installed from there; its
   /// updates are looked up on the hub.
   final String? hubSlug;
+
+  /// Of a converted package's permissions, those its manifest does not name
+  /// and that were read off its scripts instead.
+  final Set<String> foundInCode;
 
   /// Whether the plugin may reach [host] at all.
   bool allowsHost(String host) {
@@ -81,6 +86,7 @@ class InstalledPlugin {
     networkHosts: networkHosts == null ? this.networkHosts : networkHosts(),
     localNetwork: localNetwork ?? this.localNetwork,
     hubSlug: hubSlug,
+    foundInCode: foundInCode,
   );
 
   PluginLocalizer localizer(String requestedLocale) => PluginLocalizer(

@@ -111,7 +111,31 @@ class PluginStore {
       networkHosts: hosts is List ? {for (final h in hosts) '$h'} : null,
       localNetwork: record['localNetwork'] == true,
       hubSlug: record['hub'] is String ? record['hub'] as String : null,
+      foundInCode: await _foundInCode(dir, manifest),
     );
+  }
+
+  /// What a converted package uses without its manifest asking for it: its
+  /// permissions less those the original manifest converts to.
+  Future<Set<String>> _foundInCode(String dir, PluginManifest manifest) async {
+    if (manifest.compat != kTavoCompat) return const {};
+    try {
+      final original = File(p.join(dir, kTavoManifestFile));
+      final declared = PluginPermission.expand(
+        (convertTavoManifest(
+                  jsonDecode(await original.readAsString()),
+                )['permissions']
+                as List)
+            .cast<String>(),
+      );
+      return {
+        for (final x in manifest.permissions)
+          if (!declared.contains(x)) x,
+      };
+    } catch (e) {
+      debugPrint('[PluginStore] ${manifest.id} declared permissions: $e');
+      return const {};
+    }
   }
 
   /// Grants and revocations saved before `library` and `library.read` were

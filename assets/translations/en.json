@@ -3745,5 +3745,8 @@
   "plugins_history_empty_short": "Nothing yet",
   "plugins_history_summary": "Allowed: {allowed} · Not allowed: {denied}",
   "plugins_history_denied": "Not allowed",
-  "plugins_history_allowed": "Allowed"
+  "plugins_history_allowed": "Allowed",
+  "plugins_permission_declared": "Asked for by the extension",
+  "plugins_permission_found_in_code": "Found in the extension's code",
+  "plugins_permissions_found_hint": "“Found in the extension's code”: the extension does not list this permission, but its scripts use it. Glaze found the calls itself."
 }

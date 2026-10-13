@@ -1803,7 +1803,10 @@ chat bridge is published and registers a `PluginHookRunner` in
 conversion are converted on load. Tavo lets every plugin read the library and
 asks before writes, so its manifests do not say which a plugin uses; the
 library, chats, images and `messages` permissions are read off the package's
-scripts (`inferTavoPermissions`) and, like the rest, start off. For converted
+scripts (`inferTavoPermissions`) and, like the rest, start off. Which were
+found that way is worked out again on load from the original manifest
+(`InstalledPlugin.foundInCode`), and the permission rows mark each as asked
+for by the extension or found in its code. For converted
 plugins the runtime also loads `tavo_compat.js`, which defines `tavo.*` (and
 `triggerSlash`) on top of `glaze.*` and then removes `glaze`, maps
 `input:beforeSend|afterSend` onto `send:*`, reports Tavo's version from

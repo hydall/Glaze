@@ -98,7 +98,11 @@ class _PermissionsSheet extends ConsumerWidget {
     return MenuGroup(
       header: name,
       headerIcon: Icons.extension_rounded,
-      description: 'plugins_permissions_sheet_body'.tr(),
+      description: [
+        'plugins_permissions_sheet_body'.tr(),
+        if (plugin.foundInCode.isNotEmpty)
+          'plugins_permissions_found_hint'.tr(),
+      ].join('\n\n'),
       items: [
         ...pluginPermissionItems(context, ref, plugin),
         // The hosts the plugin names, to switch on without leaving.
@@ -298,7 +302,17 @@ class PluginDetailScreen extends ConsumerWidget {
     final icon = _icons[permission] ?? Icons.help_outline_rounded;
     final key = permission.replaceAll('.', '_');
     final label = _text('plugins_permission_name_$key', permission);
-    final subtitle = _text('plugins_permission_$key', '');
+    // A converted package names only some of what it uses; the rest was
+    // found in its scripts, and the user is told which is which.
+    final source = plugin.manifest.compat == null
+        ? null
+        : plugin.foundInCode.contains(permission)
+        ? 'plugins_permission_found_in_code'.tr()
+        : 'plugins_permission_declared'.tr();
+    final subtitle = [
+      ?source,
+      _text('plugins_permission_$key', ''),
+    ].where((x) => x.isNotEmpty).join('\n');
     if (!PluginPermission.all.contains(permission)) {
       // Asked for, but nothing in Glaze provides it (e.g. Tavo's `tts`).
       return MenuItem(

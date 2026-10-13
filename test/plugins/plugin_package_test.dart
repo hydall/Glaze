@@ -375,6 +375,40 @@ void main() {
       ),
     );
 
+    test(
+      'a converted package tells declared permissions from found ones',
+      () async {
+        final installed = await store.install(
+          readPluginPackage(
+            zip(
+              packageFiles(
+                manifestFile: 'manifest.json',
+                main: 'tavo.character.get(1); tavo.lorebook.create({});',
+              ),
+            ),
+          ),
+        );
+        expect(installed.foundInCode, {
+          'library.read.characters',
+          'library.create',
+        });
+        expect(
+          installed.manifest.permissions,
+          containsAll(['composer', 'variables']),
+        );
+        // The same after a reload.
+        expect(
+          (await store.loadAll()).single.foundInCode,
+          installed.foundInCode,
+        );
+      },
+    );
+
+    test('a Glaze package declares everything it asks for', () async {
+      final installed = await store.install(package(['composer']));
+      expect(installed.foundInCode, isEmpty);
+    });
+
     test('a fresh install starts with every permission off', () async {
       final installed = await store.install(
         package(['composer', 'network', 'library']),

@@ -3782,5 +3782,8 @@
   "plugins_history_empty_short": "Пока пусто",
   "plugins_history_summary": "Разрешено: {allowed} · Не разрешено: {denied}",
   "plugins_history_denied": "Не разрешено",
-  "plugins_history_allowed": "Разрешено"
+  "plugins_history_allowed": "Разрешено",
+  "plugins_permission_declared": "Запрошено расширением",
+  "plugins_permission_found_in_code": "Найдено в коде расширения",
+  "plugins_permissions_found_hint": "«Найдено в коде расширения»: расширение не указало это разрешение, но его скрипты им пользуются. Glaze нашёл эти вызовы сам."
 }
