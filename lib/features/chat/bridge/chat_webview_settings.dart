@@ -107,6 +107,11 @@ InAppWebViewSettings chatWebViewInAppSettings({bool isInspectable = true}) {
     mixedContentMode: chatWebViewMixedContentMode(),
     useShouldOverrideUrlLoading: true,
     webViewAssetLoader: chatWebViewAssetLoader(),
+    // Only the chat page itself talks to the app. Message HTML, panels and
+    // plugins run in subframes and reach it through the page, which stamps
+    // who is asking; a subframe with the bridge could claim to be anyone.
+    javaScriptBridgeForMainFrameOnly: true,
+    javaScriptHandlersForMainFrameOnly: true,
     // The page is a full-screen chat whose only scroll is the in-page
     // #chat-container. The document itself is pinned in CSS (`html, body` are
     // `position: fixed; overflow: hidden`), so it has no scroll range on either

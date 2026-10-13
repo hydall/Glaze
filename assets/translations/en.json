@@ -3669,5 +3669,9 @@
   "plugins_network_add": "Add a host",
   "plugins_network_add_confirm": "Add",
   "plugins_network_add_invalid": "That is not a host name",
-  "plugins_network_webrtc": "WebRTC"
+  "plugins_network_webrtc": "WebRTC",
+  "plugins_local_network": "Local network",
+  "plugins_local_network_hint": "Router, NAS, local servers and plain http. Without it, only https on the internet.",
+  "plugins_permissions_sheet_title": "Permissions",
+  "plugins_permissions_sheet_body": "Everything starts off. Switch on what the plugin may do; you can change it later in the plugin's page."
 }

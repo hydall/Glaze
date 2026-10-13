@@ -74,6 +74,8 @@ class PluginNetworkLogNotifier
   final String pluginId;
   Timer? _flush;
 
+  static const maxHosts = 200;
+
   Future<File> get _file async {
     final store = await ref.read(pluginStoreProvider.future);
     return File(p.join(store.dataDir(pluginId), 'network.json'));
@@ -105,10 +107,20 @@ class PluginNetworkLogNotifier
     final previous =
         current[host] ??
         PluginHostRecord(host: host, count: 0, blocked: 0, lastSeen: now);
-    state = AsyncData({
+    final next = {
       ...current,
       host: previous.seen(wasBlocked: blocked, at: now),
-    });
+    };
+    // The plugin reports its own hosts, so it could flood the list; the
+    // oldest entries go first.
+    if (next.length > maxHosts) {
+      final oldest = next.values.toList()
+        ..sort((a, b) => a.lastSeen.compareTo(b.lastSeen));
+      for (final r in oldest.take(next.length - maxHosts)) {
+        next.remove(r.host);
+      }
+    }
+    state = AsyncData(next);
     _flush?.cancel();
     _flush = Timer(const Duration(seconds: 2), () => unawaited(_write()));
   }

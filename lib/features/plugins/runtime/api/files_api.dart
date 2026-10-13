@@ -6,6 +6,8 @@ import 'package:dio/dio.dart';
 
 import '../../models/plugin_manifest.dart';
 import '../plugin_api.dart';
+import '../plugin_file_store.dart';
+import '../plugin_network.dart';
 
 /// Per-file size cap for `glaze.files.save`.
 const int kPluginFileMaxBytes = 32 * 1024 * 1024;
@@ -81,6 +83,15 @@ Future<Map<String, Object?>> savePluginFile(
     throw const PluginApiError('too_large', 'The file is too large');
   }
   final target = pluginFile(c, name, scope: scope);
+  final store = c.host.files(c.plugin.id);
+  final replaced = await target.file.exists() ? await target.file.length() : 0;
+  if (await store.usedBytes() - replaced + bytes.length >
+      PluginFileStore.maxFilesBytes) {
+    throw const PluginApiError(
+      'quota_exceeded',
+      'The plugin has used up its file storage',
+    );
+  }
   await target.file.parent.create(recursive: true);
   await target.file.writeAsBytes(bytes, flush: true);
   return _describe(target.file, target.virtualPath);
@@ -171,23 +182,70 @@ Future<Uint8List> decodePluginContent(
 }
 
 /// Downloads [url] for the calling plugin, which needs internet access to
-/// its host; the attempt goes into the plugin's network log either way.
+/// its host, and to every host a redirect leads to; each attempt goes into
+/// the plugin's network log either way. Without local network access hosts
+/// that are or resolve to local addresses are refused. The body is capped at
+/// [kPluginFileMaxBytes] while it streams in.
 Future<Uint8List> fetchForPlugin(PluginCall c, String url) async {
-  final uri = Uri.tryParse(url);
-  if (uri == null || !const {'http', 'https'}.contains(uri.scheme)) {
-    throw const PluginApiError('invalid_arguments', 'Only http(s) URLs');
+  var uri = Uri.tryParse(url);
+  final dio = Dio(
+    BaseOptions(
+      connectTimeout: const Duration(seconds: 20),
+      receiveTimeout: const Duration(seconds: 60),
+      followRedirects: false,
+      validateStatus: (_) => true,
+      responseType: ResponseType.stream,
+    ),
+  );
+  try {
+    for (var hop = 0; ; hop++) {
+      if (uri == null || !const {'http', 'https'}.contains(uri.scheme)) {
+        throw const PluginApiError('invalid_arguments', 'Only http(s) URLs');
+      }
+      if (hop > 5) {
+        throw const PluginApiError('network_error', 'Too many redirects');
+      }
+      await _requireReachable(c, uri);
+      final response = await dio.getUri<ResponseBody>(uri);
+      final status = response.statusCode ?? 0;
+      final location = response.headers.value('location');
+      if (status >= 300 && status < 400 && location != null) {
+        uri = uri.resolve(location);
+        continue;
+      }
+      if (status < 200 || status >= 300) {
+        throw PluginApiError('network_error', 'HTTP $status from ${uri.host}');
+      }
+      final declared = int.tryParse(
+        response.headers.value('content-length') ?? '',
+      );
+      if (declared != null && declared > kPluginFileMaxBytes) {
+        throw const PluginApiError('too_large', 'The file is too large');
+      }
+      final out = BytesBuilder(copy: false);
+      await for (final chunk in response.data!.stream) {
+        out.add(chunk);
+        if (out.length > kPluginFileMaxBytes) {
+          throw const PluginApiError('too_large', 'The file is too large');
+        }
+      }
+      return out.takeBytes();
+    }
+  } finally {
+    // Also drops the bodies of redirects and refused responses.
+    dio.close(force: true);
   }
+}
+
+Future<void> _requireReachable(PluginCall c, Uri uri) async {
   final host = uri.host.toLowerCase();
-  final allowed = c.plugin.allowsHost(host);
+  final allowed =
+      c.plugin.allowsHost(host) &&
+      (c.plugin.localNetwork || !await isLocalNetworkHost(host));
   c.host.networkUsed(c.plugin.id, host, blocked: !allowed);
   if (!allowed) {
     throw PluginApiError('permission_denied', 'The plugin may not reach $host');
   }
-  final response = await Dio().get<List<int>>(
-    url,
-    options: Options(responseType: ResponseType.bytes),
-  );
-  return Uint8List.fromList(response.data ?? const []);
 }
 
 Future<Object?> _save(PluginCall c) async {

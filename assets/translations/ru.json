@@ -3706,5 +3706,9 @@
   "plugins_network_add": "Добавить адрес",
   "plugins_network_add_confirm": "Добавить",
   "plugins_network_add_invalid": "Это не адрес сайта",
-  "plugins_network_webrtc": "WebRTC"
+  "plugins_network_webrtc": "WebRTC",
+  "plugins_local_network": "Локальная сеть",
+  "plugins_local_network_hint": "Роутер, NAS, локальные серверы и незащищённый http. Без этого только https в интернете.",
+  "plugins_permissions_sheet_title": "Разрешения",
+  "plugins_permissions_sheet_body": "Всё выключено. Включите то, что плагину можно делать. Потом это можно поменять на странице плагина."
 }

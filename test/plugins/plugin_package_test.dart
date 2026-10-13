@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
@@ -6,10 +7,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/features/plugins/compat/tavo/tavo_manifest_converter.dart';
 import 'package:glaze_flutter/features/plugins/models/plugin_manifest.dart';
 import 'package:glaze_flutter/features/plugins/models/plugin_settings_schema.dart';
+import 'package:glaze_flutter/features/plugins/runtime/plugin_file_store.dart';
 import 'package:glaze_flutter/features/plugins/services/plugin_compatibility.dart';
 import 'package:glaze_flutter/features/plugins/services/plugin_localizer.dart';
 import 'package:glaze_flutter/features/plugins/services/plugin_manifest_parser.dart';
 import 'package:glaze_flutter/features/plugins/services/plugin_package_reader.dart';
+import 'package:glaze_flutter/features/plugins/services/plugin_store.dart';
 
 Map<String, dynamic> manifest([Map<String, dynamic> extra = const {}]) => {
   'format': 1,
@@ -301,6 +304,82 @@ void main() {
         () => readPluginPackage(Uint8List.fromList([1, 2, 3])),
         throwsA(isA<PluginManifestException>()),
       );
+    });
+
+    test('refuses an archive that declares too much before inflating', () {
+      final archive = Archive();
+      for (final e in packageFiles().entries) {
+        archive.addFile(ArchiveFile.string(e.key, e.value));
+      }
+      // Highly compressible: small on disk, past the cap once inflated.
+      archive.addFile(
+        ArchiveFile(
+          'big.bin',
+          kMaxPluginPackageBytes + 1,
+          Uint8List(kMaxPluginPackageBytes + 1),
+        ),
+      );
+      final bytes = Uint8List.fromList(ZipEncoder().encode(archive));
+      expect(bytes.length, lessThan(kMaxPluginPackageBytes ~/ 100));
+      expect(() => readPluginPackage(bytes), fails('too large'));
+    });
+  });
+
+  group('PluginStore.install', () {
+    late Directory temp;
+    late PluginStore store;
+
+    setUp(() async {
+      temp = await Directory.systemTemp.createTemp('plugin_store_test');
+      store = PluginStore(root: '${temp.path}/p', dataRoot: '${temp.path}/d');
+    });
+
+    tearDown(() => temp.delete(recursive: true));
+
+    PluginPackage package(List<String> permissions) => readPluginPackage(
+      zip(
+        packageFiles(
+          m: manifest({
+            'permissions': permissions,
+            'hosts': ['api.example.com'],
+          }),
+        ),
+      ),
+    );
+
+    test('a fresh install starts with every permission off', () async {
+      final installed = await store.install(
+        package(['composer', 'network', 'library']),
+      );
+      expect(installed.revoked, {'composer', 'network', 'library'});
+      expect(installed.networkHosts, isEmpty);
+      expect(installed.localNetwork, isFalse);
+      expect(installed.allowsHost('api.example.com'), isFalse);
+    });
+
+    test('an update switches off only what is new', () async {
+      final first = await store.install(package(['composer']));
+      await store.save(
+        first.copyWith(revoked: const {}, config: const {'on': false}),
+      );
+      final updated = await store.install(package(['composer', 'network']));
+      expect(updated.revoked, {'network'});
+      expect(updated.config, {'on': false});
+      expect(updated.networkHosts, isEmpty);
+    });
+
+    test('chat files go with the chat', () async {
+      final installed = await store.install(package(const []));
+      final files = PluginFileStore(dataDir: store.dataDir(installed.id));
+      final chat = files.resolve('a.txt', sessionId: 'c_1');
+      final global = files.resolve('a.txt', scope: 'global', sessionId: null);
+      for (final f in [chat.file, global.file]) {
+        await f.parent.create(recursive: true);
+        await f.writeAsString('x');
+      }
+      await store.deleteChatFiles('c_1');
+      expect(await chat.file.exists(), isFalse);
+      expect(await global.file.exists(), isTrue);
     });
   });
 

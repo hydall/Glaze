@@ -15,6 +15,7 @@ import 'package:glaze_flutter/features/plugins/providers/plugin_library_provider
 import 'package:glaze_flutter/features/plugins/runtime/plugin_api.dart';
 import 'package:glaze_flutter/features/plugins/runtime/plugin_bridge_service.dart';
 import 'package:glaze_flutter/features/plugins/runtime/plugin_file_store.dart';
+import 'package:glaze_flutter/features/plugins/runtime/plugin_network.dart';
 import 'package:glaze_flutter/features/plugins/runtime/plugin_html_inliner.dart';
 import 'package:glaze_flutter/features/plugins/runtime/plugin_message_diff.dart';
 import 'package:glaze_flutter/features/plugins/runtime/plugin_variable_store.dart';
@@ -340,6 +341,52 @@ void main() {
       ((listed['result'] as Map)['files'] as List).single['name'],
       'note.txt',
     );
+  });
+
+  test('files.list takes only the known scopes', () async {
+    final s = service(const ['files']);
+    for (final scope in [temp.path, '../..', 'chat/..']) {
+      final out = await call(s, 'files.list', [
+        {'scope': scope},
+      ]);
+      expect((out['error'] as Map)['code'], 'invalid_arguments', reason: scope);
+    }
+  });
+
+  test('downloads stay off the local network unless allowed', () async {
+    final s = service(const ['files', 'network']);
+    for (final url in [
+      'http://127.0.0.1:9/x',
+      'http://localhost/x',
+      'http://192.168.1.1/x',
+      'http://[::1]/x',
+      'http://printer.local/x',
+    ]) {
+      final out = await call(s, 'files.save', ['a.txt', url]);
+      expect((out['error'] as Map)['code'], 'permission_denied', reason: url);
+    }
+    expect(host.network.every((e) => e.endsWith(':blocked')), isTrue);
+  });
+
+  test('local addresses are told apart from public ones', () {
+    for (final a in [
+      '127.0.0.1',
+      '10.1.2.3',
+      '172.16.0.1',
+      '192.168.0.1',
+      '169.254.1.1',
+      '100.64.0.1',
+      '0.0.0.0',
+      '::1',
+      'fd00::1',
+      'fe80::1',
+      '::ffff:192.168.0.1',
+    ]) {
+      expect(isLocalNetworkAddress(InternetAddress(a)), isTrue, reason: a);
+    }
+    for (final a in ['8.8.8.8', '172.32.0.1', '2001:4860:4860::8888']) {
+      expect(isLocalNetworkAddress(InternetAddress(a)), isFalse, reason: a);
+    }
   });
 
   test('storage shim persists per plugin', () async {

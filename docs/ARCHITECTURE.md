@@ -1646,18 +1646,29 @@ check the bridge, the SDK method list and the frame policy use. Library writes
 (characters, chats, personas, presets, lorebooks, regex, themes) and image
 generation also ask through a consent sheet (`PluginConsent`): allow once,
 always allow (`InstalledPlugin.grants`) or deny (`user_denied`); on the detail
-screen each is set to Ask, Always or Off. Grants and revocations live in
+screen each is set to Ask, Always or Off. A fresh install starts with every
+permission revoked and no hosts allowed, and an update revokes the permissions
+the installed version did not ask for; the import flow then shows the
+permission sheet (`showPluginPermissionsSheet`). Grants and revocations live in
 `registry.json`. Grants are read live; a revocation restarts the chat's
 frames. `images.generate` uses the app's own `ImageGenService`.
 
 **Network.** Internet access has three modes on the detail screen: off
 (`network` revoked), listed hosts (`InstalledPlugin.networkHosts`, a set of
 `example.com` / `*.example.com` rules) and any host (`networkHosts == null`).
-A fresh install of a plugin whose `plugin.json` names `hosts` starts in the
-listed mode with those; updates keep the user's setup. Except in the any-host
-mode, every plugin frame gets a Content-Security-Policy that allows inline
-code, `data:`/`blob:` URLs and the listed hosts (any port) only, and a frame
-that navigates itself away is removed. WebRTC, which no CSP covers (STUN/TURN
+The hosts `plugin.json` names show up in the listed mode switched off; updates
+keep the user's setup. Local network access (`InstalledPlugin.localNetwork`) is
+a separate switch, off by default. Every plugin frame gets a
+Content-Security-Policy that allows inline code, `data:`/`blob:` URLs and the
+listed hosts (any port), or any https/wss host in the any-host mode; only with
+local network access does it allow http/ws as well (and, in the any-host mode,
+drop the policy), and without it listed hosts on the local network are
+dropped. The SDK also refuses fetch/XHR/WebSocket/EventSource calls to local
+addresses and names (`localhost`, `*.local`, private and link-local IPs).
+Home devices rarely speak TLS, so https-only keeps frames off them; on Android
+the network security config already refuses cleartext except to loopback. A
+frame that navigates itself away is removed, and the chat WebView's navigation
+policy cancels subframe navigations on Android before any request leaves. WebRTC, which no CSP covers (STUN/TURN
 and peer addresses from a session description can reach any server, and peers
 are IPs, not hosts, so it cannot follow a host list), is taken away from every
 subframe of the chat WebView by a document-start user script injected by the
@@ -1669,20 +1680,26 @@ plugins get refusing stubs, and attempts show in the log as `webrtc`. Nested
 frames in a plugin's sandbox each get their own opaque origin and no SDK, so
 they have no WebRTC and a plugin cannot borrow it from them. Verified on Android WebView; iOS and desktop not
 yet. Downloads the API makes from Dart (`files.save` and `ui.preview` with a
-URL, theme assets) go through `fetchForPlugin`, which applies the same rules.
+URL, theme assets) go through `fetchForPlugin`, which applies the same rules
+to the first URL and every redirect, refuses hosts that are or resolve to local
+addresses without local network access (`plugin_network.dart`), and streams the
+body with a size cap and timeouts.
 The SDK reports each host a frame loads from — fetch/XHR/WebSocket/EventSource
 calls, resource timing entries and policy violations — through the
 `pluginNetwork` handler into `pluginNetworkLogProvider`
 (`plugin_data/<id>/network.json`); the detail screen lists it, and in the
 listed mode each host there can be allowed or disallowed. The log is a guide
-(plugin code could hide some of its traffic from it); the policy is the
-enforcement.
+(plugin code could hide some of its traffic from it, and it is capped at 200
+hosts); the policy is the enforcement.
 
 **Storage.** Packages are unpacked to `<data>/plugins/<id>/`; `registry.json`
 in that folder holds install order, the enabled flag, saved settings and
 grants. Plugin-owned data (the `localStorage` shim, `glaze.files.*` with
 `chat`, `global` and `tmp` scopes) lives in `<data>/plugin_data/<id>/`;
-`files/tmp` is cleared on start. Variables: chat scope in
+`files/tmp` is cleared on start, a chat's `files/chat/<session>` goes with the
+chat (session ids are reused), scopes other than those three are refused, and
+all files of one plugin together are capped at 256 MB. `readPluginPackage`
+checks the sizes and file count the zip declares before inflating anything. Variables: chat scope in
 `ChatSession.sessionVars['__plugin_variables']`, per-message scope in
 `'__plugin_message_variables'` (dropped with the message), global scope in
 `plugin_data/_global_variables.json` — all separate from block variables.
@@ -1691,7 +1708,16 @@ grants. Plugin-owned data (the `localStorage` shim, `glaze.files.*` with
 `sandbox="allow-scripts"` iframe (null origin). `plugin_host.js` maps each
 frame window to its plugin (and message, for message panels) and stamps those
 ids on every `glaze-plugin:call` it forwards to the `pluginBridge` handler, so
-a plugin cannot speak for another. `PluginBridgeService` rejects disabled
+a plugin cannot speak for another. The chat WebView exposes the app bridge to
+the main frame only (`javaScriptBridgeForMainFrameOnly`,
+`javaScriptHandlersForMainFrameOnly`): on Android the injected Java object is
+visible in every frame, and before this a subframe could call any handler
+with any plugin id. Message HTML and panels therefore reach the app through the
+page's `glaze:request` relays. `plugin_host.js` listens for messages in the
+capture phase before the page's other listeners and stops everything a plugin
+frame, or a frame nested in one, posts, so plugins cannot use those relays.
+Replies to hooks, actions and file runs carry random ids and are accepted only
+from the frame that was asked. `PluginBridgeService` rejects disabled
 plugins and methods whose permission the manifest lacks; `plugin_sdk.js` only
 builds the granted methods into `glaze`. Chat panels cover the page but are
 clipped (`clip-path`) to the boxes the plugin draws, so the chat keeps its

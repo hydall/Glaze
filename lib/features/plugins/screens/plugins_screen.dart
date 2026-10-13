@@ -124,6 +124,9 @@ Future<void> importPluginFromFile(BuildContext context, WidgetRef ref) async {
       final proceed = await _confirmUnsupported(context, unsupported);
       if (proceed != true) return;
     }
+    final before = (ref.read(pluginLibraryProvider).value ?? const [])
+        .where((x) => x.id == package.manifest.id)
+        .firstOrNull;
     final installed = await ref
         .read(pluginLibraryProvider.notifier)
         .installPackage(package);
@@ -135,6 +138,13 @@ Future<void> importPluginFromFile(BuildContext context, WidgetRef ref) async {
       context,
       'plugins_installed_toast'.tr(namedArgs: {'name': name}),
     );
+    // New permissions start off; offer to switch them on right away.
+    final asked = installed.manifest.permissions.where(
+      (x) => !(before?.manifest.permissions.contains(x) ?? false),
+    );
+    if (asked.isNotEmpty) {
+      await showPluginPermissionsSheet(context, installed.id);
+    }
   } catch (e) {
     if (!context.mounted) return;
     GlazeToast.show(

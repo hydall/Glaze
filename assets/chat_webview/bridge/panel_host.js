@@ -52,6 +52,14 @@ export class PanelHost {
     window.addEventListener('message', this._onMessage);
   }
 
+  /** Whether [win] is one of this host's panel frames. */
+  owns(win) {
+    for (const panel of this._panels.values()) {
+      if (panel.iframe.contentWindow === win) return true;
+    }
+    return false;
+  }
+
   async _relayGlazeRequest(panel, data) {
     try {
       const result = await this.bridge._callGlazeBridge({

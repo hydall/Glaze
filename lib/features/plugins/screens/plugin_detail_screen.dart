@@ -27,6 +27,89 @@ Future<void> openPluginDetailScreen(BuildContext context, String id) async {
   );
 }
 
+/// The rows that set up what [plugin] may do: a switch per permission, the
+/// ask/always/off choice for consents and the internet mode.
+List<Widget> pluginPermissionItems(
+  BuildContext context,
+  WidgetRef ref,
+  InstalledPlugin plugin,
+) {
+  final notifier = ref.read(pluginLibraryProvider.notifier);
+  return [
+    for (final permission in plugin.manifest.permissions) ...[
+      PluginDetailScreen._permissionItem(context, notifier, plugin, permission),
+      if (permission == PluginPermission.network &&
+          plugin.allows(PluginPermission.network))
+        MenuItem(
+          icon: Icons.router_outlined,
+          label: 'plugins_local_network'.tr(),
+          subtitle: 'plugins_local_network_hint'.tr(),
+          trailing: GlazeSwitch(
+            value: plugin.localNetwork,
+            onChanged: (v) => notifier.setLocalNetwork(plugin.id, v),
+          ),
+          onTap: () =>
+              notifier.setLocalNetwork(plugin.id, !plugin.localNetwork),
+        ),
+    ],
+  ];
+}
+
+/// Shown after a plugin is installed or updated with new permissions:
+/// everything starts off and the user switches on what the plugin may do.
+Future<void> showPluginPermissionsSheet(BuildContext context, String id) =>
+    GlazeBottomSheet.show<void>(
+      context,
+      title: 'plugins_permissions_sheet_title'.tr(),
+      child: _PermissionsSheet(pluginId: id),
+    );
+
+class _PermissionsSheet extends ConsumerWidget {
+  const _PermissionsSheet({required this.pluginId});
+
+  final String pluginId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final plugins = ref.watch(pluginLibraryProvider).value ?? const [];
+    final plugin = plugins.where((x) => x.id == pluginId).firstOrNull;
+    if (plugin == null) return const SizedBox.shrink();
+    final name = plugin
+        .localizer(context.locale.toLanguageTag())
+        .resolve(plugin.manifest.name);
+    final notifier = ref.read(pluginLibraryProvider.notifier);
+    final listed =
+        PluginDetailScreen._networkMode(plugin) == PluginNetworkMode.listed;
+    return MenuGroup(
+      header: name,
+      headerIcon: Icons.extension_rounded,
+      description: 'plugins_permissions_sheet_body'.tr(),
+      items: [
+        ...pluginPermissionItems(context, ref, plugin),
+        // The hosts the plugin names, to switch on without leaving.
+        if (listed)
+          for (final host in {
+            ...plugin.manifest.hosts,
+            ...?plugin.networkHosts,
+          }.toList()..sort())
+            MenuItem(
+              icon: Icons.language_rounded,
+              label: host,
+              trailing: GlazeSwitch(
+                value: plugin.allowsHost(host),
+                onChanged: (v) => notifier.setHostAllowed(plugin.id, host, v),
+              ),
+              onTap: () => notifier.setHostAllowed(
+                plugin.id,
+                host,
+                !plugin.allowsHost(host),
+              ),
+            ),
+      ],
+    );
+  }
+}
+
 /// One installed plugin: what it is, what it may do, its settings form and
 /// the uninstall action.
 class PluginDetailScreen extends ConsumerWidget {
@@ -108,10 +191,7 @@ class PluginDetailScreen extends ConsumerWidget {
             description: manifest.permissions.isEmpty
                 ? 'plugins_permissions_none'.tr()
                 : null,
-            items: [
-              for (final permission in manifest.permissions)
-                _permissionItem(context, notifier, plugin, permission),
-            ],
+            items: pluginPermissionItems(context, ref, plugin),
           ),
           _NetworkLog(plugin: plugin),
           if (manifest.settings.isNotEmpty)
@@ -154,7 +234,7 @@ class PluginDetailScreen extends ConsumerWidget {
     return text == key ? fallback : text;
   }
 
-  Widget _permissionItem(
+  static Widget _permissionItem(
     BuildContext context,
     PluginLibraryNotifier notifier,
     InstalledPlugin plugin,
@@ -217,7 +297,7 @@ class PluginDetailScreen extends ConsumerWidget {
       ? PluginNetworkMode.any
       : PluginNetworkMode.listed;
 
-  void _pickNetworkMode(
+  static void _pickNetworkMode(
     BuildContext context,
     PluginLibraryNotifier notifier,
     InstalledPlugin plugin,
@@ -241,7 +321,7 @@ class PluginDetailScreen extends ConsumerWidget {
     );
   }
 
-  void _pickConsentMode(
+  static void _pickConsentMode(
     BuildContext context,
     PluginLibraryNotifier notifier,
     InstalledPlugin plugin,
@@ -309,8 +389,10 @@ class _NetworkLog extends ConsumerWidget {
       ..sort((a, b) => b.lastSeen.compareTo(a.lastSeen));
     // Allowed hosts not seen yet still belong on the list.
     final unseen = [
-      for (final h
-          in (plugin.networkHosts ?? const <String>{}).toList()..sort())
+      for (final h in {
+        ...?plugin.networkHosts,
+        if (listed) ...plugin.manifest.hosts,
+      }.toList()..sort())
         if (!log.containsKey(h)) h,
     ];
     final format = DateFormat.MMMd(context.locale.toLanguageTag()).add_Hm();
@@ -326,7 +408,12 @@ class _NetworkLog extends ConsumerWidget {
       },
       items: [
         for (final h in unseen)
-          _hostItem(notifier, h, allowed: true, listed: listed),
+          _hostItem(
+            notifier,
+            h,
+            allowed: !listed || plugin.allowsHost(h),
+            listed: listed,
+          ),
         for (final r in records)
           // Not hosts: shown as they were, never switched per host.
           if (r.host == 'navigation' || r.host == 'webrtc')

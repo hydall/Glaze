@@ -295,6 +295,8 @@ export class Bridge {
       const data = e.data || {};
       if (!data || data.type !== 'glaze:request') return;
       if (!e.source) return;
+      // Panels are answered by their host, which stamps the panel identity.
+      if (this._panelHost && this._panelHost.owns(e.source)) return;
       try {
         const result = await this._callGlazeBridge({
           id: data.id,

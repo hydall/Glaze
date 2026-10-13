@@ -14,6 +14,7 @@ class InstalledPlugin {
     this.grants = const {},
     this.revoked = const {},
     this.networkHosts,
+    this.localNetwork = false,
   });
 
   final PluginManifest manifest;
@@ -37,6 +38,11 @@ class InstalledPlugin {
   /// for any host.
   final Set<String>? networkHosts;
 
+  /// With `network` allowed: whether the plugin may also reach devices on
+  /// the user's own network (loopback, private and link-local addresses)
+  /// and use unencrypted http/ws.
+  final bool localNetwork;
+
   /// Whether the plugin may reach [host] at all.
   bool allowsHost(String host) {
     if (!allows(PluginPermission.network)) return false;
@@ -57,6 +63,7 @@ class InstalledPlugin {
     Set<String>? grants,
     Set<String>? revoked,
     Set<String>? Function()? networkHosts,
+    bool? localNetwork,
   }) => InstalledPlugin(
     manifest: manifest,
     directory: directory,
@@ -67,6 +74,7 @@ class InstalledPlugin {
     grants: grants ?? this.grants,
     revoked: revoked ?? this.revoked,
     networkHosts: networkHosts == null ? this.networkHosts : networkHosts(),
+    localNetwork: localNetwork ?? this.localNetwork,
   );
 
   PluginLocalizer localizer(String requestedLocale) => PluginLocalizer(
@@ -105,5 +113,6 @@ class InstalledPlugin {
     'grants': grants.toList(),
     'revoked': revoked.toList(),
     'networkHosts': networkHosts?.toList(),
+    'localNetwork': localNetwork,
   };
 }

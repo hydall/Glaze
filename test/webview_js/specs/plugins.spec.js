@@ -248,6 +248,8 @@ test('with the network permission hosts are logged', async ({ page }) => {
   await setup(page, [
     plugin('on', {
       network: true,
+      // The test server is on loopback.
+      localNetwork: true,
       main: `fetch('http://127.0.0.1:4176/test/webview_js/harness/plugins.html').catch(() => {}).then(() => glaze.ui.toast('done'));`,
     }),
   ]);
@@ -267,6 +269,7 @@ test('with a host list only those hosts are reachable', async ({ page }) => {
   await setup(page, [
     plugin('list', {
       network: ['127.0.0.1'],
+      localNetwork: true,
       main: `
         const ok = await fetch('http://127.0.0.1:4176/test/webview_js/harness/plugins.html', { mode: 'no-cors' }).then(() => 'ok', () => 'fail');
         const other = await fetch('https://example.com/x', { mode: 'no-cors' }).then(() => 'ok', () => 'fail');
@@ -277,6 +280,57 @@ test('with a host list only those hosts are reachable', async ({ page }) => {
   await expect.poll(() => toasts(page)).toEqual(['ok|fail']);
   await expect.poll(() => netReports(page)).toContainEqual({ pluginId: 'list', host: 'example.com', blocked: true });
   expect((await netReports(page)).filter((r) => r.host === '127.0.0.1').every((r) => !r.blocked)).toBe(true);
+});
+
+const LOCAL_PROBE = `
+  (async () => {
+    const page = 'http://127.0.0.1:4176/test/webview_js/harness/plugins.html';
+    const plain = await fetch(page, { mode: 'no-cors' }).then(() => 'ok', () => 'fail');
+    const secure = await fetch('https://192.168.0.1/', { mode: 'no-cors' }).then(() => 'ok', (e) => e.message.indexOf('Local network') >= 0 ? 'refused' : 'fail');
+    glaze.ui.toast(plain + '|' + secure);
+  })();
+`;
+
+test('the local network is out of reach unless allowed', async ({ page }) => {
+  await setup(page, [
+    plugin('any', { network: true, main: LOCAL_PROBE }),
+    plugin('list', { network: ['127.0.0.1', '192.168.0.1'], main: LOCAL_PROBE }),
+    plugin('local', { network: true, localNetwork: true, main: LOCAL_PROBE.replace("'https://192.168.0.1/'", 'page') }),
+  ]);
+  await expect.poll(async () => (await toasts(page)).sort()).toEqual(['fail|refused', 'fail|refused', 'ok|ok']);
+  const reports = await netReports(page);
+  expect(reports).toContainEqual({ pluginId: 'any', host: '127.0.0.1', blocked: true });
+  expect(reports).toContainEqual({ pluginId: 'list', host: '192.168.0.1', blocked: true });
+  expect(reports.filter((r) => r.pluginId === 'local').every((r) => !r.blocked)).toBe(true);
+});
+
+test('what plugin frames post never reaches the page past the plugin host', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__leaked = [];
+    // Registered after the host, like the page's own relays.
+    addEventListener('load', () => addEventListener('message', (e) => {
+      if (e.data && e.data.probe) window.__leaked.push(e.data.probe);
+    }));
+  });
+  await setup(page, [
+    plugin('p', {
+      main: `
+        parent.postMessage({ probe: 'direct', type: 'glaze:request' }, '*');
+        const f = document.createElement('iframe');
+        f.srcdoc = '<script>top.postMessage({ probe: "nested", type: "glaze:request" }, "*"); parent.postMessage({ probe: "up" }, "*")<\\/script>';
+        document.body.appendChild(f);
+        setTimeout(() => glaze.ui.toast('posted'), 300);
+      `,
+    }),
+  ]);
+  await expect.poll(() => toasts(page)).toEqual(['posted']);
+  // A frame that is not a plugin's still gets through.
+  await page.evaluate(() => {
+    const f = document.createElement('iframe');
+    f.srcdoc = '<script>parent.postMessage({ probe: "card" }, "*")<\/script>';
+    document.body.appendChild(f);
+  });
+  await expect.poll(() => page.evaluate(() => window.__leaked)).toEqual(['card']);
 });
 
 const RTC_PROBE = `
@@ -319,4 +373,24 @@ test('the WebView guard gives WebRTC back only for any host and the right key', 
     'nested:undefined:function:null',
   ]);
   await expect.poll(() => netReports(page)).toContainEqual({ pluginId: 'any', host: 'webrtc', blocked: false });
+});
+
+test('a message panel reaches the app through its host, once', async ({ page }) => {
+  await page.goto(URL);
+  const calls = await page.evaluate(async () => {
+    window.__glazeSdkSource = await (await fetch('/assets/chat_webview/glaze_sdk.js')).text();
+    const { PanelHost } = await import('/assets/chat_webview/bridge/panel_host.js');
+    const section = document.createElement('div');
+    section.dataset.messageId = 'm1';
+    document.body.appendChild(section);
+    const calls = [];
+    const host = new PanelHost({
+      _sendToFlutter: () => {},
+      _callGlazeBridge: async (request) => { calls.push(request); return 'ok'; },
+    });
+    host.open('m1', '<script>setTimeout(() => glaze.showToast("hi"), 50)<\/script>', '{}');
+    await new Promise((r) => setTimeout(r, 500));
+    return calls.map((c) => ({ method: c.method, panel: !!c.context.panelId, owned: host.owns(document.querySelector('iframe.interactive-panel-frame').contentWindow) }));
+  });
+  expect(calls).toEqual([{ method: 'showToast', panel: true, owned: true }]);
 });

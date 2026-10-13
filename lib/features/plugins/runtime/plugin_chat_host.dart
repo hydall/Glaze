@@ -364,6 +364,7 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
         x.config,
         (x.revoked.toList()..sort()),
         x.networkHosts?.toList()?..sort(),
+        x.localNetwork,
       ],
   ]);
 

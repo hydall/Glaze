@@ -98,6 +98,8 @@ class PluginRuntimePayloadBuilder {
           : plugin.networkHosts == null
           ? true
           : (plugin.networkHosts!.toList()..sort()),
+      'localNetwork':
+          plugin.allows(PluginPermission.network) && plugin.localNetwork,
       'messageActions': await messageActions(plugin, localizer),
     };
   }

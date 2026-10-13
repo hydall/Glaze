@@ -44,7 +44,24 @@
   (function watchNetwork() {
     var seen = new Set();
     var network = boot.network;
+    var local = boot.localNetwork === true;
+    // Same rule as the host's frame policy, which is what actually blocks.
+    function isLocalHost(host) {
+      host = String(host).toLowerCase().replace(/^\[|\]$/g, '');
+      if (host === 'localhost' || /\.(localhost|local|lan|home\.arpa|internal)$/.test(host)) return true;
+      var v4 = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(host);
+      if (v4) {
+        var a = +v4[1], b = +v4[2];
+        return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b < 128) ||
+          (a === 169 && b === 254) || (a === 172 && b >= 16 && b < 32) || (a === 192 && b === 168) || a >= 224;
+      }
+      if (host.indexOf(':') >= 0) {
+        return host === '::' || host === '::1' || /^(fc|fd|fe[89ab]|ff)/.test(host) || /^::ffff:/.test(host);
+      }
+      return false;
+    }
     function allowed(host) {
+      if (!local && isLocalHost(host)) return false;
       if (network === true) return true;
       if (!Array.isArray(network)) return false;
       return network.some(function (rule) {
@@ -63,6 +80,14 @@
       post({ type: P + 'net', host: host, blocked: !!blocked });
     }
     function remote(url) { return /^(https?|wss?):/i.test(String(url)); }
+    function hostOf(url) {
+      try { return new URL(String(url), location.href).hostname.toLowerCase(); } catch (e) { return ''; }
+    }
+    // A call to the local network without access to it fails like a
+    // network error, before anything is sent.
+    function refused(url) {
+      return !local && network !== false && remote(url) && isLocalHost(hostOf(url));
+    }
     try {
       new PerformanceObserver(function (list) {
         list.getEntries().forEach(function (e) { if (remote(e.name)) report(e.name); });
@@ -76,12 +101,14 @@
       window.fetch = function (input) {
         var url = input && typeof input === 'object' && 'url' in input ? input.url : input;
         if (remote(url)) report(url);
+        if (refused(url)) return Promise.reject(new TypeError('Local network access is not allowed for this plugin'));
         return nativeFetch.apply(this, arguments);
       };
     }
     var open = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function (method, url) {
       if (remote(url)) report(url);
+      if (refused(url)) throw new DOMException('Local network access is not allowed for this plugin', 'SecurityError');
       return open.apply(this, arguments);
     };
     ['WebSocket', 'EventSource'].forEach(function (name) {
@@ -89,6 +116,7 @@
       if (!Native) return;
       var Wrapped = function (url) {
         if (remote(url)) report(url);
+        if (refused(url)) throw new DOMException('Local network access is not allowed for this plugin', 'SecurityError');
         return new (Function.prototype.bind.apply(Native, [null].concat(Array.prototype.slice.call(arguments))))();
       };
       Wrapped.prototype = Native.prototype;

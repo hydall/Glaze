@@ -34,6 +34,17 @@ PluginPackage readPluginPackage(Uint8List bytes) {
     throw const PluginManifestException('The file is not a plugin package');
   }
 
+  // Sizes the archive declares, checked before anything is inflated.
+  var declared = 0;
+  var count = 0;
+  for (final entry in archive) {
+    if (!entry.isFile) continue;
+    declared += entry.size;
+    if (++count > kMaxPluginFiles || declared > kMaxPluginPackageBytes) {
+      throw const PluginManifestException('The plugin package is too large');
+    }
+  }
+
   final files = <String, Uint8List>{};
   var total = 0;
   for (final entry in archive) {

@@ -43,6 +43,8 @@
       }, 60000);
 
       function onMessage(event) {
+        // Answers come from the page; a sibling frame could guess the id.
+        if (event.source !== window.parent) return;
         const data = event.data || {};
         if (!data || data.type !== 'glaze:response' || data.id !== id) return;
         clearTimeout(timeout);

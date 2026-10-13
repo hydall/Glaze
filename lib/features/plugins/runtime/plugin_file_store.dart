@@ -13,6 +13,9 @@ class PluginFileStore {
 
   final String dataDir;
   static const maxStorageBytes = 2 * 1024 * 1024;
+
+  /// Cap on everything a plugin keeps in its files, across all scopes.
+  static const maxFilesBytes = 256 * 1024 * 1024;
   static const scopes = {'chat', 'global', 'tmp'};
 
   File get _storageFile => File(p.join(dataDir, 'storage.json'));
@@ -77,7 +80,7 @@ class PluginFileStore {
     final String dir;
     if (effectiveScope == 'chat') {
       if (sessionId == null) throw StateError('No chat is open');
-      dir = p.join(dataDir, 'files', 'chat', _safeSegment(sessionId));
+      dir = p.join(dataDir, 'files', 'chat', chatSegment(sessionId));
     } else {
       dir = p.join(dataDir, 'files', effectiveScope);
     }
@@ -88,15 +91,30 @@ class PluginFileStore {
   }
 
   Directory scopeDir(String scope, String? sessionId) {
+    if (!scopes.contains(scope)) {
+      throw ArgumentError('Unsupported file scope "$scope"');
+    }
     if (scope == 'chat') {
       if (sessionId == null) throw StateError('No chat is open');
       return Directory(
-        p.join(dataDir, 'files', 'chat', _safeSegment(sessionId)),
+        p.join(dataDir, 'files', 'chat', chatSegment(sessionId)),
       );
     }
     return Directory(p.join(dataDir, 'files', scope));
   }
 
-  static String _safeSegment(String s) =>
+  /// Bytes the plugin's files take, all scopes together.
+  Future<int> usedBytes() async {
+    final dir = Directory(p.join(dataDir, 'files'));
+    if (!await dir.exists()) return 0;
+    var total = 0;
+    await for (final e in dir.list(recursive: true, followLinks: false)) {
+      if (e is File) total += await e.length();
+    }
+    return total;
+  }
+
+  /// The folder name of a chat's files.
+  static String chatSegment(String s) =>
       s.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
 }

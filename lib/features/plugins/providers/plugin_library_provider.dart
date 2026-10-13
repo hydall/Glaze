@@ -86,7 +86,8 @@ class PluginLibraryNotifier extends AsyncNotifier<List<InstalledPlugin>> {
       );
 
   /// Off takes `network` away; listed keeps it to [InstalledPlugin.networkHosts]
-  /// (starting from the manifest's hosts); any lets it reach every host.
+  /// (the manifest's hosts show up switched off); any lets it reach every
+  /// host.
   Future<void> setNetworkMode(String id, PluginNetworkMode mode) => _update(
     id,
     (x) => x.copyWith(
@@ -96,11 +97,14 @@ class PluginLibraryNotifier extends AsyncNotifier<List<InstalledPlugin>> {
       networkHosts: switch (mode) {
         PluginNetworkMode.off => null,
         PluginNetworkMode.any => () => null,
-        PluginNetworkMode.listed =>
-          () => x.networkHosts ?? {...x.manifest.hosts},
+        PluginNetworkMode.listed => () => x.networkHosts ?? <String>{},
       },
     ),
   );
+
+  /// Lets the plugin reach the user's own network, or stops it.
+  Future<void> setLocalNetwork(String id, bool allowed) =>
+      _update(id, (x) => x.copyWith(localNetwork: allowed));
 
   /// Adds [host] to, or removes it from, the plugin's allowed hosts.
   Future<void> setHostAllowed(String id, String host, bool allowed) => _update(

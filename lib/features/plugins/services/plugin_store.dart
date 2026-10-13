@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import '../models/installed_plugin.dart';
 import '../compat/tavo/tavo_manifest_converter.dart';
 import '../models/plugin_manifest.dart';
+import '../runtime/plugin_file_store.dart';
 import 'plugin_manifest_parser.dart';
 import 'plugin_package_reader.dart';
 
@@ -103,6 +104,7 @@ class PluginStore {
       grants: grants is List ? {for (final g in grants) '$g'} : const {},
       revoked: revoked is List ? {for (final r in revoked) '$r'} : const {},
       networkHosts: hosts is List ? {for (final h in hosts) '$h'} : null,
+      localNetwork: record['localNetwork'] == true,
     );
   }
 
@@ -130,6 +132,18 @@ class PluginStore {
     }
   }
 
+  /// Removes every plugin's files kept for the chat [sessionId].
+  Future<void> deleteChatFiles(String sessionId) async {
+    final root = Directory(dataRoot);
+    if (!await root.exists()) return;
+    final segment = PluginFileStore.chatSegment(sessionId);
+    await for (final dir in root.list()) {
+      if (dir is! Directory) continue;
+      final chat = Directory(p.join(dir.path, 'files', 'chat', segment));
+      if (await chat.exists()) await chat.delete(recursive: true);
+    }
+  }
+
   /// Unpacks [package], replacing an older version of the same plugin and
   /// keeping its settings and enabled state.
   Future<InstalledPlugin> install(PluginPackage package) async {
@@ -142,25 +156,45 @@ class PluginStore {
       await file.writeAsBytes(e.value);
     }
     final target = Directory(packageDir(id));
+    final records = await _readRecords();
+    final existing = records.where((r) => r['id'] == id).firstOrNull;
+    // Permissions the installed version did not ask for start switched off
+    // like on a fresh install; the user turns them on.
+    var before = const <String>[];
+    if (existing != null && await target.exists()) {
+      try {
+        before = (await _readManifest(target.path)).permissions;
+      } catch (_) {
+        // An unreadable old manifest counts as asking for nothing.
+      }
+    }
     if (await target.exists()) await target.delete(recursive: true);
     await staging.rename(target.path);
 
-    final records = await _readRecords();
-    final existing = records.where((r) => r['id'] == id).firstOrNull;
+    final added = package.manifest.permissions.where(
+      (x) => !before.contains(x),
+    );
+    final oldRevoked = existing?['revoked'];
     final record = <String, Object?>{
       'id': id,
       'enabled': existing == null ? true : existing['enabled'] == true,
       'installedAt': DateTime.now().millisecondsSinceEpoch,
       'config': existing?['config'] ?? const <String, Object?>{},
       'grants': existing?['grants'] ?? const <String>[],
-      'revoked': existing?['revoked'] ?? const <String>[],
-      // A fresh install of a plugin that names its hosts may reach only
-      // those; an update keeps what the user set up.
-      'networkHosts': existing != null
+      'revoked': {
+        if (oldRevoked is List) ...oldRevoked.map((x) => '$x'),
+        ...added,
+      }.toList(),
+      // Hosts start switched off; the manifest's show up to switch on. An
+      // update keeps what the user set up.
+      'networkHosts':
+          existing != null && !added.contains(PluginPermission.network)
           ? existing['networkHosts']
-          : package.manifest.hosts.isEmpty
-          ? null
-          : package.manifest.hosts,
+          : const <String>[],
+      'localNetwork':
+          existing != null && !added.contains(PluginPermission.network)
+          ? existing['localNetwork'] == true
+          : false,
     };
     if (existing == null) {
       records.add(record);

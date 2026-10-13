@@ -12,6 +12,7 @@ import '../../shared/utils/time_formatter.dart';
 import '../chat/chat_provider.dart';
 import '../chat/chat_session_service.dart';
 import '../extensions/state/message_variables_notifier.dart';
+import '../plugins/providers/plugin_library_provider.dart';
 
 class ChatSessionInfo {
   final String sessionId;
@@ -255,6 +256,13 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
     final charId = _characterIdOf(sessionId);
     await ref.read(sessionDeletionRepoProvider).deleteSession(sessionId);
     ChatSessionService.clearCache();
+    // Session ids are reused, so a later chat would inherit these.
+    try {
+      final plugins = await ref.read(pluginStoreProvider.future);
+      await plugins.deleteChatFiles(sessionId);
+    } catch (_) {
+      // Leftover plugin files never block deleting the chat.
+    }
     // The chat screen may still be bound to the row that just went away. Left
     // alone it keeps serving the deleted session, and its next write recreates
     // the row it was deleted from (`commitDeleteMessages` ends in a full

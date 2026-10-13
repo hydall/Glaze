@@ -53,31 +53,57 @@
       insets: insets,
       compat: plugin.compat || null,
       network: plugin.network === true ? true : Array.isArray(plugin.network) ? plugin.network : false,
+      localNetwork: plugin.network !== false && plugin.localNetwork === true,
       // Only a plugin that may reach any host gets WebRTC back.
       rtcToken: plugin.network === true ? rtcToken : null,
     }, extra || {});
   }
 
+  // Hosts on the user's own network: loopback, private and link-local
+  // addresses and the names that only resolve inside a network.
+  function isLocalHost(host) {
+    host = String(host).toLowerCase().replace(/^\[|\]$/g, '');
+    if (host === 'localhost' || /\.(localhost|local|lan|home\.arpa|internal)$/.test(host)) return true;
+    var v4 = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(host);
+    if (v4) {
+      var a = +v4[1], b = +v4[2];
+      return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b < 128) ||
+        (a === 169 && b === 254) || (a === 172 && b >= 16 && b < 32) || (a === 192 && b === 168) || a >= 224;
+    }
+    if (host.indexOf(':') >= 0) {
+      return host === '::' || host === '::1' || /^(fc|fd|fe[89ab]|ff)/.test(host) || /^::ffff:/.test(host);
+    }
+    return false;
+  }
+
   // A plugin frame may load from outside only where its network setting
   // says: `true` anywhere, a host list only there, otherwise nowhere.
+  // Without local network access only https/wss go out, which keeps the
+  // frame away from home devices (they rarely speak TLS), and listed hosts
+  // on the local network are dropped.
   // Everything a plugin ships is inlined as data URLs, so it needs none.
-  function networkPolicy(network) {
-    if (network === true) return null;
+  function networkPolicy(network, local) {
+    if (network === true && local) return null;
+    var schemes = local ? ['https', 'http', 'wss', 'ws'] : ['https', 'wss'];
     var hosts = '';
-    if (Array.isArray(network)) {
+    if (network === true) {
+      hosts = ' https: wss:';
+    } else if (Array.isArray(network)) {
       network.forEach(function (h) {
-        if (/^(\*\.)?[a-z0-9.-]+$/.test(h)) ['https', 'http', 'wss', 'ws'].forEach(function (scheme) { hosts += ' ' + scheme + '://' + h + ':*'; });
+        if (!/^(\*\.)?[a-z0-9.-]+$/.test(h)) return;
+        if (!local && isLocalHost(h.replace(/^\*\./, ''))) return;
+        schemes.forEach(function (scheme) { hosts += ' ' + scheme + '://' + h + ':*'; });
       });
     }
-    var local = " data: blob:" + hosts;
-    return "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'" + local +
-      "; style-src 'unsafe-inline'" + local + "; img-src" + local + "; media-src" + local +
-      "; font-src" + local + "; worker-src" + local + "; frame-src" + local +
+    var outside = " data: blob:" + hosts;
+    return "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'" + outside +
+      "; style-src 'unsafe-inline'" + outside + "; img-src" + outside + "; media-src" + outside +
+      "; font-src" + outside + "; worker-src" + outside + "; frame-src" + outside +
       "; connect-src " + (hosts ? hosts.slice(1) : "'none'");
   }
 
   function headScripts(plugin, boot) {
-    var policy = networkPolicy(plugin.network);
+    var policy = networkPolicy(plugin.network, boot.localNetwork);
     var html = (policy ? '<meta http-equiv="Content-Security-Policy" content="' + policy + '">' : '') +
       '<meta charset="utf-8">' +
       '<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">' +
@@ -241,7 +267,25 @@
     });
   }
 
+  // Whether [win] is a plugin frame or nested anywhere inside one.
+  function insidePluginFrame(win) {
+    for (var w = win, depth = 0; w && depth < 32; depth++) {
+      if (frames.has(w)) return true;
+      var up;
+      try { up = w.parent; } catch (e) { return false; }
+      if (!up || up === w || up === window) return false;
+      w = up;
+    }
+    return false;
+  }
+
+  // Registered before the page's own listeners and in the capture phase:
+  // what plugin frames (and frames they nest) post stops here, so they can
+  // only speak the plugin protocol and never reach the page's other relays,
+  // such as the one serving message HTML.
   window.addEventListener('message', function (e) {
+    if (!e.source || !insidePluginFrame(e.source)) return;
+    e.stopImmediatePropagation();
     var state = frames.get(e.source);
     if (!state) return;
     var d = e.data;
@@ -262,8 +306,12 @@
         });
         return;
       case 'reply': {
-        var resolve = pendingReplies.get(d.id);
-        if (resolve) { pendingReplies.delete(d.id); resolve(d.result); }
+        // Only the frame that was asked may answer.
+        var pending = pendingReplies.get(d.id);
+        if (pending && pending.state === state) {
+          pendingReplies.delete(d.id);
+          pending.resolve(d.result);
+        }
         return;
       }
       case 'subscribe':
@@ -287,18 +335,27 @@
         }
         return;
     }
-  });
+  }, true);
+
+  function randomId() {
+    var bytes = new Uint8Array(12);
+    crypto.getRandomValues(bytes);
+    return Array.prototype.map.call(bytes, function (b) { return (b + 256).toString(16).slice(1); }).join('');
+  }
 
   function ask(state, msg, capMs) {
     return new Promise(function (resolve) {
-      var id = 'r' + (++replySeq);
+      var id = 'r' + (++replySeq) + '-' + randomId();
       var timer = capMs ? setTimeout(function () {
         pendingReplies.delete(id);
         resolve(null);
       }, capMs) : null;
-      pendingReplies.set(id, function (result) {
-        if (timer) clearTimeout(timer);
-        resolve(result);
+      pendingReplies.set(id, {
+        state: state,
+        resolve: function (result) {
+          if (timer) clearTimeout(timer);
+          resolve(result);
+        },
       });
       send(state, Object.assign({ id: id }, msg));
     });
@@ -499,7 +556,7 @@
     frames.clear();
     messageFrames.clear();
     plugins.clear();
-    pendingReplies.forEach(function (resolve) { resolve(null); });
+    pendingReplies.forEach(function (pending) { pending.resolve(null); });
     pendingReplies.clear();
     document.querySelectorAll('.glaze-plugin-slot,.glaze-plugin-msg-actions').forEach(function (el) { el.remove(); });
   }
