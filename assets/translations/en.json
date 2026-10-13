@@ -3564,7 +3564,7 @@
   "plugins_title": "Plugins",
   "plugins_intro": "Plugins add actions, panels and send hooks to every chat. Each plugin runs in an isolated frame inside the chat and can only use what its manifest asks for. Install plugins only from authors you trust.",
   "plugins_import": "Import plugin",
-  "plugins_import_hint": "Tavo Extensions are supportable.",
+  "plugins_import_hint": "Tavo Extensions are supported.",
   "plugins_installed": "Installed",
   "plugins_empty": "No plugins installed yet.",
   "plugins_installed_toast": "Installed {name}",
