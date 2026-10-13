@@ -125,7 +125,7 @@
       ['RTCPeerConnection', 'webkitRTCPeerConnection'].forEach(function (name) {
         window[name] = function () {
           log(true);
-          throw new DOMException('Direct connections are not allowed for this plugin', 'NotAllowedError');
+          throw new DOMException('WebRTC is not allowed for this plugin', 'NotAllowedError');
         };
       });
       return;
