@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:archive/archive.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
@@ -109,6 +110,7 @@ class PluginStore {
           : const {},
       networkHosts: hosts is List ? {for (final h in hosts) '$h'} : null,
       localNetwork: record['localNetwork'] == true,
+      hubSlug: record['hub'] is String ? record['hub'] as String : null,
     );
   }
 
@@ -161,8 +163,12 @@ class PluginStore {
   /// Unpacks [package], replacing an older version of the same plugin and
   /// keeping its settings and enabled state. A package whose author differs
   /// from the installed one's is not trusted as an update: it starts like a
-  /// fresh install and the old plugin's data goes.
-  Future<InstalledPlugin> install(PluginPackage package) async {
+  /// fresh install and the old plugin's data goes. [hubSlug] marks a package
+  /// downloaded from the hub; an update from a file keeps the mark.
+  Future<InstalledPlugin> install(
+    PluginPackage package, {
+    String? hubSlug,
+  }) async {
     final id = package.manifest.id;
     final staging = Directory(p.join(root, '.staging-$id'));
     if (await staging.exists()) await staging.delete(recursive: true);
@@ -219,6 +225,7 @@ class PluginStore {
           existing != null && !added.contains(PluginPermission.network)
           ? existing['localNetwork'] == true
           : false,
+      'hub': ?(hubSlug ?? existing?['hub']),
     };
     if (existing == null) {
       records.add(record);
@@ -245,6 +252,26 @@ class PluginStore {
       final dir = Directory(path);
       if (await dir.exists()) await dir.delete(recursive: true);
     }
+  }
+
+  /// Packs an installed package back into a zip, as it came in: a converted
+  /// package goes without the `plugin.json` Glaze wrote for it.
+  Future<Uint8List> exportPackage(String id) async {
+    final dir = Directory(packageDir(id));
+    final converted = await File(p.join(dir.path, kTavoManifestFile)).exists();
+    final archive = Archive();
+    final files = await dir
+        .list(recursive: true)
+        .where((e) => e is File)
+        .cast<File>()
+        .toList();
+    files.sort((a, b) => a.path.compareTo(b.path));
+    for (final file in files) {
+      final name = p.posix.joinAll(p.split(p.relative(file.path, from: dir.path)));
+      if (converted && name == kPluginManifestFile) continue;
+      archive.addFile(ArchiveFile.bytes(name, await file.readAsBytes()));
+    }
+    return Uint8List.fromList(ZipEncoder().encode(archive));
   }
 
   /// Reads a file from an installed package; null when it is missing or the

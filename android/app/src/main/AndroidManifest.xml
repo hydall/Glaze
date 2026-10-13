@@ -49,6 +49,18 @@
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="com.hydall.glaze"/>
             </intent-filter>
+            <!-- Plugin pages of Tavo's hub open as an install sheet. The
+                 domain is not ours to verify, so Android asks the user (or
+                 lets them turn it on under "Open by default"). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https" android:host="hub.tavoai.dev"/>
+                <data android:pathPrefix="/plugins/"/>
+                <data android:pathPrefix="/webview/plugins/"/>
+                <data android:pathPrefix="/plugin-market/"/>
+            </intent-filter>
         </activity>
         <service
             android:name="com.pravera.flutter_foreground_task.service.ForegroundService"

@@ -1797,6 +1797,20 @@ plugins the runtime also loads `tavo_compat.js`, which defines `tavo.*` (and
 for `tts` or calls `tavo.tts`/`glaze.tts` shows a warning sheet first
 (`plugin_compatibility.dart`).
 
+**Tavo Hub links** (`compat/tavo/tavo_hub.dart`, `screens/plugin_hub_sheet.dart`).
+A `hub.tavoai.dev` plugin page opens as a sheet instead of the browser: from
+"Install from a link" on the Plugins screen, links tapped in chats and
+descriptions (`openPluginHubLinkInApp`), and on Android the system's VIEW
+intent (an unverified filter, routed through `DeepLinkService.setWebLinkHandler`).
+The sheet reads the plugin from the hub's public API, downloads the package
+only from the hub's hosts, checks its sha256 and package id, and installs it
+through the same prompts as a file (`installPluginPackage`). Such installs keep
+the slug (`hub` in the registry, `InstalledPlugin.hubSlug`);
+`pluginHubUpdatesProvider` looks them up once per run and the list and plugin
+screen offer the update. Any plugin can be exported back to a file in its own
+format: `.tpg` for converted ones (without the generated `plugin.json`),
+`.glzp` otherwise (`PluginStore.exportPackage`).
+
 ## 10. Known Design Issues
 
 Open issues:

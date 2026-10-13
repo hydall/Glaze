@@ -15,6 +15,7 @@ class InstalledPlugin {
     this.revoked = const {},
     this.networkHosts,
     this.localNetwork = false,
+    this.hubSlug,
   });
 
   final PluginManifest manifest;
@@ -42,6 +43,10 @@ class InstalledPlugin {
   /// the user's own network (loopback, private and link-local addresses)
   /// and use unencrypted http/ws.
   final bool localNetwork;
+
+  /// The plugin's page on Tavo's hub when it was installed from there; its
+  /// updates are looked up on the hub.
+  final String? hubSlug;
 
   /// Whether the plugin may reach [host] at all.
   bool allowsHost(String host) {
@@ -75,6 +80,7 @@ class InstalledPlugin {
     revoked: revoked ?? this.revoked,
     networkHosts: networkHosts == null ? this.networkHosts : networkHosts(),
     localNetwork: localNetwork ?? this.localNetwork,
+    hubSlug: hubSlug,
   );
 
   PluginLocalizer localizer(String requestedLocale) => PluginLocalizer(
@@ -114,5 +120,6 @@ class InstalledPlugin {
     'revoked': revoked.toList(),
     'networkHosts': networkHosts?.toList(),
     'localNetwork': localNetwork,
+    'hub': ?hubSlug,
   };
 }

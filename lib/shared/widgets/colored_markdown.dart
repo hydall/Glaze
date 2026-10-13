@@ -4,6 +4,8 @@ import 'package:gpt_markdown/gpt_markdown.dart';
 import 'package:gpt_markdown/custom_widgets/markdown_config.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../features/plugins/screens/plugin_hub_sheet.dart';
+
 Color? parseHexColor(String hex) {
   var h = hex.replaceFirst('#', '');
   if (h.length == 3) h = '${h[0]}${h[0]}${h[1]}${h[1]}${h[2]}${h[2]}';
@@ -354,7 +356,7 @@ class LinkMd extends InlineMd {
       recognizer: TapGestureRecognizer()
         ..onTap = () {
           final uri = Uri.tryParse(url);
-          if (uri != null) {
+          if (uri != null && !openPluginHubLinkInApp(uri)) {
             launchUrl(uri, mode: LaunchMode.externalApplication);
           }
         },
@@ -410,7 +412,7 @@ class LinkedImageMd extends InlineMd {
         child: GestureDetector(
           onTap: () {
             final uri = Uri.tryParse(linkUrl);
-            if (uri != null) {
+            if (uri != null && !openPluginHubLinkInApp(uri)) {
               launchUrl(uri, mode: LaunchMode.externalApplication);
             }
           },

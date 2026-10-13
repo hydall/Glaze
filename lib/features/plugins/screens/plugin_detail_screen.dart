@@ -12,12 +12,18 @@ import '../../../shared/widgets/glaze_scaffold.dart';
 import '../../../shared/widgets/glaze_switch.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/menu_group.dart';
+import '../../../core/services/file_export_service.dart';
+import '../compat/tavo/tavo_hub.dart';
+import '../compat/tavo/tavo_manifest_converter.dart';
 import '../models/installed_plugin.dart';
 import '../models/plugin_manifest.dart';
 import '../providers/plugin_history_provider.dart';
+import '../providers/plugin_hub_provider.dart';
 import '../providers/plugin_library_provider.dart';
 import '../providers/plugin_network_log_provider.dart';
+import 'plugin_hub_sheet.dart';
 import 'plugin_settings_form.dart';
+import '../widgets/plugin_text_widgets.dart';
 
 Future<void> openPluginDetailScreen(BuildContext context, String id) async {
   final viewId = Uri(path: 'plugin-detail', queryParameters: {'id': id});
@@ -145,6 +151,13 @@ class PluginDetailScreen extends ConsumerWidget {
     final manifest = plugin.manifest;
     final notifier = ref.read(pluginLibraryProvider.notifier);
     final cover = manifest.icon;
+    final update = ref.watch(pluginHubUpdatesProvider).value?[plugin.id];
+    final description = manifest.description == null
+        ? ''
+        : localizer.resolve(manifest.description).trim();
+    final releaseNotes = manifest.releaseNotes == null
+        ? ''
+        : localizer.resolve(manifest.releaseNotes).trim();
 
     return GlazeScaffold(
       title: localizer.resolve(manifest.name),
@@ -172,7 +185,6 @@ class PluginDetailScreen extends ConsumerWidget {
           MenuGroup(
             header: 'plugins_about'.tr(),
             headerIcon: Icons.info_outline_rounded,
-            description: localizer.resolve(manifest.description),
             items: [
               MenuSwitchItem(
                 label: 'plugins_enabled'.tr(),
@@ -185,12 +197,27 @@ class PluginDetailScreen extends ConsumerWidget {
                 value: manifest.author ?? '—',
                 onTap: () {},
               ),
-              MenuItem(
-                icon: Icons.tag_rounded,
-                label: 'plugins_version'.tr(),
-                value: manifest.version,
-                onTap: () {},
+              if (description.isNotEmpty)
+                PluginDescriptionItem(text: description),
+              pluginVersionItem(
+                context,
+                version: manifest.version,
+                releaseNotes: releaseNotes.isEmpty ? null : releaseNotes,
               ),
+              if (plugin.hubSlug case final slug?)
+                MenuItem(
+                  icon: Icons.storefront_outlined,
+                  label: 'plugins_hub_source'.tr(),
+                  subtitle: update == null
+                      ? null
+                      : 'plugins_hub_update_available'.tr(
+                          namedArgs: {'version': update.version},
+                        ),
+                  onTap: () => openPluginHubLink(
+                    context,
+                    Uri.https(kTavoHubSite, '/plugins/$slug'),
+                  ),
+                ),
             ],
           ),
           MenuGroup(
@@ -205,19 +232,24 @@ class PluginDetailScreen extends ConsumerWidget {
           _History(plugin: plugin),
           if (manifest.settings.isNotEmpty)
             PluginSettingsForm(plugin: plugin, localizer: localizer),
-          if (manifest.releaseNotes != null)
-            MenuGroup(
-              header: 'plugins_release_notes'.tr(),
-              headerIcon: Icons.new_releases_outlined,
-              description: localizer.resolve(manifest.releaseNotes),
-              items: const [],
-            ),
           MenuGroup(
             items: [
               MenuItem(
+                icon: Icons.ios_share_rounded,
+                label: 'plugins_export'.tr(),
+                subtitle: 'plugins_export_hint_${pluginExportFormat(plugin)}'
+                    .tr(),
+                onTap: () => exportPlugin(context, ref, plugin),
+              ),
+              MenuItem(
                 icon: Icons.delete_outline_rounded,
                 label: 'plugins_uninstall'.tr(),
-                onTap: () => _confirmUninstall(context, ref, plugin),
+                onTap: () => confirmPluginUninstall(
+                  context,
+                  ref,
+                  plugin,
+                  closeScreen: true,
+                ),
               ),
             ],
           ),
@@ -366,28 +398,72 @@ class PluginDetailScreen extends ConsumerWidget {
       ],
     );
   }
+}
 
-  void _confirmUninstall(
-    BuildContext context,
-    WidgetRef ref,
-    InstalledPlugin plugin,
-  ) {
-    GlazeBottomSheet.show<void>(
+/// Asks before [plugin] and everything it stored go; [closeScreen] also
+/// leaves the plugin's own screen afterwards.
+void confirmPluginUninstall(
+  BuildContext context,
+  WidgetRef ref,
+  InstalledPlugin plugin, {
+  bool closeScreen = false,
+}) {
+  GlazeBottomSheet.show<void>(
+    context,
+    title: 'plugins_uninstall'.tr(),
+    bigInfo: BottomSheetBigInfo(
+      icon: Icons.delete_outline_rounded,
+      description: 'plugins_uninstall_confirm'.tr(),
+      buttonText: 'plugins_uninstall'.tr(),
+      buttonIcon: Icons.delete_outline_rounded,
+      onButtonTap: () async {
+        Navigator.of(context, rootNavigator: true).pop();
+        await ref.read(pluginLibraryProvider.notifier).uninstall(plugin.id);
+        if (closeScreen &&
+            context.mounted &&
+            Navigator.of(context).canPop()) {
+          Navigator.of(context).pop();
+        }
+      },
+    ),
+  );
+}
+
+/// The format [plugin] is exported in: its own app's.
+String pluginExportFormat(InstalledPlugin plugin) =>
+    plugin.manifest.compat == kTavoCompat ? 'tpg' : 'glzp';
+
+/// Packs [plugin] back into a file and saves it.
+Future<void> exportPlugin(
+  BuildContext context,
+  WidgetRef ref,
+  InstalledPlugin plugin,
+) async {
+  try {
+    final store = await ref.read(pluginStoreProvider.future);
+    final bytes = await store.exportPackage(plugin.id);
+    final ext = pluginExportFormat(plugin);
+    final base = '${plugin.id}-${plugin.manifest.version}'.replaceAll(
+      RegExp(r'[^A-Za-z0-9._-]'),
+      '_',
+    );
+    final path = await FileExportService.exportBytes(
+      bytes: bytes,
+      filename: '$base.$ext',
+      subfolder: 'plugins',
+    );
+    if (path.isEmpty || !context.mounted) return;
+    GlazeToast.show(
       context,
-      title: 'plugins_uninstall'.tr(),
-      bigInfo: BottomSheetBigInfo(
-        icon: Icons.delete_outline_rounded,
-        description: 'plugins_uninstall_confirm'.tr(),
-        buttonText: 'plugins_uninstall'.tr(),
-        buttonIcon: Icons.delete_outline_rounded,
-        onButtonTap: () async {
-          Navigator.of(context, rootNavigator: true).pop();
-          await ref.read(pluginLibraryProvider.notifier).uninstall(plugin.id);
-          if (context.mounted && Navigator.of(context).canPop()) {
-            Navigator.of(context).pop();
-          }
-        },
-      ),
+      'plugins_exported_toast'.tr(namedArgs: {'path': path}),
+    );
+  } catch (e) {
+    if (!context.mounted) return;
+    GlazeToast.show(
+      context,
+      'plugins_export_failed'.tr(namedArgs: {'error': '$e'}),
+      isError: true,
+      showCopyButton: true,
     );
   }
 }

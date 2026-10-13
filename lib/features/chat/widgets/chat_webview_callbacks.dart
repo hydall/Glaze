@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../plugins/screens/plugin_hub_sheet.dart';
 import '../chat_provider.dart';
 import 'webview_callbacks.dart';
 
@@ -173,7 +174,9 @@ class ChatWebViewCallbacks {
   }
 
   void onLinkClick(String url) {
-    launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+    final uri = Uri.tryParse(url);
+    if (uri == null || openPluginHubLinkInApp(uri)) return;
+    launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
   void onLoadMore() {

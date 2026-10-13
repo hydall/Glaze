@@ -41,6 +41,7 @@ import 'shared/theme/theme_provider.dart';
 
 import 'features/chat/widgets/chat_webview_preload.dart';
 import 'features/diagnostics/crash_prompt.dart';
+import 'features/plugins/screens/plugin_hub_sheet.dart';
 import 'features/chat/widgets/continue_failure_listener.dart';
 import 'features/chat/widgets/lorebook_vector_search_diagnostic_listener.dart';
 import 'shared/widgets/app_launch_splash.dart';
@@ -252,6 +253,7 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
     if (_startupHooksAttached) return;
     _startupHooksAttached = true;
     checkAndShowOnboarding(context);
+    DeepLinkService.instance.setWebLinkHandler(openPluginHubLinkInApp);
     _listenNotificationNavigation();
     _handleColdStartNotification();
     unawaited(
