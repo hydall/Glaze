@@ -65,7 +65,7 @@ Future<Object?> _send(PluginCall c) async {
 
 Future<Object?> _toast(PluginCall c) async {
   final text = c.arg(0)?.toString() ?? '';
-  if (text.trim().isNotEmpty) c.host.ui.toast(text);
+  if (text.trim().isNotEmpty) c.host.ui.toast(c.pluginName, text);
   return null;
 }
 
@@ -103,6 +103,7 @@ Future<Object?> _select(PluginCall c) async {
     throw const PluginApiError('invalid_arguments', 'select needs options');
   }
   return c.host.ui.select(
+    c.pluginName,
     options,
     title: c.arg(1)?.toString(),
     defaultValue: c.arg(2)?.toString(),
@@ -124,6 +125,7 @@ Future<Object?> _ask(PluginCall c) async {
     );
   }
   return c.host.ui.ask(
+    pluginName: c.pluginName,
     question: question,
     options: options,
     allowOther: allowOther,

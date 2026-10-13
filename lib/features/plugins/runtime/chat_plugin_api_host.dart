@@ -90,9 +90,11 @@ class ChatPluginApiHost implements PluginApiHost, PluginUi {
       Navigator.of(context, rootNavigator: true).pop(value);
 
   @override
-  void toast(String text) {
+  void toast(String pluginName, String text) {
     final context = contextResolver();
-    if (context != null && context.mounted) GlazeToast.show(context, text);
+    if (context != null && context.mounted) {
+      GlazeToast.show(context, text, source: pluginName);
+    }
   }
 
   @override
@@ -102,6 +104,7 @@ class ChatPluginApiHost implements PluginApiHost, PluginUi {
 
   @override
   Future<String?> select(
+    String pluginName,
     List<PluginOption> options, {
     String? title,
     String? defaultValue,
@@ -110,6 +113,7 @@ class ChatPluginApiHost implements PluginApiHost, PluginUi {
     return GlazeBottomSheet.show<String>(
       context,
       title: title,
+      source: pluginName,
       items: [
         for (final o in options)
           BottomSheetItem(
@@ -124,6 +128,7 @@ class ChatPluginApiHost implements PluginApiHost, PluginUi {
 
   @override
   Future<Map<String, Object?>> ask({
+    required String pluginName,
     required String question,
     required List<PluginOption> options,
     required bool allowOther,
@@ -134,6 +139,7 @@ class ChatPluginApiHost implements PluginApiHost, PluginUi {
     final answer = await GlazeBottomSheet.show<Map<String, Object?>>(
       context,
       title: question,
+      source: pluginName,
       items: options.isEmpty
           ? null
           : [

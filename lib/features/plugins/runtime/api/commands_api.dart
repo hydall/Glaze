@@ -26,7 +26,7 @@ final Map<String, ({String? permission, _Command run})> _commands = {
   'echo': (
     permission: null,
     run: (c, args) async {
-      c.host.ui.toast(args);
+      c.host.ui.toast(c.pluginName, args);
       return args;
     },
   ),

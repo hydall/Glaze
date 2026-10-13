@@ -1655,7 +1655,10 @@ detail screen each is Ask, Always or Off. Every refusal (`permission_denied`)
 goes through `PluginBridgeService._require`: it is counted in the plugin's
 history (`pluginHistoryProvider`, `plugin_data/<id>/history.json`, shown as
 "Not allowed" on the detail screen) and the user gets one toast per plugin and
-action until the app restarts; a refused plugin is never asked again. Hooks
+action until the app restarts; a refused plugin is never asked again. Toasts
+and the select/ask sheets a plugin opens are signed with its name
+(`GlazeToast.show(source:)`, `GlazeBottomSheet.show(source:)`), so a plugin
+cannot pass a question off as the app's. Hooks
 and notifications need permissions too (`pluginEventPermissions`): `send:*`
 `composer`, `generation:*` `generate`, `chat:*` and `message:*` `messages`;
 the host page drops subscriptions without them and reports each refused kind

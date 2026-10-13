@@ -28,15 +28,19 @@ typedef PickedPluginFile = ({String name, Uint8List bytes});
 
 /// Everything the API needs that shows UI. Implemented by the chat host;
 /// faked in tests.
+/// Toasts and sheets a plugin opens are signed with [pluginName], so a plugin
+/// cannot pass its own question off as the app's.
 abstract interface class PluginUi {
-  void toast(String text);
+  void toast(String pluginName, String text);
   Future<void> openUrl(String url);
   Future<String?> select(
+    String pluginName,
     List<PluginOption> options, {
     String? title,
     String? defaultValue,
   });
   Future<Map<String, Object?>> ask({
+    required String pluginName,
     required String question,
     required List<PluginOption> options,
     required bool allowOther,
@@ -104,6 +108,7 @@ String pluginActionKey(String permission, String? summary) =>
 class PluginCall {
   const PluginCall({
     required this.plugin,
+    required this.pluginName,
     required this.host,
     required this.method,
     required this.params,
@@ -113,6 +118,9 @@ class PluginCall {
   });
 
   final InstalledPlugin plugin;
+
+  /// [plugin]'s name in the user's language, for what the user sees.
+  final String pluginName;
   final PluginApiHost host;
   final String method;
 

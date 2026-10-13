@@ -27,17 +27,19 @@ class _FakeUi implements PluginUi {
   PluginConsentAnswer? answer = PluginConsentAnswer.deny;
 
   @override
-  void toast(String text) => toasts.add(text);
+  void toast(String pluginName, String text) => toasts.add(text);
   @override
   Future<void> openUrl(String url) async {}
   @override
   Future<String?> select(
+    String pluginName,
     List<PluginOption> options, {
     String? title,
     String? defaultValue,
   }) async => options.first.value;
   @override
   Future<Map<String, Object?>> ask({
+    required String pluginName,
     required String question,
     required List<PluginOption> options,
     required bool allowOther,

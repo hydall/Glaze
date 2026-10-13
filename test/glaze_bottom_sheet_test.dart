@@ -62,6 +62,37 @@ void main() {
     expect(find.byType(BackdropFilter), findsNothing);
   });
 
+  testWidgets('a sheet opened for a plugin is signed in its header', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        child: MaterialApp(
+          theme: ThemeData.dark(),
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => ElevatedButton(
+                onPressed: () => GlazeBottomSheet.show<void>(
+                  context,
+                  title: 'Enter your API key',
+                  source: 'Probe',
+                  items: [BottomSheetItem(label: 'one', onTap: () {})],
+                ),
+                child: const Text('Open'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Enter your API key'), findsOneWidget);
+    expect(find.text('Probe'), findsOneWidget);
+    expect(find.byIcon(Icons.extension_outlined), findsOneWidget);
+  });
+
   testWidgets('lazy items only build rows in the viewport', (tester) async {
     var buildCount = 0;
 

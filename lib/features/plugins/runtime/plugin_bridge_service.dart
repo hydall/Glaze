@@ -155,6 +155,7 @@ class PluginBridgeService {
     return entry.run(
       PluginCall(
         plugin: plugin,
+        pluginName: pluginName(plugin),
         host: host,
         method: method,
         params: params,
