@@ -256,6 +256,7 @@
     if (state.win) frames.delete(state.win);
     wrappers.delete(state.wrapper);
     try { state.iframe.remove(); } catch (e) { /* already detached */ }
+    if (state.holes) scheduleHoles();
   }
 
   function send(state, msg) {
@@ -279,17 +280,42 @@
     if (!Array.isArray(rects) || !rects.length) {
       style.clipPath = 'polygon(0 0, 0 0, 0 0)';
       style.pointerEvents = 'none';
+      state.holes = null;
+      scheduleHoles();
       return;
     }
     // A few px of slack keeps soft shadows and glows from being cut square.
     var pad = HIT_SLACK_PX;
-    var path = rects.map(function (r) {
+    var boxes = rects.map(function (r) {
       var x = Math.max(0, (+r[0] || 0) - pad), y = Math.max(0, (+r[1] || 0) - pad);
-      var w = Math.max(0, +r[2] || 0) + 2 * pad, h = Math.max(0, +r[3] || 0) + 2 * pad;
-      return 'M' + x + ' ' + y + 'h' + w + 'v' + h + 'h' + (-w) + 'Z';
-    }).join(' ');
-    style.clipPath = 'path(\'' + path + '\')';
+      return [x, y, Math.max(0, +r[2] || 0) + 2 * pad, Math.max(0, +r[3] || 0) + 2 * pad];
+    });
+    style.clipPath = 'path(\'' + boxes.map(function (b) {
+      return 'M' + b[0] + ' ' + b[1] + 'h' + b[2] + 'v' + b[3] + 'h' + (-b[2]) + 'Z';
+    }).join(' ') + '\')';
     style.pointerEvents = 'auto';
+    state.holes = boxes;
+    scheduleHoles();
+  }
+
+  // What chat panels draw goes over the app's own controls laid over the
+  // page (header, message box): the app leaves these areas to the page.
+  var holesKey = '[]';
+  var holesTimer = 0;
+  function reportHoles() {
+    holesTimer = 0;
+    var all = [];
+    wrappers.forEach(function (f) { if (f.kind === 'panel' && f.holes) all = all.concat(f.holes); });
+    var key = JSON.stringify(all);
+    if (key === holesKey) return;
+    holesKey = key;
+    if (window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
+      window.flutter_inappwebview.callHandler('pluginHoles', all);
+    }
+  }
+
+  function scheduleHoles() {
+    if (!holesTimer) holesTimer = setTimeout(reportHoles, 0);
   }
 
   /* ---------- Dart transport ---------- */

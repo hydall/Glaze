@@ -85,6 +85,10 @@ class GlazeScaffold extends StatefulWidget {
   /// [useShellHeader] is true.
   final int? headerBranchIndex;
 
+  /// Wraps the floating header over a body drawn behind it; the chat uses
+  /// it to leave room for what plugins draw over the page.
+  final Widget Function(Widget header)? headerWrapper;
+
   const GlazeScaffold({
     super.key,
     this.title,
@@ -102,6 +106,7 @@ class GlazeScaffold extends StatefulWidget {
     this.headerBlurViaWebView = false,
     this.headerBackdropKey,
     this.flushHeader = false,
+    this.headerWrapper,
   });
 
   @override
@@ -225,7 +230,12 @@ class _GlazeScaffoldState extends State<GlazeScaffold> {
             ? Stack(
                 children: [
                   Positioned.fill(child: widget.body),
-                  Positioned(top: 0, left: 0, right: 0, child: headerSlot),
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: widget.headerWrapper?.call(headerSlot) ?? headerSlot,
+                  ),
                 ],
               )
             : Column(

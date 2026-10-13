@@ -174,6 +174,11 @@ test('a panel takes taps only where it draws', async ({ page }) => {
   await expect.poll(async () => (await calls(page, 'ui.toast')).length).toBe(1);
   await page.mouse.click(100, 300);
   expect(await page.evaluate(() => window.__underClicks || 0)).toBe(1);
+  // The app is told the same area, so its own controls leave it free.
+  const holes = () => page.evaluate(() => window.__calls.filter((c) => c.name === 'pluginHoles').map((c) => c.request));
+  await expect.poll(async () => (await holes()).at(-1)).toEqual([[294, 564, 92, 52]]);
+  await page.evaluate(() => window.glazePlugins.teardown());
+  await expect.poll(async () => (await holes()).at(-1)).toEqual([]);
 });
 
 test('the sync variable cache and the storage shim', async ({ page }) => {

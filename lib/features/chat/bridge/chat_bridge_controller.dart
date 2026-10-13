@@ -435,6 +435,10 @@ class ChatBridgeController {
   /// (`{pluginId, host, blocked}`).
   void Function(Map<String, dynamic> report)? onPluginNetwork;
 
+  /// Where chat panels draw, in page pixels (`[[x, y, w, h], …]`): the app
+  /// leaves these areas of its controls over the page to the plugins.
+  void Function(List<Object?> rects)? onPluginHoles;
+
   /// Awaits a JS function body with [arguments] bound as parameters and
   /// returns its resolved value. Null when the page is gone or the body threw.
   Future<Object?> callAsyncJs(
@@ -489,6 +493,14 @@ class ChatBridgeController {
       callback: (JavaScriptHandlerFunctionData data) {
         final raw = data.args.isNotEmpty ? data.args.first : null;
         if (raw is Map) onPluginActionFailed?.call(Map<String, dynamic>.from(raw));
+        return null;
+      },
+    );
+    _controller.addJavaScriptHandler(
+      handlerName: 'pluginHoles',
+      callback: (JavaScriptHandlerFunctionData data) {
+        final raw = data.args.isNotEmpty ? data.args.first : null;
+        onPluginHoles?.call(raw is List ? raw : const []);
         return null;
       },
     );

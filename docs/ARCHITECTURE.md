@@ -1755,7 +1755,12 @@ from the frame that was asked. `PluginBridgeService` rejects disabled
 plugins and methods whose permission is missing or switched off;
 `plugin_sdk.js` only builds the methods the manifest asks for into `glaze`. Chat panels cover the page but are
 clipped (`clip-path`) to the boxes the plugin draws, so the chat keeps its
-taps; message panels sit in `.msg-content-stack`, message actions in the
+taps. The same boxes go to the app (`pluginHoles` → `PluginHoles`), and the
+Flutter controls over the page (header, message box, buttons) are cut out
+there by `PluginHolesCutter`: panels are laid out for the whole screen, so
+what they draw shows, and takes taps, over the app's own chrome. Frames
+inside the page may only load `about:srcdoc`/`about:blank`
+(`chatWebViewNavigationPolicy`); iOS asks about those too. Message panels sit in `.msg-content-stack`, message actions in the
 footer's `.msg-trailing-actions`. Package scripts, CSS and assets
 (`/plugins/<id>/…`) are inlined by `plugin_html_inliner.dart`, since a
 null-origin frame cannot fetch them. Layout insets are exposed as

@@ -28,6 +28,7 @@ import 'plugin_bridge_service.dart';
 import 'plugin_chat_runtime.dart';
 import 'plugin_message_diff.dart';
 import 'plugin_runtime_payload.dart';
+import '../widgets/plugin_holes.dart';
 
 /// The running plugin runtime of a chat, by character id; null while the
 /// chat has no WebView bridge or no enabled plugins.
@@ -64,6 +65,7 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
   String? _chatSignature;
   late final PluginHookRegistry _hooks;
   late final StateController<PluginChatRuntime?> _registry;
+  late final PluginHoles _holes;
 
   @override
   void initState() {
@@ -71,6 +73,7 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
     // Captured up front: `ref` must not be used once the widget unmounts.
     _hooks = ref.read(pluginHookRegistryProvider);
     _registry = ref.read(pluginRuntimeRegistryProvider(widget.charId).notifier);
+    _holes = ref.read(pluginHolesProvider(widget.charId));
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_restart());
     });
@@ -107,6 +110,8 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
     });
     runtime.bridge.onPluginActionFailed = null;
     runtime.bridge.onPluginNetwork = null;
+    runtime.bridge.onPluginHoles = null;
+    _holes.clear();
     runtime.dispose();
   }
 
@@ -201,6 +206,7 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
         }
       },
     );
+    bridge.onPluginHoles = _holes.update;
     bridge.onPluginNetwork = (report) {
       final id = report['pluginId'];
       final host = report['host'];
