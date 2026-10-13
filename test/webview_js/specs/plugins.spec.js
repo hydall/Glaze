@@ -221,6 +221,26 @@ test('file handlers return text, or the next one is tried', async ({ page }) => 
   expect(own).toMatchObject({ ok: false, error: { code: 'unsupported_format' } });
 });
 
+test('Tavo plugins read messages through tavo.message', async ({ page }) => {
+  await setup(page, [
+    plugin('t', {
+      compat: 'tavo',
+      methods: ['messages.list', 'messages.get', 'ui.toast'],
+      main: `
+        tavo.plugin.on('message:added', (e) => tavo.utils.toast('event:' + e.message.id + ':' + e.message.role));
+        (async () => {
+          const all = await tavo.message.find();
+          const one = await tavo.message.get('m9');
+          tavo.utils.toast(all.map((m) => m.id + ':' + m.role + ':' + m.content).join(',') + '|' + one.content);
+        })().catch((e) => tavo.utils.toast('failed: ' + e.message));
+      `,
+    }),
+  ]);
+  await expect.poll(() => toasts(page)).toEqual(['m1:user:hi,m2:assistant:hello|one']);
+  await page.evaluate(() => window.glazePlugins.dispatchEvent('message:added', { message: { id: 'm3', role: 'user' } }));
+  await expect.poll(async () => (await toasts(page)).at(-1)).toBe('event:m3:user');
+});
+
 test('Tavo plugins get tavo.* mapped onto glaze.*', async ({ page }) => {
   await setup(page, [
     plugin('t', {

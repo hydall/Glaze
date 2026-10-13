@@ -24,6 +24,15 @@
         if (request.method === 'variables.get') {
           return { ok: true, result: 'value-for-' + request.pluginId };
         }
+        if (request.method === 'messages.list') {
+          return { ok: true, result: [
+            { id: 'm1', role: 'user', content: 'hi', hidden: false },
+            { id: 'm2', role: 'assistant', content: 'hello', hidden: false, characterId: 'c1' },
+          ] };
+        }
+        if (request.method === 'messages.get') {
+          return { ok: true, result: { id: request.params[0], role: 'assistant', content: 'one', hidden: false } };
+        }
         if (request.method === 'messages.count') {
           return { ok: false, error: { code: 'permission_denied', message: 'denied' } };
         }

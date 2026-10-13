@@ -30,14 +30,16 @@
 
   /* ---------- Shapes ---------- */
   var ROLE_IN = { assistant: 'assistant', user: 'user', system: 'system' };
-  function message(m) {
+  // Not `message`: that name is the `tavo.message` namespace below, and a
+  // `var` of the same name would replace this function once it ran.
+  function messageOut(m) {
     if (!m) return m;
     var out = { id: m.id, content: m.content, hidden: !!m.hidden, role: ROLE_IN[m.role] || m.role };
     if (m.characterId != null) out.characterId = m.characterId;
     if (m.reasoning) out.reasoning = m.reasoning;
     return out;
   }
-  function messages(list) { return Array.isArray(list) ? list.map(message) : list; }
+  function messagesOut(list) { return Array.isArray(list) ? list.map(messageOut) : list; }
 
   function character(c) {
     if (!c) return c;
@@ -190,10 +192,10 @@
   var message = {
     find: function (range, filter) {
       filter = filter || {};
-      return fn(M, 'list')(range, { role: filter.role, hidden: filter.hidden }).then(messages);
+      return fn(M, 'list')(range, { role: filter.role, hidden: filter.hidden }).then(messagesOut);
     },
-    get: function (ref) { return fn(M, 'get')(ref).then(message); },
-    current: function () { return fn(M, 'current')().then(message); },
+    get: function (ref) { return fn(M, 'get')(ref).then(messageOut); },
+    current: function () { return fn(M, 'current')().then(messageOut); },
     count: function () { return fn(M, 'count')(); },
     append: function (m) {
       m = m || {};
@@ -432,7 +434,7 @@
     return function (e) {
       var props = { type: { value: tavoType || EVENT_OUT[e.type] || e.type, enumerable: true } };
       if (e.source && SOURCE_OUT[e.source]) props.source = { value: SOURCE_OUT[e.source], enumerable: true };
-      if (e.message) props.message = { value: message(e.message), enumerable: true };
+      if (e.message) props.message = { value: messageOut(e.message), enumerable: true };
       if (e.chat) props.chat = { value: chat(e.chat), enumerable: true };
       return handler(Object.create(e, props));
     };
