@@ -3691,7 +3691,7 @@
   "plugins_denied_toast": "{name}: “{action}” is not allowed",
   "plugins_history": "Not allowed",
   "plugins_history_hint": "What the plugin tried and was stopped from doing. Allow it in Permissions above if the plugin needs it.",
-  "plugins_history_count": "Tried {count} times",
+  "plugins_history_count": "Attempts: {count}",
   "plugins_history_clear": "Clear the list",
   "plugins_update_title": "Update {name}?",
   "plugins_update_version": "Version {from} → {to}.",

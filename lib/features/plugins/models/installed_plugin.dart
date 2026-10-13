@@ -28,7 +28,7 @@ class InstalledPlugin {
   /// Locale tag → flat catalog.
   final Map<String, Map<String, String>> catalogs;
 
-  /// Consents the user allowed for good (`PluginConsent` names).
+  /// Asking permissions the user allowed for good (`PluginPermission` names).
   final Set<String> grants;
 
   /// Manifest permissions the user switched off.
