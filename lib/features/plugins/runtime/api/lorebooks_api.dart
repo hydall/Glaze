@@ -11,14 +11,14 @@ import 'shapes.dart';
 /// SillyTavern World Info and `character_book`). Attach a book to a chat
 /// with `glaze.chats.update({ lorebooks })`.
 Map<String, PluginMethod> lorebooksApi() => {
-  'lorebooks.list': const PluginMethod(_list),
-  'lorebooks.get': const PluginMethod(_get),
-  'lorebooks.find': const PluginMethod(_find),
-  'lorebooks.create': libraryWrite(_create, 'plugins_consent_lorebook_create'),
-  'lorebooks.update': libraryWrite(_update, 'plugins_consent_lorebook_update'),
-  'lorebooks.remove': libraryWrite(_remove, 'plugins_consent_lorebook_remove'),
-  'lorebooks.import': libraryWrite(_import, 'plugins_consent_lorebook_import'),
-  'lorebooks.export': const PluginMethod(_export),
+  'lorebooks.list': libraryRead(_list),
+  'lorebooks.get': libraryRead(_get),
+  'lorebooks.find': libraryRead(_find),
+  'lorebooks.create': libraryCreate(_create, 'plugins_consent_lorebook_create'),
+  'lorebooks.update': libraryUpdate(_update, 'plugins_consent_lorebook_update'),
+  'lorebooks.remove': libraryDelete(_remove, 'plugins_consent_lorebook_remove'),
+  'lorebooks.import': libraryCreate(_import, 'plugins_consent_lorebook_import'),
+  'lorebooks.export': libraryRead(_export),
 };
 
 Future<List<Lorebook>> _all(PluginCall c) =>

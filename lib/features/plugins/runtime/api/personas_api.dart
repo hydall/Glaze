@@ -3,39 +3,22 @@ import '../../../../core/state/active_selection_provider.dart';
 import '../../../../core/state/shared_prefs_provider.dart';
 import '../../../../core/utils/id_generator.dart';
 import '../../../personas/persona_list_provider.dart';
-import '../../models/plugin_manifest.dart';
 import '../plugin_api.dart';
+import 'library_io.dart';
 import 'shapes.dart';
 
 /// `glaze.personas.*`.
 Map<String, PluginMethod> personasApi() => {
-  'personas.list': const PluginMethod(_list),
-  'personas.get': const PluginMethod(_get),
-  'personas.find': const PluginMethod(_find),
-  'personas.current': const PluginMethod(_current),
-  'personas.create': const PluginMethod(
-    _create,
-    permission: PluginPermission.library,
-    consent: PluginConsent.library,
-    summary: 'plugins_consent_persona_create',
-  ),
-  'personas.update': const PluginMethod(
-    _update,
-    permission: PluginPermission.library,
-    consent: PluginConsent.library,
-    summary: 'plugins_consent_persona_update',
-  ),
-  'personas.remove': const PluginMethod(
-    _remove,
-    permission: PluginPermission.library,
-    consent: PluginConsent.library,
-    summary: 'plugins_consent_persona_remove',
-  ),
-  'personas.setDefault': const PluginMethod(
+  'personas.list': libraryRead(_list),
+  'personas.get': libraryRead(_get),
+  'personas.find': libraryRead(_find),
+  'personas.current': libraryRead(_current),
+  'personas.create': libraryCreate(_create, 'plugins_consent_persona_create'),
+  'personas.update': libraryUpdate(_update, 'plugins_consent_persona_update'),
+  'personas.remove': libraryDelete(_remove, 'plugins_consent_persona_remove'),
+  'personas.setDefault': libraryUpdate(
     _setDefault,
-    permission: PluginPermission.library,
-    consent: PluginConsent.library,
-    summary: 'plugins_consent_persona_default',
+    'plugins_consent_persona_default',
   ),
 };
 

@@ -17,10 +17,6 @@ class PluginApiError implements Exception {
   String toString() => '$code: $message';
 }
 
-/// A write that needs the user's consent before the first time a plugin does
-/// it (unless they chose "always allow" for that plugin).
-enum PluginConsent { library, images }
-
 /// What the user answered to a consent sheet.
 enum PluginConsentAnswer { deny, once, always }
 
@@ -47,9 +43,11 @@ abstract interface class PluginUi {
     String? placeholder,
     String? defaultValue,
   });
-  Future<PluginConsentAnswer> consent({
+
+  /// Null when the sheet was dismissed or could not be shown.
+  Future<PluginConsentAnswer?> consent({
     required String pluginName,
-    required PluginConsent kind,
+    required String permission,
     required String summary,
   });
   Future<void> previewImage(Uint8List bytes);
@@ -74,13 +72,33 @@ abstract interface class PluginApiHost {
   PluginFileStore files(String pluginId);
   ComposerTextAccess? composer();
 
-  /// Called after a variable write so every frame's sync cache follows.
-  void variablesChanged(String scope, Map<String, dynamic> root);
+  /// Called after a variable write so the plugin's frames' sync caches
+  /// follow.
+  void variablesChanged(
+    String pluginId,
+    String scope,
+    Map<String, dynamic> root,
+  );
 
   /// Records that [pluginId] reached, or was stopped from reaching, [host]
   /// through the app.
   void networkUsed(String pluginId, String host, {required bool blocked});
+
+  /// Tells the user [pluginName] was stopped from doing what [actionKey]
+  /// (see [pluginActionKey]) names and notes it in the plugin's history;
+  /// [shown] is false when the user just said no themselves.
+  void denied(
+    String pluginId,
+    String pluginName,
+    String actionKey, {
+    bool shown = true,
+  });
 }
+
+/// Translation key naming an attempt: the method's summary, else the
+/// permission's name.
+String pluginActionKey(String permission, String? summary) =>
+    summary ?? 'plugins_permission_name_${permission.replaceAll('.', '_')}';
 
 /// One bridged call, already attributed to [plugin] by the WebView host.
 class PluginCall {
@@ -90,7 +108,7 @@ class PluginCall {
     required this.method,
     required this.params,
     this.messageId,
-    this.requestConsent,
+    this.requirePermission,
     this.invoker,
   });
 
@@ -105,10 +123,10 @@ class PluginCall {
   /// plugin); null for other frames.
   final String? messageId;
 
-  /// Asks the user (once, or until they allow it for good) before a write
-  /// the method's static [PluginMethod.consent] could not decide up front.
-  final Future<void> Function(PluginConsent kind, String summary)?
-  requestConsent;
+  /// Checks a permission the method's static [PluginMethod.permission]
+  /// could not decide up front, asking the user when it is one that asks.
+  final Future<void> Function(String permission, String? summary)?
+  requirePermission;
 
   /// Runs another bridged method as the same plugin (permission checks
   /// included); used by `commands.run`.
@@ -124,9 +142,18 @@ class PluginCall {
     return run(method, params);
   }
 
-  Future<void> consent(PluginConsent kind, String summary) async {
-    final ask = requestConsent;
-    if (ask != null) await ask(kind, summary);
+  /// Throws `permission_denied` unless the plugin may use [permission];
+  /// [summary] is the translation key naming the attempt.
+  Future<void> require(String permission, [String? summary]) async {
+    final check = requirePermission;
+    if (check != null) {
+      await check(permission, summary);
+    } else if (!plugin.allows(permission)) {
+      throw PluginApiError(
+        'permission_denied',
+        'This needs the "$permission" permission',
+      );
+    }
   }
 
   Object? arg(int index) {
@@ -157,14 +184,22 @@ class PluginCall {
 
 typedef PluginOperation = Future<Object?> Function(PluginCall call);
 
-/// A bridged method, the manifest permission it needs (null = none) and the
-/// consent it asks for.
+/// A bridged method and the manifest permission it needs (null = none). A
+/// permission in [PluginPermission.asking] also asks the user.
 class PluginMethod {
-  const PluginMethod(this.run, {this.permission, this.consent, this.summary});
+  const PluginMethod(
+    this.run, {
+    this.permission,
+    this.summary,
+    this.internal = false,
+  });
   final PluginOperation run;
   final String? permission;
-  final PluginConsent? consent;
 
-  /// Translation key describing the write in the consent sheet.
+  /// Called by the host page on the plugin's behalf, not part of the API.
+  final bool internal;
+
+  /// Translation key describing the attempt in the consent sheet and the
+  /// plugin's history.
   final String? summary;
 }

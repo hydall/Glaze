@@ -140,6 +140,7 @@ Future<Object?> _preview(PluginCall c) async {
   } else if (source.startsWith('http://') || source.startsWith('https://')) {
     bytes = await fetchForPlugin(c, source);
   } else if (source.startsWith('files/')) {
+    await c.require(PluginPermission.files);
     bytes = await readPluginFile(c, source);
   } else {
     bytes = base64Decode(source);

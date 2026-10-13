@@ -14,9 +14,9 @@ import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/menu_group.dart';
 import '../models/installed_plugin.dart';
 import '../models/plugin_manifest.dart';
+import '../providers/plugin_history_provider.dart';
 import '../providers/plugin_library_provider.dart';
 import '../providers/plugin_network_log_provider.dart';
-import '../runtime/plugin_api.dart';
 import 'plugin_settings_form.dart';
 
 Future<void> openPluginDetailScreen(BuildContext context, String id) async {
@@ -35,8 +35,16 @@ List<Widget> pluginPermissionItems(
   InstalledPlugin plugin,
 ) {
   final notifier = ref.read(pluginLibraryProvider.notifier);
+  final order = PluginPermission.all.toList();
+  int rank(String p) {
+    final i = order.indexOf(p);
+    return i < 0 ? order.length : i;
+  }
+
+  final permissions = [...plugin.manifest.permissions]
+    ..sort((a, b) => rank(a).compareTo(rank(b)));
   return [
-    for (final permission in plugin.manifest.permissions) ...[
+    for (final permission in permissions) ...[
       PluginDetailScreen._permissionItem(context, notifier, plugin, permission),
       if (permission == PluginPermission.network &&
           plugin.allows(PluginPermission.network))
@@ -194,6 +202,7 @@ class PluginDetailScreen extends ConsumerWidget {
             items: pluginPermissionItems(context, ref, plugin),
           ),
           _NetworkLog(plugin: plugin),
+          _History(plugin: plugin),
           if (manifest.settings.isNotEmpty)
             PluginSettingsForm(plugin: plugin, localizer: localizer),
           if (manifest.releaseNotes != null)
@@ -224,8 +233,15 @@ class PluginDetailScreen extends ConsumerWidget {
     PluginPermission.files: Icons.folder_outlined,
     PluginPermission.generate: Icons.auto_awesome_outlined,
     PluginPermission.images: Icons.image_outlined,
-    PluginPermission.library: Icons.library_books_outlined,
     PluginPermission.network: Icons.public_rounded,
+    PluginPermission.libraryRead: Icons.library_books_outlined,
+    PluginPermission.libraryCreate: Icons.library_add_outlined,
+    PluginPermission.libraryUpdate: Icons.edit_outlined,
+    PluginPermission.libraryDelete: Icons.delete_outline_rounded,
+    PluginPermission.chatsRead: Icons.forum_outlined,
+    PluginPermission.chatsCreate: Icons.add_comment_outlined,
+    PluginPermission.chatsUpdate: Icons.edit_note_rounded,
+    PluginPermission.chatsDelete: Icons.delete_sweep_outlined,
     'tts': Icons.record_voice_over_outlined,
   };
 
@@ -241,8 +257,9 @@ class PluginDetailScreen extends ConsumerWidget {
     String permission,
   ) {
     final icon = _icons[permission] ?? Icons.help_outline_rounded;
-    final label = _text('plugins_permission_name_$permission', permission);
-    final subtitle = _text('plugins_permission_$permission', '');
+    final key = permission.replaceAll('.', '_');
+    final label = _text('plugins_permission_name_$key', permission);
+    final subtitle = _text('plugins_permission_$key', '');
     if (!PluginPermission.all.contains(permission)) {
       // Asked for, but nothing in Glaze provides it (e.g. Tavo's `tts`).
       return MenuItem(
@@ -252,7 +269,7 @@ class PluginDetailScreen extends ConsumerWidget {
         onTap: () {},
       );
     }
-    if (PluginConsent.values.any((c) => c.name == permission)) {
+    if (PluginPermission.asking.contains(permission)) {
       final mode = !plugin.allows(permission)
           ? PluginConsentMode.off
           : plugin.grants.contains(permission)
@@ -330,7 +347,10 @@ class PluginDetailScreen extends ConsumerWidget {
   ) {
     GlazeBottomSheet.show<void>(
       context,
-      title: _text('plugins_permission_name_$permission', permission),
+      title: _text(
+        'plugins_permission_name_${permission.replaceAll('.', '_')}',
+        permission,
+      ),
       items: [
         for (final mode in PluginConsentMode.values)
           BottomSheetItem(
@@ -510,6 +530,48 @@ class _NetworkLog extends ConsumerWidget {
           notifier.setHostAllowed(plugin.id, host, true);
         },
       ),
+    );
+  }
+}
+
+/// What the plugin tried and was not allowed to do.
+class _History extends ConsumerWidget {
+  const _History({required this.plugin});
+
+  final InstalledPlugin plugin;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final denied =
+        ref.watch(pluginHistoryProvider(plugin.id)).value ?? const {};
+    if (denied.isEmpty) return const SizedBox.shrink();
+    final entries = denied.values.toList()
+      ..sort((a, b) => b.lastSeen.compareTo(a.lastSeen));
+    final format = DateFormat.MMMd(context.locale.toLanguageTag()).add_Hm();
+    return MenuGroup(
+      header: 'plugins_history'.tr(),
+      headerIcon: Icons.history_rounded,
+      description: 'plugins_history_hint'.tr(),
+      items: [
+        for (final d in entries)
+          MenuItem(
+            icon: Icons.block_rounded,
+            label: PluginDetailScreen._text(d.action, d.action),
+            subtitle: 'plugins_history_count'.tr(
+              namedArgs: {'count': '${d.count}'},
+            ),
+            value: format.format(
+              DateTime.fromMillisecondsSinceEpoch(d.lastSeen),
+            ),
+            onTap: () {},
+          ),
+        MenuItem(
+          icon: Icons.delete_sweep_outlined,
+          label: 'plugins_history_clear'.tr(),
+          onTap: () =>
+              ref.read(pluginHistoryProvider(plugin.id).notifier).clear(),
+        ),
+      ],
     );
   }
 }

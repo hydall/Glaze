@@ -19,39 +19,32 @@ import '../../../../core/services/character_import_persistence_coordinator.dart'
 import '../../models/plugin_manifest.dart';
 import '../plugin_api.dart';
 import 'files_api.dart';
+import 'library_io.dart';
 import 'shapes.dart';
 
 /// `glaze.characters.*`.
 Map<String, PluginMethod> charactersApi() => {
-  'characters.list': const PluginMethod(_list),
-  'characters.get': const PluginMethod(_get),
-  'characters.find': const PluginMethod(_find),
-  'characters.current': const PluginMethod(_current),
-  'characters.create': const PluginMethod(
+  'characters.list': libraryRead(_list),
+  'characters.get': libraryRead(_get),
+  'characters.find': libraryRead(_find),
+  'characters.current': libraryRead(_current),
+  'characters.create': libraryCreate(
     _create,
-    permission: PluginPermission.library,
-    consent: PluginConsent.library,
-    summary: 'plugins_consent_character_create',
+    'plugins_consent_character_create',
   ),
-  'characters.update': const PluginMethod(
+  'characters.update': libraryUpdate(
     _update,
-    permission: PluginPermission.library,
-    consent: PluginConsent.library,
-    summary: 'plugins_consent_character_update',
+    'plugins_consent_character_update',
   ),
-  'characters.remove': const PluginMethod(
+  'characters.remove': libraryDelete(
     _remove,
-    permission: PluginPermission.library,
-    consent: PluginConsent.library,
-    summary: 'plugins_consent_character_remove',
+    'plugins_consent_character_remove',
   ),
-  'characters.import': const PluginMethod(
+  'characters.import': libraryCreate(
     _import,
-    permission: PluginPermission.library,
-    consent: PluginConsent.library,
-    summary: 'plugins_consent_character_import',
+    'plugins_consent_character_import',
   ),
-  'characters.export': const PluginMethod(_export),
+  'characters.export': libraryRead(_export),
 };
 
 Future<List<Character>> _all(PluginCall c) =>
@@ -131,12 +124,7 @@ Future<Object?> _import(PluginCall c) async {
     bytes = Uint8List.fromList(utf8.encode(jsonEncode(source)));
     fileName = 'card.json';
   } else if (source is String) {
-    if (!c.plugin.allows(PluginPermission.files)) {
-      throw const PluginApiError(
-        'permission_denied',
-        'Importing from a file needs the "files" permission',
-      );
-    }
+    await c.require(PluginPermission.files);
     bytes = await readPluginFile(c, source);
     fileName = source.split('/').last;
   } else {
@@ -191,12 +179,7 @@ Future<Object?> _export(PluginCall c) async {
   final bytes = await file.readAsBytes();
   await file.delete().catchError((_) => file);
   if (format == 'object') return jsonDecode(utf8.decode(bytes));
-  if (!c.plugin.allows(PluginPermission.files)) {
-    throw const PluginApiError(
-      'permission_denied',
-      'Exporting to a file needs the "files" permission',
-    );
-  }
+  await c.require(PluginPermission.files);
   return savePluginFile(
     c,
     '${safeFileName(ch.name, 'character')}.${format == 'png' ? 'png' : 'json'}',

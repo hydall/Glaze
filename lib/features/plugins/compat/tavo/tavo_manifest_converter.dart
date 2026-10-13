@@ -23,6 +23,68 @@ const _permissionMap = {
   'tts': 'tts',
 };
 
+/// Tavo lets every plugin read the library and other chats and asks the
+/// user before writes; Glaze has permissions for those. Its manifest does
+/// not say which a plugin uses, so they are read off the plugin's scripts:
+/// `tavo.<namespace>.<method>` (or the namespace reached some other way and
+/// the method called on it), and the notifications it listens to.
+Set<String> inferTavoPermissions(Iterable<String> sources) {
+  final found = <String>{};
+  final call = RegExp(
+    r'\b(character|persona|preset|lorebook|regex|theme|chat|image)\s*\.\s*'
+    r'(assets\s*\.\s*)?([A-Za-z]+)\b',
+  );
+  // Tavo sends chat and message notifications to every plugin; in Glaze
+  // they come with `messages`.
+  final events = RegExp(r'''['"`](chat|message):[a-z]+['"`]''');
+  for (final source in sources) {
+    if (events.hasMatch(source)) found.add(PluginPermission.messages);
+    for (final m in call.allMatches(source)) {
+      final ns = m.group(1)!;
+      final asset = m.group(2) != null;
+      final method = m.group(3)!;
+      if (ns == 'image') {
+        if (method == 'generate') found.add(PluginPermission.images);
+        continue;
+      }
+      if (ns == 'chat') {
+        final p = switch (method) {
+          'get' || 'find' || 'open' || 'export' => PluginPermission.chatsRead,
+          'create' || 'import' => PluginPermission.chatsCreate,
+          'copy' => PluginPermission.chatsCreate,
+          'update' => PluginPermission.chatsUpdate,
+          'delete' => PluginPermission.chatsDelete,
+          _ => null,
+        };
+        if (p != null) found.add(p);
+        if (method == 'copy') found.add(PluginPermission.chatsRead);
+        continue;
+      }
+      final p = asset
+          ? switch (method) {
+              'list' || 'export' => PluginPermission.libraryRead,
+              'import' ||
+              'rename' ||
+              'delete' => PluginPermission.libraryUpdate,
+              _ => null,
+            }
+          : switch (method) {
+              'all' ||
+              'get' ||
+              'find' ||
+              'current' ||
+              'export' => PluginPermission.libraryRead,
+              'create' || 'import' => PluginPermission.libraryCreate,
+              'update' => PluginPermission.libraryUpdate,
+              'delete' => PluginPermission.libraryDelete,
+              _ => null,
+            };
+      if (p != null) found.add(p);
+    }
+  }
+  return found;
+}
+
 const _settingTypes = {
   'switch': 'toggle',
   'select': 'select',
@@ -69,10 +131,6 @@ Map<String, dynamic> convertTavoManifest(Object? json) {
             ? tavo['permissions'] as List
             : const []))
       ?_permissionMap[p],
-    // Tavo gates library writes and image generation with user
-    // confirmations, not manifest permissions.
-    PluginPermission.library,
-    PluginPermission.images,
   };
 
   final localization = tavo['localization'];

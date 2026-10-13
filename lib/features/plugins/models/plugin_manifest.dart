@@ -33,13 +33,38 @@ class PluginText {
 /// not list is rejected.
 abstract final class PluginPermission {
   static const composer = 'composer';
+
+  /// The open chat: its messages, memory and events.
   static const messages = 'messages';
   static const variables = 'variables';
   static const files = 'files';
   static const generate = 'generate';
   static const images = 'images';
-  static const library = 'library';
   static const network = 'network';
+
+  /// Characters, personas, presets, lorebooks, regex scripts and themes.
+  static const libraryRead = 'library.read';
+  static const libraryCreate = 'library.create';
+  static const libraryUpdate = 'library.update';
+  static const libraryDelete = 'library.delete';
+
+  /// Chats other than the open one, and creating or deleting chats.
+  static const chatsRead = 'chats.read';
+  static const chatsCreate = 'chats.create';
+  static const chatsUpdate = 'chats.update';
+  static const chatsDelete = 'chats.delete';
+
+  /// Format 1 manifests written before the split; stands for all of
+  /// [library] and [chats].
+  static const legacyLibrary = 'library';
+
+  static const library = [
+    libraryRead,
+    libraryCreate,
+    libraryUpdate,
+    libraryDelete,
+  ];
+  static const chats = [chatsRead, chatsCreate, chatsUpdate, chatsDelete];
 
   static const all = {
     composer,
@@ -48,8 +73,20 @@ abstract final class PluginPermission {
     files,
     generate,
     images,
-    library,
     network,
+    ...library,
+    ...chats,
+  };
+
+  /// Permissions that ask the user each time unless set to always allow.
+  static const asking = {
+    images,
+    libraryCreate,
+    libraryUpdate,
+    libraryDelete,
+    chatsCreate,
+    chatsUpdate,
+    chatsDelete,
   };
 }
 
@@ -237,4 +274,15 @@ bool pluginHostAllowed(Iterable<String> rules, String host) {
     }
   }
   return false;
+}
+
+/// Whether [next] comes from the author of the installed [previous]; an
+/// update from someone else is not trusted with the old plugin's grants and
+/// data. Authors are only what manifests say, so this guards against
+/// mistakes and lazy impostors; the confirmation before an update is what
+/// the user decides on.
+bool isSamePluginAuthor(PluginManifest? previous, PluginManifest next) {
+  if (previous == null) return false;
+  String norm(String? a) => (a ?? '').trim().toLowerCase();
+  return norm(previous.author) == norm(next.author);
 }

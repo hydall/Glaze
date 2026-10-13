@@ -1,11 +1,14 @@
-import 'dart:typed_data';
+import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 
+import '../../../core/state/db_provider.dart';
 import '../../../core/utils/platform_paths.dart';
 import '../models/installed_plugin.dart';
 import '../models/plugin_manifest.dart';
+import '../runtime/plugin_variable_store.dart';
 import '../services/plugin_package_reader.dart';
 import '../services/plugin_store.dart';
 
@@ -17,6 +20,18 @@ final pluginStoreProvider = FutureProvider<PluginStore>((ref) async {
   return PluginStore(
     root: p.join(base, 'plugins'),
     dataRoot: p.join(base, 'plugin_data'),
+  );
+});
+
+/// The one store behind every chat's `glaze.variables`.
+final pluginVariableStoreProvider = FutureProvider<PluginVariableStore>((
+  ref,
+) async {
+  final store = await ref.watch(pluginStoreProvider.future);
+  return PluginVariableStore(
+    chatRepo: ref.watch(chatRepoProvider),
+    globalFile: (id) => File(p.join(store.dataDir(id), 'variables.json')),
+    sharedFile: File(p.join(store.dataRoot, '_shared_variables.json')),
   );
 });
 
@@ -44,7 +59,16 @@ class PluginLibraryNotifier extends AsyncNotifier<List<InstalledPlugin>> {
 
   /// Installs a package already read with [readPluginPackage].
   Future<InstalledPlugin> installPackage(PluginPackage package) async {
+    final previous = (state.value ?? const <InstalledPlugin>[])
+        .where((x) => x.id == package.manifest.id)
+        .firstOrNull;
     final installed = await (await _store).install(package);
+    // Another author's package starts over; what the old plugin kept in
+    // chats is not its to read.
+    if (previous != null &&
+        !isSamePluginAuthor(previous.manifest, package.manifest)) {
+      await _forgetVariables(installed.id);
+    }
     final current = [...(state.value ?? const <InstalledPlugin>[])];
     final index = current.indexWhere((x) => x.id == installed.id);
     if (index >= 0) {
@@ -58,10 +82,21 @@ class PluginLibraryNotifier extends AsyncNotifier<List<InstalledPlugin>> {
 
   Future<void> uninstall(String id) async {
     await (await _store).uninstall(id);
+    await _forgetVariables(id);
     state = AsyncData([
       for (final x in state.value ?? const <InstalledPlugin>[])
         if (x.id != id) x,
     ]);
+  }
+
+  Future<void> _forgetVariables(String id) async {
+    try {
+      await (await ref.read(
+        pluginVariableStoreProvider.future,
+      )).forgetPlugin(id);
+    } catch (e) {
+      debugPrint('[PluginLibrary] $id variables not cleared: $e');
+    }
   }
 
   Future<void> setEnabled(String id, bool enabled) =>

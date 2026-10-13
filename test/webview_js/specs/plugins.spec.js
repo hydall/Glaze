@@ -37,6 +37,7 @@ function plugin(id, extra) {
     vars: { chat: { greeting: 'hi' }, global: {} },
     storage: {},
     methods: ['variables.get', 'messages.count', 'ui.toast'],
+    events: ['send', 'generation', 'chat', 'message'],
     messageActions: [],
     ...extra,
   };
@@ -89,8 +90,14 @@ test('calls carry the identity of the frame, not what the plugin claims', async 
   await setup(page, [
     plugin('honest', {
       main: `
+        // The message prefix is learned from the host's first reply.
+        addEventListener('message', (e) => {
+          const t = e.data && e.data.type;
+          if (typeof t !== 'string' || !t.endsWith('result') || window.__sent) return;
+          window.__sent = true;
+          top.postMessage({ type: t.slice(0, -6) + 'call', id: 'x', method: 'ui.toast', params: ['spoof'], pluginId: 'other' }, '*');
+        });
         glaze.variables.get('k').then((v) => glaze.ui.toast(String(v)));
-        parent.postMessage({ type: 'glaze-plugin:call', id: 'x', method: 'ui.toast', params: ['spoof'], pluginId: 'other' }, '*');
       `,
     }),
   ]);
@@ -106,8 +113,8 @@ test('plugin frames are sandboxed away from the chat page', async ({ page }) => 
     plugin('p', {
       main: `
         let leaked = 'blocked';
-        try { leaked = String(parent.document.title); } catch (e) {}
-        try { if (parent.flutter_inappwebview) leaked = 'bridge'; } catch (e) {}
+        try { leaked = String(top.document.title); } catch (e) {}
+        try { if (top.flutter_inappwebview) leaked = 'bridge'; } catch (e) {}
         glaze.ui.toast(leaked);
       `,
     }),
@@ -257,12 +264,16 @@ test('with the network permission hosts are logged', async ({ page }) => {
   await expect.poll(() => netReports(page)).toContainEqual({ pluginId: 'on', host: '127.0.0.1', blocked: false });
 });
 
-test('a frame without internet access that navigates away is removed', async ({ page }) => {
+test('a frame without internet access cannot navigate away, and is removed', async ({ page }) => {
+  const leaks = [];
+  page.on('request', (r) => { if (r.url().includes('leak=')) leaks.push(r.url()); });
   await setup(page, [
-    plugin('nav', { main: `setTimeout(() => { location.href = 'http://127.0.0.1:4176/test/webview_js/harness/plugins.html'; }, 50);` }),
+    plugin('nav', { main: `setTimeout(() => { location.href = 'http://127.0.0.1:4176/test/webview_js/harness/plugins.html?leak=chat'; }, 50);` }),
   ]);
   await expect.poll(() => page.locator('iframe[data-glaze-plugin="nav"]').count()).toBe(0);
   await expect.poll(() => netReports(page)).toContainEqual({ pluginId: 'nav', host: 'navigation', blocked: true });
+  // Stopped by the wrapper's policy before anything was sent.
+  expect(leaks).toEqual([]);
 });
 
 test('with a host list only those hosts are reachable', async ({ page }) => {
@@ -286,7 +297,8 @@ const LOCAL_PROBE = `
   (async () => {
     const page = 'http://127.0.0.1:4176/test/webview_js/harness/plugins.html';
     const plain = await fetch(page, { mode: 'no-cors' }).then(() => 'ok', () => 'fail');
-    const secure = await fetch('https://192.168.0.1/', { mode: 'no-cors' }).then(() => 'ok', (e) => e.message.indexOf('Local network') >= 0 ? 'refused' : 'fail');
+    // Refused like a network failure, so the plugin cannot tell.
+    const secure = await fetch('https://192.168.0.1/', { mode: 'no-cors' }).then(() => 'ok', (e) => e.message === 'Failed to fetch' ? 'refused' : 'other');
     glaze.ui.toast(plain + '|' + secure);
   })();
 `;
@@ -315,7 +327,7 @@ test('what plugin frames post never reaches the page past the plugin host', asyn
   await setup(page, [
     plugin('p', {
       main: `
-        parent.postMessage({ probe: 'direct', type: 'glaze:request' }, '*');
+        top.postMessage({ probe: 'direct', type: 'glaze:request' }, '*');
         const f = document.createElement('iframe');
         f.srcdoc = '<script>top.postMessage({ probe: "nested", type: "glaze:request" }, "*"); parent.postMessage({ probe: "up" }, "*")<\\/script>';
         document.body.appendChild(f);
@@ -337,7 +349,7 @@ const RTC_PROBE = `
   (async () => {
     let r;
     try { new RTCPeerConnection(); r = 'ok'; } catch (e) { r = e.name; }
-    glaze.ui.toast(typeof RTCPeerConnection + ':' + r + ':' + typeof window.__glazeRtc);
+    glaze.ui.toast(typeof RTCPeerConnection + ':' + r + ':' + typeof window.__rtcGate);
   })();
 `;
 
@@ -361,7 +373,7 @@ test('the WebView guard gives WebRTC back only for any host and the right key', 
       // A nested frame has no SDK and no key: no WebRTC there.
       main: `
         const f = document.createElement('iframe');
-        f.srcdoc = '<script>parent.postMessage({ rtc: typeof RTCPeerConnection, hook: typeof __glazeRtc, give: String(__glazeRtc && __glazeRtc("bad")) }, "*")<\\/script>';
+        f.srcdoc = '<script>parent.postMessage({ rtc: typeof RTCPeerConnection, hook: typeof __rtcGate, give: String(__rtcGate && __rtcGate("bad")) }, "*")<\\/script>';
         addEventListener('message', (e) => { if (e.data && e.data.rtc) glaze.ui.toast('nested:' + e.data.rtc + ':' + e.data.hook + ':' + e.data.give); });
         document.body.appendChild(f);
       `,
@@ -393,4 +405,82 @@ test('a message panel reaches the app through its host, once', async ({ page }) 
     return calls.map((c) => ({ method: c.method, panel: !!c.context.panelId, owned: host.owns(document.querySelector('iframe.interactive-panel-frame').contentWindow) }));
   });
   expect(calls).toEqual([{ method: 'showToast', panel: true, owned: true }]);
+});
+
+test('hooks and notifications need their permissions', async ({ page }) => {
+  await setup(page, [
+    plugin('none', {
+      events: [],
+      main: `
+        glaze.plugin.on('send:before', (e) => { e.text = 'stolen'; });
+        glaze.plugin.on('send:after', () => {});
+        glaze.plugin.on('message:added', () => glaze.ui.toast('saw none'));
+      `,
+    }),
+    plugin('chat', {
+      events: ['chat', 'message'],
+      main: `glaze.plugin.on('message:added', (e) => glaze.ui.toast('saw ' + e.message.id));`,
+    }),
+  ]);
+  // The refused kinds are reported once each.
+  await expect.poll(async () => (await calls(page, 'events.subscribe')).map((c) => c.request.params[0]).sort())
+    .toEqual(['message', 'send']);
+  expect(await page.evaluate(() => window.glazePlugins.hasSubscribers('send:before'))).toBe(false);
+  const out = await page.evaluate(() => window.glazePlugins.intercept('send:before', { text: 'mine' }));
+  expect(out.text).toBe('mine');
+  await page.evaluate(() => window.glazePlugins.dispatchEvent('message:added', { message: { id: 'm1' } }));
+  await expect.poll(() => toasts(page)).toEqual(['saw m1']);
+});
+
+test('variable updates reach only the plugin that owns them', async ({ page }) => {
+  await setup(page, [
+    plugin('a', { methods: ['variables.get', 'ui.toast'], main: `setTimeout(() => glaze.ui.toast('a:' + glaze.variables.peek('x')), 300);` }),
+    plugin('b', { methods: ['variables.get', 'ui.toast'], main: `setTimeout(() => glaze.ui.toast('b:' + glaze.variables.peek('x')), 300);` }),
+  ]);
+  await page.evaluate(() => window.glazePlugins.pushVars('a', 'chat', { x: 1 }));
+  await expect.poll(async () => (await toasts(page)).sort()).toEqual(['a:1', 'b:undefined']);
+});
+
+test('panel scripts before the head run under the policy, after the SDK', async ({ page }) => {
+  await setup(page, [
+    plugin('p', {
+      panels: [{
+        id: 'early',
+        placement: 'chat',
+        html: `<!doctype html><script>
+          glaze.ui.toast(typeof glaze);
+          fetch('https://example.com/').then(() => glaze.ui.toast('leaked'), () => glaze.ui.toast('blocked'));
+        </script><html><head><title>t</title></head><body></body></html>`,
+      }],
+    }),
+  ]);
+  await expect.poll(async () => (await toasts(page)).sort()).toEqual(['blocked', 'object']);
+  const mode = await page.locator('iframe[data-glaze-plugin="p"]').evaluate((f) => f.contentDocument === null);
+  expect(mode).toBe(true);
+});
+
+test('a converted plugin sees only tavo, and nothing of the host', async ({ page }) => {
+  await setup(page, [
+    plugin('t', {
+      compat: 'tavo',
+      network: true,
+      main: `
+        (async () => {
+          const seen = [
+            typeof window.glaze,
+            typeof window.__pluginBoot,
+            document.scripts.length,
+            /native code/.test(String(fetch)),
+            /native code/.test(Function.prototype.toString.call(XMLHttpRequest.prototype.open)),
+            /native code/.test(String(WebSocket)),
+            await tavo.app.version(),
+            await tavo.app.versionNumber(),
+          ];
+          tavo.utils.toast(seen.join('|'));
+        })();
+      `,
+    }),
+  ]);
+  // One script is the plugin's own, still running.
+  await expect.poll(() => toasts(page)).toEqual(['undefined|undefined|1|true|true|true|0.93.0|930']);
 });

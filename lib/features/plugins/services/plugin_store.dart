@@ -101,11 +101,25 @@ class PluginStore {
       installedAt: (record['installedAt'] as num?)?.toInt() ?? 0,
       config: config is Map ? Map<String, Object?>.from(config) : const {},
       catalogs: catalogs,
-      grants: grants is List ? {for (final g in grants) '$g'} : const {},
-      revoked: revoked is List ? {for (final r in revoked) '$r'} : const {},
+      grants: grants is List
+          ? _expandLegacy({for (final g in grants) '$g'}, read: false)
+          : const {},
+      revoked: revoked is List
+          ? _expandLegacy({for (final r in revoked) '$r'}, read: true)
+          : const {},
       networkHosts: hosts is List ? {for (final h in hosts) '$h'} : null,
       localNetwork: record['localNetwork'] == true,
     );
+  }
+
+  /// Grants and revocations saved before `library` was split up.
+  static Set<String> _expandLegacy(Set<String> names, {required bool read}) {
+    if (!names.remove(PluginPermission.legacyLibrary)) return names;
+    return {
+      ...names,
+      for (final p in [...PluginPermission.library, ...PluginPermission.chats])
+        if (read || PluginPermission.asking.contains(p)) p,
+    };
   }
 
   /// Reads `plugin.json`, converting a package installed before it existed.
@@ -145,7 +159,9 @@ class PluginStore {
   }
 
   /// Unpacks [package], replacing an older version of the same plugin and
-  /// keeping its settings and enabled state.
+  /// keeping its settings and enabled state. A package whose author differs
+  /// from the installed one's is not trusted as an update: it starts like a
+  /// fresh install and the old plugin's data goes.
   Future<InstalledPlugin> install(PluginPackage package) async {
     final id = package.manifest.id;
     final staging = Directory(p.join(root, '.staging-$id'));
@@ -157,17 +173,25 @@ class PluginStore {
     }
     final target = Directory(packageDir(id));
     final records = await _readRecords();
-    final existing = records.where((r) => r['id'] == id).firstOrNull;
+    var existing = records.where((r) => r['id'] == id).firstOrNull;
     // Permissions the installed version did not ask for start switched off
     // like on a fresh install; the user turns them on.
-    var before = const <String>[];
+    PluginManifest? previous;
     if (existing != null && await target.exists()) {
       try {
-        before = (await _readManifest(target.path)).permissions;
+        previous = await _readManifest(target.path);
       } catch (_) {
         // An unreadable old manifest counts as asking for nothing.
       }
     }
+    if (existing != null && !isSamePluginAuthor(previous, package.manifest)) {
+      records.remove(existing);
+      existing = null;
+      previous = null;
+      final data = Directory(dataDir(id));
+      if (await data.exists()) await data.delete(recursive: true);
+    }
+    final before = previous?.permissions ?? const <String>[];
     if (await target.exists()) await target.delete(recursive: true);
     await staging.rename(target.path);
 

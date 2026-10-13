@@ -25,18 +25,22 @@ class PluginRuntimePayloadBuilder {
     required String locale,
     required String sdkSource,
     required Map<String, String> compatSources,
-    required Map<String, dynamic> chatVars,
-    required Map<String, dynamic> globalVars,
+    required Future<Map<String, dynamic>> Function(
+      InstalledPlugin plugin,
+      String scope,
+    )
+    readVars,
   }) async {
     final entries = <Map<String, Object?>>[];
     for (final plugin in plugins) {
       try {
+        final variables = plugin.allows(PluginPermission.variables);
         entries.add(
           await pluginEntry(
             plugin,
             locale: locale,
-            chatVars: chatVars,
-            globalVars: globalVars,
+            chatVars: variables ? await readVars(plugin, 'chat') : const {},
+            globalVars: variables ? await readVars(plugin, 'global') : const {},
           ),
         );
       } catch (e) {
@@ -54,8 +58,8 @@ class PluginRuntimePayloadBuilder {
   Future<Map<String, Object?>> pluginEntry(
     InstalledPlugin plugin, {
     required String locale,
-    required Map<String, dynamic> chatVars,
-    required Map<String, dynamic> globalVars,
+    Map<String, dynamic> chatVars = const {},
+    Map<String, dynamic> globalVars = const {},
   }) async {
     final manifest = plugin.manifest;
     final localizer = plugin.localizer(locale);
@@ -92,6 +96,7 @@ class PluginRuntimePayloadBuilder {
       'vars': {'chat': chatVars, 'global': globalVars},
       'storage': await files.readStorage(),
       'methods': pluginMethodsFor(plugin),
+      'events': pluginEventsFor(plugin),
       // true: any host; a list: only those hosts; false: none.
       'network': !plugin.allows(PluginPermission.network)
           ? false

@@ -665,6 +665,17 @@ ORDER BY updated_at DESC
             );
   }
 
+  /// Ids of the sessions whose variables JSON contains [text].
+  Future<List<String>> sessionIdsWithVarsContaining(String text) async {
+    final query = _db.selectOnly(_db.chatSessions)
+      ..addColumns([_db.chatSessions.sessionId])
+      ..where(_db.chatSessions.sessionVarsJson.contains(text));
+    return [
+      for (final row in await query.get())
+        row.read(_db.chatSessions.sessionId)!,
+    ];
+  }
+
   Future<Map<String, dynamic>> updateSessionVarsJson(
     String sessionId,
     Map<String, dynamic> Function(Map<String, dynamic> vars) update,

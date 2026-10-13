@@ -124,10 +124,12 @@ class PluginChatRuntime implements PluginHookRunner {
         'payload': {...payload, 'at': DateTime.now().toUtc().toIso8601String()},
       });
 
-  void pushVars(String scope, Map<String, dynamic> root) => _fire(
-    'window.glazePlugins.pushVars(scope, value);',
-    {'scope': scope, 'value': root},
-  );
+  void pushVars(String pluginId, String scope, Map<String, dynamic> root) =>
+      _fire('window.glazePlugins.pushVars(pluginId, scope, value);', {
+        'pluginId': pluginId,
+        'scope': scope,
+        'value': root,
+      });
 
   /// Message order and roles for message panels and message actions.
   void setMessages(

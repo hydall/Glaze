@@ -14,27 +14,27 @@ import 'shapes.dart';
 /// `glaze.themes.*` and `glaze.themes.assets.*` (files that belong to one
 /// theme, e.g. images its CSS uses).
 Map<String, PluginMethod> themesApi() => {
-  'themes.list': const PluginMethod(_list),
-  'themes.get': const PluginMethod(_get),
-  'themes.find': const PluginMethod(_find),
-  'themes.current': const PluginMethod(_current),
-  'themes.create': libraryWrite(_create, 'plugins_consent_theme_create'),
-  'themes.update': libraryWrite(_update, 'plugins_consent_theme_update'),
-  'themes.remove': libraryWrite(_remove, 'plugins_consent_theme_remove'),
-  'themes.apply': libraryWrite(_apply, 'plugins_consent_theme_apply'),
-  'themes.import': libraryWrite(_import, 'plugins_consent_theme_import'),
-  'themes.export': const PluginMethod(_export),
-  'themes.assets.list': const PluginMethod(_assetList),
-  'themes.assets.load': const PluginMethod(_assetLoad),
-  'themes.assets.save': libraryWrite(
+  'themes.list': libraryRead(_list),
+  'themes.get': libraryRead(_get),
+  'themes.find': libraryRead(_find),
+  'themes.current': libraryRead(_current),
+  'themes.create': libraryCreate(_create, 'plugins_consent_theme_create'),
+  'themes.update': libraryUpdate(_update, 'plugins_consent_theme_update'),
+  'themes.remove': libraryDelete(_remove, 'plugins_consent_theme_remove'),
+  'themes.apply': libraryUpdate(_apply, 'plugins_consent_theme_apply'),
+  'themes.import': libraryCreate(_import, 'plugins_consent_theme_import'),
+  'themes.export': libraryRead(_export),
+  'themes.assets.list': libraryRead(_assetList),
+  'themes.assets.load': libraryRead(_assetLoad),
+  'themes.assets.save': libraryUpdate(
     _assetSave,
     'plugins_consent_theme_update',
   ),
-  'themes.assets.rename': libraryWrite(
+  'themes.assets.rename': libraryUpdate(
     _assetRename,
     'plugins_consent_theme_update',
   ),
-  'themes.assets.remove': libraryWrite(
+  'themes.assets.remove': libraryUpdate(
     _assetRemove,
     'plugins_consent_theme_update',
   ),

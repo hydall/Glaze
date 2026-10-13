@@ -4,7 +4,9 @@ import '../plugin_variable_paths.dart';
 
 /// `glaze.variables.*`: `list(scope)`, `get(name, scope)`, `set(name, value,
 /// scope)`, `update(name, value, scope)` (shallow merge), `delete(name, scope)`.
-/// Scope is `'chat'` (default), `'global'`, or `{ scope: 'message', id }`.
+/// Scope is `'chat'` (default), `'global'`, `{ scope: 'message', id }` or
+/// `'shared'`. Each plugin has its own variables; `shared` is the space all
+/// plugins read and write together.
 Map<String, PluginMethod> variablesApi() => {
   'variables.list': const PluginMethod(_list, permission: _p),
   'variables.get': const PluginMethod(_get, permission: _p),
@@ -25,14 +27,17 @@ _Scope _scope(PluginCall c, int index) {
       final id = raw['id'] ?? c.messageId;
       return (scope: 'message', messageId: id?.toString());
     }
-    return (scope: scope == 'global' ? 'global' : 'chat', messageId: null);
+    return (scope: _named(scope), messageId: null);
   }
   if (raw == 'message') return (scope: 'message', messageId: c.messageId);
-  return (scope: raw == 'global' ? 'global' : 'chat', messageId: null);
+  return (scope: _named(raw), messageId: null);
 }
 
-Future<Map<String, dynamic>> _read(PluginCall c, _Scope s) =>
-    c.host.variables.read(s.scope, c.host.sessionId, messageId: s.messageId);
+String _named(Object? scope) =>
+    scope == 'global' || scope == 'shared' ? scope as String : 'chat';
+
+Future<Map<String, dynamic>> _read(PluginCall c, _Scope s) => c.host.variables
+    .read(c.plugin.id, s.scope, c.host.sessionId, messageId: s.messageId);
 
 Future<Object?> _list(PluginCall c) => _read(c, _scope(c, 0));
 
@@ -48,12 +53,15 @@ Future<void> _write(
 ) async {
   final path = splitVariablePath(c.arg(0));
   final root = await c.host.variables.update(
+    c.plugin.id,
     s.scope,
     c.host.sessionId,
     (root) => change(root, path),
     messageId: s.messageId,
   );
-  if (s.scope != 'message') c.host.variablesChanged(s.scope, root);
+  if (s.scope == 'chat' || s.scope == 'global') {
+    c.host.variablesChanged(c.plugin.id, s.scope, root);
+  }
 }
 
 Future<Object?> _set(PluginCall c) async {

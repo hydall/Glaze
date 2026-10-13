@@ -205,6 +205,30 @@ void main() {
   });
 
   group('convertTavoManifest', () {
+    test('library, chat and image permissions come from the scripts', () {
+      expect(
+        inferTavoPermissions([
+          'const c = await tavo.character.get(id);',
+          'await tavo.lorebook.create(book); tavo.chat.delete(x);',
+          'tavo.theme.assets.rename(t, a, b); tavo.image.generate(p);',
+          'tavo.chat.copy(id)',
+        ]),
+        {
+          'library.read',
+          'library.create',
+          'library.update',
+          'chats.delete',
+          'chats.create',
+          'chats.read',
+          'images',
+        },
+      );
+      expect(inferTavoPermissions(['tavo.message.get(1)']), isEmpty);
+      expect(inferTavoPermissions(["tavo.plugin.on('chat:opened', h)"]), {
+        'messages',
+      });
+    });
+
     test('maps fields, permissions, mounts and settings', () {
       final out = convertTavoManifest(tavoManifest());
       final m = parsePluginManifest(out);
@@ -212,10 +236,10 @@ void main() {
       expect(m.main, 'main.js');
       expect(m.name.key, 'plugin.name');
       expect(m.defaultLocale, 'en');
-      expect(
-        m.permissions,
-        containsAll(['composer', 'variables', 'tts', 'library', 'images']),
-      );
+      expect(m.permissions, containsAll(['composer', 'variables', 'tts']));
+      // Library and chat access is read off the scripts, not granted.
+      expect(m.permissions, isNot(contains('library.read')));
+      expect(m.permissions, isNot(contains('images')));
       expect(m.composerActions.single.id, 'note');
       expect(m.toolsActions.single.id, 'open');
       final badge = m.panels.last;
@@ -336,12 +360,16 @@ void main() {
 
     tearDown(() => temp.delete(recursive: true));
 
-    PluginPackage package(List<String> permissions) => readPluginPackage(
+    PluginPackage package(
+      List<String> permissions, {
+      String author = 'Example',
+    }) => readPluginPackage(
       zip(
         packageFiles(
           m: manifest({
             'permissions': permissions,
             'hosts': ['api.example.com'],
+            'author': author,
           }),
         ),
       ),
@@ -351,7 +379,8 @@ void main() {
       final installed = await store.install(
         package(['composer', 'network', 'library']),
       );
-      expect(installed.revoked, {'composer', 'network', 'library'});
+      expect(installed.revoked, installed.manifest.permissions.toSet());
+      expect(installed.revoked, containsAll(['library.read', 'chats.delete']));
       expect(installed.networkHosts, isEmpty);
       expect(installed.localNetwork, isFalse);
       expect(installed.allowsHost('api.example.com'), isFalse);
@@ -366,6 +395,27 @@ void main() {
       expect(updated.revoked, {'network'});
       expect(updated.config, {'on': false});
       expect(updated.networkHosts, isEmpty);
+    });
+
+    test('a package from another author starts over', () async {
+      final first = await store.install(package(['composer']));
+      await store.save(
+        first.copyWith(
+          revoked: const {},
+          grants: const {'library.delete'},
+          networkHosts: () => null,
+        ),
+      );
+      final kept = File('${store.dataDir(first.id)}/storage.json');
+      await kept.parent.create(recursive: true);
+      await kept.writeAsString('{"token":"secret"}');
+      final other = await store.install(
+        package(['composer'], author: 'Someone else'),
+      );
+      expect(other.revoked, {'composer'});
+      expect(other.grants, isEmpty);
+      expect(other.networkHosts, isEmpty);
+      expect(await kept.exists(), isFalse);
     });
 
     test('chat files go with the chat', () async {

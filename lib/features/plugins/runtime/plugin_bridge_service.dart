@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../models/installed_plugin.dart';
+import '../models/plugin_manifest.dart';
 import 'api/characters_api.dart';
 import 'api/chats_api.dart';
 import 'api/commands_api.dart';
@@ -18,7 +19,8 @@ import 'api/variables_api.dart';
 import 'plugin_api.dart';
 
 /// Every bridged `glaze.*` method. The SDK only exposes the ones a plugin's
-/// manifest grants, and [PluginBridgeService.dispatch] re-checks each call.
+/// manifest asks for, and [PluginBridgeService.dispatch] checks each call
+/// against what the user allowed.
 final Map<String, PluginMethod> pluginMethodRegistry = Map.unmodifiable({
   ...variablesApi(),
   ...messagesApi(),
@@ -34,13 +36,43 @@ final Map<String, PluginMethod> pluginMethodRegistry = Map.unmodifiable({
   ...generationApi(),
   ...uiApi(),
   ...commandsApi(),
+  'events.subscribe': const PluginMethod(_subscribe, internal: true),
 });
 
-/// Methods [plugin] may call: those with no permission plus those whose
-/// permission its manifest lists.
+/// The permission each kind of hook or notification needs.
+const Map<String, String> pluginEventPermissions = {
+  'send': PluginPermission.composer,
+  'generation': PluginPermission.generate,
+  'chat': PluginPermission.messages,
+  'message': PluginPermission.messages,
+};
+
+/// Kinds of hooks and notifications [plugin] receives.
+List<String> pluginEventsFor(InstalledPlugin plugin) => [
+  for (final e in pluginEventPermissions.entries)
+    if (plugin.allows(e.value)) e.key,
+];
+
+/// The host page asks when a plugin subscribes to a kind of event it is not
+/// allowed: the check refuses it, which tells the user.
+Future<Object?> _subscribe(PluginCall c) async {
+  final permission = pluginEventPermissions[c.arg(0)];
+  if (permission == null) {
+    throw const PluginApiError('invalid_arguments', 'Unknown event kind');
+  }
+  await c.require(permission);
+  return true;
+}
+
+/// Methods [plugin] sees: those with no permission plus those whose
+/// permission its manifest lists. One the user switched off stays, so a call
+/// is refused with a toast rather than failing as a missing function.
 List<String> pluginMethodsFor(InstalledPlugin plugin) => [
   for (final e in pluginMethodRegistry.entries)
-    if (e.value.permission == null || plugin.allows(e.value.permission!)) e.key,
+    if (!e.value.internal &&
+        (e.value.permission == null ||
+            plugin.manifest.hasPermission(e.value.permission!)))
+      e.key,
 ];
 
 /// Dispatches `{pluginId, method, params, messageId?}` requests from the
@@ -53,24 +85,28 @@ class PluginBridgeService {
     required this.host,
     required this.pluginById,
     required this.pluginName,
-    required this.consentText,
+    required this.text,
     required this.onAlwaysAllow,
+    required this.onDeny,
   });
 
   final PluginApiHost host;
 
   /// Looks up an *enabled* plugin; a disabled or unknown id is rejected.
+  /// Read on every check, so answers saved meanwhile count.
   final InstalledPlugin? Function(String id) pluginById;
   final String Function(InstalledPlugin plugin) pluginName;
 
-  /// Resolves a consent summary key to the user's language.
-  final String Function(String key) consentText;
+  /// Resolves a translation key to the user's language.
+  final String Function(String key) text;
 
-  /// Persists "always allow" for a plugin.
-  final Future<void> Function(String pluginId, PluginConsent kind)
-  onAlwaysAllow;
+  /// Persists "always allow" for a permission that asks.
+  final Future<void> Function(String pluginId, String permission) onAlwaysAllow;
 
-  final Map<String, Set<PluginConsent>> _allowed = {};
+  /// Persists "deny": the permission is switched off.
+  final Future<void> Function(String pluginId, String permission) onDeny;
+
+  final Map<String, Set<String>> _allowed = {};
   Future<void> _consentQueue = Future.value();
 
   Future<Map<String, dynamic>> dispatch(Map<String, dynamic> request) async {
@@ -113,15 +149,8 @@ class PluginBridgeService {
     if (entry == null) {
       throw PluginApiError('unknown_method', 'Unknown method $method');
     }
-    final permission = entry.permission;
-    if (permission != null && !plugin.allows(permission)) {
-      throw PluginApiError(
-        'permission_denied',
-        '$method needs the "$permission" permission',
-      );
-    }
-    if (entry.consent case final kind?) {
-      await _consent(plugin, kind, entry.summary ?? method);
+    if (entry.permission case final permission?) {
+      await _require(plugin, permission, entry.summary);
     }
     return entry.run(
       PluginCall(
@@ -130,37 +159,69 @@ class PluginBridgeService {
         method: method,
         params: params,
         messageId: messageId,
-        requestConsent: (kind, summary) => _consent(plugin, kind, summary),
+        requirePermission: (permission, summary) =>
+            _require(plugin, permission, summary),
         invoker: (m, p) => _invoke(plugin, m, p, messageId),
       ),
     );
   }
 
-  /// Asks once per plugin and kind at a time; "always" is remembered for
-  /// good, "once" only for this call.
-  Future<void> _consent(
+  /// What the plugin tried, for the consent sheet.
+  String _action(String permission, String? summary) {
+    final key = pluginActionKey(permission, summary);
+    final described = text(key);
+    return described == key && summary == null ? permission : described;
+  }
+
+  /// Lets the call through when the plugin may use [permission]; one that
+  /// asks shows the consent sheet unless the user allowed it for good. A
+  /// plugin that was refused is not asked again: it gets a toast and an
+  /// entry in its history instead.
+  Future<void> _require(
     InstalledPlugin plugin,
-    PluginConsent kind,
-    String summaryKey,
-  ) {
+    String permission,
+    String? summary,
+  ) async {
+    void refuse({bool shown = true}) {
+      host.denied(
+        plugin.id,
+        pluginName(plugin),
+        pluginActionKey(permission, summary),
+        shown: shown,
+      );
+      throw PluginApiError(
+        'permission_denied',
+        'This needs the "$permission" permission',
+      );
+    }
+
+    final live = pluginById(plugin.id) ?? plugin;
+    if (!live.allows(permission)) refuse();
+    if (!PluginPermission.asking.contains(permission)) return;
+
     final run = _consentQueue.then((_) async {
-      if (plugin.grants.contains(kind.name) ||
-          (_allowed[plugin.id]?.contains(kind) ?? false)) {
+      final current = pluginById(plugin.id) ?? plugin;
+      if (!current.allows(permission)) refuse();
+      if (current.grants.contains(permission) ||
+          (_allowed[plugin.id]?.contains(permission) ?? false)) {
         return;
       }
       final answer = await host.ui.consent(
-        pluginName: pluginName(plugin),
-        kind: kind,
-        summary: consentText(summaryKey),
+        pluginName: pluginName(current),
+        permission: permission,
+        summary: _action(permission, summary),
       );
       switch (answer) {
-        case PluginConsentAnswer.deny:
+        case null:
           throw const PluginApiError('user_denied', 'The user declined');
+        case PluginConsentAnswer.deny:
+          await onDeny(plugin.id, permission);
+          refuse(shown: false);
         case PluginConsentAnswer.once:
           return;
         case PluginConsentAnswer.always:
-          (_allowed[plugin.id] ??= {}).add(kind);
-          await onAlwaysAllow(plugin.id, kind);
+          (_allowed[plugin.id] ??= {}).add(permission);
+          await onAlwaysAllow(plugin.id, permission);
       }
     });
     _consentQueue = run.then((_) {}, onError: (_) {});

@@ -1,16 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
-import 'package:path/path.dart' as p;
 
 import '../../../core/plugins/plugin_hooks.dart';
-import '../../../core/state/db_provider.dart';
+import '../../../core/state/active_selection_provider.dart';
+import '../../../core/state/lorebook_provider.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../chat/bridge/chat_bridge_controller.dart';
 import '../../chat/bridge/chat_bridge_registry.dart';
@@ -18,6 +17,7 @@ import '../../chat/chat_provider.dart';
 import '../../chat/chat_state.dart';
 import '../compat/tavo/tavo_manifest_converter.dart';
 import '../models/installed_plugin.dart';
+import '../models/plugin_manifest.dart';
 import '../providers/plugin_library_provider.dart';
 import '../providers/plugin_network_log_provider.dart';
 import 'api/chats_api.dart';
@@ -28,7 +28,6 @@ import 'plugin_bridge_service.dart';
 import 'plugin_chat_runtime.dart';
 import 'plugin_message_diff.dart';
 import 'plugin_runtime_payload.dart';
-import 'plugin_variable_store.dart';
 
 /// The running plugin runtime of a chat, by character id; null while the
 /// chat has no WebView bridge or no enabled plugins.
@@ -60,6 +59,9 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
   Map<String, PluginMessageSignature> _snapshot = const {};
   String? _messagesKey;
   String? _locale;
+
+  /// What `chat:updated` compares: the open chat's settings as last sent.
+  String? _chatSignature;
   late final PluginHookRegistry _hooks;
   late final StateController<PluginChatRuntime?> _registry;
 
@@ -137,11 +139,8 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
       for (final e in _compatAssets.entries)
         e.key: await rootBundle.loadString(e.value),
     };
+    final variables = await ref.read(pluginVariableStoreProvider.future);
     if (!mounted || epoch != _epoch) return;
-    final variables = PluginVariableStore(
-      chatRepo: ref.read(chatRepoProvider),
-      globalFile: File(p.join(store.dataRoot, '_global_variables.json')),
-    );
     late final PluginChatRuntime runtime;
     final host = ChatPluginApiHost(
       ref: ref.read(pluginRefProvider),
@@ -149,18 +148,21 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
       store: store,
       variables: variables,
       contextResolver: () => mounted ? context : null,
-      onVariablesChanged: (scope, root) => runtime.pushVars(scope, root),
+      onVariablesChanged: (id, scope, root) =>
+          runtime.pushVars(id, scope, root),
     );
     final library = ref.read(pluginLibraryProvider.notifier);
     final builder = PluginRuntimePayloadBuilder(store: store);
     final fileHandlers = [
       for (final plugin in [...plugins]..sort((a, b) => a.id.compareTo(b.id)))
-        for (final handler in plugin.manifest.fileHandlers)
-          PluginFileHandlerEntry(
-            pluginId: plugin.id,
-            handler: handler,
-            scripts: () => builder.fileHandlerScripts(plugin, handler),
-          ),
+        // Attached files are staged in the plugin's files.
+        if (plugin.allows(PluginPermission.files))
+          for (final handler in plugin.manifest.fileHandlers)
+            PluginFileHandlerEntry(
+              pluginId: plugin.id,
+              handler: handler,
+              scripts: () => builder.fileHandlerScripts(plugin, handler),
+            ),
     ];
     runtime = PluginChatRuntime(
       bridge: bridge,
@@ -173,8 +175,10 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
             .where((x) => x.id == id)
             .firstOrNull,
         pluginName: _name,
-        consentText: (key) => key.tr(),
-        onAlwaysAllow: (id, kind) => library.allowAlways(id, kind.name),
+        text: (key) => key.tr(),
+        onAlwaysAllow: library.allowAlways,
+        onDeny: (id, permission) =>
+            library.setPermission(id, permission, false),
       ),
       chatId: () => host.sessionId,
       fileHandlers: fileHandlers,
@@ -224,17 +228,14 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
     };
 
     final sessionId = host.sessionId;
-    final chatVars = sessionId == null
-        ? <String, dynamic>{}
-        : await variables.read('chat', sessionId);
-    final globalVars = await variables.read('global', null);
     final payload = await builder.build(
       plugins: plugins,
       locale: _locale ?? 'en',
       sdkSource: sdk,
       compatSources: compat,
-      chatVars: chatVars,
-      globalVars: globalVars,
+      readVars: (plugin, scope) async => scope == 'chat' && sessionId == null
+          ? <String, dynamic>{}
+          : variables.read(plugin.id, scope, sessionId),
     );
     if (!mounted || epoch != _epoch) {
       runtime.dispose();
@@ -304,6 +305,7 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
     if (session?.id != _sessionId) {
       final previous = _sessionId;
       _sessionId = session?.id;
+      _chatSignature = null;
       _snapshot = pluginMessageSignatures(session?.messages ?? const []);
       if (previous != null) {
         runtime.dispatchEvent('chat:closed', {'chatId': previous});
@@ -312,6 +314,7 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
       return;
     }
     if (session == null || state.isGenerating || state.isSendPending) return;
+    unawaited(_checkChatUpdated());
     final changes = diffPluginMessages(_snapshot, session.messages);
     if (changes.isEmpty) return;
     _snapshot = pluginMessageSignatures(session.messages);
@@ -342,27 +345,66 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
   Future<void> _announce(PluginChatRuntime runtime, String sessionId) async {
     final host = _host;
     if (host == null) return;
-    try {
-      runtime.pushVars('chat', await host.variables.read('chat', sessionId));
-    } catch (_) {
-      // A session that vanished mid-switch has no variables to push.
+    for (final plugin in ref.read(enabledPluginsProvider)) {
+      if (!plugin.allows(PluginPermission.variables)) continue;
+      try {
+        runtime.pushVars(
+          plugin.id,
+          'chat',
+          await host.variables.read(plugin.id, 'chat', sessionId),
+        );
+      } catch (_) {
+        // A session that vanished mid-switch has no variables to push.
+      }
     }
     if (!identical(_runtime, runtime) || _sessionId != sessionId) return;
     final session = ref.read(chatProvider(widget.charId)).value?.session;
     if (session == null || session.id != sessionId) return;
     final chat = await chatJson(host, session);
     if (!identical(_runtime, runtime) || _sessionId != sessionId) return;
+    _chatSignature = _signature(chat);
     runtime.dispatchEvent('chat:opened', {'chatId': sessionId, 'chat': chat});
   }
 
-  /// What the frames are built from; grants are read live instead.
+  /// The settings of a chat a change of which is worth a `chat:updated`;
+  /// counts and times move with every message.
+  static String _signature(Map<String, Object?> chat) => jsonEncode({
+    for (final e in chat.entries)
+      if (e.key != 'messageCount' && e.key != 'updatedAt') e.key: e.value,
+  });
+
+  /// Sends `chat:updated` when the open chat's name, persona, preset or
+  /// lorebooks changed since it was last sent.
+  Future<void> _checkChatUpdated() async {
+    final runtime = _runtime;
+    final host = _host;
+    final sessionId = _sessionId;
+    if (runtime == null || host == null || sessionId == null) return;
+    if (_chatSignature == null) return;
+    final session = ref.read(chatProvider(widget.charId)).value?.session;
+    if (session == null || session.id != sessionId) return;
+    final chat = await chatJson(host, session);
+    if (!mounted || !identical(_runtime, runtime) || _sessionId != sessionId) {
+      return;
+    }
+    final signature = _signature(chat);
+    if (signature == _chatSignature) return;
+    _chatSignature = signature;
+    runtime.dispatchEvent('chat:updated', {'chatId': sessionId, 'chat': chat});
+  }
+
+  /// What the frames are built from. Permissions that ask are checked on
+  /// each call, so switching them needs no restart.
   static String _runtimeKey(List<InstalledPlugin>? plugins) => jsonEncode([
     for (final x in plugins ?? const <InstalledPlugin>[])
       [
         x.id,
         x.installedAt,
         x.config,
-        (x.revoked.toList()..sort()),
+        [
+          for (final r in x.revoked.toList()..sort())
+            if (!PluginPermission.asking.contains(r)) r,
+        ],
         x.networkHosts?.toList()?..sort(),
         x.localNetwork,
       ],
@@ -380,6 +422,10 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
       chatProvider(widget.charId),
       (_, next) => _onChatState(next.value),
     );
+    // The chat's persona, preset and lorebooks live outside its session.
+    ref.listen(personaConnectionsProvider, (_, _) => _checkChatUpdated());
+    ref.listen(presetConnectionsProvider, (_, _) => _checkChatUpdated());
+    ref.listen(lorebookActivationsProvider, (_, _) => _checkChatUpdated());
     return widget.child;
   }
 }

@@ -10,18 +10,22 @@
 (function () {
   'use strict';
 
-  var P = 'glaze-plugin:';
+  // Message type prefix, new for every setup: the frames learn it from
+  // their boot data, and nothing in it names the app.
+  var P = 'p0:';
   var FRAME_Z = 30;
   var HIT_SLACK_PX = 6;
   var INTERCEPT_CAP_MS = 120000;
   var ACTION_CAP_MS = 600000;
   var FILE_CAP_MS = 600000;
 
+  var EVENT_KINDS = ['send', 'generation', 'chat', 'message'];
   var sdkSource = '';
   var compatSources = {};
   var rtcToken = null;
   var plugins = new Map(); // pluginId -> plugin
-  var frames = new Map(); // Window -> frame state
+  var frames = new Map(); // plugin Window -> frame state
+  var wrappers = new Map(); // wrapper Window -> frame state
   var replySeq = 0;
   var pendingReplies = new Map();
   var insets = { topSafe: 0, topBar: 0, bottomInput: 0, bottomSafe: 0 };
@@ -47,6 +51,7 @@
       kind: kind,
       config: plugin.config || {},
       i18n: plugin.i18n || null,
+      channel: P,
       vars: plugin.vars || { chat: {}, global: {} },
       storage: plugin.storage || {},
       methods: plugin.methods || [],
@@ -82,7 +87,9 @@
   // frame away from home devices (they rarely speak TLS), and listed hosts
   // on the local network are dropped.
   // Everything a plugin ships is inlined as data URLs, so it needs none.
-  function networkPolicy(network, local) {
+  // The source list a plugin may reach outside, '' for none; null when
+  // nothing is restricted.
+  function reachable(network, local) {
     if (network === true && local) return null;
     var schemes = local ? ['https', 'http', 'wss', 'ws'] : ['https', 'wss'];
     var hosts = '';
@@ -95,6 +102,12 @@
         schemes.forEach(function (scheme) { hosts += ' ' + scheme + '://' + h + ':*'; });
       });
     }
+    return hosts;
+  }
+
+  function networkPolicy(network, local) {
+    var hosts = reachable(network, local);
+    if (hosts === null) return null;
     var outside = " data: blob:" + hosts;
     return "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'" + outside +
       "; style-src 'unsafe-inline'" + outside + "; img-src" + outside + "; media-src" + outside +
@@ -108,7 +121,7 @@
       '<meta charset="utf-8">' +
       '<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">' +
       '<style>html,body{background:transparent!important;margin:0}</style>' +
-      '<script>window.__GLAZE_PLUGIN_BOOT__=' + jsonForScript(boot) + ';<\/script>' +
+      '<script>window.__pluginBoot=' + jsonForScript(boot) + ';<\/script>' +
       scriptTag(sdkSource);
     var compat = plugin.compat && compatSources[plugin.compat];
     if (compat) html += scriptTag(compat);
@@ -116,31 +129,28 @@
   }
 
   function runScriptsDoc(plugin, boot, sources) {
-    var run = '(function(){' + sources.map(function (s) {
+    var run = '(function(){document.currentScript.remove();' + sources.map(function (s) {
       return 'var s=document.createElement("script");s.textContent=' + jsonForScript(s.source +
-        '\n//# sourceURL=glaze-plugin://' + plugin.pluginId + '/' + s.name) +
+        '\n//# sourceURL=plugin://' + plugin.pluginId + '/' + s.name) +
         ';document.head.appendChild(s);';
     }).join('') + '})();';
     return '<!doctype html><html><head>' + headScripts(plugin, boot) +
       '</head><body><script>' + run + '<\/script></body></html>';
   }
 
-  // Panel HTML may be a full document or a bare snippet; the SDK has to run
-  // before any of its scripts either way.
+  // Panel HTML may be a full document or a bare snippet. The policy and the
+  // SDK go first either way, right after a leading doctype: anything the
+  // page has before its <head> would otherwise run unrestricted. The
+  // parser keeps them in the head the page's own <html>/<head> then join.
   function panelDoc(plugin, boot, html) {
     var head = headScripts(plugin, boot);
     html = String(html || '');
-    var headTag = /<head(\s[^>]*)?>/i.exec(html);
-    if (headTag) {
-      var at = headTag.index + headTag[0].length;
-      return html.slice(0, at) + head + html.slice(at);
+    if (!/<(html|head)(\s[^>]*)?>/i.test(html)) {
+      return '<!doctype html><html><head>' + head + '</head><body>' + html + '</body></html>';
     }
-    var htmlTag = /<html(\s[^>]*)?>/i.exec(html);
-    if (htmlTag) {
-      var after = htmlTag.index + htmlTag[0].length;
-      return html.slice(0, after) + '<head>' + head + '</head>' + html.slice(after);
-    }
-    return '<!doctype html><html><head>' + head + '</head><body>' + html + '</body></html>';
+    var doctype = /^\s*<!doctype[^>]*>/i.exec(html);
+    var at = doctype ? doctype[0].length : 0;
+    return html.slice(0, at) + head + html.slice(at);
   }
 
   function hiddenStyle(style) {
@@ -153,9 +163,34 @@
     style.pointerEvents = 'none';
   }
 
+  function attr(value) {
+    return String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  }
+
+  // A plugin frame sits inside a wrapper frame of its own. A frame's
+  // navigations are checked against its parent's policy, which a frame
+  // cannot change: with the plugin's own policy on the wrapper, a plugin
+  // that leaves its document for a URL (say, with the chat in the query) is
+  // stopped before the request goes out, unless its internet setting
+  // reaches that host anyway. The plugin's document inherits that policy
+  // too, so it must be the same one.
+  function wrapperDoc(plugin, srcdoc, local) {
+    var policy = networkPolicy(plugin.network, local);
+    return '<!doctype html><html><head>' +
+      (policy ? '<meta http-equiv="Content-Security-Policy" content="' + policy + '">' : '') +
+      '<style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent!important;color-scheme:normal}' +
+      'iframe{display:block;border:0;width:100%;height:100%;background:transparent;color-scheme:normal}</style></head>' +
+      '<body><iframe sandbox="allow-scripts" allowtransparency="true" srcdoc="' + attr(srcdoc) + '"></iframe>' +
+      // A second load means the plugin left its document (the policy
+      // decided whether the new one loaded); the host takes the frame down.
+      '<script>(function(){var n=0;document.querySelector("iframe").addEventListener("load",function(){' +
+      'if(++n>1)parent.postMessage({type:' + jsonForScript(P + 'gone') + '},"*");});})();<\/script></body></html>';
+  }
+
   function mountFrame(plugin, kind, srcdoc, opts) {
     opts = opts || {};
     var iframe = document.createElement('iframe');
+    // Scripts are allowed so the inner frame keeps them; the wrapper has none.
     iframe.setAttribute('sandbox', 'allow-scripts');
     iframe.setAttribute('data-glaze-plugin', plugin.pluginId);
     iframe.setAttribute('data-glaze-plugin-kind', kind);
@@ -181,17 +216,7 @@
       style.width = '100%';
       style.height = '0';
     }
-    iframe.srcdoc = srcdoc;
-    // The policy cannot stop a frame from navigating itself to a URL; one
-    // that leaves its document without internet access is torn down.
-    if (plugin.network !== true) {
-      var loads = 0;
-      iframe.addEventListener('load', function () {
-        if (++loads < 2) return;
-        reportNetwork(plugin.pluginId, 'navigation', true);
-        removeFrame(state);
-      });
-    }
+    iframe.srcdoc = wrapperDoc(plugin, srcdoc, plugin.network !== false && plugin.localNetwork === true);
     var state = {
       plugin: plugin,
       kind: kind,
@@ -203,13 +228,33 @@
       win: null,
     };
     (opts.parent || document.body).appendChild(iframe);
-    state.win = iframe.contentWindow;
-    frames.set(state.win, state);
+    // The plugin's own window is known once the wrapper has parsed; it is
+    // bound when it first posts (see frameOf).
+    state.wrapper = iframe.contentWindow;
+    wrappers.set(state.wrapper, state);
+    return state;
+  }
+
+  // The frame state of [win]: a bound plugin window, or the one window of a
+  // wrapper the first time it posts.
+  function frameOf(win) {
+    var state = frames.get(win);
+    if (state) return state;
+    var up;
+    try { up = win.parent; } catch (e) { return null; }
+    state = wrappers.get(up);
+    if (!state || state.win) return null;
+    var inner;
+    try { inner = up.frames[0]; } catch (e) { return null; }
+    if (inner !== win) return null;
+    state.win = win;
+    frames.set(win, state);
     return state;
   }
 
   function removeFrame(state) {
-    frames.delete(state.win);
+    if (state.win) frames.delete(state.win);
+    wrappers.delete(state.wrapper);
     try { state.iframe.remove(); } catch (e) { /* already detached */ }
   }
 
@@ -220,7 +265,7 @@
 
   function framesOf(pluginId) {
     var out = [];
-    frames.forEach(function (f) { if (f.plugin.pluginId === pluginId) out.push(f); });
+    wrappers.forEach(function (f) { if (f.plugin.pluginId === pluginId) out.push(f); });
     return out;
   }
 
@@ -257,7 +302,7 @@
 
   function callDart(state, method, params) {
     if (!window.flutter_inappwebview || !window.flutter_inappwebview.callHandler) {
-      return Promise.resolve({ ok: false, error: { code: 'unavailable', message: 'Glaze bridge is not available' } });
+      return Promise.resolve({ ok: false, error: { code: 'unavailable', message: 'The app is not available' } });
     }
     return window.flutter_inappwebview.callHandler('pluginBridge', {
       pluginId: state.plugin.pluginId,
@@ -270,7 +315,7 @@
   // Whether [win] is a plugin frame or nested anywhere inside one.
   function insidePluginFrame(win) {
     for (var w = win, depth = 0; w && depth < 32; depth++) {
-      if (frames.has(w)) return true;
+      if (frames.has(w) || wrappers.has(w)) return true;
       var up;
       try { up = w.parent; } catch (e) { return false; }
       if (!up || up === w || up === window) return false;
@@ -286,9 +331,16 @@
   window.addEventListener('message', function (e) {
     if (!e.source || !insidePluginFrame(e.source)) return;
     e.stopImmediatePropagation();
-    var state = frames.get(e.source);
-    if (!state) return;
+    var state = frameOf(e.source);
     var d = e.data;
+    if (!state) {
+      var wrapped = wrappers.get(e.source);
+      if (wrapped && d && d.type === P + 'gone') {
+        if (wrapped.plugin.network !== true) reportNetwork(wrapped.plugin.pluginId, 'navigation', true);
+        removeFrame(wrapped);
+      }
+      return;
+    }
     if (!d || typeof d.type !== 'string' || d.type.indexOf(P) !== 0) return;
     switch (d.type.slice(P.length)) {
       case 'ready':
@@ -314,9 +366,20 @@
         }
         return;
       }
-      case 'subscribe':
-        if (state.kind === 'main') state.plugin.subscriptions.add(String(d.event));
+      case 'subscribe': {
+        var ev = String(d.event);
+        var kind = ev.split(':')[0];
+        if (kind !== 'action' && !state.plugin.events.has(kind)) {
+          // Not allowed: the app notes the attempt once per kind.
+          if (EVENT_KINDS.indexOf(kind) >= 0 && !state.plugin.refused.has(kind)) {
+            state.plugin.refused.add(kind);
+            callDart(state, 'events.subscribe', [kind]);
+          }
+          return;
+        }
+        if (state.kind === 'main') state.plugin.subscriptions.add(ev);
         return;
+      }
       case 'emit':
         framesOf(state.plugin.pluginId).forEach(function (f) {
           if (f !== state) send(f, { type: P + 'emit', event: d.event, detail: d.detail });
@@ -388,7 +451,7 @@
     if (next.topSafe === insets.topSafe && next.topBar === insets.topBar &&
         next.bottomInput === insets.bottomInput && next.bottomSafe === insets.bottomSafe) return;
     insets = next;
-    frames.forEach(function (f) { if (f.kind === 'panel') send(f, { type: P + 'insets', insets: insets }); });
+    wrappers.forEach(function (f) { if (f.kind === 'panel') send(f, { type: P + 'insets', insets: insets }); });
   }
 
   var insetRaf = 0;
@@ -552,8 +615,9 @@
 
   /* ---------- Public API (called from Dart) ---------- */
   function teardown() {
-    frames.forEach(removeFrame);
+    wrappers.forEach(removeFrame);
     frames.clear();
+    wrappers.clear();
     messageFrames.clear();
     plugins.clear();
     pendingReplies.forEach(function (pending) { pending.resolve(null); });
@@ -564,12 +628,18 @@
   function setup(payload) {
     payload = payload || {};
     teardown();
+    P = 'p' + randomId() + ':';
     if (typeof payload.sdk === 'string') sdkSource = payload.sdk;
     rtcToken = typeof payload.rtcToken === 'string' ? payload.rtcToken : null;
     compatSources = payload.compat || {};
     refreshInsets();
     (payload.plugins || []).forEach(function (p) {
-      var plugin = Object.assign({}, p, { subscriptions: new Set() });
+      var plugin = Object.assign({}, p, {
+        subscriptions: new Set(),
+        // Kinds of hooks and notifications its permissions cover.
+        events: new Set(Array.isArray(p.events) ? p.events : []),
+        refused: new Set(),
+      });
       plugins.set(plugin.pluginId, plugin);
       if (typeof plugin.main === 'string' && plugin.main) {
         mountFrame(plugin, 'main', runScriptsDoc(plugin, bootFor(plugin, 'main'), [{ name: 'main.js', source: plugin.main }]));
@@ -587,14 +657,15 @@
 
   function dispatchEvent(type, payload, onlyPluginId) {
     var msg = { type: P + 'event', event: String(type), payload: payload || {} };
-    frames.forEach(function (f) {
-      if (f.kind === 'file') return;
+    var kind = String(type).split(':')[0];
+    wrappers.forEach(function (f) {
+      if (f.kind === 'file' || !f.plugin.events.has(kind)) return;
       if (!onlyPluginId || f.plugin.pluginId === onlyPluginId) send(f, msg);
     });
   }
 
-  function pushVars(scope, value) {
-    frames.forEach(function (f) { send(f, { type: P + 'vars', scope: scope, value: value || {} }); });
+  function pushVars(pluginId, scope, value) {
+    framesOf(pluginId).forEach(function (f) { send(f, { type: P + 'vars', scope: scope, value: value || {} }); });
   }
 
   function setMessages(list, isBusy, chatId) {

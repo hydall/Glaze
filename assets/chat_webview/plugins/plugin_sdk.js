@@ -1,17 +1,29 @@
 // Glaze plugin SDK. Runs inside a plugin iframe (sandbox="allow-scripts",
 // null origin) — never in the chat page itself — and defines `glaze`.
 //
-// The host (plugin_host.js) writes `window.__GLAZE_PLUGIN_BOOT__` first:
+// The host (plugin_host.js) writes `window.__pluginBoot` first:
 //   { pluginId, kind: 'main'|'panel'|'message'|'file', panelId?, messageId?,
-//     config, i18n, vars: { chat, global }, storage, methods: [...], insets,
-//     compat, network, rtcToken }
-// Every call goes to the parent as a `glaze-plugin:call` postMessage; the
-// parent attributes it to this frame's plugin and forwards it to Dart.
+//     channel, config, i18n, vars: { chat, global }, storage, methods: [...],
+//     insets, compat, network, rtcToken }
+// Every call goes to the parent as a `<channel>call` postMessage; the parent
+// attributes it to this frame's plugin and forwards it to Dart.
+//
+// What the plugin can see of this file is only the API: the boot data and
+// the script tags go once read, and the functions wrapped to watch the
+// network read as the browser's own.
 (function () {
   'use strict';
-  var P = 'glaze-plugin:';
-  var boot = window.__GLAZE_PLUGIN_BOOT__ || {};
-  var parentWin = window.parent;
+  var boot = window.__pluginBoot || {};
+  try { delete window.__pluginBoot; } catch (e) { window.__pluginBoot = undefined; }
+  var P = typeof boot.channel === 'string' ? boot.channel : 'p0:';
+  (function dropScripts() {
+    var own = document.currentScript;
+    var bootScript = own && own.previousElementSibling;
+    if (bootScript && bootScript.tagName === 'SCRIPT' && /__pluginBoot/.test(bootScript.textContent)) bootScript.remove();
+    if (own) own.remove();
+  })();
+  // The host is the chat page, past the wrapper frame this one sits in.
+  var parentWin = window.parent.parent;
   var kind = boot.kind || 'main';
   var isMain = kind === 'main';
   var seq = 0;
@@ -30,8 +42,18 @@
   }
 
   function fire(method, args) {
-    call(method, args).catch(function (e) { console.warn('[glaze]', method, e && e.message); });
+    call(method, args).catch(function (e) { console.warn('[plugin]', method, e && e.message); });
   }
+
+  // Wrapped browser functions print as the originals.
+  var nativeToString = Function.prototype.toString;
+  var disguised = new WeakMap();
+  function disguise(fn, as) { disguised.set(fn, as); return fn; }
+  var toString = function toString() { return nativeToString.call(disguised.get(this) || this); };
+  disguised.set(toString, nativeToString);
+  try {
+    Object.defineProperty(Function.prototype, 'toString', { value: toString, writable: true, configurable: true });
+  } catch (e) { /* left as is */ }
 
   function clone(v) { return v === undefined ? undefined : JSON.parse(JSON.stringify(v)); }
   function isPlain(v) { return v != null && typeof v === 'object' && !Array.isArray(v); }
@@ -101,9 +123,10 @@
       window.fetch = function (input) {
         var url = input && typeof input === 'object' && 'url' in input ? input.url : input;
         if (remote(url)) report(url);
-        if (refused(url)) return Promise.reject(new TypeError('Local network access is not allowed for this plugin'));
+        if (refused(url)) return Promise.reject(new TypeError('Failed to fetch'));
         return nativeFetch.apply(this, arguments);
       };
+      disguise(window.fetch, nativeFetch);
     }
     var open = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function (method, url) {
@@ -111,6 +134,7 @@
       if (refused(url)) throw new DOMException('Local network access is not allowed for this plugin', 'SecurityError');
       return open.apply(this, arguments);
     };
+    disguise(XMLHttpRequest.prototype.open, open);
     ['WebSocket', 'EventSource'].forEach(function (name) {
       var Native = window[name];
       if (!Native) return;
@@ -122,7 +146,7 @@
       Wrapped.prototype = Native.prototype;
       Object.keys(Native).forEach(function (k) { Wrapped[k] = Native[k]; });
       ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'].forEach(function (k) { if (k in Native) Wrapped[k] = Native[k]; });
-      window[name] = Wrapped;
+      window[name] = disguise(Wrapped, Native);
     });
   })();
 
@@ -131,8 +155,8 @@
   // past every policy). A plugin that may reach any host gets it back; any
   // other gets stubs that refuse and log the attempt.
   (function webrtc() {
-    var take = window.__glazeRtc;
-    try { delete window.__glazeRtc; } catch (e) { /* not ours to remove */ }
+    var take = window.__rtcGate;
+    try { delete window.__rtcGate; } catch (e) { /* not ours to remove */ }
     var key = boot.rtcToken;
     delete boot.rtcToken;
     var kept = boot.network === true && typeof take === 'function' && key ? take(key) : null;
@@ -151,10 +175,10 @@
         if (/^(webkit)?RTC/.test(name)) { try { delete window[name]; } catch (e) { /* kept */ } }
       });
       ['RTCPeerConnection', 'webkitRTCPeerConnection'].forEach(function (name) {
-        window[name] = function () {
+        window[name] = disguise(function () {
           log(true);
           throw new DOMException('WebRTC is not allowed for this plugin', 'NotAllowedError');
-        };
+        }, { toString: function () { return 'function ' + name + '() { [native code] }'; } });
       });
       return;
     }
@@ -167,7 +191,7 @@
       };
       Wrapped.prototype = Native.prototype;
       Object.setPrototypeOf(Wrapped, Native);
-      window[name] = Wrapped;
+      window[name] = disguise(Wrapped, Native);
     });
   })();
 
@@ -215,7 +239,8 @@
   }
   function cacheScope(scope) {
     if (scope && typeof scope === 'object') scope = scope.scope;
-    return scope === 'global' ? 'global' : scope === 'message' ? null : 'chat';
+    // `message` and `shared` are not cached.
+    return scope === 'global' ? 'global' : scope === 'message' || scope === 'shared' ? null : 'chat';
   }
   if (glaze.variables) {
     var v = glaze.variables;
@@ -404,7 +429,8 @@
   var INSET_VARS = { topSafe: 'top-safe', topBar: 'top-bar', bottomInput: 'bottom-input', bottomSafe: 'bottom-safe' };
   function applyInsetVars() {
     var root = document.documentElement;
-    if (!root) return;
+    // A converted plugin gets its own app's names from the compat layer.
+    if (!root || boot.compat) return;
     Object.keys(INSET_VARS).forEach(function (k) {
       root.style.setProperty('--glaze-inset-' + INSET_VARS[k], insets[k] + 'px');
     });
@@ -423,7 +449,8 @@
   });
   glaze = Object.freeze(glaze);
   try {
-    Object.defineProperty(window, 'glaze', { value: glaze, writable: false, configurable: false });
+    // The compat layer takes it away from converted plugins.
+    Object.defineProperty(window, 'glaze', { value: glaze, writable: false, configurable: !!boot.compat });
   } catch (e) { window.glaze = glaze; }
 
   /* ---------- localStorage shim ---------- */
@@ -451,8 +478,8 @@
     (list || []).slice().forEach(function (fn) {
       try {
         var r = fn(event);
-        if (r && typeof r.catch === 'function') r.catch(function (e) { console.error('[glaze plugin]', e); });
-      } catch (e) { console.error('[glaze plugin]', e); }
+        if (r && typeof r.catch === 'function') r.catch(function (e) { console.error('[plugin]', e); });
+      } catch (e) { console.error('[plugin]', e); }
     });
   }
 
@@ -496,7 +523,7 @@
         if (cancelled) return { text: text, cancelled: true, message: reason };
       } catch (e) {
         active = false;
-        console.error('[glaze plugin] ' + type, e);
+        console.error('[plugin] ' + type, e);
       }
     }
     return { text: text, cancelled: false };
@@ -556,7 +583,7 @@
         Promise.resolve().then(function () { return fn(d.args ? Object.freeze(d.args) : undefined); }).then(
           function () { post({ type: P + 'reply', id: d.id, result: { ok: true } }); },
           function (err) {
-            console.error('[glaze plugin] action', err);
+            console.error('[plugin] action', err);
             post({ type: P + 'reply', id: d.id, result: { ok: false, reason: 'handler-error', message: String(err && err.message || err) } });
           });
         return;

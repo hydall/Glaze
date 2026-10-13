@@ -24,7 +24,7 @@ import 'package:glaze_flutter/features/plugins/services/plugin_manifest_parser.d
 class _FakeUi implements PluginUi {
   final toasts = <String>[];
   final consents = <String>[];
-  PluginConsentAnswer answer = PluginConsentAnswer.deny;
+  PluginConsentAnswer? answer = PluginConsentAnswer.deny;
 
   @override
   void toast(String text) => toasts.add(text);
@@ -45,12 +45,12 @@ class _FakeUi implements PluginUi {
     String? defaultValue,
   }) async => {'status': 'cancelled'};
   @override
-  Future<PluginConsentAnswer> consent({
+  Future<PluginConsentAnswer?> consent({
     required String pluginName,
-    required PluginConsent kind,
+    required String permission,
     required String summary,
   }) async {
-    consents.add('$pluginName:${kind.name}:$summary');
+    consents.add('$pluginName:$permission:$summary');
     return answer;
   }
 
@@ -94,12 +94,23 @@ class _FakeHost implements PluginApiHost {
   PluginFileStore files(String pluginId) =>
       PluginFileStore(dataDir: '$dataRoot/$pluginId');
   @override
-  void variablesChanged(String scope, Map<String, dynamic> root) =>
-      varPushes.add('$scope:${jsonEncode(root)}');
+  void variablesChanged(
+    String pluginId,
+    String scope,
+    Map<String, dynamic> root,
+  ) => varPushes.add('$pluginId/$scope:${jsonEncode(root)}');
   final network = <String>[];
   @override
   void networkUsed(String pluginId, String host, {required bool blocked}) =>
       network.add('$host:${blocked ? 'blocked' : 'ok'}');
+  final denials = <String>[];
+  @override
+  void denied(
+    String pluginId,
+    String pluginName,
+    String actionKey, {
+    bool shown = true,
+  }) => denials.add('$actionKey${shown ? '' : ':silent'}');
 }
 
 InstalledPlugin _plugin(
@@ -153,7 +164,8 @@ void main() {
       container.read(pluginRefProvider),
       PluginVariableStore(
         chatRepo: chatRepo,
-        globalFile: File('${temp.path}/globals.json'),
+        globalFile: (id) => File('${temp.path}/$id/variables.json'),
+        sharedFile: File('${temp.path}/shared.json'),
       ),
       temp.path,
     );
@@ -171,13 +183,18 @@ void main() {
     Set<String> grants = const {},
     Set<String> revoked = const {},
   }) {
-    final plugin = _plugin(permissions, grants: grants, revoked: revoked);
+    var plugin = _plugin(permissions, grants: grants, revoked: revoked);
     return PluginBridgeService(
       host: host,
       pluginById: (id) => id == plugin.id ? plugin : null,
       pluginName: (p) => 'Test',
-      consentText: (key) => key,
-      onAlwaysAllow: (id, kind) async => alwaysAllowed.add('$id:${kind.name}'),
+      text: (key) => key,
+      onAlwaysAllow: (id, permission) async {
+        alwaysAllowed.add('$id:$permission');
+        plugin = plugin.copyWith(grants: {...plugin.grants, permission});
+      },
+      onDeny: (id, permission) async =>
+          plugin = plugin.copyWith(revoked: {...plugin.revoked, permission}),
     );
   }
 
@@ -211,19 +228,49 @@ void main() {
     },
   );
 
-  test('permissions the user took away are denied', () async {
+  test('permissions the user took away are denied with a notice', () async {
     final s = service(
-      const ['composer', 'library'],
-      revoked: const {'composer', 'library'},
+      const ['composer', 'library.delete'],
+      revoked: const {'composer', 'library.delete'},
     );
     final composer = await call(s, 'composer.get');
     expect((composer['error'] as Map)['code'], 'permission_denied');
     final library = await call(s, 'characters.remove', ['nope']);
     expect((library['error'] as Map)['code'], 'permission_denied');
     expect(host.ui.consents, isEmpty);
+    expect(host.denials, [
+      'plugins_permission_name_composer',
+      'plugins_consent_character_remove',
+    ]);
     final plugin = _plugin(const ['composer'], revoked: const {'composer'});
     expect(plugin.allows('composer'), isFalse);
-    expect(pluginMethodsFor(plugin), isNot(contains('composer.get')));
+    // Still visible, so the call reaches the app and is refused there.
+    expect(pluginMethodsFor(plugin), contains('composer.get'));
+  });
+
+  test('library and chats need their own permissions', () async {
+    final none = service(const []);
+    for (final m in ['characters.list', 'personas.get', 'chats.find']) {
+      final out = await call(none, m, ['x']);
+      expect((out['error'] as Map)['code'], 'permission_denied', reason: m);
+    }
+    // The open chat is part of `messages`, other chats of `chats.read`.
+    final messages = service(const ['messages']);
+    expect((await call(messages, 'chats.get', ['s1']))['ok'], true);
+    final other = await call(messages, 'chats.get', ['elsewhere']);
+    expect((other['error'] as Map)['code'], 'permission_denied');
+    final context = await call(none, 'generate', [
+      'hi',
+      {'context': true},
+    ]);
+    expect((context['error'] as Map)['code'], 'permission_denied');
+  });
+
+  test('legacy "library" stands for every library and chat permission', () {
+    final plugin = _plugin(const ['library']);
+    for (final p in ['library.read', 'library.delete', 'chats.update']) {
+      expect(plugin.allows(p), isTrue, reason: p);
+    }
   });
 
   test(
@@ -247,11 +294,11 @@ void main() {
       });
       final removed = await call(s, 'variables.delete', ['status.mp']);
       expect(removed['ok'], true);
-      expect(host.varPushes.last, 'chat:{"status":{"hp":70}}');
+      expect(host.varPushes.last, 'test.plugin/chat:{"status":{"hp":70}}');
       // Stored in the session row, separate from block variables.
       final stored = await ChatRepo(db).getById('s1');
       expect(
-        stored!.sessionVars[PluginVariableStore.chatKey],
+        stored!.sessionVars[PluginVariableStore.chatKeyFor('test.plugin')],
         contains('"hp":70'),
       );
     },
@@ -264,6 +311,32 @@ void main() {
     final global = await call(s, 'variables.get', ['best', 'global']);
     expect(chat['result'], isNull);
     expect(global['result'], 3);
+  });
+
+  test('each plugin has its own variables; shared is common', () async {
+    final a = service(const ['variables']);
+    await call(a, 'variables.set', ['token', 'secret']);
+    await call(a, 'variables.set', ['token', 'secret', 'global']);
+    await call(a, 'variables.set', ['hello', 'all', 'shared']);
+    final other = await host.variables.read('other.plugin', 'chat', 's1');
+    final otherGlobal = await host.variables.read(
+      'other.plugin',
+      'global',
+      null,
+    );
+    final shared = await host.variables.read('other.plugin', 'shared', null);
+    expect(other, isEmpty);
+    expect(otherGlobal, isEmpty);
+    expect(shared, {'hello': 'all'});
+  });
+
+  test("a plugin's chat variables can be forgotten", () async {
+    final s = service(const ['variables']);
+    await call(s, 'variables.set', ['token', 'secret']);
+    await host.variables.update('keep.plugin', 'chat', 's1', (r) => r['a'] = 1);
+    await host.variables.forgetPlugin('test.plugin');
+    expect(await host.variables.read('test.plugin', 'chat', 's1'), isEmpty);
+    expect(await host.variables.read('keep.plugin', 'chat', 's1'), {'a': 1});
   });
 
   test('message variables are keyed by message and forgotten', () async {
@@ -308,22 +381,42 @@ void main() {
   });
 
   test('library writes ask first; "always" is remembered', () async {
-    final s = service(const ['library']);
-    host.ui.answer = PluginConsentAnswer.deny;
-    final denied = await call(s, 'characters.remove', ['nope']);
-    expect((denied['error'] as Map)['code'], 'user_denied');
-    expect(host.ui.consents, ['Test:library:plugins_consent_character_remove']);
-
+    final s = service(const ['library.delete']);
     host.ui.answer = PluginConsentAnswer.always;
     await call(s, 'characters.remove', ['nope']);
     await call(s, 'characters.remove', ['nope']);
-    expect(host.ui.consents, hasLength(2));
-    expect(alwaysAllowed, ['test.plugin:library']);
+    expect(host.ui.consents, [
+      'Test:library.delete:plugins_consent_character_remove',
+    ]);
+    expect(alwaysAllowed, ['test.plugin:library.delete']);
 
-    final granted = service(const ['library'], grants: const {'library'});
+    final granted = service(
+      const ['library.delete'],
+      grants: const {'library.delete'},
+    );
     host.ui.consents.clear();
     await call(granted, 'characters.remove', ['nope']);
     expect(host.ui.consents, isEmpty);
+  });
+
+  test('a denied plugin is not asked again', () async {
+    final s = service(const ['library.delete']);
+    host.ui.answer = PluginConsentAnswer.deny;
+    final first = await call(s, 'characters.remove', ['nope']);
+    expect((first['error'] as Map)['code'], 'permission_denied');
+    expect(host.denials, ['plugins_consent_character_remove:silent']);
+    final again = await call(s, 'characters.remove', ['nope']);
+    expect((again['error'] as Map)['code'], 'permission_denied');
+    expect(host.ui.consents, hasLength(1));
+    expect(host.denials.last, 'plugins_consent_character_remove');
+
+    // A dismissed sheet only refuses this call.
+    final dismissed = service(const ['library.update']);
+    host.ui.answer = null;
+    final out = await call(dismissed, 'personas.update', [
+      {'id': 'x'},
+    ]);
+    expect((out['error'] as Map)['code'], 'user_denied');
   });
 
   test('files stay inside the plugin folder', () async {

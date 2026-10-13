@@ -7,55 +7,79 @@ import 'plugin_variable_paths.dart';
 /// Size cap per scope. Plugins are told to keep large blobs in files.
 const int kPluginVariableMaxBytes = 1024 * 1024;
 
-/// Backing store for `glaze.variables.*`.
+/// Backing store for `glaze.variables.*`. Every plugin has its own
+/// variables; `shared` is the one space plugins use together.
 ///
 /// `chat` and `message` live in the session row, so they travel with the
-/// chat (`message` is one map keyed by message id); `global` is one JSON file
-/// shared by all plugins. All are separate from the ExtBlocks variables.
+/// chat (`message` is one map keyed by message id); `global` is a JSON file
+/// in the plugin's data and `shared` one file for all plugins. All are
+/// separate from the ExtBlocks variables.
 class PluginVariableStore {
-  PluginVariableStore({required this.chatRepo, required this.globalFile});
+  PluginVariableStore({
+    required this.chatRepo,
+    required this.globalFile,
+    required this.sharedFile,
+  });
 
   static const chatKey = '__plugin_variables';
   static const messageKey = '__plugin_message_variables';
 
+  static String chatKeyFor(String pluginId) => '$chatKey:$pluginId';
+  static String messageKeyFor(String pluginId) => '$messageKey:$pluginId';
+
   final ChatRepo chatRepo;
-  final File globalFile;
+
+  /// The `global` file of a plugin.
+  final File Function(String pluginId) globalFile;
+  final File sharedFile;
   Future<void> _globalLock = Future.value();
 
+  File _fileFor(String pluginId, String scope) =>
+      scope == 'shared' ? sharedFile : globalFile(pluginId);
+
   Future<Map<String, dynamic>> read(
+    String pluginId,
     String scope,
     String? sessionId, {
     String? messageId,
   }) async {
-    if (scope == 'global') return _readGlobal();
+    if (scope == 'global' || scope == 'shared') {
+      return _readFile(_fileFor(pluginId, scope));
+    }
     final session = await chatRepo.getById(_requireSession(sessionId));
     if (scope == 'message') {
-      final all = decodeVariableRoot(session?.sessionVars[messageKey]);
+      final all = decodeVariableRoot(
+        session?.sessionVars[messageKeyFor(pluginId)],
+      );
       final own = all[_requireMessage(messageId)];
       return own is Map ? Map<String, dynamic>.from(own) : {};
     }
-    return decodeVariableRoot(session?.sessionVars[chatKey]);
+    return decodeVariableRoot(session?.sessionVars[chatKeyFor(pluginId)]);
   }
 
   /// Applies [change] atomically and returns the new root.
   Future<Map<String, dynamic>> update(
+    String pluginId,
     String scope,
     String? sessionId,
     void Function(Map<String, dynamic> root) change, {
     String? messageId,
   }) async {
-    if (scope == 'global') {
+    if (scope == 'global' || scope == 'shared') {
+      final file = _fileFor(pluginId, scope);
       return _serialized(() async {
-        final root = await _readGlobal();
+        final root = await _readFile(file);
         change(root);
-        await _writeGlobal(_checked(root));
+        await _writeFile(file, _checked(root));
         return root;
       });
     }
     final message = scope == 'message' ? _requireMessage(messageId) : null;
     var next = <String, dynamic>{};
     await chatRepo.updateSessionVarsJson(_requireSession(sessionId), (vars) {
-      final key = message == null ? chatKey : messageKey;
+      final key = message == null
+          ? chatKeyFor(pluginId)
+          : messageKeyFor(pluginId);
       final stored = decodeVariableRoot(vars[key] as String?);
       if (message == null) {
         next = stored;
@@ -82,18 +106,41 @@ class PluginVariableStore {
     return next;
   }
 
+  /// Drops what [pluginId] kept in chats, for an uninstall or a package from
+  /// another author taking over its id. Its `global` file goes with its
+  /// data folder.
+  Future<void> forgetPlugin(String pluginId) async {
+    final keys = {chatKeyFor(pluginId), messageKeyFor(pluginId)};
+    final ids = {
+      for (final key in keys)
+        ...await chatRepo.sessionIdsWithVarsContaining(jsonEncode(key)),
+    };
+    for (final id in ids) {
+      await chatRepo.updateSessionVarsJson(
+        id,
+        (vars) => vars..removeWhere((k, _) => keys.contains(k)),
+      );
+    }
+  }
+
   /// Drops the message-scope variables of deleted messages.
   Future<void> forgetMessages(String sessionId, Set<String> messageIds) async {
     if (messageIds.isEmpty) return;
     await chatRepo.updateSessionVarsJson(sessionId, (vars) {
-      final stored = decodeVariableRoot(vars[messageKey] as String?);
-      final before = stored.length;
-      stored.removeWhere((id, _) => messageIds.contains(id));
-      if (stored.length == before) return vars;
-      if (stored.isEmpty) {
-        vars.remove(messageKey);
-      } else {
-        vars[messageKey] = jsonEncode(stored);
+      final keys = [
+        for (final k in vars.keys)
+          if (k.startsWith('$messageKey:')) k,
+      ];
+      for (final key in keys) {
+        final stored = decodeVariableRoot(vars[key] as String?);
+        final before = stored.length;
+        stored.removeWhere((id, _) => messageIds.contains(id));
+        if (stored.length == before) continue;
+        if (stored.isEmpty) {
+          vars.remove(key);
+        } else {
+          vars[key] = jsonEncode(stored);
+        }
       }
       return vars;
     });
@@ -123,16 +170,16 @@ class PluginVariableStore {
     return encoded;
   }
 
-  Future<Map<String, dynamic>> _readGlobal() async {
-    if (!await globalFile.exists()) return {};
-    return decodeVariableRoot(await globalFile.readAsString());
+  Future<Map<String, dynamic>> _readFile(File file) async {
+    if (!await file.exists()) return {};
+    return decodeVariableRoot(await file.readAsString());
   }
 
-  Future<void> _writeGlobal(String encoded) async {
-    await globalFile.parent.create(recursive: true);
-    final tmp = File('${globalFile.path}.tmp');
+  Future<void> _writeFile(File file, String encoded) async {
+    await file.parent.create(recursive: true);
+    final tmp = File('${file.path}.tmp');
     await tmp.writeAsString(encoded, flush: true);
-    await tmp.rename(globalFile.path);
+    await tmp.rename(file.path);
   }
 
   Future<T> _serialized<T>(Future<T> Function() op) {

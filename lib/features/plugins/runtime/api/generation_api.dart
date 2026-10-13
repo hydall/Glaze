@@ -27,7 +27,6 @@ Map<String, PluginMethod> generationApi() => {
   'images.generate': const PluginMethod(
     _image,
     permission: PluginPermission.images,
-    consent: PluginConsent.images,
     summary: 'plugins_consent_image',
   ),
 };
@@ -56,6 +55,8 @@ Future<Object?> _generate(PluginCall c) async {
       {'role': 'system', 'content': options['system']},
   ];
   if (options['context'] == true) {
+    // The chat goes to the model and its reply to the plugin.
+    await c.require(PluginPermission.messages);
     final history =
         c.ref.read(chatProvider(c.host.charId)).value?.session?.messages ??
         const <ChatMessage>[];
@@ -164,12 +165,7 @@ Future<Object?> _image(PluginCall c) async {
   final mime = _imageMime(bytes);
   final saveAs = options['saveAs'];
   if (saveAs is String && saveAs.isNotEmpty) {
-    if (!c.plugin.allows(PluginPermission.files)) {
-      throw const PluginApiError(
-        'permission_denied',
-        'saveAs needs the "files" permission',
-      );
-    }
+    await c.require(PluginPermission.files);
     final info = await savePluginFile(
       c,
       saveAs,

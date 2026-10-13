@@ -15,6 +15,8 @@ import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/image_viewer.dart';
 import '../../chat/chat_provider.dart';
 import '../../chat/composer_text_bridge.dart';
+import '../models/plugin_manifest.dart';
+import '../providers/plugin_history_provider.dart';
 import '../providers/plugin_network_log_provider.dart';
 import '../services/plugin_store.dart';
 import 'plugin_api.dart';
@@ -41,7 +43,7 @@ class ChatPluginApiHost implements PluginApiHost, PluginUi {
   @override
   final PluginVariableStore variables;
   final BuildContext? Function() contextResolver;
-  final void Function(String scope, Map<String, dynamic> root)
+  final void Function(String pluginId, String scope, Map<String, dynamic> root)
   onVariablesChanged;
 
   final Map<String, PluginFileStore> _files = {};
@@ -62,8 +64,11 @@ class ChatPluginApiHost implements PluginApiHost, PluginUi {
   );
 
   @override
-  void variablesChanged(String scope, Map<String, dynamic> root) =>
-      onVariablesChanged(scope, root);
+  void variablesChanged(
+    String pluginId,
+    String scope,
+    Map<String, dynamic> root,
+  ) => onVariablesChanged(pluginId, scope, root);
 
   @override
   void networkUsed(String pluginId, String host, {required bool blocked}) =>
@@ -160,19 +165,48 @@ class ChatPluginApiHost implements PluginApiHost, PluginUi {
     return {'status': 'answered', ...answer};
   }
 
+  /// Refused actions the user was already told about, by plugin.
+  static final Set<String> _deniedToasts = {};
+
   @override
-  Future<PluginConsentAnswer> consent({
+  void denied(
+    String pluginId,
+    String pluginName,
+    String actionKey, {
+    bool shown = true,
+  }) {
+    unawaited(
+      ref.read(pluginHistoryProvider(pluginId).notifier).denied(actionKey),
+    );
+    if (!shown) return;
+    // Once per action until the app restarts: a plugin retrying, or
+    // subscribing again in every chat, is only counted in its history.
+    if (!_deniedToasts.add('$pluginId|$actionKey')) return;
+    final context = contextResolver();
+    if (context == null || !context.mounted) return;
+    final action = actionKey.tr();
+    GlazeToast.show(
+      context,
+      'plugins_denied_toast'.tr(
+        namedArgs: {'name': pluginName, 'action': action},
+      ),
+      isWarning: true,
+    );
+  }
+
+  @override
+  Future<PluginConsentAnswer?> consent({
     required String pluginName,
-    required PluginConsent kind,
+    required String permission,
     required String summary,
   }) async {
     final context = contextResolver();
-    if (context == null || !context.mounted) return PluginConsentAnswer.deny;
-    final answer = await GlazeBottomSheet.show<PluginConsentAnswer>(
+    if (context == null || !context.mounted) return null;
+    return GlazeBottomSheet.show<PluginConsentAnswer>(
       context,
       title: 'plugins_consent_title'.tr(namedArgs: {'name': pluginName}),
       bigInfo: BottomSheetBigInfo(
-        icon: kind == PluginConsent.images
+        icon: permission == PluginPermission.images
             ? Icons.image_outlined
             : Icons.edit_note_rounded,
         description: summary,
@@ -196,7 +230,6 @@ class ChatPluginApiHost implements PluginApiHost, PluginUi {
         ),
       ],
     );
-    return answer ?? PluginConsentAnswer.deny;
   }
 
   @override

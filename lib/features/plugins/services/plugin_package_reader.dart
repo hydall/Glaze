@@ -74,6 +74,14 @@ PluginPackage readPluginPackage(Uint8List bytes) {
     manifestJson = convertTavoManifest(
       _decode(files[kTavoManifestFile]!, kTavoManifestFile),
     );
+    manifestJson['permissions'] = {
+      ...(manifestJson['permissions'] as List).cast<String>(),
+      ...inferTavoPermissions([
+        for (final e in files.entries)
+          if (RegExp(r'\.(m?js|html?)$', caseSensitive: false).hasMatch(e.key))
+            utf8.decode(e.value, allowMalformed: true),
+      ]),
+    }.toList();
     files[kPluginManifestFile] = Uint8List.fromList(
       utf8.encode(const JsonEncoder.withIndent('  ').convert(manifestJson)),
     );

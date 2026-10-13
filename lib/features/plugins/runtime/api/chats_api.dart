@@ -23,24 +23,26 @@ import 'shapes.dart';
 /// `glaze.chats.*`. A chat is one session of one character; its id is the
 /// session id.
 Map<String, PluginMethod> chatsApi() => {
-  'chats.current': const PluginMethod(_current),
+  'chats.current': const PluginMethod(_current, permission: _messages),
   'chats.get': const PluginMethod(_get),
-  'chats.find': const PluginMethod(_find),
+  'chats.find': const PluginMethod(
+    _find,
+    permission: PluginPermission.chatsRead,
+  ),
   'chats.create': const PluginMethod(
     _create,
-    consent: PluginConsent.library,
+    permission: PluginPermission.chatsCreate,
     summary: 'plugins_consent_chat_create',
   ),
   'chats.update': const PluginMethod(_update),
-  'chats.open': const PluginMethod(_open),
-  'chats.copy': const PluginMethod(
-    _copy,
-    consent: PluginConsent.library,
-    summary: 'plugins_consent_chat_copy',
+  'chats.open': const PluginMethod(
+    _open,
+    permission: PluginPermission.chatsRead,
   ),
+  'chats.copy': const PluginMethod(_copy),
   'chats.remove': const PluginMethod(
     _remove,
-    consent: PluginConsent.library,
+    permission: PluginPermission.chatsDelete,
     summary: 'plugins_consent_chat_remove',
   ),
   'chats.export': const PluginMethod(
@@ -54,10 +56,18 @@ Map<String, PluginMethod> chatsApi() => {
   'chats.import': const PluginMethod(
     _import,
     permission: PluginPermission.files,
-    consent: PluginConsent.library,
-    summary: 'plugins_consent_chat_import',
   ),
 };
+
+const _messages = PluginPermission.messages;
+
+/// The open chat is covered by `messages`; any other needs `chats.read`.
+Future<ChatSession?> _readable(PluginCall c, String id) async {
+  await c.require(
+    id == c.host.sessionId ? _messages : PluginPermission.chatsRead,
+  );
+  return _session(c, id);
+}
 
 Future<ChatSession?> _session(PluginCall c, String id) async {
   final open = c.ref.read(chatProvider(c.host.charId)).value?.session;
@@ -107,7 +117,7 @@ Future<Object?> _current(PluginCall c) async {
 }
 
 Future<Object?> _get(PluginCall c) async {
-  final s = await _session(c, c.requireString(0, 'id'));
+  final s = await _readable(c, c.requireString(0, 'id'));
   return s == null ? null : chatJson(c.host, s);
 }
 
@@ -153,15 +163,16 @@ Future<Object?> _create(PluginCall c) async {
 Future<Object?> _update(PluginCall c) async {
   final data = c.mapArg(0);
   final id = data['id']?.toString() ?? c.requireSession();
-  final session = await _session(c, id);
-  if (session == null) throw PluginApiError('not_found', 'No chat $id');
   if (id != c.host.sessionId) {
-    await c.consent(PluginConsent.library, 'plugins_consent_chat_update');
-  } else if (!c.plugin.allows(PluginPermission.messages)) {
-    throw const PluginApiError(
-      'permission_denied',
-      'chats.update needs the "messages" permission',
+    await c.require(
+      PluginPermission.chatsUpdate,
+      'plugins_consent_chat_update',
     );
+  } else {
+    await c.require(_messages);
+  }
+  if (await _session(c, id) == null) {
+    throw PluginApiError('not_found', 'No chat $id');
   }
   final name = data['name'];
   if (name is String) {
@@ -239,8 +250,9 @@ Future<ChatSession> _insertCopy(
 
 Future<Object?> _copy(PluginCall c) async {
   final id = c.requireString(0, 'id');
-  final source = await _session(c, id);
+  final source = await _readable(c, id);
   if (source == null) throw PluginApiError('not_found', 'No chat $id');
+  await c.require(PluginPermission.chatsCreate, 'plugins_consent_chat_copy');
   final copy = await _insertCopy(
     c,
     source.characterId,
@@ -259,7 +271,7 @@ Future<Object?> _remove(PluginCall c) async {
 
 Future<Object?> _export(PluginCall c) async {
   final id = c.arg(0)?.toString() ?? c.requireSession();
-  final session = await _session(c, id);
+  final session = await _readable(c, id);
   if (session == null) throw PluginApiError('not_found', 'No chat $id');
   final character = await c.ref
       .read(characterRepoProvider)
@@ -304,6 +316,7 @@ Future<Object?> _inspectImport(PluginCall c) async {
 
 Future<Object?> _import(PluginCall c) async {
   final result = await _readImport(c);
+  await c.require(PluginPermission.chatsCreate, 'plugins_consent_chat_import');
   final characterId = c.mapArg(1)['characterId']?.toString() ?? c.host.charId;
   final saved = await c.ref
       .read(chatActionsServiceProvider)

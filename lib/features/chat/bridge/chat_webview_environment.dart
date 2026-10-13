@@ -89,7 +89,7 @@ final String chatWebViewRtcToken = () {
 ///
 /// Injected by the WebView itself at document start in every frame, before
 /// any page script, so a plugin cannot run first. The constructors are kept
-/// behind `__glazeRtc(key)`, which the plugin SDK calls for plugins allowed
+/// behind `__rtcGate(key)`, which the plugin SDK calls for plugins allowed
 /// to reach any host; it is a bound function, so its source (and the key)
 /// cannot be read back. The chat page keeps WebRTC.
 String _subframeGuardSource() =>
@@ -106,7 +106,7 @@ String _subframeGuardSource() =>
     }
   });
   var give = function (key) { return key === '$chatWebViewRtcToken' ? kept : null; };
-  Object.defineProperty(window, '__glazeRtc', { value: give.bind(null), configurable: true });
+  Object.defineProperty(window, '__rtcGate', { value: give.bind(null), configurable: true });
 })();
 ''';
 

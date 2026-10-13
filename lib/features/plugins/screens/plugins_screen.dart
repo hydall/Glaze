@@ -15,6 +15,7 @@ import '../../../shared/widgets/menu_group.dart';
 import '../../../shared/widgets/variation_chip.dart';
 import '../compat/tavo/tavo_manifest_converter.dart';
 import '../models/installed_plugin.dart';
+import '../models/plugin_manifest.dart';
 import '../providers/plugin_library_provider.dart';
 import '../services/plugin_compatibility.dart';
 import '../services/plugin_package_reader.dart';
@@ -127,6 +128,18 @@ Future<void> importPluginFromFile(BuildContext context, WidgetRef ref) async {
     final before = (ref.read(pluginLibraryProvider).value ?? const [])
         .where((x) => x.id == package.manifest.id)
         .firstOrNull;
+    final sameAuthor =
+        before != null && isSamePluginAuthor(before.manifest, package.manifest);
+    if (before != null) {
+      if (!context.mounted) return;
+      final proceed = await _confirmUpdate(
+        context,
+        before,
+        package.manifest,
+        sameAuthor: sameAuthor,
+      );
+      if (proceed != true) return;
+    }
     final installed = await ref
         .read(pluginLibraryProvider.notifier)
         .installPackage(package);
@@ -140,7 +153,7 @@ Future<void> importPluginFromFile(BuildContext context, WidgetRef ref) async {
     );
     // New permissions start off; offer to switch them on right away.
     final asked = installed.manifest.permissions.where(
-      (x) => !(before?.manifest.permissions.contains(x) ?? false),
+      (x) => !sameAuthor || !before.manifest.permissions.contains(x),
     );
     if (asked.isNotEmpty) {
       await showPluginPermissionsSheet(context, installed.id);
@@ -174,4 +187,57 @@ Future<bool?> _confirmUnsupported(
       onButtonTap: () => Navigator.of(context, rootNavigator: true).pop(true),
     ),
   );
+}
+
+/// Asks before [installed] is replaced by a package with the same id. A
+/// different author means a different plugin as far as Glaze can tell: it
+/// starts over, without the old one's permissions and data.
+Future<bool?> _confirmUpdate(
+  BuildContext context,
+  InstalledPlugin installed,
+  PluginManifest next, {
+  required bool sameAuthor,
+}) {
+  final locale = context.locale.toLanguageTag();
+  final name = installed.localizer(locale).resolve(installed.manifest.name);
+  final added = [
+    for (final x in next.permissions)
+      if (!installed.manifest.permissions.contains(x))
+        '• ${_permissionName(x)}',
+  ];
+  final lines = [
+    'plugins_update_version'.tr(
+      namedArgs: {'from': installed.manifest.version, 'to': next.version},
+    ),
+    if (!sameAuthor)
+      'plugins_update_author_changed'.tr(
+        namedArgs: {
+          'from': installed.manifest.author ?? '—',
+          'to': next.author ?? '—',
+        },
+      ),
+    if (sameAuthor && added.isNotEmpty) ...[
+      'plugins_update_new_permissions'.tr(),
+      ...added,
+    ],
+  ];
+  return GlazeBottomSheet.show<bool>(
+    context,
+    title: 'plugins_update_title'.tr(namedArgs: {'name': name}),
+    bigInfo: BottomSheetBigInfo(
+      icon: sameAuthor
+          ? Icons.system_update_alt_rounded
+          : Icons.gpp_maybe_outlined,
+      description: lines.join('\n'),
+      buttonText: 'plugins_update_confirm'.tr(),
+      buttonIcon: Icons.download_rounded,
+      onButtonTap: () => Navigator.of(context, rootNavigator: true).pop(true),
+    ),
+  );
+}
+
+String _permissionName(String permission) {
+  final key = 'plugins_permission_name_${permission.replaceAll('.', '_')}';
+  final text = key.tr();
+  return text == key ? permission : text;
 }

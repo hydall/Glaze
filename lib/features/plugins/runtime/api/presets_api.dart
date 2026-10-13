@@ -11,15 +11,15 @@ import 'shapes.dart';
 
 /// `glaze.presets.*` (prompt presets; objects are Glaze presets).
 Map<String, PluginMethod> presetsApi() => {
-  'presets.list': const PluginMethod(_list),
-  'presets.get': const PluginMethod(_get),
-  'presets.find': const PluginMethod(_find),
-  'presets.create': libraryWrite(_create, 'plugins_consent_preset_create'),
-  'presets.update': libraryWrite(_update, 'plugins_consent_preset_update'),
-  'presets.remove': libraryWrite(_remove, 'plugins_consent_preset_remove'),
-  'presets.import': libraryWrite(_import, 'plugins_consent_preset_import'),
-  'presets.export': const PluginMethod(_export),
-  'presets.setDefault': libraryWrite(
+  'presets.list': libraryRead(_list),
+  'presets.get': libraryRead(_get),
+  'presets.find': libraryRead(_find),
+  'presets.create': libraryCreate(_create, 'plugins_consent_preset_create'),
+  'presets.update': libraryUpdate(_update, 'plugins_consent_preset_update'),
+  'presets.remove': libraryDelete(_remove, 'plugins_consent_preset_remove'),
+  'presets.import': libraryCreate(_import, 'plugins_consent_preset_import'),
+  'presets.export': libraryRead(_export),
+  'presets.setDefault': libraryUpdate(
     _setDefault,
     'plugins_consent_preset_default',
   ),

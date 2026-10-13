@@ -8,14 +8,14 @@ import 'shapes.dart';
 /// `glaze.regex.*`: the global regex scripts. Import takes Glaze scripts or
 /// SillyTavern regex JSON (one script or a list).
 Map<String, PluginMethod> regexApi() => {
-  'regex.list': const PluginMethod(_list),
-  'regex.get': const PluginMethod(_get),
-  'regex.find': const PluginMethod(_find),
-  'regex.create': libraryWrite(_create, 'plugins_consent_regex_create'),
-  'regex.update': libraryWrite(_update, 'plugins_consent_regex_update'),
-  'regex.remove': libraryWrite(_remove, 'plugins_consent_regex_remove'),
-  'regex.import': libraryWrite(_import, 'plugins_consent_regex_import'),
-  'regex.export': const PluginMethod(_export),
+  'regex.list': libraryRead(_list),
+  'regex.get': libraryRead(_get),
+  'regex.find': libraryRead(_find),
+  'regex.create': libraryCreate(_create, 'plugins_consent_regex_create'),
+  'regex.update': libraryUpdate(_update, 'plugins_consent_regex_update'),
+  'regex.remove': libraryDelete(_remove, 'plugins_consent_regex_remove'),
+  'regex.import': libraryCreate(_import, 'plugins_consent_regex_import'),
+  'regex.export': libraryRead(_export),
 };
 
 Future<List<PresetRegex>> _all(PluginCall c) =>

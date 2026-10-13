@@ -4,7 +4,13 @@
 (function () {
   'use strict';
   var g = window.glaze;
+  if (document.currentScript) document.currentScript.remove();
   if (!g) return;
+  // The plugin sees only the `tavo` it was written for.
+  try { delete window.glaze; } catch (e) { /* kept */ }
+
+  var TAVO_VERSION = '0.93.0';
+  var TAVO_VERSION_NUMBER = 930;
 
   function missing(name) {
     return function () { return Promise.reject(new Error(name + ' is not available to this plugin')); };
@@ -469,7 +475,11 @@
       play: function () { return Promise.resolve(false); },
       stop: function () { return Promise.resolve(); },
     },
-    app: { version: fn(g.app, 'version'), versionNumber: fn(g.app, 'versionNumber') },
+    // The Tavo release whose API this layer follows.
+    app: {
+      version: function () { return Promise.resolve(TAVO_VERSION); },
+      versionNumber: function () { return Promise.resolve(TAVO_VERSION_NUMBER); },
+    },
     plugin: Object.freeze(pluginNs),
     ui: Object.freeze({ getInsets: g.ui.insets, onInsetsChanged: g.ui.onInsetsChanged }),
   };
