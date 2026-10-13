@@ -1638,12 +1638,17 @@ Code lives in `lib/features/plugins/` and `assets/chat_webview/plugins/`.
 `plugin_manifest_parser.dart`; `readPluginPackage` also checks that every
 referenced file exists and that no path escapes the package.
 
-**Permissions** (`PluginPermission`): `composer`, `messages`, `variables`,
+**Permissions** (`PluginPermission`): `composer`, `messages`, `variables`
+(the plugin's own: chat, message and global scopes), `variables.shared` (the
+`shared` scope; the variables methods check the scope they are given),
 `files`, `generate`, `images`, `network`, and the library and chats split by
-what is done: `library.read|create|update|delete` (characters, personas,
-presets, lorebooks, regex scripts, themes) and `chats.read|create|update|delete`
-(chats other than the open one; the open one is `messages`). A format 1
-manifest's old `library` stands for all eight. The manifest lists what a plugin
+what is done. Reading the library is one permission per kind,
+`library.read.characters|personas|presets|lorebooks|regex|themes`; changing it
+is `library.create|update|delete`; other chats are
+`chats.read|create|update|delete` (the open one is `messages`). Older
+manifests and saved settings are expanded on load
+(`PluginPermission.expand`): `library.read` stands for the six reads, a format
+1 manifest's `library` for all of the library and chats. The manifest lists what a plugin
 asks for; the user can take any of them away on the plugin's detail screen
 (`InstalledPlugin.revoked`), and `InstalledPlugin.allows` is the one check the
 bridge, the frame policy and the events use. The SDK still builds methods
@@ -1651,11 +1656,14 @@ whose permission was taken away, so a call reaches the app and is refused
 there. Creating, changing and deleting (`PluginPermission.asking`) and image
 generation also ask through a consent sheet: allow once, always allow
 (`InstalledPlugin.grants`) or deny, which switches the permission off; on the
-detail screen each is Ask, Always or Off. Every refusal (`permission_denied`)
-goes through `PluginBridgeService._require`: it is counted in the plugin's
-history (`pluginHistoryProvider`, `plugin_data/<id>/history.json`, shown as
-"Not allowed" on the detail screen) and the user gets one toast per plugin and
-action until the app restarts; a refused plugin is never asked again. Toasts
+detail screen each is Ask, Always or Off. Every permission check goes
+through `PluginBridgeService._require` and is counted in the plugin's request
+history (`pluginHistoryProvider`, `plugin_data/<id>/history.json`: per action,
+how often it was let through and how often not, and when last), shown on its
+own screen (`PluginHistoryScreen`) opened from the detail screen. On a refusal
+(`permission_denied`) the user also gets one toast per plugin and action until
+the app restarts; a refused plugin is never asked again. A dismissed consent
+sheet counts as not allowed without a toast. Toasts
 and the select/ask sheets a plugin opens are signed with its name
 (`GlazeToast.show(source:)`, `GlazeBottomSheet.show(source:)`), so a plugin
 cannot pass a question off as the app's. Hooks
@@ -1729,7 +1737,8 @@ Variables are per plugin: chat scope in
 `'__plugin_message_variables:<id>'` (dropped with the message), global scope
 in `plugin_data/<id>/variables.json`; the `shared` scope
 (`plugin_data/_shared_variables.json`) is the one plugins use together. Only
-the owner's frames get its values pushed, and only with `variables`. An
+the owner's frames get its values pushed, and only with `variables`; the
+`shared` scope needs `variables.shared`. An
 uninstall drops its chat variables (`PluginVariableStore.forgetPlugin`). All
 are separate from block variables.
 

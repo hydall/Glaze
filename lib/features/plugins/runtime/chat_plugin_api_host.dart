@@ -180,6 +180,11 @@ class ChatPluginApiHost implements PluginApiHost, PluginUi {
   static final Set<String> _deniedToasts = {};
 
   @override
+  void allowed(String pluginId, String actionKey) => unawaited(
+    ref.read(pluginHistoryProvider(pluginId).notifier).allowed(actionKey),
+  );
+
+  @override
   void denied(
     String pluginId,
     String pluginName,

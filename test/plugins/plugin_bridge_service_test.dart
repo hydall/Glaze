@@ -11,6 +11,7 @@ import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/core/state/db_provider.dart';
 import 'package:glaze_flutter/features/chat/composer_text_bridge.dart';
 import 'package:glaze_flutter/features/plugins/models/installed_plugin.dart';
+import 'package:glaze_flutter/features/plugins/models/plugin_manifest.dart';
 import 'package:glaze_flutter/features/plugins/providers/plugin_library_provider.dart';
 import 'package:glaze_flutter/features/plugins/runtime/plugin_api.dart';
 import 'package:glaze_flutter/features/plugins/runtime/plugin_bridge_service.dart';
@@ -105,6 +106,9 @@ class _FakeHost implements PluginApiHost {
   @override
   void networkUsed(String pluginId, String host, {required bool blocked}) =>
       network.add('$host:${blocked ? 'blocked' : 'ok'}');
+  final grants = <String>[];
+  @override
+  void allowed(String pluginId, String actionKey) => grants.add(actionKey);
   final denials = <String>[];
   @override
   void denied(
@@ -270,9 +274,58 @@ void main() {
 
   test('legacy "library" stands for every library and chat permission', () {
     final plugin = _plugin(const ['library']);
-    for (final p in ['library.read', 'library.delete', 'chats.update']) {
+    for (final p in [
+      'library.read.characters',
+      'library.read.themes',
+      'library.delete',
+      'chats.update',
+    ]) {
       expect(plugin.allows(p), isTrue, reason: p);
     }
+  });
+
+  test('legacy "library.read" stands for reading every kind', () {
+    final plugin = _plugin(const ['library.read']);
+    expect(plugin.manifest.permissions, PluginPermission.libraryReads);
+    expect(plugin.allows('library.read'), isFalse);
+  });
+
+  test('library reading is allowed kind by kind', () async {
+    final s = service(const ['library.read.personas']);
+    final personas = await call(s, 'personas.list', []);
+    expect(personas['ok'], isTrue, reason: '$personas');
+    final characters = await call(s, 'characters.list', []);
+    expect((characters['error'] as Map)['code'], 'permission_denied');
+    expect(
+      pluginMethodsFor(_plugin(const ['library.read.personas'])),
+      allOf(contains('personas.list'), isNot(contains('characters.list'))),
+    );
+  });
+
+  test('own and shared variables are separate permissions', () async {
+    final own = service(const ['variables']);
+    expect(
+      (await call(own, 'variables.set', ['a', 1, 'global']))['ok'],
+      isTrue,
+    );
+    final shared = await call(own, 'variables.set', ['a', 1, 'shared']);
+    expect((shared['error'] as Map)['code'], 'permission_denied');
+
+    final onlyShared = service(const ['variables.shared']);
+    expect(
+      (await call(onlyShared, 'variables.set', ['a', 1, 'shared']))['ok'],
+      isTrue,
+    );
+    final chat = await call(onlyShared, 'variables.get', ['a']);
+    expect((chat['error'] as Map)['code'], 'permission_denied');
+    expect(
+      pluginMethodsFor(_plugin(const ['variables.shared'])),
+      contains('variables.get'),
+    );
+    expect(
+      pluginMethodsFor(_plugin(const [])),
+      isNot(contains('variables.get')),
+    );
   });
 
   test(
@@ -316,7 +369,7 @@ void main() {
   });
 
   test('each plugin has its own variables; shared is common', () async {
-    final a = service(const ['variables']);
+    final a = service(const ['variables', 'variables.shared']);
     await call(a, 'variables.set', ['token', 'secret']);
     await call(a, 'variables.set', ['token', 'secret', 'global']);
     await call(a, 'variables.set', ['hello', 'all', 'shared']);
@@ -419,6 +472,22 @@ void main() {
       {'id': 'x'},
     ]);
     expect((out['error'] as Map)['code'], 'user_denied');
+    // Noted, without telling the user what they just did.
+    expect(host.denials.last, endsWith(':silent'));
+  });
+
+  test('the history notes what was let through and what was not', () async {
+    final s = service(const ['variables']);
+    await call(s, 'variables.get', ['a']);
+    await call(s, 'variables.get', ['a', 'shared']);
+    expect(host.grants, ['plugins_permission_name_variables']);
+    expect(host.denials, ['plugins_permission_name_variables_shared']);
+
+    host.ui.answer = PluginConsentAnswer.once;
+    await call(service(const ['library.update']), 'personas.update', [
+      {'id': 'x'},
+    ]);
+    expect(host.grants.last, startsWith('plugins_consent_'));
   });
 
   test('files stay inside the plugin folder', () async {

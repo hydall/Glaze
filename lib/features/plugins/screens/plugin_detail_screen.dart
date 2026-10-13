@@ -21,6 +21,7 @@ import '../providers/plugin_history_provider.dart';
 import '../providers/plugin_hub_provider.dart';
 import '../providers/plugin_library_provider.dart';
 import '../providers/plugin_network_log_provider.dart';
+import 'plugin_history_screen.dart';
 import 'plugin_hub_sheet.dart';
 import 'plugin_settings_form.dart';
 import '../widgets/plugin_text_widgets.dart';
@@ -262,11 +263,17 @@ class PluginDetailScreen extends ConsumerWidget {
     PluginPermission.composer: Icons.edit_note_rounded,
     PluginPermission.messages: Icons.chat_bubble_outline_rounded,
     PluginPermission.variables: Icons.data_object_rounded,
+    PluginPermission.variablesShared: Icons.share_outlined,
     PluginPermission.files: Icons.folder_outlined,
     PluginPermission.generate: Icons.auto_awesome_outlined,
     PluginPermission.images: Icons.image_outlined,
     PluginPermission.network: Icons.public_rounded,
-    PluginPermission.libraryRead: Icons.library_books_outlined,
+    PluginPermission.charactersRead: Icons.person_outline_rounded,
+    PluginPermission.personasRead: Icons.badge_outlined,
+    PluginPermission.presetsRead: Icons.tune_rounded,
+    PluginPermission.lorebooksRead: Icons.menu_book_outlined,
+    PluginPermission.regexRead: Icons.code_rounded,
+    PluginPermission.themesRead: Icons.palette_outlined,
     PluginPermission.libraryCreate: Icons.library_add_outlined,
     PluginPermission.libraryUpdate: Icons.edit_outlined,
     PluginPermission.libraryDelete: Icons.delete_outline_rounded,
@@ -419,9 +426,7 @@ void confirmPluginUninstall(
       onButtonTap: () async {
         Navigator.of(context, rootNavigator: true).pop();
         await ref.read(pluginLibraryProvider.notifier).uninstall(plugin.id);
-        if (closeScreen &&
-            context.mounted &&
-            Navigator.of(context).canPop()) {
+        if (closeScreen && context.mounted && Navigator.of(context).canPop()) {
           Navigator.of(context).pop();
         }
       },
@@ -611,6 +616,7 @@ class _NetworkLog extends ConsumerWidget {
 }
 
 /// What the plugin tried and was not allowed to do.
+/// The row opening the plugin's request history, with what it holds.
 class _History extends ConsumerWidget {
   const _History({required this.plugin});
 
@@ -618,34 +624,26 @@ class _History extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final denied =
-        ref.watch(pluginHistoryProvider(plugin.id)).value ?? const {};
-    if (denied.isEmpty) return const SizedBox.shrink();
-    final entries = denied.values.toList()
-      ..sort((a, b) => b.lastSeen.compareTo(a.lastSeen));
-    final format = DateFormat.MMMd(context.locale.toLanguageTag()).add_Hm();
+    final records =
+        ref.watch(pluginHistoryProvider(plugin.id)).value?.values ??
+        const <PluginRequestRecord>[];
+    final denied = records.where((r) => r.denied > 0).length;
+    final allowed = records.where((r) => r.allowed > 0).length;
     return MenuGroup(
-      header: 'plugins_history'.tr(),
-      headerIcon: Icons.history_rounded,
-      description: 'plugins_history_hint'.tr(),
       items: [
-        for (final d in entries)
-          MenuItem(
-            icon: Icons.block_rounded,
-            label: PluginDetailScreen._text(d.action, d.action),
-            subtitle: 'plugins_history_count'.tr(
-              namedArgs: {'count': '${d.count}'},
-            ),
-            value: format.format(
-              DateTime.fromMillisecondsSinceEpoch(d.lastSeen),
-            ),
-            onTap: () {},
-          ),
         MenuItem(
-          icon: Icons.delete_sweep_outlined,
-          label: 'plugins_history_clear'.tr(),
-          onTap: () =>
-              ref.read(pluginHistoryProvider(plugin.id).notifier).clear(),
+          icon: Icons.history_rounded,
+          label: 'plugins_history_title'.tr(),
+          subtitle: records.isEmpty
+              ? 'plugins_history_empty_short'.tr()
+              : 'plugins_history_summary'.tr(
+                  namedArgs: {'allowed': '$allowed', 'denied': '$denied'},
+                ),
+          trailing: Icon(
+            Icons.chevron_right_rounded,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+          onTap: () => openPluginHistoryScreen(context, plugin.id),
         ),
       ],
     );

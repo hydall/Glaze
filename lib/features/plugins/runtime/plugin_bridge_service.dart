@@ -69,11 +69,15 @@ Future<Object?> _subscribe(PluginCall c) async {
 /// is refused with a toast rather than failing as a missing function.
 List<String> pluginMethodsFor(InstalledPlugin plugin) => [
   for (final e in pluginMethodRegistry.entries)
-    if (!e.value.internal &&
-        (e.value.permission == null ||
-            plugin.manifest.hasPermission(e.value.permission!)))
-      e.key,
+    if (!e.value.internal && _exposed(e.value, plugin)) e.key,
 ];
+
+bool _exposed(PluginMethod method, InstalledPlugin plugin) {
+  final permission = method.permission;
+  if (permission != null) return plugin.manifest.hasPermission(permission);
+  return method.exposedBy.isEmpty ||
+      method.exposedBy.any(plugin.manifest.hasPermission);
+}
 
 /// Dispatches `{pluginId, method, params, messageId?}` requests from the
 /// chat WebView's plugin host.
@@ -196,16 +200,19 @@ class PluginBridgeService {
       );
     }
 
+    void grant() =>
+        host.allowed(plugin.id, pluginActionKey(permission, summary));
+
     final live = pluginById(plugin.id) ?? plugin;
     if (!live.allows(permission)) refuse();
-    if (!PluginPermission.asking.contains(permission)) return;
+    if (!PluginPermission.asking.contains(permission)) return grant();
 
     final run = _consentQueue.then((_) async {
       final current = pluginById(plugin.id) ?? plugin;
       if (!current.allows(permission)) refuse();
       if (current.grants.contains(permission) ||
           (_allowed[plugin.id]?.contains(permission) ?? false)) {
-        return;
+        return grant();
       }
       final answer = await host.ui.consent(
         pluginName: pluginName(current),
@@ -214,15 +221,23 @@ class PluginBridgeService {
       );
       switch (answer) {
         case null:
+          // Dismissed: not allowed this time, and asked again next time.
+          host.denied(
+            plugin.id,
+            pluginName(plugin),
+            pluginActionKey(permission, summary),
+            shown: false,
+          );
           throw const PluginApiError('user_denied', 'The user declined');
         case PluginConsentAnswer.deny:
           await onDeny(plugin.id, permission);
           refuse(shown: false);
         case PluginConsentAnswer.once:
-          return;
+          grant();
         case PluginConsentAnswer.always:
           (_allowed[plugin.id] ??= {}).add(permission);
           await onAlwaysAllow(plugin.id, permission);
+          grant();
       }
     });
     _consentQueue = run.then((_) {}, onError: (_) {});

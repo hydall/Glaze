@@ -214,7 +214,7 @@ void main() {
           'tavo.chat.copy(id)',
         ]),
         {
-          'library.read',
+          'library.read.characters',
           'library.create',
           'library.update',
           'chats.delete',
@@ -238,7 +238,7 @@ void main() {
       expect(m.defaultLocale, 'en');
       expect(m.permissions, containsAll(['composer', 'variables', 'tts']));
       // Library and chat access is read off the scripts, not granted.
-      expect(m.permissions, isNot(contains('library.read')));
+      expect(m.permissions, isNot(contains('library.read.characters')));
       expect(m.permissions, isNot(contains('images')));
       expect(m.composerActions.single.id, 'note');
       expect(m.toolsActions.single.id, 'open');
@@ -380,7 +380,10 @@ void main() {
         package(['composer', 'network', 'library']),
       );
       expect(installed.revoked, installed.manifest.permissions.toSet());
-      expect(installed.revoked, containsAll(['library.read', 'chats.delete']));
+      expect(
+        installed.revoked,
+        containsAll(['library.read.characters', 'chats.delete']),
+      );
       expect(installed.networkHosts, isEmpty);
       expect(installed.localNetwork, isFalse);
       expect(installed.allowsHost('api.example.com'), isFalse);

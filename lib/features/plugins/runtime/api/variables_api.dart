@@ -6,20 +6,32 @@ import '../plugin_variable_paths.dart';
 /// scope)`, `update(name, value, scope)` (shallow merge), `delete(name, scope)`.
 /// Scope is `'chat'` (default), `'global'`, `{ scope: 'message', id }` or
 /// `'shared'`. Each plugin has its own variables; `shared` is the space all
-/// plugins read and write together.
+/// plugins read and write together. The plugin's own variables need
+/// `variables`, the shared ones `variables.shared`.
 Map<String, PluginMethod> variablesApi() => {
-  'variables.list': const PluginMethod(_list, permission: _p),
-  'variables.get': const PluginMethod(_get, permission: _p),
-  'variables.set': const PluginMethod(_set, permission: _p),
-  'variables.update': const PluginMethod(_update, permission: _p),
-  'variables.delete': const PluginMethod(_delete, permission: _p),
+  'variables.list': const PluginMethod(_list, exposedBy: _p),
+  'variables.get': const PluginMethod(_get, exposedBy: _p),
+  'variables.set': const PluginMethod(_set, exposedBy: _p),
+  'variables.update': const PluginMethod(_update, exposedBy: _p),
+  'variables.delete': const PluginMethod(_delete, exposedBy: _p),
 };
 
-const _p = PluginPermission.variables;
+const _p = [PluginPermission.variables, PluginPermission.variablesShared];
 
 typedef _Scope = ({String scope, String? messageId});
 
-_Scope _scope(PluginCall c, int index) {
+/// The scope argument at [index], once the plugin may use it.
+Future<_Scope> _scope(PluginCall c, int index) async {
+  final scope = _parse(c, index);
+  await c.require(
+    scope.scope == 'shared'
+        ? PluginPermission.variablesShared
+        : PluginPermission.variables,
+  );
+  return scope;
+}
+
+_Scope _parse(PluginCall c, int index) {
   final raw = c.arg(index);
   if (raw is Map) {
     final scope = raw['scope'];
@@ -39,18 +51,19 @@ String _named(Object? scope) =>
 Future<Map<String, dynamic>> _read(PluginCall c, _Scope s) => c.host.variables
     .read(c.plugin.id, s.scope, c.host.sessionId, messageId: s.messageId);
 
-Future<Object?> _list(PluginCall c) => _read(c, _scope(c, 0));
+Future<Object?> _list(PluginCall c) async => _read(c, await _scope(c, 0));
 
 Future<Object?> _get(PluginCall c) async {
-  final root = await _read(c, _scope(c, 1));
+  final root = await _read(c, await _scope(c, 1));
   return readVariablePath(root, splitVariablePath(c.arg(0)));
 }
 
 Future<void> _write(
   PluginCall c,
-  _Scope s,
+  int scopeIndex,
   void Function(Map<String, dynamic> root, List<String> path) change,
 ) async {
+  final s = await _scope(c, scopeIndex);
   final path = splitVariablePath(c.arg(0));
   final root = await c.host.variables.update(
     c.plugin.id,
@@ -66,7 +79,7 @@ Future<void> _write(
 
 Future<Object?> _set(PluginCall c) async {
   final value = jsonClone(c.arg(1));
-  await _write(c, _scope(c, 2), (root, path) {
+  await _write(c, 2, (root, path) {
     writeVariablePath(root, path, value);
   });
   return null;
@@ -74,7 +87,7 @@ Future<Object?> _set(PluginCall c) async {
 
 Future<Object?> _update(PluginCall c) async {
   final value = jsonClone(c.arg(1));
-  await _write(c, _scope(c, 2), (root, path) {
+  await _write(c, 2, (root, path) {
     writeVariablePath(
       root,
       path,
@@ -86,7 +99,7 @@ Future<Object?> _update(PluginCall c) async {
 
 Future<Object?> _delete(PluginCall c) async {
   var removed = false;
-  await _write(c, _scope(c, 1), (root, path) {
+  await _write(c, 1, (root, path) {
     removed = removeVariablePath(root, path);
   });
   return removed;

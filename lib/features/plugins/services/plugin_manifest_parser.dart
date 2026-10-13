@@ -84,15 +84,11 @@ PluginManifest parsePluginManifest(Object? json) {
     throw const PluginManifestException('locales must be an object');
   }
 
-  final permissions = <String>{
+  final permissions = PluginPermission.expand([
     for (final p
         in (raw['permissions'] is List ? raw['permissions'] as List : const []))
-      if (p == PluginPermission.legacyLibrary) ...[
-        ...PluginPermission.library,
-        ...PluginPermission.chats,
-      ] else if (p is String)
-        p,
-  }.toList();
+      if (p is String) p,
+  ]).toList();
 
   final hosts = <String>[];
   final rawHosts = raw['hosts'];

@@ -36,14 +36,27 @@ abstract final class PluginPermission {
 
   /// The open chat: its messages, memory and events.
   static const messages = 'messages';
+
+  /// The plugin's own variables: per chat, per message and global.
   static const variables = 'variables';
+
+  /// The `shared` variables every plugin reads and writes together.
+  static const variablesShared = 'variables.shared';
   static const files = 'files';
   static const generate = 'generate';
   static const images = 'images';
   static const network = 'network';
 
-  /// Characters, personas, presets, lorebooks, regex scripts and themes.
-  static const libraryRead = 'library.read';
+  /// Reading the library, one permission per kind of item.
+  static const charactersRead = 'library.read.characters';
+  static const personasRead = 'library.read.personas';
+  static const presetsRead = 'library.read.presets';
+  static const lorebooksRead = 'library.read.lorebooks';
+  static const regexRead = 'library.read.regex';
+  static const themesRead = 'library.read.themes';
+
+  /// Changing the library: characters, personas, presets, lorebooks, regex
+  /// scripts and themes.
   static const libraryCreate = 'library.create';
   static const libraryUpdate = 'library.update';
   static const libraryDelete = 'library.delete';
@@ -58,8 +71,21 @@ abstract final class PluginPermission {
   /// [library] and [chats].
   static const legacyLibrary = 'library';
 
+  /// Written before reading was split by kind; stands for all of
+  /// [libraryReads].
+  static const legacyLibraryRead = 'library.read';
+
+  static const libraryReads = [
+    charactersRead,
+    personasRead,
+    presetsRead,
+    lorebooksRead,
+    regexRead,
+    themesRead,
+  ];
+
   static const library = [
-    libraryRead,
+    ...libraryReads,
     libraryCreate,
     libraryUpdate,
     libraryDelete,
@@ -70,6 +96,7 @@ abstract final class PluginPermission {
     composer,
     messages,
     variables,
+    variablesShared,
     files,
     generate,
     images,
@@ -79,6 +106,19 @@ abstract final class PluginPermission {
   };
 
   /// Permissions that ask the user each time unless set to always allow.
+  /// [names] with the permissions that were split up replaced by their
+  /// parts.
+  static Set<String> expand(Iterable<String> names) => {
+    for (final p in names)
+      if (p == legacyLibrary) ...[
+        ...library,
+        ...chats,
+      ] else if (p == legacyLibraryRead)
+        ...libraryReads
+      else
+        p,
+  };
+
   static const asking = {
     images,
     libraryCreate,

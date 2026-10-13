@@ -114,13 +114,15 @@ class PluginStore {
     );
   }
 
-  /// Grants and revocations saved before `library` was split up.
+  /// Grants and revocations saved before `library` and `library.read` were
+  /// split up. A grant only matters for permissions that ask, so an old one
+  /// stands for those alone.
   static Set<String> _expandLegacy(Set<String> names, {required bool read}) {
-    if (!names.remove(PluginPermission.legacyLibrary)) return names;
+    final expanded = PluginPermission.expand(names);
+    if (read) return expanded;
     return {
-      ...names,
-      for (final p in [...PluginPermission.library, ...PluginPermission.chats])
-        if (read || PluginPermission.asking.contains(p)) p,
+      for (final p in expanded)
+        if (names.contains(p) || PluginPermission.asking.contains(p)) p,
     };
   }
 
@@ -267,7 +269,9 @@ class PluginStore {
         .toList();
     files.sort((a, b) => a.path.compareTo(b.path));
     for (final file in files) {
-      final name = p.posix.joinAll(p.split(p.relative(file.path, from: dir.path)));
+      final name = p.posix.joinAll(
+        p.split(p.relative(file.path, from: dir.path)),
+      );
       if (converted && name == kPluginManifestFile) continue;
       archive.addFile(ArchiveFile.bytes(name, await file.readAsBytes()));
     }

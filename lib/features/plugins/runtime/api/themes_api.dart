@@ -6,6 +6,7 @@ import '../../../../shared/theme/theme_preset.dart';
 import '../../../../shared/theme/theme_provider.dart';
 import '../../../../core/utils/id_generator.dart';
 import '../../providers/plugin_library_provider.dart';
+import '../../models/plugin_manifest.dart';
 import '../plugin_api.dart';
 import 'files_api.dart';
 import 'library_io.dart';
@@ -14,18 +15,18 @@ import 'shapes.dart';
 /// `glaze.themes.*` and `glaze.themes.assets.*` (files that belong to one
 /// theme, e.g. images its CSS uses).
 Map<String, PluginMethod> themesApi() => {
-  'themes.list': libraryRead(_list),
-  'themes.get': libraryRead(_get),
-  'themes.find': libraryRead(_find),
-  'themes.current': libraryRead(_current),
+  'themes.list': libraryRead(PluginPermission.themesRead, _list),
+  'themes.get': libraryRead(PluginPermission.themesRead, _get),
+  'themes.find': libraryRead(PluginPermission.themesRead, _find),
+  'themes.current': libraryRead(PluginPermission.themesRead, _current),
   'themes.create': libraryCreate(_create, 'plugins_consent_theme_create'),
   'themes.update': libraryUpdate(_update, 'plugins_consent_theme_update'),
   'themes.remove': libraryDelete(_remove, 'plugins_consent_theme_remove'),
   'themes.apply': libraryUpdate(_apply, 'plugins_consent_theme_apply'),
   'themes.import': libraryCreate(_import, 'plugins_consent_theme_import'),
-  'themes.export': libraryRead(_export),
-  'themes.assets.list': libraryRead(_assetList),
-  'themes.assets.load': libraryRead(_assetLoad),
+  'themes.export': libraryRead(PluginPermission.themesRead, _export),
+  'themes.assets.list': libraryRead(PluginPermission.themesRead, _assetList),
+  'themes.assets.load': libraryRead(PluginPermission.themesRead, _assetLoad),
   'themes.assets.save': libraryUpdate(
     _assetSave,
     'plugins_consent_theme_update',

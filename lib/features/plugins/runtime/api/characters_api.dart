@@ -24,10 +24,10 @@ import 'shapes.dart';
 
 /// `glaze.characters.*`.
 Map<String, PluginMethod> charactersApi() => {
-  'characters.list': libraryRead(_list),
-  'characters.get': libraryRead(_get),
-  'characters.find': libraryRead(_find),
-  'characters.current': libraryRead(_current),
+  'characters.list': libraryRead(PluginPermission.charactersRead, _list),
+  'characters.get': libraryRead(PluginPermission.charactersRead, _get),
+  'characters.find': libraryRead(PluginPermission.charactersRead, _find),
+  'characters.current': libraryRead(PluginPermission.charactersRead, _current),
   'characters.create': libraryCreate(
     _create,
     'plugins_consent_character_create',
@@ -44,7 +44,7 @@ Map<String, PluginMethod> charactersApi() => {
     _import,
     'plugins_consent_character_import',
   ),
-  'characters.export': libraryRead(_export),
+  'characters.export': libraryRead(PluginPermission.charactersRead, _export),
 };
 
 Future<List<Character>> _all(PluginCall c) =>

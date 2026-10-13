@@ -8,41 +8,67 @@ import 'package:path/path.dart' as p;
 
 import 'plugin_library_provider.dart';
 
-/// One kind of thing a plugin was stopped from doing.
-class PluginDenial {
-  const PluginDenial({
+/// One kind of thing a plugin asked for: how often it was let through and
+/// how often it was stopped.
+class PluginRequestRecord {
+  const PluginRequestRecord({
     required this.action,
-    required this.count,
-    required this.lastSeen,
+    this.allowed = 0,
+    this.lastAllowed = 0,
+    this.denied = 0,
+    this.lastDenied = 0,
   });
 
-  /// Translation key naming the attempt.
+  /// Translation key naming the request (see `pluginActionKey`).
   final String action;
-  final int count;
+  final int allowed;
+  final int denied;
 
-  /// Milliseconds since epoch.
-  final int lastSeen;
+  /// Milliseconds since epoch; 0 for never.
+  final int lastAllowed;
+  final int lastDenied;
 
-  Map<String, Object?> toJson() => {'count': count, 'lastSeen': lastSeen};
+  int get lastSeen => lastAllowed > lastDenied ? lastAllowed : lastDenied;
 
-  static PluginDenial fromJson(String action, Map<dynamic, dynamic> json) =>
-      PluginDenial(
+  PluginRequestRecord _count({required bool allowed, required int at}) =>
+      PluginRequestRecord(
         action: action,
-        count: (json['count'] as num?)?.toInt() ?? 0,
-        lastSeen: (json['lastSeen'] as num?)?.toInt() ?? 0,
+        allowed: this.allowed + (allowed ? 1 : 0),
+        lastAllowed: allowed ? at : lastAllowed,
+        denied: denied + (allowed ? 0 : 1),
+        lastDenied: allowed ? lastDenied : at,
+      );
+
+  Map<String, Object?> toJson() => {
+    'allowed': allowed,
+    'lastAllowed': lastAllowed,
+    'denied': denied,
+    'lastDenied': lastDenied,
+  };
+
+  static int _int(Object? v) => (v as num?)?.toInt() ?? 0;
+
+  static PluginRequestRecord fromJson(String action, Map<dynamic, dynamic> j) =>
+      PluginRequestRecord(
+        action: action,
+        allowed: _int(j['allowed']),
+        lastAllowed: _int(j['lastAllowed']),
+        denied: _int(j['denied']),
+        lastDenied: _int(j['lastDenied']),
       );
 }
 
-/// What a plugin tried and was not allowed to do, by plugin id, kept in
-/// `<plugin_data>/<id>/history.json`.
+/// What a plugin asked to use and whether it was let through, by plugin
+/// id, kept in `<plugin_data>/<id>/history.json`.
 final pluginHistoryProvider =
     AsyncNotifierProvider.family<
       PluginHistoryNotifier,
-      Map<String, PluginDenial>,
+      Map<String, PluginRequestRecord>,
       String
     >(PluginHistoryNotifier.new);
 
-class PluginHistoryNotifier extends AsyncNotifier<Map<String, PluginDenial>> {
+class PluginHistoryNotifier
+    extends AsyncNotifier<Map<String, PluginRequestRecord>> {
   PluginHistoryNotifier(this.pluginId);
 
   final String pluginId;
@@ -56,18 +82,37 @@ class PluginHistoryNotifier extends AsyncNotifier<Map<String, PluginDenial>> {
   }
 
   @override
-  Future<Map<String, PluginDenial>> build() async {
+  Future<Map<String, PluginRequestRecord>> build() async {
     ref.onDispose(() => _flush?.cancel());
     try {
       final file = await _file;
       if (!await file.exists()) return const {};
       final json = jsonDecode(await file.readAsString());
-      final denied = json is Map ? json['denied'] : null;
+      if (json is! Map) return const {};
+      final requests = json['requests'];
+      if (requests is Map) {
+        return {
+          for (final e in requests.entries)
+            if (e.value is Map)
+              '${e.key}': PluginRequestRecord.fromJson(
+                '${e.key}',
+                e.value as Map,
+              ),
+        };
+      }
+      // Kept refusals only, before allowed requests were counted too.
+      final denied = json['denied'];
       if (denied is! Map) return const {};
       return {
         for (final e in denied.entries)
           if (e.value is Map)
-            '${e.key}': PluginDenial.fromJson('${e.key}', e.value as Map),
+            '${e.key}': PluginRequestRecord(
+              action: '${e.key}',
+              denied: PluginRequestRecord._int((e.value as Map)['count']),
+              lastDenied: PluginRequestRecord._int(
+                (e.value as Map)['lastSeen'],
+              ),
+            ),
       };
     } catch (e) {
       debugPrint('[PluginHistory] $pluginId unreadable: $e');
@@ -75,15 +120,18 @@ class PluginHistoryNotifier extends AsyncNotifier<Map<String, PluginDenial>> {
     }
   }
 
-  Future<void> denied(String action) async {
+  Future<void> allowed(String action) => _count(action, allowed: true);
+
+  Future<void> denied(String action) => _count(action, allowed: false);
+
+  Future<void> _count(String action, {required bool allowed}) async {
     final current = await future;
     final now = DateTime.now().millisecondsSinceEpoch;
     final next = {
       ...current,
-      action: PluginDenial(
-        action: action,
-        count: (current[action]?.count ?? 0) + 1,
-        lastSeen: now,
+      action: (current[action] ?? PluginRequestRecord(action: action))._count(
+        allowed: allowed,
+        at: now,
       ),
     };
     if (next.length > maxEntries) {
@@ -105,13 +153,15 @@ class PluginHistoryNotifier extends AsyncNotifier<Map<String, PluginDenial>> {
   }
 
   Future<void> _write() async {
-    final denied = state.value ?? const {};
+    final requests = state.value ?? const {};
     try {
       final file = await _file;
       await file.parent.create(recursive: true);
       await file.writeAsString(
         jsonEncode({
-          'denied': {for (final e in denied.entries) e.key: e.value.toJson()},
+          'requests': {
+            for (final e in requests.entries) e.key: e.value.toJson(),
+          },
         }),
       );
     } catch (e) {

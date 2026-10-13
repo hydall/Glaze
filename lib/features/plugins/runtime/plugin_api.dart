@@ -88,6 +88,10 @@ abstract interface class PluginApiHost {
   /// through the app.
   void networkUsed(String pluginId, String host, {required bool blocked});
 
+  /// Notes in [pluginId]'s history that it was let through to do what
+  /// [actionKey] (see [pluginActionKey]) names.
+  void allowed(String pluginId, String actionKey);
+
   /// Tells the user [pluginName] was stopped from doing what [actionKey]
   /// (see [pluginActionKey]) names and notes it in the plugin's history;
   /// [shown] is false when the user just said no themselves.
@@ -200,9 +204,14 @@ class PluginMethod {
     this.permission,
     this.summary,
     this.internal = false,
+    this.exposedBy = const [],
   });
   final PluginOperation run;
   final String? permission;
+
+  /// For a method whose permission depends on its arguments (checked when
+  /// it runs): the manifest permissions that make it part of the API.
+  final List<String> exposedBy;
 
   /// Called by the host page on the plugin's behalf, not part of the API.
   final bool internal;

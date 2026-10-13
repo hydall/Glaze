@@ -38,10 +38,10 @@ Future<Object?> exportJson(
 
 String? refId(Object? v) => (v is Map ? v['id'] : v)?.toString();
 
-/// Library method reading characters, personas, presets, lorebooks, regex
-/// scripts or themes.
-PluginMethod libraryRead(PluginOperation run) =>
-    PluginMethod(run, permission: PluginPermission.libraryRead);
+/// Library method reading one kind of item; [permission] is that kind's
+/// read permission.
+PluginMethod libraryRead(String permission, PluginOperation run) =>
+    PluginMethod(run, permission: permission);
 
 /// Library method that adds things.
 PluginMethod libraryCreate(PluginOperation run, String summary) => PluginMethod(

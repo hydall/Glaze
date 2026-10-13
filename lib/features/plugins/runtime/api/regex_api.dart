@@ -1,6 +1,7 @@
 import '../../../../core/models/preset.dart';
 import '../../../../core/state/global_regex_provider.dart';
 import '../../../../core/utils/id_generator.dart';
+import '../../models/plugin_manifest.dart';
 import '../plugin_api.dart';
 import 'library_io.dart';
 import 'shapes.dart';
@@ -8,14 +9,14 @@ import 'shapes.dart';
 /// `glaze.regex.*`: the global regex scripts. Import takes Glaze scripts or
 /// SillyTavern regex JSON (one script or a list).
 Map<String, PluginMethod> regexApi() => {
-  'regex.list': libraryRead(_list),
-  'regex.get': libraryRead(_get),
-  'regex.find': libraryRead(_find),
+  'regex.list': libraryRead(PluginPermission.regexRead, _list),
+  'regex.get': libraryRead(PluginPermission.regexRead, _get),
+  'regex.find': libraryRead(PluginPermission.regexRead, _find),
   'regex.create': libraryCreate(_create, 'plugins_consent_regex_create'),
   'regex.update': libraryUpdate(_update, 'plugins_consent_regex_update'),
   'regex.remove': libraryDelete(_remove, 'plugins_consent_regex_remove'),
   'regex.import': libraryCreate(_import, 'plugins_consent_regex_import'),
-  'regex.export': libraryRead(_export),
+  'regex.export': libraryRead(PluginPermission.regexRead, _export),
 };
 
 Future<List<PresetRegex>> _all(PluginCall c) =>

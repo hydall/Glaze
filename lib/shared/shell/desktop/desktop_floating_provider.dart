@@ -21,6 +21,8 @@ const desktopFloatingViews = <String, String?>{
   'plugins': null,
   // `?id=<plugin>`.
   'plugin-detail': null,
+  // `?id=<plugin>`.
+  'plugin-history': null,
   // `?id=<character>`, or `?new=<id>` for a character not yet created.
   'character-editor': null,
   // `?preset=<id>&block=<id>`: works on the preset editor it was opened from.

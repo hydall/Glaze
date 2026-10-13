@@ -60,20 +60,17 @@ Set<String> inferTavoPermissions(Iterable<String> sources) {
         if (method == 'copy') found.add(PluginPermission.chatsRead);
         continue;
       }
+      final read = _reads[ns]!;
       final p = asset
           ? switch (method) {
-              'list' || 'export' => PluginPermission.libraryRead,
+              'list' || 'export' => read,
               'import' ||
               'rename' ||
               'delete' => PluginPermission.libraryUpdate,
               _ => null,
             }
           : switch (method) {
-              'all' ||
-              'get' ||
-              'find' ||
-              'current' ||
-              'export' => PluginPermission.libraryRead,
+              'all' || 'get' || 'find' || 'current' || 'export' => read,
               'create' || 'import' => PluginPermission.libraryCreate,
               'update' => PluginPermission.libraryUpdate,
               'delete' => PluginPermission.libraryDelete,
@@ -84,6 +81,15 @@ Set<String> inferTavoPermissions(Iterable<String> sources) {
   }
   return found;
 }
+
+const _reads = {
+  'character': PluginPermission.charactersRead,
+  'persona': PluginPermission.personasRead,
+  'preset': PluginPermission.presetsRead,
+  'lorebook': PluginPermission.lorebooksRead,
+  'regex': PluginPermission.regexRead,
+  'theme': PluginPermission.themesRead,
+};
 
 const _settingTypes = {
   'switch': 'toggle',

@@ -5,20 +5,21 @@ import '../../../../core/state/active_selection_provider.dart';
 import '../../../../core/utils/id_generator.dart';
 import '../../../presets/preset_export.dart';
 import '../../../presets/preset_list_provider.dart';
+import '../../models/plugin_manifest.dart';
 import '../plugin_api.dart';
 import 'library_io.dart';
 import 'shapes.dart';
 
 /// `glaze.presets.*` (prompt presets; objects are Glaze presets).
 Map<String, PluginMethod> presetsApi() => {
-  'presets.list': libraryRead(_list),
-  'presets.get': libraryRead(_get),
-  'presets.find': libraryRead(_find),
+  'presets.list': libraryRead(PluginPermission.presetsRead, _list),
+  'presets.get': libraryRead(PluginPermission.presetsRead, _get),
+  'presets.find': libraryRead(PluginPermission.presetsRead, _find),
   'presets.create': libraryCreate(_create, 'plugins_consent_preset_create'),
   'presets.update': libraryUpdate(_update, 'plugins_consent_preset_update'),
   'presets.remove': libraryDelete(_remove, 'plugins_consent_preset_remove'),
   'presets.import': libraryCreate(_import, 'plugins_consent_preset_import'),
-  'presets.export': libraryRead(_export),
+  'presets.export': libraryRead(PluginPermission.presetsRead, _export),
   'presets.setDefault': libraryUpdate(
     _setDefault,
     'plugins_consent_preset_default',
