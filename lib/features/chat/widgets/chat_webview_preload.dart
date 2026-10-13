@@ -98,7 +98,10 @@ class _ChatWebViewPreloaderState extends State<ChatWebViewPreloader> {
                     _handlePreloadProcessGone();
                   },
                   shouldOverrideUrlLoading: (controller, request) async {
-                    return chatWebViewNavigationPolicy(request.request.url);
+                    return chatWebViewNavigationPolicy(
+                      request.request.url,
+                      mainFrame: request.isForMainFrame,
+                    );
                   },
                 ),
               ),

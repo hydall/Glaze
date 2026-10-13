@@ -221,6 +221,36 @@ void main() {
       );
     });
 
+    test('lets frames inside the page load only inline content', () {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      setChatWebViewAssetBaseUrlForTesting(WebUri('http://127.0.0.1:51234/'));
+
+      for (final url in ['about:srcdoc', 'about:blank']) {
+        expect(
+          chatWebViewNavigationPolicy(WebUri(url), mainFrame: false),
+          NavigationActionPolicy.ALLOW,
+          reason: url,
+        );
+        expect(
+          chatWebViewNavigationPolicy(WebUri(url)),
+          NavigationActionPolicy.CANCEL,
+          reason: url,
+        );
+      }
+      for (final url in [
+        'https://example.com/',
+        'http://127.0.0.1:51234/index.html',
+        'data:text/html,hi',
+        'about:blank?x',
+      ]) {
+        expect(
+          chatWebViewNavigationPolicy(WebUri(url), mainFrame: false),
+          NavigationActionPolicy.CANCEL,
+          reason: url,
+        );
+      }
+    });
+
     test('allows the loopback bootstrap navigation on Windows', () {
       debugDefaultTargetPlatformOverride = TargetPlatform.windows;
       setChatWebViewAssetBaseUrlForTesting(WebUri('http://127.0.0.1:51234/'));

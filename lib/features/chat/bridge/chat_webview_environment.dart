@@ -141,8 +141,24 @@ URLRequest? chatWebViewInitialUrlRequest() {
   return null;
 }
 
-NavigationActionPolicy chatWebViewNavigationPolicy(WebUri? url) {
+/// Whether the chat WebView may go to [url]. Only the page itself loads in
+/// the main frame. A frame inside it may only take inline content
+/// (`about:srcdoc`, `about:blank`): message HTML and plugin frames are all
+/// built that way. iOS asks about those too, and turning them down left
+/// every such frame empty there.
+NavigationActionPolicy chatWebViewNavigationPolicy(
+  WebUri? url, {
+  bool mainFrame = true,
+}) {
   if (url == null) return NavigationActionPolicy.CANCEL;
+
+  if (!mainFrame) {
+    return url.scheme == 'about' &&
+            (url.path == 'srcdoc' || url.path == 'blank') &&
+            !url.hasQuery
+        ? NavigationActionPolicy.ALLOW
+        : NavigationActionPolicy.CANCEL;
+  }
 
   final initialUrl = chatWebViewInitialUrlRequest()?.url;
   if (initialUrl != null && url == initialUrl) {

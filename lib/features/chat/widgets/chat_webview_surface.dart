@@ -326,7 +326,10 @@ class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
                         }
                       },
                       shouldOverrideUrlLoading: (controller, request) async {
-                        return chatWebViewNavigationPolicy(request.request.url);
+                        return chatWebViewNavigationPolicy(
+                          request.request.url,
+                          mainFrame: request.isForMainFrame,
+                        );
                       },
                     ),
                   )
