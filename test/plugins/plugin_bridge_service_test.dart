@@ -108,13 +108,15 @@ class _FakeHost implements PluginApiHost {
       network.add('$host:${blocked ? 'blocked' : 'ok'}');
   final grants = <String>[];
   @override
-  void allowed(String pluginId, String actionKey) => grants.add(actionKey);
+  void allowed(String pluginId, String actionKey, String permission) =>
+      grants.add(actionKey);
   final denials = <String>[];
   @override
   void denied(
     String pluginId,
     String pluginName,
     String actionKey, {
+    required String permission,
     bool shown = true,
   }) => denials.add('$actionKey${shown ? '' : ':silent'}');
 }
@@ -236,8 +238,8 @@ void main() {
 
   test('permissions the user took away are denied with a notice', () async {
     final s = service(
-      const ['composer', 'library.delete'],
-      revoked: const {'composer', 'library.delete'},
+      const ['composer', 'library.delete.characters'],
+      revoked: const {'composer', 'library.delete.characters'},
     );
     final composer = await call(s, 'composer.get');
     expect((composer['error'] as Map)['code'], 'permission_denied');
@@ -277,11 +279,16 @@ void main() {
     for (final p in [
       'library.read.characters',
       'library.read.themes',
-      'library.delete',
+      'library.delete.characters',
       'chats.update',
     ]) {
       expect(plugin.allows(p), isTrue, reason: p);
     }
+  });
+
+  test('legacy "library.delete" stands for deleting every kind', () {
+    final plugin = _plugin(const ['library.delete']);
+    expect(plugin.manifest.permissions, PluginPermission.libraryDeletes);
   });
 
   test('legacy "library.read" stands for reading every kind', () {
@@ -436,18 +443,18 @@ void main() {
   });
 
   test('library writes ask first; "always" is remembered', () async {
-    final s = service(const ['library.delete']);
+    final s = service(const ['library.delete.characters']);
     host.ui.answer = PluginConsentAnswer.always;
     await call(s, 'characters.remove', ['nope']);
     await call(s, 'characters.remove', ['nope']);
     expect(host.ui.consents, [
-      'Test:library.delete:plugins_consent_character_remove',
+      'Test:library.delete.characters:plugins_consent_character_remove',
     ]);
-    expect(alwaysAllowed, ['test.plugin:library.delete']);
+    expect(alwaysAllowed, ['test.plugin:library.delete.characters']);
 
     final granted = service(
-      const ['library.delete'],
-      grants: const {'library.delete'},
+      const ['library.delete.characters'],
+      grants: const {'library.delete.characters'},
     );
     host.ui.consents.clear();
     await call(granted, 'characters.remove', ['nope']);
@@ -455,7 +462,7 @@ void main() {
   });
 
   test('a denied plugin is not asked again', () async {
-    final s = service(const ['library.delete']);
+    final s = service(const ['library.delete.characters']);
     host.ui.answer = PluginConsentAnswer.deny;
     final first = await call(s, 'characters.remove', ['nope']);
     expect((first['error'] as Map)['code'], 'permission_denied');
@@ -466,7 +473,7 @@ void main() {
     expect(host.denials.last, 'plugins_consent_character_remove');
 
     // A dismissed sheet only refuses this call.
-    final dismissed = service(const ['library.update']);
+    final dismissed = service(const ['library.update.personas']);
     host.ui.answer = null;
     final out = await call(dismissed, 'personas.update', [
       {'id': 'x'},
@@ -484,7 +491,7 @@ void main() {
     expect(host.denials, ['plugins_permission_name_variables_shared']);
 
     host.ui.answer = PluginConsentAnswer.once;
-    await call(service(const ['library.update']), 'personas.update', [
+    await call(service(const ['library.update.personas']), 'personas.update', [
       {'id': 'x'},
     ]);
     expect(host.grants.last, startsWith('plugins_consent_'));

@@ -15,10 +15,26 @@ Map<String, PluginMethod> lorebooksApi() => {
   'lorebooks.list': libraryRead(PluginPermission.lorebooksRead, _list),
   'lorebooks.get': libraryRead(PluginPermission.lorebooksRead, _get),
   'lorebooks.find': libraryRead(PluginPermission.lorebooksRead, _find),
-  'lorebooks.create': libraryCreate(_create, 'plugins_consent_lorebook_create'),
-  'lorebooks.update': libraryUpdate(_update, 'plugins_consent_lorebook_update'),
-  'lorebooks.remove': libraryDelete(_remove, 'plugins_consent_lorebook_remove'),
-  'lorebooks.import': libraryCreate(_import, 'plugins_consent_lorebook_import'),
+  'lorebooks.create': libraryCreate(
+    PluginPermission.lorebooksCreate,
+    _create,
+    'plugins_consent_lorebook_create',
+  ),
+  'lorebooks.update': libraryUpdate(
+    PluginPermission.lorebooksUpdate,
+    _update,
+    'plugins_consent_lorebook_update',
+  ),
+  'lorebooks.remove': libraryDelete(
+    PluginPermission.lorebooksDelete,
+    _remove,
+    'plugins_consent_lorebook_remove',
+  ),
+  'lorebooks.import': libraryCreate(
+    PluginPermission.lorebooksCreate,
+    _import,
+    'plugins_consent_lorebook_import',
+  ),
   'lorebooks.export': libraryRead(PluginPermission.lorebooksRead, _export),
 };
 

@@ -47,19 +47,32 @@ abstract final class PluginPermission {
   static const images = 'images';
   static const network = 'network';
 
-  /// Reading the library, one permission per kind of item.
+  /// The library, one permission per kind of item and what is done to it:
+  /// `library.<read|create|update|delete>.<kind>`.
   static const charactersRead = 'library.read.characters';
+  static const charactersCreate = 'library.create.characters';
+  static const charactersUpdate = 'library.update.characters';
+  static const charactersDelete = 'library.delete.characters';
   static const personasRead = 'library.read.personas';
+  static const personasCreate = 'library.create.personas';
+  static const personasUpdate = 'library.update.personas';
+  static const personasDelete = 'library.delete.personas';
   static const presetsRead = 'library.read.presets';
+  static const presetsCreate = 'library.create.presets';
+  static const presetsUpdate = 'library.update.presets';
+  static const presetsDelete = 'library.delete.presets';
   static const lorebooksRead = 'library.read.lorebooks';
+  static const lorebooksCreate = 'library.create.lorebooks';
+  static const lorebooksUpdate = 'library.update.lorebooks';
+  static const lorebooksDelete = 'library.delete.lorebooks';
   static const regexRead = 'library.read.regex';
+  static const regexCreate = 'library.create.regex';
+  static const regexUpdate = 'library.update.regex';
+  static const regexDelete = 'library.delete.regex';
   static const themesRead = 'library.read.themes';
-
-  /// Changing the library: characters, personas, presets, lorebooks, regex
-  /// scripts and themes.
-  static const libraryCreate = 'library.create';
-  static const libraryUpdate = 'library.update';
-  static const libraryDelete = 'library.delete';
+  static const themesCreate = 'library.create.themes';
+  static const themesUpdate = 'library.update.themes';
+  static const themesDelete = 'library.delete.themes';
 
   /// Chats other than the open one, and creating or deleting chats.
   static const chatsRead = 'chats.read';
@@ -71,9 +84,12 @@ abstract final class PluginPermission {
   /// [library] and [chats].
   static const legacyLibrary = 'library';
 
-  /// Written before reading was split by kind; stands for all of
-  /// [libraryReads].
+  /// Written before the library was split by kind; each stands for its
+  /// action on every kind.
   static const legacyLibraryRead = 'library.read';
+  static const legacyLibraryCreate = 'library.create';
+  static const legacyLibraryUpdate = 'library.update';
+  static const legacyLibraryDelete = 'library.delete';
 
   static const libraryReads = [
     charactersRead,
@@ -83,12 +99,58 @@ abstract final class PluginPermission {
     regexRead,
     themesRead,
   ];
+  static const libraryCreates = [
+    charactersCreate,
+    personasCreate,
+    presetsCreate,
+    lorebooksCreate,
+    regexCreate,
+    themesCreate,
+  ];
+  static const libraryUpdates = [
+    charactersUpdate,
+    personasUpdate,
+    presetsUpdate,
+    lorebooksUpdate,
+    regexUpdate,
+    themesUpdate,
+  ];
+  static const libraryDeletes = [
+    charactersDelete,
+    personasDelete,
+    presetsDelete,
+    lorebooksDelete,
+    regexDelete,
+    themesDelete,
+  ];
 
+  /// Kind by kind, each read, create, update, delete: the order they are
+  /// listed in.
   static const library = [
-    ...libraryReads,
-    libraryCreate,
-    libraryUpdate,
-    libraryDelete,
+    charactersRead,
+    charactersCreate,
+    charactersUpdate,
+    charactersDelete,
+    personasRead,
+    personasCreate,
+    personasUpdate,
+    personasDelete,
+    presetsRead,
+    presetsCreate,
+    presetsUpdate,
+    presetsDelete,
+    lorebooksRead,
+    lorebooksCreate,
+    lorebooksUpdate,
+    lorebooksDelete,
+    regexRead,
+    regexCreate,
+    regexUpdate,
+    regexDelete,
+    themesRead,
+    themesCreate,
+    themesUpdate,
+    themesDelete,
   ];
   static const chats = [chatsRead, chatsCreate, chatsUpdate, chatsDelete];
 
@@ -115,19 +177,43 @@ abstract final class PluginPermission {
         ...chats,
       ] else if (p == legacyLibraryRead)
         ...libraryReads
+      else if (p == legacyLibraryCreate)
+        ...libraryCreates
+      else if (p == legacyLibraryUpdate)
+        ...libraryUpdates
+      else if (p == legacyLibraryDelete)
+        ...libraryDeletes
       else
         p,
   };
 
   static const asking = {
     images,
-    libraryCreate,
-    libraryUpdate,
-    libraryDelete,
+    ...libraryCreates,
+    ...libraryUpdates,
+    ...libraryDeletes,
     chatsCreate,
     chatsUpdate,
     chatsDelete,
   };
+}
+
+/// The broad kind of a permission, for sorting and filtering.
+enum PluginPermissionCategory {
+  general,
+  variables,
+  library,
+  chats;
+
+  static PluginPermissionCategory of(String permission) {
+    if (permission == PluginPermission.variables ||
+        permission == PluginPermission.variablesShared) {
+      return variables;
+    }
+    if (PluginPermission.library.contains(permission)) return library;
+    if (PluginPermission.chats.contains(permission)) return chats;
+    return general;
+  }
 }
 
 enum PluginPanelPlacement { chat, message }

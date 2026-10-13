@@ -1643,12 +1643,13 @@ referenced file exists and that no path escapes the package.
 `shared` scope; the variables methods check the scope they are given),
 `files`, `generate`, `images`, `network`, and the library and chats split by
 what is done. Reading the library is one permission per kind,
-`library.read.characters|personas|presets|lorebooks|regex|themes`; changing it
-is `library.create|update|delete`; other chats are
+and so is changing it: `library.<read|create|update|delete>.<kind>` with
+kind `characters|personas|presets|lorebooks|regex|themes`; other chats are
 `chats.read|create|update|delete` (the open one is `messages`). Older
 manifests and saved settings are expanded on load
-(`PluginPermission.expand`): `library.read` stands for the six reads, a format
-1 manifest's `library` for all of the library and chats. The manifest lists what a plugin
+(`PluginPermission.expand`): `library.read|create|update|delete` stands for
+that action on every kind, a format 1 manifest's `library` for all of the
+library and chats. The manifest lists what a plugin
 asks for; the user can take any of them away on the plugin's detail screen
 (`InstalledPlugin.revoked`), and `InstalledPlugin.allows` is the one check the
 bridge, the frame policy and the events use. The SDK still builds methods
@@ -1660,7 +1661,9 @@ detail screen each is Ask, Always or Off. Every permission check goes
 through `PluginBridgeService._require` and is counted in the plugin's request
 history (`pluginHistoryProvider`, `plugin_data/<id>/history.json`: per action,
 how often it was let through and how often not, and when last), shown on its
-own screen (`PluginHistoryScreen`) opened from the detail screen. On a refusal
+own screen (`PluginHistoryScreen`) opened from the detail screen, filtered by
+answer and by kind of permission (`PluginPermissionCategory`; each record
+keeps the permission it was checked against). On a refusal
 (`permission_denied`) the user also gets one toast per plugin and action until
 the app restarts; a refused plugin is never asked again. A dismissed consent
 sheet counts as not allowed without a toast. Toasts
@@ -1810,8 +1813,9 @@ for by the extension or found in its code. A converted package imported
 before the split still holding the catch-all `library` (or `library.read`) has
 its scripts read again once on load (`PluginStore._reinfer`), so it ends up
 with the exact library and chat permissions it uses. The permission rows are
-grouped: general, variables, reading the library, changing it, other chats
-(`pluginPermissionGroups`). For converted
+grouped: general, variables, one group per library kind, other chats
+(`pluginPermissionGroups`); each group's header switch gives or takes away
+all of it (`PluginLibraryNotifier.setPermissions`). For converted
 plugins the runtime also loads `tavo_compat.js`, which defines `tavo.*` (and
 `triggerSlash`) on top of `glaze.*` and then removes `glaze`, maps
 `input:beforeSend|afterSend` onto `send:*`, reports Tavo's version from

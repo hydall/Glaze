@@ -60,35 +60,33 @@ Set<String> inferTavoPermissions(Iterable<String> sources) {
         if (method == 'copy') found.add(PluginPermission.chatsRead);
         continue;
       }
-      final read = _reads[ns]!;
-      final p = asset
+      final action = asset
           ? switch (method) {
-              'list' || 'export' => read,
-              'import' ||
-              'rename' ||
-              'delete' => PluginPermission.libraryUpdate,
+              'list' || 'export' => 'read',
+              'import' || 'rename' || 'delete' => 'update',
               _ => null,
             }
           : switch (method) {
-              'all' || 'get' || 'find' || 'current' || 'export' => read,
-              'create' || 'import' => PluginPermission.libraryCreate,
-              'update' => PluginPermission.libraryUpdate,
-              'delete' => PluginPermission.libraryDelete,
+              'all' || 'get' || 'find' || 'current' || 'export' => 'read',
+              'create' || 'import' => 'create',
+              'update' => 'update',
+              'delete' => 'delete',
               _ => null,
             };
-      if (p != null) found.add(p);
+      if (action != null) found.add('library.$action.${_kinds[ns]}');
     }
   }
   return found;
 }
 
-const _reads = {
-  'character': PluginPermission.charactersRead,
-  'persona': PluginPermission.personasRead,
-  'preset': PluginPermission.presetsRead,
-  'lorebook': PluginPermission.lorebooksRead,
-  'regex': PluginPermission.regexRead,
-  'theme': PluginPermission.themesRead,
+/// Tavo namespace → the kind in Glaze's `library.<action>.<kind>`.
+const _kinds = {
+  'character': 'characters',
+  'persona': 'personas',
+  'preset': 'presets',
+  'lorebook': 'lorebooks',
+  'regex': 'regex',
+  'theme': 'themes',
 };
 
 const _settingTypes = {

@@ -29,18 +29,22 @@ Map<String, PluginMethod> charactersApi() => {
   'characters.find': libraryRead(PluginPermission.charactersRead, _find),
   'characters.current': libraryRead(PluginPermission.charactersRead, _current),
   'characters.create': libraryCreate(
+    PluginPermission.charactersCreate,
     _create,
     'plugins_consent_character_create',
   ),
   'characters.update': libraryUpdate(
+    PluginPermission.charactersUpdate,
     _update,
     'plugins_consent_character_update',
   ),
   'characters.remove': libraryDelete(
+    PluginPermission.charactersDelete,
     _remove,
     'plugins_consent_character_remove',
   ),
   'characters.import': libraryCreate(
+    PluginPermission.charactersCreate,
     _import,
     'plugins_consent_character_import',
   ),

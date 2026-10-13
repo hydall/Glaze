@@ -13,6 +13,7 @@ import 'plugin_library_provider.dart';
 class PluginRequestRecord {
   const PluginRequestRecord({
     required this.action,
+    this.permission,
     this.allowed = 0,
     this.lastAllowed = 0,
     this.denied = 0,
@@ -21,6 +22,10 @@ class PluginRequestRecord {
 
   /// Translation key naming the request (see `pluginActionKey`).
   final String action;
+
+  /// The permission it was checked against; null in histories kept before
+  /// it was noted.
+  final String? permission;
   final int allowed;
   final int denied;
 
@@ -30,16 +35,21 @@ class PluginRequestRecord {
 
   int get lastSeen => lastAllowed > lastDenied ? lastAllowed : lastDenied;
 
-  PluginRequestRecord _count({required bool allowed, required int at}) =>
-      PluginRequestRecord(
-        action: action,
-        allowed: this.allowed + (allowed ? 1 : 0),
-        lastAllowed: allowed ? at : lastAllowed,
-        denied: denied + (allowed ? 0 : 1),
-        lastDenied: allowed ? lastDenied : at,
-      );
+  PluginRequestRecord _count({
+    required bool allowed,
+    required int at,
+    required String permission,
+  }) => PluginRequestRecord(
+    action: action,
+    permission: permission,
+    allowed: this.allowed + (allowed ? 1 : 0),
+    lastAllowed: allowed ? at : lastAllowed,
+    denied: denied + (allowed ? 0 : 1),
+    lastDenied: allowed ? lastDenied : at,
+  );
 
   Map<String, Object?> toJson() => {
+    'permission': ?permission,
     'allowed': allowed,
     'lastAllowed': lastAllowed,
     'denied': denied,
@@ -51,6 +61,9 @@ class PluginRequestRecord {
   static PluginRequestRecord fromJson(String action, Map<dynamic, dynamic> j) =>
       PluginRequestRecord(
         action: action,
+        permission: j['permission'] is String
+            ? j['permission'] as String
+            : null,
         allowed: _int(j['allowed']),
         lastAllowed: _int(j['lastAllowed']),
         denied: _int(j['denied']),
@@ -120,11 +133,17 @@ class PluginHistoryNotifier
     }
   }
 
-  Future<void> allowed(String action) => _count(action, allowed: true);
+  Future<void> allowed(String action, String permission) =>
+      _count(action, permission, allowed: true);
 
-  Future<void> denied(String action) => _count(action, allowed: false);
+  Future<void> denied(String action, String permission) =>
+      _count(action, permission, allowed: false);
 
-  Future<void> _count(String action, {required bool allowed}) async {
+  Future<void> _count(
+    String action,
+    String permission, {
+    required bool allowed,
+  }) async {
     final current = await future;
     final now = DateTime.now().millisecondsSinceEpoch;
     final next = {
@@ -132,6 +151,7 @@ class PluginHistoryNotifier
       action: (current[action] ?? PluginRequestRecord(action: action))._count(
         allowed: allowed,
         at: now,
+        permission: permission,
       ),
     };
     if (next.length > maxEntries) {

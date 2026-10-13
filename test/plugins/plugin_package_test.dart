@@ -215,8 +215,8 @@ void main() {
         ]),
         {
           'library.read.characters',
-          'library.create',
-          'library.update',
+          'library.create.lorebooks',
+          'library.update.themes',
           'chats.delete',
           'chats.create',
           'chats.read',
@@ -390,7 +390,7 @@ void main() {
         );
         expect(installed.foundInCode, {
           'library.read.characters',
-          'library.create',
+          'library.create.lorebooks',
         });
         expect(
           installed.manifest.permissions,
@@ -446,7 +446,7 @@ void main() {
         );
         expect(
           reloaded.manifest.permissions,
-          isNot(contains('library.delete')),
+          isNot(contains('library.delete.characters')),
         );
         // Written back: the next load reads it as it is.
         expect(await file.readAsString(), isNot(contains('"library"')));

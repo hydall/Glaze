@@ -167,12 +167,19 @@ class PluginStore {
     return parsePluginManifest(converted);
   }
 
+  static const _legacy = {
+    PluginPermission.legacyLibrary,
+    PluginPermission.legacyLibraryRead,
+    PluginPermission.legacyLibraryCreate,
+    PluginPermission.legacyLibraryUpdate,
+    PluginPermission.legacyLibraryDelete,
+  };
+
   static bool _hasLegacyLibrary(Map<String, dynamic> json) {
     final permissions = json['permissions'];
     return json['compat'] == kTavoCompat &&
         permissions is List &&
-        (permissions.contains(PluginPermission.legacyLibrary) ||
-            permissions.contains(PluginPermission.legacyLibraryRead));
+        permissions.any(_legacy.contains);
   }
 
   /// A converted package imported before library access was read off its
@@ -194,8 +201,7 @@ class PluginStore {
     final scoped = {
       ...PluginPermission.library,
       ...PluginPermission.chats,
-      PluginPermission.legacyLibrary,
-      PluginPermission.legacyLibraryRead,
+      ..._legacy,
     };
     json['permissions'] = {
       for (final x in (json['permissions'] as List).cast<String>())

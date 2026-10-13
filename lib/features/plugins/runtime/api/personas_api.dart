@@ -14,10 +14,23 @@ Map<String, PluginMethod> personasApi() => {
   'personas.get': libraryRead(PluginPermission.personasRead, _get),
   'personas.find': libraryRead(PluginPermission.personasRead, _find),
   'personas.current': libraryRead(PluginPermission.personasRead, _current),
-  'personas.create': libraryCreate(_create, 'plugins_consent_persona_create'),
-  'personas.update': libraryUpdate(_update, 'plugins_consent_persona_update'),
-  'personas.remove': libraryDelete(_remove, 'plugins_consent_persona_remove'),
+  'personas.create': libraryCreate(
+    PluginPermission.personasCreate,
+    _create,
+    'plugins_consent_persona_create',
+  ),
+  'personas.update': libraryUpdate(
+    PluginPermission.personasUpdate,
+    _update,
+    'plugins_consent_persona_update',
+  ),
+  'personas.remove': libraryDelete(
+    PluginPermission.personasDelete,
+    _remove,
+    'plugins_consent_persona_remove',
+  ),
   'personas.setDefault': libraryUpdate(
+    PluginPermission.personasUpdate,
     _setDefault,
     'plugins_consent_persona_default',
   ),

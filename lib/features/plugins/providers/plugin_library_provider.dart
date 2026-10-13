@@ -124,6 +124,22 @@ class PluginLibraryNotifier extends AsyncNotifier<List<InstalledPlugin>> {
         ),
       );
 
+  /// Gives back or takes away every one of [permissions] at once; a
+  /// permission that asks comes back as Ask.
+  Future<void> setPermissions(
+    String id,
+    Iterable<String> permissions,
+    bool allowed,
+  ) => _update(
+    id,
+    (x) => x.copyWith(
+      revoked: allowed
+          ? ({...x.revoked}..removeAll(permissions))
+          : {...x.revoked, ...permissions},
+      grants: allowed ? null : ({...x.grants}..removeAll(permissions)),
+    ),
+  );
+
   /// Off takes `network` away; listed keeps it to [InstalledPlugin.networkHosts]
   /// (the manifest's hosts show up switched off); any lets it reach every
   /// host.

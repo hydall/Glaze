@@ -38,8 +38,9 @@ Future<void> openPluginDetailScreen(BuildContext context, String id) async {
 /// Groups of rows that set up what [plugin] may do: a switch per
 /// permission, the ask/always/off choice for consents and the internet mode.
 /// The first group, headed [header], holds the general permissions and
-/// [afterNetwork] under the internet rows; variables, reading the library,
-/// changing it and other chats follow, each in a group of its own.
+/// [afterNetwork] under the internet rows; variables, each kind of library
+/// item and other chats follow, each in a group of its own. Every group's
+/// header has a switch that gives or takes away all of its permissions.
 List<Widget> pluginPermissionGroups(
   BuildContext context,
   WidgetRef ref,
@@ -56,14 +57,23 @@ List<Widget> pluginPermissionGroups(
     return i < 0 ? order.length : i;
   }
 
-  final sections = <_PermissionSection, List<Widget>>{
-    for (final s in _PermissionSection.values) s: [],
-  };
+  final rows = <_PermissionSection, List<Widget>>{};
+  final members = <_PermissionSection, List<String>>{};
   final permissions = [...plugin.manifest.permissions]
     ..sort((a, b) => rank(a).compareTo(rank(b)));
   for (final permission in permissions) {
-    sections[_PermissionSection.of(permission)]!.addAll([
-      PluginDetailScreen._permissionItem(context, notifier, plugin, permission),
+    final section = _PermissionSection.of(permission);
+    if (PluginPermission.all.contains(permission)) {
+      (members[section] ??= []).add(permission);
+    }
+    (rows[section] ??= []).addAll([
+      PluginDetailScreen._permissionItem(
+        context,
+        notifier,
+        plugin,
+        permission,
+        short: section.kind != null,
+      ),
       if (permission == PluginPermission.network &&
           plugin.allows(PluginPermission.network)) ...[
         MenuItem(
@@ -81,19 +91,37 @@ List<Widget> pluginPermissionGroups(
       ],
     ]);
   }
+
+  Widget? groupSwitch(_PermissionSection section) {
+    final list = members[section];
+    if (list == null || list.isEmpty) return null;
+    return GlazeSwitch(
+      value: list.every(plugin.allows),
+      onChanged: (v) => notifier.setPermissions(plugin.id, list, v),
+    );
+  }
+
   return [
     MenuGroup(
       header: header,
       headerIcon: headerIcon,
       description: description,
-      items: sections[_PermissionSection.general]!,
+      headerTrailing: groupSwitch(_PermissionSection.general),
+      items: rows[_PermissionSection.general] ?? const [],
     ),
     for (final section in _PermissionSection.values.skip(1))
-      if (sections[section]!.isNotEmpty)
+      if (rows[section] case final items?)
         MenuGroup(
-          header: 'plugins_permission_group_${section.name}'.tr(),
+          header: section.kind == null
+              ? 'plugins_permission_group_${section.name}'.tr()
+              : 'plugins_permission_group_library'.tr(
+                  namedArgs: {
+                    'kind': 'plugins_permission_kind_${section.kind}'.tr(),
+                  },
+                ),
           headerIcon: section.icon,
-          items: sections[section]!,
+          headerTrailing: groupSwitch(section),
+          items: items,
         ),
   ];
 }
@@ -101,21 +129,30 @@ List<Widget> pluginPermissionGroups(
 enum _PermissionSection {
   general(Icons.verified_user_outlined),
   variables(Icons.data_object_rounded),
-  libraryRead(Icons.library_books_outlined),
-  libraryChange(Icons.edit_outlined),
+  characters(Icons.person_outline_rounded, 'characters'),
+  personas(Icons.badge_outlined, 'personas'),
+  presets(Icons.tune_rounded, 'presets'),
+  lorebooks(Icons.menu_book_outlined, 'lorebooks'),
+  regex(Icons.code_rounded, 'regex'),
+  themes(Icons.palette_outlined, 'themes'),
   chats(Icons.forum_outlined);
 
-  const _PermissionSection(this.icon);
+  const _PermissionSection(this.icon, [this.kind]);
 
   final IconData icon;
+
+  /// The library kind (`library.<action>.<kind>`) the group holds.
+  final String? kind;
 
   static _PermissionSection of(String permission) {
     if (permission == PluginPermission.variables ||
         permission == PluginPermission.variablesShared) {
       return variables;
     }
-    if (PluginPermission.libraryReads.contains(permission)) return libraryRead;
-    if (PluginPermission.library.contains(permission)) return libraryChange;
+    if (PluginPermission.library.contains(permission)) {
+      final kind = permission.split('.').last;
+      return values.firstWhere((s) => s.kind == kind);
+    }
     if (PluginPermission.chats.contains(permission)) return chats;
     return general;
   }
@@ -330,15 +367,11 @@ class PluginDetailScreen extends ConsumerWidget {
     PluginPermission.generate: Icons.auto_awesome_outlined,
     PluginPermission.images: Icons.image_outlined,
     PluginPermission.network: Icons.public_rounded,
-    PluginPermission.charactersRead: Icons.person_outline_rounded,
-    PluginPermission.personasRead: Icons.badge_outlined,
-    PluginPermission.presetsRead: Icons.tune_rounded,
-    PluginPermission.lorebooksRead: Icons.menu_book_outlined,
-    PluginPermission.regexRead: Icons.code_rounded,
-    PluginPermission.themesRead: Icons.palette_outlined,
-    PluginPermission.libraryCreate: Icons.library_add_outlined,
-    PluginPermission.libraryUpdate: Icons.edit_outlined,
-    PluginPermission.libraryDelete: Icons.delete_outline_rounded,
+    // Library rows, by action.
+    'read': Icons.visibility_outlined,
+    'create': Icons.add_circle_outline_rounded,
+    'update': Icons.edit_outlined,
+    'delete': Icons.delete_outline_rounded,
     PluginPermission.chatsRead: Icons.forum_outlined,
     PluginPermission.chatsCreate: Icons.add_comment_outlined,
     PluginPermission.chatsUpdate: Icons.edit_note_rounded,
@@ -355,11 +388,16 @@ class PluginDetailScreen extends ConsumerWidget {
     BuildContext context,
     PluginLibraryNotifier notifier,
     InstalledPlugin plugin,
-    String permission,
-  ) {
-    final icon = _icons[permission] ?? Icons.help_outline_rounded;
+    String permission, {
+    bool short = false,
+  }) {
     final key = permission.replaceAll('.', '_');
-    final label = _text('plugins_permission_name_$key', permission);
+    // In a group of one library kind the row names just the action.
+    final action = short ? permission.split('.')[1] : null;
+    final icon = _icons[action ?? permission] ?? Icons.help_outline_rounded;
+    final label = action != null
+        ? 'plugins_permission_action_$action'.tr()
+        : _text('plugins_permission_name_$key', permission);
     // A converted package names only some of what it uses; the rest was
     // found in its scripts, and the user is told which is which.
     final source = plugin.manifest.compat == null

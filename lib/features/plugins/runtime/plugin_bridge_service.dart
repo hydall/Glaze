@@ -192,6 +192,7 @@ class PluginBridgeService {
         plugin.id,
         pluginName(plugin),
         pluginActionKey(permission, summary),
+        permission: permission,
         shown: shown,
       );
       throw PluginApiError(
@@ -200,8 +201,11 @@ class PluginBridgeService {
       );
     }
 
-    void grant() =>
-        host.allowed(plugin.id, pluginActionKey(permission, summary));
+    void grant() => host.allowed(
+      plugin.id,
+      pluginActionKey(permission, summary),
+      permission,
+    );
 
     final live = pluginById(plugin.id) ?? plugin;
     if (!live.allows(permission)) refuse();
@@ -226,6 +230,7 @@ class PluginBridgeService {
             plugin.id,
             pluginName(plugin),
             pluginActionKey(permission, summary),
+            permission: permission,
             shown: false,
           );
           throw const PluginApiError('user_denied', 'The user declined');

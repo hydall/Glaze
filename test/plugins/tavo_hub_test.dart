@@ -79,11 +79,11 @@ void main() {
   group('tavoHubPluginRef', () {
     test('reads the slug or package id of a plugin page', () {
       for (final (url, ref) in [
-        ('https://hub.tavoai.dev/plugins/package/pusya.social', 'pusya.social'),
-        ('https://hub.tavoai.dev/plugins/pusya-social', 'pusya-social'),
+        ('https://hub.tavoai.dev/plugins/package/quick.note', 'quick.note'),
+        ('https://hub.tavoai.dev/plugins/quick-note', 'quick-note'),
         (
-          'https://hub.tavoai.dev/webview/plugins/pusya-social?x=1',
-          'pusya-social',
+          'https://hub.tavoai.dev/webview/plugins/quick-note?x=1',
+          'quick-note',
         ),
         ('https://hub.tavoai.dev/plugin-market/package/a.b', 'a.b'),
         ('https://HUB.tavoai.dev/plugins/a/', 'a'),

@@ -180,19 +180,25 @@ class ChatPluginApiHost implements PluginApiHost, PluginUi {
   static final Set<String> _deniedToasts = {};
 
   @override
-  void allowed(String pluginId, String actionKey) => unawaited(
-    ref.read(pluginHistoryProvider(pluginId).notifier).allowed(actionKey),
-  );
+  void allowed(String pluginId, String actionKey, String permission) =>
+      unawaited(
+        ref
+            .read(pluginHistoryProvider(pluginId).notifier)
+            .allowed(actionKey, permission),
+      );
 
   @override
   void denied(
     String pluginId,
     String pluginName,
     String actionKey, {
+    required String permission,
     bool shown = true,
   }) {
     unawaited(
-      ref.read(pluginHistoryProvider(pluginId).notifier).denied(actionKey),
+      ref
+          .read(pluginHistoryProvider(pluginId).notifier)
+          .denied(actionKey, permission),
     );
     if (!shown) return;
     // Once per action until the app restarts: a plugin retrying, or

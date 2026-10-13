@@ -89,8 +89,8 @@ abstract interface class PluginApiHost {
   void networkUsed(String pluginId, String host, {required bool blocked});
 
   /// Notes in [pluginId]'s history that it was let through to do what
-  /// [actionKey] (see [pluginActionKey]) names.
-  void allowed(String pluginId, String actionKey);
+  /// [actionKey] (see [pluginActionKey]) names, under [permission].
+  void allowed(String pluginId, String actionKey, String permission);
 
   /// Tells the user [pluginName] was stopped from doing what [actionKey]
   /// (see [pluginActionKey]) names and notes it in the plugin's history;
@@ -99,6 +99,7 @@ abstract interface class PluginApiHost {
     String pluginId,
     String pluginName,
     String actionKey, {
+    required String permission,
     bool shown = true,
   });
 }
