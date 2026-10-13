@@ -3748,5 +3748,9 @@
   "plugins_history_allowed": "Allowed",
   "plugins_permission_declared": "Asked for by the extension",
   "plugins_permission_found_in_code": "Found in the extension's code",
-  "plugins_permissions_found_hint": "“Found in the extension's code”: the extension does not list this permission, but its scripts use it. Glaze found the calls itself."
+  "plugins_permissions_found_hint": "“Found in the extension's code”: the extension does not list this permission, but its scripts use it. Glaze found the calls itself.",
+  "plugins_permission_group_variables": "Variables",
+  "plugins_permission_group_libraryRead": "Reading the library",
+  "plugins_permission_group_libraryChange": "Changing the library",
+  "plugins_permission_group_chats": "Other chats"
 }

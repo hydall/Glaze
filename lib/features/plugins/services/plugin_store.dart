@@ -154,13 +154,57 @@ class PluginStore {
   Future<PluginManifest> _readManifest(String dir) async {
     final own = File(p.join(dir, kPluginManifestFile));
     if (await own.exists()) {
-      return parsePluginManifest(jsonDecode(await own.readAsString()));
+      final json = jsonDecode(await own.readAsString());
+      if (json is Map<String, dynamic> && _hasLegacyLibrary(json)) {
+        return _reinfer(dir, own, json);
+      }
+      return parsePluginManifest(json);
     }
     final converted = convertTavoManifest(
       jsonDecode(await File(p.join(dir, kTavoManifestFile)).readAsString()),
     );
     await own.writeAsString(jsonEncode(converted));
     return parsePluginManifest(converted);
+  }
+
+  static bool _hasLegacyLibrary(Map<String, dynamic> json) {
+    final permissions = json['permissions'];
+    return json['compat'] == kTavoCompat &&
+        permissions is List &&
+        (permissions.contains(PluginPermission.legacyLibrary) ||
+            permissions.contains(PluginPermission.legacyLibraryRead));
+  }
+
+  /// A converted package imported before library access was read off its
+  /// scripts kind by kind holds the old catch-all permission, which stands
+  /// for all of the library and chats. Its scripts are read again for what
+  /// it really uses, once; what else it holds stays.
+  Future<PluginManifest> _reinfer(
+    String dir,
+    File own,
+    Map<String, dynamic> json,
+  ) async {
+    final sources = <String>[];
+    await for (final f in Directory(dir).list(recursive: true)) {
+      if (f is File &&
+          RegExp(r'\.(m?js|html?)$', caseSensitive: false).hasMatch(f.path)) {
+        sources.add(await f.readAsString().catchError((_) => ''));
+      }
+    }
+    final scoped = {
+      ...PluginPermission.library,
+      ...PluginPermission.chats,
+      PluginPermission.legacyLibrary,
+      PluginPermission.legacyLibraryRead,
+    };
+    json['permissions'] = {
+      for (final x in (json['permissions'] as List).cast<String>())
+        if (!scoped.contains(x)) x,
+      ...inferTavoPermissions(sources).where(scoped.contains),
+    }.toList();
+    final manifest = parsePluginManifest(json);
+    await own.writeAsString(jsonEncode(json));
+    return manifest;
   }
 
   /// Clears every plugin's `files/tmp` (temporary files last one run).

@@ -3785,5 +3785,9 @@
   "plugins_history_allowed": "Разрешено",
   "plugins_permission_declared": "Запрошено расширением",
   "plugins_permission_found_in_code": "Найдено в коде расширения",
-  "plugins_permissions_found_hint": "«Найдено в коде расширения»: расширение не указало это разрешение, но его скрипты им пользуются. Glaze нашёл эти вызовы сам."
+  "plugins_permissions_found_hint": "«Найдено в коде расширения»: расширение не указало это разрешение, но его скрипты им пользуются. Glaze нашёл эти вызовы сам.",
+  "plugins_permission_group_variables": "Переменные",
+  "plugins_permission_group_libraryRead": "Чтение библиотеки",
+  "plugins_permission_group_libraryChange": "Изменение библиотеки",
+  "plugins_permission_group_chats": "Другие чаты"
 }

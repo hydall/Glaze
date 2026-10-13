@@ -35,13 +35,20 @@ Future<void> openPluginDetailScreen(BuildContext context, String id) async {
   );
 }
 
-/// The rows that set up what [plugin] may do: a switch per permission, the
-/// ask/always/off choice for consents and the internet mode.
-List<Widget> pluginPermissionItems(
+/// Groups of rows that set up what [plugin] may do: a switch per
+/// permission, the ask/always/off choice for consents and the internet mode.
+/// The first group, headed [header], holds the general permissions and
+/// [afterNetwork] under the internet rows; variables, reading the library,
+/// changing it and other chats follow, each in a group of its own.
+List<Widget> pluginPermissionGroups(
   BuildContext context,
   WidgetRef ref,
-  InstalledPlugin plugin,
-) {
+  InstalledPlugin plugin, {
+  required String header,
+  required IconData headerIcon,
+  String? description,
+  List<Widget> afterNetwork = const [],
+}) {
   final notifier = ref.read(pluginLibraryProvider.notifier);
   final order = PluginPermission.all.toList();
   int rank(String p) {
@@ -49,13 +56,16 @@ List<Widget> pluginPermissionItems(
     return i < 0 ? order.length : i;
   }
 
+  final sections = <_PermissionSection, List<Widget>>{
+    for (final s in _PermissionSection.values) s: [],
+  };
   final permissions = [...plugin.manifest.permissions]
     ..sort((a, b) => rank(a).compareTo(rank(b)));
-  return [
-    for (final permission in permissions) ...[
+  for (final permission in permissions) {
+    sections[_PermissionSection.of(permission)]!.addAll([
       PluginDetailScreen._permissionItem(context, notifier, plugin, permission),
       if (permission == PluginPermission.network &&
-          plugin.allows(PluginPermission.network))
+          plugin.allows(PluginPermission.network)) ...[
         MenuItem(
           icon: Icons.router_outlined,
           label: 'plugins_local_network'.tr(),
@@ -67,8 +77,48 @@ List<Widget> pluginPermissionItems(
           onTap: () =>
               notifier.setLocalNetwork(plugin.id, !plugin.localNetwork),
         ),
-    ],
+        ...afterNetwork,
+      ],
+    ]);
+  }
+  return [
+    MenuGroup(
+      header: header,
+      headerIcon: headerIcon,
+      description: description,
+      items: sections[_PermissionSection.general]!,
+    ),
+    for (final section in _PermissionSection.values.skip(1))
+      if (sections[section]!.isNotEmpty)
+        MenuGroup(
+          header: 'plugins_permission_group_${section.name}'.tr(),
+          headerIcon: section.icon,
+          items: sections[section]!,
+        ),
   ];
+}
+
+enum _PermissionSection {
+  general(Icons.verified_user_outlined),
+  variables(Icons.data_object_rounded),
+  libraryRead(Icons.library_books_outlined),
+  libraryChange(Icons.edit_outlined),
+  chats(Icons.forum_outlined);
+
+  const _PermissionSection(this.icon);
+
+  final IconData icon;
+
+  static _PermissionSection of(String permission) {
+    if (permission == PluginPermission.variables ||
+        permission == PluginPermission.variablesShared) {
+      return variables;
+    }
+    if (PluginPermission.libraryReads.contains(permission)) return libraryRead;
+    if (PluginPermission.library.contains(permission)) return libraryChange;
+    if (PluginPermission.chats.contains(permission)) return chats;
+    return general;
+  }
 }
 
 /// Shown after a plugin is installed or updated with new permissions:
@@ -96,36 +146,41 @@ class _PermissionsSheet extends ConsumerWidget {
     final notifier = ref.read(pluginLibraryProvider.notifier);
     final listed =
         PluginDetailScreen._networkMode(plugin) == PluginNetworkMode.listed;
-    return MenuGroup(
-      header: name,
-      headerIcon: Icons.extension_rounded,
-      description: [
-        'plugins_permissions_sheet_body'.tr(),
-        if (plugin.foundInCode.isNotEmpty)
-          'plugins_permissions_found_hint'.tr(),
-      ].join('\n\n'),
-      items: [
-        ...pluginPermissionItems(context, ref, plugin),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: pluginPermissionGroups(
+        context,
+        ref,
+        plugin,
+        header: name,
+        headerIcon: Icons.extension_rounded,
+        description: [
+          'plugins_permissions_sheet_body'.tr(),
+          if (plugin.foundInCode.isNotEmpty)
+            'plugins_permissions_found_hint'.tr(),
+        ].join('\n\n'),
         // The hosts the plugin names, to switch on without leaving.
-        if (listed)
-          for (final host in {
-            ...plugin.manifest.hosts,
-            ...?plugin.networkHosts,
-          }.toList()..sort())
-            MenuItem(
-              icon: Icons.language_rounded,
-              label: host,
-              trailing: GlazeSwitch(
-                value: plugin.allowsHost(host),
-                onChanged: (v) => notifier.setHostAllowed(plugin.id, host, v),
+        afterNetwork: [
+          if (listed)
+            for (final host in {
+              ...plugin.manifest.hosts,
+              ...?plugin.networkHosts,
+            }.toList()..sort())
+              MenuItem(
+                icon: Icons.language_rounded,
+                label: host,
+                trailing: GlazeSwitch(
+                  value: plugin.allowsHost(host),
+                  onChanged: (v) => notifier.setHostAllowed(plugin.id, host, v),
+                ),
+                onTap: () => notifier.setHostAllowed(
+                  plugin.id,
+                  host,
+                  !plugin.allowsHost(host),
+                ),
               ),
-              onTap: () => notifier.setHostAllowed(
-                plugin.id,
-                host,
-                !plugin.allowsHost(host),
-              ),
-            ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -226,13 +281,15 @@ class PluginDetailScreen extends ConsumerWidget {
                 ),
             ],
           ),
-          MenuGroup(
+          ...pluginPermissionGroups(
+            context,
+            ref,
+            plugin,
             header: 'plugins_permissions'.tr(),
             headerIcon: Icons.verified_user_outlined,
             description: manifest.permissions.isEmpty
                 ? 'plugins_permissions_none'.tr()
                 : null,
-            items: pluginPermissionItems(context, ref, plugin),
           ),
           _NetworkLog(plugin: plugin),
           _History(plugin: plugin),
@@ -314,7 +371,7 @@ class PluginDetailScreen extends ConsumerWidget {
       return MenuItem(
         icon: icon,
         label: label,
-        overline: source,
+        badge: source,
         subtitle: subtitle.isEmpty ? null : subtitle,
         onTap: () {},
       );
@@ -328,7 +385,7 @@ class PluginDetailScreen extends ConsumerWidget {
       return MenuItem(
         icon: icon,
         label: label,
-        overline: source,
+        badge: source,
         subtitle: subtitle,
         value: 'plugins_consent_mode_${mode.name}'.tr(),
         onTap: () =>
@@ -340,7 +397,7 @@ class PluginDetailScreen extends ConsumerWidget {
       return MenuItem(
         icon: icon,
         label: label,
-        overline: source,
+        badge: source,
         subtitle: subtitle,
         value: 'plugins_network_mode_${mode.name}'.tr(),
         onTap: () => _pickNetworkMode(context, notifier, plugin, mode),
@@ -350,7 +407,7 @@ class PluginDetailScreen extends ConsumerWidget {
     return MenuItem(
       icon: icon,
       label: label,
-      overline: source,
+      badge: source,
       subtitle: subtitle,
       trailing: GlazeSwitch(
         value: allowed,

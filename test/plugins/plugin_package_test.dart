@@ -404,6 +404,55 @@ void main() {
       },
     );
 
+    test(
+      'an old catch-all library permission is read off the scripts again',
+      () async {
+        final installed = await store.install(
+          readPluginPackage(
+            zip(
+              packageFiles(
+                manifestFile: 'manifest.json',
+                main: 'tavo.persona.current(); tavo.chat.delete(1);',
+              ),
+            ),
+          ),
+        );
+        final file = File('${store.packageDir(installed.id)}/plugin.json');
+        final json =
+            jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+        json['permissions'] = [
+          ...(json['permissions'] as List).where(
+            (x) => !'$x'.startsWith('library') && !'$x'.startsWith('chats'),
+          ),
+          'library',
+          'images',
+        ];
+        await file.writeAsString(jsonEncode(json));
+
+        final reloaded = (await store.loadAll()).single;
+        expect(
+          reloaded.manifest.permissions,
+          containsAll([
+            'composer',
+            'variables',
+            'images',
+            'library.read.personas',
+            'chats.delete',
+          ]),
+        );
+        expect(
+          reloaded.manifest.permissions,
+          isNot(contains('library.read.characters')),
+        );
+        expect(
+          reloaded.manifest.permissions,
+          isNot(contains('library.delete')),
+        );
+        // Written back: the next load reads it as it is.
+        expect(await file.readAsString(), isNot(contains('"library"')));
+      },
+    );
+
     test('a Glaze package declares everything it asks for', () async {
       final installed = await store.install(package(['composer']));
       expect(installed.foundInCode, isEmpty);

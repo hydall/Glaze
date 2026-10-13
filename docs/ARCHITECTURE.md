@@ -1806,7 +1806,12 @@ library, chats, images and `messages` permissions are read off the package's
 scripts (`inferTavoPermissions`) and, like the rest, start off. Which were
 found that way is worked out again on load from the original manifest
 (`InstalledPlugin.foundInCode`), and the permission rows mark each as asked
-for by the extension or found in its code. For converted
+for by the extension or found in its code. A converted package imported
+before the split still holding the catch-all `library` (or `library.read`) has
+its scripts read again once on load (`PluginStore._reinfer`), so it ends up
+with the exact library and chat permissions it uses. The permission rows are
+grouped: general, variables, reading the library, changing it, other chats
+(`pluginPermissionGroups`). For converted
 plugins the runtime also loads `tavo_compat.js`, which defines `tavo.*` (and
 `triggerSlash`) on top of `glaze.*` and then removes `glaze`, maps
 `input:beforeSend|afterSend` onto `send:*`, reports Tavo's version from
