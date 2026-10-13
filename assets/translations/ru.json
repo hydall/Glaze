@@ -3734,5 +3734,6 @@
   "plugins_update_version": "Версия {from} → {to}.",
   "plugins_update_author_changed": "Автор другой ({from} → {to}). Плагин установится как новый: разрешения будут выключены, а данные и настройки старого удалятся.",
   "plugins_update_new_permissions": "Он запрашивает новые разрешения, они будут выключены:",
-  "plugins_update_confirm": "Обновить"
+  "plugins_update_confirm": "Обновить",
+  "plugins_request_from": "Запрос от расширения «{name}»"
 }

@@ -3697,5 +3697,6 @@
   "plugins_update_version": "Version {from} → {to}.",
   "plugins_update_author_changed": "The author is different ({from} → {to}). It will be installed as a new plugin: its permissions start off and the old one's data and settings are deleted.",
   "plugins_update_new_permissions": "It asks for new permissions; they start off:",
-  "plugins_update_confirm": "Update"
+  "plugins_update_confirm": "Update",
+  "plugins_request_from": "Request from the extension “{name}”"
 }

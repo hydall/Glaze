@@ -97,6 +97,11 @@ class ChatPluginApiHost implements PluginApiHost, PluginUi {
     }
   }
 
+  /// Signs a sheet a plugin opened, so its question is not taken for the
+  /// app's.
+  String _requestFrom(String pluginName) =>
+      'plugins_request_from'.tr(namedArgs: {'name': pluginName});
+
   @override
   Future<void> openUrl(String url) async {
     await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
@@ -113,7 +118,7 @@ class ChatPluginApiHost implements PluginApiHost, PluginUi {
     return GlazeBottomSheet.show<String>(
       context,
       title: title,
-      source: pluginName,
+      source: _requestFrom(pluginName),
       items: [
         for (final o in options)
           BottomSheetItem(
@@ -139,7 +144,7 @@ class ChatPluginApiHost implements PluginApiHost, PluginUi {
     final answer = await GlazeBottomSheet.show<Map<String, Object?>>(
       context,
       title: question,
-      source: pluginName,
+      source: _requestFrom(pluginName),
       items: options.isEmpty
           ? null
           : [
