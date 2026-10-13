@@ -164,7 +164,7 @@ Future<Object?> _image(PluginCall c) async {
   final mime = _imageMime(bytes);
   final saveAs = options['saveAs'];
   if (saveAs is String && saveAs.isNotEmpty) {
-    if (!c.plugin.manifest.hasPermission(PluginPermission.files)) {
+    if (!c.plugin.allows(PluginPermission.files)) {
       throw const PluginApiError(
         'permission_denied',
         'saveAs needs the "files" permission',

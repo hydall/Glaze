@@ -141,7 +141,11 @@ Future<Object?> _list(PluginCall c) async {
   };
 }
 
-Future<Uint8List> decodePluginContent(Object? content, String? encoding) async {
+Future<Uint8List> decodePluginContent(
+  PluginCall c,
+  Object? content,
+  String? encoding,
+) async {
   if (content is List) return Uint8List.fromList(content.cast<int>());
   if (content is! String) {
     throw const PluginApiError(
@@ -161,18 +165,35 @@ Future<Uint8List> decodePluginContent(Object? content, String? encoding) async {
     return UriData.parse(content).contentAsBytes();
   }
   if (content.startsWith('http://') || content.startsWith('https://')) {
-    final response = await Dio().get<List<int>>(
-      content,
-      options: Options(responseType: ResponseType.bytes),
-    );
-    return Uint8List.fromList(response.data ?? const []);
+    return fetchForPlugin(c, content);
   }
   return utf8.encode(content);
+}
+
+/// Downloads [url] for the calling plugin, which needs internet access to
+/// its host; the attempt goes into the plugin's network log either way.
+Future<Uint8List> fetchForPlugin(PluginCall c, String url) async {
+  final uri = Uri.tryParse(url);
+  if (uri == null || !const {'http', 'https'}.contains(uri.scheme)) {
+    throw const PluginApiError('invalid_arguments', 'Only http(s) URLs');
+  }
+  final host = uri.host.toLowerCase();
+  final allowed = c.plugin.allowsHost(host);
+  c.host.networkUsed(c.plugin.id, host, blocked: !allowed);
+  if (!allowed) {
+    throw PluginApiError('permission_denied', 'The plugin may not reach $host');
+  }
+  final response = await Dio().get<List<int>>(
+    url,
+    options: Options(responseType: ResponseType.bytes),
+  );
+  return Uint8List.fromList(response.data ?? const []);
 }
 
 Future<Object?> _save(PluginCall c) async {
   final options = c.mapArg(2);
   final bytes = await decodePluginContent(
+    c,
     c.arg(1),
     options['encoding'] as String?,
   );
@@ -283,6 +304,7 @@ Future<Object?> _share(PluginCall c) async {
     name = first.split('/').last;
   } else {
     bytes = await decodePluginContent(
+      c,
       c.arg(1),
       c.mapArg(2)['encoding'] as String? ?? 'utf8',
     );

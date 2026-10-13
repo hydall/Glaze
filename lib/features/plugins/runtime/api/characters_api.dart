@@ -131,7 +131,7 @@ Future<Object?> _import(PluginCall c) async {
     bytes = Uint8List.fromList(utf8.encode(jsonEncode(source)));
     fileName = 'card.json';
   } else if (source is String) {
-    if (!c.plugin.manifest.hasPermission(PluginPermission.files)) {
+    if (!c.plugin.allows(PluginPermission.files)) {
       throw const PluginApiError(
         'permission_denied',
         'Importing from a file needs the "files" permission',
@@ -191,7 +191,7 @@ Future<Object?> _export(PluginCall c) async {
   final bytes = await file.readAsBytes();
   await file.delete().catchError((_) => file);
   if (format == 'object') return jsonDecode(utf8.decode(bytes));
-  if (!c.plugin.manifest.hasPermission(PluginPermission.files)) {
+  if (!c.plugin.allows(PluginPermission.files)) {
     throw const PluginApiError(
       'permission_denied',
       'Exporting to a file needs the "files" permission',

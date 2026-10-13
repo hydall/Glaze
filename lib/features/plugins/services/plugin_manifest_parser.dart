@@ -90,6 +90,19 @@ PluginManifest parsePluginManifest(Object? json) {
       if (p is String) p,
   ];
 
+  final hosts = <String>[];
+  final rawHosts = raw['hosts'];
+  if (rawHosts != null && rawHosts is! List) {
+    throw const PluginManifestException('hosts must be an array');
+  }
+  for (final h in (rawHosts as List?) ?? const []) {
+    final host = h is String ? normalizePluginHost(h) : null;
+    if (host == null) {
+      throw PluginManifestException('hosts has an invalid host: $h');
+    }
+    if (!hosts.contains(host)) hosts.add(host);
+  }
+
   final contributes = raw['contributes'] is Map
       ? Map<String, dynamic>.from(raw['contributes'] as Map)
       : const <String, dynamic>{};
@@ -241,6 +254,7 @@ PluginManifest parsePluginManifest(Object? json) {
     minGlazeVersion: minVersion is String ? minVersion : null,
     compat: compat,
     permissions: permissions,
+    hosts: hosts,
     composerActions: composerActions,
     toolsActions: toolsActions,
     messageActions: messageActions,

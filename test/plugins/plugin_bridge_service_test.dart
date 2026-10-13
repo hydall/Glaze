@@ -95,11 +95,17 @@ class _FakeHost implements PluginApiHost {
   @override
   void variablesChanged(String scope, Map<String, dynamic> root) =>
       varPushes.add('$scope:${jsonEncode(root)}');
+  final network = <String>[];
+  @override
+  void networkUsed(String pluginId, String host, {required bool blocked}) =>
+      network.add('$host:${blocked ? 'blocked' : 'ok'}');
 }
 
 InstalledPlugin _plugin(
   List<String> permissions, {
   Set<String> grants = const {},
+  Set<String> revoked = const {},
+  Set<String>? networkHosts,
 }) => InstalledPlugin(
   manifest: parsePluginManifest({
     'format': 1,
@@ -112,6 +118,8 @@ InstalledPlugin _plugin(
   enabled: true,
   installedAt: 0,
   grants: grants,
+  revoked: revoked,
+  networkHosts: networkHosts,
 );
 
 void main() {
@@ -160,8 +168,9 @@ void main() {
   PluginBridgeService service(
     List<String> permissions, {
     Set<String> grants = const {},
+    Set<String> revoked = const {},
   }) {
-    final plugin = _plugin(permissions, grants: grants);
+    final plugin = _plugin(permissions, grants: grants, revoked: revoked);
     return PluginBridgeService(
       host: host,
       pluginById: (id) => id == plugin.id ? plugin : null,
@@ -200,6 +209,21 @@ void main() {
       );
     },
   );
+
+  test('permissions the user took away are denied', () async {
+    final s = service(
+      const ['composer', 'library'],
+      revoked: const {'composer', 'library'},
+    );
+    final composer = await call(s, 'composer.get');
+    expect((composer['error'] as Map)['code'], 'permission_denied');
+    final library = await call(s, 'characters.remove', ['nope']);
+    expect((library['error'] as Map)['code'], 'permission_denied');
+    expect(host.ui.consents, isEmpty);
+    final plugin = _plugin(const ['composer'], revoked: const {'composer'});
+    expect(plugin.allows('composer'), isFalse);
+    expect(pluginMethodsFor(plugin), isNot(contains('composer.get')));
+  });
 
   test(
     'chat variables: dotted paths, update merges, delete, sync push',
@@ -324,6 +348,30 @@ void main() {
     await call(s, 'storage.set', {'key': 'b', 'value': '2'});
     await call(s, 'storage.remove', {'key': 'a'});
     expect(await host.files('test.plugin').readStorage(), {'b': '2'});
+  });
+
+  test('downloads through the app follow the internet setting', () async {
+    final s = service(const ['files']);
+    final out = await call(s, 'files.save', [
+      'a.txt',
+      'https://example.com/a.txt',
+    ]);
+    expect((out['error'] as Map)['code'], 'permission_denied');
+    expect(host.network, ['example.com:blocked']);
+
+    final listed = _plugin(
+      const ['network'],
+      networkHosts: const {'*.cdn.net', 'api.io'},
+    );
+    expect(listed.allowsHost('img.cdn.net'), isTrue);
+    expect(listed.allowsHost('cdn.net'), isFalse);
+    expect(listed.allowsHost('api.io'), isTrue);
+    expect(listed.allowsHost('evil.io'), isFalse);
+    expect(_plugin(const ['network']).allowsHost('anything.org'), isTrue);
+    expect(
+      _plugin(const ['network'], revoked: const {'network'}).allowsHost('a.io'),
+      isFalse,
+    );
   });
 
   test('message diff reports added, updated and deleted', () {

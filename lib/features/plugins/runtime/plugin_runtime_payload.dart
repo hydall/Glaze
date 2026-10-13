@@ -86,6 +86,12 @@ class PluginRuntimePayloadBuilder {
       'vars': {'chat': chatVars, 'global': globalVars},
       'storage': await files.readStorage(),
       'methods': pluginMethodsFor(plugin),
+      // true: any host; a list: only those hosts; false: none.
+      'network': !plugin.allows(PluginPermission.network)
+          ? false
+          : plugin.networkHosts == null
+          ? true
+          : (plugin.networkHosts!.toList()..sort()),
       'messageActions': await messageActions(plugin, localizer),
     };
   }

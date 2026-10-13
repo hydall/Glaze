@@ -12,6 +12,8 @@ import '../../../shared/widgets/glaze_scaffold.dart';
 import '../../../shared/widgets/glaze_switch.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/menu_group.dart';
+import '../../../shared/widgets/variation_chip.dart';
+import '../compat/tavo/tavo_manifest_converter.dart';
 import '../models/installed_plugin.dart';
 import '../providers/plugin_library_provider.dart';
 import '../services/plugin_compatibility.dart';
@@ -75,15 +77,22 @@ class PluginsScreen extends ConsumerWidget {
                 MenuItem(
                   icon: Icons.extension_outlined,
                   label: plugin.localizer(locale).resolve(plugin.manifest.name),
-                  subtitle: [
-                    if (plugin.manifest.author != null) plugin.manifest.author!,
-                    'v${plugin.manifest.version}',
-                  ].join(' · '),
-                  trailing: GlazeSwitch(
-                    value: plugin.enabled,
-                    onChanged: (v) => ref
-                        .read(pluginLibraryProvider.notifier)
-                        .setEnabled(plugin.id, v),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Converted Tavo packages are marked; Glaze's own
+                      // plugins need no label.
+                      if (plugin.manifest.compat == kTavoCompat) ...[
+                        const VariationChip(name: 'Tavo'),
+                        const SizedBox(width: 10),
+                      ],
+                      GlazeSwitch(
+                        value: plugin.enabled,
+                        onChanged: (v) => ref
+                            .read(pluginLibraryProvider.notifier)
+                            .setEnabled(plugin.id, v),
+                      ),
+                    ],
                   ),
                   onTap: () => openPluginDetailScreen(context, plugin.id),
                 ),

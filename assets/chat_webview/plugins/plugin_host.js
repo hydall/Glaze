@@ -51,11 +51,32 @@
       methods: plugin.methods || [],
       insets: insets,
       compat: plugin.compat || null,
+      network: plugin.network === true ? true : Array.isArray(plugin.network) ? plugin.network : false,
     }, extra || {});
   }
 
+  // A plugin frame may load from outside only where its network setting
+  // says: `true` anywhere, a host list only there, otherwise nowhere.
+  // Everything a plugin ships is inlined as data URLs, so it needs none.
+  function networkPolicy(network) {
+    if (network === true) return null;
+    var hosts = '';
+    if (Array.isArray(network)) {
+      network.forEach(function (h) {
+        if (/^(\*\.)?[a-z0-9.-]+$/.test(h)) ['https', 'http', 'wss', 'ws'].forEach(function (scheme) { hosts += ' ' + scheme + '://' + h + ':*'; });
+      });
+    }
+    var local = " data: blob:" + hosts;
+    return "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'" + local +
+      "; style-src 'unsafe-inline'" + local + "; img-src" + local + "; media-src" + local +
+      "; font-src" + local + "; worker-src" + local + "; frame-src" + local +
+      "; connect-src " + (hosts ? hosts.slice(1) : "'none'");
+  }
+
   function headScripts(plugin, boot) {
-    var html = '<meta charset="utf-8">' +
+    var policy = networkPolicy(plugin.network);
+    var html = (policy ? '<meta http-equiv="Content-Security-Policy" content="' + policy + '">' : '') +
+      '<meta charset="utf-8">' +
       '<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">' +
       '<style>html,body{background:transparent!important;margin:0}</style>' +
       '<script>window.__GLAZE_PLUGIN_BOOT__=' + jsonForScript(boot) + ';<\/script>' +
@@ -132,6 +153,16 @@
       style.height = '0';
     }
     iframe.srcdoc = srcdoc;
+    // The policy cannot stop a frame from navigating itself to a URL; one
+    // that leaves its document without internet access is torn down.
+    if (plugin.network !== true) {
+      var loads = 0;
+      iframe.addEventListener('load', function () {
+        if (++loads < 2) return;
+        reportNetwork(plugin.pluginId, 'navigation', true);
+        removeFrame(state);
+      });
+    }
     var state = {
       plugin: plugin,
       kind: kind,
@@ -188,6 +219,13 @@
   }
 
   /* ---------- Dart transport ---------- */
+  function reportNetwork(pluginId, host, blocked) {
+    if (!window.flutter_inappwebview || !window.flutter_inappwebview.callHandler) return;
+    window.flutter_inappwebview.callHandler('pluginNetwork', {
+      pluginId: pluginId, host: String(host).slice(0, 253), blocked: !!blocked,
+    });
+  }
+
   function callDart(state, method, params) {
     if (!window.flutter_inappwebview || !window.flutter_inappwebview.callHandler) {
       return Promise.resolve({ ok: false, error: { code: 'unavailable', message: 'Glaze bridge is not available' } });
@@ -232,6 +270,9 @@
         framesOf(state.plugin.pluginId).forEach(function (f) {
           if (f !== state) send(f, { type: P + 'emit', event: d.event, detail: d.detail });
         });
+        return;
+      case 'net':
+        if (typeof d.host === 'string' && d.host) reportNetwork(state.plugin.pluginId, d.host, d.blocked);
         return;
       case 'hit':
         if (state.kind === 'panel') applyHitRects(state, d.rects);

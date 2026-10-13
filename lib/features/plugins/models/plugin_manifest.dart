@@ -166,6 +166,7 @@ class PluginManifest {
     this.minGlazeVersion,
     this.compat,
     this.permissions = const [],
+    this.hosts = const [],
     this.composerActions = const [],
     this.toolsActions = const [],
     this.messageActions = const [],
@@ -191,6 +192,10 @@ class PluginManifest {
   /// runtime then also loads that app's script API (`tavo`).
   final String? compat;
   final List<String> permissions;
+
+  /// Hosts the plugin says it needs (`example.com`, `*.example.com`); with
+  /// the `network` permission, a fresh install may reach only these.
+  final List<String> hosts;
   final List<PluginAction> composerActions;
   final List<PluginAction> toolsActions;
   final List<PluginAction> messageActions;
@@ -202,4 +207,34 @@ class PluginManifest {
   final Map<String, dynamic> raw;
 
   bool hasPermission(String permission) => permissions.contains(permission);
+}
+
+final RegExp _hostPattern = RegExp(
+  r'^(\*\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$',
+);
+
+/// [raw] as a host rule (`example.com` or `*.example.com`, lower case), or
+/// null when it is not one.
+String? normalizePluginHost(String raw) {
+  var host = raw.trim().toLowerCase();
+  final uri = host.contains('://') ? Uri.tryParse(host) : null;
+  if (uri != null) host = uri.host;
+  if (host.endsWith('.')) host = host.substring(0, host.length - 1);
+  return host.isNotEmpty && host.length <= 253 && _hostPattern.hasMatch(host)
+      ? host
+      : null;
+}
+
+/// Whether [host] is covered by one of [rules]; `*.example.com` covers
+/// subdomains of example.com, not example.com itself.
+bool pluginHostAllowed(Iterable<String> rules, String host) {
+  host = host.toLowerCase();
+  for (final rule in rules) {
+    if (rule.startsWith('*.')
+        ? host.endsWith(rule.substring(1))
+        : host == rule) {
+      return true;
+    }
+  }
+  return false;
 }

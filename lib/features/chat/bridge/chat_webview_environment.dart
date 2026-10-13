@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -71,6 +72,40 @@ Future<String?> _deriveMobileJanitorWebViewUA() async {
     return null;
   }
 }
+
+/// Takes WebRTC away from every frame below the chat page — the plugin
+/// frames and anything they nest. Peer connections reach the network over
+/// STUN/TURN, which no Content-Security-Policy covers, so a plugin without
+/// internet access could otherwise still talk to a server of its choosing.
+///
+/// Injected by the WebView itself at document start in every frame, before
+/// any page script, so a plugin cannot run first or borrow a clean copy from
+/// a fresh nested frame. The chat page keeps WebRTC.
+const String _subframeGuardSource = r'''
+(function () {
+  if (window === window.top) return;
+  Object.getOwnPropertyNames(window).forEach(function (name) {
+    if (!/^(webkit)?RTC/.test(name)) return;
+    try { delete window[name]; } catch (e) {}
+    if (name in window) {
+      try { Object.defineProperty(window, name, { value: undefined, configurable: false, writable: false }); } catch (e) {}
+    }
+  });
+})();
+''';
+
+/// User scripts for both chat WebViews (the visible one and the preloaded
+/// one it may inherit through `keepAlive`).
+UnmodifiableListView<UserScript> chatWebViewUserScripts() =>
+    UnmodifiableListView([
+      UserScript(
+        groupName: 'glaze_subframe_guard',
+        source: _subframeGuardSource,
+        injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+        forMainFrameOnly: false,
+        allowedOriginRules: {'*'},
+      ),
+    ]);
 
 String? chatWebViewInitialFile() {
   if (_chatWebViewAssetBaseUrl != null) return null;

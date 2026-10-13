@@ -1,8 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:dio/dio.dart';
-
 import '../../../../core/constants/app_version.dart';
 import '../../../chat/composer_text_bridge.dart';
 import '../../models/plugin_manifest.dart';
@@ -140,11 +138,7 @@ Future<Object?> _preview(PluginCall c) async {
   if (source.startsWith('data:')) {
     bytes = UriData.parse(source).contentAsBytes();
   } else if (source.startsWith('http://') || source.startsWith('https://')) {
-    final response = await Dio().get<List<int>>(
-      source,
-      options: Options(responseType: ResponseType.bytes),
-    );
-    bytes = Uint8List.fromList(response.data ?? const []);
+    bytes = await fetchForPlugin(c, source);
   } else if (source.startsWith('files/')) {
     bytes = await readPluginFile(c, source);
   } else {

@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 
 import '../../../core/utils/platform_paths.dart';
 import '../models/installed_plugin.dart';
+import '../models/plugin_manifest.dart';
 import '../services/plugin_package_reader.dart';
 import '../services/plugin_store.dart';
 
@@ -18,6 +19,12 @@ final pluginStoreProvider = FutureProvider<PluginStore>((ref) async {
     dataRoot: p.join(base, 'plugin_data'),
   );
 });
+
+/// How a permission that asks first is set up for one plugin.
+enum PluginConsentMode { ask, always, off }
+
+/// Internet access of one plugin.
+enum PluginNetworkMode { off, listed, any }
 
 /// Installed plugins in install order (= runtime order).
 class PluginLibraryNotifier extends AsyncNotifier<List<InstalledPlugin>> {
@@ -66,8 +73,62 @@ class PluginLibraryNotifier extends AsyncNotifier<List<InstalledPlugin>> {
   Future<void> allowAlways(String id, String consent) =>
       _update(id, (x) => x.copyWith(grants: {...x.grants, consent}));
 
-  Future<void> revokeGrants(String id) =>
-      _update(id, (x) => x.copyWith(grants: const {}));
+  /// Gives back or takes away a manifest permission.
+  Future<void> setPermission(String id, String permission, bool allowed) =>
+      _update(
+        id,
+        (x) => x.copyWith(
+          revoked: allowed
+              ? ({...x.revoked}..remove(permission))
+              : {...x.revoked, permission},
+          grants: allowed ? null : ({...x.grants}..remove(permission)),
+        ),
+      );
+
+  /// Off takes `network` away; listed keeps it to [InstalledPlugin.networkHosts]
+  /// (starting from the manifest's hosts); any lets it reach every host.
+  Future<void> setNetworkMode(String id, PluginNetworkMode mode) => _update(
+    id,
+    (x) => x.copyWith(
+      revoked: mode == PluginNetworkMode.off
+          ? {...x.revoked, PluginPermission.network}
+          : ({...x.revoked}..remove(PluginPermission.network)),
+      networkHosts: switch (mode) {
+        PluginNetworkMode.off => null,
+        PluginNetworkMode.any => () => null,
+        PluginNetworkMode.listed =>
+          () => x.networkHosts ?? {...x.manifest.hosts},
+      },
+    ),
+  );
+
+  /// Adds [host] to, or removes it from, the plugin's allowed hosts.
+  Future<void> setHostAllowed(String id, String host, bool allowed) => _update(
+    id,
+    (x) => x.copyWith(
+      networkHosts: () => allowed
+          ? {...?x.networkHosts, host}
+          : ({...?x.networkHosts}..remove(host)),
+    ),
+  );
+
+  /// For a permission that asks first: ask every time, allow for good, or
+  /// take it away.
+  Future<void> setConsentMode(
+    String id,
+    String consent,
+    PluginConsentMode mode,
+  ) => _update(
+    id,
+    (x) => x.copyWith(
+      revoked: mode == PluginConsentMode.off
+          ? {...x.revoked, consent}
+          : ({...x.revoked}..remove(consent)),
+      grants: mode == PluginConsentMode.always
+          ? {...x.grants, consent}
+          : ({...x.grants}..remove(consent)),
+    ),
+  );
 
   Future<void> resetConfigValue(String id, String key) =>
       _update(id, (x) => x.copyWith(config: {...x.config}..remove(key)));

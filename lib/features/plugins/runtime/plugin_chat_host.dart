@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:easy_localization/easy_localization.dart';
@@ -18,6 +19,7 @@ import '../../chat/chat_state.dart';
 import '../compat/tavo/tavo_manifest_converter.dart';
 import '../models/installed_plugin.dart';
 import '../providers/plugin_library_provider.dart';
+import '../providers/plugin_network_log_provider.dart';
 import 'api/chats_api.dart';
 import 'api/files_api.dart';
 import 'api/shapes.dart';
@@ -102,6 +104,7 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
       if (identical(registry.state, runtime)) registry.state = null;
     });
     runtime.bridge.onPluginActionFailed = null;
+    runtime.bridge.onPluginNetwork = null;
     runtime.dispose();
   }
 
@@ -148,7 +151,6 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
       contextResolver: () => mounted ? context : null,
       onVariablesChanged: (scope, root) => runtime.pushVars(scope, root),
     );
-    final byId = {for (final x in plugins) x.id: x};
     final library = ref.read(pluginLibraryProvider.notifier);
     final builder = PluginRuntimePayloadBuilder(store: store);
     final fileHandlers = [
@@ -164,7 +166,12 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
       bridge: bridge,
       service: PluginBridgeService(
         host: host,
-        pluginById: (id) => byId[id],
+        // Read live: "always allow" answers land in the library without
+        // restarting the frames.
+        pluginById: (id) => ref
+            .read(enabledPluginsProvider)
+            .where((x) => x.id == id)
+            .firstOrNull,
         pluginName: _name,
         consentText: (key) => key.tr(),
         onAlwaysAllow: (id, kind) => library.allowAlways(id, kind.name),
@@ -190,6 +197,17 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
         }
       },
     );
+    bridge.onPluginNetwork = (report) {
+      final id = report['pluginId'];
+      final host = report['host'];
+      if (id is! String || host is! String || host.isEmpty) return;
+      if (!plugins.any((x) => x.id == id)) return;
+      unawaited(
+        ref
+            .read(pluginNetworkLogProvider(id).notifier)
+            .record(host, blocked: report['blocked'] == true),
+      );
+    };
     bridge.onPluginActionFailed = (failure) {
       if (!mounted) return;
       GlazeToast.show(
@@ -337,12 +355,26 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
     runtime.dispatchEvent('chat:opened', {'chatId': sessionId, 'chat': chat});
   }
 
+  /// What the frames are built from; grants are read live instead.
+  static String _runtimeKey(List<InstalledPlugin>? plugins) => jsonEncode([
+    for (final x in plugins ?? const <InstalledPlugin>[])
+      [
+        x.id,
+        x.installedAt,
+        x.config,
+        (x.revoked.toList()..sort()),
+        x.networkHosts?.toList()?..sort(),
+      ],
+  ]);
+
   @override
   Widget build(BuildContext context) {
     ref.listen(chatBridgeRegistryProvider(widget.charId), (prev, next) {
       if (!identical(prev, next)) unawaited(_restart());
     });
-    ref.listen(enabledPluginsProvider, (_, _) => unawaited(_restart()));
+    ref.listen(enabledPluginsProvider, (prev, next) {
+      if (_runtimeKey(prev) != _runtimeKey(next)) unawaited(_restart());
+    });
     ref.listen(
       chatProvider(widget.charId),
       (_, next) => _onChatState(next.value),

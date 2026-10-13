@@ -80,6 +80,7 @@ class _ChatWebViewPreloaderState extends State<ChatWebViewPreloader> {
                   initialFile: chatWebViewInitialFile(),
                   initialUrlRequest: chatWebViewInitialUrlRequest(),
                   initialSettings: _webViewSettings,
+                  initialUserScripts: chatWebViewUserScripts(),
                   onLoadStop: (_, _) {
                     if (mounted) setState(() => _preloaded = true);
                   },

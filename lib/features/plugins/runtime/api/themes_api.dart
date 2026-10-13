@@ -186,6 +186,7 @@ Future<Object?> _assetSave(PluginCall c) async {
   _requireEditable(c, c.arg(0));
   final file = await _asset(c, c.requireString(1, 'name'));
   final bytes = await decodePluginContent(
+    c,
     c.arg(2),
     c.mapArg(3)['encoding'] as String?,
   );

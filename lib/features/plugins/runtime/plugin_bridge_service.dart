@@ -40,9 +40,7 @@ final Map<String, PluginMethod> pluginMethodRegistry = Map.unmodifiable({
 /// permission its manifest lists.
 List<String> pluginMethodsFor(InstalledPlugin plugin) => [
   for (final e in pluginMethodRegistry.entries)
-    if (e.value.permission == null ||
-        plugin.manifest.hasPermission(e.value.permission!))
-      e.key,
+    if (e.value.permission == null || plugin.allows(e.value.permission!)) e.key,
 ];
 
 /// Dispatches `{pluginId, method, params, messageId?}` requests from the
@@ -116,7 +114,7 @@ class PluginBridgeService {
       throw PluginApiError('unknown_method', 'Unknown method $method');
     }
     final permission = entry.permission;
-    if (permission != null && !plugin.manifest.hasPermission(permission)) {
+    if (permission != null && !plugin.allows(permission)) {
       throw PluginApiError(
         'permission_denied',
         '$method needs the "$permission" permission',

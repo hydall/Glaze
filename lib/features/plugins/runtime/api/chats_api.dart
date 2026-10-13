@@ -157,7 +157,7 @@ Future<Object?> _update(PluginCall c) async {
   if (session == null) throw PluginApiError('not_found', 'No chat $id');
   if (id != c.host.sessionId) {
     await c.consent(PluginConsent.library, 'plugins_consent_chat_update');
-  } else if (!c.plugin.manifest.hasPermission(PluginPermission.messages)) {
+  } else if (!c.plugin.allows(PluginPermission.messages)) {
     throw const PluginApiError(
       'permission_denied',
       'chats.update needs the "messages" permission',

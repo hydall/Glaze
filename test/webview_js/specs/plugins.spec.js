@@ -217,3 +217,55 @@ test('Tavo plugins get tavo.* mapped onto glaze.*', async ({ page }) => {
   await expect.poll(() => page.evaluate(() => window.glazePlugins.runAction('t', 'action:composer:go'))).toEqual({ ok: true });
   await expect.poll(() => toasts(page)).toEqual(['value-for-t|hi', 'went']);
 });
+
+async function netReports(page) {
+  return page.evaluate(() => window.__calls.filter((c) => c.name === 'pluginNetwork').map((c) => c.request));
+}
+
+test('without the network permission nothing is loaded from outside', async ({ page }) => {
+  await setup(page, [
+    plugin('off', {
+      main: `
+        fetch('https://example.com/x').then(() => glaze.ui.toast('loaded'), () => glaze.ui.toast('failed'));
+      `,
+    }),
+  ]);
+  await expect.poll(() => toasts(page)).toEqual(['failed']);
+  await expect.poll(() => netReports(page)).toContainEqual({ pluginId: 'off', host: 'example.com', blocked: true });
+  expect((await netReports(page)).some((r) => !r.blocked)).toBe(false);
+});
+
+test('with the network permission hosts are logged', async ({ page }) => {
+  await setup(page, [
+    plugin('on', {
+      network: true,
+      main: `fetch('http://127.0.0.1:4176/test/webview_js/harness/plugins.html').catch(() => {}).then(() => glaze.ui.toast('done'));`,
+    }),
+  ]);
+  await expect.poll(() => toasts(page)).toEqual(['done']);
+  await expect.poll(() => netReports(page)).toContainEqual({ pluginId: 'on', host: '127.0.0.1', blocked: false });
+});
+
+test('a frame without internet access that navigates away is removed', async ({ page }) => {
+  await setup(page, [
+    plugin('nav', { main: `setTimeout(() => { location.href = 'http://127.0.0.1:4176/test/webview_js/harness/plugins.html'; }, 50);` }),
+  ]);
+  await expect.poll(() => page.locator('iframe[data-glaze-plugin="nav"]').count()).toBe(0);
+  await expect.poll(() => netReports(page)).toContainEqual({ pluginId: 'nav', host: 'navigation', blocked: true });
+});
+
+test('with a host list only those hosts are reachable', async ({ page }) => {
+  await setup(page, [
+    plugin('list', {
+      network: ['127.0.0.1'],
+      main: `
+        const ok = await fetch('http://127.0.0.1:4176/test/webview_js/harness/plugins.html', { mode: 'no-cors' }).then(() => 'ok', () => 'fail');
+        const other = await fetch('https://example.com/x', { mode: 'no-cors' }).then(() => 'ok', () => 'fail');
+        glaze.ui.toast(ok + '|' + other);
+      `.replace(/^/, '(async () => {').concat('})();'),
+    }),
+  ]);
+  await expect.poll(() => toasts(page)).toEqual(['ok|fail']);
+  await expect.poll(() => netReports(page)).toContainEqual({ pluginId: 'list', host: 'example.com', blocked: true });
+  expect((await netReports(page)).filter((r) => r.host === '127.0.0.1').every((r) => !r.blocked)).toBe(true);
+});

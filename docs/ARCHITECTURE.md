@@ -1629,7 +1629,7 @@ Code lives in `lib/features/plugins/` and `assets/chat_webview/plugins/`.
 
 **Manifest (`plugin.json`, `format: 1`).** `id`, `name`, `version` (SemVer),
 `main`, `author`, `description`, `releaseNotes`, `locales: {default, files}`,
-`icon`, `minGlazeVersion`, `permissions`, and `contributes`:
+`icon`, `minGlazeVersion`, `permissions`, `hosts`, and `contributes`:
 `composerActions`, `toolsActions`, `messageActions`,
 `panels[{id, src, placement: chat|message, slot, role, position}]`,
 `fileHandlers[{id, extensions, mimeTypes, scripts, icon}]` and `settings[]`
@@ -1639,12 +1639,39 @@ Code lives in `lib/features/plugins/` and `assets/chat_webview/plugins/`.
 referenced file exists and that no path escapes the package.
 
 **Permissions** (`PluginPermission`): `composer`, `messages`, `variables`,
-`files`, `generate`, `images`, `library`, `network`. Library writes
+`files`, `generate`, `images`, `library`, `network`. The manifest lists what a
+plugin asks for; the user can take any of them away on the plugin's detail
+screen (`InstalledPlugin.revoked`), and `InstalledPlugin.allows` is the one
+check the bridge, the SDK method list and the frame policy use. Library writes
 (characters, chats, personas, presets, lorebooks, regex, themes) and image
-generation also ask the user through a consent sheet (`PluginConsent`): allow
-once, always allow (kept in `InstalledPlugin.grants` in `registry.json`, reset
-from the plugin's detail screen) or deny (`user_denied`). `images.generate`
-uses the app's own `ImageGenService`.
+generation also ask through a consent sheet (`PluginConsent`): allow once,
+always allow (`InstalledPlugin.grants`) or deny (`user_denied`); on the detail
+screen each is set to Ask, Always or Off. Grants and revocations live in
+`registry.json`. Grants are read live; a revocation restarts the chat's
+frames. `images.generate` uses the app's own `ImageGenService`.
+
+**Network.** Internet access has three modes on the detail screen: off
+(`network` revoked), listed hosts (`InstalledPlugin.networkHosts`, a set of
+`example.com` / `*.example.com` rules) and any host (`networkHosts == null`).
+A fresh install of a plugin whose `plugin.json` names `hosts` starts in the
+listed mode with those; updates keep the user's setup. Except in the any-host
+mode, every plugin frame gets a Content-Security-Policy that allows inline
+code, `data:`/`blob:` URLs and the listed hosts (any port) only, and a frame
+that navigates itself away is removed. WebRTC, which no CSP covers (STUN/TURN
+can carry data to any server), is taken away from every subframe of the chat
+WebView by a document-start user script injected by the WebView itself in all
+frames (`chatWebViewUserScripts`), before any plugin code; nested frames in a
+plugin's sandbox each get their own opaque origin, so a plugin cannot borrow a
+clean constructor from one. Verified on Android WebView; iOS and desktop not
+yet. Downloads the API makes from Dart (`files.save` and `ui.preview` with a
+URL, theme assets) go through `fetchForPlugin`, which applies the same rules.
+The SDK reports each host a frame loads from — fetch/XHR/WebSocket/EventSource
+calls, resource timing entries and policy violations — through the
+`pluginNetwork` handler into `pluginNetworkLogProvider`
+(`plugin_data/<id>/network.json`); the detail screen lists it, and in the
+listed mode each host there can be allowed or disallowed. The log is a guide
+(plugin code could hide some of its traffic from it); the policy is the
+enforcement.
 
 **Storage.** Packages are unpacked to `<data>/plugins/<id>/`; `registry.json`
 in that folder holds install order, the enabled flag, saved settings and

@@ -3,7 +3,8 @@
 //
 // The host (plugin_host.js) writes `window.__GLAZE_PLUGIN_BOOT__` first:
 //   { pluginId, kind: 'main'|'panel'|'message'|'file', panelId?, messageId?,
-//     config, i18n, vars: { chat, global }, storage, methods: [...], insets }
+//     config, i18n, vars: { chat, global }, storage, methods: [...], insets,
+//     compat, network }
 // Every call goes to the parent as a `glaze-plugin:call` postMessage; the
 // parent attributes it to this frame's plugin and forwards it to Dart.
 (function () {
@@ -34,6 +35,68 @@
 
   function clone(v) { return v === undefined ? undefined : JSON.parse(JSON.stringify(v)); }
   function isPlain(v) { return v != null && typeof v === 'object' && !Array.isArray(v); }
+
+  /* ---------- Network log ---------- */
+  // Reports each host this frame loads from (or is stopped from loading
+  // from) so the plugin's page can list them. Installed before any plugin
+  // code runs; it sees fetch/XHR/WebSocket/EventSource calls, every resource
+  // the page loads and every request the frame's policy blocks.
+  (function watchNetwork() {
+    var seen = new Set();
+    var network = boot.network;
+    function allowed(host) {
+      if (network === true) return true;
+      if (!Array.isArray(network)) return false;
+      return network.some(function (rule) {
+        return rule.indexOf('*.') === 0 ? host.slice(-(rule.length - 1)) === rule.slice(1) : host === rule;
+      });
+    }
+    function report(url, blocked) {
+      var host;
+      try { host = new URL(String(url), location.href).hostname; } catch (e) { return; }
+      if (!host) return;
+      host = host.toLowerCase();
+      if (blocked === undefined) blocked = !allowed(host);
+      var key = (blocked ? '!' : '') + host;
+      if (seen.has(key)) return;
+      seen.add(key);
+      post({ type: P + 'net', host: host, blocked: !!blocked });
+    }
+    function remote(url) { return /^(https?|wss?):/i.test(String(url)); }
+    try {
+      new PerformanceObserver(function (list) {
+        list.getEntries().forEach(function (e) { if (remote(e.name)) report(e.name); });
+      }).observe({ type: 'resource', buffered: true });
+    } catch (e) { /* no resource timing */ }
+    document.addEventListener('securitypolicyviolation', function (e) {
+      if (remote(e.blockedURI)) report(e.blockedURI, true);
+    });
+    var nativeFetch = window.fetch;
+    if (nativeFetch) {
+      window.fetch = function (input) {
+        var url = input && typeof input === 'object' && 'url' in input ? input.url : input;
+        if (remote(url)) report(url);
+        return nativeFetch.apply(this, arguments);
+      };
+    }
+    var open = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (method, url) {
+      if (remote(url)) report(url);
+      return open.apply(this, arguments);
+    };
+    ['WebSocket', 'EventSource'].forEach(function (name) {
+      var Native = window[name];
+      if (!Native) return;
+      var Wrapped = function (url) {
+        if (remote(url)) report(url);
+        return new (Function.prototype.bind.apply(Native, [null].concat(Array.prototype.slice.call(arguments))))();
+      };
+      Wrapped.prototype = Native.prototype;
+      Object.keys(Native).forEach(function (k) { Wrapped[k] = Native[k]; });
+      ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'].forEach(function (k) { if (k in Native) Wrapped[k] = Native[k]; });
+      window[name] = Wrapped;
+    });
+  })();
 
   /* ---------- Bridged namespaces, built from the granted method list ---------- */
   var glaze = {};

@@ -181,6 +181,26 @@ void main() {
     });
   });
 
+  group('hosts', () {
+    test('are normalized and checked', () {
+      final m = parsePluginManifest(
+        manifest({
+          'hosts': ['API.Example.com', 'https://cdn.io/x', '*.img.net'],
+        }),
+      );
+      expect(m.hosts, ['api.example.com', 'cdn.io', '*.img.net']);
+      expect(
+        () => parsePluginManifest(
+          manifest({
+            'hosts': ['not a host'],
+          }),
+        ),
+        fails('hosts'),
+      );
+      expect(normalizePluginHost('*.*.x.com'), isNull);
+    });
+  });
+
   group('convertTavoManifest', () {
     test('maps fields, permissions, mounts and settings', () {
       final out = convertTavoManifest(tavoManifest());

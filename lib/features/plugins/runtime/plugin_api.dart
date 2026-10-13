@@ -76,6 +76,10 @@ abstract interface class PluginApiHost {
 
   /// Called after a variable write so every frame's sync cache follows.
   void variablesChanged(String scope, Map<String, dynamic> root);
+
+  /// Records that [pluginId] reached, or was stopped from reaching, [host]
+  /// through the app.
+  void networkUsed(String pluginId, String host, {required bool blocked});
 }
 
 /// One bridged call, already attributed to [plugin] by the WebView host.

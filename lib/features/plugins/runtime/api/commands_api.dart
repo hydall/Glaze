@@ -89,8 +89,7 @@ Future<Object?> _run(PluginCall c) async {
     if (command == null) {
       throw PluginApiError('unknown_command', 'Unknown command: $text');
     }
-    if (command.permission case final p?
-        when !c.plugin.manifest.hasPermission(p)) {
+    if (command.permission case final p? when !c.plugin.allows(p)) {
       throw PluginApiError(
         'permission_denied',
         '/${match!.group(1)} needs the "$p" permission',

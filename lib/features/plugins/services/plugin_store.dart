@@ -91,6 +91,8 @@ class PluginStore {
     }
     final config = record['config'];
     final grants = record['grants'];
+    final revoked = record['revoked'];
+    final hosts = record['networkHosts'];
     return InstalledPlugin(
       manifest: manifest,
       directory: dir,
@@ -99,6 +101,8 @@ class PluginStore {
       config: config is Map ? Map<String, Object?>.from(config) : const {},
       catalogs: catalogs,
       grants: grants is List ? {for (final g in grants) '$g'} : const {},
+      revoked: revoked is List ? {for (final r in revoked) '$r'} : const {},
+      networkHosts: hosts is List ? {for (final h in hosts) '$h'} : null,
     );
   }
 
@@ -149,6 +153,14 @@ class PluginStore {
       'installedAt': DateTime.now().millisecondsSinceEpoch,
       'config': existing?['config'] ?? const <String, Object?>{},
       'grants': existing?['grants'] ?? const <String>[],
+      'revoked': existing?['revoked'] ?? const <String>[],
+      // A fresh install of a plugin that names its hosts may reach only
+      // those; an update keeps what the user set up.
+      'networkHosts': existing != null
+          ? existing['networkHosts']
+          : package.manifest.hosts.isEmpty
+          ? null
+          : package.manifest.hosts,
     };
     if (existing == null) {
       records.add(record);

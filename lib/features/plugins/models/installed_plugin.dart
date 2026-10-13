@@ -12,6 +12,8 @@ class InstalledPlugin {
     this.config = const {},
     this.catalogs = const {},
     this.grants = const {},
+    this.revoked = const {},
+    this.networkHosts,
   });
 
   final PluginManifest manifest;
@@ -28,12 +30,33 @@ class InstalledPlugin {
   /// Consents the user allowed for good (`PluginConsent` names).
   final Set<String> grants;
 
+  /// Manifest permissions the user switched off.
+  final Set<String> revoked;
+
+  /// With `network` allowed: the only hosts the plugin may reach, or null
+  /// for any host.
+  final Set<String>? networkHosts;
+
+  /// Whether the plugin may reach [host] at all.
+  bool allowsHost(String host) {
+    if (!allows(PluginPermission.network)) return false;
+    final list = networkHosts;
+    return list == null || pluginHostAllowed(list, host);
+  }
+
   String get id => manifest.id;
+
+  /// Whether the manifest asks for [permission] and the user has not taken
+  /// it away.
+  bool allows(String permission) =>
+      manifest.hasPermission(permission) && !revoked.contains(permission);
 
   InstalledPlugin copyWith({
     bool? enabled,
     Map<String, Object?>? config,
     Set<String>? grants,
+    Set<String>? revoked,
+    Set<String>? Function()? networkHosts,
   }) => InstalledPlugin(
     manifest: manifest,
     directory: directory,
@@ -42,6 +65,8 @@ class InstalledPlugin {
     config: config ?? this.config,
     catalogs: catalogs,
     grants: grants ?? this.grants,
+    revoked: revoked ?? this.revoked,
+    networkHosts: networkHosts == null ? this.networkHosts : networkHosts(),
   );
 
   PluginLocalizer localizer(String requestedLocale) => PluginLocalizer(
@@ -78,5 +103,7 @@ class InstalledPlugin {
     'installedAt': installedAt,
     'config': config,
     'grants': grants.toList(),
+    'revoked': revoked.toList(),
+    'networkHosts': networkHosts?.toList(),
   };
 }

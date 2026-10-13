@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -14,6 +15,7 @@ import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/image_viewer.dart';
 import '../../chat/chat_provider.dart';
 import '../../chat/composer_text_bridge.dart';
+import '../providers/plugin_network_log_provider.dart';
 import '../services/plugin_store.dart';
 import 'plugin_api.dart';
 import 'plugin_file_store.dart';
@@ -62,6 +64,14 @@ class ChatPluginApiHost implements PluginApiHost, PluginUi {
   @override
   void variablesChanged(String scope, Map<String, dynamic> root) =>
       onVariablesChanged(scope, root);
+
+  @override
+  void networkUsed(String pluginId, String host, {required bool blocked}) =>
+      unawaited(
+        ref
+            .read(pluginNetworkLogProvider(pluginId).notifier)
+            .record(host, blocked: blocked),
+      );
 
   BuildContext _context() {
     final context = contextResolver();

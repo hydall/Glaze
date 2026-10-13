@@ -10,7 +10,7 @@ Future<Map<String, dynamic>> readImportSource(PluginCall c) async {
   final source = c.arg(0);
   if (source is Map) return Map<String, dynamic>.from(source);
   if (source is String) {
-    if (!c.plugin.manifest.hasPermission(PluginPermission.files)) {
+    if (!c.plugin.allows(PluginPermission.files)) {
       throw const PluginApiError(
         'permission_denied',
         'Importing from a file needs the "files" permission',
@@ -33,7 +33,7 @@ Future<Object?> exportJson(
   String name,
 ) async {
   if (c.mapArg(1)['format'] == 'object') return object;
-  if (!c.plugin.manifest.hasPermission(PluginPermission.files)) {
+  if (!c.plugin.allows(PluginPermission.files)) {
     throw const PluginApiError(
       'permission_denied',
       'Exporting to a file needs the "files" permission',
