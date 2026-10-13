@@ -328,11 +328,14 @@ class _NetworkLog extends ConsumerWidget {
         for (final h in unseen)
           _hostItem(notifier, h, allowed: true, listed: listed),
         for (final r in records)
-          if (r.host == 'navigation')
+          // Not hosts: shown as they were, never switched per host.
+          if (r.host == 'navigation' || r.host == 'webrtc')
             MenuItem(
-              icon: Icons.block_rounded,
-              label: 'plugins_network_navigation'.tr(),
-              subtitle: 'plugins_network_blocked'.tr(),
+              icon: r.lastBlocked
+                  ? Icons.block_rounded
+                  : Icons.swap_horiz_rounded,
+              label: 'plugins_network_${r.host}'.tr(),
+              subtitle: r.lastBlocked ? 'plugins_network_blocked'.tr() : null,
               value: format.format(
                 DateTime.fromMillisecondsSinceEpoch(r.lastSeen),
               ),

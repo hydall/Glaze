@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
+import '../../chat/bridge/chat_webview_environment.dart';
 import '../models/installed_plugin.dart';
 import '../models/plugin_manifest.dart';
 import '../services/plugin_localizer.dart';
@@ -42,7 +43,12 @@ class PluginRuntimePayloadBuilder {
         debugPrint('[PluginRuntime] ${plugin.id} skipped: $e');
       }
     }
-    return {'sdk': sdkSource, 'compat': compatSources, 'plugins': entries};
+    return {
+      'sdk': sdkSource,
+      'compat': compatSources,
+      'plugins': entries,
+      'rtcToken': chatWebViewRtcToken,
+    };
   }
 
   Future<Map<String, Object?>> pluginEntry(

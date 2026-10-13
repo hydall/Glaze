@@ -4,7 +4,7 @@
 // The host (plugin_host.js) writes `window.__GLAZE_PLUGIN_BOOT__` first:
 //   { pluginId, kind: 'main'|'panel'|'message'|'file', panelId?, messageId?,
 //     config, i18n, vars: { chat, global }, storage, methods: [...], insets,
-//     compat, network }
+//     compat, network, rtcToken }
 // Every call goes to the parent as a `glaze-plugin:call` postMessage; the
 // parent attributes it to this frame's plugin and forwards it to Dart.
 (function () {
@@ -94,6 +94,51 @@
       Wrapped.prototype = Native.prototype;
       Object.keys(Native).forEach(function (k) { Wrapped[k] = Native[k]; });
       ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'].forEach(function (k) { if (k in Native) Wrapped[k] = Native[k]; });
+      window[name] = Wrapped;
+    });
+  })();
+
+  /* ---------- WebRTC ---------- */
+  // The WebView strips WebRTC from plugin frames (it reaches the network
+  // past every policy). A plugin that may reach any host gets it back; any
+  // other gets stubs that refuse and log the attempt.
+  (function webrtc() {
+    var take = window.__glazeRtc;
+    try { delete window.__glazeRtc; } catch (e) { /* not ours to remove */ }
+    var key = boot.rtcToken;
+    delete boot.rtcToken;
+    var kept = boot.network === true && typeof take === 'function' && key ? take(key) : null;
+    var logged = false;
+    function log(blocked) {
+      if (logged) return;
+      logged = true;
+      post({ type: P + 'net', host: 'webrtc', blocked: blocked });
+    }
+    if (kept) {
+      Object.keys(kept).forEach(function (name) { window[name] = kept[name]; });
+    } else if (boot.network === true) {
+      // No WebView guard on this platform: WebRTC was never taken away.
+    } else {
+      Object.getOwnPropertyNames(window).forEach(function (name) {
+        if (/^(webkit)?RTC/.test(name)) { try { delete window[name]; } catch (e) { /* kept */ } }
+      });
+      ['RTCPeerConnection', 'webkitRTCPeerConnection'].forEach(function (name) {
+        window[name] = function () {
+          log(true);
+          throw new DOMException('Direct connections are not allowed for this plugin', 'NotAllowedError');
+        };
+      });
+      return;
+    }
+    ['RTCPeerConnection', 'webkitRTCPeerConnection'].forEach(function (name) {
+      var Native = window[name];
+      if (typeof Native !== 'function') return;
+      var Wrapped = function () {
+        log(false);
+        return new (Function.prototype.bind.apply(Native, [null].concat(Array.prototype.slice.call(arguments))))();
+      };
+      Wrapped.prototype = Native.prototype;
+      Object.setPrototypeOf(Wrapped, Native);
       window[name] = Wrapped;
     });
   })();

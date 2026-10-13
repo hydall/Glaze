@@ -3661,12 +3661,13 @@
   "plugins_network_mode_listed": "Listed hosts",
   "plugins_network_mode_any": "Any host",
   "plugins_network_mode_off_hint": "Nothing from outside",
-  "plugins_network_mode_listed_hint": "Only the hosts you allow",
+  "plugins_network_mode_listed_hint": "Only the hosts you allow, no direct connections",
   "plugins_network_mode_any_hint": "Anything on the internet",
-  "plugins_network_listed": "The plugin may reach only the hosts switched on here. Hosts it tried and was stopped from reaching show up too, so you can allow them.",
+  "plugins_network_listed": "The plugin may reach only the hosts switched on here. Hosts it tried and was stopped from reaching show up too, so you can allow them. Direct connections (WebRTC, used for calls) work only with Any host.",
   "plugins_network_allowed": "Allowed",
   "plugins_network_not_allowed": "Not allowed",
   "plugins_network_add": "Add a host",
   "plugins_network_add_confirm": "Add",
-  "plugins_network_add_invalid": "That is not a host name"
+  "plugins_network_add_invalid": "That is not a host name",
+  "plugins_network_webrtc": "Direct connections (WebRTC)"
 }

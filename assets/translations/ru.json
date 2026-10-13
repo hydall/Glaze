@@ -3698,12 +3698,13 @@
   "plugins_network_mode_listed": "Только разрешённые",
   "plugins_network_mode_any": "Любые адреса",
   "plugins_network_mode_off_hint": "Ничего извне",
-  "plugins_network_mode_listed_hint": "Только адреса, которые вы разрешили",
+  "plugins_network_mode_listed_hint": "Только адреса, которые вы разрешили, без прямых соединений",
   "plugins_network_mode_any_hint": "Всё в интернете",
-  "plugins_network_listed": "Плагину доступны только включённые здесь адреса. Адреса, к которым он пытался обратиться и был остановлен, тоже появляются здесь, и их можно разрешить.",
+  "plugins_network_listed": "Плагину доступны только включённые здесь адреса. Адреса, к которым он пытался обратиться и был остановлен, тоже появляются здесь, и их можно разрешить. Прямые соединения (WebRTC, на нём работают звонки) доступны только в режиме «Любые адреса».",
   "plugins_network_allowed": "Разрешено",
   "plugins_network_not_allowed": "Не разрешено",
   "plugins_network_add": "Добавить адрес",
   "plugins_network_add_confirm": "Добавить",
-  "plugins_network_add_invalid": "Это не адрес сайта"
+  "plugins_network_add_invalid": "Это не адрес сайта",
+  "plugins_network_webrtc": "Прямые соединения (WebRTC)"
 }

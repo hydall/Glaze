@@ -1658,11 +1658,16 @@ listed mode with those; updates keep the user's setup. Except in the any-host
 mode, every plugin frame gets a Content-Security-Policy that allows inline
 code, `data:`/`blob:` URLs and the listed hosts (any port) only, and a frame
 that navigates itself away is removed. WebRTC, which no CSP covers (STUN/TURN
-can carry data to any server), is taken away from every subframe of the chat
-WebView by a document-start user script injected by the WebView itself in all
-frames (`chatWebViewUserScripts`), before any plugin code; nested frames in a
-plugin's sandbox each get their own opaque origin, so a plugin cannot borrow a
-clean constructor from one. Verified on Android WebView; iOS and desktop not
+and peer addresses from a session description can reach any server, and peers
+are IPs, not hosts, so it cannot follow a host list), is taken away from every
+subframe of the chat WebView by a document-start user script injected by the
+WebView itself in all frames (`chatWebViewUserScripts`), before any plugin
+code. The script keeps the constructors behind a bound `__glazeRtc(key)`; the
+key (`chatWebViewRtcToken`, one per app run) goes only to plugins in the
+any-host mode, whose SDK takes WebRTC back before plugin code runs. Other
+plugins get refusing stubs, and attempts show in the log as `webrtc`. Nested
+frames in a plugin's sandbox each get their own opaque origin and no SDK, so
+they have no WebRTC and a plugin cannot borrow it from them. Verified on Android WebView; iOS and desktop not
 yet. Downloads the API makes from Dart (`files.save` and `ui.preview` with a
 URL, theme assets) go through `fetchForPlugin`, which applies the same rules.
 The SDK reports each host a frame loads from — fetch/XHR/WebSocket/EventSource

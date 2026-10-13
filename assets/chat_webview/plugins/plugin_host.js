@@ -19,6 +19,7 @@
 
   var sdkSource = '';
   var compatSources = {};
+  var rtcToken = null;
   var plugins = new Map(); // pluginId -> plugin
   var frames = new Map(); // Window -> frame state
   var replySeq = 0;
@@ -52,6 +53,8 @@
       insets: insets,
       compat: plugin.compat || null,
       network: plugin.network === true ? true : Array.isArray(plugin.network) ? plugin.network : false,
+      // Only a plugin that may reach any host gets WebRTC back.
+      rtcToken: plugin.network === true ? rtcToken : null,
     }, extra || {});
   }
 
@@ -505,6 +508,7 @@
     payload = payload || {};
     teardown();
     if (typeof payload.sdk === 'string') sdkSource = payload.sdk;
+    rtcToken = typeof payload.rtcToken === 'string' ? payload.rtcToken : null;
     compatSources = payload.compat || {};
     refreshInsets();
     (payload.plugins || []).forEach(function (p) {

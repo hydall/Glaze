@@ -1,20 +1,29 @@
 // The plugin host: sandboxed frames, identity stamping, blocking hooks,
 // events, the clipped panel overlay and the Tavo compatibility layer.
+import fs from 'node:fs';
 import { test, expect } from '@playwright/test';
 
 const URL = '/test/webview_js/harness/plugins.html';
 
-async function setup(page, plugins) {
+async function setup(page, plugins, extra = {}) {
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto(URL);
-  await page.evaluate(async (list) => {
+  await page.evaluate(async ({ list, extra }) => {
     const load = async (p) => (await fetch('/assets/chat_webview/plugins/' + p)).text();
     const sdk = await load('plugin_sdk.js');
     const tavo = await load('compat/tavo_compat.js');
-    window.glazePlugins.setup({ sdk, compat: { tavo }, plugins: list });
-  }, plugins);
+    window.glazePlugins.setup({ sdk, compat: { tavo }, plugins: list, ...extra });
+  }, { list: plugins, extra });
   return errors;
+}
+
+// The WebView's document-start guard, read from the Dart source and injected
+// into every frame the way the WebView does it.
+function guardSource(key) {
+  const dart = fs.readFileSync(new globalThis.URL('../../../lib/features/chat/bridge/chat_webview_environment.dart', import.meta.url), 'utf8');
+  const body = /String _subframeGuardSource\(\) =>\s*'''([\s\S]*?)''';/.exec(dart)[1];
+  return body.replace('$chatWebViewRtcToken', key);
 }
 
 function plugin(id, extra) {
@@ -268,4 +277,46 @@ test('with a host list only those hosts are reachable', async ({ page }) => {
   await expect.poll(() => toasts(page)).toEqual(['ok|fail']);
   await expect.poll(() => netReports(page)).toContainEqual({ pluginId: 'list', host: 'example.com', blocked: true });
   expect((await netReports(page)).filter((r) => r.host === '127.0.0.1').every((r) => !r.blocked)).toBe(true);
+});
+
+const RTC_PROBE = `
+  (async () => {
+    let r;
+    try { new RTCPeerConnection(); r = 'ok'; } catch (e) { r = e.name; }
+    glaze.ui.toast(typeof RTCPeerConnection + ':' + r + ':' + typeof window.__glazeRtc);
+  })();
+`;
+
+test('without a guard, WebRTC is refused unless any host is allowed', async ({ page }) => {
+  await setup(page, [
+    plugin('off', { main: RTC_PROBE }),
+    plugin('list', { network: ['example.com'], main: RTC_PROBE }),
+  ]);
+  await expect.poll(async () => (await toasts(page)).sort())
+    .toEqual(['function:NotAllowedError:undefined', 'function:NotAllowedError:undefined']);
+  await expect.poll(() => netReports(page)).toContainEqual({ pluginId: 'off', host: 'webrtc', blocked: true });
+});
+
+test('the WebView guard gives WebRTC back only for any host and the right key', async ({ page }) => {
+  await page.addInitScript(guardSource('k1'));
+  await setup(page, [
+    plugin('any', { network: true, main: RTC_PROBE }),
+    plugin('list', { network: ['example.com'], main: RTC_PROBE }),
+    plugin('nested', {
+      network: true,
+      // A nested frame has no SDK and no key: no WebRTC there.
+      main: `
+        const f = document.createElement('iframe');
+        f.srcdoc = '<script>parent.postMessage({ rtc: typeof RTCPeerConnection, hook: typeof __glazeRtc, give: String(__glazeRtc && __glazeRtc("bad")) }, "*")<\\/script>';
+        addEventListener('message', (e) => { if (e.data && e.data.rtc) glaze.ui.toast('nested:' + e.data.rtc + ':' + e.data.hook + ':' + e.data.give); });
+        document.body.appendChild(f);
+      `,
+    }),
+  ], { rtcToken: 'k1' });
+  await expect.poll(async () => (await toasts(page)).sort()).toEqual([
+    'function:NotAllowedError:undefined',
+    'function:ok:undefined',
+    'nested:undefined:function:null',
+  ]);
+  await expect.poll(() => netReports(page)).toContainEqual({ pluginId: 'any', host: 'webrtc', blocked: false });
 });
