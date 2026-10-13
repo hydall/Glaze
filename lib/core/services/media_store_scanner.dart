@@ -29,3 +29,21 @@ Future<void> registerWithMediaStore(String path) async {
     // Missing handler, refused path, no MediaProvider: nothing to do about it.
   }
 }
+
+/// Adds an image to the iOS Photos library. iOS has no public folder an app
+/// can write into, so this is the only place a saved image is visible from
+/// outside Glaze.
+///
+/// Throws on failure, denied access included: unlike [registerWithMediaStore]
+/// there is no visible fallback, so a swallowed error would report a save
+/// nobody can find.
+Future<String> saveImageToPhotos({
+  required Uint8List bytes,
+  required String filename,
+}) async {
+  final saved = await _channel.invokeMethod<String>('saveImageToGallery', {
+    'bytes': bytes,
+    'filename': filename,
+  });
+  return saved ?? '';
+}
