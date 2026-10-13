@@ -1,5 +1,5 @@
-// The Tavo-compatible plugin host: sandboxed frames, identity stamping,
-// blocking hooks, events and the clipped fragment overlay.
+// The plugin host: sandboxed frames, identity stamping, blocking hooks,
+// events, the clipped panel overlay and the Tavo compatibility layer.
 import { test, expect } from '@playwright/test';
 
 const URL = '/test/webview_js/harness/plugins.html';
@@ -9,8 +9,10 @@ async function setup(page, plugins) {
   page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto(URL);
   await page.evaluate(async (list) => {
-    const sdk = await (await fetch('/assets/chat_webview/plugins/tavo_sdk.js')).text();
-    window.glazePlugins.setup({ sdk, plugins: list });
+    const load = async (p) => (await fetch('/assets/chat_webview/plugins/' + p)).text();
+    const sdk = await load('plugin_sdk.js');
+    const tavo = await load('compat/tavo_compat.js');
+    window.glazePlugins.setup({ sdk, compat: { tavo }, plugins: list });
   }, plugins);
   return errors;
 }
@@ -18,13 +20,15 @@ async function setup(page, plugins) {
 function plugin(id, extra) {
   return {
     pluginId: id,
-    entry: null,
-    fragments: [],
+    compat: null,
+    main: null,
+    panels: [],
     config: {},
     i18n: null,
     vars: { chat: { greeting: 'hi' }, global: {} },
     storage: {},
-    methods: ['variable.get', 'message.count', 'utils.toast'],
+    methods: ['variables.get', 'messages.count', 'ui.toast'],
+    messageActions: [],
     ...extra,
   };
 }
@@ -33,101 +37,116 @@ async function calls(page, method) {
   return page.evaluate((m) => window.__calls.filter((c) => c.request.method === m), method);
 }
 
-test('input:beforeSend handlers rewrite and cancel in plugin order', async ({ page }) => {
+async function toasts(page) {
+  return (await calls(page, 'ui.toast')).map((c) => c.request.params[0]);
+}
+
+test('send:before handlers rewrite and cancel in plugin order', async ({ page }) => {
   await setup(page, [
     plugin('a', {
-      entry: `tavo.plugin.on('input:beforeSend', (e) => { e.text = e.text.toUpperCase(); });`,
+      main: `glaze.plugin.on('send:before', (e) => { e.text = e.text.toUpperCase(); });`,
     }),
     plugin('b', {
-      entry: `tavo.plugin.on('input:beforeSend', (e) => { if (e.text.includes('STOP')) e.cancel('nope'); else e.text += '!'; });`,
+      main: `glaze.plugin.on('send:before', (e) => { if (e.text.includes('STOP')) e.cancel('nope'); else e.text += '!'; });`,
     }),
   ]);
-  await expect.poll(() => page.evaluate(() => window.glazePlugins.hasSubscribers('input:beforeSend'))).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.glazePlugins.hasSubscribers('send:before'))).toBe(true);
   await expect.poll(() => page.evaluate(() =>
-    window.glazePlugins.intercept('input:beforeSend', { text: 'hello' }).then((r) => r.text))).toBe('HELLO!');
+    window.glazePlugins.intercept('send:before', { text: 'hello' }).then((r) => r.text))).toBe('HELLO!');
   const cancelled = await page.evaluate(() =>
-    window.glazePlugins.intercept('input:beforeSend', { text: 'stop' }));
+    window.glazePlugins.intercept('send:before', { text: 'stop' }));
   expect(cancelled).toMatchObject({ cancelled: true, cancelledBy: 'b', message: 'nope', text: 'STOP' });
 });
 
 test('a throwing handler keeps the text and the chain going', async ({ page }) => {
   await setup(page, [
-    plugin('a', { entry: `tavo.plugin.on('generation:prepare', (e) => { e.text = 'lost'; throw new Error('x'); });` }),
-    plugin('b', { entry: `tavo.plugin.on('generation:prepare', async (e) => { e.text = e.text + ' +ctx'; });` }),
+    plugin('a', { main: `glaze.plugin.on('generation:prepare', (e) => { e.text = 'lost'; throw new Error('x'); });` }),
+    plugin('b', { main: `glaze.plugin.on('generation:prepare', async (e) => { e.text = e.text + ' +ctx'; });` }),
   ]);
   await expect.poll(() => page.evaluate(() =>
     window.glazePlugins.intercept('generation:prepare', { text: 'q' }).then((r) => r.text))).toBe('q +ctx');
 });
 
+test('generation:success may not empty the reply', async ({ page }) => {
+  await setup(page, [
+    plugin('a', { main: `glaze.plugin.on('generation:success', (e) => { e.text = ''; });` }),
+    plugin('b', { main: `glaze.plugin.on('generation:success', (e) => { e.text = e.text + ' [b]'; });` }),
+  ]);
+  await expect.poll(() => page.evaluate(() =>
+    window.glazePlugins.intercept('generation:success', { text: 'reply' }).then((r) => r.text))).toBe('reply [b]');
+});
+
 test('calls carry the identity of the frame, not what the plugin claims', async ({ page }) => {
   await setup(page, [
     plugin('honest', {
-      entry: `
-        tavo.variable.get('k').then((v) => tavo.utils.toast(String(v)));
-        parent.postMessage({ type: 'tavo:call', id: 'x', method: 'utils.toast', params: ['spoof'], pluginId: 'other' }, '*');
+      main: `
+        glaze.variables.get('k').then((v) => glaze.ui.toast(String(v)));
+        parent.postMessage({ type: 'glaze-plugin:call', id: 'x', method: 'ui.toast', params: ['spoof'], pluginId: 'other' }, '*');
       `,
     }),
   ]);
-  await expect.poll(async () => (await calls(page, 'utils.toast')).length).toBe(2);
-  const toasts = await calls(page, 'utils.toast');
-  for (const c of toasts) expect(c.request.pluginId).toBe('honest');
-  expect(toasts.map((c) => c.request.params[0])).toContain('value-for-honest');
+  await expect.poll(async () => (await calls(page, 'ui.toast')).length).toBe(2);
+  const all = await calls(page, 'ui.toast');
+  for (const c of all) expect(c.request.pluginId).toBe('honest');
+  expect(all.map((c) => c.request.params[0])).toContain('value-for-honest');
+  expect(all[0].name).toBe('pluginBridge');
 });
 
 test('plugin frames are sandboxed away from the chat page', async ({ page }) => {
   await setup(page, [
     plugin('p', {
-      entry: `
+      main: `
         let leaked = 'blocked';
         try { leaked = String(parent.document.title); } catch (e) {}
         try { if (parent.flutter_inappwebview) leaked = 'bridge'; } catch (e) {}
-        tavo.utils.toast(leaked);
+        glaze.ui.toast(leaked);
       `,
     }),
   ]);
-  await expect.poll(async () => (await calls(page, 'utils.toast')).map((c) => c.request.params[0])).toEqual(['blocked']);
+  await expect.poll(() => toasts(page)).toEqual(['blocked']);
   const sandbox = await page.locator('iframe[data-glaze-plugin="p"]').getAttribute('sandbox');
   expect(sandbox).toBe('allow-scripts');
 });
 
-test('only granted methods exist on the scoped tavo object', async ({ page }) => {
+test('only granted methods exist on the glaze object', async ({ page }) => {
   await setup(page, [
     plugin('p', {
-      methods: ['utils.toast'],
-      entry: `tavo.utils.toast([typeof tavo.message.count, typeof tavo.input.get, typeof tavo.plugin.on].join(','));`,
+      methods: ['ui.toast'],
+      main: `glaze.ui.toast([typeof glaze.messages, typeof glaze.composer, typeof glaze.plugin.on].join(','));`,
     }),
   ]);
-  await expect.poll(async () => (await calls(page, 'utils.toast')).map((c) => c.request.params[0]))
-    .toEqual(['undefined,undefined,function']);
+  await expect.poll(() => toasts(page)).toEqual(['undefined,undefined,function']);
 });
 
 test('emit reaches the plugin\'s other frames; events reach all frames', async ({ page }) => {
   await setup(page, [
     plugin('p', {
-      entry: `tavo.plugin.on('chat:opened', (e) => tavo.plugin.emit('ping', { chat: e.chatId }));`,
-      fragments: [{
+      main: `glaze.plugin.on('chat:opened', (e) => glaze.plugin.emit('ping', { chat: e.chatId }));`,
+      panels: [{
         id: 'f',
+        placement: 'chat',
         order: 10,
-        html: `<script>tavo.plugin.on('ping', (d) => tavo.utils.toast('got ' + d.chat));</script>`,
+        html: `<script>glaze.plugin.on('ping', (d) => glaze.ui.toast('got ' + d.chat));</script>`,
       }],
     }),
   ]);
   // Frames load asynchronously; the host queues the event until each is ready.
   await page.evaluate(() => window.glazePlugins.dispatchEvent('chat:opened', { chatId: 'c1' }));
-  await expect.poll(async () => (await calls(page, 'utils.toast')).map((c) => c.request.params[0])).toEqual(['got c1']);
+  await expect.poll(() => toasts(page)).toEqual(['got c1']);
 });
 
-test('a fragment takes taps only where it draws', async ({ page }) => {
+test('a panel takes taps only where it draws', async ({ page }) => {
   await page.setViewportSize({ width: 400, height: 700 });
   await setup(page, [
     plugin('p', {
-      fragments: [{
+      panels: [{
         id: 'fab',
+        placement: 'chat',
         order: 10,
         html: `
-          <style>#fab { position: fixed; right: 20px; bottom: calc(var(--tavo-inset-bottom-input, 0px) + 10px); width: 80px; height: 40px; }</style>
+          <style>#fab { position: fixed; right: 20px; bottom: calc(var(--glaze-inset-bottom-input, 0px) + 10px); width: 80px; height: 40px; }</style>
           <div id="root" style="position:fixed;left:0;top:0;width:0;height:0">
-            <button id="fab" onclick="tavo.utils.toast('fab')">fab</button>
+            <button id="fab" onclick="glaze.ui.toast('fab')">fab</button>
           </div>`,
       }],
     }),
@@ -136,7 +155,7 @@ test('a fragment takes taps only where it draws', async ({ page }) => {
   await expect.poll(() => frame.evaluate((el) => el.style.clipPath)).toContain('path(');
   // Bottom inset 80 → button spans y 570..610, x 300..380.
   await page.mouse.click(340, 590);
-  await expect.poll(async () => (await calls(page, 'utils.toast')).length).toBe(1);
+  await expect.poll(async () => (await calls(page, 'ui.toast')).length).toBe(1);
   await page.mouse.click(100, 300);
   expect(await page.evaluate(() => window.__underClicks || 0)).toBe(1);
 });
@@ -144,23 +163,57 @@ test('a fragment takes taps only where it draws', async ({ page }) => {
 test('the sync variable cache and the storage shim', async ({ page }) => {
   await setup(page, [
     plugin('p', {
+      methods: ['variables.get', 'variables.set', 'ui.toast'],
       storage: { kept: 'yes' },
-      entry: `
+      main: `
         localStorage.setItem('n', '1');
-        tavo.utils.toast([tavo.get('greeting'), localStorage.getItem('kept'), localStorage.getItem('n'), localStorage.length].join('|'));
+        glaze.ui.toast([glaze.variables.peek('greeting'), localStorage.getItem('kept'), localStorage.getItem('n'), localStorage.length].join('|'));
       `,
     }),
   ]);
-  await expect.poll(async () => (await calls(page, 'utils.toast')).map((c) => c.request.params[0])).toEqual(['hi|yes|1|2']);
+  await expect.poll(() => toasts(page)).toEqual(['hi|yes|1|2']);
   const stored = await calls(page, 'storage.set');
-  expect(stored[0].request.params).toEqual({ key: 'n', value: '1' });
+  expect(stored[0].request.params).toEqual([{ key: 'n', value: '1' }]);
 });
 
-test('actions run the entry handler and report a missing one', async ({ page }) => {
+test('actions run the main handler and report a missing one', async ({ page }) => {
   await setup(page, [
-    plugin('p', { entry: `tavo.plugin.onInputAction('go', async () => { await tavo.utils.toast('went'); });` }),
+    plugin('p', { main: `glaze.plugin.onComposerAction('go', async () => { await glaze.ui.toast('went'); });` }),
   ]);
-  await expect.poll(() => page.evaluate(() => window.glazePlugins.runAction('p', 'inputActions:go'))).toEqual({ ok: true });
-  expect(await page.evaluate(() => window.glazePlugins.runAction('p', 'inputActions:nope')))
+  await expect.poll(() => page.evaluate(() => window.glazePlugins.runAction('p', 'action:composer:go'))).toEqual({ ok: true });
+  expect(await page.evaluate(() => window.glazePlugins.runAction('p', 'action:composer:nope')))
     .toEqual({ ok: false, reason: 'missing-handler' });
+});
+
+test('file handlers return text, or the next one is tried', async ({ page }) => {
+  await setup(page, [
+    plugin('p', {
+      main: `glaze.plugin.registerFileHandler('txt', { extract: async (f) => ({ content: 'read ' + f.name }) });`,
+    }),
+  ]);
+  await expect.poll(() => page.evaluate(() =>
+    window.glazePlugins.runFileHandler('p', 'txt', { name: 'a.txt', path: 'files/tmp/a.txt' }, [])))
+    .toEqual({ ok: true, content: 'read a.txt' });
+  const own = await page.evaluate(() => window.glazePlugins.runFileHandler('p', 'csv', { name: 'b.csv' }, [
+    { name: 'csv.js', source: `glaze.plugin.registerFileHandler('csv', { extract: async () => { const e = new Error('no'); e.code = 'unsupported_format'; throw e; } });` },
+  ]));
+  expect(own).toMatchObject({ ok: false, error: { code: 'unsupported_format' } });
+});
+
+test('Tavo plugins get tavo.* mapped onto glaze.*', async ({ page }) => {
+  await setup(page, [
+    plugin('t', {
+      compat: 'tavo',
+      main: `
+        tavo.plugin.on('input:beforeSend', (e) => { e.text = '[t] ' + e.text; });
+        tavo.plugin.onInputAction('go', () => tavo.utils.toast('went'));
+        tavo.variable.get('k').then((v) => tavo.utils.toast(v + '|' + tavo.get('greeting')));
+      `,
+    }),
+  ]);
+  await expect.poll(() => toasts(page)).toEqual(['value-for-t|hi']);
+  await expect.poll(() => page.evaluate(() =>
+    window.glazePlugins.intercept('send:before', { text: 'x' }).then((r) => r.text))).toBe('[t] x');
+  await expect.poll(() => page.evaluate(() => window.glazePlugins.runAction('t', 'action:composer:go'))).toEqual({ ok: true });
+  await expect.poll(() => toasts(page)).toEqual(['value-for-t|hi', 'went']);
 });

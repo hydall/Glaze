@@ -11,6 +11,7 @@ class InstalledPlugin {
     required this.installedAt,
     this.config = const {},
     this.catalogs = const {},
+    this.grants = const {},
   });
 
   final PluginManifest manifest;
@@ -24,17 +25,24 @@ class InstalledPlugin {
   /// Locale tag → flat catalog.
   final Map<String, Map<String, String>> catalogs;
 
+  /// Consents the user allowed for good (`PluginConsent` names).
+  final Set<String> grants;
+
   String get id => manifest.id;
 
-  InstalledPlugin copyWith({bool? enabled, Map<String, Object?>? config}) =>
-      InstalledPlugin(
-        manifest: manifest,
-        directory: directory,
-        enabled: enabled ?? this.enabled,
-        installedAt: installedAt,
-        config: config ?? this.config,
-        catalogs: catalogs,
-      );
+  InstalledPlugin copyWith({
+    bool? enabled,
+    Map<String, Object?>? config,
+    Set<String>? grants,
+  }) => InstalledPlugin(
+    manifest: manifest,
+    directory: directory,
+    enabled: enabled ?? this.enabled,
+    installedAt: installedAt,
+    config: config ?? this.config,
+    catalogs: catalogs,
+    grants: grants ?? this.grants,
+  );
 
   PluginLocalizer localizer(String requestedLocale) => PluginLocalizer(
     catalogs: catalogs,
@@ -43,7 +51,7 @@ class InstalledPlugin {
   );
 
   /// Saved value, else schema default, for every keyed field — what
-  /// `tavo.plugin.config.all()` returns.
+  /// `glaze.plugin.settings.all()` returns.
   Map<String, Object?> effectiveConfig(PluginLocalizer localizer) {
     final out = <String, Object?>{};
     for (final field in manifest.settings) {
@@ -69,5 +77,6 @@ class InstalledPlugin {
     'enabled': enabled,
     'installedAt': installedAt,
     'config': config,
+    'grants': grants.toList(),
   };
 }

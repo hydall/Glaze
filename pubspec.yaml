@@ -72,6 +72,7 @@ flutter:
     - assets/chat_webview/bridge/
     - assets/chat_webview/formatter/
     - assets/chat_webview/plugins/
+    - assets/chat_webview/plugins/compat/
     - assets/chat_webview/renderer/
     - assets/translations/
     - .env

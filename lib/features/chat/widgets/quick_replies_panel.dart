@@ -384,12 +384,12 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
                         );
                       },
                     ),
-                  // Input actions of enabled plugins (Tavo's "+" menu).
+                  // Composer actions of enabled plugins.
                   ...pluginActionCards(
                     context,
                     ref,
                     charId: widget.charId,
-                    kind: PluginActionKind.input,
+                    kind: PluginActionKind.composer,
                     itemWidth: itemWidth,
                     listRow: list,
                     editing: widget.editing,

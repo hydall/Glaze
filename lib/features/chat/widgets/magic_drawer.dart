@@ -603,7 +603,7 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
           context,
           ref,
           charId: widget.charId,
-          kind: PluginActionKind.sidebar,
+          kind: PluginActionKind.tools,
           itemWidth: itemWidth,
           listRow: list,
           editing: widget.editing,

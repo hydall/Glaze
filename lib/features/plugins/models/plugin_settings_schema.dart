@@ -1,15 +1,15 @@
 import 'plugin_manifest.dart';
 
-/// Field types of `contributes.settings.schema`.
+/// Field types of `contributes.settings`.
 enum PluginSettingType {
   toggle,
   select,
   slider,
   text,
   textarea,
-  info,
+  note,
   divider,
-  sectionBreak,
+  group,
 }
 
 class PluginSelectOption {
@@ -47,38 +47,36 @@ class PluginSettingField {
   final double? max;
   final double? step;
 
-  /// `info` only: `info` or `warning`.
+  /// `note` only: `info` or `warning`.
   final String? icon;
 
   bool get storesValue => key != null;
 
   static const _types = {
-    'switch': PluginSettingType.toggle,
+    'toggle': PluginSettingType.toggle,
     'select': PluginSettingType.select,
     'slider': PluginSettingType.slider,
     'text': PluginSettingType.text,
     'textarea': PluginSettingType.textarea,
-    'info': PluginSettingType.info,
+    'note': PluginSettingType.note,
     'divider': PluginSettingType.divider,
-    'break': PluginSettingType.sectionBreak,
+    'group': PluginSettingType.group,
   };
 
   static PluginSettingField parse(Object? raw, int index) {
     if (raw is! Map) {
-      throw PluginManifestException(
-        'settings.schema[$index] must be an object',
-      );
+      throw PluginManifestException('settings[$index] must be an object');
     }
     final type = _types[raw['type']];
     if (type == null) {
       throw PluginManifestException(
-        'settings.schema[$index] has an unsupported type: ${raw['type']}',
+        'settings[$index] has an unsupported type: ${raw['type']}',
       );
     }
     String requireKey() {
       final key = raw['key'];
       if (key is! String || key.isEmpty) {
-        throw PluginManifestException('settings.schema[$index] needs a key');
+        throw PluginManifestException('settings[$index] needs a key');
       }
       return key;
     }
@@ -86,7 +84,7 @@ class PluginSettingField {
     PluginText requireText(String field) {
       final text = PluginText.tryParse(raw[field]);
       if (text == null) {
-        throw PluginManifestException('settings.schema[$index] needs a $field');
+        throw PluginManifestException('settings[$index] needs a $field');
       }
       return text;
     }
@@ -97,20 +95,20 @@ class PluginSettingField {
     }
 
     switch (type) {
-      case PluginSettingType.info:
+      case PluginSettingType.note:
         return PluginSettingField(
           type: type,
           label: requireText('text'),
           icon: raw['icon'] == 'warning' ? 'warning' : 'info',
         );
       case PluginSettingType.divider:
-      case PluginSettingType.sectionBreak:
+      case PluginSettingType.group:
         return PluginSettingField(type: type);
       case PluginSettingType.select:
         final rawOptions = raw['options'];
         if (rawOptions is! List || rawOptions.isEmpty) {
           throw PluginManifestException(
-            'settings.schema[$index] select needs options',
+            'settings[$index] select needs options',
           );
         }
         final options = <PluginSelectOption>[];
@@ -130,7 +128,7 @@ class PluginSettingField {
             );
           } else {
             throw PluginManifestException(
-              'settings.schema[$index] has an invalid option',
+              'settings[$index] has an invalid option',
             );
           }
         }
@@ -148,12 +146,12 @@ class PluginSettingField {
         final step = number('step');
         if (min == null || max == null || max <= min) {
           throw PluginManifestException(
-            'settings.schema[$index] slider needs min < max',
+            'settings[$index] slider needs min < max',
           );
         }
         if (step != null && step <= 0) {
           throw PluginManifestException(
-            'settings.schema[$index] slider step must be positive',
+            'settings[$index] slider step must be positive',
           );
         }
         return PluginSettingField(

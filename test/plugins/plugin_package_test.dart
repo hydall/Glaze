@@ -3,54 +3,93 @@ import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:glaze_flutter/features/plugins/compat/tavo/tavo_manifest_converter.dart';
 import 'package:glaze_flutter/features/plugins/models/plugin_manifest.dart';
 import 'package:glaze_flutter/features/plugins/models/plugin_settings_schema.dart';
+import 'package:glaze_flutter/features/plugins/services/plugin_compatibility.dart';
 import 'package:glaze_flutter/features/plugins/services/plugin_localizer.dart';
 import 'package:glaze_flutter/features/plugins/services/plugin_manifest_parser.dart';
 import 'package:glaze_flutter/features/plugins/services/plugin_package_reader.dart';
 
 Map<String, dynamic> manifest([Map<String, dynamic> extra = const {}]) => {
+  'format': 1,
+  'id': 'Com.Example.Note',
+  'name': {'t': 'plugin.name'},
+  'version': '1.0.0',
+  'main': 'main.js',
+  'author': 'Example',
+  'description': 'A note plugin.',
+  'locales': {
+    'default': 'en',
+    'files': {'en': 'locales/en.json', 'ru': 'locales/ru.json'},
+  },
+  'permissions': ['composer'],
+  'contributes': {
+    'composerActions': [
+      {'id': 'note', 'label': 'Note'},
+    ],
+    'panels': [
+      {'id': 'panel', 'src': 'ui/panel.html', 'placement': 'chat'},
+    ],
+    'settings': [
+      {'type': 'note', 'text': 'Hello', 'icon': 'warning'},
+      {'key': 'on', 'type': 'toggle', 'label': 'On', 'default': true},
+      {
+        'key': 'mode',
+        'type': 'select',
+        'label': 'Mode',
+        'options': [
+          'a',
+          {'value': 'b', 'label': 'Bee'},
+        ],
+      },
+      {'type': 'group'},
+      {
+        'key': 'strength',
+        'type': 'slider',
+        'label': 'Strength',
+        'min': 0,
+        'max': 1,
+        'step': 0.1,
+      },
+    ],
+  },
+  ...extra,
+};
+
+Map<String, dynamic> tavoManifest([Map<String, dynamic> extra = const {}]) => {
   'specVersion': 2,
   'id': 'Com.Example.Note',
   'name': {r'$t': 'plugin.name'},
   'version': '1.0.0',
-  'entry': 'entry.js',
+  'entry': 'main.js',
   'author': 'Example',
   'description': 'A note plugin.',
   'localization': {
     'defaultLocale': 'en',
     'resources': {'en': 'locales/en.json', 'ru': 'locales/ru.json'},
   },
-  'permissions': ['input'],
+  'permissions': ['input', 'variable', 'tts'],
   'contributes': {
     'inputActions': [
       {'id': 'note', 'label': 'Note'},
     ],
+    'sidebar': [
+      {'id': 'open', 'label': 'Open'},
+    ],
     'htmlFragments': [
       {'id': 'panel', 'src': 'ui/panel.html', 'mount': '/chat/body/end'},
+      {
+        'id': 'badge',
+        'src': 'ui/panel.html',
+        'mount': '/messages/start?role=character&position=last',
+      },
     ],
     'settings': {
       'schema': [
-        {'type': 'info', 'text': 'Hello', 'icon': 'warning'},
+        {'type': 'info', 'text': 'Hello'},
         {'key': 'on', 'type': 'switch', 'label': 'On', 'default': true},
-        {
-          'key': 'mode',
-          'type': 'select',
-          'label': 'Mode',
-          'options': [
-            'a',
-            {'value': 'b', 'label': 'Bee'},
-          ],
-        },
         {'type': 'break'},
-        {
-          'key': 'strength',
-          'type': 'slider',
-          'label': 'Strength',
-          'min': 0,
-          'max': 1,
-          'step': 0.1,
-        },
       ],
     },
   },
@@ -65,47 +104,54 @@ Uint8List zip(Map<String, String> files) {
   return Uint8List.fromList(ZipEncoder().encode(archive));
 }
 
-Map<String, String> packageFiles([Map<String, dynamic>? m]) => {
-  'manifest.json': jsonEncode(m ?? manifest()),
-  'entry.js': 'tavo.plugin.onInputAction("note", () => {});',
+Map<String, String> packageFiles({
+  String manifestFile = 'plugin.json',
+  Map<String, dynamic>? m,
+  String main = 'glaze.plugin.on("action:composer:note", () => {});',
+}) => {
+  manifestFile: jsonEncode(
+    m ?? (manifestFile == 'plugin.json' ? manifest() : tavoManifest()),
+  ),
+  'main.js': main,
   'ui/panel.html': '<div>panel</div>',
   'locales/en.json': jsonEncode({'plugin.name': 'Quick Note'}),
   'locales/ru.json': jsonEncode({'plugin.name': 'Заметка'}),
 };
 
+Matcher fails(String text) => throwsA(
+  isA<PluginManifestException>().having(
+    (e) => e.message,
+    'message',
+    contains(text),
+  ),
+);
+
 void main() {
   group('parsePluginManifest', () {
-    test('reads a v2 manifest and normalizes the id', () {
+    test('reads plugin.json and normalizes the id', () {
       final m = parsePluginManifest(manifest());
       expect(m.id, 'com.example.note');
       expect(m.name.key, 'plugin.name');
-      expect(m.inputActions.single.id, 'note');
-      expect(m.fragments.single.mount.surface, PluginMountSurface.chat);
-      expect(m.fragments.single.mount.slot, 'end');
+      expect(m.composerActions.single.id, 'note');
+      expect(m.panels.single.placement, PluginPanelPlacement.chat);
+      expect(m.panels.single.slot, 'end');
       expect(m.settings.map((f) => f.type), [
-        PluginSettingType.info,
+        PluginSettingType.note,
         PluginSettingType.toggle,
         PluginSettingType.select,
-        PluginSettingType.sectionBreak,
+        PluginSettingType.group,
         PluginSettingType.slider,
       ]);
       expect(m.settings[2].options.map((o) => o.value), ['a', 'b']);
     });
 
-    test('rejects what Tavo rejects', () {
-      Matcher fails(String text) => throwsA(
-        isA<PluginManifestException>().having(
-          (e) => e.message,
-          'message',
-          contains(text),
-        ),
-      );
+    test('rejects invalid manifests', () {
       expect(
         () => parsePluginManifest(manifest({'id': 'bad id'})),
         fails('id'),
       );
       expect(
-        () => parsePluginManifest(manifest({'specVersion': 3})),
+        () => parsePluginManifest(manifest({'format': 2})),
         fails('newer'),
       );
       expect(
@@ -113,45 +159,92 @@ void main() {
         fails('SemVer'),
       );
       expect(
-        () => parsePluginManifest(manifest({'entry': '../x.js'})),
-        fails('safe path'),
+        () => parsePluginManifest(manifest({'main': '../x.js'})),
+        fails('safe package path'),
       );
       expect(
-        () => parsePluginManifest(manifest({'entry': null})),
-        fails('entry'),
+        () => parsePluginManifest(manifest({'main': null})),
+        fails('main script'),
       );
       expect(
-        () => parsePluginManifest(manifest({'localization': null})),
+        () => parsePluginManifest(
+          manifest({
+            'contributes': {
+              'panels': [
+                {'id': 'p', 'src': 'p.html', 'placement': 'side'},
+              ],
+            },
+          }),
+        ),
+        fails('placement'),
+      );
+    });
+  });
+
+  group('convertTavoManifest', () {
+    test('maps fields, permissions, mounts and settings', () {
+      final out = convertTavoManifest(tavoManifest());
+      final m = parsePluginManifest(out);
+      expect(m.compat, kTavoCompat);
+      expect(m.main, 'main.js');
+      expect(m.name.key, 'plugin.name');
+      expect(m.defaultLocale, 'en');
+      expect(
+        m.permissions,
+        containsAll(['composer', 'variables', 'tts', 'library', 'images']),
+      );
+      expect(m.composerActions.single.id, 'note');
+      expect(m.toolsActions.single.id, 'open');
+      final badge = m.panels.last;
+      expect(badge.placement, PluginPanelPlacement.message);
+      expect(badge.slot, 'start');
+      expect(badge.role, 'character');
+      expect(badge.position, 'last');
+      expect(m.settings.map((f) => f.type), [
+        PluginSettingType.note,
+        PluginSettingType.toggle,
+        PluginSettingType.group,
+      ]);
+    });
+
+    test('keeps the loose v1 rules', () {
+      final m = parsePluginManifest(
+        convertTavoManifest({
+          'id': 'old.plugin',
+          'name': 'Old',
+          'version': 'beta',
+          'scripts': {'actions': 'actions.js'},
+          'contributes': {
+            'sidebar': [
+              {'id': 'go', 'label': 'Go'},
+            ],
+          },
+        }),
+      );
+      expect(m.version, 'beta');
+      expect(m.main, 'actions.js');
+    });
+
+    test('rejects what Tavo rejects', () {
+      expect(
+        () => convertTavoManifest(tavoManifest({'specVersion': 3})),
+        fails('specVersion'),
+      );
+      expect(
+        () => convertTavoManifest(tavoManifest({'localization': null})),
         fails('localization'),
       );
-    });
-
-    test('v1 manifests keep their loose rules', () {
-      final m = parsePluginManifest({
-        'id': 'old.plugin',
-        'name': 'Old',
-        'version': 'beta',
-        'scripts': {'actions': 'actions.js'},
-        'contributes': {
-          'sidebar': [
-            {'id': 'go', 'label': 'Go'},
-          ],
-        },
-      });
-      expect(m.specVersion, 1);
-      expect(m.entry, 'actions.js');
-    });
-
-    test('parses message mounts with filters', () {
-      final mount = PluginMount.parse(
-        '/messages/end?role=character&position=last',
-      );
-      expect(mount.surface, PluginMountSurface.messages);
-      expect(mount.role, 'character');
-      expect(mount.position, 'last');
       expect(
-        () => PluginMount.parse('/chat/side/end'),
-        throwsA(isA<PluginManifestException>()),
+        () => convertTavoManifest(
+          tavoManifest({
+            'contributes': {
+              'htmlFragments': [
+                {'id': 'x', 'src': 'ui/panel.html', 'mount': '/side/end'},
+              ],
+            },
+          }),
+        ),
+        fails('mount'),
       );
     });
   });
@@ -164,15 +257,22 @@ void main() {
         zip({for (final e in packageFiles().entries) 'note/${e.key}': e.value}),
       );
       expect(nested.manifest.id, 'com.example.note');
-      expect(nested.files.keys, contains('entry.js'));
+      expect(nested.files.keys, contains('main.js'));
+    });
+
+    test('converts a Tavo package and stores plugin.json', () {
+      final package = readPluginPackage(
+        zip(packageFiles(manifestFile: 'manifest.json')),
+      );
+      expect(package.manifest.compat, kTavoCompat);
+      final stored = jsonDecode(utf8.decode(package.files['plugin.json']!));
+      expect(stored['format'], kPluginManifestFormat);
+      expect(stored['compat'], 'tavo');
     });
 
     test('rejects missing files and unsafe paths', () {
-      final missing = packageFiles()..remove('entry.js');
-      expect(
-        () => readPluginPackage(zip(missing)),
-        throwsA(isA<PluginManifestException>()),
-      );
+      final missing = packageFiles()..remove('main.js');
+      expect(() => readPluginPackage(zip(missing)), fails('main'));
       expect(
         () => readPluginPackage(zip({...packageFiles(), '../evil.js': 'x'})),
         throwsA(isA<PluginManifestException>()),
@@ -180,6 +280,27 @@ void main() {
       expect(
         () => readPluginPackage(Uint8List.fromList([1, 2, 3])),
         throwsA(isA<PluginManifestException>()),
+      );
+    });
+  });
+
+  group('unsupportedPluginFeatures', () {
+    test('flags TTS by permission or by script use', () {
+      final byPermission = readPluginPackage(
+        zip(packageFiles(manifestFile: 'manifest.json')),
+      );
+      expect(unsupportedPluginFeatures(byPermission), {
+        UnsupportedPluginFeature.tts,
+      });
+      final byScript = readPluginPackage(
+        zip(packageFiles(main: 'await tavo.tts.speak("hi");')),
+      );
+      expect(unsupportedPluginFeatures(byScript), {
+        UnsupportedPluginFeature.tts,
+      });
+      expect(
+        unsupportedPluginFeatures(readPluginPackage(zip(packageFiles()))),
+        isEmpty,
       );
     });
   });

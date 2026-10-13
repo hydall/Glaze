@@ -4,7 +4,24 @@ import 'package:flutter/foundation.dart';
 
 import '../../../core/plugins/plugin_hooks.dart';
 import '../../chat/bridge/chat_bridge_controller.dart';
-import 'tavo_bridge_service.dart';
+import '../models/plugin_manifest.dart';
+import 'api/files_api.dart';
+import 'plugin_bridge_service.dart';
+
+/// A declared file handler of a running plugin.
+class PluginFileHandlerEntry {
+  const PluginFileHandlerEntry({
+    required this.pluginId,
+    required this.handler,
+    required this.scripts,
+  });
+
+  final String pluginId;
+  final PluginFileHandler handler;
+
+  /// Sources of the handler's own scripts; empty when `main` registers it.
+  final Future<List<Map<String, String>>> Function() scripts;
+}
 
 /// Result of a native-triggered plugin action.
 class PluginActionResult {
@@ -14,34 +31,58 @@ class PluginActionResult {
   final String? message;
 }
 
+/// Result of a file handler run: the text for the model, or an error code
+/// (`unsupported_format` lets the next handler try).
+class PluginFileResult {
+  const PluginFileResult({this.content, this.code, this.message});
+  final String? content;
+  final String? code;
+  final String? message;
+  bool get ok => content != null;
+}
+
 /// Drives the plugin frames inside one chat WebView: setup/teardown, event
-/// fan-out, blocking hooks and native actions. Owns no Riverpod state; the
-/// host widget feeds it.
+/// fan-out, blocking hooks, actions and file handlers. Owns no Riverpod
+/// state; the host widget feeds it.
 class PluginChatRuntime implements PluginHookRunner {
   PluginChatRuntime({
     required this.bridge,
     required this.service,
     required this.chatId,
     required this.onCancelledSend,
+    this.fileHandlers = const [],
+    this.stageFile,
   }) {
-    bridge.onTavoRequest = service.dispatch;
+    bridge.onPluginRequest = service.dispatch;
   }
 
   final ChatBridgeController bridge;
-  final TavoBridgeService service;
+  final PluginBridgeService service;
 
   /// Current session id; read on every event.
   final String? Function() chatId;
 
-  /// Shows the plugin's reason when `input:beforeSend` cancels.
+  /// Shows the plugin's reason when `send:before` cancels.
   final void Function(String? message) onCancelledSend;
+
+  /// Sorted by plugin id: the order handlers are tried in.
+  final List<PluginFileHandlerEntry> fileHandlers;
+
+  /// Writes an attached file where the plugin [pluginId] can read it and
+  /// describes it as `{path, name, mimeType, size}`.
+  final Future<Map<String, Object?>> Function(
+    String pluginId,
+    String name,
+    Uint8List bytes,
+  )?
+  stageFile;
 
   bool _disposed = false;
   bool _ready = false;
 
   bool get isReady => _ready && !_disposed;
 
-  /// (Re)creates every plugin frame from [payload]. Entry scripts rerun.
+  /// (Re)creates every plugin frame from [payload]. Main scripts rerun.
   Future<void> setup(Map<String, Object?> payload) async {
     if (_disposed) return;
     final count = await bridge.callAsyncJs(
@@ -62,41 +103,42 @@ class PluginChatRuntime implements PluginHookRunner {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
-    if (identical(bridge.onTavoRequest, service.dispatch)) {
-      bridge.onTavoRequest = null;
+    if (identical(bridge.onPluginRequest, service.dispatch)) {
+      bridge.onPluginRequest = null;
     }
     unawaited(teardown().catchError((Object _) {}));
   }
 
-  void dispatchEvent(String type, Map<String, Object?> payload) {
+  void _fire(String body, Map<String, dynamic> arguments) {
     if (!isReady) return;
     unawaited(
       bridge
-          .callAsyncJs(
-            'window.glazePlugins.dispatchEvent(type, payload); return true;',
-            arguments: {
-              'type': type,
-              'payload': {
-                ...payload,
-                'at': DateTime.now().toUtc().toIso8601String(),
-              },
-            },
-          )
+          .callAsyncJs('$body return true;', arguments: arguments)
           .catchError((Object _) => null),
     );
   }
 
-  void pushVars(String scope, Map<String, dynamic> root) {
-    if (!isReady) return;
-    unawaited(
-      bridge
-          .callAsyncJs(
-            'window.glazePlugins.pushVars(scope, value); return true;',
-            arguments: {'scope': scope, 'value': root},
-          )
-          .catchError((Object _) => null),
-    );
-  }
+  void dispatchEvent(String type, Map<String, Object?> payload) =>
+      _fire('window.glazePlugins.dispatchEvent(type, payload);', {
+        'type': type,
+        'payload': {...payload, 'at': DateTime.now().toUtc().toIso8601String()},
+      });
+
+  void pushVars(String scope, Map<String, dynamic> root) => _fire(
+    'window.glazePlugins.pushVars(scope, value);',
+    {'scope': scope, 'value': root},
+  );
+
+  /// Message order and roles for message panels and message actions.
+  void setMessages(
+    List<Map<String, Object?>> messages, {
+    required bool busy,
+    required String? chatId,
+  }) => _fire('window.glazePlugins.setMessages(list, busy, chatId);', {
+    'list': messages,
+    'busy': busy,
+    'chatId': chatId,
+  });
 
   Future<void> updateLocalization(List<Map<String, Object?>> entries) async {
     if (!isReady) return;
@@ -136,7 +178,7 @@ class PluginChatRuntime implements PluginHookRunner {
     String text, {
     required String source,
   }) async {
-    final result = await _intercept('input:beforeSend', {
+    final result = await _intercept('send:before', {
       'text': text,
       'source': source,
     });
@@ -170,10 +212,54 @@ class PluginChatRuntime implements PluginHookRunner {
   }
 
   @override
-  void notify(String type, Map<String, Object?> payload) =>
-      dispatchEvent(type, payload);
+  Future<String> finishGeneration(
+    String text, {
+    required String source,
+    required String generationId,
+  }) async {
+    final result = await _intercept('generation:success', {
+      'text': text,
+      'source': source,
+      'generationId': generationId,
+    });
+    final next = result?['text'];
+    return next is String && next.trim().isNotEmpty ? next : text;
+  }
 
-  /// Runs an `inputActions:` / `sidebar:` / `lastMessageActions:` handler.
+  @override
+  Set<String> get fileExtensions => {
+    for (final entry in fileHandlers) ...entry.handler.extensions,
+  };
+
+  @override
+  Future<PluginFileExtraction> extractFile(String name, Uint8List bytes) async {
+    final stage = stageFile;
+    final mimeType = pluginMimeType(name);
+    String? error;
+    for (final entry in fileHandlers) {
+      if (stage == null || !entry.handler.matches(name, mimeType)) continue;
+      final file = await stage(entry.pluginId, name, bytes);
+      final result = await runFileHandler(
+        entry.pluginId,
+        entry.handler.id,
+        file,
+        await entry.scripts(),
+      );
+      if (result.ok) return PluginFileExtraction(content: result.content);
+      if (result.code == 'unsupported_format') continue;
+      error = result.message ?? result.code;
+      break;
+    }
+    return PluginFileExtraction(handled: error != null, error: error);
+  }
+
+  @override
+  void notify(String type, Map<String, Object?> payload) => dispatchEvent(
+    type,
+    {...payload, 'chatId': payload['chatId'] ?? chatId()},
+  );
+
+  /// Runs an `action:composer:` / `action:tools:` / `action:message:` handler.
   Future<PluginActionResult> runAction(
     String pluginId,
     String event, {
@@ -202,6 +288,42 @@ class PluginChatRuntime implements PluginHookRunner {
         reason: 'handler-error',
         message: e.toString(),
       );
+    }
+  }
+
+  /// Runs one file handler on [file] (`{path, name, mimeType, size}`, the
+  /// path readable through the plugin's files).
+  Future<PluginFileResult> runFileHandler(
+    String pluginId,
+    String handlerId,
+    Map<String, Object?> file,
+    List<Map<String, String>> scripts,
+  ) async {
+    if (!isReady) {
+      return const PluginFileResult(code: 'runtime-not-ready');
+    }
+    try {
+      final result = await bridge.callAsyncJs(
+        'return await window.glazePlugins.runFileHandler(pluginId, handlerId, file, scripts);',
+        arguments: {
+          'pluginId': pluginId,
+          'handlerId': handlerId,
+          'file': file,
+          'scripts': scripts,
+        },
+        timeout: const Duration(minutes: 11),
+      );
+      if (result is! Map) return const PluginFileResult(code: 'failed');
+      if (result['ok'] == true && result['content'] is String) {
+        return PluginFileResult(content: result['content'] as String);
+      }
+      final error = result['error'];
+      return PluginFileResult(
+        code: error is Map ? '${error['code']}' : 'failed',
+        message: error is Map ? error['message']?.toString() : null,
+      );
+    } catch (e) {
+      return PluginFileResult(code: 'failed', message: '$e');
     }
   }
 }

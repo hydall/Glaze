@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/llm/generation_phase.dart';
 import '../../../core/models/character.dart';
 import '../../../core/models/chat_message.dart';
+import '../../../core/plugins/plugin_hooks.dart';
 import '../../../core/db/repositories/lorebook_use_manifest_repo.dart';
 import '../../../core/llm/prompt/exact_lorebook_manifest.dart';
 import '../../../core/llm/studio/studio_history_limiter.dart';
@@ -178,6 +179,22 @@ class GenerationPipeline {
         return null;
       }
 
+      result = await _applyPluginSuccess(
+        result,
+        messageId: continueTargetId == null
+            ? completedMessageId
+            : result.session!.messages.lastOrNull?.id,
+        source: continueTargetId != null
+            ? 'continuation'
+            : regenTargetId != null
+            ? 'regeneration'
+            : 'reply',
+        genId: genId,
+      );
+      if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) {
+        return null;
+      }
+
       // Continue mode extends an existing assistant message instead of adding
       // a turn, so it owns its own commit + post-gen tail (INV-CM1). Awaited
       // rather than returned directly: the notification lease is released in
@@ -218,6 +235,10 @@ class GenerationPipeline {
           regenTargetId == null &&
           result.session!.messages.lastOrNull?.isError == true;
       if (generationErrored) {
+        _notifyPluginError(
+          genId,
+          result.session!.messages.lastOrNull?.content ?? '',
+        );
         ctx.abortHandler.clearStreaming();
         ctx.abortHandler.restorationMessage = null;
         final settled = result.copyWith(
@@ -239,6 +260,9 @@ class GenerationPipeline {
           regenMsg != null &&
           !regenMsg.isError &&
           !regenMsg.isTyping;
+      if (regenMsg != null && regenMsg.isError) {
+        _notifyPluginError(genId, regenMsg.content);
+      }
       final regenOutcome = await _regenResolver.resolve(
         result: result,
         regenTargetId: regenTargetId,
@@ -380,6 +404,58 @@ class GenerationPipeline {
       ctx.setPhase(GenerationPhase.idle, genId: genId);
       await notificationLease?.release();
     }
+  }
+
+  PluginHookRunner? get _pluginHooks =>
+      ctx.ref.read(pluginHookRegistryProvider).forChat(ctx.charId);
+
+  /// Plugins may rewrite the finished reply [messageId] before it is saved
+  /// (`generation:success`). The active swipe keeps in step with `content`.
+  Future<ChatState> _applyPluginSuccess(
+    ChatState result, {
+    required String? messageId,
+    required String source,
+    required int genId,
+  }) async {
+    final hooks = _pluginHooks;
+    final session = result.session;
+    if (hooks == null || session == null || messageId == null) return result;
+    final index = session.messages.indexWhere((m) => m.id == messageId);
+    if (index < 0) return result;
+    final message = session.messages[index];
+    if (message.role != 'assistant' ||
+        message.isError ||
+        message.content.trim().isEmpty) {
+      return result;
+    }
+    final String text;
+    try {
+      text = await hooks.finishGeneration(
+        message.content,
+        source: source,
+        generationId: '${ctx.charId}:$genId',
+      );
+    } catch (e) {
+      debugPrint('[GenerationPipeline] plugin generation:success failed: $e');
+      return result;
+    }
+    if (text == message.content) return result;
+    final swipes = [...message.swipes];
+    if (message.swipeId >= 0 &&
+        message.swipeId < swipes.length &&
+        swipes[message.swipeId] == message.content) {
+      swipes[message.swipeId] = text;
+    }
+    final messages = [...session.messages];
+    messages[index] = message.copyWith(content: text, swipes: swipes);
+    return result.copyWith(session: session.copyWith(messages: messages));
+  }
+
+  void _notifyPluginError(int genId, String error) {
+    _pluginHooks?.notify('generation:error', {
+      'generationId': '${ctx.charId}:$genId',
+      'error': error,
+    });
   }
 
   /// Continue mode tail: fold the generated block into the assistant message
@@ -628,6 +704,7 @@ class GenerationPipeline {
   }) async {
     if (!ctx.ref.mounted) return;
     if (!ctx.abortHandler.isCurrentGen(genId)) return;
+    _notifyPluginError(genId, e.toString());
     final current = ctx.getState().value;
     // A continuation that threw leaves the message it was extending untouched
     // and settles through the toast instead of an error block (INV-CM4).

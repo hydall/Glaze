@@ -1,8 +1,8 @@
 import '../models/plugin_manifest.dart';
 
-/// Resolves a plugin's `$t` keys against its package catalogs.
+/// Resolves a plugin's `{ "t": key }` texts against its locale files.
 ///
-/// Fallback chain, as in Tavo: requested locale → compatible locales (same
+/// Fallback chain: requested locale → compatible locales (same
 /// language) → `en` → the plugin's `defaultLocale` → the key itself.
 class PluginLocalizer {
   PluginLocalizer({
@@ -59,7 +59,7 @@ class PluginLocalizer {
     return text.literal ?? t(text.key!);
   }
 
-  /// Flattened catalog for `tavo.plugin.i18n`, lowest priority first so the
+  /// Flattened catalog for `glaze.plugin.i18n`, lowest priority first so the
   /// preferred locale wins.
   Map<String, Object?> runtimeSnapshot() {
     final messages = <String, String>{};

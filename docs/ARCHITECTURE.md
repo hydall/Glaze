@@ -1621,47 +1621,85 @@ the message header.
 
 ---
 
-## 9.1 Plugins (Tavo `.tpg` format)
+## 9.1 Plugins
 
-Glaze installs Tavo plugins (zip packages with a `manifest.json`, spec v1 and
-v2) and runs them in the chat WebView. Code lives in `lib/features/plugins/`
-and `assets/chat_webview/plugins/`.
+Glaze plugins are `.glzp` zip packages with a `plugin.json` at the root. They
+run in the chat WebView and talk to the app through the `glaze.*` script API.
+Code lives in `lib/features/plugins/` and `assets/chat_webview/plugins/`.
+
+**Manifest (`plugin.json`, `format: 1`).** `id`, `name`, `version` (SemVer),
+`main`, `author`, `description`, `releaseNotes`, `locales: {default, files}`,
+`icon`, `minGlazeVersion`, `permissions`, and `contributes`:
+`composerActions`, `toolsActions`, `messageActions`,
+`panels[{id, src, placement: chat|message, slot, role, position}]`,
+`fileHandlers[{id, extensions, mimeTypes, scripts, icon}]` and `settings[]`
+(`toggle`, `select`, `slider`, `text`, `textarea`, `note`, `divider`,
+`group`). Translatable text is a string or `{"t": key}`. Parsed by
+`plugin_manifest_parser.dart`; `readPluginPackage` also checks that every
+referenced file exists and that no path escapes the package.
+
+**Permissions** (`PluginPermission`): `composer`, `messages`, `variables`,
+`files`, `generate`, `images`, `library`, `network`. Library writes
+(characters, chats, personas, presets, lorebooks, regex, themes) and image
+generation also ask the user through a consent sheet (`PluginConsent`): allow
+once, always allow (kept in `InstalledPlugin.grants` in `registry.json`, reset
+from the plugin's detail screen) or deny (`user_denied`). `images.generate`
+uses the app's own `ImageGenService`.
 
 **Storage.** Packages are unpacked to `<data>/plugins/<id>/`; `registry.json`
-in that folder holds install order, the enabled flag and saved settings.
-Plugin-owned data (the `localStorage` shim, `tavo.file.*`) lives in
-`<data>/plugin_data/<id>/`. `tavo.variable` chat scope is stored in
-`ChatSession.sessionVars['__tavo_variables']`, global scope in
-`plugin_data/_global_variables.json` — both separate from `glaze.*` variables.
+in that folder holds install order, the enabled flag, saved settings and
+grants. Plugin-owned data (the `localStorage` shim, `glaze.files.*` with
+`chat`, `global` and `tmp` scopes) lives in `<data>/plugin_data/<id>/`;
+`files/tmp` is cleared on start. Variables: chat scope in
+`ChatSession.sessionVars['__plugin_variables']`, per-message scope in
+`'__plugin_message_variables'` (dropped with the message), global scope in
+`plugin_data/_global_variables.json` — all separate from block variables.
 
-**Isolation.** Unlike Tavo, which runs plugin code in the chat page itself,
-every entry script and every `/chat` HTML fragment runs in its own
-`sandbox="allow-scripts"` iframe (null origin). `plugin_host.js` maps each frame
-window to its plugin and stamps that id on every call it forwards to the
-`tavoBridge` handler, so a plugin cannot speak for another. `TavoBridgeService`
-rejects disabled plugins and methods whose manifest permission
-(`input`, `message`, `generate`, `variable`, `file`) is missing; the SDK
-(`tavo_sdk.js`) only exposes granted methods. Fragment frames cover the page but
-are clipped (`clip-path`) to the boxes the plugin draws, so the chat keeps its
-taps. Package scripts, CSS and assets (`/plugins/<id>/…`) are inlined by
-`plugin_html_inliner.dart`, since a null-origin frame cannot fetch them.
+**Isolation.** Every main script, panel and file-handler run gets its own
+`sandbox="allow-scripts"` iframe (null origin). `plugin_host.js` maps each
+frame window to its plugin (and message, for message panels) and stamps those
+ids on every `glaze-plugin:call` it forwards to the `pluginBridge` handler, so
+a plugin cannot speak for another. `PluginBridgeService` rejects disabled
+plugins and methods whose permission the manifest lacks; `plugin_sdk.js` only
+builds the granted methods into `glaze`. Chat panels cover the page but are
+clipped (`clip-path`) to the boxes the plugin draws, so the chat keeps its
+taps; message panels sit in `.msg-content-stack`, message actions in the
+footer's `.msg-trailing-actions`. Package scripts, CSS and assets
+(`/plugins/<id>/…`) are inlined by `plugin_html_inliner.dart`, since a
+null-origin frame cannot fetch them. Layout insets are exposed as
+`--glaze-inset-*` CSS variables.
 
 **Hooks.** `PluginChatHost` (wraps the chat screen) starts the runtime once the
 chat bridge is published and registers a `PluginHookRunner` in
 `pluginHookRegistryProvider`; core chat code only sees that port.
-- `input:beforeSend` — `ChatNotifier._sendMessage`, before auto-translation;
-  may rewrite or cancel.
+- `send:before` — `ChatNotifier._sendMessage`, before auto-translation; may
+  rewrite or cancel.
 - `generation:prepare` — `StreamGenerationService.run`, on a copy of the
   session passed to prompt collection only; never persisted.
-- `input:afterSend`, `chat:opened|closed`, `message:added|updated|deleted`
+- `generation:success` — `GenerationPipeline.run`, before the reply is
+  committed (for Continue, the new block before it is merged); may rewrite but
+  not empty the text. `generation:error` (pipeline error paths) and
+  `generation:cancelled` (`AbortHandler`) are notifications.
+- `send:after`, `chat:opened|closed`, `message:added|updated|deleted`
   (diffed from settled `ChatState`) — notifications.
-- Input actions appear in the drawer's Actions tab, sidebar actions in Tools.
-- `tavo.plugin.emit(name, detail)` is a Glaze extension that delivers to the
-  plugin's other frames.
+- Composer actions appear in the drawer's Actions tab, tools actions in Tools,
+  message actions on the last message (`action:composer|tools|message:<id>`).
+- File handlers: with any running, the composer's attach button accepts every
+  file; images still attach, other files are staged in the plugin's
+  `files/tmp` and the first matching handler that does not answer
+  `unsupported_format` turns them into text for the composer.
+- `glaze.plugin.emit(name, detail)` delivers to the plugin's other frames.
 
-**Not supported yet:** `/messages` fragments, last-message actions, file
-processors, `generation:success|error|cancelled`, write APIs for
-characters/lorebooks/regex/presets, `tavo.tts`, `tavo.image`.
+**Tavo compatibility** (`compat/tavo/`, `compat/tavo_compat.js`). A Tavo
+`.tpg` (`manifest.json`, spec v1/v2) is converted to `plugin.json` on import
+(`convertTavoManifest`, `compat: "tavo"`); installs from before the
+conversion are converted on load. Converted plugins get `library` and `images`
+(Tavo gates those with confirmations, not permissions). For them the runtime
+also loads `tavo_compat.js`, which defines `tavo.*` (and `triggerSlash`) on top
+of `glaze.*`, maps `input:beforeSend|afterSend` onto `send:*` and sets the
+`--tavo-inset-*` variables. TTS is not supported: importing a package that asks
+for `tts` or calls `tavo.tts`/`glaze.tts` shows a warning sheet first
+(`plugin_compatibility.dart`).
 
 ## 10. Known Design Issues
 

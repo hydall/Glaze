@@ -12,8 +12,8 @@ import '../runtime/plugin_chat_host.dart';
 /// Which contribution list a card comes from, and the event prefix its
 /// handler is registered under.
 enum PluginActionKind {
-  input('inputActions'),
-  sidebar('sidebar');
+  composer('action:composer'),
+  tools('action:tools');
 
   const PluginActionKind(this.eventPrefix);
   final String eventPrefix;
@@ -36,8 +36,8 @@ List<PluginActionEntry> pluginActionEntries(
   return [
     for (final plugin in ref.watch(enabledPluginsProvider))
       for (final action in switch (kind) {
-        PluginActionKind.input => plugin.manifest.inputActions,
-        PluginActionKind.sidebar => plugin.manifest.sidebarActions,
+        PluginActionKind.composer => plugin.manifest.composerActions,
+        PluginActionKind.tools => plugin.manifest.toolsActions,
       })
         (
           pluginId: plugin.id,

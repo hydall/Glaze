@@ -328,6 +328,21 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   Future<void> deleteMessages(Set<int> indices) =>
       _messageOpsCtrl.deleteMessages(indices);
 
+  /// Plugin message writes (`glaze.messages.*`). Refused while a reply is
+  /// being generated so a plugin cannot race the stream.
+  Future<ChatSession?> mutateMessagesForPlugin(
+    List<ChatMessage> Function(List<ChatMessage> latest) mutate,
+  ) {
+    final current = state.value;
+    if (current == null ||
+        current.isGenerating ||
+        current.isSendPending ||
+        current.isPostGenRunning) {
+      throw StateError('The chat is busy generating');
+    }
+    return _messageOpsCtrl.mutateMessages(mutate);
+  }
+
   Future<void> toggleMessageHidden(int index) =>
       _messageOpsCtrl.toggleMessageHidden(index);
 
@@ -497,7 +512,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       // rather than the original. A failure keeps the original text.
       final translation = ref.read(pipelineSettingsProvider).translation;
       // Plugins see the text exactly as typed, before translation, and may
-      // rewrite it or cancel the send (`input:beforeSend`). The runtime shows
+      // rewrite it or cancel the send (`send:before`). The runtime shows
       // the plugin's reason; a rejected send puts the text back in the
       // composer.
       final pluginHooks = ref.read(pluginHookRegistryProvider).forChat(arg);
@@ -663,7 +678,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       // generation pipeline starts immediately, the post-gen service runs
       // the chain in the background and persists its own InfoBlocks.
       unawaited(_dispatchAfterUserBlocks(updatedSession));
-      pluginHooks?.notify('input:afterSend', {
+      pluginHooks?.notify('send:after', {
         'chatId': updatedSession.id,
         'source': 'ui',
         'text': outgoingText,

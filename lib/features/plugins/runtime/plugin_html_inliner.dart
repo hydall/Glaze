@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'tavo_file_api.dart';
+import 'api/files_api.dart';
 
 typedef PluginFileReader =
     Future<Uint8List?> Function(String pluginId, String path);
@@ -16,15 +16,14 @@ final _stylesheet = RegExp(
 );
 final _assetRef = RegExp(r'''(["'(])/plugins/([a-z0-9._-]+)/([^"')\s]+)''');
 
-/// Fragment frames have an opaque origin, so `/plugins/<id>/<path>` URLs
+/// Plugin frames have an opaque origin, so `/plugins/<id>/<path>` URLs
 /// cannot be served to them. Package scripts and stylesheets are inlined and
-/// other assets become data URLs — the same files Tavo serves, read from the
-/// installed packages.
+/// other assets become data URLs, read from the installed packages.
 Future<String> inlinePluginAssets(String html, PluginFileReader read) async {
   var out = await _replaceAsync(html, _scriptSrc, (m) async {
     final bytes = await read(m.group(2)!, Uri.decodeFull(m.group(3)!));
     if (bytes == null) {
-      return '<script>console.error("[tavo] missing ${m.group(3)}")</script>';
+      return '<script>console.error("[glaze] missing ${m.group(3)}")</script>';
     }
     final attrs = '${m.group(1)}${m.group(4)}'.replaceAll(
       RegExp(r'\b(async|defer)\b', caseSensitive: false),
@@ -48,7 +47,7 @@ Future<String> inlinePluginAssets(String html, PluginFileReader read) async {
     final path = Uri.decodeFull(m.group(3)!);
     final bytes = await read(m.group(2)!, path);
     if (bytes == null) return m.group(0)!;
-    return '${m.group(1)}data:${tavoMimeType(path)};base64,${base64Encode(bytes)}';
+    return '${m.group(1)}data:${pluginMimeType(path)};base64,${base64Encode(bytes)}';
   });
 }
 

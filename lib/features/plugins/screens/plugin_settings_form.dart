@@ -28,7 +28,7 @@ class PluginSettingsForm extends ConsumerWidget {
     final values = plugin.effectiveConfig(localizer);
     final groups = <List<Widget>>[[]];
     for (final field in plugin.manifest.settings) {
-      if (field.type == PluginSettingType.sectionBreak ||
+      if (field.type == PluginSettingType.group ||
           field.type == PluginSettingType.divider) {
         if (groups.last.isNotEmpty) groups.add([]);
         continue;
@@ -66,7 +66,7 @@ class PluginSettingsForm extends ConsumerWidget {
         : null;
 
     switch (field.type) {
-      case PluginSettingType.info:
+      case PluginSettingType.note:
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           child: Row(
@@ -153,7 +153,7 @@ class PluginSettingsForm extends ConsumerWidget {
           onReset: reset(),
         );
       case PluginSettingType.divider:
-      case PluginSettingType.sectionBreak:
+      case PluginSettingType.group:
         return const SizedBox.shrink();
     }
   }

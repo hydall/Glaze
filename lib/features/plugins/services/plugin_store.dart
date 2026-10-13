@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import '../models/installed_plugin.dart';
+import '../compat/tavo/tavo_manifest_converter.dart';
+import '../models/plugin_manifest.dart';
 import 'plugin_manifest_parser.dart';
 import 'plugin_package_reader.dart';
 
@@ -69,11 +71,9 @@ class PluginStore {
 
   Future<InstalledPlugin> _load(String id, Map<String, dynamic> record) async {
     final dir = packageDir(id);
-    final manifest = parsePluginManifest(
-      jsonDecode(await File(p.join(dir, 'manifest.json')).readAsString()),
-    );
+    final manifest = await _readManifest(dir);
     final catalogs = <String, Map<String, String>>{};
-    for (final e in manifest.localeResources.entries) {
+    for (final e in manifest.localeFiles.entries) {
       try {
         final json = jsonDecode(
           await File(p.join(dir, e.value)).readAsString(),
@@ -90,6 +90,7 @@ class PluginStore {
       }
     }
     final config = record['config'];
+    final grants = record['grants'];
     return InstalledPlugin(
       manifest: manifest,
       directory: dir,
@@ -97,7 +98,32 @@ class PluginStore {
       installedAt: (record['installedAt'] as num?)?.toInt() ?? 0,
       config: config is Map ? Map<String, Object?>.from(config) : const {},
       catalogs: catalogs,
+      grants: grants is List ? {for (final g in grants) '$g'} : const {},
     );
+  }
+
+  /// Reads `plugin.json`, converting a package installed before it existed.
+  Future<PluginManifest> _readManifest(String dir) async {
+    final own = File(p.join(dir, kPluginManifestFile));
+    if (await own.exists()) {
+      return parsePluginManifest(jsonDecode(await own.readAsString()));
+    }
+    final converted = convertTavoManifest(
+      jsonDecode(await File(p.join(dir, kTavoManifestFile)).readAsString()),
+    );
+    await own.writeAsString(jsonEncode(converted));
+    return parsePluginManifest(converted);
+  }
+
+  /// Clears every plugin's `files/tmp` (temporary files last one run).
+  Future<void> clearTemporaryFiles() async {
+    final root = Directory(dataRoot);
+    if (!await root.exists()) return;
+    await for (final dir in root.list()) {
+      if (dir is! Directory) continue;
+      final tmp = Directory(p.join(dir.path, 'files', 'tmp'));
+      if (await tmp.exists()) await tmp.delete(recursive: true);
+    }
   }
 
   /// Unpacks [package], replacing an older version of the same plugin and
@@ -122,6 +148,7 @@ class PluginStore {
       'enabled': existing == null ? true : existing['enabled'] == true,
       'installedAt': DateTime.now().millisecondsSinceEpoch,
       'config': existing?['config'] ?? const <String, Object?>{},
+      'grants': existing?['grants'] ?? const <String>[],
     };
     if (existing == null) {
       records.add(record);

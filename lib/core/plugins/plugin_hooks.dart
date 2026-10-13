@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 /// Outcome of the plugin `input:beforeSend` chain.
@@ -16,12 +18,23 @@ class PluginSendHookResult {
   final String? message;
 }
 
+/// Outcome of running the plugin file handlers on an attached file: the text
+/// to insert, or why there is none ([handled] is false when no handler took
+/// the file).
+class PluginFileExtraction {
+  const PluginFileExtraction({this.content, this.handled = true, this.error});
+
+  final String? content;
+  final bool handled;
+  final String? error;
+}
+
 /// What the chat pipeline may ask of the plugins running in one chat.
 ///
 /// Implemented by the plugin runtime (`features/plugins`); the chat pipeline
 /// only sees this port so it does not depend on the plugin feature.
 abstract interface class PluginHookRunner {
-  /// `input:beforeSend`: may rewrite or cancel the text about to be sent.
+  /// `send:before`: may rewrite or cancel the text about to be sent.
   Future<PluginSendHookResult> beforeSend(
     String text, {
     required String source,
@@ -35,7 +48,23 @@ abstract interface class PluginHookRunner {
     required String generationId,
   });
 
-  /// Fire-and-forget notification (`input:afterSend`, `generation:error`, …).
+  /// `generation:success`: may rewrite the finished reply before it is
+  /// saved. An empty result keeps [text].
+  Future<String> finishGeneration(
+    String text, {
+    required String source,
+    required String generationId,
+  });
+
+  /// Lower-case extensions the plugin file handlers accept.
+  Set<String> get fileExtensions;
+
+  /// Turns an attached file into text through the first matching handler
+  /// that does not answer `unsupported_format`.
+  Future<PluginFileExtraction> extractFile(String name, Uint8List bytes);
+
+  /// Fire-and-forget notification (`send:after`, `generation:error`,
+  /// `generation:cancelled`, …).
   void notify(String type, Map<String, Object?> payload);
 }
 

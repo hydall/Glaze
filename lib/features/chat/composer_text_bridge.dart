@@ -1,6 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-/// Programmatic access to the composer's text, for plugins (`tavo.input.*`).
+/// Programmatic access to the composer's text, for plugins (`glaze.composer.*`).
 ///
 /// The text controller is private to [ChatInputBar], which registers itself
 /// here on mount — the same holder pattern as `ComposerActionBridge`.

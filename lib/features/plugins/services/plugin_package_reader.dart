@@ -3,27 +3,29 @@ import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
 
+import '../compat/tavo/tavo_manifest_converter.dart';
 import '../models/plugin_manifest.dart';
 import 'plugin_manifest_parser.dart';
 
-/// Upper bounds for an imported package; a `.tpg` is a zip, so these guard
+/// Upper bounds for an imported package; a package is a zip, so these guard
 /// against archives that expand far beyond what a plugin needs.
 const int kMaxPluginPackageBytes = 64 * 1024 * 1024;
 const int kMaxPluginFiles = 2000;
+const String kPluginManifestFile = 'plugin.json';
 
-/// A validated, in-memory `.tpg` package.
+/// A validated, in-memory plugin package.
 class PluginPackage {
   const PluginPackage({required this.manifest, required this.files});
 
   final PluginManifest manifest;
 
-  /// Package-relative path → bytes.
+  /// Package-relative path → bytes. Always holds a `plugin.json`, also for
+  /// converted packages.
   final Map<String, Uint8List> files;
 }
 
-/// Reads a `.tpg` (zip) and checks it the way Tavo's installer does:
-/// `manifest.json` at the root, safe paths only, and every file the manifest
-/// points at present.
+/// Reads a `.glzp` (or a Tavo `.tpg`, converted on the way in): the manifest
+/// at the root, safe paths only, and every file the manifest points at.
 PluginPackage readPluginPackage(Uint8List bytes) {
   final Archive archive;
   try {
@@ -52,35 +54,22 @@ PluginPackage readPluginPackage(Uint8List bytes) {
     files[name] = content;
   }
 
-  // Zipping the folder instead of its contents is a common authoring slip;
-  // accept a single top-level folder holding the manifest.
-  if (!files.containsKey('manifest.json')) {
-    final nested = files.keys.where((k) => k.endsWith('/manifest.json'));
-    final candidate = nested.length == 1 ? nested.first : null;
-    final prefix = candidate?.substring(
-      0,
-      candidate.length - 'manifest.json'.length,
-    );
-    if (prefix == null ||
-        prefix.split('/').where((s) => s.isNotEmpty).length != 1 ||
-        !files.keys.every((k) => k.startsWith(prefix))) {
-      throw const PluginManifestException('manifest.json is missing');
-    }
-    final stripped = {
-      for (final e in files.entries) e.key.substring(prefix.length): e.value,
-    };
-    files
-      ..clear()
-      ..addAll(stripped);
-  }
+  _unwrapSingleFolder(files);
 
-  final Object? json;
-  try {
-    json = jsonDecode(utf8.decode(files['manifest.json']!));
-  } catch (_) {
-    throw const PluginManifestException('manifest.json is not valid JSON');
+  final Map<String, dynamic> manifestJson;
+  if (files.containsKey(kPluginManifestFile)) {
+    manifestJson = _decode(files[kPluginManifestFile]!, kPluginManifestFile);
+  } else if (files.containsKey(kTavoManifestFile)) {
+    manifestJson = convertTavoManifest(
+      _decode(files[kTavoManifestFile]!, kTavoManifestFile),
+    );
+    files[kPluginManifestFile] = Uint8List.fromList(
+      utf8.encode(const JsonEncoder.withIndent('  ').convert(manifestJson)),
+    );
+  } else {
+    throw const PluginManifestException('plugin.json is missing');
   }
-  final manifest = parsePluginManifest(json);
+  final manifest = parsePluginManifest(manifestJson);
 
   void requireFile(String? path, String field) {
     if (path != null && !files.containsKey(path)) {
@@ -88,12 +77,54 @@ PluginPackage readPluginPackage(Uint8List bytes) {
     }
   }
 
-  requireFile(manifest.entry, 'entry');
-  for (final f in manifest.fragments) {
-    requireFile(f.src, 'htmlFragments.${f.id}');
+  requireFile(manifest.main, 'main');
+  for (final p in manifest.panels) {
+    requireFile(p.src, 'panels.${p.id}');
   }
-  for (final path in manifest.localeResources.values) {
-    requireFile(path, 'localization.resources');
+  for (final h in manifest.fileHandlers) {
+    for (final s in h.scripts) {
+      requireFile(s, 'fileHandlers.${h.id}');
+    }
+  }
+  for (final path in manifest.localeFiles.values) {
+    requireFile(path, 'locales');
   }
   return PluginPackage(manifest: manifest, files: files);
+}
+
+Map<String, dynamic> _decode(Uint8List bytes, String name) {
+  try {
+    final json = jsonDecode(utf8.decode(bytes));
+    if (json is Map<String, dynamic>) return json;
+  } catch (_) {
+    // Reported below.
+  }
+  throw PluginManifestException('$name is not valid JSON');
+}
+
+/// Zipping the folder instead of its contents is a common authoring slip;
+/// accept a single top-level folder holding the manifest.
+void _unwrapSingleFolder(Map<String, Uint8List> files) {
+  if (files.containsKey(kPluginManifestFile) ||
+      files.containsKey(kTavoManifestFile)) {
+    return;
+  }
+  final nested = files.keys.where(
+    (k) =>
+        k.endsWith('/$kPluginManifestFile') ||
+        k.endsWith('/$kTavoManifestFile'),
+  );
+  final candidate = nested.length == 1 ? nested.first : null;
+  final prefix = candidate?.substring(0, candidate.lastIndexOf('/') + 1);
+  if (prefix == null ||
+      prefix.split('/').where((s) => s.isNotEmpty).length != 1 ||
+      !files.keys.every((k) => k.startsWith(prefix))) {
+    return;
+  }
+  final stripped = {
+    for (final e in files.entries) e.key.substring(prefix.length): e.value,
+  };
+  files
+    ..clear()
+    ..addAll(stripped);
 }

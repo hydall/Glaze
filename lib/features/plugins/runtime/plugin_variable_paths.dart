@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-/// Dotted-path helpers for `tavo.variable.*` (`'status.hp'`).
+/// Dotted-path helpers for `glaze.variables.*` (`'status.hp'`).
 List<String> splitVariablePath(Object? name) {
   if (name is! String) throw ArgumentError('Variable name must be a string');
   final parts = name.split('.').where((p) => p.isNotEmpty).toList();

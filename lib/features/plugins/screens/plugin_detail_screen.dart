@@ -48,7 +48,7 @@ class PluginDetailScreen extends ConsumerWidget {
     final localizer = plugin.localizer(context.locale.toLanguageTag());
     final manifest = plugin.manifest;
     final notifier = ref.read(pluginLibraryProvider.notifier);
-    final cover = manifest.cover;
+    final cover = manifest.icon;
 
     return GlazeScaffold(
       title: localizer.resolve(manifest.name),
@@ -101,7 +101,15 @@ class PluginDetailScreen extends ConsumerWidget {
             header: 'plugins_permissions'.tr(),
             headerIcon: Icons.verified_user_outlined,
             description: _permissionsText(plugin),
-            items: const [],
+            items: [
+              if (plugin.grants.isNotEmpty)
+                MenuItem(
+                  icon: Icons.restart_alt_rounded,
+                  label: 'plugins_revoke_grants'.tr(),
+                  subtitle: 'plugins_revoke_grants_hint'.tr(),
+                  onTap: () => notifier.revokeGrants(plugin.id),
+                ),
+            ],
           ),
           if (manifest.settings.isNotEmpty)
             PluginSettingsForm(plugin: plugin, localizer: localizer),

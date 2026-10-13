@@ -8,6 +8,9 @@ import '../models/installed_plugin.dart';
 import '../services/plugin_package_reader.dart';
 import '../services/plugin_store.dart';
 
+/// A long-lived [Ref] the plugin API reads app state and services through.
+final pluginRefProvider = Provider<Ref>((ref) => ref);
+
 final pluginStoreProvider = FutureProvider<PluginStore>((ref) async {
   final base = await getAppDataDir();
   return PluginStore(
@@ -21,15 +24,19 @@ class PluginLibraryNotifier extends AsyncNotifier<List<InstalledPlugin>> {
   @override
   Future<List<InstalledPlugin>> build() async {
     final store = await ref.watch(pluginStoreProvider.future);
+    await store.clearTemporaryFiles();
     return store.loadAll();
   }
 
   Future<PluginStore> get _store => ref.read(pluginStoreProvider.future);
 
-  /// Validates and installs a `.tpg`. Throws [PluginManifestException] with a
-  /// readable reason when the package is rejected.
-  Future<InstalledPlugin> install(Uint8List bytes) async {
-    final package = readPluginPackage(bytes);
+  /// Validates and installs a package. Throws [PluginManifestException] with
+  /// a readable reason when the package is rejected.
+  Future<InstalledPlugin> install(Uint8List bytes) =>
+      installPackage(readPluginPackage(bytes));
+
+  /// Installs a package already read with [readPluginPackage].
+  Future<InstalledPlugin> installPackage(PluginPackage package) async {
     final installed = await (await _store).install(package);
     final current = [...(state.value ?? const <InstalledPlugin>[])];
     final index = current.indexWhere((x) => x.id == installed.id);
@@ -55,6 +62,12 @@ class PluginLibraryNotifier extends AsyncNotifier<List<InstalledPlugin>> {
 
   Future<void> setConfigValue(String id, String key, Object? value) =>
       _update(id, (x) => x.copyWith(config: {...x.config, key: value}));
+
+  Future<void> allowAlways(String id, String consent) =>
+      _update(id, (x) => x.copyWith(grants: {...x.grants, consent}));
+
+  Future<void> revokeGrants(String id) =>
+      _update(id, (x) => x.copyWith(grants: const {}));
 
   Future<void> resetConfigValue(String id, String key) =>
       _update(id, (x) => x.copyWith(config: {...x.config}..remove(key)));

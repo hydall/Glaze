@@ -3,13 +3,13 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
-/// Per-plugin storage: the `localStorage` shim and `tavo.file.*`.
+/// Per-plugin storage: the `localStorage` shim and `glaze.files.*`.
 ///
-/// Files are private to the plugin (unlike Tavo, where chat files are shared
-/// by every script in the chat). Virtual paths keep Tavo's shape:
-/// `files/chat/<name>`, `files/global/<name>`, `files/tmp/<name>`.
-class TavoFileStore {
-  TavoFileStore({required this.dataDir});
+/// Files are private to the plugin. Virtual paths are
+/// `files/chat/<name>` (per chat), `files/global/<name>` and
+/// `files/tmp/<name>` (cleared on the next start).
+class PluginFileStore {
+  PluginFileStore({required this.dataDir});
 
   final String dataDir;
   static const maxStorageBytes = 2 * 1024 * 1024;

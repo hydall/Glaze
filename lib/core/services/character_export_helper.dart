@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../models/character.dart';
+import '../models/lorebook.dart';
 import '../state/lorebook_provider.dart';
 import '../utils/platform_paths.dart';
 import 'character_book_converter.dart';
@@ -26,14 +27,17 @@ Future<String> exportCharacterToFile({
   final tmpDir = await getTemporaryDirectory();
   final outputDir = tmpDir.path;
 
-  final characterBookData = _buildCharacterBookData(ref, character.id);
+  final characterBookData = buildCharacterBookData(
+    ref.read(lorebooksProvider).value ?? const [],
+    character.id,
+  );
 
   final safeName = (character.name.isEmpty ? 'character' : character.name)
       .replaceAll(RegExp(r'[/\\?%*:|"<>\.]'), '-')
       .trim();
 
   if (format == 'png') {
-    final avatarBytes = await _resolveAvatarBytes(character);
+    final avatarBytes = await resolveCharacterAvatarBytes(character);
     final result = await exportCharacterAsPng(
       character: character,
       avatarBytes: avatarBytes,
@@ -48,7 +52,7 @@ Future<String> exportCharacterToFile({
       subfolder: 'characters',
     );
   } else if (format == 'zip') {
-    final avatarBytes = await _resolveAvatarBytes(character);
+    final avatarBytes = await resolveCharacterAvatarBytes(character);
     final galleryEntries = character.gallery;
     final galleryBytesList = <Uint8List>[];
     for (final entry in galleryEntries) {
@@ -98,11 +102,12 @@ Future<String> exportCharacterToFile({
 
 /// Merges all character-scoped lorebooks for [characterId] into a single V2
 /// `character_book` payload, or null when there are none.
-Map<String, dynamic>? _buildCharacterBookData(
-  WidgetRef ref,
+/// The `character_book` a card export embeds: every lorebook bound to
+/// [characterId], merged into one book.
+Map<String, dynamic>? buildCharacterBookData(
+  List<Lorebook> lorebooks,
   String characterId,
 ) {
-  final lorebooks = ref.read(lorebooksProvider).value ?? [];
   final charLorebooks = lorebooks.where(
     (lb) =>
         lb.activationScope == 'character' &&
@@ -126,7 +131,8 @@ Map<String, dynamic>? _buildCharacterBookData(
   return merged;
 }
 
-Future<Uint8List> _resolveAvatarBytes(Character character) async {
+/// The character's avatar bytes, or a generated placeholder.
+Future<Uint8List> resolveCharacterAvatarBytes(Character character) async {
   final path = character.avatarPath;
   if (path != null && path.isNotEmpty) {
     final resolved = resolveGlazeFilePath(path);

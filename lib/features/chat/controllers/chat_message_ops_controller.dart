@@ -210,6 +210,27 @@ class ChatMessageOpsController {
     _invalidateHistory();
   }
 
+  /// Applies a plugin's change to the open session's message list through the
+  /// same write queue as UI edits. Returns null when no session is open.
+  Future<ChatSession?> mutateMessages(
+    List<ChatMessage> Function(List<ChatMessage> latest) mutate,
+  ) async {
+    if (!_ref.mounted) return null;
+    final current = _getState().value;
+    if (current == null || current.session == null) return null;
+    final token = _writes.beginPublication();
+    final updated = await _writes.run(
+      () => _messageSvc.commitMessagesMutation(
+        current.session!,
+        (latest) => latest.copyWith(messages: mutate(latest.messages)),
+      ),
+    );
+    if (!_ref.mounted) return updated;
+    _dropTokenBreakdown();
+    _publish(updated, token: token);
+    return updated;
+  }
+
   Future<void> toggleMessageHidden(int index) async {
     if (!_ref.mounted) return;
     final current = _getState().value;

@@ -420,12 +420,16 @@ class ChatBridgeController {
   )?
   onPanelEvent;
 
-  /// Plugin runtime entry point for `tavo.*` calls relayed by
+  /// Plugin runtime entry point for `glaze.*` calls relayed by
   /// `assets/chat_webview/plugins/plugin_host.js`. The host stamps the
   /// calling plugin's id on each request; null while no plugin runtime is
   /// attached to this chat.
   Future<Map<String, dynamic>> Function(Map<String, dynamic> request)?
-  onTavoRequest;
+  onPluginRequest;
+
+  /// A message action rendered in the WebView failed
+  /// (`{pluginId, reason, message}`).
+  void Function(Map<String, dynamic> failure)? onPluginActionFailed;
 
   /// Awaits a JS function body with [arguments] bound as parameters and
   /// returns its resolved value. Null when the page is gone or the body threw.
@@ -459,11 +463,11 @@ class ChatBridgeController {
       );
     }
     _controller.addJavaScriptHandler(
-      handlerName: 'tavoBridge',
+      handlerName: 'pluginBridge',
       callback: (JavaScriptHandlerFunctionData data) async {
         final args = data.args;
         final raw = args.isNotEmpty ? args.first : null;
-        final handler = onTavoRequest;
+        final handler = onPluginRequest;
         if (handler == null || raw is! Map) {
           return const {
             'ok': false,
@@ -474,6 +478,14 @@ class ChatBridgeController {
           };
         }
         return handler(Map<String, dynamic>.from(raw));
+      },
+    );
+    _controller.addJavaScriptHandler(
+      handlerName: 'pluginActionFailed',
+      callback: (JavaScriptHandlerFunctionData data) {
+        final raw = data.args.isNotEmpty ? data.args.first : null;
+        if (raw is Map) onPluginActionFailed?.call(Map<String, dynamic>.from(raw));
+        return null;
       },
     );
     _controller.addJavaScriptHandler(

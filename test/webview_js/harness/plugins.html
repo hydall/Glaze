@@ -21,10 +21,10 @@
     window.flutter_inappwebview = {
       callHandler: async (name, request) => {
         window.__calls.push({ name, request });
-        if (request.method === 'variable.get') {
+        if (request.method === 'variables.get') {
           return { ok: true, result: 'value-for-' + request.pluginId };
         }
-        if (request.method === 'message.count') {
+        if (request.method === 'messages.count') {
           return { ok: false, error: { code: 'permission_denied', message: 'denied' } };
         }
         return { ok: true, result: null };

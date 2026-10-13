@@ -7,12 +7,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/shell/desktop/desktop_floating_provider.dart';
 import '../../../shared/shell/shell_header_provider.dart';
+import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_scaffold.dart';
 import '../../../shared/widgets/glaze_switch.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/menu_group.dart';
 import '../models/installed_plugin.dart';
 import '../providers/plugin_library_provider.dart';
+import '../services/plugin_compatibility.dart';
+import '../services/plugin_package_reader.dart';
 import 'plugin_detail_screen.dart';
 
 /// Opens the plugin list: a floating window on desktop, a pushed route on
@@ -25,7 +28,7 @@ Future<void> openPluginsScreen(BuildContext context) async {
   ).push(MaterialPageRoute<void>(builder: (_) => const PluginsScreen()));
 }
 
-/// Installed Tavo-format plugins: import a `.tpg`, switch each on or off,
+/// Installed plugins: import a package, switch each on or off,
 /// open its details and settings.
 class PluginsScreen extends ConsumerWidget {
   const PluginsScreen({super.key});
@@ -92,20 +95,29 @@ class PluginsScreen extends ConsumerWidget {
   }
 }
 
-/// Picks a `.tpg` and installs it, reporting the outcome in a toast.
+/// Picks a plugin package and installs it, reporting the outcome in a toast.
+/// A package that relies on features Glaze lacks is installed only after the
+/// user confirms a warning.
 Future<void> importPluginFromFile(BuildContext context, WidgetRef ref) async {
   final result = await FilePicker.pickFiles(
     type: Platform.isIOS ? FileType.any : FileType.custom,
-    allowedExtensions: Platform.isIOS ? null : const ['tpg', 'zip'],
+    allowedExtensions: Platform.isIOS ? null : const ['glzp', 'tpg', 'zip'],
     withData: true,
   );
   final picked = result?.files.singleOrNull;
   if (picked == null) return;
   try {
     final bytes = picked.bytes ?? await File(picked.path!).readAsBytes();
+    final package = readPluginPackage(bytes);
+    final unsupported = unsupportedPluginFeatures(package);
+    if (unsupported.isNotEmpty) {
+      if (!context.mounted) return;
+      final proceed = await _confirmUnsupported(context, unsupported);
+      if (proceed != true) return;
+    }
     final installed = await ref
         .read(pluginLibraryProvider.notifier)
-        .install(bytes);
+        .installPackage(package);
     if (!context.mounted) return;
     final name = installed
         .localizer(context.locale.toLanguageTag())
@@ -123,4 +135,24 @@ Future<void> importPluginFromFile(BuildContext context, WidgetRef ref) async {
       showCopyButton: true,
     );
   }
+}
+
+Future<bool?> _confirmUnsupported(
+  BuildContext context,
+  Set<UnsupportedPluginFeature> features,
+) {
+  final list = features
+      .map((f) => '• ${'plugins_unsupported_${f.name}'.tr()}')
+      .join('\n');
+  return GlazeBottomSheet.show<bool>(
+    context,
+    title: 'plugins_unsupported_title'.tr(),
+    bigInfo: BottomSheetBigInfo(
+      icon: Icons.warning_amber_rounded,
+      description: '${'plugins_unsupported_body'.tr()}\n\n$list',
+      buttonText: 'plugins_unsupported_install'.tr(),
+      buttonIcon: Icons.download_rounded,
+      onButtonTap: () => Navigator.of(context, rootNavigator: true).pop(true),
+    ),
+  );
 }
