@@ -443,6 +443,9 @@ class MenuItem extends StatefulWidget {
   final Widget? trailing;
   final VoidCallback onTap;
 
+  /// Shown above [label], e.g. a chip marking where the row comes from.
+  final Widget? overline;
+
   const MenuItem({
     super.key,
     this.icon,
@@ -451,6 +454,7 @@ class MenuItem extends StatefulWidget {
     this.subtitle,
     this.value,
     this.trailing,
+    this.overline,
     required this.onTap,
   });
 
@@ -489,6 +493,10 @@ class _MenuItemState extends State<MenuItem> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  if (widget.overline != null) ...[
+                    widget.overline!,
+                    const SizedBox(height: 5),
+                  ],
                   Text(
                     widget.label,
                     style: TextStyle(

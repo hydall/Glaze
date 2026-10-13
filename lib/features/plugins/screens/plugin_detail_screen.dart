@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 
 import '../../../shared/shell/desktop/desktop_floating_provider.dart';
 import '../../../shared/shell/shell_header_provider.dart';
+import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_scaffold.dart';
 import '../../../shared/widgets/glaze_switch.dart';
@@ -306,18 +307,14 @@ class PluginDetailScreen extends ConsumerWidget {
     // found in its scripts, and the user is told which is which.
     final source = plugin.manifest.compat == null
         ? null
-        : plugin.foundInCode.contains(permission)
-        ? 'plugins_permission_found_in_code'.tr()
-        : 'plugins_permission_declared'.tr();
-    final subtitle = [
-      ?source,
-      _text('plugins_permission_$key', ''),
-    ].where((x) => x.isNotEmpty).join('\n');
+        : _SourceChip(found: plugin.foundInCode.contains(permission));
+    final subtitle = _text('plugins_permission_$key', '');
     if (!PluginPermission.all.contains(permission)) {
       // Asked for, but nothing in Glaze provides it (e.g. Tavo's `tts`).
       return MenuItem(
         icon: icon,
         label: label,
+        overline: source,
         subtitle: subtitle.isEmpty ? null : subtitle,
         onTap: () {},
       );
@@ -331,6 +328,7 @@ class PluginDetailScreen extends ConsumerWidget {
       return MenuItem(
         icon: icon,
         label: label,
+        overline: source,
         subtitle: subtitle,
         value: 'plugins_consent_mode_${mode.name}'.tr(),
         onTap: () =>
@@ -342,6 +340,7 @@ class PluginDetailScreen extends ConsumerWidget {
       return MenuItem(
         icon: icon,
         label: label,
+        overline: source,
         subtitle: subtitle,
         value: 'plugins_network_mode_${mode.name}'.tr(),
         onTap: () => _pickNetworkMode(context, notifier, plugin, mode),
@@ -351,6 +350,7 @@ class PluginDetailScreen extends ConsumerWidget {
     return MenuItem(
       icon: icon,
       label: label,
+      overline: source,
       subtitle: subtitle,
       trailing: GlazeSwitch(
         value: allowed,
@@ -660,6 +660,52 @@ class _History extends ConsumerWidget {
           onTap: () => openPluginHistoryScreen(context, plugin.id),
         ),
       ],
+    );
+  }
+}
+
+/// Marks a converted plugin's permission as asked for by the plugin or found
+/// in its code; the second stands out, as nothing in the plugin said so.
+class _SourceChip extends StatelessWidget {
+  const _SourceChip({required this.found});
+
+  final bool found;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = found ? const Color(0xFFE8A33D) : context.cs.primary;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(6, 2, 8, 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withValues(alpha: 0.45)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            found ? Icons.code_rounded : Icons.check_rounded,
+            size: 13,
+            color: color,
+          ),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              found
+                  ? 'plugins_permission_found_in_code'.tr()
+                  : 'plugins_permission_declared'.tr(),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: color,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
