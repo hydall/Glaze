@@ -97,8 +97,15 @@ final class PromptCaptureViewService {
   /// The chat's own requests plus the session-less embedding ones (lorebook
   /// indexing), newest first. Indexing runs outside any chat, and without
   /// them the inspector never showed what it sent.
+  ///
+  /// Reads the whole per-session retention window — the repo keeps
+  /// [LlmRequestCaptureRepo.maxRowsPerSession] rows, so asking for a shorter
+  /// page silently hid every turn older than the newest handful of requests.
   Future<List<PromptCaptureView>> load(String sessionId) async {
-    final rowsFuture = _repo.newestForSession(sessionId);
+    final rowsFuture = _repo.newestForSession(
+      sessionId,
+      limit: LlmRequestCaptureRepo.maxRowsPerSession,
+    );
     final sharedFuture = _repo.newestEmbeddingsWithoutSession();
     final eventsFuture = _repo.newestCallEventsForSession(sessionId);
     final rows = [...await rowsFuture, ...await sharedFuture]

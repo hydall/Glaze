@@ -328,6 +328,11 @@ final class LlmRequestCaptureRepo
       rowCeiling: rowCeiling,
       byteBudget: maxBytesPerSession,
       minRows: minRowsPerSession,
+      // Embedding captures are diagnostics of their own stream — indexing, a
+      // vector search — and a chat can emit many of them per turn. Counting
+      // them against the request budget let them evict the generation requests
+      // a reader actually came to see, so they sit outside it.
+      exemptStageLike: 'embedding%',
     );
   }
 
@@ -346,24 +351,30 @@ final class LlmRequestCaptureRepo
   /// characters and would under-count every non-ASCII prompt). A row is dropped
   /// when it is past the row ceiling, or when it is past [minRows] *and* the
   /// running total has already exceeded the byte budget.
+  ///
+  /// [exemptStageLike] leaves rows of that stage pattern out of both the
+  /// accounting and the deletion: they are never counted against the budget and
+  /// never removed by it. They remain bounded by the global trim.
   Future<void> _trimTo({
     required String predicate,
     required List<Object?> args,
     required int rowCeiling,
     required int byteBudget,
     required int minRows,
+    String? exemptStageLike,
   }) => db.customStatement(
     'DELETE FROM llm_request_capture_rows WHERE id IN ('
     'SELECT id FROM ('
     'SELECT id, '
     'ROW_NUMBER() OVER w AS rn, '
     'SUM(LENGTH(CAST(event_json AS BLOB))) OVER w AS running_bytes '
-    'FROM llm_request_capture_rows WHERE $predicate '
+    'FROM llm_request_capture_rows WHERE $predicate'
+    '${exemptStageLike == null ? '' : ' AND (stage IS NULL OR stage NOT LIKE ?)'} '
     'WINDOW w AS (ORDER BY created_at_ms DESC, id DESC '
     'ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)'
     ') WHERE rn > ? OR (rn > ? AND running_bytes > ?)'
     ')',
-    [...args, rowCeiling, minRows, byteBudget],
+    [...args, ?exemptStageLike, rowCeiling, minRows, byteBudget],
   );
 
   static _EncodedCapture _encodeBounded(LlmRequestCaptureEvent event) {

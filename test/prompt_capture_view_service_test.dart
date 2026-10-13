@@ -153,6 +153,23 @@ void main() {
     expect(capture.parserVerdicts.single.parserCode, 'accepted');
   });
 
+  test('returns the whole retained window, not just the newest page', () async {
+    for (var i = 0; i < 80; i++) {
+      await repo.record(
+        _event(
+          stage: 'main',
+          content: 'turn $i',
+          createdAt: DateTime.utc(2026, 1, 1).add(Duration(seconds: i)),
+        ),
+      );
+    }
+
+    final captures = await service.load('session');
+
+    expect(captures, hasLength(80));
+    expect(captures.first.row.stage, 'main');
+  });
+
   test('lists session-less embedding requests alongside the chat', () async {
     Future<void> aux(String stage, String? sessionId, DateTime at) {
       return repo.record(
