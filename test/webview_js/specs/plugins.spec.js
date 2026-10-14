@@ -331,6 +331,52 @@ async function netReports(page) {
   return page.evaluate(() => window.__calls.filter((c) => c.name === 'pluginNetwork').map((c) => c.request));
 }
 
+async function httpReports(page) {
+  return page.evaluate(() => window.__calls.filter((c) => c.name === 'pluginHttp').map((c) => c.request));
+}
+
+test('what a frame sends and gets back reaches the request log', async ({ page }) => {
+  await page.route('http://127.0.0.1:4176/api/**', (route) => route.fulfill({
+    status: route.request().url().endsWith('/missing') ? 404 : 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ echo: route.request().postData() }),
+  }));
+  await setup(page, [
+    plugin('on', {
+      network: true,
+      localNetwork: true,
+      main: `
+        (async () => {
+          const res = await fetch('http://127.0.0.1:4176/api/chat', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer k' },
+            body: JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] }),
+          });
+          const own = await res.json();
+          const xhr = new XMLHttpRequest();
+          xhr.open('GET', 'http://127.0.0.1:4176/api/missing');
+          await new Promise((r) => { xhr.onloadend = r; xhr.send(); });
+          glaze.ui.toast(own.echo + '|' + xhr.status);
+        })().catch((e) => glaze.ui.toast('failed: ' + e.message));
+      `,
+    }),
+  ]);
+  await expect.poll(() => toasts(page)).toEqual(['{"messages":[{"role":"user","content":"hi"}]}|404']);
+  await expect.poll(async () => (await httpReports(page)).length).toBe(4);
+  const reports = await httpReports(page);
+  const starts = reports.filter((r) => r.phase === 'start');
+  const ends = reports.filter((r) => r.phase === 'end');
+  expect(reports.every((r) => r.pluginId === 'on')).toBe(true);
+  const post = starts.find((r) => r.via === 'fetch');
+  expect(post).toMatchObject({ method: 'POST', url: 'http://127.0.0.1:4176/api/chat' });
+  expect(post.headers).toContainEqual(['authorization', 'Bearer k']);
+  expect(JSON.parse(post.body).messages[0].content).toBe('hi');
+  expect(ends.find((r) => r.id === post.id)).toMatchObject({ status: 200, error: null });
+  expect(JSON.parse(ends.find((r) => r.id === post.id).body).echo).toContain('hi');
+  const get = starts.find((r) => r.via === 'xhr');
+  expect(get).toMatchObject({ method: 'GET', url: 'http://127.0.0.1:4176/api/missing' });
+  expect(ends.find((r) => r.id === get.id)).toMatchObject({ status: 404 });
+});
+
 test('without the network permission nothing is loaded from outside', async ({ page }) => {
   await setup(page, [
     plugin('off', {

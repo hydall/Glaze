@@ -327,6 +327,28 @@
     });
   }
 
+  // A request a plugin frame made, for the app's request log. The frame
+  // says what it sent; the plugin it belongs to is the host's to say.
+  function reportRequest(pluginId, d) {
+    if (!window.flutter_inappwebview || !window.flutter_inappwebview.callHandler) return;
+    var str = function (v, max) { return typeof v === 'string' ? v.slice(0, max) : null; };
+    var headers = Array.isArray(d.headers) ? d.headers.slice(0, 64).filter(function (h) {
+      return Array.isArray(h) && h.length === 2 && typeof h[0] === 'string' && typeof h[1] === 'string';
+    }).map(function (h) { return [h[0].slice(0, 256), h[1].slice(0, 8192)]; }) : [];
+    window.flutter_inappwebview.callHandler('pluginHttp', {
+      pluginId: pluginId,
+      phase: d.phase === 'start' ? 'start' : 'end',
+      id: str(d.id, 64),
+      via: str(d.via, 32),
+      method: str(d.method, 16),
+      url: str(d.url, 8192),
+      headers: headers,
+      body: str(d.body, 200000),
+      status: typeof d.status === 'number' ? d.status : null,
+      error: str(d.error, 2000),
+    });
+  }
+
   function callDart(state, method, params) {
     if (!window.flutter_inappwebview || !window.flutter_inappwebview.callHandler) {
       return Promise.resolve({ ok: false, error: { code: 'unavailable', message: 'The app is not available' } });
@@ -414,6 +436,9 @@
         return;
       case 'net':
         if (typeof d.host === 'string' && d.host) reportNetwork(state.plugin.pluginId, d.host, d.blocked);
+        return;
+      case 'req':
+        if (typeof d.id === 'string' && d.id) reportRequest(state.plugin.pluginId, d);
         return;
       case 'hit':
         if (state.kind === 'panel') applyHitRects(state, d.rects);

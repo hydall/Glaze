@@ -28,6 +28,7 @@ import 'plugin_bridge_service.dart';
 import 'plugin_chat_runtime.dart';
 import 'plugin_message_diff.dart';
 import 'plugin_runtime_payload.dart';
+import 'plugin_request_capture.dart';
 import '../widgets/plugin_holes.dart';
 
 /// The running plugin runtime of a chat, by character id; null while the
@@ -110,6 +111,7 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
     });
     runtime.bridge.onPluginActionFailed = null;
     runtime.bridge.onPluginNetwork = null;
+    runtime.bridge.onPluginHttpRequest = null;
     runtime.bridge.onPluginHoles = null;
     _holes.clear();
     runtime.dispose();
@@ -217,6 +219,11 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
             .read(pluginNetworkLogProvider(id).notifier)
             .record(host, blocked: report['blocked'] == true),
       );
+    };
+    bridge.onPluginHttpRequest = (report) {
+      final id = report['pluginId'];
+      if (id is! String || !plugins.any((x) => x.id == id)) return;
+      recordFramePluginRequest(id, _sessionId, report);
     };
     bridge.onPluginActionFailed = (failure) {
       if (!mounted) return;

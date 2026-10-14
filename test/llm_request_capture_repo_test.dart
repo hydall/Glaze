@@ -174,6 +174,29 @@ void main() {
     expect(embeddings, hasLength(300));
   });
 
+  test('plugin requests have a budget of their own', () async {
+    // A plugin polling a server neither evicts the chat's model requests
+    // nor grows without bound.
+    for (var i = 0; i < 10; i++) {
+      await repo.record(_event(sequence: i, stage: 'main'));
+    }
+    for (var i = 0; i < 150; i++) {
+      await repo.record(_event(sequence: 1000 + i, stage: 'plugin.net'));
+    }
+
+    final main = await repo.newestForSession('session', stage: 'main');
+    final plugin = await repo.newestForSession(
+      'session',
+      stage: 'plugin.net',
+      limit: 1000,
+    );
+    expect(main, hasLength(10));
+    expect(
+      plugin,
+      hasLength(LlmRequestCaptureRepo.maxPluginRequestsPerSession),
+    );
+  });
+
   test('byte budget evicts before the row ceiling is reached', () async {
     // Four 190k-char messages per request — just under the per-string
     // sanitizer cap, so each row lands at roughly 0.77 MB. Twelve of them is

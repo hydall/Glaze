@@ -5,7 +5,9 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 
 import '../../models/plugin_manifest.dart';
+import '../../../../core/utils/id_generator.dart';
 import '../plugin_api.dart';
+import '../plugin_request_capture.dart';
 import 'files_api.dart';
 
 /// `glaze.net.fetch(input, init)`: a request the app makes for the plugin.
@@ -95,8 +97,28 @@ Future<Object?> _fetch(PluginCall c) async {
     throw PluginApiError('invalid_arguments', '$method takes no body');
   }
 
-  final cancel = CancelToken();
+  if (uri == null) {
+    throw const PluginApiError('invalid_arguments', 'Malformed URL');
+  }
   final id = options['id'];
+  final capture = pluginRequestContext(
+    pluginId: c.plugin.id,
+    sessionId: c.host.sessionId,
+    requestId: 'app:${generateId()}',
+    method: method,
+    url: uri,
+  );
+  recordPluginRequest(
+    capture,
+    method: method,
+    url: '$uri',
+    headers: [
+      for (final h in headers.entries) [h.key, h.value],
+    ],
+    body: body == null ? null : _bodyText(body, headers['content-type']),
+    via: 'glaze.net.fetch',
+  );
+  final cancel = CancelToken();
   final key = id is String && id.isNotEmpty ? _key(c, id) : null;
   if (key != null) _inFlight[key] = cancel;
   final timeoutMs = options['timeout'];
@@ -165,6 +187,16 @@ Future<Object?> _fetch(PluginCall c) async {
         uri = next;
         continue;
       }
+      final bytes = method == 'HEAD'
+          ? null
+          : await _readCapped(response.data!.stream);
+      recordPluginResponse(
+        capture,
+        status: status,
+        body: bytes == null
+            ? null
+            : _bodyText(bytes, response.headers.value('content-type')),
+      );
       return {
         'status': status,
         'statusText': (response.statusMessage ?? '').replaceAll(
@@ -174,26 +206,51 @@ Future<Object?> _fetch(PluginCall c) async {
         'url': uri.toString(),
         'redirected': hop > 0,
         'headers': _responseHeaders(response.headers),
-        'body': method == 'HEAD'
-            ? null
-            : base64Encode(await _readCapped(response.data!.stream)),
+        'body': bytes == null ? null : base64Encode(bytes),
       };
     }
   } on DioException catch (e) {
-    if (CancelToken.isCancel(e)) {
-      throw e.error == 'timeout'
-          ? const PluginApiError('timeout', 'The request timed out')
-          : const PluginApiError('aborted', 'The request was aborted');
-    }
-    throw PluginApiError(
-      'network_error',
-      e.message ?? 'The request failed (${e.type.name})',
+    final error = !CancelToken.isCancel(e)
+        ? PluginApiError(
+            'network_error',
+            e.message ?? 'The request failed (${e.type.name})',
+          )
+        : e.error == 'timeout'
+        ? const PluginApiError('timeout', 'The request timed out')
+        : const PluginApiError('aborted', 'The request was aborted');
+    recordPluginResponse(
+      capture,
+      error: error.code == 'network_error' ? error.message : error.code,
     );
+    throw error;
+  } on PluginApiError catch (e) {
+    recordPluginResponse(capture, error: '${e.code}: ${e.message}');
+    rethrow;
   } finally {
     timer?.cancel();
     if (key != null && identical(_inFlight[key], cancel)) _inFlight.remove(key);
     dio.close(force: true);
   }
+}
+
+/// [bytes] as the inspector shows them: text, or what kind of data and how
+/// much of it.
+String _bodyText(Uint8List bytes, String? type) {
+  final t = (type ?? '').toLowerCase();
+  if (RegExp(
+    r'^(image|audio|video|font)/|octet-stream|pdf|zip|protobuf',
+  ).hasMatch(t)) {
+    return '[${t.split(';').first}, ${bytes.length} bytes]';
+  }
+  final text = utf8.decode(
+    bytes.length > kPluginRequestTextCap * 4
+        ? bytes.sublist(0, kPluginRequestTextCap * 4)
+        : bytes,
+    allowMalformed: true,
+  );
+  return text.length > kPluginRequestTextCap
+      ? text.substring(0, kPluginRequestTextCap)
+      : text;
 }
 
 /// Lower-cased names, without the ones the app sets itself; repeated names

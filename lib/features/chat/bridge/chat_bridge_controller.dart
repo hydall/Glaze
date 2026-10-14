@@ -435,6 +435,9 @@ class ChatBridgeController {
   /// (`{pluginId, host, blocked}`).
   void Function(Map<String, dynamic> report)? onPluginNetwork;
 
+  /// An HTTP request a plugin frame made, start or end, for the request log.
+  void Function(Map<String, dynamic> report)? onPluginHttpRequest;
+
   /// Where chat panels draw, in page pixels (`[[x, y, w, h], …]`): the app
   /// leaves these areas of its controls over the page to the plugins.
   void Function(List<Object?> rects)? onPluginHoles;
@@ -509,6 +512,16 @@ class ChatBridgeController {
       callback: (JavaScriptHandlerFunctionData data) {
         final raw = data.args.isNotEmpty ? data.args.first : null;
         if (raw is Map) onPluginNetwork?.call(Map<String, dynamic>.from(raw));
+        return null;
+      },
+    );
+    _controller.addJavaScriptHandler(
+      handlerName: 'pluginHttp',
+      callback: (JavaScriptHandlerFunctionData data) {
+        final raw = data.args.isNotEmpty ? data.args.first : null;
+        if (raw is Map) {
+          onPluginHttpRequest?.call(Map<String, dynamic>.from(raw));
+        }
         return null;
       },
     );

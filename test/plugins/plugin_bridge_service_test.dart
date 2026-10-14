@@ -8,12 +8,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/db/repositories/chat_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/llm_request_capture_repo.dart';
 import 'package:glaze_flutter/core/llm/transport/llm_call_event.dart';
 import 'package:glaze_flutter/core/llm/transport/llm_request_capture.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/core/state/db_provider.dart';
 import 'package:glaze_flutter/features/chat/composer_text_bridge.dart';
+import 'package:glaze_flutter/features/chat/services/prompt_capture_view_service.dart';
 import 'package:glaze_flutter/features/plugins/models/installed_plugin.dart';
 import 'package:glaze_flutter/features/plugins/models/plugin_manifest.dart';
 import 'package:glaze_flutter/features/plugins/providers/plugin_library_provider.dart';
@@ -21,6 +23,7 @@ import 'package:glaze_flutter/features/plugins/runtime/plugin_api.dart';
 import 'package:glaze_flutter/features/plugins/runtime/plugin_bridge_service.dart';
 import 'package:glaze_flutter/features/plugins/runtime/plugin_file_store.dart';
 import 'package:glaze_flutter/features/plugins/runtime/plugin_network.dart';
+import 'package:glaze_flutter/features/plugins/runtime/plugin_request_capture.dart';
 import 'package:glaze_flutter/features/plugins/runtime/plugin_html_inliner.dart';
 import 'package:glaze_flutter/features/plugins/runtime/plugin_message_diff.dart';
 import 'package:glaze_flutter/features/plugins/runtime/plugin_variable_store.dart';
@@ -225,6 +228,31 @@ void main() {
     String pluginId = 'test.plugin',
   ]) => s.dispatch({'pluginId': pluginId, 'method': method, 'params': params});
 
+  /// Stores captured requests in the test database, as the app does, and
+  /// returns what the Prompt Inspector reads for the chat once every one
+  /// has its outcome.
+  Future<List<PromptCaptureView>> Function() captureRequests() {
+    final repo = LlmRequestCaptureRepo(db);
+    LlmRequestCapture.sink = repo;
+    LlmCallEventCapture.sink = repo;
+    addTearDown(() {
+      LlmRequestCapture.sink = null;
+      LlmCallEventCapture.sink = null;
+    });
+    return () async {
+      var views = <PromptCaptureView>[];
+      for (var i = 0; i < 100; i++) {
+        views = await PromptCaptureViewService(repo).load('s1');
+        if (views.isNotEmpty &&
+            views.every((v) => v.transportOutcome != null)) {
+          break;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      return views;
+    };
+  }
+
   test(
     'denies methods the manifest does not grant, and unknown plugins',
     () async {
@@ -307,15 +335,8 @@ void main() {
       );
       await req.response.close();
     });
-    final requests = <LlmRequestCaptureEvent>[];
-    final outcomes = <LlmCallEvent>[];
-    LlmRequestCapture.sink = _Sink(requests.add);
-    LlmCallEventCapture.sink = _EventSink(outcomes.add);
-    addTearDown(() async {
-      LlmRequestCapture.sink = null;
-      LlmCallEventCapture.sink = null;
-      await server.close(force: true);
-    });
+    addTearDown(() => server.close(force: true));
+    final captured = captureRequests();
     await container
         .read(apiConfigRepoProvider)
         .put(
@@ -330,15 +351,12 @@ void main() {
 
     final out = await call(service(const ['generate']), 'generate', ['ping']);
     expect(out['result'], 'pong');
-    await pumpEventQueue();
-    final request = requests.single.context!;
-    expect(request.stage, 'plugin.generate');
-    expect(request.sessionId, 's1');
-    expect(request.agentId, 'test.plugin');
-    final outcome = outcomes.single;
-    expect(outcome.context.callId, request.callId);
-    expect(outcome.context.attempt, request.attempt);
-    expect(outcome.responseText, 'pong');
+    final view = (await captured()).single;
+    expect(view.row.stage, 'plugin.generate');
+    expect(view.row.agentId, 'test.plugin');
+    expect(view.messages.single['content'], 'ping');
+    expect(view.transportOutcome?.kind, 'transport_succeeded');
+    expect(view.responseText, contains('pong'));
   });
 
   test('legacy "library" stands for every library and chat permission', () {
@@ -756,6 +774,78 @@ void main() {
       expect(host.network, ['127.0.0.1:ok']);
     });
 
+    test(
+      'each request shows in the chat\'s requests, secrets hidden',
+      () async {
+        final captured = captureRequests();
+        final s = service(const ['network'], localNetwork: true);
+        await fetch(s, '/echo?key=secret&q=1', {
+          'method': 'POST',
+          'headers': [
+            ['Content-Type', 'application/json'],
+            ['Authorization', 'Bearer k'],
+          ],
+          'body': base64Encode(
+            utf8.encode(
+              jsonEncode({
+                'model': 'gpt',
+                'messages': [
+                  {'role': 'user', 'content': 'hi'},
+                ],
+              }),
+            ),
+          ),
+        });
+        await fetch(s, '/missing');
+        final views = await captured();
+        expect(views, hasLength(2));
+        final missing = views.first;
+        expect(missing.row.agentId, 'test.plugin · GET 127.0.0.1/missing');
+        expect(missing.transportOutcome?.kind, 'transport_failed');
+        expect(missing.transportOutcome?.statusCode, 404);
+        final echo = views.last;
+        expect(echo.row.stage, 'plugin.net');
+        expect(echo.request['model'], 'gpt');
+        expect(echo.request['method'], 'POST');
+        expect(
+          echo.request['url'],
+          contains('key=%E2%80%A2%E2%80%A2%E2%80%A2'),
+        );
+        expect(echo.request['url'], contains('q=1'));
+        expect((echo.request['headers'] as Map)['authorization'], '•••');
+        expect(echo.messages.single['content'], 'hi');
+        expect(echo.responseText, contains('"got"'));
+      },
+    );
+
+    test('requests a frame reports show up too', () async {
+      final captured = captureRequests();
+      recordFramePluginRequest('test.plugin', 's1', {
+        'phase': 'start',
+        'id': 'f-1',
+        'via': 'fetch',
+        'method': 'post',
+        'url': 'https://api.example.com/v1/images',
+        'headers': [
+          ['x-api-key', 'secret'],
+        ],
+        'body': '{"prompt":"a cat"}',
+      });
+      recordFramePluginRequest('test.plugin', 's1', {
+        'phase': 'end',
+        'id': 'f-1',
+        'status': 500,
+        'body': 'oops',
+      });
+      final view = (await captured()).single;
+      expect(view.row.agentId, 'test.plugin · POST api.example.com/v1/images');
+      expect(view.request['via'], 'fetch');
+      expect((view.request['headers'] as Map)['x-api-key'], '•••');
+      expect(view.messages.single, {'role': 'prompt', 'content': 'a cat'});
+      expect(view.transportOutcome?.status, 'http_5xx');
+      expect(view.responseText, 'oops');
+    });
+
     test('redirects are checked and followed as a browser would', () async {
       final s = service(const ['network'], localNetwork: true);
       var out = await fetch(s, '/see-other', {
@@ -836,18 +926,4 @@ void main() {
     expect(html, contains('<style>body{background:url(data:image/png;base64,'));
     expect(html, contains('<img src="data:image/png;base64,UE5H">'));
   });
-}
-
-class _Sink implements LlmRequestCaptureSink {
-  _Sink(this.onEvent);
-  final void Function(LlmRequestCaptureEvent) onEvent;
-  @override
-  void record(LlmRequestCaptureEvent event) => onEvent(event);
-}
-
-class _EventSink implements LlmCallEventSink {
-  _EventSink(this.onEvent);
-  final void Function(LlmCallEvent) onEvent;
-  @override
-  void recordCallEvent(LlmCallEvent event) => onEvent(event);
 }

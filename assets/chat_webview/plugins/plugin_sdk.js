@@ -63,6 +63,8 @@
   // from) so the plugin's page can list them. Installed before any plugin
   // code runs; it sees fetch/XHR/WebSocket/EventSource calls, every resource
   // the page loads and every request the frame's policy blocks.
+  // The calls themselves (what was sent and what came back) also go to the
+  // app's request log, which the Prompt Inspector shows.
   (function watchNetwork() {
     var seen = new Set();
     var network = boot.network;
@@ -110,6 +112,92 @@
     function refused(url) {
       return !local && network !== false && remote(url) && isLocalHost(hostOf(url));
     }
+
+    /* Request log: a 'req' message when a call goes out, one when it ends. */
+    var CAP = 200000;
+    var reqPrefix = Math.random().toString(36).slice(2, 10);
+    var reqSeq = 0;
+    function capText(t) { t = String(t); return t.length > CAP ? t.slice(0, CAP) : t; }
+    function decode(bytes) {
+      if (bytes.byteLength > CAP * 4) return '[binary, ' + bytes.byteLength + ' bytes]';
+      try { return capText(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); }
+      catch (e) { return '[binary, ' + bytes.byteLength + ' bytes]'; }
+    }
+    function bodyText(b) {
+      try {
+        if (b == null) return Promise.resolve(null);
+        if (typeof b === 'string') return Promise.resolve(capText(b));
+        if (typeof URLSearchParams !== 'undefined' && b instanceof URLSearchParams) return Promise.resolve(capText(b));
+        if (typeof FormData !== 'undefined' && b instanceof FormData) {
+          var parts = [];
+          b.forEach(function (v, k) {
+            parts.push(k + '=' + (typeof v === 'string' ? v : '[file ' + (v.name || '') + ', ' + v.size + ' bytes]'));
+          });
+          return Promise.resolve(capText(parts.join('\n')));
+        }
+        if (typeof Blob !== 'undefined' && b instanceof Blob) {
+          if (b.size > CAP * 4 || /^(image|audio|video|font)\//.test(b.type)) {
+            return Promise.resolve('[' + (b.type || 'binary') + ', ' + b.size + ' bytes]');
+          }
+          return b.arrayBuffer().then(function (buf) { return decode(new Uint8Array(buf)); });
+        }
+        if (b instanceof ArrayBuffer) return Promise.resolve(decode(new Uint8Array(b)));
+        if (ArrayBuffer.isView(b)) return Promise.resolve(decode(new Uint8Array(b.buffer, b.byteOffset, b.byteLength)));
+        if (typeof ReadableStream !== 'undefined' && b instanceof ReadableStream) return Promise.resolve('[stream]');
+        if (b && typeof b.then === 'function') return b.then(bodyText, function () { return null; });
+        return Promise.resolve(capText(b));
+      } catch (e) { return Promise.resolve(null); }
+    }
+    // Returns the function that reports the end; it waits for the start.
+    function logRequest(via, method, url, headers, body) {
+      var id = reqPrefix + '-' + (++reqSeq);
+      var abs;
+      try { abs = new URL(String(url), location.href).href; } catch (e) { abs = String(url); }
+      var started = bodyText(body).then(function (text) {
+        post({ type: P + 'req', phase: 'start', id: id, via: via, method: String(method || 'GET').toUpperCase(),
+          url: abs, headers: headers || [], body: text });
+      });
+      return function (status, text, error) {
+        started.then(function () {
+          post({ type: P + 'req', phase: 'end', id: id, status: status == null ? null : status,
+            body: text == null ? null : capText(text), error: error ? String(error) : null });
+        });
+      };
+    }
+    function pairs(h) {
+      var out = [];
+      try { new Headers(h || undefined).forEach(function (v, n) { out.push([n, v]); }); } catch (e) { /* none */ }
+      return out;
+    }
+    function binaryType(type) { return /^(image|audio|video|font)\/|octet-stream|pdf|zip|protobuf/i.test(type || ''); }
+    // Reads a copy of the response, so the plugin's own read is untouched.
+    function readResponse(res, end) {
+      var type = res.headers.get('content-type') || '';
+      if (binaryType(type)) {
+        var len = res.headers.get('content-length');
+        end(res.status, '[' + type.split(';')[0] + (len ? ', ' + len + ' bytes' : '') + ']');
+        return;
+      }
+      var copy;
+      try { copy = res.clone(); } catch (e) { end(res.status, null); return; }
+      if (!copy.body || !copy.body.getReader) {
+        copy.text().then(function (t) { end(res.status, t); }, function (e) { end(res.status, null, e && e.message); });
+        return;
+      }
+      var reader = copy.body.getReader(), dec = new TextDecoder(), text = '';
+      (function pump() {
+        reader.read().then(function (r) {
+          if (!r.done) text += dec.decode(r.value, { stream: true });
+          if (r.done || text.length >= CAP) {
+            if (!r.done) reader.cancel().catch(function () {});
+            end(res.status, text);
+            return;
+          }
+          pump();
+        }, function (e) { end(res.status, text || null, e && e.message || 'The response failed'); });
+      })();
+    }
+
     try {
       new PerformanceObserver(function (list) {
         list.getEntries().forEach(function (e) { if (remote(e.name)) report(e.name); });
@@ -120,28 +208,104 @@
     });
     var nativeFetch = window.fetch;
     if (nativeFetch) {
-      window.fetch = function (input) {
+      window.fetch = function (input, init) {
         var url = input && typeof input === 'object' && 'url' in input ? input.url : input;
-        if (remote(url)) report(url);
-        if (refused(url)) return Promise.reject(new TypeError('Failed to fetch'));
-        return nativeFetch.apply(this, arguments);
+        var end = null;
+        if (remote(url)) {
+          report(url);
+          try {
+            var isRequest = typeof Request !== 'undefined' && input instanceof Request;
+            var method = (init && init.method) || (isRequest ? input.method : 'GET');
+            var body = init && init.body != null ? init.body : null;
+            if (body == null && isRequest && !/^(GET|HEAD)$/i.test(method) && !input.bodyUsed) {
+              body = input.clone().arrayBuffer();
+            }
+            end = logRequest('fetch', method, url, pairs((init && init.headers) || (isRequest ? input.headers : null)), body);
+          } catch (e) { /* not logged */ }
+        }
+        if (refused(url)) {
+          if (end) end(null, null, 'Local network access is not allowed');
+          return Promise.reject(new TypeError('Failed to fetch'));
+        }
+        var result = nativeFetch.apply(this, arguments);
+        if (end) {
+          result.then(function (res) { readResponse(res, end); },
+            function (e) { end(null, null, (e && e.name === 'AbortError') ? 'aborted' : (e && e.message) || 'Failed to fetch'); });
+        }
+        return result;
       };
       disguise(window.fetch, nativeFetch);
     }
     var open = XMLHttpRequest.prototype.open;
+    var xhrs = new WeakMap();
     XMLHttpRequest.prototype.open = function (method, url) {
       if (remote(url)) report(url);
       if (refused(url)) throw new DOMException('Local network access is not allowed for this plugin', 'SecurityError');
+      xhrs.set(this, remote(url) ? { method: method, url: url, headers: [] } : null);
       return open.apply(this, arguments);
     };
     disguise(XMLHttpRequest.prototype.open, open);
+    var setHeader = XMLHttpRequest.prototype.setRequestHeader;
+    XMLHttpRequest.prototype.setRequestHeader = function (name, value) {
+      var info = xhrs.get(this);
+      if (info) info.headers.push([String(name).toLowerCase(), String(value)]);
+      return setHeader.apply(this, arguments);
+    };
+    disguise(XMLHttpRequest.prototype.setRequestHeader, setHeader);
+    var send = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.send = function (body) {
+      var info = xhrs.get(this);
+      if (info) {
+        xhrs.set(this, null);
+        var xhr = this;
+        var end = logRequest('xhr', info.method, info.url, info.headers, body);
+        var done = function (error) {
+          var text = null;
+          try {
+            if (xhr.responseType === '' || xhr.responseType === 'text') text = xhr.responseText;
+            else if (xhr.responseType === 'json') text = JSON.stringify(xhr.response);
+            else if (xhr.response && xhr.response.byteLength != null) text = '[binary, ' + xhr.response.byteLength + ' bytes]';
+            else if (xhr.response && xhr.response.size != null) text = '[' + (xhr.response.type || 'binary') + ', ' + xhr.response.size + ' bytes]';
+          } catch (e) { /* unreadable */ }
+          end(xhr.status || null, text, error);
+        };
+        xhr.addEventListener('load', function () { done(null); });
+        xhr.addEventListener('error', function () { done('The request failed'); });
+        xhr.addEventListener('abort', function () { done('aborted'); });
+        xhr.addEventListener('timeout', function () { done('timeout'); });
+      }
+      return send.apply(this, arguments);
+    };
+    disguise(XMLHttpRequest.prototype.send, send);
+    if (navigator.sendBeacon) {
+      var beacon = navigator.sendBeacon;
+      navigator.sendBeacon = function (url, data) {
+        var sent = beacon.apply(navigator, arguments);
+        if (remote(url)) {
+          report(url);
+          logRequest('beacon', 'POST', url, [], data)(null, null, sent ? null : 'Not queued');
+        }
+        return sent;
+      };
+      disguise(navigator.sendBeacon, beacon);
+    }
     ['WebSocket', 'EventSource'].forEach(function (name) {
       var Native = window[name];
       if (!Native) return;
       var Wrapped = function (url) {
         if (remote(url)) report(url);
         if (refused(url)) throw new DOMException('Local network access is not allowed for this plugin', 'SecurityError');
-        return new (Function.prototype.bind.apply(Native, [null].concat(Array.prototype.slice.call(arguments))))();
+        var made = new (Function.prototype.bind.apply(Native, [null].concat(Array.prototype.slice.call(arguments))))();
+        if (remote(url)) {
+          // A connection, not one call: logged when it opens or fails.
+          var end = logRequest(name === 'WebSocket' ? 'websocket' : 'eventsource', 'GET', made.url || url, [], null);
+          var once = function (status, text, error) { if (end) { end(status, text, error); end = null; } };
+          made.addEventListener('open', function () {
+            once(name === 'WebSocket' ? 101 : 200, '[' + name + ' open]');
+          });
+          made.addEventListener('error', function () { once(null, null, name + ' failed'); });
+        }
+        return made;
       };
       Wrapped.prototype = Native.prototype;
       Object.keys(Native).forEach(function (k) { Wrapped[k] = Native[k]; });

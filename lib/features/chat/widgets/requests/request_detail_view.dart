@@ -64,7 +64,9 @@ class _RequestDetailViewState extends ConsumerState<RequestDetailView> {
   /// what protocol, with what limits — then how the call actually went.
   static const _paramKeys = [
     'model',
+    'method',
     'protocolEndpoint',
+    'via',
     'stream',
     'maxTokens',
     'temperature',

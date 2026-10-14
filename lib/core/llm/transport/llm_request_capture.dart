@@ -121,7 +121,7 @@ class LlmRequestCapture {
   static void recordAuxiliary({
     required String stage,
     required String endpoint,
-    required String model,
+    String? model,
     LlmCaptureContext? context,
     String? sessionId,
     String? messageId,
@@ -148,7 +148,7 @@ class LlmRequestCapture {
           ),
       request: Map<String, dynamic>.unmodifiable({
         'protocolEndpoint': _stripQuery(endpoint),
-        'model': model,
+        'model': ?model,
         'messageCount': messages.length,
         'messages': sanitizedMessages,
         ...params,

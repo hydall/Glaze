@@ -104,7 +104,9 @@ final class PromptCaptureViewService {
   Future<List<PromptCaptureView>> load(String sessionId) async {
     final rowsFuture = _repo.newestForSession(
       sessionId,
-      limit: LlmRequestCaptureRepo.maxRowsPerSession,
+      limit:
+          LlmRequestCaptureRepo.maxRowsPerSession +
+          LlmRequestCaptureRepo.maxPluginRequestsPerSession,
     );
     final sharedFuture = _repo.newestEmbeddingsWithoutSession();
     final eventsFuture = _repo.newestCallEventsForSession(sessionId);

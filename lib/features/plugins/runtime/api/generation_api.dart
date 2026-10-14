@@ -37,13 +37,18 @@ Map<String, PluginMethod> generationApi() => {
 
 /// What the Prompt Inspector's Requests tab shows a plugin's call under: its
 /// chat, a stage of its own, and the plugin's id where an agent's name goes.
-LlmCaptureContext _capture(PluginCall c, String stage) => LlmCaptureContext(
-  stage: stage,
-  sessionId: c.host.sessionId,
-  agentId: c.plugin.id,
-  callId: 'call:plugin:${generateId()}',
-  attempt: 1,
-);
+/// The run id is the call's own: an outcome without one is not stored.
+LlmCaptureContext _capture(PluginCall c, String stage) {
+  final id = 'call:plugin:${generateId()}';
+  return LlmCaptureContext(
+    stage: stage,
+    sessionId: c.host.sessionId,
+    agentId: c.plugin.id,
+    pipelineRunId: id,
+    callId: id,
+    attempt: 1,
+  );
+}
 
 /// Records how the call [_capture] describes ended, so the inspector has its
 /// response or its error.
