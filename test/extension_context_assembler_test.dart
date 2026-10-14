@@ -6,6 +6,7 @@ import 'package:glaze_flutter/core/llm/prompt_builder.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
+import 'package:glaze_flutter/core/models/persona.dart';
 import 'package:glaze_flutter/features/extensions/models/block_config.dart';
 import 'package:glaze_flutter/features/extensions/models/extension_context_policy.dart';
 import 'package:glaze_flutter/features/extensions/services/extension_context_assembler.dart';
@@ -17,7 +18,10 @@ const _block = BlockConfig(id: 'b1', name: 'State', contextMessageCount: 1);
 ChatMessage _chat(String id, String role, String content) =>
     ChatMessage(id: id, role: role, content: content, timestamp: 1);
 
-MainModelContextSnapshot _snapshot(List<PromptMessage> promptMessages) {
+MainModelContextSnapshot _snapshot(
+  List<PromptMessage> promptMessages, {
+  Persona? persona,
+}) {
   final result = PromptResult(
     messages: promptMessages,
     breakdown: const TokenBreakdown(
@@ -34,6 +38,7 @@ MainModelContextSnapshot _snapshot(List<PromptMessage> promptMessages) {
   );
   final payload = PromptPayload(
     character: _character,
+    persona: persona,
     history: const [],
     apiConfig: _api,
   );
@@ -181,6 +186,7 @@ void main() {
     ]);
     final assembly = assembler.assemble(
       policy: const ExtensionContextPolicy(
+        includeCharacterCard: false,
         includeMainPresetInstructions: true,
         includeRuntimePrompts: true,
       ),
@@ -322,6 +328,101 @@ void main() {
     );
     expect(assembly.reconstructed, isTrue);
     expect(assembly.messages.last['content'], 'instruction');
+  });
+
+  group('card and persona with a snapshot', () {
+    const persona = Persona(id: 'p1', name: 'Bob', prompt: 'Likes {{char}}');
+
+    ExtensionContextAssembly assemble(
+      ExtensionContextPolicy policy,
+      List<PromptMessage> prompt,
+    ) => assembler.assemble(
+      policy: policy,
+      blockConfig: _block,
+      chatMessages: [_chat('u1', 'user', 'turn')],
+      anchorMessageId: 'u1',
+      // Stale arguments: the snapshot's payload is what the main request
+      // was built for.
+      character: const Character(id: 'c1', name: 'Stale'),
+      persona: null,
+      systemInstruction: 'block',
+      supplementalInstruction: '',
+      mainContextSnapshot: _snapshot(prompt, persona: persona),
+    );
+
+    // The preset switched the standard blocks off and places the card
+    // through a macro inside its own block.
+    const macroPreset = [
+      PromptMessage(
+        role: 'system',
+        content: 'jailbreak + Card + Likes Alice',
+        blockId: 'custom_info',
+      ),
+      PromptMessage(
+        role: 'user',
+        content: 'turn',
+        isHistory: true,
+        sourceMessageId: 'u1',
+      ),
+    ];
+
+    test('macro-built preset still gets the card and the persona', () {
+      final messages = assemble(
+        const ExtensionContextPolicy(),
+        macroPreset,
+      ).messages.map((message) => message['content'] as String).toList();
+      expect(messages, [
+        'Character: Alice\nDescription: Card',
+        'User persona: Bob\nLikes Alice',
+        'turn',
+        'block',
+      ]);
+    });
+
+    test('toggles drop them', () {
+      final text = assemble(
+        const ExtensionContextPolicy(
+          includeCharacterCard: false,
+          includePersona: false,
+        ),
+        macroPreset,
+      ).messages.map((message) => message['content']).join('\n');
+      expect(text, isNot(contains('Character:')));
+      expect(text, isNot(contains('User persona:')));
+    });
+
+    test('standard blocks are not sent twice', () {
+      final messages = assemble(const ExtensionContextPolicy(), const [
+        PromptMessage(role: 'system', content: 'Card', blockId: 'char_card'),
+        PromptMessage(
+          role: 'system',
+          content: 'User Name: Bob',
+          blockId: 'user_persona',
+        ),
+      ]).messages.map((message) => message['content']).toList();
+      expect(messages, [
+        'Character: Alice\nDescription: Card',
+        'User persona: Bob\nLikes Alice',
+        'block',
+      ]);
+    });
+  });
+
+  test('reconstructed card carries example dialogue', () {
+    final assembly = assembler.assemble(
+      policy: const ExtensionContextPolicy(),
+      blockConfig: _block,
+      chatMessages: [_chat('u1', 'user', 'hi')],
+      anchorMessageId: 'u1',
+      character: _character.copyWith(mesExample: '{{char}}: hello'),
+      persona: null,
+      systemInstruction: 'block',
+      supplementalInstruction: '',
+    );
+    expect(
+      assembly.messages.first['content'],
+      'Character: Alice\nDescription: Card\nExample dialogue: Alice: hello',
+    );
   });
 
   test('block history count limits reconstructed history', () {
