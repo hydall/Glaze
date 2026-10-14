@@ -4,10 +4,12 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 
+import '../../../../core/utils/id_generator.dart';
 import '../../models/plugin_manifest.dart';
 import '../plugin_api.dart';
 import '../plugin_file_store.dart';
 import '../plugin_network.dart';
+import '../plugin_request_capture.dart';
 
 /// Per-file size cap for `glaze.files.save`.
 const int kPluginFileMaxBytes = 32 * 1024 * 1024;
@@ -185,8 +187,38 @@ Future<Uint8List> decodePluginContent(
 /// its host, and to every host a redirect leads to; each attempt goes into
 /// the plugin's network log either way. Without local network access hosts
 /// that are or resolve to local addresses are refused. The body is capped at
-/// [kPluginFileMaxBytes] while it streams in.
+/// [kPluginFileMaxBytes] while it streams in. The download shows in the
+/// chat's requests like the plugin's other requests.
 Future<Uint8List> fetchForPlugin(PluginCall c, String url) async {
+  final capture = pluginRequestContext(
+    pluginId: c.plugin.id,
+    sessionId: c.host.sessionId,
+    requestId: 'download:${generateId()}',
+    method: 'GET',
+    url: Uri.tryParse(url),
+  );
+  recordPluginRequest(capture, method: 'GET', url: url, via: 'download');
+  try {
+    final (:bytes, :status, :type) = await _download(c, url);
+    recordPluginResponse(
+      capture,
+      status: status,
+      body: '[${type ?? 'data'}, ${bytes.length} bytes]',
+    );
+    return bytes;
+  } on PluginApiError catch (e) {
+    recordPluginResponse(capture, error: '${e.code}: ${e.message}');
+    rethrow;
+  } catch (e) {
+    recordPluginResponse(capture, error: '$e');
+    rethrow;
+  }
+}
+
+Future<({Uint8List bytes, int status, String? type})> _download(
+  PluginCall c,
+  String url,
+) async {
   var uri = Uri.tryParse(url);
   final dio = Dio(
     BaseOptions(
@@ -229,7 +261,11 @@ Future<Uint8List> fetchForPlugin(PluginCall c, String url) async {
           throw const PluginApiError('too_large', 'The file is too large');
         }
       }
-      return out.takeBytes();
+      return (
+        bytes: out.takeBytes(),
+        status: status,
+        type: response.headers.value('content-type')?.split(';').first,
+      );
     }
   } finally {
     // Also drops the bodies of redirects and refused responses.

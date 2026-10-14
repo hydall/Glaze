@@ -846,6 +846,21 @@ void main() {
       expect(view.responseText, 'oops');
     });
 
+    test('downloads the app makes for a plugin show up too', () async {
+      final captured = captureRequests();
+      final s = service(const ['network', 'files'], localNetwork: true);
+      final saved = await call(s, 'files.save', ['a.json', '$base/echo']);
+      expect(saved['ok'], true);
+      final missing = await call(s, 'files.save', ['b.json', '$base/none']);
+      expect(missing['ok'], false);
+      final views = await captured();
+      expect(views, hasLength(2));
+      expect(views.last.request['via'], 'download');
+      expect(views.last.responseText, '[text/plain, 10 bytes]');
+      expect(views.first.transportOutcome?.kind, 'transport_failed');
+      expect(views.first.responseError, contains('HTTP 404'));
+    });
+
     test('redirects are checked and followed as a browser would', () async {
       final s = service(const ['network'], localNetwork: true);
       var out = await fetch(s, '/see-other', {
