@@ -449,7 +449,7 @@ window.GLAZE = {
       icon: 'cloud_sync',
       title: { ru: 'Данные', en: 'Your data' },
       items: [
-        { icon: 'sync', ru: ['Облачная синхронизация', 'Dropbox или Google Drive, по желанию с шифрованием.'], en: ['Cloud sync', 'Dropbox or Google Drive, optionally encrypted.'] },
+        { icon: 'sync', ru: ['Облачная синхронизация', 'Dropbox или Google Drive.'], en: ['Cloud sync', 'Dropbox or Google Drive.'] },
         { icon: 'unarchive', ru: ['Бэкапы и переезд', 'Свой формат .glz, а ещё полный бэкап SillyTavern (.zip) и Tavo (.tbk) переносятся в Glaze вместе с чатами.'], en: ['Backups and moving in', 'Glaze\'s own .glz, plus full SillyTavern (.zip) and Tavo (.tbk) backups move into Glaze, chats included.'] },
       ],
     },
@@ -464,6 +464,18 @@ window.GLAZE = {
   // Body: Markdown in site/articles/<slug>.<lang>.md. `langs` lists the
   // languages it is written in; any other shows the first one with a notice.
   articles: [
+    {
+      slug: 'plugins',
+      kind: 'news',
+      date: '2026-10-14',
+      author: 'hydall',
+      langs: ['ru', 'en'],
+      title: { ru: 'Расширения', en: 'Extensions' },
+      lead: {
+        ru: 'Плагины в Glaze: импорт расширений Tavo, матрица разрешений, свои интерфейсы поверх чата без доступа к нему и glaze.net.fetch для разработчиков. Уже на Nightly.',
+        en: 'Plugins in Glaze: Tavo extension import, a permission matrix, plugin interfaces over the chat without access to it, and glaze.net.fetch for developers. Already on Nightly.',
+      },
+    },
     {
       slug: '0.8.2',
       kind: 'changelog',

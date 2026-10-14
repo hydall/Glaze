@@ -334,8 +334,8 @@
   // ── markdown ───────────────────────────────────────────────────────────
 
   // Enough Markdown for an article: headings, paragraphs, lists, quotes, rules,
-  // and inline bold, italics, code and links. Source is escaped first, so an
-  // article can never inject markup of its own.
+  // images on their own line, and inline bold, italics, code and links. Source
+  // is escaped first, so an article can never inject markup of its own.
   function mdInline(text) {
     const code = [];
     return esc(text)
@@ -353,12 +353,17 @@
     const lines = src.replace(/\r\n?/g, '\n').split('\n');
     const out = [];
     let i = 0;
-    const isBlockStart = (l) => /^(#{1,6} |> ?|[-*] |\d+\. |---+\s*$|\s*$)/.test(l);
+    const isBlockStart = (l) => /^(#{1,6} |> ?|[-*] |\d+\. |---+\s*$|!\[|\s*$)/.test(l);
     while (i < lines.length) {
       const line = lines[i];
       if (!line.trim()) { i++; continue; }
       let m;
-      if ((m = line.match(/^(#{1,6}) +(.*)$/))) {
+      if ((m = line.match(/^!\[([^\]]*)\]\(([^)\s]+)\)\s*$/))) {
+        // A relative path is an article's own file, under articles/.
+        const src = /^https?:/.test(m[2]) ? m[2] : `${ROOT}articles/${m[2]}`;
+        out.push(`<figure><img src="${esc(src)}" alt="${esc(m[1])}" loading="lazy" decoding="async"></figure>`);
+        i++;
+      } else if ((m = line.match(/^(#{1,6}) +(.*)$/))) {
         // An article's own headings start at h3: h2 is the page title's level.
         const level = Math.min(m[1].length + 1, 6);
         out.push(`<h${level}>${mdInline(m[2])}</h${level}>`);

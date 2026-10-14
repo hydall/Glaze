@@ -550,6 +550,16 @@ a.article-author:hover span { color: var(--accent-text); }
 }
 .article-body blockquote p:last-child { margin-bottom: 0; }
 .article-body hr { margin: 28px 0; border: 0; border-top: 1px solid var(--line); }
+.article-body figure { margin: 0 0 16px; }
+/* Phone screenshots are tall: cap the height so one does not fill the screen. */
+.article-body figure img {
+  display: block;
+  max-width: 100%;
+  max-height: 560px;
+  margin: 0 auto;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+}
 
 /* A release's files next to its article: a sticky column on the right on
    desktop, a card under the article below that. */
