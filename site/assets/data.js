@@ -449,7 +449,7 @@ window.GLAZE = {
       icon: 'cloud_sync',
       title: { ru: 'Данные', en: 'Your data' },
       items: [
-        { icon: 'sync', ru: ['Облачная синхронизация', 'Dropbox или Google Drive, по желанию с шифрованием.'], en: ['Cloud sync', 'Dropbox or Google Drive, optionally encrypted.'] },
+        { icon: 'sync', ru: ['Облачная синхронизация', 'Dropbox или Google Drive.'], en: ['Cloud sync', 'Dropbox or Google Drive.'] },
         { icon: 'unarchive', ru: ['Бэкапы и переезд', 'Свой формат .glz, а ещё полный бэкап SillyTavern (.zip) и Tavo (.tbk) переносятся в Glaze вместе с чатами.'], en: ['Backups and moving in', 'Glaze\'s own .glz, plus full SillyTavern (.zip) and Tavo (.tbk) backups move into Glaze, chats included.'] },
       ],
     },
