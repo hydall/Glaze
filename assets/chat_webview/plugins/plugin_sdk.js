@@ -315,6 +315,68 @@
     else document.addEventListener('DOMContentLoaded', watchFiles);
   }
 
+  /* ---------- Requests through the app ---------- */
+  // glaze.net.fetch takes what fetch() takes and resolves to a Response. The
+  // app makes the request, so the page's cross-origin rules do not apply;
+  // the plugin's internet rules do.
+  if (glaze.net && glaze.net.fetch) {
+    var appFetch = glaze.net.fetch, appAbort = glaze.net.abort;
+    delete glaze.net.abort;
+    var NULL_BODY = { 204: 1, 205: 1, 304: 1 };
+    var toBase64 = function (bytes) {
+      var bin = '';
+      for (var i = 0; i < bytes.length; i += 0x8000) {
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+      }
+      return btoa(bin);
+    };
+    var fromBase64 = function (s) {
+      var bin = atob(s), out = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out;
+    };
+    var aborted = function (signal) {
+      return signal.reason !== undefined ? signal.reason : new DOMException('The operation was aborted.', 'AbortError');
+    };
+    glaze.net.fetch = function (input, init) {
+      var request;
+      try { request = new Request(input, init); } catch (e) { return Promise.reject(e); }
+      var signal = request.signal;
+      if (signal.aborted) return Promise.reject(aborted(signal));
+      var id = 'n' + (++seq);
+      var timeout = init && typeof init.timeout === 'number' ? init.timeout : undefined;
+      var body = request.method === 'GET' || request.method === 'HEAD' ? Promise.resolve(null) : request.arrayBuffer();
+      return new Promise(function (resolve, reject) {
+        var onAbort = function () {
+          if (appAbort) appAbort(id).catch(function () {});
+          reject(aborted(signal));
+        };
+        signal.addEventListener('abort', onAbort);
+        var done = function () { signal.removeEventListener('abort', onAbort); };
+        body.then(function (buf) {
+          if (signal.aborted) return;
+          var headers = [];
+          request.headers.forEach(function (value, name) { headers.push([name, value]); });
+          return appFetch(request.url, {
+            id: id, method: request.method, headers: headers, timeout: timeout,
+            body: buf && buf.byteLength ? toBase64(new Uint8Array(buf)) : null,
+          }).then(function (r) {
+            done();
+            var res = new Response(r.body == null || NULL_BODY[r.status] ? null : fromBase64(r.body), {
+              status: r.status, statusText: r.statusText || '', headers: r.headers || [],
+            });
+            Object.defineProperty(res, 'url', { value: r.url });
+            Object.defineProperty(res, 'redirected', { value: !!r.redirected });
+            resolve(res);
+          });
+        }).catch(function (e) {
+          done();
+          reject(e && e.code === 'aborted' && signal.aborted ? aborted(signal) : e);
+        });
+      });
+    };
+  }
+
   /* ---------- Events, hooks and actions ---------- */
   var handlers = new Map();
   var emitHandlers = new Map();

@@ -36,6 +36,17 @@
         if (request.method === 'messages.count') {
           return { ok: false, error: { code: 'permission_denied', message: 'denied' } };
         }
+        if (request.method === 'net.fetch') {
+          const [url, init] = request.params;
+          if (url.endsWith('/slow')) return new Promise(() => {});
+          const sent = init.body ? atob(init.body) : '';
+          const echo = JSON.stringify({ method: init.method, headers: init.headers, body: sent });
+          return { ok: true, result: {
+            status: 201, statusText: 'Created', url: url + '?final', redirected: true,
+            headers: [['content-type', 'application/json'], ['x-echo', 'yes']],
+            body: btoa(echo),
+          } };
+        }
         return { ok: true, result: null };
       },
     };

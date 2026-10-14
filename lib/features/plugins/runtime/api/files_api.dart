@@ -205,7 +205,7 @@ Future<Uint8List> fetchForPlugin(PluginCall c, String url) async {
       if (hop > 5) {
         throw const PluginApiError('network_error', 'Too many redirects');
       }
-      await _requireReachable(c, uri);
+      await requirePluginHost(c, uri);
       final response = await dio.getUri<ResponseBody>(uri);
       final status = response.statusCode ?? 0;
       final location = response.headers.value('location');
@@ -237,7 +237,9 @@ Future<Uint8List> fetchForPlugin(PluginCall c, String url) async {
   }
 }
 
-Future<void> _requireReachable(PluginCall c, Uri uri) async {
+/// Lets the calling plugin reach [uri]'s host, logging the attempt; throws
+/// `permission_denied` when it may not.
+Future<void> requirePluginHost(PluginCall c, Uri uri) async {
   final host = uri.host.toLowerCase();
   final allowed =
       c.plugin.allowsHost(host) &&

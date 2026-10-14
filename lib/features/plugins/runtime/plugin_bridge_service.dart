@@ -10,6 +10,7 @@ import 'api/generation_api.dart';
 import 'api/lorebooks_api.dart';
 import 'api/memory_api.dart';
 import 'api/messages_api.dart';
+import 'api/net_api.dart';
 import 'api/personas_api.dart';
 import 'api/presets_api.dart';
 import 'api/regex_api.dart';
@@ -34,6 +35,7 @@ final Map<String, PluginMethod> pluginMethodRegistry = Map.unmodifiable({
   ...themesApi(),
   ...filesApi(),
   ...generationApi(),
+  ...netApi(),
   ...uiApi(),
   ...commandsApi(),
   'events.subscribe': const PluginMethod(_subscribe, internal: true),

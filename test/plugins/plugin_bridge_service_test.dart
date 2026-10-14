@@ -126,6 +126,7 @@ InstalledPlugin _plugin(
   Set<String> grants = const {},
   Set<String> revoked = const {},
   Set<String>? networkHosts,
+  bool localNetwork = false,
 }) => InstalledPlugin(
   manifest: parsePluginManifest({
     'format': 1,
@@ -140,6 +141,7 @@ InstalledPlugin _plugin(
   grants: grants,
   revoked: revoked,
   networkHosts: networkHosts,
+  localNetwork: localNetwork,
 );
 
 void main() {
@@ -190,8 +192,14 @@ void main() {
     List<String> permissions, {
     Set<String> grants = const {},
     Set<String> revoked = const {},
+    bool localNetwork = false,
   }) {
-    var plugin = _plugin(permissions, grants: grants, revoked: revoked);
+    var plugin = _plugin(
+      permissions,
+      grants: grants,
+      revoked: revoked,
+      localNetwork: localNetwork,
+    );
     return PluginBridgeService(
       host: host,
       pluginById: (id) => id == plugin.id ? plugin : null,
@@ -613,6 +621,126 @@ void main() {
       _plugin(const ['network'], revoked: const {'network'}).allowsHost('a.io'),
       isFalse,
     );
+  });
+
+  group('requests through the app', () {
+    late HttpServer server;
+    late String base;
+    final seen = <String>[];
+
+    setUp(() async {
+      seen.clear();
+      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      base = 'http://127.0.0.1:${server.port}';
+      server.listen((r) async {
+        final body = await utf8.decodeStream(r);
+        seen.add(
+          '${r.method} ${r.uri.path} '
+          'auth=${r.headers.value('authorization')} '
+          'cookie=${r.headers.value('cookie')} '
+          'type=${r.headers.value('content-type')} body=$body',
+        );
+        final res = r.response;
+        switch (r.uri.path) {
+          case '/echo':
+            res.headers.set('x-reply', 'yes');
+            res.headers.add('set-cookie', 'a=1');
+            res.write('{"got":${jsonEncode(body)}}');
+          case '/see-other':
+            res.statusCode = 303;
+            res.headers.set('location', '/echo');
+          case '/elsewhere':
+            res.statusCode = 307;
+            res.headers.set('location', 'http://localhost:${server.port}/echo');
+          case '/slow':
+            await Future<void>.delayed(const Duration(seconds: 2));
+            res.write('late');
+          default:
+            res.statusCode = 404;
+        }
+        await res.close();
+      });
+    });
+
+    tearDown(() => server.close(force: true));
+
+    Future<Map<String, dynamic>> fetch(
+      PluginBridgeService s,
+      String path, [
+      Map<String, Object?> init = const {},
+    ]) => call(s, 'net.fetch', ['$base$path', init]);
+
+    test('sends what the plugin gives and returns the reply', () async {
+      final s = service(const ['network'], localNetwork: true);
+      final out = await fetch(s, '/echo', {
+        'method': 'POST',
+        'headers': [
+          ['Content-Type', 'application/json'],
+          ['Authorization', 'Bearer k'],
+          ['Cookie', 'stolen=1'],
+        ],
+        'body': base64Encode(utf8.encode('{"a":1}')),
+      });
+      final result = out['result'] as Map;
+      expect(result['status'], 200);
+      expect(
+        utf8.decode(base64Decode(result['body'] as String)),
+        contains('a'),
+      );
+      final headers = {
+        for (final h in result['headers'] as List) (h as List)[0]: h[1],
+      };
+      expect(headers['x-reply'], 'yes');
+      expect(headers.containsKey('set-cookie'), isFalse);
+      expect(seen.single, startsWith('POST /echo auth=Bearer k cookie=null'));
+      expect(seen.single, contains('type=application/json'));
+      expect(host.network, ['127.0.0.1:ok']);
+    });
+
+    test('redirects are checked and followed as a browser would', () async {
+      final s = service(const ['network'], localNetwork: true);
+      var out = await fetch(s, '/see-other', {
+        'method': 'POST',
+        'headers': [
+          ['content-type', 'text/plain'],
+        ],
+        'body': base64Encode(utf8.encode('x')),
+      });
+      expect((out['result'] as Map)['redirected'], isTrue);
+      expect(seen.last, 'GET /echo auth=null cookie=null type=null body=');
+
+      out = await fetch(s, '/elsewhere', {
+        'headers': [
+          ['authorization', 'Bearer k'],
+        ],
+      });
+      expect((out['result'] as Map)['status'], 200);
+      expect(seen.last, startsWith('GET /echo auth=null'));
+      expect(host.network, contains('localhost:ok'));
+    });
+
+    test('follows the internet and local network settings', () async {
+      var out = await fetch(service(const ['network']), '/echo');
+      expect((out['error'] as Map)['code'], 'permission_denied');
+      out = await call(service(const ['network']), 'net.fetch', [
+        'https://127.0.0.1:${server.port}/echo',
+      ]);
+      expect((out['error'] as Map)['code'], 'permission_denied');
+      expect(host.network, ['127.0.0.1:blocked']);
+      out = await fetch(service(const []), '/echo');
+      expect((out['error'] as Map)['code'], 'permission_denied');
+      expect(seen, isEmpty);
+    });
+
+    test('a request can be aborted or time out', () async {
+      final s = service(const ['network'], localNetwork: true);
+      final pending = fetch(s, '/slow', {'id': 'r1'});
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await call(s, 'net.abort', ['r1']);
+      expect(((await pending)['error'] as Map)['code'], 'aborted');
+      final out = await fetch(s, '/slow', {'timeout': 200});
+      expect((out['error'] as Map)['code'], 'timeout');
+    });
   });
 
   test('message diff reports added, updated and deleted', () {

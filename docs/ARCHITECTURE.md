@@ -1718,6 +1718,19 @@ URL, theme assets) go through `fetchForPlugin`, which applies the same rules
 to the first URL and every redirect, refuses hosts that are or resolve to local
 addresses without local network access (`plugin_network.dart`), and streams the
 body with a size cap and timeouts.
+`glaze.net.fetch(input, init)` (`net_api.dart`) is a request the app makes for
+the plugin, so a plugin can call a service whose CORS rules shut out its page
+without a relay server of its own.
+The SDK reads the arguments through `new Request` and hands Dart the method,
+headers and base64 body; the answer comes back as a `Response`. It needs
+`network`, runs `requirePluginHost` on every hop, takes plain http only with
+local network access, and sends no cookies; headers the app owns (`Cookie`,
+`Host`, `Origin`, `Referer`, `Sec-*`, `Proxy-*`, hop-by-hop ones) are dropped,
+`Set-Cookie` is not returned, a redirect to another origin drops
+`Authorization`, and 303 (or 301/302 after a POST) turns into a GET. Bodies
+both ways are capped at 32 MB and the response is not streamed. An
+`AbortSignal` cancels the request through `net.abort`, which the SDK takes off
+the plugin's `glaze`.
 Plugins are not told about any of this: the SDK reports each host a frame
 loads from — fetch/XHR/WebSocket/EventSource
 calls, resource timing entries and policy violations — through the

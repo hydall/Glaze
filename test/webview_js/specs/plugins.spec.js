@@ -283,6 +283,35 @@ test('Tavo plugins get tavo.* mapped onto glaze.*', async ({ page }) => {
   await expect.poll(() => toasts(page)).toEqual(['value-for-t|hi', 'went']);
 });
 
+test('glaze.net.fetch goes through the app and answers with a Response', async ({ page }) => {
+  await setup(page, [
+    plugin('n', {
+      methods: ['net.fetch', 'net.abort', 'ui.toast'],
+      main: `
+        (async () => {
+          const res = await glaze.net.fetch('https://api.example/echo', {
+            method: 'POST', headers: { 'X-Key': 'k' }, body: JSON.stringify({ a: 1 }),
+          });
+          const echo = await res.json();
+          const key = echo.headers.find((h) => h[0] === 'x-key');
+          glaze.ui.toast([res.status, res.ok, res.statusText, res.url, res.redirected, res.headers.get('x-echo'),
+            echo.method, key && key[1], echo.body, typeof glaze.net.abort].join('|'));
+          const ctl = new AbortController();
+          const slow = glaze.net.fetch('https://api.example/slow', { signal: ctl.signal });
+          setTimeout(() => ctl.abort(), 50);
+          await slow.catch((e) => glaze.ui.toast('aborted:' + e.name));
+        })().catch((e) => glaze.ui.toast('failed: ' + e.message));
+      `,
+    }),
+  ]);
+  await expect.poll(() => toasts(page)).toEqual([
+    '201|true|Created|https://api.example/echo?final|true|yes|POST|k|{"a":1}|undefined',
+    'aborted:AbortError',
+  ]);
+  const slow = (await calls(page, 'net.fetch')).at(-1).request.params[1].id;
+  expect((await calls(page, 'net.abort')).map((c) => c.request.params[0])).toEqual([slow]);
+});
+
 async function netReports(page) {
   return page.evaluate(() => window.__calls.filter((c) => c.name === 'pluginNetwork').map((c) => c.request));
 }
