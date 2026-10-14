@@ -197,6 +197,21 @@ test('the sync variable cache and the storage shim', async ({ page }) => {
   expect(stored[0].request.params).toEqual([{ key: 'n', value: '1' }]);
 });
 
+test('panels are told to avoid the status bar, not the app header', async ({ page }) => {
+  await setup(page, [
+    plugin('p', {
+      methods: ['ui.toast'],
+      panels: [{
+        id: 'x',
+        placement: 'chat',
+        html: `<script>setTimeout(() => { const i = glaze.ui.insets(); glaze.ui.toast(i.topBar + '|' + i.topSafe + '|' + i.bottomInput); }, 100);<\/script>`,
+      }],
+    }),
+  ]);
+  // The harness page pads the chat 60 px under a header, 80 px over the composer.
+  await expect.poll(() => toasts(page)).toEqual(['0|0|80']);
+});
+
 test('the storage shim refuses a write past its quota, like a browser', async ({ page }) => {
   await setup(page, [
     plugin('p', {

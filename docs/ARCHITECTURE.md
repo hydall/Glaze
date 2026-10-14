@@ -1780,7 +1780,8 @@ inside the page may only load `about:srcdoc`/`about:blank`
 footer's `.msg-trailing-actions`. Package scripts, CSS and assets
 (`/plugins/<id>/…`) are inlined by `plugin_html_inliner.dart`, since a
 null-origin frame cannot fetch them. Layout insets are exposed as
-`--glaze-inset-*` CSS variables.
+`--glaze-inset-*` CSS variables. The top bar inset is the status bar alone:
+panels draw over the app's header, which is cut out where they draw.
 
 **Hooks.** `PluginChatHost` (wraps the chat screen) starts the runtime once the
 chat bridge is published and registers a `PluginHookRunner` in

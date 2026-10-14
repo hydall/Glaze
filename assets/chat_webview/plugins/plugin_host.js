@@ -469,9 +469,12 @@
     if (!container) return;
     var safe = readSafeArea();
     var round = function (v) { return Math.round(v * 100) / 100; };
+    // Nothing of the app's top bar is to be avoided: what panels draw goes
+    // over it (the app cuts its controls out there), so the top bar inset
+    // is the status bar alone.
     var next = {
       topSafe: round(safe.top),
-      topBar: round(Math.max(safe.top, parseFloat(container.style.paddingTop) || 0)),
+      topBar: round(safe.top),
       bottomInput: round(Math.max(safe.bottom, parseFloat(container.style.paddingBottom) || 0)),
       bottomSafe: round(safe.bottom),
     };
