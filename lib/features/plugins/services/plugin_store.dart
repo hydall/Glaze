@@ -60,20 +60,39 @@ class PluginStore {
   /// Every installed plugin whose package still parses, in install order.
   Future<List<InstalledPlugin>> loadAll() async {
     final out = <InstalledPlugin>[];
-    for (final record in await _readRecords()) {
+    final records = await _readRecords();
+    var changed = false;
+    for (final record in records) {
       final id = record['id'] as String;
       try {
-        out.add(await _load(id, record));
+        final found = <String>{};
+        out.add(await _load(id, record, found));
+        if (found.isNotEmpty) changed = true;
       } catch (e) {
         debugPrint('[PluginStore] skipping $id: $e');
       }
     }
+    if (changed) await _writeRecords(records);
     return out;
   }
 
-  Future<InstalledPlugin> _load(String id, Map<String, dynamic> record) async {
+  /// Permissions its scripts are found to need when read again arrive
+  /// switched off, as after an update; they are added to [found] and to the
+  /// record, which the caller saves.
+  Future<InstalledPlugin> _load(
+    String id,
+    Map<String, dynamic> record,
+    Set<String> found,
+  ) async {
     final dir = packageDir(id);
-    final manifest = await _readManifest(dir);
+    final manifest = await _readManifest(dir, found);
+    if (found.isNotEmpty) {
+      final old = record['revoked'];
+      record['revoked'] = {
+        if (old is List) ...old.map((x) => '$x'),
+        ...found,
+      }.toList();
+    }
     final catalogs = <String, Map<String, String>>{};
     for (final e in manifest.localeFiles.entries) {
       try {
@@ -151,12 +170,14 @@ class PluginStore {
   }
 
   /// Reads `plugin.json`, converting a package installed before it existed.
-  Future<PluginManifest> _readManifest(String dir) async {
+  /// Permissions a converted package's scripts are newly found to need go
+  /// into [found].
+  Future<PluginManifest> _readManifest(String dir, [Set<String>? found]) async {
     final own = File(p.join(dir, kPluginManifestFile));
     if (await own.exists()) {
       final json = jsonDecode(await own.readAsString());
-      if (json is Map<String, dynamic> && _hasLegacyLibrary(json)) {
-        return _reinfer(dir, own, json);
+      if (json is Map<String, dynamic> && _staleInference(json)) {
+        return _reinfer(dir, own, json, found);
       }
       return parsePluginManifest(json);
     }
@@ -175,6 +196,14 @@ class PluginStore {
     PluginPermission.legacyLibraryDelete,
   };
 
+  /// A converted package whose permissions were read off its scripts by an
+  /// older [inferTavoPermissions], or before that was done at all.
+  static bool _staleInference(Map<String, dynamic> json) =>
+      _hasLegacyLibrary(json) ||
+      json['compat'] == kTavoCompat &&
+          json['permissions'] is List &&
+          json[kTavoInferenceKey] != kTavoInferenceVersion;
+
   static bool _hasLegacyLibrary(Map<String, dynamic> json) {
     final permissions = json['permissions'];
     return json['compat'] == kTavoCompat &&
@@ -182,14 +211,15 @@ class PluginStore {
         permissions.any(_legacy.contains);
   }
 
-  /// A converted package imported before library access was read off its
-  /// scripts kind by kind holds the old catch-all permission, which stands
-  /// for all of the library and chats. Its scripts are read again for what
-  /// it really uses, once; what else it holds stays.
+  /// Its scripts are read again, once. Library and chat access, including
+  /// the old catch-all permission that stood for all of it, is replaced by
+  /// what they really use; anything else they need is added, and goes into
+  /// [found], and what else it holds stays.
   Future<PluginManifest> _reinfer(
     String dir,
     File own,
     Map<String, dynamic> json,
+    Set<String>? found,
   ) async {
     final sources = <String>[];
     await for (final f in Directory(dir).list(recursive: true)) {
@@ -203,11 +233,17 @@ class PluginStore {
       ...PluginPermission.chats,
       ..._legacy,
     };
+    final held = (json['permissions'] as List).cast<String>();
+    final inferred = inferTavoPermissions(sources);
     json['permissions'] = {
-      for (final x in (json['permissions'] as List).cast<String>())
+      for (final x in held)
         if (!scoped.contains(x)) x,
-      ...inferTavoPermissions(sources).where(scoped.contains),
+      ...inferred,
     }.toList();
+    found?.addAll(
+      inferred.where((x) => !scoped.contains(x) && !held.contains(x)),
+    );
+    json[kTavoInferenceKey] = kTavoInferenceVersion;
     final manifest = parsePluginManifest(json);
     await own.writeAsString(jsonEncode(json));
     return manifest;
@@ -309,7 +345,7 @@ class PluginStore {
       records[records.indexOf(existing)] = record;
     }
     await _writeRecords(records);
-    return _load(id, record);
+    return _load(id, record, {});
   }
 
   Future<void> save(InstalledPlugin plugin) async {

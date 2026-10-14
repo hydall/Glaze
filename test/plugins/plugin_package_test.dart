@@ -227,6 +227,13 @@ void main() {
       expect(inferTavoPermissions(["tavo.plugin.on('chat:opened', h)"]), {
         'messages',
       });
+      expect(
+        inferTavoPermissions([
+          "tavo.plugin.on('generation:prepare', h);",
+          'tavo.plugin.on("input:beforeSend", h);',
+        ]),
+        {'generate', 'composer'},
+      );
     });
 
     test('maps fields, permissions, mounts and settings', () {
@@ -450,6 +457,39 @@ void main() {
         );
         // Written back: the next load reads it as it is.
         expect(await file.readAsString(), isNot(contains('"library"')));
+      },
+    );
+
+    test(
+      'a package converted before hooks were read gains what they need, off',
+      () async {
+        final installed = await store.install(
+          readPluginPackage(
+            zip(
+              packageFiles(
+                manifestFile: 'manifest.json',
+                main: "tavo.plugin.on('generation:prepare', (e) => {});",
+              ),
+            ),
+          ),
+        );
+        expect(installed.manifest.permissions, contains('generate'));
+        final file = File('${store.packageDir(installed.id)}/plugin.json');
+        final json =
+            jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+        json.remove('tavoInference');
+        json['permissions'] = [
+          ...(json['permissions'] as List).where((x) => x != 'generate'),
+        ];
+        await file.writeAsString(jsonEncode(json));
+
+        final reloaded = (await store.loadAll()).single;
+        expect(reloaded.manifest.permissions, contains('generate'));
+        expect(reloaded.foundInCode, contains('generate'));
+        // Off until the user switches it on, as after an update; read once.
+        expect(reloaded.revoked, contains('generate'));
+        expect(await file.readAsString(), contains('"tavoInference"'));
+        expect((await store.loadAll()).single.revoked, contains('generate'));
       },
     );
 

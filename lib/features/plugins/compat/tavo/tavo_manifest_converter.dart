@@ -23,11 +23,19 @@ const _permissionMap = {
   'tts': 'tts',
 };
 
+/// Key in a converted package's `plugin.json` holding the
+/// [kTavoInferenceVersion] its permissions were read off its scripts with.
+const String kTavoInferenceKey = 'tavoInference';
+
+/// Bumped whenever [inferTavoPermissions] learns something new, so packages
+/// converted before are read again.
+const int kTavoInferenceVersion = 2;
+
 /// Tavo lets every plugin read the library and other chats and asks the
 /// user before writes; Glaze has permissions for those. Its manifest does
 /// not say which a plugin uses, so they are read off the plugin's scripts:
 /// `tavo.<namespace>.<method>` (or the namespace reached some other way and
-/// the method called on it), and the notifications it listens to.
+/// the method called on it), and the notifications and hooks it listens to.
 Set<String> inferTavoPermissions(Iterable<String> sources) {
   final found = <String>{};
   final call = RegExp(
@@ -37,8 +45,18 @@ Set<String> inferTavoPermissions(Iterable<String> sources) {
   // Tavo sends chat and message notifications to every plugin; in Glaze
   // they come with `messages`.
   final events = RegExp(r'''['"`](chat|message):[a-z]+['"`]''');
+  // Tavo runs send and generation hooks whether the manifest asks for them
+  // or not; in Glaze they come with `composer` and `generate`.
+  final sendHooks = RegExp(r'''['"`]input:(beforeSend|afterSend)['"`]''');
+  final generationHooks = RegExp(
+    r'''['"`]generation:(prepare|success|error|cancelled)['"`]''',
+  );
   for (final source in sources) {
     if (events.hasMatch(source)) found.add(PluginPermission.messages);
+    if (sendHooks.hasMatch(source)) found.add(PluginPermission.composer);
+    if (generationHooks.hasMatch(source)) {
+      found.add(PluginPermission.generate);
+    }
     for (final m in call.allMatches(source)) {
       final ns = m.group(1)!;
       final asset = m.group(2) != null;

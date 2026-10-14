@@ -1824,13 +1824,18 @@ chat bridge is published and registers a `PluginHookRunner` in
 conversion are converted on load. Tavo lets every plugin read the library and
 asks before writes, so its manifests do not say which a plugin uses; the
 library, chats, images and `messages` permissions are read off the package's
-scripts (`inferTavoPermissions`) and, like the rest, start off. Which were
-found that way is worked out again on load from the original manifest
-(`InstalledPlugin.foundInCode`), and the permission rows mark each as asked
-for by the extension or found in its code. A converted package imported
-before the split still holding the catch-all `library` (or `library.read`) has
-its scripts read again once on load (`PluginStore._reinfer`), so it ends up
-with the exact library and chat permissions it uses. The permission rows are
+scripts (`inferTavoPermissions`) and, like the rest, start off. Tavo also runs
+send and generation hooks for plugins that do not ask for `input` or
+`generate`, so `input:*` and `generation:*` hook names in the scripts add
+`composer` and `generate`. Which were found that way is worked out again on
+load from the original manifest (`InstalledPlugin.foundInCode`), and the
+permission rows mark each as asked for by the extension or found in its code.
+`plugin.json` records the `tavoInference` version it was read with; a
+converted package read with an older one, or still holding the catch-all
+`library` (or `library.read`) from before the split, has its scripts read
+again once on load (`PluginStore._reinfer`). It ends up with the exact library
+and chat permissions it uses; any other permission newly found arrives
+switched off, as after an update. The permission rows are
 grouped: general, variables, the library, other chats
 (`pluginPermissionGroups`); each group's header switch gives or takes away
 all of it (`PluginLibraryNotifier.setPermissions`). For converted

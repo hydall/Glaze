@@ -82,6 +82,7 @@ PluginPackage readPluginPackage(Uint8List bytes) {
             utf8.decode(e.value, allowMalformed: true),
       ]),
     }.toList();
+    manifestJson[kTavoInferenceKey] = kTavoInferenceVersion;
     files[kPluginManifestFile] = Uint8List.fromList(
       utf8.encode(const JsonEncoder.withIndent('  ').convert(manifestJson)),
     );
