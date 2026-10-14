@@ -1813,7 +1813,7 @@ for by the extension or found in its code. A converted package imported
 before the split still holding the catch-all `library` (or `library.read`) has
 its scripts read again once on load (`PluginStore._reinfer`), so it ends up
 with the exact library and chat permissions it uses. The permission rows are
-grouped: general, variables, one group per library kind, other chats
+grouped: general, variables, the library, other chats
 (`pluginPermissionGroups`); each group's header switch gives or takes away
 all of it (`PluginLibraryNotifier.setPermissions`). For converted
 plugins the runtime also loads `tavo_compat.js`, which defines `tavo.*` (and

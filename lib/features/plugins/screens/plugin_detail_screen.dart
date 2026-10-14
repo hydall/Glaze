@@ -38,8 +38,8 @@ Future<void> openPluginDetailScreen(BuildContext context, String id) async {
 /// Groups of rows that set up what [plugin] may do: a switch per
 /// permission, the ask/always/off choice for consents and the internet mode.
 /// The first group, headed [header], holds the general permissions and
-/// [afterNetwork] under the internet rows; variables, each kind of library
-/// item and other chats follow, each in a group of its own. Every group's
+/// [afterNetwork] under the internet rows; variables, the library and other
+/// chats follow, each in a group of its own. Every group's
 /// header has a switch that gives or takes away all of its permissions.
 List<Widget> pluginPermissionGroups(
   BuildContext context,
@@ -57,23 +57,17 @@ List<Widget> pluginPermissionGroups(
     return i < 0 ? order.length : i;
   }
 
-  final rows = <_PermissionSection, List<Widget>>{};
-  final members = <_PermissionSection, List<String>>{};
+  final rows = <PluginPermissionCategory, List<Widget>>{};
+  final members = <PluginPermissionCategory, List<String>>{};
   final permissions = [...plugin.manifest.permissions]
     ..sort((a, b) => rank(a).compareTo(rank(b)));
   for (final permission in permissions) {
-    final section = _PermissionSection.of(permission);
+    final section = PluginPermissionCategory.of(permission);
     if (PluginPermission.all.contains(permission)) {
       (members[section] ??= []).add(permission);
     }
     (rows[section] ??= []).addAll([
-      PluginDetailScreen._permissionItem(
-        context,
-        notifier,
-        plugin,
-        permission,
-        short: section.kind != null,
-      ),
+      PluginDetailScreen._permissionItem(context, notifier, plugin, permission),
       if (permission == PluginPermission.network &&
           plugin.allows(PluginPermission.network)) ...[
         MenuItem(
@@ -92,7 +86,7 @@ List<Widget> pluginPermissionGroups(
     ]);
   }
 
-  Widget? groupSwitch(_PermissionSection section) {
+  Widget? groupSwitch(PluginPermissionCategory section) {
     final list = members[section];
     if (list == null || list.isEmpty) return null;
     return GlazeSwitch(
@@ -106,57 +100,25 @@ List<Widget> pluginPermissionGroups(
       header: header,
       headerIcon: headerIcon,
       description: description,
-      headerTrailing: groupSwitch(_PermissionSection.general),
-      items: rows[_PermissionSection.general] ?? const [],
+      headerTrailing: groupSwitch(PluginPermissionCategory.general),
+      items: rows[PluginPermissionCategory.general] ?? const [],
     ),
-    for (final section in _PermissionSection.values.skip(1))
+    for (final section in PluginPermissionCategory.values.skip(1))
       if (rows[section] case final items?)
         MenuGroup(
-          header: section.kind == null
-              ? 'plugins_permission_group_${section.name}'.tr()
-              : 'plugins_permission_group_library'.tr(
-                  namedArgs: {
-                    'kind': 'plugins_permission_kind_${section.kind}'.tr(),
-                  },
-                ),
-          headerIcon: section.icon,
+          header: 'plugins_permission_category_${section.name}'.tr(),
+          headerIcon: _groupIcons[section],
           headerTrailing: groupSwitch(section),
           items: items,
         ),
   ];
 }
 
-enum _PermissionSection {
-  general(Icons.verified_user_outlined),
-  variables(Icons.data_object_rounded),
-  characters(Icons.person_outline_rounded, 'characters'),
-  personas(Icons.badge_outlined, 'personas'),
-  presets(Icons.tune_rounded, 'presets'),
-  lorebooks(Icons.menu_book_outlined, 'lorebooks'),
-  regex(Icons.code_rounded, 'regex'),
-  themes(Icons.palette_outlined, 'themes'),
-  chats(Icons.forum_outlined);
-
-  const _PermissionSection(this.icon, [this.kind]);
-
-  final IconData icon;
-
-  /// The library kind (`library.<action>.<kind>`) the group holds.
-  final String? kind;
-
-  static _PermissionSection of(String permission) {
-    if (permission == PluginPermission.variables ||
-        permission == PluginPermission.variablesShared) {
-      return variables;
-    }
-    if (PluginPermission.library.contains(permission)) {
-      final kind = permission.split('.').last;
-      return values.firstWhere((s) => s.kind == kind);
-    }
-    if (PluginPermission.chats.contains(permission)) return chats;
-    return general;
-  }
-}
+const _groupIcons = {
+  PluginPermissionCategory.variables: Icons.data_object_rounded,
+  PluginPermissionCategory.library: Icons.library_books_outlined,
+  PluginPermissionCategory.chats: Icons.forum_outlined,
+};
 
 /// Shown after a plugin is installed or updated with new permissions:
 /// everything starts off and the user switches on what the plugin may do.
@@ -388,16 +350,17 @@ class PluginDetailScreen extends ConsumerWidget {
     BuildContext context,
     PluginLibraryNotifier notifier,
     InstalledPlugin plugin,
-    String permission, {
-    bool short = false,
-  }) {
+    String permission,
+  ) {
     final key = permission.replaceAll('.', '_');
-    // In a group of one library kind the row names just the action.
-    final action = short ? permission.split('.')[1] : null;
-    final icon = _icons[action ?? permission] ?? Icons.help_outline_rounded;
-    final label = action != null
-        ? 'plugins_permission_action_$action'.tr()
-        : _text('plugins_permission_name_$key', permission);
+    // Library rows take the action's icon; their names say the kind.
+    final parts = permission.split('.');
+    final icon =
+        _icons[PluginPermission.library.contains(permission)
+            ? parts[1]
+            : permission] ??
+        Icons.help_outline_rounded;
+    final label = _text('plugins_permission_name_$key', permission);
     // A converted package names only some of what it uses; the rest was
     // found in its scripts, and the user is told which is which.
     final source = plugin.manifest.compat == null
