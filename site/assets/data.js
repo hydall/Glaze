@@ -465,6 +465,18 @@ window.GLAZE = {
   // languages it is written in; any other shows the first one with a notice.
   articles: [
     {
+      slug: 'plugins',
+      kind: 'news',
+      date: '2026-10-14',
+      author: 'hydall',
+      langs: ['ru', 'en'],
+      title: { ru: 'Расширения', en: 'Extensions' },
+      lead: {
+        ru: 'Плагины в Glaze: импорт расширений Tavo, матрица разрешений, свои интерфейсы поверх чата без доступа к нему и glaze.net.fetch для разработчиков. Уже на Nightly.',
+        en: 'Plugins in Glaze: Tavo extension import, a permission matrix, plugin interfaces over the chat without access to it, and glaze.net.fetch for developers. Already on Nightly.',
+      },
+    },
+    {
       slug: '0.8.2',
       kind: 'changelog',
       date: '2026-10-12',
