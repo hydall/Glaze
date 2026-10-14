@@ -12,7 +12,18 @@ class PluginFileStore {
   PluginFileStore({required this.dataDir});
 
   final String dataDir;
-  static const maxStorageBytes = 2 * 1024 * 1024;
+  /// Cap of the `localStorage` shim: keys and values together, in UTF-8.
+  /// The shim refuses a write past it the way a browser does, so a plugin
+  /// learns at once that its data was not kept.
+  static const maxStorageBytes = 10 * 1024 * 1024;
+
+  static int storageBytes(Map<String, String> values) {
+    var total = 0;
+    for (final e in values.entries) {
+      total += utf8.encode(e.key).length + utf8.encode(e.value).length;
+    }
+    return total;
+  }
 
   /// Cap on everything a plugin keeps in its files, across all scopes.
   static const maxFilesBytes = 256 * 1024 * 1024;
@@ -41,10 +52,10 @@ class PluginFileStore {
     final run = _lock.then((_) async {
       final values = await readStorage();
       change(values);
-      final encoded = jsonEncode(values);
-      if (utf8.encode(encoded).length > maxStorageBytes) {
+      if (storageBytes(values) > maxStorageBytes) {
         throw StateError('Plugin storage exceeds $maxStorageBytes bytes');
       }
+      final encoded = jsonEncode(values);
       await Directory(dataDir).create(recursive: true);
       final tmp = File('${_storageFile.path}.tmp');
       await tmp.writeAsString(encoded, flush: true);

@@ -81,10 +81,7 @@ void main() {
       for (final (url, ref) in [
         ('https://hub.tavoai.dev/plugins/package/quick.note', 'quick.note'),
         ('https://hub.tavoai.dev/plugins/quick-note', 'quick-note'),
-        (
-          'https://hub.tavoai.dev/webview/plugins/quick-note?x=1',
-          'quick-note',
-        ),
+        ('https://hub.tavoai.dev/webview/plugins/quick-note?x=1', 'quick-note'),
         ('https://hub.tavoai.dev/plugin-market/package/a.b', 'a.b'),
         ('https://HUB.tavoai.dev/plugins/a/', 'a'),
       ]) {

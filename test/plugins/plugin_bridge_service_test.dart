@@ -497,6 +497,29 @@ void main() {
     expect(host.grants.last, startsWith('plugins_consent_'));
   });
 
+  test('storage holds what a browser would, and refuses more', () async {
+    final s = service(const []);
+    final big = 'я' * (4 * 1024 * 1024);
+    final ok = await call(s, 'storage.set', [
+      {'key': 'db', 'value': big},
+    ]);
+    expect(ok['ok'], isTrue, reason: '$ok');
+    final over = await call(s, 'storage.set', [
+      {'key': 'bak', 'value': big},
+    ]);
+    expect(over['ok'], isFalse);
+    expect((await host.files('test.plugin').readStorage()).keys, ['db']);
+  });
+
+  test('global variables take a large value', () async {
+    final s = service(const ['variables']);
+    final big = 'x' * (3 * 1024 * 1024);
+    final out = await call(s, 'variables.set', ['db', big, 'global']);
+    expect(out['ok'], isTrue, reason: '$out');
+    final chat = await call(s, 'variables.set', ['db', big]);
+    expect(chat['ok'], isFalse);
+  });
+
   test('files stay inside the plugin folder', () async {
     final s = service(const ['files']);
     final saved = await call(s, 'files.save', ['note.txt', 'hello']);

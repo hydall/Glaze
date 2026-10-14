@@ -95,6 +95,7 @@ class PluginRuntimePayloadBuilder {
       'i18n': localizer.catalogs.isEmpty ? null : localizer.runtimeSnapshot(),
       'vars': {'chat': chatVars, 'global': globalVars},
       'storage': await files.readStorage(),
+      'storageQuota': PluginFileStore.maxStorageBytes,
       'methods': pluginMethodsFor(plugin),
       'events': pluginEventsFor(plugin),
       // true: any host; a list: only those hosts; false: none.

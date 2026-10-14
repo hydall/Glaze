@@ -457,13 +457,37 @@
   // A null-origin frame has no Web Storage; keep a per-plugin copy in Glaze
   // and persist every write.
   var store = Object.assign({}, boot.storage || {});
+  // Kept in UTF-8 bytes, as the app counts; a write past the quota throws
+  // like a full browser storage and is not kept.
+  var quota = boot.storageQuota > 0 ? boot.storageQuota : Infinity;
+  var encoder = new TextEncoder();
+  function bytes(s) { return encoder.encode(s).length; }
+  var used = 0;
+  Object.keys(store).forEach(function (k) { used += bytes(k) + bytes(store[k]); });
   var storage = {
     get length() { return Object.keys(store).length; },
     key: function (i) { var k = Object.keys(store); return i >= 0 && i < k.length ? k[i] : null; },
     getItem: function (k) { k = String(k); return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null; },
-    setItem: function (k, v) { k = String(k); v = String(v); store[k] = v; fire('storage.set', [{ key: k, value: v }]); },
-    removeItem: function (k) { k = String(k); delete store[k]; fire('storage.remove', [{ key: k }]); },
-    clear: function () { store = {}; fire('storage.clear', []); },
+    setItem: function (k, v) {
+      k = String(k); v = String(v);
+      var had = Object.prototype.hasOwnProperty.call(store, k);
+      var next = used - (had ? bytes(k) + bytes(store[k]) : 0) + bytes(k) + bytes(v);
+      if (next > quota) {
+        throw new DOMException("Failed to execute 'setItem' on 'Storage': Setting the value of '" + k +
+          "' exceeded the quota.", 'QuotaExceededError');
+      }
+      used = next;
+      store[k] = v;
+      fire('storage.set', [{ key: k, value: v }]);
+    },
+    removeItem: function (k) {
+      k = String(k);
+      if (!Object.prototype.hasOwnProperty.call(store, k)) return;
+      used -= bytes(k) + bytes(store[k]);
+      delete store[k];
+      fire('storage.remove', [{ key: k }]);
+    },
+    clear: function () { store = {}; used = 0; fire('storage.clear', []); },
   };
   try { Object.defineProperty(window, 'localStorage', { value: storage, configurable: true }); } catch (e) { /* keep native */ }
 

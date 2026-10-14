@@ -197,6 +197,30 @@ test('the sync variable cache and the storage shim', async ({ page }) => {
   expect(stored[0].request.params).toEqual([{ key: 'n', value: '1' }]);
 });
 
+test('the storage shim refuses a write past its quota, like a browser', async ({ page }) => {
+  await setup(page, [
+    plugin('p', {
+      methods: ['ui.toast'],
+      // 'kept' + 'yes' = 7 bytes; 'я' is two.
+      storage: { kept: 'yes' },
+      storageQuota: 20,
+      main: `
+        const out = [];
+        localStorage.setItem('a', 'яя');
+        try { localStorage.setItem('b', 'x'.repeat(20)); } catch (e) { out.push(e.name); }
+        out.push(localStorage.getItem('b'));
+        localStorage.removeItem('a');
+        localStorage.setItem('b', 'x'.repeat(11));
+        out.push(localStorage.getItem('b').length);
+        glaze.ui.toast(out.join('|'));
+      `,
+    }),
+  ]);
+  await expect.poll(() => toasts(page)).toEqual(['QuotaExceededError||11']);
+  const stored = (await calls(page, 'storage.set')).map((c) => c.request.params[0].key);
+  expect(stored).toEqual(['a', 'b']);
+});
+
 test('actions run the main handler and report a missing one', async ({ page }) => {
   await setup(page, [
     plugin('p', { main: `glaze.plugin.onComposerAction('go', async () => { await glaze.ui.toast('went'); });` }),

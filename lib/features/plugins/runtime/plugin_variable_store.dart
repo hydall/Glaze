@@ -4,8 +4,13 @@ import 'dart:io';
 import '../../../core/db/repositories/chat_repo.dart';
 import 'plugin_variable_paths.dart';
 
-/// Size cap per scope. Plugins are told to keep large blobs in files.
+/// Size cap of a plugin's variables in one chat (or its messages), which
+/// live in the session row.
 const int kPluginVariableMaxBytes = 1024 * 1024;
+
+/// Size cap of the `global` and `shared` files. Converted plugins keep
+/// whole databases there, as the app they were written for allows.
+const int kPluginGlobalVariableMaxBytes = 16 * 1024 * 1024;
 
 /// Backing store for `glaze.variables.*`. Every plugin has its own
 /// variables; `shared` is the one space plugins use together.
@@ -70,7 +75,10 @@ class PluginVariableStore {
       return _serialized(() async {
         final root = await _readFile(file);
         change(root);
-        await _writeFile(file, _checked(root));
+        await _writeFile(
+          file,
+          _checked(root, max: kPluginGlobalVariableMaxBytes),
+        );
         return root;
       });
     }
@@ -160,12 +168,13 @@ class PluginVariableStore {
     return messageId;
   }
 
-  String _checked(Map<String, dynamic> root) {
+  String _checked(
+    Map<String, dynamic> root, {
+    int max = kPluginVariableMaxBytes,
+  }) {
     final encoded = jsonEncode(root);
-    if (utf8.encode(encoded).length > kPluginVariableMaxBytes) {
-      throw StateError(
-        'Plugin variables exceed $kPluginVariableMaxBytes bytes',
-      );
+    if (utf8.encode(encoded).length > max) {
+      throw StateError('Plugin variables exceed $max bytes');
     }
     return encoded;
   }

@@ -54,6 +54,7 @@
       channel: P,
       vars: plugin.vars || { chat: {}, global: {} },
       storage: plugin.storage || {},
+      storageQuota: plugin.storageQuota || 0,
       methods: plugin.methods || [],
       insets: insets,
       compat: plugin.compat || null,
