@@ -1121,7 +1121,12 @@ always-on capture sink (`llmRequestCaptureInstallationProvider` →
 not mix runs. Rows are folded into groups by `messageId` (one chat turn: the
 main model or the agent shards, then cleaner, ledger, ext blocks) or by
 `pipelineRunId` (a background job — card rewrite, reconciliation), and the two
-kinds share one chronological list. Retries of one call collapse into a single
+kinds share one chronological list. Plugin calls (`glaze.generate`,
+`glaze.images.generate`) carry the open chat, a stage of their own
+(`plugin.generate`, `image.plugin`) and the plugin's id as the step name, and
+record their outcome, so each shows as a call of its own with its response.
+Requests a plugin makes from its frame, or through `glaze.net.fetch`, are not
+model calls the app can read and are not shown. Retries of one call collapse into a single
 step carrying an attempt count. Opening a step shows that exact payload; the tab
 strip hides while it is open, and the step gets two tabs of its own: what was
 sent, and what came back (`PromptCaptureView.responseText`, read from the call

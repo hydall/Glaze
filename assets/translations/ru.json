@@ -3227,6 +3227,7 @@
   "requests_response_none": "Для этого запроса ответ не записан",
   "requests_stage_embedding": "Эмбеддинги",
   "requests_stage_image": "Изображение",
+  "requests_stage_plugin": "Плагин",
   "count_message_didnt_fit": {
     "one": "{} сообщение не поместилось в контекст",
     "few": "{} сообщения не поместились в контекст",

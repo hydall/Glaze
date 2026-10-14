@@ -5,8 +5,12 @@ import 'dart:typed_data';
 import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/db/repositories/chat_repo.dart';
+import 'package:glaze_flutter/core/llm/transport/llm_call_event.dart';
+import 'package:glaze_flutter/core/llm/transport/llm_request_capture.dart';
+import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/core/state/db_provider.dart';
 import 'package:glaze_flutter/features/chat/composer_text_bridge.dart';
@@ -280,6 +284,61 @@ void main() {
       {'context': true},
     ]);
     expect((context['error'] as Map)['code'], 'permission_denied');
+  });
+
+  test('a plugin\'s text request shows up in the chat\'s requests', () async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    SharedPreferences.setMockInitialValues({});
+    // The test binding answers every HTTP request with a 400.
+    HttpOverrides.global = null;
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    server.listen((req) async {
+      await req.drain<void>();
+      req.response.headers.contentType = ContentType.json;
+      req.response.write(
+        jsonEncode({
+          'choices': [
+            {
+              'message': {'role': 'assistant', 'content': 'pong'},
+              'finish_reason': 'stop',
+            },
+          ],
+        }),
+      );
+      await req.response.close();
+    });
+    final requests = <LlmRequestCaptureEvent>[];
+    final outcomes = <LlmCallEvent>[];
+    LlmRequestCapture.sink = _Sink(requests.add);
+    LlmCallEventCapture.sink = _EventSink(outcomes.add);
+    addTearDown(() async {
+      LlmRequestCapture.sink = null;
+      LlmCallEventCapture.sink = null;
+      await server.close(force: true);
+    });
+    await container
+        .read(apiConfigRepoProvider)
+        .put(
+          ApiConfig(
+            id: 'api',
+            name: 'Local',
+            apiKey: 'k',
+            endpoint: 'http://127.0.0.1:${server.port}/v1',
+            model: 'm',
+          ),
+        );
+
+    final out = await call(service(const ['generate']), 'generate', ['ping']);
+    expect(out['result'], 'pong');
+    await pumpEventQueue();
+    final request = requests.single.context!;
+    expect(request.stage, 'plugin.generate');
+    expect(request.sessionId, 's1');
+    expect(request.agentId, 'test.plugin');
+    final outcome = outcomes.single;
+    expect(outcome.context.callId, request.callId);
+    expect(outcome.context.attempt, request.attempt);
+    expect(outcome.responseText, 'pong');
   });
 
   test('legacy "library" stands for every library and chat permission', () {
@@ -777,4 +836,18 @@ void main() {
     expect(html, contains('<style>body{background:url(data:image/png;base64,'));
     expect(html, contains('<img src="data:image/png;base64,UE5H">'));
   });
+}
+
+class _Sink implements LlmRequestCaptureSink {
+  _Sink(this.onEvent);
+  final void Function(LlmRequestCaptureEvent) onEvent;
+  @override
+  void record(LlmRequestCaptureEvent event) => onEvent(event);
+}
+
+class _EventSink implements LlmCallEventSink {
+  _EventSink(this.onEvent);
+  final void Function(LlmCallEvent) onEvent;
+  @override
+  void recordCallEvent(LlmCallEvent event) => onEvent(event);
 }

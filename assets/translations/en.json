@@ -3200,6 +3200,7 @@
   "requests_response_none": "No response was recorded for this request",
   "requests_stage_embedding": "Embeddings",
   "requests_stage_image": "Image",
+  "requests_stage_plugin": "Plugin",
   "count_message_didnt_fit": {
     "one": "{} message didn't fit into context size",
     "other": "{} messages didn't fit into context size"

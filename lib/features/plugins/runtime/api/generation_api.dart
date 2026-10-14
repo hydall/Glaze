@@ -4,11 +4,15 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 
+import '../../../../core/llm/transport/call_attempt_outcome.dart';
 import '../../../../core/llm/transport/chat_transport_request.dart';
+import '../../../../core/llm/transport/llm_call_event.dart';
+import '../../../../core/llm/transport/llm_capture_context.dart';
 import '../../../../core/llm/transport/transport_factory.dart';
 import '../../../../core/models/chat_message.dart';
 import '../../../../core/state/db_provider.dart';
 import '../../../../core/state/persona_resolution.dart';
+import '../../../../core/utils/id_generator.dart';
 import '../../../chat/chat_provider.dart';
 import '../../../image_gen/image_gen_provider.dart';
 import '../../../settings/api_list_provider.dart';
@@ -30,6 +34,38 @@ Map<String, PluginMethod> generationApi() => {
     summary: 'plugins_consent_image',
   ),
 };
+
+/// What the Prompt Inspector's Requests tab shows a plugin's call under: its
+/// chat, a stage of its own, and the plugin's id where an agent's name goes.
+LlmCaptureContext _capture(PluginCall c, String stage) => LlmCaptureContext(
+  stage: stage,
+  sessionId: c.host.sessionId,
+  agentId: c.plugin.id,
+  callId: 'call:plugin:${generateId()}',
+  attempt: 1,
+);
+
+/// Records how the call [_capture] describes ended, so the inspector has its
+/// response or its error.
+void _recordOutcome(
+  LlmCaptureContext capture,
+  DateTime started, {
+  String? responseText,
+  Object? error,
+}) => unawaited(
+  LlmCallEventCapture.record(
+    LlmCallEvent.transport(
+      context: capture,
+      attempt: describeCallAttempt(
+        attempt: 1,
+        startedAtMs: started.millisecondsSinceEpoch,
+        elapsedMs: DateTime.now().difference(started).inMilliseconds,
+        error: error,
+      ),
+      responseText: responseText,
+    ),
+  ),
+);
 
 Future<Object?> _generate(PluginCall c) async {
   final prompt = c.requireString(0, 'prompt');
@@ -75,6 +111,8 @@ Future<Object?> _generate(PluginCall c) async {
 
   final cancelToken = CancelToken();
   final completer = Completer<String>();
+  final capture = _capture(c, 'plugin.generate');
+  final started = DateTime.now();
   unawaited(
     pickChatTransport(config.protocol).stream(
       request: ChatTransportRequest.fromApiConfig(
@@ -82,6 +120,7 @@ Future<Object?> _generate(PluginCall c) async {
         messages: messages,
         stream: false,
         sessionId: c.host.sessionId,
+        captureContext: capture,
       ),
       cancelToken: cancelToken,
       onComplete: (text, _, {rawResponseJson}) {
@@ -97,11 +136,15 @@ Future<Object?> _generate(PluginCall c) async {
       ? Duration(milliseconds: timeoutMs.toInt())
       : const Duration(minutes: 5);
   try {
-    return await completer.future.timeout(limit);
-  } on TimeoutException {
+    final text = await completer.future.timeout(limit);
+    _recordOutcome(capture, started, responseText: text);
+    return text;
+  } on TimeoutException catch (e) {
     cancelToken.cancel('glaze.generate timed out');
+    _recordOutcome(capture, started, error: e);
     throw const PluginApiError('timeout', 'Generation timed out');
   } catch (e) {
+    _recordOutcome(capture, started, error: e);
     if (e is PluginApiError) rethrow;
     throw PluginApiError('generation_failed', '$e');
   }
@@ -138,6 +181,8 @@ Future<Object?> _image(PluginCall c) async {
     )),
   );
   final cancelToken = CancelToken();
+  final capture = _capture(c, 'image.plugin');
+  final started = DateTime.now();
   final Uint8List bytes;
   try {
     final job = service.generateImage(
@@ -151,18 +196,26 @@ Future<Object?> _image(PluginCall c) async {
       instructionAspectRatio: options['aspectRatio']?.toString(),
       instructionImageSize: options['size']?.toString(),
       cancelToken: cancelToken,
+      captureContext: capture,
     );
     final timeoutMs = options['timeout'];
     bytes = timeoutMs is num && timeoutMs > 0
         ? await job.timeout(Duration(milliseconds: timeoutMs.toInt()))
         : await job;
-  } on TimeoutException {
+  } on TimeoutException catch (e) {
     cancelToken.cancel('glaze.images.generate timed out');
+    _recordOutcome(capture, started, error: e);
     throw const PluginApiError('timeout', 'Image generation timed out');
   } catch (e) {
+    _recordOutcome(capture, started, error: e);
     throw PluginApiError('generation_failed', '$e');
   }
   final mime = _imageMime(bytes);
+  _recordOutcome(
+    capture,
+    started,
+    responseText: '$mime, ${(bytes.length / 1024).ceil()} KB',
+  );
   final saveAs = options['saveAs'];
   if (saveAs is String && saveAs.isNotEmpty) {
     await c.require(PluginPermission.files);

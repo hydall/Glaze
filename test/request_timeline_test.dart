@@ -159,6 +159,8 @@ void main() {
       RequestStageFamily.embedding,
     );
     expect(requestStageFamily('image.generate'), RequestStageFamily.image);
+    expect(requestStageFamily('image.plugin'), RequestStageFamily.image);
+    expect(requestStageFamily('plugin.generate'), RequestStageFamily.plugin);
     expect(requestStageFamily(null), RequestStageFamily.other);
   });
 }
