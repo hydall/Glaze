@@ -1,13 +1,22 @@
+import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../features/presets/preset_list_provider.dart';
+import '../application/sync_repo_interfaces.dart';
+import '../models/preset.dart';
 import '../state/db_provider.dart';
 import '../state/shared_prefs_provider.dart';
+import '../utils/id_generator.dart';
 import 'featured_presets.dart';
 
 const _seededKey = 'defaultPresetsSeeded';
 const _featuredSeededKey = 'featuredPresetsSeeded_v2';
+
+/// The user's custom preset list order (see `PresetListNotifier`).
+const _presetOrderKey = 'presetOrder';
 
 /// Per-preset revision last written by the seeder, so a shipped update to a
 /// bundled preset can be told apart from a preset the user has kept.
@@ -71,40 +80,120 @@ Future<void> applyFirstRunPresetChoice({SharedPreferences? preferences}) async {
 /// After that, a preset still in the library is refreshed when its bundled
 /// [FeaturedPreset.revision] is newer than the one the seeder last wrote — the
 /// way a shipped update to a bundled preset reaches existing installs.
+///
+/// An update never discards the user's work: when the stored preset no longer
+/// matches the bundled revision it was seeded from, it is kept under a new id
+/// as "Old `name`", next to the updated one.
 Future<void> seedFeaturedPresets(WidgetRef ref) async {
   final prefs = await ref.read(sharedPreferencesProvider.future);
-  final firstRun = prefs.getBool(_featuredSeededKey) != true;
-  final repo = ref.read(presetRepoProvider);
   var wrote = false;
-
   try {
-    for (final f in featuredPresets) {
-      final revisionKey = _featuredRevisionKey(f.id);
-      final existing = await repo.getById(f.id);
-      if (existing == null) {
-        // A first run seeds everything; a later run leaves a deleted preset
-        // deleted instead of resurrecting it.
-        if (firstRun) {
-          await repo.put(await loadFeaturedPreset(f));
-          await prefs.setInt(revisionKey, f.revision);
-          wrote = true;
-        }
-        continue;
-      }
-      // An install seeded before revisions were tracked counts as revision 1.
-      final seededRevision = prefs.getInt(revisionKey) ?? 1;
-      if (f.revision > seededRevision) {
-        await repo.put(await loadFeaturedPreset(f));
-        wrote = true;
-      }
-      await prefs.setInt(revisionKey, f.revision);
-    }
-
-    await prefs.setBool(_featuredSeededKey, true);
+    await syncFeaturedPresets(
+      prefs: prefs,
+      repo: ref.read(presetRepoProvider),
+      onWrite: () => wrote = true,
+    );
   } finally {
     // Seeding runs in the background, so the preset list (Tools card, desktop
     // sidebar, chat preset resolution) may already have loaded the library
     // without these presets and would keep that until the next launch.
     if (wrote) ref.invalidate(presetListProvider);
+  }
+}
+
+/// The body of [seedFeaturedPresets], without Riverpod. [onWrite] fires on
+/// each write to [repo], so a run that fails halfway still refreshes the list.
+@visibleForTesting
+Future<void> syncFeaturedPresets({
+  required SharedPreferences prefs,
+  required SyncPresetStore repo,
+  void Function()? onWrite,
+}) async {
+  final firstRun = prefs.getBool(_featuredSeededKey) != true;
+  for (final f in featuredPresets) {
+    final revisionKey = _featuredRevisionKey(f.id);
+    final existing = await repo.getById(f.id);
+    if (existing == null) {
+      // A first run seeds everything; a later run leaves a deleted preset
+      // deleted instead of resurrecting it.
+      if (firstRun) {
+        await repo.put(await loadFeaturedPreset(f));
+        await prefs.setInt(revisionKey, f.revision);
+        onWrite?.call();
+      }
+      continue;
+    }
+    // An install seeded before revisions were tracked counts as revision 1.
+    final seededRevision = prefs.getInt(revisionKey) ?? 1;
+    if (f.revision > seededRevision) {
+      // Loaded before anything is written, so a bad asset cannot leave a kept
+      // copy behind that the next launch would duplicate.
+      final updated = await loadFeaturedPreset(f);
+      if (!await _matchesPreviousRevision(existing, f)) {
+        await _keepOldCopy(prefs, repo, existing, f);
+        onWrite?.call();
+      }
+      await repo.put(updated);
+      onWrite?.call();
+    }
+    await prefs.setInt(revisionKey, f.revision);
+  }
+
+  await prefs.setBool(_featuredSeededKey, true);
+}
+
+/// Whether replacing [existing] with the update loses nothing the user did to
+/// the previous bundled revision of [f]: every editable block (its text and
+/// switch) and every regex in it is one that revision shipped.
+///
+/// Not an exact comparison on purpose. The same bundled preset reached
+/// installs through different importers (the Vue app's migration among them),
+/// which leave their own block ids, depths, ordering and regex flags behind,
+/// so only what the user can actually author is compared. A preset that
+/// shipped no previous revision is always replaced.
+Future<bool> _matchesPreviousRevision(Preset existing, FeaturedPreset f) async {
+  final asset = f.previousJsonAsset;
+  if (asset == null) return true;
+  final shipped = _authoredParts(await loadFeaturedPreset(f, jsonAsset: asset));
+  for (final part in _authoredParts(existing)) {
+    if (!shipped.remove(part)) return false;
+  }
+  return true;
+}
+
+List<String> _authoredParts(Preset p) => [
+  for (final b in p.blocks)
+    if (!b.isStatic)
+      jsonEncode(['block', b.name, b.role, b.content, b.enabled]),
+  for (final r in p.regexes)
+    jsonEncode(['regex', r.name, r.regex, r.replacement, r.disabled]),
+];
+
+/// Saves the user's edited [existing] under a fresh id as "Old `name`" with
+/// the previous cover, and places it right after the featured preset in a
+/// custom list order.
+Future<void> _keepOldCopy(
+  SharedPreferences prefs,
+  SyncPresetStore repo,
+  Preset existing,
+  FeaturedPreset f,
+) async {
+  final copy = existing.copyWith(
+    id: generateId(),
+    name: 'Old ${f.name}',
+    imagePath: existing.imagePath ?? f.previousImageAsset ?? f.imageAsset,
+  );
+  await repo.put(copy);
+
+  final raw = prefs.getString(_presetOrderKey);
+  if (raw == null) return;
+  try {
+    final order = (jsonDecode(raw) as List).cast<String>();
+    final at = order.indexOf(f.id);
+    if (at < 0) return;
+    order.insert(at + 1, copy.id);
+    await prefs.setString(_presetOrderKey, jsonEncode(order));
+  } catch (_) {
+    // An unreadable order is the list's problem; the copy is already saved.
   }
 }
