@@ -7,11 +7,16 @@ import '../models/info_block.dart';
 import 'block_content_extractor.dart';
 
 /// Whether [block]'s finished result is shown inside the message text rather
-/// than in the panel under it.
+/// than in the panel under it. In the original that is every generated block
+/// and every accumulation state; a script shows nothing of its own.
 bool showsInMessage(BlockConfig block) =>
-    block.type == BlockType.generated &&
+    rendersInMessage(block.type) &&
     block.render == BlockRender.message &&
     !block.hideDisplay;
+
+/// Whether a block of [type] can be shown inside the message at all.
+bool rendersInMessage(BlockType type) =>
+    type == BlockType.generated || type == BlockType.accumulation;
 
 /// The text the original extension appends to a message for display: every
 /// finished [BlockRender.message] block stored under [message], in preset

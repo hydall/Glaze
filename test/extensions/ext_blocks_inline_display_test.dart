@@ -135,4 +135,31 @@ void main() {
     expect(showsInMessage(block), isTrue);
     expect(showsInMessage(block.copyWith(hideDisplay: true)), isFalse);
   });
+
+  test('accumulation state goes in the message; a script never does', () {
+    final accumulation = decodeUpstreamBlock({
+      'name': 'stats',
+      'block_type': 'accumulation',
+      'updater_name': 'stats_update',
+    });
+    final script = decodeUpstreamBlock({
+      'name': 'js',
+      'block_type': 'script',
+      'script_type': 'js',
+      'script': 'return 1',
+    });
+    expect(showsInMessage(accumulation), isTrue);
+    expect(script.render, BlockRender.card);
+    expect(
+      showsInMessage(script.copyWith(render: BlockRender.message)),
+      isFalse,
+    );
+
+    final text = inlineExtBlocksText(
+      preset: ExtensionPreset(id: 'p', name: 'p', blocks: [accumulation]),
+      rows: [_row(accumulation.id, 'gold: 3')],
+      message: message,
+    );
+    expect(text, '<stats>\ngold: 3\n</stats>');
+  });
 }

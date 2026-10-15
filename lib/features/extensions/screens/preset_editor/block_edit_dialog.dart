@@ -434,6 +434,9 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
               const _HelpText('block_render_panel_help'),
             if (_type == BlockType.generated && _render == BlockRender.message)
               const _HelpText('block_render_message_help'),
+            if (_type == BlockType.accumulation &&
+                _render == BlockRender.message)
+              const _HelpText('block_render_message_accumulation_help'),
             if (_type == BlockType.script) const _HelpText('block_script_help'),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -538,12 +541,21 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
   /// back into the prompt, whether it streams.
   List<Widget> _outputItems() {
     final items = <Widget>[
+      // Accumulation state is text: a card or the message, never an iframe.
+      if (_type == BlockType.accumulation)
+        MenuSelectorItem(
+          label: 'block_render_label'.tr(),
+          currentValue: _renderLabel(_render),
+          description: 'block_render_desc'.tr(),
+          onTap: () =>
+              _pickRender(const [BlockRender.card, BlockRender.message]),
+        ),
       if (_type == BlockType.generated) ...[
         MenuSelectorItem(
           label: 'block_render_label'.tr(),
           currentValue: _renderLabel(_render),
           description: 'block_render_desc'.tr(),
-          onTap: _pickRender,
+          onTap: () => _pickRender(BlockRender.values),
         ),
         if (_render == BlockRender.panel)
           MenuFieldItem(
@@ -626,12 +638,12 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
     BlockRender.message => 'block_render_message'.tr(),
   };
 
-  Future<void> _pickRender() async {
+  Future<void> _pickRender(List<BlockRender> options) async {
     await GlazeBottomSheet.show<void>(
       context,
       title: 'block_render_label'.tr(),
       items: [
-        for (final option in BlockRender.values)
+        for (final option in options)
           BottomSheetItem(
             label: _renderLabel(option),
             icon: _render == option
