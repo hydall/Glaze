@@ -18,6 +18,7 @@
 | `network_error` | Запрос не удался. |
 | `no_connection` | В Glaze не настроено подключение к API. |
 | `generation_failed` | Генерация не удалась. |
+| `unknown_preset` | В манифесте нет настройки `apiPreset`/`imagePreset` нужного вида с таким `preset`. |
 | `unavailable` | Здесь недоступно (например, нет поля ввода). |
 | `conflict`, `read_only`, `invalid_file`, `import_failed`, `unknown_command` | Бывают у отдельных методов; в `message` сказано, что не так. |
 
@@ -242,6 +243,7 @@ const hp = glaze.variables.peek('stats.hp');
 
 | Параметр | Что делает |
 |---|---|
+| `preset` | `key` настройки `apiPreset`: запрос идёт через подключение и модель, выбранные пользователем для этой функции ([Пресеты API](#info/plugins-manifest/пресеты-api)). Не выбрано — подключение чата. |
 | `system` | Системный промпт. |
 | `context: true` | Ставит перед промптом последние 40 видимых сообщений чата. Нужно также `messages`. |
 | `settings: { temperature?, maxTokens? }` | Переопределяет настройки подключения. |
@@ -262,6 +264,7 @@ const summary = await glaze.generate('Перескажи разговор одн
 
 | Параметр | Что делает |
 |---|---|
+| `preset` | `key` настройки `imagePreset`: подключение и стиль, выбранные пользователем для этих картинок ([Пресеты API](#info/plugins-manifest/пресеты-api)). |
 | `aspectRatio`, `size` | Передаются генератору, если он их поддерживает. |
 | `timeout` | В миллисекундах. |
 | `saveAs`, `scope` | Сохранить в файлы плагина под этим именем (нужно `files`). |
@@ -336,6 +339,7 @@ await glaze.commands.run('/gen Придумай название таверны 
 | Метод | Что делает | Разрешение |
 |---|---|---|
 | `characters.current()` | Персонаж открытого чата. | `read` |
+| `lorebooks.coverage()` | Какие записи лорбуков открытый чат положит в промпт и почему (см. ниже). Нужно также `messages`. | `read` |
 | `characters.import(source)` | Принимает карточку (объект) или файл карточки `.png`/`.json`. Возвращает `{ characterId, lorebookId }`. | `create` |
 | `characters.export(id, { format })` | `json` (по умолчанию) или `png` пишут файл карточки в файлы плагина (нужно `files`); `object` возвращает карточку. | `read` |
 | `personas.current()` | Персона открытого чата. | `read` |
@@ -356,5 +360,24 @@ await glaze.commands.run('/gen Придумай название таверны 
   createdAt, updatedAt
 }
 ```
+
+`lorebooks.coverage()` — тот же разбор чата, что показывает инспектор промпта, поэтому он всегда совпадает с тем, что получает модель:
+
+```js
+{
+  entries: [{
+    id, comment, content, position, order, lorebookId, lorebookName,
+    constant, activated,          // activated: ключи совпали (или запись постоянная)
+    matchedKeys: [], matchedSecondaryKeys: [], matchMessageIndex,
+    cutOff,                       // null, 'budget' (общий лимит) или 'bookLimit' (лимит её лорбука)
+    recursionPass,                // 1 или больше, если запись включил текст другой записи
+    stickyHeld, onCooldown
+  }],
+  totalCandidates, activatedCount, cutOffCount, injectedCount, inactiveCount,
+  settings: { ...настройки лорбуков, entryCap }
+}
+```
+
+Запись с `probability` ниже 100% показывается так, будто у неё 100%, чтобы ответ не менялся от вызова к вызову. Нужна Glaze 0.9.0 (Nightly).
 
 Персона: `{ id, name, displayName, description, avatar, active }`. Пресеты, лорбуки, regex-скрипты и темы приходят в том виде, в каком их хранит Glaze; `import` принимает также пресеты, лорбуки и regex-скрипты SillyTavern.

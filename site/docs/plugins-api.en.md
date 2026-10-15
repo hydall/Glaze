@@ -18,6 +18,7 @@ A failed call rejects with an `Error` with a `code` and a `message`:
 | `network_error` | The request failed. |
 | `no_connection` | No API connection is set up in Glaze. |
 | `generation_failed` | Generation failed. |
+| `unknown_preset` | `preset` names no `apiPreset`/`imagePreset` setting of the right kind in the manifest. |
 | `unavailable` | Not available here (for example, no message box). |
 | `conflict`, `read_only`, `invalid_file`, `import_failed`, `unknown_command` | Specific to a few methods; `message` says what went wrong. |
 
@@ -242,6 +243,7 @@ Limits: 32 MB per file, 256 MB for all the plugin's files.
 
 | Option | What it does |
 |---|---|
+| `preset` | The `key` of an `apiPreset` setting: runs on the connection and model the user picked for that feature ([API presets](#info/plugins-manifest/api-presets)). Unset, the chat's connection. |
 | `system` | A system prompt. |
 | `context: true` | Puts the chat's last 40 visible messages before the prompt. Also needs `messages`. |
 | `settings: { temperature?, maxTokens? }` | Overrides the connection's settings. |
@@ -262,6 +264,7 @@ The request is not streamed and doesn't appear in the chat; it is in the Prompt 
 
 | Option | What it does |
 |---|---|
+| `preset` | The `key` of an `imagePreset` setting: the connection and style the user picked for these images ([API presets](#info/plugins-manifest/api-presets)). |
 | `aspectRatio`, `size` | Passed to the generator, if it supports them. |
 | `timeout` | In milliseconds. |
 | `saveAs`, `scope` | Save into the plugin's files under this name (needs `files`). |
@@ -336,6 +339,7 @@ Extra methods:
 | Method | What it does | Permission |
 |---|---|---|
 | `characters.current()` | The open chat's character. | `read` |
+| `lorebooks.coverage()` | Which lorebook entries the open chat will put into the prompt, and why (see below). Also needs `messages`. | `read` |
 | `characters.import(source)` | Takes a card (object) or a `.png`/`.json` card file. Returns `{ characterId, lorebookId }`. | `create` |
 | `characters.export(id, { format })` | `json` (default) or `png` write a card file into the plugin's files (needs `files`); `object` returns the card. | `read` |
 | `personas.current()` | The persona of the open chat. | `read` |
@@ -356,5 +360,24 @@ A character:
   createdAt, updatedAt
 }
 ```
+
+`lorebooks.coverage()` is the same reading of the chat that the Prompt Inspector shows, so it always agrees with what the model gets:
+
+```js
+{
+  entries: [{
+    id, comment, content, position, order, lorebookId, lorebookName,
+    constant, activated,          // activated: its keys matched (or it is constant)
+    matchedKeys: [], matchedSecondaryKeys: [], matchMessageIndex,
+    cutOff,                       // null, 'budget' (the global limit) or 'bookLimit' (its book's limit)
+    recursionPass,                // 1, or more if another entry's text activated it
+    stickyHeld, onCooldown
+  }],
+  totalCandidates, activatedCount, cutOffCount, injectedCount, inactiveCount,
+  settings: { ...lorebook settings, entryCap }
+}
+```
+
+An entry with a `probability` below 100% is reported as if it were 100%, so the answer doesn't change between calls. Needs Glaze 0.9.0 (Nightly).
 
 A persona: `{ id, name, displayName, description, avatar, active }`. Presets, lorebooks, regex scripts and themes come in the form Glaze stores them in; `import` also takes SillyTavern's presets, lorebooks and regex scripts.
