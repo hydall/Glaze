@@ -320,6 +320,11 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     tagEnd: tagEnd,
   );
 
+  /// Replaces a message's text for an ext-block rewrite; see
+  /// [ChatMessageOpsController.replaceMessageText].
+  Future<ChatSession?> replaceMessageText(String messageId, String text) =>
+      _messageOpsCtrl.replaceMessageText(messageId, text);
+
   Future<void> moveMessage(int fromIndex, int toIndex) =>
       _messageOpsCtrl.moveMessage(fromIndex, toIndex);
 
@@ -751,8 +756,12 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           }
         }
 
+        // A user-side rewrite block may have changed the message just sent.
+        final latestSession = state.value?.session;
         await _runGeneration(
-          updatedSession,
+          latestSession?.id == updatedSession.id
+              ? latestSession!
+              : updatedSession,
           current,
           guidanceText: guidanceText,
         );

@@ -16,7 +16,10 @@ void main() {
 
   group('legacy block types', () {
     test('infoblock becomes a generated card', () {
-      final block = decode({'type': 'infoblock', 'prompt': 'Describe the room'});
+      final block = decode({
+        'type': 'infoblock',
+        'prompt': 'Describe the room',
+      });
 
       expect(block.type, BlockType.generated);
       expect(block.render, BlockRender.card);
@@ -101,10 +104,11 @@ void main() {
         ],
       });
 
-      expect(
-        preset.blocks.map((BlockConfig b) => b.type).toList(),
-        [BlockType.generated, BlockType.generated, BlockType.script],
-      );
+      expect(preset.blocks.map((BlockConfig b) => b.type).toList(), [
+        BlockType.generated,
+        BlockType.generated,
+        BlockType.script,
+      ]);
       expect(preset.blocks[1].render, BlockRender.panel);
     });
 
@@ -222,11 +226,15 @@ void main() {
       expect(block.type.isRunnable, isTrue);
     });
 
-    test('rewrite and accumulation still have no runtime', () {
-      expect(BlockType.rewrite.isRunnable, isFalse);
-      expect(BlockType.accumulation.isRunnable, isFalse);
-      expect(BlockType.script.isRunnable, isTrue);
-    });
+    test(
+      'rewrite runs without a panel result; accumulation has no runtime',
+      () {
+        expect(BlockType.rewrite.isRunnable, isTrue);
+        expect(BlockType.rewrite.hasPanelResult, isFalse);
+        expect(BlockType.accumulation.isRunnable, isFalse);
+        expect(BlockType.script.isRunnable, isTrue);
+      },
+    );
   });
 
   group('upstream round trip', () {

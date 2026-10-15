@@ -18,6 +18,7 @@ import '../providers/extension_presets_provider.dart';
 import '../providers/extensions_settings_provider.dart';
 import '../providers/info_blocks_provider.dart';
 import 'info_block_service.dart';
+import 'rewrite/rewrite_service.dart';
 import 'blocks/block_processor.dart';
 import 'blocks/block_context.dart';
 import 'blocks/block_handler.dart';
@@ -196,6 +197,58 @@ class ExtensionPostGenService {
     for (final row in rows) {
       if (!blockIds.contains(row.blockId)) continue;
       await notifier.delete(row.id);
+    }
+  }
+
+  /// The active preset's enabled rewrite blocks, for the manual rewrite sheet.
+  List<BlockConfig> rewriteBlocks() {
+    final preset = _resolveActivePreset();
+    if (preset == null) return const [];
+    return [
+      for (final block in preset.blocks)
+        if (block.enabled && block.type == BlockType.rewrite) block,
+    ];
+  }
+
+  /// Runs the rewrite block [blockId] on [messageId] by hand, as the
+  /// original's selection popup does. [textToRewrite] narrows it to a
+  /// fragment that must occur once in the message; [additionalPrompt] fills
+  /// `{{additionalPrompt}}`. Stop reaches it like any other block run.
+  Future<void> runRewriteBlock({
+    required String blockId,
+    required String charId,
+    required String sessionId,
+    required String messageId,
+    required List<ChatMessage> messages,
+    required Character character,
+    required Persona? persona,
+    String? textToRewrite,
+    String additionalPrompt = '',
+  }) async {
+    final preset = _resolveActivePreset();
+    final block = preset?.blocks.where((b) => b.id == blockId).firstOrNull;
+    if (preset == null || block == null || block.type != BlockType.rewrite) {
+      return;
+    }
+    final cancelToken = _startBlockRun();
+    try {
+      await _ref
+          .read(extBlocksRewriteServiceProvider)
+          .rewriteMessage(
+            blocks: [block],
+            charId: charId,
+            sessionId: sessionId,
+            messageId: messageId,
+            messages: messages,
+            character: character,
+            persona: persona,
+            preset: preset,
+            textToRewrite: textToRewrite,
+            additionalMacros: {'additionalPrompt': additionalPrompt},
+            cancelToken: cancelToken,
+          );
+    } finally {
+      _finishBlockRun(cancelToken);
     }
   }
 
@@ -561,6 +614,13 @@ class ExtensionPostGenService {
   // Chain execution
   // ─────────────────────────────────────────────────────────────────────────
 
+  /// Runs one chain in the original extension's order: scripts marked
+  /// "before", rewrites marked "before", the generated blocks, rewrites
+  /// marked "after", scripts marked "after".
+  ///
+  /// Only carried scripts with no dependency take a phase. A script the model
+  /// writes, or one chained to the block before it, keeps its place in the
+  /// ordinary chain, where it has always run.
   Future<void> _runChain({
     required String charId,
     required String sessionId,
@@ -576,28 +636,91 @@ class ExtensionPostGenService {
     MainModelContextSnapshot? mainModelContextSnapshot,
     bool Function(BlockConfig block)? where,
   }) async {
-    await _blockProcessor.run(
-      preset: preset,
-      trigger: trigger,
-      cancelToken: cancelToken,
+    final eligible = _blockProcessor.selectBlocks(
+      preset,
+      trigger,
       where: where,
-      runBlock: ({required blockConfig, required previousOutput}) {
-        return _runSingleBlock(
+    );
+    List<BlockConfig> phase(bool Function(BlockConfig b) test) =>
+        eligible.where(test).toList();
+    final beforeScripts = phase(
+      (b) => isPhasedScript(b) && b.executionOrder == BlockRunOrder.before,
+    );
+    final afterScripts = phase(
+      (b) => isPhasedScript(b) && b.executionOrder == BlockRunOrder.after,
+    );
+    final beforeRewrites = phase(
+      (b) =>
+          b.type == BlockType.rewrite &&
+          b.generationOrder == BlockRunOrder.before,
+    );
+    final afterRewrites = phase(
+      (b) =>
+          b.type == BlockType.rewrite &&
+          b.generationOrder == BlockRunOrder.after,
+    );
+
+    var current = messages;
+    Future<InfoBlock?> runOne(BlockConfig blockConfig, String? previous) =>
+        _runSingleBlock(
           charId: charId,
           sessionId: sessionId,
           messageId: messageId,
           swipeId: swipeId,
           agentSwipeId: agentSwipeId,
-          messages: messages,
+          messages: current,
           blockConfig: blockConfig,
           preset: preset,
           character: character,
           persona: persona,
-          previousOutput: previousOutput,
+          previousOutput: previous,
           cancelToken: cancelToken,
           mainModelContextSnapshot: mainModelContextSnapshot,
         );
-      },
+
+    Future<void> runScripts(List<BlockConfig> scripts) async {
+      for (final script in scripts) {
+        if (cancelToken.isCancelled) return;
+        final result = await runOne(script, null);
+        if (result != null) {
+          _ref
+              .read(infoBlocksProvider(sessionId).notifier)
+              .addOrReplace(result);
+        }
+      }
+    }
+
+    Future<void> runRewrites(List<BlockConfig> rewrites) async {
+      if (rewrites.isEmpty || cancelToken.isCancelled) return;
+      current = await _ref
+          .read(extBlocksRewriteServiceProvider)
+          .rewriteMessage(
+            blocks: rewrites,
+            charId: charId,
+            sessionId: sessionId,
+            messageId: messageId,
+            messages: current,
+            character: character,
+            persona: persona,
+            preset: preset,
+            cancelToken: cancelToken,
+          );
+    }
+
+    await runScripts(beforeScripts);
+    await runRewrites(beforeRewrites);
+    if (cancelToken.isCancelled) return;
+
+    await _blockProcessor.run(
+      preset: preset,
+      trigger: trigger,
+      cancelToken: cancelToken,
+      where: (b) =>
+          (where?.call(b) ?? true) &&
+          b.type != BlockType.rewrite &&
+          !isPhasedScript(b),
+      runBlock: ({required blockConfig, required previousOutput}) =>
+          runOne(blockConfig, previousOutput),
       onBlockComplete: (result) {
         _ref.read(infoBlocksProvider(sessionId).notifier).addOrReplace(result);
       },
@@ -619,6 +742,9 @@ class ExtensionPostGenService {
         );
       },
     );
+
+    await runRewrites(afterRewrites);
+    await runScripts(afterScripts);
   }
 
   /// The keyword / period check for the message [messageId] in [messages].
@@ -703,11 +829,11 @@ class ExtensionPostGenService {
           executeJsScript: _executeContextJsScript,
         );
       case BlockType.rewrite:
+        // Rewrites change the message in their own phase and never reach a
+        // panel row; this only answers a stray manual run.
         return UnsupportedBlockHandler(
           markBlockError: _markContextBlockError,
-          reason:
-              'Rewrite blocks can be edited and exported, but are not executed '
-              'yet.',
+          reason: 'Rewrite blocks rewrite the message and have no panel run.',
         );
       case BlockType.accumulation:
         return UnsupportedBlockHandler(
@@ -764,3 +890,12 @@ class ExtensionPostGenService {
     isAuthorized: isAuthorized,
   );
 }
+
+/// A script block that runs in its "before" or "after" phase rather than in
+/// the ordinary chain: one carrying its own code and not chained to the block
+/// before it, which is every script the original extension exports.
+@visibleForTesting
+bool isPhasedScript(BlockConfig block) =>
+    block.type == BlockType.script &&
+    block.source == BlockSource.carried &&
+    !block.dependsOnPrevious;

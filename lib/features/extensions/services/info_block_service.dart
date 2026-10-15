@@ -93,6 +93,9 @@ class InfoBlockService {
     int swipeId = 0,
     CancelToken? cancelToken,
     void Function(String partial)? onStreamUpdate,
+    Map<String, String> dynamicMacros = const {},
+    String? leadingSystemPrompt,
+    bool returnRawResponse = false,
   }) async {
     if (cancelToken?.isCancelled == true) return (content: null, error: null);
 
@@ -113,13 +116,19 @@ class InfoBlockService {
     // which is what the image and JS types used to get from a type check.
     final resolvedTemplate = _resolveTemplate(blockConfig);
     final personaDescription = personaModel?.prompt ?? personaPrompt;
-    final systemContent = _buildSystemMessage(
+    final blockSystemContent = _buildSystemMessage(
       blockConfig: blockConfig,
       template: resolvedTemplate,
       character: character,
       persona: persona,
       personaDescription: personaDescription,
+      dynamicMacros: dynamicMacros,
     );
+    // A caller's own preamble (a rewrite's diff protocol) leads the block's
+    // instructions, the way the original prepends it to the request.
+    final systemContent = leadingSystemPrompt == null
+        ? blockSystemContent
+        : '$leadingSystemPrompt\n\n$blockSystemContent';
     final supplementalContent = _buildSupplementalMessage(
       blockConfig: blockConfig,
       character: character,
@@ -127,6 +136,7 @@ class InfoBlockService {
       personaDescription: personaDescription,
       previousOutput: previousOutput,
       previousBlocks: previousBlocks,
+      dynamicMacros: dynamicMacros,
     );
     final canUseSnapshot = contextPolicy.useMainModelContext
         ? mainModelContextSnapshot != null
@@ -175,6 +185,7 @@ class InfoBlockService {
             globalVars: globalVars,
             systemInstruction: systemContent,
             supplementalInstruction: supplementalContent,
+            dynamicMacros: dynamicMacros,
           )
         : const ExtensionContextAssembler().assemble(
             policy: contextPolicy,
@@ -292,6 +303,9 @@ class InfoBlockService {
     if (rawResponse == null || rawResponse.trim().isEmpty) {
       return (content: null, error: 'LLM returned empty response');
     }
+    if (returnRawResponse) {
+      return (content: rawResponse.trim(), error: null);
+    }
 
     final content = resolveBlockContent(
       rawResponse: _withoutCodeFence(rawResponse),
@@ -321,11 +335,13 @@ class InfoBlockService {
     Character? character,
     String? persona,
     String? personaDescription,
+    Map<String, String> dynamicMacros = const {},
   }) {
     return MacroContext(
       character: character,
       persona: persona,
       personaDescription: personaDescription,
+      dynamicMacros: dynamicMacros,
     );
   }
 
@@ -417,6 +433,7 @@ class InfoBlockService {
     required Map<String, String> globalVars,
     required String systemInstruction,
     required String supplementalInstruction,
+    Map<String, String> dynamicMacros = const {},
   }) async {
     final blocksByMessageId = await _loadBlocksByMessageId(sessionId);
     final promptRegexes = await _ref.read(activeRegexesProvider.future);
@@ -430,6 +447,7 @@ class InfoBlockService {
       globalVars: globalVars,
       promptRegexes: promptRegexes,
       blocksByMessageId: blocksByMessageId,
+      dynamicMacros: dynamicMacros,
     );
     if (itemMessages.isEmpty) {
       return const ExtensionContextAssembly(messages: [], reconstructed: true);
@@ -481,15 +499,16 @@ class InfoBlockService {
     Character? character,
     String? persona,
     String? personaDescription,
+    Map<String, String> dynamicMacros = const {},
   }) {
-    final instructions = expand(
-      blockConfig.prompt.trim(),
-      _macroContext(
-        character: character,
-        persona: persona,
-        personaDescription: personaDescription,
-      ),
+    final macros = _macroContext(
+      character: character,
+      persona: persona,
+      personaDescription: personaDescription,
+      dynamicMacros: dynamicMacros,
     );
+    final instructions = expand(blockConfig.prompt.trim(), macros);
+    template = expand(template, macros);
 
     // No template means the block's prompt is the whole instruction. An image
     // agent's prompt is written that way — it fixes its own output shape — and
@@ -542,6 +561,7 @@ class InfoBlockService {
     String? personaDescription,
     required String? previousOutput,
     List<InfoBlock> previousBlocks = const [],
+    Map<String, String> dynamicMacros = const {},
   }) {
     final buffer = StringBuffer();
 
@@ -552,6 +572,7 @@ class InfoBlockService {
           character: character,
           persona: persona,
           personaDescription: personaDescription,
+          dynamicMacros: dynamicMacros,
         ),
       );
       buffer.writeln(sysPrompt);

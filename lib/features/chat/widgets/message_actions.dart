@@ -1,11 +1,16 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/state/character_provider.dart';
+import '../../../core/state/persona_resolution.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../extensions/services/extension_post_gen_service.dart';
 import '../chat_provider.dart';
 import '../editing_message_provider.dart';
+import 'ext_block_dialogs.dart';
 import 'message_delete_confirmation.dart';
 
 void showMessageContextMenu({
@@ -32,6 +37,9 @@ void showMessageContextMenu({
   // every callback would throw "Cannot use Ref after disposed".
   final isActivelyGenerating = isGenerating && isLast && !isUser;
   final isTypingTarget = isTyping && !isUser;
+  final rewriteBlocks = ref
+      .read(extensionPostGenServiceProvider)
+      .rewriteBlocks();
 
   final items = <BottomSheetItem>[
     if (isTypingTarget)
@@ -76,6 +84,51 @@ void showMessageContextMenu({
             // the listener stops the stale session and opens a fresh editor.
             if (editing.state == messageId) editing.state = null;
             editing.state = messageId;
+          },
+        ),
+      if (!isError &&
+          !isGenerating &&
+          sessionId != null &&
+          rewriteBlocks.isNotEmpty)
+        BottomSheetItem(
+          icon: Icons.auto_fix_high,
+          label: 'extblocks_rewrite_action'.tr(),
+          onTap: () async {
+            Navigator.of(context, rootNavigator: true).pop();
+            final request = await ExtBlockDialogs.promptRewrite(
+              context: context,
+              blocks: rewriteBlocks,
+            );
+            if (request == null) return;
+            final state = ref.read(chatProvider(charId)).value;
+            final character = ref.read(characterByIdProvider(charId));
+            if (state == null ||
+                character == null ||
+                state.session?.id != sessionId ||
+                state.isGenerating) {
+              return;
+            }
+            final persona = ref.read(
+              effectivePersonaForChatProvider((
+                charId: charId,
+                sessionId: sessionId,
+              )),
+            );
+            await ref
+                .read(extensionPostGenServiceProvider)
+                .runRewriteBlock(
+                  blockId: request.blockId,
+                  charId: charId,
+                  sessionId: sessionId,
+                  messageId: messageId,
+                  messages: state.messages,
+                  character: character,
+                  persona: persona,
+                  textToRewrite: request.fragment.trim().isEmpty
+                      ? null
+                      : request.fragment,
+                  additionalPrompt: request.additionalPrompt,
+                );
           },
         ),
       if ((!isUser && isLast && !isGenerating) || isError)

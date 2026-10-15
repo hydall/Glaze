@@ -67,10 +67,11 @@ class ExtBlocksPanelBuilder {
   /// The panel hangs under an assistant message and runs the reply chain,
   /// so only those blocks can ever fill a placeholder here. A user-only block
   /// stores its result under the user message (deliberately panel-less), a
-  /// `periodic` block stores nothing at all, and `rewrite` / `accumulation`
-  /// blocks have no runtime yet — listing them would leave a row stuck on
-  /// "pending" forever, with a run button that either re-binds the block to
-  /// the wrong message or writes an error card.
+  /// `periodic` block stores nothing at all, a `rewrite` block changes the
+  /// message instead of leaving a result, and `accumulation` blocks have no
+  /// runtime yet — listing them would leave a row stuck on "pending" forever,
+  /// with a run button that either re-binds the block to the wrong message or
+  /// writes an error card.
   ///
   /// A block gated by a keyword or by a period longer than one turn is
   /// expected to be missing from most replies, so its absence is not shown
@@ -78,6 +79,7 @@ class ExtBlocksPanelBuilder {
   static bool _canPlaceholder(BlockConfig cfg) =>
       cfg.runsOnChar &&
       cfg.type.isRunnable &&
+      cfg.type.hasPanelResult &&
       cfg.keyword.isEmpty &&
       cfg.period <= 2;
 

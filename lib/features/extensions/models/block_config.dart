@@ -38,12 +38,19 @@ enum BlockType {
 
 /// Whether the runtime can execute a block of this type.
 ///
-/// Rewrite and accumulation blocks come in from the original extension's
-/// exports and are fully editable here, but nothing runs them yet. Keeping
-/// them out of the automatic chain is what stops an imported preset from
-/// stamping an error card onto every message.
+/// Accumulation blocks come in from the original extension's exports and are
+/// fully editable here, but nothing runs them yet. Keeping them out of the
+/// automatic chain is what stops an imported preset from stamping an error
+/// card onto every message.
 extension BlockTypeRunnable on BlockType {
   bool get isRunnable => switch (this) {
+    BlockType.generated || BlockType.script || BlockType.rewrite => true,
+    BlockType.accumulation => false,
+  };
+
+  /// Whether a run leaves a result in the message's panel. A rewrite changes
+  /// the message itself instead.
+  bool get hasPanelResult => switch (this) {
     BlockType.generated || BlockType.script => true,
     BlockType.rewrite || BlockType.accumulation => false,
   };

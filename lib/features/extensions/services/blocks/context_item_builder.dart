@@ -42,6 +42,7 @@ List<ContextItemMessage> buildContextItemMessages({
   required List<PresetRegex> promptRegexes,
   required Map<String, List<InfoBlock>> blocksByMessageId,
   int pauseCounter = 0,
+  Map<String, String> dynamicMacros = const {},
 }) {
   final anchorIndex = messages.indexWhere((m) => m.id == anchorMessageId);
   final upToAnchor = anchorIndex < 0
@@ -58,6 +59,7 @@ List<ContextItemMessage> buildContextItemMessages({
     globalVars: globalVars,
     promptRegexes: promptRegexes,
     blocksByMessageId: blocksByMessageId,
+    dynamicMacros: dynamicMacros,
     pauseCounter: pauseCounter,
   );
 
@@ -100,6 +102,7 @@ class _ContextItemBuilder {
     required this.promptRegexes,
     required this.blocksByMessageId,
     required this.pauseCounter,
+    required this.dynamicMacros,
   });
 
   final List<ChatMessage> messages;
@@ -112,6 +115,7 @@ class _ContextItemBuilder {
   final List<PresetRegex> promptRegexes;
   final Map<String, List<InfoBlock>> blocksByMessageId;
   final int pauseCounter;
+  final Map<String, String> dynamicMacros;
 
   String? contentFor(BlockContextItem item) {
     switch (item.type) {
@@ -135,6 +139,7 @@ class _ContextItemBuilder {
         character: character,
         persona: persona?.name,
         personaDescription: persona?.prompt,
+        dynamicMacros: dynamicMacros,
       ),
     );
   }

@@ -100,6 +100,35 @@ class ChatMessageOpsController {
     _publish(updated, token: token);
   }
 
+  /// Replaces the text of [messageId] (and its active swipe) with [text] on
+  /// behalf of an ext-block rewrite. Unlike [editMessage] this runs while
+  /// post-generation work is in flight — the rewrite is part of it — and
+  /// skips the on-edit regexes, which are for what a person types.
+  ///
+  /// Returns the committed session, or `null` when the message is gone or the
+  /// chat moved on to another session.
+  Future<ChatSession?> replaceMessageText(String messageId, String text) async {
+    if (!_ref.mounted) return null;
+    final current = _getState().value;
+    final session = current?.session;
+    if (session == null) return null;
+    final index = session.messages.indexWhere((m) => m.id == messageId);
+    if (index < 0) return null;
+    final token = _writes.beginPublication();
+    final updated = await _writes.run(
+      () => _messageSvc.commitMessageMutation(
+        session,
+        index,
+        (latest, latestIndex) =>
+            _messageSvc.editMessage(latest, latestIndex, text),
+      ),
+    );
+    if (!_ref.mounted) return null;
+    _ref.read(cachedTokenBreakdownProvider(_charId).notifier).state = null;
+    _publish(updated, token: token);
+    return updated;
+  }
+
   Future<ChatSession> _applyRunOnEditRegexes(
     ChatSession session,
     int index,
