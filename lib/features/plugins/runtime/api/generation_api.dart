@@ -17,14 +17,16 @@ import '../../../../core/utils/id_generator.dart';
 import '../../../chat/chat_provider.dart';
 import '../../../image_gen/image_gen_provider.dart';
 import '../../../settings/api_list_provider.dart';
-import '../../models/installed_plugin.dart';
 import '../../models/plugin_manifest.dart';
+import '../../models/plugin_settings_schema.dart';
 import '../plugin_api.dart';
 import 'files_api.dart';
 
 /// `glaze.generate(prompt, options)` (one-off text with the chat's
 /// connection) and `glaze.images.generate(prompt, options)` (Glaze image
-/// generation settings).
+/// generation settings). `options.preset` names an `apiPreset` /
+/// `imagePreset` setting of the plugin to run on the connection, model and
+/// style the user picked for that feature instead.
 Map<String, PluginMethod> generationApi() => {
   'generate': const PluginMethod(
     _generate,
@@ -74,25 +76,44 @@ void _recordOutcome(
   ),
 );
 
-/// The connection a plugin's call runs on: the API preset the user bound to
-/// it in its settings ([boundId]), else the chat's active one. When a
-/// [modelOverride] is set, it replaces whatever model the connection carries.
+/// The preset `options.preset` names: a [type] setting the plugin declared,
+/// with whatever the user picked for it. No `preset` is an unset one.
+PluginPresetValue _preset(
+  PluginCall c,
+  Map<String, Object?> options,
+  PluginSettingType type,
+) {
+  final key = options['preset'];
+  if (key == null) return const PluginPresetValue();
+  final declared =
+      key is String &&
+      c.plugin.manifest.settings.any((f) => f.key == key && f.type == type);
+  if (!declared) {
+    throw PluginApiError(
+      'unknown_preset',
+      'No "${type.name}" setting "$key" in the manifest',
+    );
+  }
+  return PluginPresetValue.parse(c.plugin.config[key]);
+}
+
+/// The connection a plugin's call runs on: the one its [preset] binds, else
+/// the chat's active one, with the preset's model override on top.
 ///
-/// A bound preset that no longer exists falls back to the active connection,
-/// so a deleted preset never leaves the plugin unable to generate.
+/// A bound connection that no longer exists falls back to the active one, so
+/// a deleted connection never leaves the plugin unable to generate.
 Future<ApiConfig?> _resolveConfig(
-  PluginCall c, {
-  required String boundId,
-  String modelOverride = '',
-}) async {
+  PluginCall c,
+  PluginPresetValue preset,
+) async {
   final configs = await c.ref.read(apiListProvider.future);
   ApiConfig? config;
-  if (boundId.isNotEmpty) {
-    config = configs.where((x) => x.id == boundId).firstOrNull;
+  if (preset.api.isNotEmpty) {
+    config = configs.where((x) => x.id == preset.api).firstOrNull;
   }
   config ??= c.ref.read(activeApiConfigProvider);
-  if (config != null && modelOverride.isNotEmpty) {
-    config = config.copyWith(model: modelOverride);
+  if (config != null && preset.model.isNotEmpty) {
+    config = config.copyWith(model: preset.model);
   }
   return config;
 }
@@ -102,8 +123,7 @@ Future<Object?> _generate(PluginCall c) async {
   final options = c.mapArg(1);
   var config = await _resolveConfig(
     c,
-    boundId: c.plugin.apiConfigId,
-    modelOverride: c.plugin.apiModel,
+    _preset(c, options, PluginSettingType.apiPreset),
   );
   if (config == null || config.model.isEmpty) {
     throw const PluginApiError('no_connection', 'No API connection is set up');
@@ -196,19 +216,19 @@ String _imageMime(Uint8List b) {
 Future<Object?> _image(PluginCall c) async {
   final prompt = c.requireString(0, 'prompt');
   final options = c.mapArg(1);
+  final preset = _preset(c, options, PluginSettingType.imagePreset);
   var settings = await c.ref.read(imageGenSettingsProvider.future);
-  // The style the user bound: follow the image settings (empty), force none,
-  // or draw in a named one of the library.
-  final styleId = c.plugin.imageStyleId;
-  if (styleId == kPluginNoImageStyle) {
+  // The preset's style: follow the image settings (empty), force none, or
+  // draw in a named one of the library.
+  if (preset.style == kPluginNoImageStyle) {
     settings = settings.copyWith(activeStyleId: '');
-  } else if (styleId.isNotEmpty) {
-    settings = settings.copyWith(activeStyleId: styleId);
+  } else if (preset.style.isNotEmpty) {
+    settings = settings.copyWith(activeStyleId: preset.style);
   }
   final service = await c.ref
       .read(imageGenSettingsProvider.notifier)
       .getServiceAsync();
-  final api = await _resolveConfig(c, boundId: c.plugin.imageApiConfigId);
+  final api = await _resolveConfig(c, preset.copyWith(model: ''));
   final character = await c.ref
       .read(characterRepoProvider)
       .getById(c.host.charId);

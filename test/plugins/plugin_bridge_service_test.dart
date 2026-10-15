@@ -18,6 +18,7 @@ import 'package:glaze_flutter/features/chat/composer_text_bridge.dart';
 import 'package:glaze_flutter/features/chat/services/prompt_capture_view_service.dart';
 import 'package:glaze_flutter/features/plugins/models/installed_plugin.dart';
 import 'package:glaze_flutter/features/plugins/models/plugin_manifest.dart';
+import 'package:glaze_flutter/features/plugins/models/plugin_settings_schema.dart';
 import 'package:glaze_flutter/features/plugins/providers/plugin_library_provider.dart';
 import 'package:glaze_flutter/features/plugins/runtime/plugin_api.dart';
 import 'package:glaze_flutter/features/plugins/runtime/plugin_bridge_service.dart';
@@ -135,6 +136,8 @@ InstalledPlugin _plugin(
   Set<String> revoked = const {},
   Set<String>? networkHosts,
   bool localNetwork = false,
+  List<Map<String, Object?>> settings = const [],
+  Map<String, Object?> config = const {},
 }) => InstalledPlugin(
   manifest: parsePluginManifest({
     'format': 1,
@@ -142,7 +145,9 @@ InstalledPlugin _plugin(
     'name': 'Test',
     'version': '1.0.0',
     'permissions': permissions,
+    if (settings.isNotEmpty) 'contributes': {'settings': settings},
   }),
+  config: config,
   directory: '/nowhere',
   enabled: true,
   installedAt: 0,
@@ -201,21 +206,16 @@ void main() {
     Set<String> grants = const {},
     Set<String> revoked = const {},
     bool localNetwork = false,
-    String apiConfigId = '',
-    String apiModel = '',
-    String imageApiConfigId = '',
-    String imageStyleId = '',
+    List<Map<String, Object?>> settings = const [],
+    Map<String, Object?> config = const {},
   }) {
     var plugin = _plugin(
       permissions,
       grants: grants,
       revoked: revoked,
       localNetwork: localNetwork,
-    ).copyWith(
-      apiConfigId: apiConfigId,
-      apiModel: apiModel,
-      imageApiConfigId: imageApiConfigId,
-      imageStyleId: imageStyleId,
+      settings: settings,
+      config: config,
     );
     return PluginBridgeService(
       host: host,
@@ -398,7 +398,7 @@ void main() {
     expect(view.responseText, contains('pong'));
   });
 
-  test('generation runs on the connection bound to the plugin', () async {
+  test('generation runs on the connection its preset binds', () async {
     TestWidgetsFlutterBinding.ensureInitialized();
     SharedPreferences.setMockInitialValues({});
     HttpOverrides.global = null;
@@ -410,9 +410,7 @@ void main() {
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       server.listen((req) async {
         final body = await utf8.decoder.bind(req).join();
-        models.add(
-          (jsonDecode(body) as Map)['model']?.toString() ?? '',
-        );
+        models.add((jsonDecode(body) as Map)['model']?.toString() ?? '');
         req.response.headers.contentType = ContentType.json;
         req.response.write(
           jsonEncode({
@@ -433,33 +431,98 @@ void main() {
     final active = await serve('active');
     final bound = await serve('bound');
     final repo = container.read(apiConfigRepoProvider);
-    await repo.put(
-      ApiConfig(
-        id: 'active',
-        name: 'Active',
-        apiKey: 'k',
-        endpoint: 'http://127.0.0.1:${active.port}/v1',
-        model: 'm-active',
-      ),
-    );
-    await repo.put(
-      ApiConfig(
-        id: 'bound',
-        name: 'Bound',
-        apiKey: 'k',
-        endpoint: 'http://127.0.0.1:${bound.port}/v1',
-        model: 'm-bound',
-      ),
-    );
+    for (final (id, server) in [('active', active), ('bound', bound)]) {
+      await repo.put(
+        ApiConfig(
+          id: id,
+          name: id,
+          apiKey: 'k',
+          endpoint: 'http://127.0.0.1:${server.port}/v1',
+          model: 'm-$id',
+        ),
+      );
+    }
     container.read(activeApiPresetIdProvider.notifier).state = 'active';
 
-    final out = await call(
-      service(const ['generate'], apiConfigId: 'bound', apiModel: 'shadow'),
-      'generate',
-      ['ping'],
+    final s = service(
+      const ['generate'],
+      settings: [
+        {'type': 'apiPreset', 'key': 'summary', 'label': 'Summary'},
+        {'type': 'apiPreset', 'key': 'replies', 'label': 'Replies'},
+        {'type': 'imagePreset', 'key': 'photos', 'label': 'Photos'},
+      ],
+      config: {
+        'summary': {'api': 'bound', 'model': 'shadow'},
+      },
     );
-    expect(out['result'], 'bound', reason: '$out');
-    expect(models, ['shadow']);
+
+    final summary = await call(s, 'generate', [
+      'ping',
+      {'preset': 'summary'},
+    ]);
+    expect(summary['result'], 'bound', reason: '$summary');
+    // A preset left unset, and no preset at all, follow the chat.
+    final replies = await call(s, 'generate', [
+      'ping',
+      {'preset': 'replies'},
+    ]);
+    expect(replies['result'], 'active', reason: '$replies');
+    final plain = await call(s, 'generate', ['ping']);
+    expect(plain['result'], 'active', reason: '$plain');
+    expect(models, ['shadow', 'm-active', 'm-active']);
+
+    // A name the manifest does not declare, or declares for images, is a
+    // mistake the plugin hears about rather than a silent fallback.
+    for (final name in ['missing', 'photos']) {
+      final out = await call(s, 'generate', [
+        'ping',
+        {'preset': name},
+      ]);
+      expect((out['error'] as Map)['code'], 'unknown_preset', reason: name);
+    }
+    expect(models, hasLength(3));
+  });
+
+  test('preset settings parse and store their pick', () {
+    final plugin = _plugin(
+      const ['generate', 'images'],
+      settings: [
+        {
+          'type': 'apiPreset',
+          'key': 'summary',
+          'label': 'Summary',
+          'description': 'Cheap model is fine',
+        },
+        {'type': 'imagePreset', 'key': 'photos', 'label': 'Photos'},
+      ],
+      config: {
+        'photos': {'api': 'img', 'style': kPluginNoImageStyle},
+      },
+    );
+    final fields = plugin.manifest.settings;
+    expect(fields.map((f) => f.type), [
+      PluginSettingType.apiPreset,
+      PluginSettingType.imagePreset,
+    ]);
+    expect(fields.every((f) => f.storesValue), isTrue);
+    final photos = PluginPresetValue.parse(plugin.config['photos']);
+    expect(photos.api, 'img');
+    expect(photos.style, kPluginNoImageStyle);
+    expect(PluginPresetValue.parse(null).toJson(), isEmpty);
+    expect(
+      () => parsePluginManifest({
+        'format': 1,
+        'id': 'x.y',
+        'name': 'X',
+        'version': '1.0.0',
+        'contributes': {
+          'settings': [
+            {'type': 'apiPreset', 'label': 'No key'},
+          ],
+        },
+      }),
+      throwsA(isA<PluginManifestException>()),
+    );
   });
 
   test('legacy "library" stands for every library and chat permission', () {

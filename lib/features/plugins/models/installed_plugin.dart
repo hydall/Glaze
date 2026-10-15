@@ -2,10 +2,6 @@ import '../services/plugin_localizer.dart';
 import 'plugin_manifest.dart';
 import 'plugin_settings_schema.dart';
 
-/// [InstalledPlugin.imageStyleId] value that overrides the image settings'
-/// active style with none at all, rather than following it.
-const String kPluginNoImageStyle = '@none';
-
 /// A plugin unpacked under `<data>/plugins/<id>/` plus its saved state.
 class InstalledPlugin {
   const InstalledPlugin({
@@ -21,10 +17,6 @@ class InstalledPlugin {
     this.localNetwork = false,
     this.hubSlug,
     this.foundInCode = const {},
-    this.apiConfigId = '',
-    this.apiModel = '',
-    this.imageApiConfigId = '',
-    this.imageStyleId = '',
   });
 
   final PluginManifest manifest;
@@ -61,23 +53,6 @@ class InstalledPlugin {
   /// and that were read off its scripts instead.
   final Set<String> foundInCode;
 
-  /// The API connection `glaze.generate` runs on. Empty means "whichever
-  /// connection the chat is on", like the Extensions presets' `apiConfigId`
-  /// and the Studio slots.
-  final String apiConfigId;
-
-  /// Model override for [apiConfigId]. Empty means the connection's own.
-  final String apiModel;
-
-  /// The API connection `glaze.images.generate` borrows its endpoint and key
-  /// from, for the providers that run over the LLM one. Empty follows the
-  /// chat's, like [apiConfigId].
-  final String imageApiConfigId;
-
-  /// Image style `glaze.images.generate` draws in. Empty follows the image
-  /// settings' active style; [kPluginNoImageStyle] forces "no style".
-  final String imageStyleId;
-
   /// Whether the plugin may reach [host] at all.
   bool allowsHost(String host) {
     if (!allows(PluginPermission.network)) return false;
@@ -99,10 +74,6 @@ class InstalledPlugin {
     Set<String>? revoked,
     Set<String>? Function()? networkHosts,
     bool? localNetwork,
-    String? apiConfigId,
-    String? apiModel,
-    String? imageApiConfigId,
-    String? imageStyleId,
   }) => InstalledPlugin(
     manifest: manifest,
     directory: directory,
@@ -116,10 +87,6 @@ class InstalledPlugin {
     localNetwork: localNetwork ?? this.localNetwork,
     hubSlug: hubSlug,
     foundInCode: foundInCode,
-    apiConfigId: apiConfigId ?? this.apiConfigId,
-    apiModel: apiModel ?? this.apiModel,
-    imageApiConfigId: imageApiConfigId ?? this.imageApiConfigId,
-    imageStyleId: imageStyleId ?? this.imageStyleId,
   );
 
   PluginLocalizer localizer(String requestedLocale) => PluginLocalizer(
@@ -160,9 +127,5 @@ class InstalledPlugin {
     'networkHosts': networkHosts?.toList(),
     'localNetwork': localNetwork,
     'hub': ?hubSlug,
-    'apiConfigId': ?(apiConfigId.isEmpty ? null : apiConfigId),
-    'apiModel': ?(apiModel.isEmpty ? null : apiModel),
-    'imageApiConfigId': ?(imageApiConfigId.isEmpty ? null : imageApiConfigId),
-    'imageStyleId': ?(imageStyleId.isEmpty ? null : imageStyleId),
   };
 }

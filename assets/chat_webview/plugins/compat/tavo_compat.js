@@ -464,14 +464,23 @@
   };
   if (GP.i18n) pluginNs.i18n = GP.i18n;
 
+  // Glaze reads `preset` as one of the plugin's own preset settings, which a
+  // converted plugin never declares; whatever Tavo meant by it stays behind.
+  function ownOptions(o) {
+    if (!o || typeof o !== 'object' || !('preset' in o)) return o;
+    var copy = {};
+    for (var k in o) if (k !== 'preset') copy[k] = o[k];
+    return copy;
+  }
+
   var tavo = {
     variable: Object.freeze(variable),
     get: legacy.get, set: legacy.set, update: legacy.update, unset: legacy.unset,
     message: message, chat: chatApi, character: characterApi, persona: personaApi,
     preset: presetApi, lorebook: lorebookApi, regex: regexApi, memory: memoryApi,
     theme: themeApi, file: file, input: input, utils: utils,
-    generate: function (prompt, options) { return (g.generate || missing('generate'))(prompt, options); },
-    image: { generate: function (p, o) { return fn(g.images, 'generate')(p, o); } },
+    generate: function (prompt, options) { return (g.generate || missing('generate'))(prompt, ownOptions(options)); },
+    image: { generate: function (p, o) { return fn(g.images, 'generate')(p, ownOptions(o)); } },
     tts: {
       // Glaze has no text-to-speech for plugins.
       play: function () { return Promise.resolve(false); },

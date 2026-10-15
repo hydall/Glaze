@@ -14,9 +14,6 @@ import '../../../shared/widgets/glaze_switch.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/menu_group.dart';
 import '../../../core/services/file_export_service.dart';
-import '../../image_gen/image_gen_models.dart';
-import '../../image_gen/image_gen_provider.dart';
-import '../../settings/widgets/api_slot_group.dart';
 import '../compat/tavo/tavo_hub.dart';
 import '../compat/tavo/tavo_manifest_converter.dart';
 import '../models/installed_plugin.dart';
@@ -295,7 +292,6 @@ class PluginDetailScreen extends ConsumerWidget {
           ),
           _NetworkLog(plugin: plugin),
           _History(plugin: plugin),
-          _GenerationSection(plugin: plugin),
           if (manifest.settings.isNotEmpty)
             PluginSettingsForm(plugin: plugin, localizer: localizer),
           MenuGroup(
@@ -722,120 +718,6 @@ class _History extends ConsumerWidget {
           onTap: () => openPluginHistoryScreen(context, plugin.id),
         ),
       ],
-    );
-  }
-}
-
-/// Where the plugin's own generation goes.
-///
-/// Two [ApiSlotGroup]s — the same rows the Extensions presets and the Studio
-/// slots bind their calls with, so they read and behave identically: text
-/// generation (`glaze.generate`, with a model override) and images
-/// (`glaze.images.generate`, with a connection for the providers that borrow
-/// the LLM endpoint and a style). An empty connection follows the chat's, as
-/// everywhere else; each group shows only when the plugin may do that.
-class _GenerationSection extends ConsumerWidget {
-  const _GenerationSection({required this.plugin});
-
-  final InstalledPlugin plugin;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final permissions = plugin.manifest.permissions;
-    final canGenerate = permissions.contains(PluginPermission.generate);
-    final canImages = permissions.contains(PluginPermission.images);
-    if (!canGenerate && !canImages) return const SizedBox.shrink();
-    final notifier = ref.read(pluginLibraryProvider.notifier);
-    return Column(
-      children: [
-        if (canGenerate)
-          ApiSlotGroup(
-            header: 'plugins_generation'.tr(),
-            description: 'plugins_generation_desc'.tr(),
-            apiConfigId: plugin.apiConfigId,
-            onApiConfigChanged: (id) => notifier.setApiConfig(plugin.id, id),
-            modelRows: [
-              ApiSlotModelRow(
-                value: plugin.apiModel,
-                description: 'plugins_generation_model_desc'.tr(),
-                onChanged: (v) => notifier.setApiModel(plugin.id, v),
-              ),
-            ],
-          ),
-        if (canImages)
-          ApiSlotGroup(
-            header: 'plugins_generation_image'.tr(),
-            description: 'plugins_generation_image_desc'.tr(),
-            apiLabel: 'plugins_generation_image_api'.tr(),
-            apiConfigId: plugin.imageApiConfigId,
-            onApiConfigChanged: (id) =>
-                notifier.setImageApiConfig(plugin.id, id),
-            modelRows: const [],
-            trailingItems: [_ImageStyleRow(plugin: plugin)],
-          ),
-      ],
-    );
-  }
-}
-
-/// The style `glaze.images.generate` draws in: whatever the image settings
-/// have active, none at all, or one named in the style library.
-class _ImageStyleRow extends ConsumerWidget {
-  const _ImageStyleRow({required this.plugin});
-
-  final InstalledPlugin plugin;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final styles =
-        ref.watch(imageGenSettingsProvider).value?.styles ??
-        const <ImageStyle>[];
-    final current = plugin.imageStyleId;
-    final String value;
-    if (current.isEmpty) {
-      value = 'plugins_generation_style_settings'.tr();
-    } else if (current == kPluginNoImageStyle) {
-      value = 'plugins_generation_style_none'.tr();
-    } else {
-      value =
-          styles.where((s) => s.id == current).firstOrNull?.name ??
-          'plugins_generation_style_missing'.tr();
-    }
-    final notifier = ref.read(pluginLibraryProvider.notifier);
-    void pick(String id) {
-      notifier.setImageStyle(plugin.id, id);
-      Navigator.of(context, rootNavigator: true).pop();
-    }
-
-    return MenuSelectorItem(
-      label: 'plugins_generation_style'.tr(),
-      description: 'plugins_generation_style_desc'.tr(),
-      currentValue: value,
-      onReset: current.isEmpty
-          ? null
-          : () => notifier.setImageStyle(plugin.id, ''),
-      onTap: () => GlazeBottomSheet.show<void>(
-        context,
-        title: 'plugins_generation_style'.tr(),
-        items: [
-          BottomSheetItem(
-            label: 'plugins_generation_style_settings'.tr(),
-            icon: current.isEmpty ? Icons.check_rounded : null,
-            onTap: () => pick(''),
-          ),
-          BottomSheetItem(
-            label: 'plugins_generation_style_none'.tr(),
-            icon: current == kPluginNoImageStyle ? Icons.check_rounded : null,
-            onTap: () => pick(kPluginNoImageStyle),
-          ),
-          for (final style in styles)
-            BottomSheetItem(
-              label: style.name,
-              icon: current == style.id ? Icons.check_rounded : null,
-              onTap: () => pick(style.id),
-            ),
-        ],
-      ),
     );
   }
 }

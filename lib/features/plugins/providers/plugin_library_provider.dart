@@ -192,30 +192,6 @@ class PluginLibraryNotifier extends AsyncNotifier<List<InstalledPlugin>> {
   Future<void> resetConfigValue(String id, String key) =>
       _update(id, (x) => x.copyWith(config: {...x.config}..remove(key)));
 
-  /// Binds the plugin's generation to one API connection — `''` follows the
-  /// chat's.
-  Future<void> setApiConfig(String id, String apiConfigId) => _update(
-    id,
-    (x) => x.copyWith(
-      apiConfigId: apiConfigId,
-      // A model chosen against the previous connection would not resolve.
-      apiModel: apiConfigId == x.apiConfigId ? x.apiModel : '',
-    ),
-  );
-
-  Future<void> setApiModel(String id, String apiModel) =>
-      _update(id, (x) => x.copyWith(apiModel: apiModel));
-
-  /// Binds the plugin's images to one API connection — `''` follows the
-  /// chat's.
-  Future<void> setImageApiConfig(String id, String imageApiConfigId) =>
-      _update(id, (x) => x.copyWith(imageApiConfigId: imageApiConfigId));
-
-  /// Picks the image style the plugin's images are drawn in; `''` follows the
-  /// image settings, [kPluginNoImageStyle] forces "no style".
-  Future<void> setImageStyle(String id, String imageStyleId) =>
-      _update(id, (x) => x.copyWith(imageStyleId: imageStyleId));
-
   Future<void> _update(
     String id,
     InstalledPlugin Function(InstalledPlugin) change,

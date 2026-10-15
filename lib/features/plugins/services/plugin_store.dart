@@ -131,18 +131,6 @@ class PluginStore {
       localNetwork: record['localNetwork'] == true,
       hubSlug: record['hub'] is String ? record['hub'] as String : null,
       foundInCode: await _foundInCode(dir, manifest),
-      apiConfigId: record['apiConfigId'] is String
-          ? record['apiConfigId'] as String
-          : '',
-      apiModel: record['apiModel'] is String
-          ? record['apiModel'] as String
-          : '',
-      imageApiConfigId: record['imageApiConfigId'] is String
-          ? record['imageApiConfigId'] as String
-          : '',
-      imageStyleId: record['imageStyleId'] is String
-          ? record['imageStyleId'] as String
-          : '',
     );
   }
 
@@ -349,12 +337,6 @@ class PluginStore {
           existing != null && !added.contains(PluginPermission.network)
           ? existing['localNetwork'] == true
           : false,
-      // The API preset the user bound, and the image style, survive an update
-      // like any other setting.
-      'apiConfigId': ?(existing?['apiConfigId'] as String?),
-      'apiModel': ?(existing?['apiModel'] as String?),
-      'imageApiConfigId': ?(existing?['imageApiConfigId'] as String?),
-      'imageStyleId': ?(existing?['imageStyleId'] as String?),
       'hub': ?(hubSlug ?? existing?['hub']),
     };
     if (existing == null) {

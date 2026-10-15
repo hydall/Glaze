@@ -10,6 +10,53 @@ enum PluginSettingType {
   note,
   divider,
   group,
+
+  /// An API connection (and model) one of the plugin's features generates
+  /// text on: `glaze.generate(prompt, {preset: key})`.
+  apiPreset,
+
+  /// An API connection and image style one of the plugin's features draws
+  /// with: `glaze.images.generate(prompt, {preset: key})`.
+  imagePreset,
+}
+
+/// [PluginPresetValue.style] that overrides the image settings' active style
+/// with none at all, rather than following it.
+const String kPluginNoImageStyle = '@none';
+
+/// What an [PluginSettingType.apiPreset] / [PluginSettingType.imagePreset]
+/// field stores: the API connection ([api], empty follows the chat's), plus a
+/// model override for text or an image style ([style], empty follows the
+/// image settings, [kPluginNoImageStyle] forces none).
+class PluginPresetValue {
+  const PluginPresetValue({this.api = '', this.model = '', this.style = ''});
+
+  factory PluginPresetValue.parse(Object? raw) {
+    if (raw is! Map) return const PluginPresetValue();
+    String read(String key) => raw[key] is String ? raw[key] as String : '';
+    return PluginPresetValue(
+      api: read('api'),
+      model: read('model'),
+      style: read('style'),
+    );
+  }
+
+  final String api;
+  final String model;
+  final String style;
+
+  PluginPresetValue copyWith({String? api, String? model, String? style}) =>
+      PluginPresetValue(
+        api: api ?? this.api,
+        model: model ?? this.model,
+        style: style ?? this.style,
+      );
+
+  Map<String, Object?> toJson() => {
+    if (api.isNotEmpty) 'api': api,
+    if (model.isNotEmpty) 'model': model,
+    if (style.isNotEmpty) 'style': style,
+  };
 }
 
 class PluginSelectOption {
@@ -61,6 +108,8 @@ class PluginSettingField {
     'note': PluginSettingType.note,
     'divider': PluginSettingType.divider,
     'group': PluginSettingType.group,
+    'apiPreset': PluginSettingType.apiPreset,
+    'imagePreset': PluginSettingType.imagePreset,
   };
 
   static PluginSettingField parse(Object? raw, int index) {
@@ -163,6 +212,15 @@ class PluginSettingField {
           min: min,
           max: max,
           step: step,
+        );
+      case PluginSettingType.apiPreset:
+      case PluginSettingType.imagePreset:
+        // No default: an unset preset follows the chat's connection.
+        return PluginSettingField(
+          type: type,
+          key: requireKey(),
+          label: requireText('label'),
+          description: PluginText.tryParse(raw['description']),
         );
       case PluginSettingType.toggle:
       case PluginSettingType.text:

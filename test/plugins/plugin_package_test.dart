@@ -523,33 +523,6 @@ void main() {
       expect(updated.networkHosts, isEmpty);
     });
 
-    test(
-      'the bound API preset and image style survive a reload and an update',
-      () async {
-        final first = await store.install(package(['generate', 'images']));
-        await store.save(
-          first.copyWith(
-            revoked: const {},
-            apiConfigId: 'api-text',
-            apiModel: 'gpt-cheap',
-            imageApiConfigId: 'api-image',
-            imageStyleId: 'style-9',
-          ),
-        );
-        final reloaded = (await store.loadAll()).single;
-        expect(reloaded.apiConfigId, 'api-text');
-        expect(reloaded.apiModel, 'gpt-cheap');
-        expect(reloaded.imageApiConfigId, 'api-image');
-        expect(reloaded.imageStyleId, 'style-9');
-
-        final updated = await store.install(package(['generate', 'images']));
-        expect(updated.apiConfigId, 'api-text');
-        expect(updated.apiModel, 'gpt-cheap');
-        expect(updated.imageApiConfigId, 'api-image');
-        expect(updated.imageStyleId, 'style-9');
-      },
-    );
-
     test('a package from another author starts over', () async {
       final first = await store.install(package(['composer']));
       await store.save(
