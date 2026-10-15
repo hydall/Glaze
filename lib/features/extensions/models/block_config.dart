@@ -263,6 +263,11 @@ abstract class BlockConfig with _$BlockConfig {
     /// Put the result through the user's own text replacements.
     @Default(false) bool applyRegex,
 
+    /// How [inject] places the result: appended to recent replies, or as a
+    /// prompt block the way the original extension does. Imported blocks
+    /// come in as [InjectionTarget.prompt].
+    @Default(InjectionTarget.history) InjectionTarget injectTarget,
+
     /// Role the injected result is attributed to.
     @Default(InjectionRole.system) InjectionRole injectionRole,
 

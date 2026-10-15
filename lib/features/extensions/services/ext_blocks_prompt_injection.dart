@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/db/repositories/info_blocks_repository.dart';
+import '../../../core/llm/prompt/runtime_prompt_block.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../core/state/active_selection_provider.dart';
 import '../../../core/state/db_provider.dart';
@@ -52,18 +53,38 @@ class ExtBlocksPromptInjection {
     );
   }
 
+  /// Prompt blocks the last [injectIntoHistory] call computed per session.
+  final Map<String, List<RuntimePromptBlock>> _promptBlocks = {};
+
+  /// The blocks injected the original extension's way — as prompt blocks
+  /// rather than inside the history — for [sessionId]'s current request.
+  ///
+  /// Computed by [injectIntoHistory], which every prompt build runs first;
+  /// reading them is synchronous so they ride along with the runtime
+  /// injections JavaScript makes.
+  List<RuntimePromptBlock> promptBlocksFor(String sessionId) =>
+      _promptBlocks[sessionId] ?? const [];
+
   Future<List<ChatMessage>> injectIntoHistory({
     required String sessionId,
     required List<ChatMessage> messages,
   }) async {
     final preset = _resolveActivePreset();
-    if (preset == null || messages.isEmpty) return messages;
+    if (preset == null || messages.isEmpty) {
+      _promptBlocks.remove(sessionId);
+      return messages;
+    }
 
     final repo = _ref.read(infoBlocksRepoProvider);
     final macroCtx = _resolveMacroContext();
     final injector = InfoBlockInjector(
       _InfoBlocksRepoReader(repo),
       macroContextResolver: () => macroCtx,
+    );
+    _promptBlocks[sessionId] = await injector.buildPromptBlocks(
+      messages: messages,
+      sessionId: sessionId,
+      preset: preset,
     );
     return injector.injectBlocks(
       messages: messages,

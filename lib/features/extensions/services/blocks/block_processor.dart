@@ -46,6 +46,7 @@ class BlockProcessor {
     required BlockRunner runBlock,
     required BlockComplete onBlockComplete,
     bool Function(BlockConfig block)? where,
+    void Function(Future<InfoBlock?> run)? onBackgroundStarted,
   }) async {
     final blocks = selectBlocks(preset, trigger, where: where);
 
@@ -87,7 +88,14 @@ class BlockProcessor {
         previousFuture = null;
       } else {
         previousFuture = blockFuture;
-        inFlight.add(blockFuture);
+        // A background block keeps running after the chain returns, so the
+        // run reads as finished while it works, as in the original. A block
+        // that depends on it still waits for it.
+        if (blockConfig.background) {
+          onBackgroundStarted?.call(blockFuture);
+        } else {
+          inFlight.add(blockFuture);
+        }
         unawaited(
           blockFuture.then((result) {
             if (result != null) {
@@ -98,9 +106,6 @@ class BlockProcessor {
       }
     }
 
-    if (previousFuture != null) {
-      await previousFuture;
-    }
     if (inFlight.isNotEmpty) {
       await Future.wait(inFlight);
     }

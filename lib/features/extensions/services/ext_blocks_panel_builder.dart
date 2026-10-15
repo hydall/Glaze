@@ -5,6 +5,7 @@ import '../models/block_config.dart';
 import '../providers/extension_presets_provider.dart';
 import '../providers/extensions_settings_provider.dart';
 import '../providers/info_blocks_provider.dart';
+import 'blocks/block_trigger_rules.dart';
 
 typedef ExtBlocksPanelKey = ({
   String sessionId,
@@ -63,15 +64,22 @@ class ExtBlocksPanelBuilder {
   /// Whether a block without a stored row belongs in this message's panel as a
   /// `pending` placeholder.
   ///
-  /// The panel hangs under an assistant message and runs the `afterAssistant`
-  /// set, so only those blocks can ever fill a placeholder here. An
-  /// `afterUser` block stores its result under the user message (deliberately
-  /// panel-less), a `periodic` block stores nothing at all, and `rewrite` /
-  /// `accumulation` blocks have no runtime yet — listing them would leave a row
-  /// stuck on "pending" forever, with a run button that either re-binds the
-  /// block to the wrong message or writes an error card.
+  /// The panel hangs under an assistant message and runs the reply chain,
+  /// so only those blocks can ever fill a placeholder here. A user-only block
+  /// stores its result under the user message (deliberately panel-less), a
+  /// `periodic` block stores nothing at all, and `rewrite` / `accumulation`
+  /// blocks have no runtime yet — listing them would leave a row stuck on
+  /// "pending" forever, with a run button that either re-binds the block to
+  /// the wrong message or writes an error card.
+  ///
+  /// A block gated by a keyword or by a period longer than one turn is
+  /// expected to be missing from most replies, so its absence is not shown
+  /// as pending either.
   static bool _canPlaceholder(BlockConfig cfg) =>
-      cfg.trigger == BlockTrigger.afterAssistant && cfg.type.isRunnable;
+      cfg.runsOnChar &&
+      cfg.type.isRunnable &&
+      cfg.keyword.isEmpty &&
+      cfg.period <= 2;
 
   /// Merges enabled preset blocks with DB rows. A block that can run here but
   /// has no row yet becomes `pending`.
@@ -94,11 +102,18 @@ class ExtBlocksPanelBuilder {
 
     final dbBlocks = ref
         .read(infoBlocksProvider(sessionId).notifier)
-        .getByMessageId(messageId, swipeId: swipeId, agentSwipeId: agentSwipeId);
+        .getByMessageId(
+          messageId,
+          swipeId: swipeId,
+          agentSwipeId: agentSwipeId,
+        );
     final dbByBlockId = {for (final b in dbBlocks) b.blockId: b};
 
-    final enabledConfigs = preset.blocks.where((b) => b.enabled).toList()
-      ..sort((a, b) => a.order.compareTo(b.order));
+    // A block hidden from display still runs and injects; it only stays out
+    // of the panel.
+    final enabledConfigs =
+        preset.blocks.where((b) => b.enabled && !b.hideDisplay).toList()
+          ..sort((a, b) => a.order.compareTo(b.order));
 
     if (enabledConfigs.isEmpty) return [];
 

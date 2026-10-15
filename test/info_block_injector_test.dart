@@ -1,7 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:glaze_flutter/core/models/chat_message.dart';
+import 'package:glaze_flutter/core/llm/prompt/runtime_prompt_block.dart';
 import 'package:glaze_flutter/features/extensions/models/block_config.dart';
+import 'package:glaze_flutter/features/extensions/models/block_injection.dart';
+import 'package:glaze_flutter/features/extensions/models/block_run_status.dart';
 import 'package:glaze_flutter/features/extensions/models/extension_preset.dart';
 import 'package:glaze_flutter/features/extensions/models/info_block.dart';
 import 'package:glaze_flutter/features/extensions/services/info_block_injector.dart';
@@ -143,11 +146,9 @@ void main() {
         ],
       );
 
-      final result = await InfoBlockInjector(repo).injectBlocks(
-        messages: messages,
-        sessionId: sessionId,
-        preset: preset,
-      );
+      final result = await InfoBlockInjector(
+        repo,
+      ).injectBlocks(messages: messages, sessionId: sessionId, preset: preset);
 
       expect(result[0].content, contains('my-content'));
       expect(result[0].content, isNot(contains('other-content')));
@@ -318,6 +319,95 @@ void main() {
       );
 
       expect(result[0].content, 'one');
+    });
+  });
+
+  group('prompt-block injection', () {
+    final messages = [
+      ChatMessage(id: 'u1', role: 'user', content: 'hi'),
+      ChatMessage(id: 'a1', role: 'assistant', content: 'reply 1'),
+      ChatMessage(id: 'u2', role: 'user', content: 'again'),
+      ChatMessage(id: 'a2', role: 'assistant', content: 'reply 2'),
+    ];
+    BlockConfig config({
+      InjectionPosition position = InjectionPosition.inChat,
+      int depth = 4,
+    }) => BlockConfig(
+      id: 'cfg1',
+      name: 'loomledger',
+      inject: true,
+      injectTarget: InjectionTarget.prompt,
+      injectionRole: InjectionRole.user,
+      injectionPosition: position,
+      injectionDepth: depth,
+      template: '<loomledger></loomledger>',
+    );
+    ExtensionPreset preset(BlockConfig block) =>
+        ExtensionPreset(id: 'p1', name: 'test', createdAt: 0, blocks: [block]);
+
+    test('injects only the latest finished result', () async {
+      final repo = _FakeInfoBlockReader({
+        'a1': [_block(id: 'b1', messageId: 'a1', content: 'old')],
+        'a2': [
+          _block(
+            id: 'b2',
+            messageId: 'a2',
+            content: 'broken',
+          ).copyWith(status: BlockRunStatus.error),
+        ],
+        'u2': [_block(id: 'b3', messageId: 'u2', content: 'newest')],
+      });
+      final blocks = await InfoBlockInjector(repo).buildPromptBlocks(
+        messages: messages,
+        sessionId: 'sess1',
+        preset: preset(config()),
+      );
+      expect(blocks, hasLength(1));
+      expect(blocks.single.content, contains('newest'));
+      expect(blocks.single.content, startsWith('<loomledger>'));
+      expect(blocks.single.role, 'user');
+      expect(blocks.single.depth, 4);
+      expect(blocks.single.placement, RuntimePromptPlacement.depth);
+    });
+
+    test('maps the original positions and negative depth', () async {
+      final repo = _FakeInfoBlockReader({
+        'a1': [_block(id: 'b1', messageId: 'a1', content: 'x')],
+      });
+      final after = await InfoBlockInjector(repo).buildPromptBlocks(
+        messages: messages,
+        sessionId: 'sess1',
+        preset: preset(config(position: InjectionPosition.afterMainPrompt)),
+      );
+      expect(after.single.placement, RuntimePromptPlacement.afterMain);
+      final top = await InfoBlockInjector(repo).buildPromptBlocks(
+        messages: messages,
+        sessionId: 'sess1',
+        preset: preset(config(depth: -1)),
+      );
+      expect(top.single.depth, messages.length + 1);
+    });
+
+    test('a prompt-block injection leaves the history alone', () async {
+      final repo = _FakeInfoBlockReader({
+        'a2': [_block(id: 'b2', messageId: 'a2', content: 'ledger')],
+      });
+      final result = await InfoBlockInjector(repo).injectBlocks(
+        messages: messages,
+        sessionId: 'sess1',
+        preset: preset(config()),
+      );
+      expect(result[3].content, 'reply 2');
+    });
+
+    test('nothing produced yet injects nothing', () async {
+      final blocks = await InfoBlockInjector(_FakeInfoBlockReader({}))
+          .buildPromptBlocks(
+            messages: messages,
+            sessionId: 'sess1',
+            preset: preset(config()),
+          );
+      expect(blocks, isEmpty);
     });
   });
 }

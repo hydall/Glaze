@@ -199,7 +199,6 @@ class BlockStateGroup extends StatelessWidget {
   Widget build(BuildContext context) {
     return MenuGroup(
       header: 'block_sec_state'.tr(),
-      description: 'extblocks_carried_only'.tr(),
       items: [
         MenuSwitchItem(
           label: 'block_hide_display'.tr(),
@@ -245,7 +244,6 @@ class BlockInjectionGroup extends StatelessWidget {
   Widget build(BuildContext context) {
     return MenuGroup(
       header: 'block_sec_injection'.tr(),
-      description: 'extblocks_carried_only'.tr(),
       items: [
         MenuSelectorItem(
           label: 'block_injection_role'.tr(),

@@ -78,6 +78,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
   late bool _hideDisplay;
   late bool _background;
   late bool _applyRegex;
+  late InjectionTarget _injectTarget;
   late InjectionRole _injectionRole;
   late InjectionPosition _injectionPosition;
   late BlockRunOrder _generationOrder;
@@ -145,6 +146,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
     _hideDisplay = b.hideDisplay;
     _background = b.background;
     _applyRegex = b.applyRegex;
+    _injectTarget = b.injectTarget;
     _injectionRole = b.injectionRole;
     _injectionPosition = b.injectionPosition;
     _generationOrder = b.generationOrder;
@@ -215,6 +217,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
       keywordIsRegex: _keywordIsRegex,
       hideDisplay: _hideDisplay,
       background: _background,
+      injectTarget: _injectTarget,
       applyRegex: _applyRegex,
       injectionRole: _injectionRole,
       injectionPosition: _injectionPosition,
@@ -366,9 +369,11 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
               onBackgroundChanged: (v) => setState(() => _background = v),
               onApplyRegexChanged: (v) => setState(() => _applyRegex = v),
             ),
-            // A rewrite block replaces the reply instead of being injected
-            // alongside it, so placement settings would mean nothing for it.
-            if (_type != BlockType.rewrite)
+            // Placement only means something for a result injected as a
+            // prompt block; one appended to replies sits where they are.
+            if (_type == BlockType.generated &&
+                _inject &&
+                _injectTarget == InjectionTarget.prompt)
               BlockInjectionGroup(
                 role: _injectionRole,
                 position: _injectionPosition,
@@ -547,7 +552,20 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
           value: _inject,
           onChanged: _onInjectChanged,
         ),
-        if (_inject) ...[
+        if (_inject)
+          MenuSelectorItem(
+            label: 'block_inject_target'.tr(),
+            currentValue: _injectTargetLabel(_injectTarget),
+            onTap: () => pickBlockOption<InjectionTarget>(
+              context: context,
+              title: 'block_inject_target'.tr(),
+              options: InjectionTarget.values,
+              current: _injectTarget,
+              labelOf: _injectTargetLabel,
+              onPicked: (v) => setState(() => _injectTarget = v),
+            ),
+          ),
+        if (_inject && _injectTarget == InjectionTarget.history) ...[
           MenuFieldItem(
             label: 'block_inject_last_n_label'.tr(),
             helper: 'block_inject_last_n_helper'.tr(),
@@ -574,6 +592,11 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
     if (items.isEmpty) return const [];
     return [MenuGroup(header: 'block_sec_output'.tr(), items: items)];
   }
+
+  String _injectTargetLabel(InjectionTarget target) => switch (target) {
+    InjectionTarget.history => 'block_inject_target_history'.tr(),
+    InjectionTarget.prompt => 'block_inject_target_prompt'.tr(),
+  };
 
   String _renderLabel(BlockRender render) => switch (render) {
     BlockRender.card => 'block_render_card'.tr(),

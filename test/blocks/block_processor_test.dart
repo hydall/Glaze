@@ -186,5 +186,35 @@ void main() {
       expect(returned, isTrue);
       expect(completed, containsAll(['slow', 'fast-a', 'fast-b']));
     });
+
+    test('does not wait for a background block', () async {
+      const processor = BlockProcessor();
+      final slow = Completer<InfoBlock?>();
+      final background = <Future<InfoBlock?>>[];
+      final preset = ExtensionPreset(
+        id: 'p1',
+        name: 'Preset',
+        blocks: const [
+          BlockConfig(id: 'bg', name: 'Bg', background: true, order: 1),
+          BlockConfig(id: 'fg', name: 'Fg', order: 2),
+        ],
+      );
+
+      await processor.run(
+        preset: preset,
+        trigger: BlockTrigger.afterAssistant,
+        cancelToken: CancelToken(),
+        runBlock: ({required blockConfig, required previousOutput}) {
+          if (blockConfig.id == 'bg') return slow.future;
+          return Future.value(_result(blockConfig, 'out'));
+        },
+        onBlockComplete: (_) {},
+        onBackgroundStarted: background.add,
+      );
+
+      expect(background, hasLength(1));
+      expect(slow.isCompleted, isFalse);
+      slow.complete(null);
+    });
   });
 }

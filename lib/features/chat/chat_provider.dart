@@ -700,10 +700,19 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         ),
       );
 
-      // Dispatch `afterUser` extension blocks. This is fire-and-forget — the
-      // generation pipeline starts immediately, the post-gen service runs
-      // the chain in the background and persists its own InfoBlocks.
-      unawaited(_dispatchAfterUserBlocks(updatedSession));
+      // Run the `afterUser` extension blocks before the reply, as the
+      // original extension does, so what they produce or inject reaches it.
+      // A block marked background does not hold this up; a failing one is
+      // logged and the reply goes ahead.
+      await _dispatchAfterUserBlocks(updatedSession);
+      if (!ref.mounted) return;
+      // Stopping while those blocks ran stops the reply too.
+      final afterUserBlocks = state.value;
+      if (afterUserBlocks == null ||
+          !afterUserBlocks.isGenerating ||
+          afterUserBlocks.session?.id != updatedSession.id) {
+        return;
+      }
       pluginHooks?.notify('send:after', {
         'chatId': updatedSession.id,
         'source': 'ui',

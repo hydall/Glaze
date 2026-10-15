@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -44,10 +46,12 @@ class ExtensionPostGenService {
   final Ref _ref;
   final BlockPanelUpdater _panelUpdater;
 
-  /// Active cancel tokens for block runs. Multiple chains can overlap
-  /// (for example, an afterAssistant image block and afterUser blocks from the
-  /// next message), so a single mutable token would orphan older runs.
-  final Set<CancelToken> _blocksCancelTokens = <CancelToken>{};
+  /// Active cancel tokens for block runs, each with the number of holders
+  /// still using it. Multiple chains can overlap (for example, an
+  /// afterAssistant image block and afterUser blocks from the next message),
+  /// so a single mutable token would orphan older runs; and a background block
+  /// outlives its chain, so it holds the token until it is done.
+  final Map<CancelToken, int> _blocksCancelTokens = <CancelToken, int>{};
 
   final BlockProcessor _blockProcessor = const BlockProcessor();
 
@@ -428,19 +432,28 @@ class ExtensionPostGenService {
 
   /// Cancels any in-flight block generation for the current session.
   void cancelBlocks() {
-    for (final token in _blocksCancelTokens.toList()) {
+    for (final token in _blocksCancelTokens.keys.toList()) {
       if (!token.isCancelled) token.cancel();
     }
   }
 
   CancelToken _startBlockRun() {
     final token = CancelToken();
-    _blocksCancelTokens.add(token);
+    _blocksCancelTokens[token] = 1;
     return token;
   }
 
+  void _holdBlockRun(CancelToken token) {
+    _blocksCancelTokens[token] = (_blocksCancelTokens[token] ?? 0) + 1;
+  }
+
   void _finishBlockRun(CancelToken token) {
-    _blocksCancelTokens.remove(token);
+    final holders = (_blocksCancelTokens[token] ?? 1) - 1;
+    if (holders <= 0) {
+      _blocksCancelTokens.remove(token);
+    } else {
+      _blocksCancelTokens[token] = holders;
+    }
   }
 
   void _publishStreamingBlockContent({
@@ -587,6 +600,23 @@ class ExtensionPostGenService {
       },
       onBlockComplete: (result) {
         _ref.read(infoBlocksProvider(sessionId).notifier).addOrReplace(result);
+      },
+      onBackgroundStarted: (run) {
+        // Stop still reaches a background block after its chain returned,
+        // and the panel catches up once it lands.
+        _holdBlockRun(cancelToken);
+        unawaited(
+          run.whenComplete(() {
+            _finishBlockRun(cancelToken);
+            _refreshPanelForMessage(
+              charId,
+              sessionId,
+              messageId,
+              swipeId,
+              agentSwipeId,
+            );
+          }),
+        );
       },
     );
   }

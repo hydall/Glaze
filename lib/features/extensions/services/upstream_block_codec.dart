@@ -153,6 +153,7 @@ BlockConfig decodeUpstreamBlock(Map<String, dynamic> json, {int order = 0}) {
     ),
     hideDisplay: upstreamBool(json['hide_display']),
     inject: upstreamBool(json['inject_block']),
+    injectTarget: InjectionTarget.prompt,
     background: upstreamBool(json['background']),
     applyRegex: upstreamBool(json['apply_regex']),
     injectionRole: upstreamEnum(

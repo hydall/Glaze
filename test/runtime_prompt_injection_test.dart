@@ -87,6 +87,82 @@ void main() {
     },
   );
 
+  test('runtime prompt blocks can sit on either side of the main prompt', () {
+    final result = buildPrompt(
+      PromptPayload(
+        character: Character(id: 'c1', name: 'Alice'),
+        preset: const Preset(
+          id: 'p1',
+          name: 'Prompt',
+          blocks: [
+            PresetBlock(
+              id: 'main',
+              name: 'Main',
+              role: 'system',
+              content: 'Main prompt.',
+            ),
+            PresetBlock(
+              id: 'chat_history',
+              name: 'History',
+              role: 'system',
+              content: '',
+            ),
+          ],
+        ),
+        history: const [ChatMessage(id: 'm1', role: 'user', content: 'Hi')],
+        apiConfig: const ApiConfig(
+          id: 'api',
+          name: 'API',
+          contextSize: 10000,
+          maxTokens: 100,
+        ),
+        runtimePromptBlocks: const [
+          RuntimePromptBlock(
+            id: 'after',
+            content: 'After main.',
+            depth: 0,
+            role: 'system',
+            placement: RuntimePromptPlacement.afterMain,
+          ),
+          RuntimePromptBlock(
+            id: 'before',
+            content: 'Before main.',
+            depth: 0,
+            role: 'user',
+            placement: RuntimePromptPlacement.beforeMain,
+          ),
+        ],
+      ),
+    );
+
+    final contents = result.messages.map((m) => m.content).join('|');
+    expect(
+      contents.indexOf('Before main.'),
+      lessThan(contents.indexOf('Main prompt.')),
+    );
+    expect(
+      contents.indexOf('Main prompt.'),
+      lessThan(contents.indexOf('After main.')),
+    );
+    expect(contents.indexOf('After main.'), lessThan(contents.indexOf('Hi')));
+  });
+
+  test('a placement survives the isolate round trip', () {
+    const block = RuntimePromptBlock(
+      id: 'x',
+      content: 'c',
+      depth: 2,
+      role: 'assistant',
+      placement: RuntimePromptPlacement.beforeMain,
+    );
+    final back = RuntimePromptBlock.fromJson(block.toJson());
+    expect(back.placement, RuntimePromptPlacement.beforeMain);
+    expect(
+      RuntimePromptBlock.fromJson({'id': 'y', 'content': 'c'}).placement,
+      RuntimePromptPlacement.depth,
+    );
+  });
+
   test('factual-continuity guard is opt-in and prompt-only', () {
     PromptPayload payload({required bool guardActive}) => PromptPayload(
       character: Character(id: 'c1', name: 'Alice'),

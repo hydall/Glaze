@@ -167,4 +167,25 @@ void main() {
 
     expect(container.read(extBlocksPanelCanRunAllProvider(_messageKey)), isTrue);
   });
+
+  test('a hidden block stays out of the panel even with a stored row', () async {
+    final container = await containerWith(const [
+      BlockConfig(id: 'shown', name: 'Shown', order: 0),
+      BlockConfig(id: 'hidden', name: 'Hidden', hideDisplay: true, order: 1),
+    ]);
+    await storeRow(container, blockId: 'hidden', agentSwipeId: -1);
+
+    expect(statusesOf(container), ['shown:pending']);
+  });
+
+  test('a keyword- or period-gated block is not shown as pending', () async {
+    final container = await containerWith(const [
+      BlockConfig(id: 'every', name: 'Every', order: 0),
+      BlockConfig(id: 'keyword', name: 'Keyword', keyword: 'x', order: 1),
+      BlockConfig(id: 'sparse', name: 'Sparse', period: 4, order: 2),
+      BlockConfig(id: 'both', name: 'Both', triggerOnUser: true, order: 3),
+    ]);
+
+    expect(statusesOf(container), ['every:pending', 'both:pending']);
+  });
 }
