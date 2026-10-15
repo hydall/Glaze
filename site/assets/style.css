@@ -655,6 +655,21 @@ a.article-author:hover span { color: var(--accent-text); }
 .info-group-head .ms { font-size: 20px; color: var(--accent); }
 .info-group-head h3 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.2px; }
 .info-group-lead { margin: 6px 0 0; font-size: 14px; color: var(--on-dim); }
+.info-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 10px 14px;
+  border: 1px solid rgba(242, 169, 59, 0.35);
+  border-radius: 12px;
+  background: rgba(242, 169, 59, 0.08);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--on);
+}
+.info-note .ms { font-size: 20px; color: var(--amber); }
+.article .info-note { margin-top: 16px; }
 .info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; margin-top: 14px; }
 .info-card {
   display: flex;

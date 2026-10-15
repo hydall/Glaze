@@ -1,7 +1,5 @@
 A plugin adds features to Glaze's chat: buttons in the chat drawer, its own panels over the chat or inside messages, processing of messages before they are sent and replies after they arrive, and its own settings. Plugins are written in HTML and JavaScript and talk to the app through the `glaze.*` API.
 
-> Plugins are in Nightly builds for now. The API may still change before the release.
-
 ## How a plugin runs
 
 Each plugin runs in its own isolated frame inside the chat. It does not see the chat page, other plugins or the app's data. Everything it needs it asks for through `glaze.*`, and the app checks every call against the plugin's permissions.

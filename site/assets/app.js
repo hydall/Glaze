@@ -577,6 +577,7 @@
       <div class="info-group">
         <div class="info-group-head">${ms(g.icon)}<h3>${esc(pick(g.title))}</h3></div>
         ${g.lead ? `<p class="info-group-lead">${esc(pick(g.lead))}</p>` : ''}
+        ${infoNote(g)}
         <div class="info-grid">${g.pages.map((p) => `
           <a class="group info-card" href="${infoHref(p.slug)}" data-glow>
             <span class="tile">${ms(p.icon)}</span>
@@ -587,6 +588,9 @@
       </div>`).join('');
     return `${sectionHead('info', t('info_title'), t('info_lead'))}${groups}`;
   }
+
+  // A group's warning, such as "still in testing".
+  const infoNote = (g) => g.note ? `<div class="info-note">${ms('science')}<span>${esc(pick(g.note))}</span></div>` : '';
 
   function docPage(page) {
     loadDoc(page);
@@ -608,6 +612,7 @@
       : '<span></span>';
     return `<article class="group article">
         <h1>${esc(pick(page.title))}</h1>
+        ${infoNote(page.group)}
         ${content}
       </article>
       <nav class="doc-steps">${step(pages[at - 1], 'prev')}${step(pages[at + 1], 'next')}</nav>`;

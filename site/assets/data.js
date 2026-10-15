@@ -510,6 +510,11 @@ window.GLAZE = {
       id: 'plugins',
       icon: 'extension',
       title: { ru: 'Плагины', en: 'Plugins' },
+      // Shown over the group in the grid and over each of its pages.
+      note: {
+        ru: 'Плагины сейчас тестируются на Nightly. Всё может измениться.',
+        en: 'Plugins are currently being tested on Nightly. Everything is subject to change.',
+      },
       lead: {
         ru: 'Как написать плагин для Glaze: пакет, манифест, разрешения и API glaze.*.',
         en: 'How to write a Glaze plugin: the package, the manifest, permissions and the glaze.* API.',
