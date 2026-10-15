@@ -587,6 +587,8 @@
   "error_http_308": "Permanent Redirect",
   "error_endpoint_redirect": "Wrong API endpoint — the server redirects this request instead of answering it. Check the base URL, including its API path.",
   "error_images_maybe_unsupported": "This request included an image. The selected model may not accept images — hide them with the eye button on those messages, or switch to a model that does.",
+  "error_embedding_model_missing": "No embedding model set. Pick one in the \"Embedding Model\" field — a chat model cannot produce embeddings.",
+  "error_embedding_anthropic_unsupported": "Anthropic has no embeddings API. Turn off \"Use LLM API\" and set a dedicated embedding endpoint (OpenAI, Gemini, Voyage, a local server…).",
   "error_http_400": "Bad Request",
   "error_http_401": "Unauthorized",
   "error_http_402": "Payment Required",

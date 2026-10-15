@@ -2,7 +2,9 @@ import 'dart:async';
 import 'dart:collection';
 
 import 'package:dio/dio.dart';
+import 'package:easy_localization/easy_localization.dart';
 
+import '../utils/error_format.dart';
 import 'transport/llm_capture_context.dart';
 import 'transport/llm_request_capture.dart';
 
@@ -294,6 +296,14 @@ class EmbeddingService {
     if (urls.isEmpty) {
       throw 'Embedding endpoint is empty or not a valid URL';
     }
+    // Both would only come back as a bare 400/404 from the provider. Anthropic
+    // is reachable through "use LLM API", but serves no embeddings at all.
+    if (Uri.tryParse(urls.first)?.host.toLowerCase() == 'api.anthropic.com') {
+      throw 'error_embedding_anthropic_unsupported'.tr();
+    }
+    if (config.model.trim().isEmpty) {
+      throw 'error_embedding_model_missing'.tr();
+    }
 
     final headers = <String, String>{'Content-Type': 'application/json'};
     if (config.apiKey.isNotEmpty) {
@@ -359,7 +369,9 @@ class EmbeddingService {
             int.tryParse(e.response?.headers.value('retry-after') ?? '') ?? 60;
         throw RateLimitException(retryAfter);
       }
-      throw 'Network error: ${e.message}';
+      // Dio's own message is a generic status-code essay; the provider's body
+      // is what says which field it rejected (unknown model, bad input, …).
+      throw formatError(e);
     } finally {
       EmbeddingRequestGate.endRequest(requestToken);
     }

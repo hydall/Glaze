@@ -21,6 +21,8 @@ import '../../core/models/api_config.dart';
 import '../../core/models/extra_request_parameter.dart';
 import '../../core/state/active_selection_provider.dart';
 import '../../core/state/shared_prefs_provider.dart';
+import '../../core/state/lorebook_embedding_provider.dart';
+import '../../core/utils/error_format.dart';
 import '../presets/preset_list_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
@@ -2703,7 +2705,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       case ApiTestFailure(:final error):
         setState(() {
           _llmStatus = ApiConnectionStatus.failed;
-          _llmError = error.toString();
+          _llmError = formatError(error);
         });
         GlazeErrorDialog.show(
           context,
@@ -2724,9 +2726,9 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       final source = _embeddingLlmSource();
       endpoint = source?.endpoint ?? '';
       apiKey = source?.apiKey ?? '';
-      model = _embModelCtrl.text.trim().isNotEmpty
+      model = source == null
           ? _embModelCtrl.text.trim()
-          : (source?.model ?? '');
+          : embeddingModelForBorrowedLlm(_embModelCtrl.text, source);
     } else {
       endpoint = _embEndpointCtrl.text.trim();
       apiKey = _embApiKeyCtrl.text.trim();
@@ -2757,7 +2759,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       case ApiTestFailure(:final error):
         setState(() {
           _embStatus = ApiConnectionStatus.failed;
-          _embError = error.toString();
+          _embError = formatError(error);
         });
         GlazeErrorDialog.show(
           context,
