@@ -57,6 +57,11 @@ class ApiSlotGroup extends ConsumerStatefulWidget {
   final ValueChanged<String> onApiConfigChanged;
   final List<ApiSlotModelRow> modelRows;
 
+  /// Label of the connection row and its picker. Defaults to the generic
+  /// "API connection"; a slot whose connection is one of several on the same
+  /// screen (a plugin's text vs image calls) gives it a name of its own.
+  final String? apiLabel;
+
   /// Rows appended after the connection and the model — a link into per-slot
   /// parameters, a generation limit, anything the slot owns by itself.
   final List<Widget> trailingItems;
@@ -75,6 +80,7 @@ class ApiSlotGroup extends ConsumerStatefulWidget {
     required this.apiConfigId,
     required this.onApiConfigChanged,
     required this.modelRows,
+    this.apiLabel,
     this.trailingItems = const [],
     this.leadingItems = const [],
     this.showSlotRows = true,
@@ -102,7 +108,7 @@ class _ApiSlotGroupState extends ConsumerState<ApiSlotGroup> {
         ...widget.leadingItems,
         if (widget.showSlotRows) ...[
           MenuSelectorItem(
-            label: 'studio_slot_api'.tr(),
+            label: widget.apiLabel ?? 'studio_slot_api'.tr(),
             currentValue: _apiName(configs, widget.apiConfigId),
             onTap: () => _pickApiConfig(configs),
           ),
@@ -151,7 +157,7 @@ class _ApiSlotGroupState extends ConsumerState<ApiSlotGroup> {
 
     GlazeBottomSheet.show<void>(
       context,
-      title: 'studio_slot_api'.tr(),
+      title: widget.apiLabel ?? 'studio_slot_api'.tr(),
       items: [
         radio('', 'studio_slot_use_chat_api'.tr()),
         for (final config in configs) radio(config.id, _configLabel(config)),

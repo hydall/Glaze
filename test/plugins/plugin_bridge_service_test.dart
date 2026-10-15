@@ -28,6 +28,7 @@ import 'package:glaze_flutter/features/plugins/runtime/plugin_html_inliner.dart'
 import 'package:glaze_flutter/features/plugins/runtime/plugin_message_diff.dart';
 import 'package:glaze_flutter/features/plugins/runtime/plugin_variable_store.dart';
 import 'package:glaze_flutter/features/plugins/services/plugin_manifest_parser.dart';
+import 'package:glaze_flutter/features/settings/api_list_provider.dart';
 
 class _FakeUi implements PluginUi {
   final toasts = <String>[];
@@ -200,12 +201,21 @@ void main() {
     Set<String> grants = const {},
     Set<String> revoked = const {},
     bool localNetwork = false,
+    String apiConfigId = '',
+    String apiModel = '',
+    String imageApiConfigId = '',
+    String imageStyleId = '',
   }) {
     var plugin = _plugin(
       permissions,
       grants: grants,
       revoked: revoked,
       localNetwork: localNetwork,
+    ).copyWith(
+      apiConfigId: apiConfigId,
+      apiModel: apiModel,
+      imageApiConfigId: imageApiConfigId,
+      imageStyleId: imageStyleId,
     );
     return PluginBridgeService(
       host: host,
@@ -386,6 +396,70 @@ void main() {
     expect(view.messages.single['content'], 'ping');
     expect(view.transportOutcome?.kind, 'transport_succeeded');
     expect(view.responseText, contains('pong'));
+  });
+
+  test('generation runs on the connection bound to the plugin', () async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    SharedPreferences.setMockInitialValues({});
+    HttpOverrides.global = null;
+
+    // Two connections, answering so a call's target is readable from its
+    // reply; each records the model the request carried.
+    final models = <String>[];
+    Future<HttpServer> serve(String reply) async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((req) async {
+        final body = await utf8.decoder.bind(req).join();
+        models.add(
+          (jsonDecode(body) as Map)['model']?.toString() ?? '',
+        );
+        req.response.headers.contentType = ContentType.json;
+        req.response.write(
+          jsonEncode({
+            'choices': [
+              {
+                'message': {'role': 'assistant', 'content': reply},
+                'finish_reason': 'stop',
+              },
+            ],
+          }),
+        );
+        await req.response.close();
+      });
+      addTearDown(() => server.close(force: true));
+      return server;
+    }
+
+    final active = await serve('active');
+    final bound = await serve('bound');
+    final repo = container.read(apiConfigRepoProvider);
+    await repo.put(
+      ApiConfig(
+        id: 'active',
+        name: 'Active',
+        apiKey: 'k',
+        endpoint: 'http://127.0.0.1:${active.port}/v1',
+        model: 'm-active',
+      ),
+    );
+    await repo.put(
+      ApiConfig(
+        id: 'bound',
+        name: 'Bound',
+        apiKey: 'k',
+        endpoint: 'http://127.0.0.1:${bound.port}/v1',
+        model: 'm-bound',
+      ),
+    );
+    container.read(activeApiPresetIdProvider.notifier).state = 'active';
+
+    final out = await call(
+      service(const ['generate'], apiConfigId: 'bound', apiModel: 'shadow'),
+      'generate',
+      ['ping'],
+    );
+    expect(out['result'], 'bound', reason: '$out');
+    expect(models, ['shadow']);
   });
 
   test('legacy "library" stands for every library and chat permission', () {

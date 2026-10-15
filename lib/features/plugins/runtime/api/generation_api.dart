@@ -9,6 +9,7 @@ import '../../../../core/llm/transport/chat_transport_request.dart';
 import '../../../../core/llm/transport/llm_call_event.dart';
 import '../../../../core/llm/transport/llm_capture_context.dart';
 import '../../../../core/llm/transport/transport_factory.dart';
+import '../../../../core/models/api_config.dart';
 import '../../../../core/models/chat_message.dart';
 import '../../../../core/state/db_provider.dart';
 import '../../../../core/state/persona_resolution.dart';
@@ -16,6 +17,7 @@ import '../../../../core/utils/id_generator.dart';
 import '../../../chat/chat_provider.dart';
 import '../../../image_gen/image_gen_provider.dart';
 import '../../../settings/api_list_provider.dart';
+import '../../models/installed_plugin.dart';
 import '../../models/plugin_manifest.dart';
 import '../plugin_api.dart';
 import 'files_api.dart';
@@ -72,11 +74,37 @@ void _recordOutcome(
   ),
 );
 
+/// The connection a plugin's call runs on: the API preset the user bound to
+/// it in its settings ([boundId]), else the chat's active one. When a
+/// [modelOverride] is set, it replaces whatever model the connection carries.
+///
+/// A bound preset that no longer exists falls back to the active connection,
+/// so a deleted preset never leaves the plugin unable to generate.
+Future<ApiConfig?> _resolveConfig(
+  PluginCall c, {
+  required String boundId,
+  String modelOverride = '',
+}) async {
+  final configs = await c.ref.read(apiListProvider.future);
+  ApiConfig? config;
+  if (boundId.isNotEmpty) {
+    config = configs.where((x) => x.id == boundId).firstOrNull;
+  }
+  config ??= c.ref.read(activeApiConfigProvider);
+  if (config != null && modelOverride.isNotEmpty) {
+    config = config.copyWith(model: modelOverride);
+  }
+  return config;
+}
+
 Future<Object?> _generate(PluginCall c) async {
   final prompt = c.requireString(0, 'prompt');
   final options = c.mapArg(1);
-  await c.ref.read(apiListProvider.future);
-  var config = c.ref.read(activeApiConfigProvider);
+  var config = await _resolveConfig(
+    c,
+    boundId: c.plugin.apiConfigId,
+    modelOverride: c.plugin.apiModel,
+  );
   if (config == null || config.model.isEmpty) {
     throw const PluginApiError('no_connection', 'No API connection is set up');
   }
@@ -168,14 +196,19 @@ String _imageMime(Uint8List b) {
 Future<Object?> _image(PluginCall c) async {
   final prompt = c.requireString(0, 'prompt');
   final options = c.mapArg(1);
-  final settings = await c.ref.read(imageGenSettingsProvider.future);
+  var settings = await c.ref.read(imageGenSettingsProvider.future);
+  // The style the user bound: follow the image settings (empty), force none,
+  // or draw in a named one of the library.
+  final styleId = c.plugin.imageStyleId;
+  if (styleId == kPluginNoImageStyle) {
+    settings = settings.copyWith(activeStyleId: '');
+  } else if (styleId.isNotEmpty) {
+    settings = settings.copyWith(activeStyleId: styleId);
+  }
   final service = await c.ref
       .read(imageGenSettingsProvider.notifier)
       .getServiceAsync();
-  await c.ref.read(apiListProvider.future);
-  final api =
-      c.ref.read(activeApiConfigProvider) ??
-      c.ref.read(apiListProvider).value?.firstOrNull;
+  final api = await _resolveConfig(c, boundId: c.plugin.imageApiConfigId);
   final character = await c.ref
       .read(characterRepoProvider)
       .getById(c.host.charId);
