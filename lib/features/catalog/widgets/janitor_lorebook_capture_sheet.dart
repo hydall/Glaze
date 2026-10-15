@@ -62,8 +62,8 @@ extension _PhaseLabel on _Phase {
 /// what the character has, and every action — download a public book, capture
 /// and rebuild the closed one — happens here.
 ///
-/// [characterId] is the Glaze character the saved books are scoped to; null
-/// saves them as standalone (global) lorebooks.
+/// [characterId] is the Glaze character the saved books are scoped to (active
+/// for that character only); null saves them as standalone books switched off.
 ///
 /// The first open is walked through once by a spotlight tour
 /// ([AppGuide.lorebookCapture]), started from the sheet itself once its
@@ -110,7 +110,7 @@ Future<void> showJanitorLorebookCaptureSheet(
 class JanitorLorebookCapture extends ConsumerStatefulWidget {
   final JanitorLorebookArgs args;
 
-  /// Glaze character the saved books are attached to. Null → saved globally.
+  /// Glaze character the saved books are attached to. Null → saved switched off.
   final String? characterId;
 
   /// A capture the caller already ran (the import flow captures the hidden card
@@ -1249,11 +1249,10 @@ class _JanitorLorebookCaptureState
       }
       _offerSaveExport(
         // convertCharacterBook builds an embedded book — always character-scoped
-        // and off by default. Saved from here it is a book the user asked for,
-        // and with no character it is a standalone one, same as every other save
-        // this sheet offers.
+        // and off by default. Same rule as every other save this sheet offers:
+        // active for the character when there is one, otherwise saved off.
         converted.copyWith(
-          enabled: true,
+          enabled: false,
           activationScope: widget.characterId != null ? 'character' : 'global',
           activationTargetId: widget.characterId,
         ),
