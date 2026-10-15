@@ -104,13 +104,15 @@ class ImageGenSettingsNotifier extends AsyncNotifier<ImageGenSettings> {
     state = AsyncData(settings);
   }
 
+  // Both wait for the stored settings: patching the defaults while they are
+  // still loading would save over everything else the user configured.
   Future<void> updateEnabled(bool enabled) async {
-    final s = state.value ?? const ImageGenSettings();
+    final s = await future;
     await save(s.copyWith(enabled: enabled));
   }
 
   Future<void> updateApiType(ImageGenApiType apiType) async {
-    final s = state.value ?? const ImageGenSettings();
+    final s = await future;
     await save(s.copyWith(apiType: apiType));
   }
 

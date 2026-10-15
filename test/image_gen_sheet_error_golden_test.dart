@@ -119,8 +119,8 @@ void main() {
       a1111: A1111ImageSettings(endpoint: 'http://a1111.local:7860'),
     );
 
-    // The sheet reads the settings once in initState, so they must already be
-    // loaded when it mounts.
+    // Loaded before the sheet mounts, so the first frame is the form and not
+    // the loading spinner.
     final container = ProviderContainer(
       overrides: [
         imageGenSettingsProvider.overrideWith(() => _StubSettings(settings)),
