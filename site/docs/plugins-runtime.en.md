@@ -9,12 +9,12 @@ All plugin code runs in sandboxed frames inside the chat, each with its own empt
 | Message panel | The HTML of a panel with `placement: "message"`, one frame per message. | `message` |
 | File handler | The `scripts` of a file handler, while it works on a file. | `file` |
 
-Frames are created when a chat opens and recreated when plugins are installed, switched on or off, when the user changes a plugin's settings or switches one of its permissions off. Anything kept only in a JavaScript variable is lost then: store what matters in [variables](#docs/plugins-api/glaze-variables), files or `localStorage`.
+Frames are created when a chat opens and recreated when plugins are installed, switched on or off, when the user changes a plugin's settings or switches one of its permissions off. Anything kept only in a JavaScript variable is lost then: store what matters in [variables](#info/plugins-api/glaze-variables), files or `localStorage`.
 
 What works in a frame:
 
 - `localStorage`: per plugin, kept by the app, up to 10 MB. Other browser storage (cookies, IndexedDB, `sessionStorage`) is not available.
-- Network requests, within the plugin's [internet rules](#docs/plugins-permissions/network).
+- Network requests, within the plugin's [internet rules](#info/plugins-permissions/network).
 - `console.log`: in the WebView's console when debugging.
 
 The main script is one file: bundle your code into it if it is split into modules.
@@ -57,7 +57,7 @@ Events tell the plugin what happened; they can't change anything. The main scrip
 | `message:deleted` | A message was deleted. | `message` (only `id`), `change` | `messages` |
 | `message:changed` | Any of the three above. | as above | `messages` |
 
-All events have `chatId` and `at`. The shapes of `chat` and `message` are in the [API reference](#docs/plugins-api/glaze-messages).
+All events have `chatId` and `at`. The shapes of `chat` and `message` are in the [API reference](#info/plugins-api/glaze-messages).
 
 ```js
 glaze.plugin.on('message:added', ({ message }) => {

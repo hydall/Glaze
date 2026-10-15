@@ -30,7 +30,7 @@ Always available.
 | `id` | The plugin's id. |
 | `kind` | The frame: `main`, `panel`, `message` or `file`. |
 | `panelId`, `messageId` | The panel's id; the message of a message panel. Otherwise `null`. |
-| `on(name, handler)` | Subscribe to a hook, an event or a message from the plugin's other frames. Returns a function that unsubscribes. See [Hooks, actions and panels](#docs/plugins-runtime). |
+| `on(name, handler)` | Subscribe to a hook, an event or a message from the plugin's other frames. Returns a function that unsubscribes. See [Hooks, actions and panels](#info/plugins-runtime). |
 | `emit(name, detail)` | Send a message to the plugin's other frames. |
 | `onComposerAction(id, fn)`, `onToolsAction(id, fn)`, `onMessageAction(id, fn)` | Handle the manifest's actions. Main script only. |
 | `registerFileHandler(id, { extract })` | Register a file handler. |
@@ -270,7 +270,7 @@ Returns a `data:` URL of the image, or its path with `saveAs`.
 
 ## glaze.net
 
-`glaze.net.fetch(input, init?)` works like `fetch`, but the request is sent by the app. Needs `network`; follows the plugin's [internet rules](#docs/plugins-permissions/network).
+`glaze.net.fetch(input, init?)` works like `fetch`, but the request is sent by the app. Needs `network`; follows the plugin's [internet rules](#info/plugins-permissions/network).
 
 ```js
 const res = await glaze.net.fetch('https://api.example.com/v1/items', {

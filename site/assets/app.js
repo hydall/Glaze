@@ -2,11 +2,11 @@
   'use strict';
 
   const G = window.GLAZE;
-  const SECTIONS = ['overview', 'articles', 'docs', 'features', 'screenshots', 'download', 'roadmap', 'resources'];
+  const SECTIONS = ['overview', 'articles', 'info', 'download', 'roadmap', 'resources'];
   // Download is reached through the header button, not a regular tab.
   const TABS = SECTIONS.filter((s) => s !== 'download');
   const LANGS = { ru: 'Русский', en: 'English' };
-  const SECTION_ICONS = { overview: 'home', features: 'widgets', screenshots: 'photo_library', articles: 'article', docs: 'menu_book', download: 'download', roadmap: 'timeline', resources: 'link' };
+  const SECTION_ICONS = { overview: 'home', articles: 'article', info: 'menu_book', download: 'download', roadmap: 'timeline', resources: 'link' };
 
   const BRAND = {
     github: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>',
@@ -33,8 +33,9 @@
     shots: 'phone',          // phone | desktop, the Screenshots page's switch
     shot: -1,                // index into visibleShots() shown full screen, -1 when closed
     article: null,           // slug of the article open on the Articles page, null for the list
-    doc: null,               // slug of the docs page open, null for the list
-    docAnchor: null,         // id of the heading the docs page is scrolled to
+    info: null,              // slug of the Info page open, null for the grid of them
+    infoAnchor: null,        // id of the heading an Info page is scrolled to
+    drawer: false,           // the phone menu is open
     nightly: null,           // { run, sha, date, url, assets: [{ name, size, url }] }
     nightlyState: 'idle',    // idle | loading | live | failed
   };
@@ -251,9 +252,7 @@
       </div>`;
 
     $('#tabBar').innerHTML = TABS.map((s) => `<a class="tab" href="#${s}" data-section="${s}">${esc(t('nav_' + s))}</a>`).join('');
-    // The phone bar has less room per tab: a shorter label where one is set.
-    $('#navBar').innerHTML = TABS.map((s) => `
-      <a class="nav-item" href="#${s}" data-section="${s}">${ms(SECTION_ICONS[s])}<span>${esc(G.ui[state.lang]['navbar_' + s] ?? t('nav_' + s))}</span></a>`).join('');
+    $('#menuBtn').setAttribute('aria-label', t('menu_open'));
 
   }
 
@@ -296,7 +295,7 @@
       <div class="group overview-glance" data-glow>
         <div class="group-header">${ms('widgets')}<h3>${esc(t('overview_features_header'))}</h3></div>
         ${glance}
-        <a class="text-link overview-features-link" href="#features">${esc(t('overview_features_link'))}${ms('arrow_forward')}</a>
+        <a class="text-link overview-features-link" href="#info/features">${esc(t('overview_features_link'))}${ms('arrow_forward')}</a>
       </div>
     </div>`;
   }
@@ -317,7 +316,7 @@
     return `<span class="row-credit">${ms('open_in_new')}<a href="${url}" ${ext}>${esc(url.replace(/^https?:\/\//, ''))}</a></span>`;
   }
 
-  function renderFeatures() {
+  function featuresPage() {
     const groups = G.features.map((f) => group({
       icon: f.icon,
       title: pick(f.title),
@@ -328,10 +327,8 @@
           <span class="row-sub">${esc(sub)}</span>${featureCredit(it.credit)}${featureLink(it.link)}</span></div>`;
       }).join(''),
     })).join('');
-    $('#features').innerHTML = `<div class="container">
-      ${sectionHead('features', t('features_title'), t('features_lead'))}
-      <div class="feature-grid">${groups}</div>
-    </div>`;
+    return `${sectionHead('features', t('features_title'), t('features_lead'))}
+      <div class="feature-grid">${groups}</div>`;
   }
 
   // ── markdown ───────────────────────────────────────────────────────────
@@ -521,13 +518,16 @@
     </div>`;
   }
 
-  // ── docs ───────────────────────────────────────────────────────────────
+  // ── info ───────────────────────────────────────────────────────────────
 
-  // Pages come in groups (plugins, ...), each page a Markdown file per
-  // language under docs/. #docs/<slug> opens one, #docs/<slug>/<heading id>
-  // one of its headings.
+  // Info is a set of pages in groups: the app's features and screenshots,
+  // then the docs, each docs page a Markdown file per language under docs/.
+  // #info shows them all as a grid, #info/<slug> opens one, and
+  // #info/<slug>/<heading id> one of a docs page's headings
+  // (#info/screenshots/desktop the desktop screenshots).
   const docCache = new Map(); // `${slug}.${lang}` -> html | 'loading' | 'failed'
-  const docPages = () => G.docs.flatMap((g) => g.pages.map((p) => ({ ...p, group: g })));
+  const infoPages = () => G.info.flatMap((g) => g.pages.map((p) => ({ ...p, group: g })));
+  const infoHref = (slug, sub) => `#info/${encodeURIComponent(slug)}${sub ? '/' + encodeURIComponent(sub) : ''}`;
 
   async function loadDoc(page) {
     const key = `${page.slug}.${state.lang}`;
@@ -540,83 +540,121 @@
     } catch {
       docCache.set(key, 'failed');
     }
-    if (state.doc === page.slug) {
-      renderDocs();
-      scrollToDocAnchor();
+    if (state.info === page.slug) {
+      renderInfo();
+      scrollToInfoAnchor();
     }
   }
 
-  function scrollToDocAnchor(smooth = false) {
-    const el = state.docAnchor && document.getElementById(state.docAnchor);
+  function scrollToInfoAnchor(smooth = false) {
+    const el = state.infoAnchor && document.getElementById(state.infoAnchor);
     if (el) el.scrollIntoView({ behavior: smooth ? 'smooth' : 'instant', block: 'start' });
   }
 
-  function renderDocs() {
-    if (!state.doc) {
-      const groups = G.docs.map((g) => group({
-        icon: g.icon,
-        title: pick(g.title),
-        desc: pick(g.lead),
-        cls: 'docs-group',
-        body: g.pages.map((p) => `
-          <a class="row tile-row" href="#docs/${encodeURIComponent(p.slug)}">
+  // A docs page's own headings, once it has loaded.
+  function docHeadings(page) {
+    const body = page.kind ? null : docCache.get(`${page.slug}.${state.lang}`);
+    if (!body || body === 'loading' || body === 'failed') return [];
+    return [...body.matchAll(/<h3 id="([^"]*)">(.*?)<\/h3>/g)].map(([, id, html]) => ({ id, text: html.replace(/<[^>]+>/g, '') }));
+  }
+
+  // Every group with its pages, the open one with its headings: the
+  // sidebar on wide screens, part of the menu on phones.
+  function infoTree(cls) {
+    return G.info.map((g) => `
+      <div class="${cls}-caps">${ms(g.icon)}${esc(pick(g.title))}</div>
+      ${g.pages.map((p) => {
+        const open = p.slug === state.info;
+        const toc = open ? docHeadings(p).map((h) =>
+          `<a class="${cls}-toc-link" href="${infoHref(p.slug, h.id)}" data-info-anchor="${esc(h.id)}">${h.text}</a>`).join('') : '';
+        return `<a class="${cls}-link ${open ? 'active' : ''}" href="${infoHref(p.slug)}">${esc(pick(p.title))}</a>
+          ${toc ? `<div class="${cls}-toc">${toc}</div>` : ''}`;
+      }).join('')}`).join('');
+  }
+
+  function infoGrid() {
+    const groups = G.info.map((g) => `
+      <div class="info-group">
+        <div class="info-group-head">${ms(g.icon)}<h3>${esc(pick(g.title))}</h3></div>
+        ${g.lead ? `<p class="info-group-lead">${esc(pick(g.lead))}</p>` : ''}
+        <div class="info-grid">${g.pages.map((p) => `
+          <a class="group info-card" href="${infoHref(p.slug)}" data-glow>
             <span class="tile">${ms(p.icon)}</span>
-            <span class="row-text"><span class="tile-label">${esc(pick(p.title))}</span><span class="tile-sub">${esc(pick(p.lead))}</span></span>
-            ${ms('chevron_right', 'chevron')}
-          </a>`).join(''),
-      })).join('');
-      $('#docs').innerHTML = `<div class="container">
-        ${sectionHead('docs', t('docs_title'), t('docs_lead'))}
-        <div class="docs-list">${groups}</div>
-      </div>`;
-      return;
-    }
-    const pages = docPages();
-    const at = pages.findIndex((p) => p.slug === state.doc);
-    const back = `<a class="text-link article-back" href="#docs">${ms('arrow_back')}${esc(t('docs_back'))}</a>`;
-    if (at < 0) {
-      $('#docs').innerHTML = `<div class="container article-page">${back}<p class="article-status">${esc(t('docs_not_found'))}</p></div>`;
-      return;
-    }
-    const page = pages[at];
+            <span class="tile-label">${esc(pick(p.title))}</span>
+            <span class="tile-sub">${esc(pick(p.lead))}</span>
+          </a>`).join('')}
+        </div>
+      </div>`).join('');
+    return `${sectionHead('info', t('info_title'), t('info_lead'))}${groups}`;
+  }
+
+  function docPage(page) {
     loadDoc(page);
     const body = docCache.get(`${page.slug}.${state.lang}`);
     const ready = body && body !== 'loading' && body !== 'failed';
     const content = body === 'failed'
-      ? `<p class="article-status warn">${esc(t('docs_failed'))}</p>`
+      ? `<p class="article-status warn">${esc(t('info_failed'))}</p>`
       : !ready
-      ? `<p class="article-status">${esc(t('docs_loading'))}</p>`
+      ? `<p class="article-status">${esc(t('info_loading'))}</p>`
       : `<div class="article-body doc-body">${body}</div>`;
-    // The page's own headings, under its entry in the sidebar.
-    const toc = ready
-      ? [...body.matchAll(/<h3 id="([^"]*)">(.*?)<\/h3>/g)].map(([, id, html]) =>
-        `<a class="doc-toc-link" href="#docs/${encodeURIComponent(page.slug)}/${encodeURIComponent(id)}" data-doc-anchor="${esc(id)}">${html.replace(/<[^>]+>/g, '')}</a>`).join('')
-      : '';
-    const nav = page.group.pages.map((p) => `
-      <a class="doc-nav-link ${p.slug === page.slug ? 'active' : ''}" href="#docs/${encodeURIComponent(p.slug)}">${esc(pick(p.title))}</a>
-      ${p.slug === page.slug && toc ? `<div class="doc-toc">${toc}</div>` : ''}`).join('');
-    const step = (p, dir) => p && p.group === page.group
-      ? `<a class="group doc-step ${dir}" href="#docs/${encodeURIComponent(p.slug)}" data-glow>
-          <span class="caps">${esc(t(dir === 'prev' ? 'docs_prev' : 'docs_next'))}</span>
+    // Previous and next docs page of the same group.
+    const pages = page.group.pages.filter((p) => !p.kind);
+    const at = pages.findIndex((p) => p.slug === page.slug);
+    const step = (p, dir) => p
+      ? `<a class="group doc-step ${dir}" href="${infoHref(p.slug)}" data-glow>
+          <span class="caps">${esc(t(dir === 'prev' ? 'info_prev' : 'info_next'))}</span>
           <span class="tile-label">${esc(pick(p.title))}</span>
         </a>`
       : '<span></span>';
-    $('#docs').innerHTML = `<div class="container doc-page">
-      <div class="article-tools">${back}</div>
-      <div class="doc-layout">
-        <aside class="doc-nav">
-          <div class="caps">${ms(page.group.icon)}${esc(pick(page.group.title))}</div>
-          ${nav}
-        </aside>
-        <div class="doc-main">
-          <article class="group article">
-            <h1>${esc(pick(page.title))}</h1>
-            ${content}
-          </article>
-          <nav class="doc-steps">${step(pages[at - 1], 'prev')}${step(pages[at + 1], 'next')}</nav>
-        </div>
+    return `<article class="group article">
+        <h1>${esc(pick(page.title))}</h1>
+        ${content}
+      </article>
+      <nav class="doc-steps">${step(pages[at - 1], 'prev')}${step(pages[at + 1], 'next')}</nav>`;
+  }
+
+  function renderInfo() {
+    const page = state.info && infoPages().find((p) => p.slug === state.info);
+    const back = `<a class="text-link article-back" href="#info">${ms('arrow_back')}${esc(t('info_back'))}</a>`;
+    const main = !state.info
+      ? infoGrid()
+      : !page
+      ? `${back}<p class="article-status">${esc(t('info_not_found'))}</p>`
+      : `<div class="article-tools">${back}</div>${
+        page.kind === 'features' ? featuresPage() : page.kind === 'screenshots' ? screenshotsPage() : docPage(page)}`;
+    $('#info').innerHTML = `<div class="container info-page">
+      <div class="info-layout">
+        <aside class="info-nav">${infoTree('info-nav')}</aside>
+        <div class="info-main ${page && !page.kind ? 'doc' : ''}">${main}</div>
       </div>
     </div>`;
+    renderDrawer();
+  }
+
+  // ── phone menu ─────────────────────────────────────────────────────────
+
+  // Phones have no room for the header's tabs: the menu button opens them
+  // in a panel from the left, with the Info pages under Info.
+  function renderDrawer() {
+    const box = $('#drawer');
+    if (!box) return;
+    box.innerHTML = `
+      <div class="drawer-head">
+        <a class="brand" href="#overview"><span class="logo" aria-hidden="true"></span>Glaze</a>
+        <button class="drawer-close" type="button" data-drawer-close aria-label="${esc(t('menu_close'))}">${ms('close')}</button>
+      </div>
+      <nav class="drawer-nav" aria-label="Sections">
+        ${TABS.map((s) => `
+          <a class="drawer-link ${s === state.active ? 'active' : ''}" href="#${s}" data-section="${s}">${ms(SECTION_ICONS[s])}<span>${esc(t('nav_' + s))}</span></a>
+          ${s === 'info' ? `<div class="drawer-info">${infoTree('drawer-info')}</div>` : ''}`).join('')}
+      </nav>`;
+  }
+
+  function toggleDrawer(open) {
+    state.drawer = open ?? !state.drawer;
+    document.body.classList.toggle('drawer-open', state.drawer);
+    $('#menuBtn').setAttribute('aria-expanded', state.drawer);
+    $('#drawer').toggleAttribute('inert', !state.drawer);
   }
 
   // ── screenshots ────────────────────────────────────────────────────────
@@ -627,7 +665,7 @@
   const visibleShots = () => G.screenshots.flatMap((g) =>
     g.items.filter((it) => state.shots === 'phone' || !it.phoneOnly));
 
-  function renderScreenshots() {
+  function screenshotsPage() {
     const all = visibleShots();
     const groups = G.screenshots.map((g) => {
       const items = g.items.filter((it) => all.includes(it));
@@ -647,13 +685,11 @@
     }).join('');
 
     const devices = ['phone', 'desktop'].map((d) => `
-      <a class="tab ${d === state.shots ? 'active' : ''}" href="#screenshots${d === 'desktop' ? '/desktop' : ''}">${esc(t('shots_' + d))}</a>`).join('');
+      <a class="tab ${d === state.shots ? 'active' : ''}" href="#info/screenshots${d === 'desktop' ? '/desktop' : ''}">${esc(t('shots_' + d))}</a>`).join('');
 
-    $('#screenshots').innerHTML = `<div class="container">
-      ${sectionHead('screenshots', t('screenshots_title'), t('screenshots_lead'))}
+    return `${sectionHead('screenshots', t('screenshots_title'), t('screenshots_lead'))}
       <nav class="tab-bar channel-switch" aria-label="${esc(t('shots_platform'))}">${devices}</nav>
-      <div class="shots ${state.shots}">${groups}</div>
-    </div>`;
+      <div class="shots ${state.shots}">${groups}</div>`;
   }
 
   function renderViewer() {
@@ -954,13 +990,11 @@
   function renderAll() {
     renderChrome();
     renderOverview();
-    renderFeatures();
-    renderScreenshots();
     renderViewer();
     renderDownload();
     renderRoadmap();
     renderArticles();
-    renderDocs();
+    renderInfo();
     renderResources();
     markActive(state.active);
   }
@@ -978,6 +1012,13 @@
 
   // Every section is its own page, like a tab in the app: the header's
   // segmented control on desktop, the bottom nav bar on phones.
+  // Features and Screenshots were sections of their own before they moved
+  // into Info: their old links lead there.
+  function infoRedirect() {
+    const hash = location.hash.slice(1);
+    if (/^(features|screenshots)(\/|$)/.test(hash)) history.replaceState(null, '', '#info/' + hash);
+  }
+
   function sectionFromHash() {
     const [head] = decodeURIComponent(location.hash.slice(1)).split('/');
     if (head === 'about') return 'resources';
@@ -1001,17 +1042,14 @@
   }
 
   function route(animate = true) {
+    infoRedirect();
+    toggleDrawer(false);
     const hash = decodeURIComponent(location.hash.slice(1));
     const id = sectionFromHash();
     const channel = hash === 'download/nightly' ? 'nightly' : 'stable';
     if (id === 'download' && channel !== state.channel) {
       state.channel = channel;
       renderDownload();
-    }
-    const shots = hash === 'screenshots/desktop' ? 'desktop' : 'phone';
-    if (id === 'screenshots' && shots !== state.shots) {
-      state.shots = shots;
-      renderScreenshots();
     }
     if (state.shot >= 0) openShot(-1);
     const article = id === 'articles' ? hash.split('/').slice(1).join('/') || null : null;
@@ -1020,19 +1058,24 @@
       state.article = article;
       renderArticles();
     }
-    const [doc = null, anchor = null] = id === 'docs' ? hash.split('/').slice(1) : [];
-    const docChanged = id === 'docs' && doc !== state.doc;
-    const anchorChanged = id === 'docs' && anchor !== state.docAnchor;
-    state.docAnchor = anchor;
-    if (docChanged) {
-      state.doc = doc;
-      renderDocs();
+    const [page = null, sub = null] = id === 'info' ? hash.split('/').slice(1) : [];
+    // The screenshots page's second part is the device, a docs page's a heading.
+    const shots = page === 'screenshots' && sub === 'desktop' ? 'desktop' : 'phone';
+    const anchor = page === 'screenshots' ? null : sub;
+    const pageChanged = id === 'info' && (page !== state.info || (page === 'screenshots' && shots !== state.shots));
+    const anchorChanged = id === 'info' && anchor !== state.infoAnchor;
+    if (id === 'info') state.infoAnchor = anchor;
+    if (pageChanged) {
+      state.info = page;
+      if (page === 'screenshots') state.shots = shots;
     }
     const changed = id !== state.active;
     showTab(id, animate);
+    // After showTab, so the menu marks the section the page is on.
+    if (pageChanged || changed) renderInfo();
     if (hash.startsWith('roadmap/')) focusReleaseFromHash();
-    else if (anchor && (docChanged || anchorChanged || changed || !animate)) scrollToDocAnchor(!docChanged && !changed);
-    else if (changed || articleChanged || docChanged || !animate) window.scrollTo({ top: 0, behavior: 'instant' });
+    else if (anchor && (pageChanged || anchorChanged || changed || !animate)) scrollToInfoAnchor(!pageChanged && !changed);
+    else if (changed || articleChanged || pageChanged || !animate) window.scrollTo({ top: 0, behavior: 'instant' });
   }
 
   function onScroll() {
@@ -1063,9 +1106,18 @@
     const link = e.target.closest('a[href^="#"]');
     if (link && link.getAttribute('href') === (location.hash || '#overview')) {
       e.preventDefault();
+      toggleDrawer(false);
       // A link to the heading already in the address goes back to it.
-      if (link.dataset.docAnchor) scrollToDocAnchor(true);
+      if (link.dataset.infoAnchor) scrollToInfoAnchor(true);
       else window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    if (e.target.closest('[data-drawer-open]')) {
+      toggleDrawer(true);
+      return;
+    }
+    if (e.target.closest('[data-drawer-close]') || e.target.id === 'drawerBackdrop') {
+      toggleDrawer(false);
       return;
     }
     if (e.target.closest('[data-lang-menu]')) {
@@ -1131,7 +1183,7 @@
   });
 
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') toggleLangMenu(false);
+    if (e.key === 'Escape') { toggleLangMenu(false); toggleDrawer(false); }
     if (state.shot < 0) return;
     if (e.key === 'Escape') openShot(-1);
     if (e.key === 'ArrowRight') openShot(state.shot + 1);

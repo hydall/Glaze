@@ -6,7 +6,7 @@ A plugin adds features to Glaze's chat: buttons in the chat drawer, its own pane
 
 Each plugin runs in its own isolated frame inside the chat. It does not see the chat page, other plugins or the app's data. Everything it needs it asks for through `glaze.*`, and the app checks every call against the plugin's permissions.
 
-A plugin only gets what it lists in its manifest, and every permission starts switched off: the user turns on what they are willing to give. Some actions, such as changing the library or generating images, also ask the user each time. More on this in [Permissions and network](#docs/plugins-permissions).
+A plugin only gets what it lists in its manifest, and every permission starts switched off: the user turns on what they are willing to give. Some actions, such as changing the library or generating images, also ask the user each time. More on this in [Permissions and network](#info/plugins-permissions).
 
 ## The package
 
@@ -82,7 +82,7 @@ Glaze can also install Tavo extensions (`.tpg` files and Tavo Hub links): they r
 
 ## Next
 
-- [The plugin.json manifest](#docs/plugins-manifest): every field.
-- [Permissions and network](#docs/plugins-permissions).
-- [Hooks, actions and panels](#docs/plugins-runtime): how plugin code plugs into the chat.
-- [API reference](#docs/plugins-api): every `glaze.*` method.
+- [The plugin.json manifest](#info/plugins-manifest): every field.
+- [Permissions and network](#info/plugins-permissions).
+- [Hooks, actions and panels](#info/plugins-runtime): how plugin code plugs into the chat.
+- [API reference](#info/plugins-api): every `glaze.*` method.

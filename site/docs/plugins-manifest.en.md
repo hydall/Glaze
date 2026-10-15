@@ -13,7 +13,7 @@
 | `releaseNotes` | no | What changed in this version; shown on the plugin's page. |
 | `icon` | no | Path to an image in the package, shown as the cover on the plugin's page. |
 | `main` | no | Path to the main script. Required if the plugin has actions. |
-| `permissions` | no | What the plugin asks for. See [Permissions and network](#docs/plugins-permissions). |
+| `permissions` | no | What the plugin asks for. See [Permissions and network](#info/plugins-permissions). |
 | `hosts` | no | Internet hosts the plugin needs: `api.example.com` or `*.example.com`. |
 | `locales` | no | Translation files, see below. |
 | `minGlazeVersion` | no | Lowest Glaze version the plugin is written for. Glaze does not check it yet. |
@@ -49,7 +49,7 @@ A translation file is a flat object of keys and strings:
 }
 ```
 
-Glaze picks the user's interface language, then another variant of the same language, then English, then `default`. If a key is missing everywhere, the key itself is shown. The same files are available in code through `glaze.plugin.i18n` (see the [API reference](#docs/plugins-api/glaze-plugin)).
+Glaze picks the user's interface language, then another variant of the same language, then English, then `default`. If a key is missing everywhere, the key itself is shown. The same files are available in code through `glaze.plugin.i18n` (see the [API reference](#info/plugins-api/glaze-plugin)).
 
 ## Actions
 
@@ -69,7 +69,7 @@ Actions are buttons the plugin adds to the chat. Each has an `id` (unique within
 | `toolsActions` | The Tools tab of the same drawer. |
 | `messageActions` | A round button in the footer of the last message. `role`: `character` (default), `user` or `any`, whose message it appears on. Without an icon the button shows the first letter of the label. |
 
-A tap runs the handler the main script registered for that `id`; see [Hooks, actions and panels](#docs/plugins-runtime/actions).
+A tap runs the handler the main script registered for that `id`; see [Hooks, actions and panels](#info/plugins-runtime/actions).
 
 ## Panels
 
@@ -91,7 +91,7 @@ A panel is an HTML page of the plugin shown in the chat.
 | `role` | Message panels: only in `user` or only in `character` messages. |
 | `position` | Message panels: only in the `first` or only in the `last` message. |
 
-How panels are laid out and how they load package files: [Hooks, actions and panels](#docs/plugins-runtime/panels).
+How panels are laid out and how they load package files: [Hooks, actions and panels](#info/plugins-runtime/panels).
 
 ## File handlers
 
@@ -103,7 +103,7 @@ A file handler turns an attached file into text for the message. For example, it
 ]
 ```
 
-`extensions` (without the dot) and `mimeTypes` say which files it takes; at least one is required. `scripts` are loaded only to run this handler; if the list is empty, the handler is registered by the main script. Registering in code: [Hooks, actions and panels](#docs/plugins-runtime/file-handlers).
+`extensions` (without the dot) and `mimeTypes` say which files it takes; at least one is required. `scripts` are loaded only to run this handler; if the list is empty, the handler is registered by the main script. Registering in code: [Hooks, actions and panels](#info/plugins-runtime/file-handlers).
 
 ## Settings
 

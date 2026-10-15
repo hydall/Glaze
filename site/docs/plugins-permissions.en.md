@@ -11,7 +11,7 @@ A plugin gets only what it lists in `permissions` in its manifest, and only what
 | `files` | The plugin's own files (`glaze.files`), import and export through files. |
 | `generate` | Text generation with the chat's connection (`glaze.generate`); the `generation:*` hooks. |
 | `images` | Image generation with the user's image settings (`glaze.images.generate`). Asks. |
-| `network` | Internet access. See [Network](#docs/plugins-permissions/network). |
+| `network` | Internet access. See [Network](#info/plugins-permissions/network). |
 | `library.read.<kind>` | Reading the library: characters, personas, presets, lorebooks, regex scripts or themes. |
 | `library.create.<kind>` | Adding to the library. Asks. |
 | `library.update.<kind>` | Changing the library. Asks. |
@@ -76,7 +76,7 @@ The plugin's page lists every host its frames loaded from or were stopped from l
 
 ## Requests through the app
 
-`glaze.net.fetch` sends a request from the app rather than from the plugin's frame. The page's cross-origin rules (CORS) don't apply, so a plugin can call an API that doesn't allow browsers without a relay server of its own. The plugin's internet rules apply as usual. Details: [glaze.net](#docs/plugins-api/glaze-net).
+`glaze.net.fetch` sends a request from the app rather than from the plugin's frame. The page's cross-origin rules (CORS) don't apply, so a plugin can call an API that doesn't allow browsers without a relay server of its own. The plugin's internet rules apply as usual. Details: [glaze.net](#info/plugins-api/glaze-net).
 
 ## Security
 

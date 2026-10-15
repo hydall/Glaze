@@ -30,7 +30,7 @@
 | `id` | Id плагина. |
 | `kind` | Вид фрейма: `main`, `panel`, `message` или `file`. |
 | `panelId`, `messageId` | Id панели; сообщение панели сообщения. Иначе `null`. |
-| `on(name, handler)` | Подписаться на хук, событие или сообщение из других фреймов плагина. Возвращает функцию отписки. См. [Хуки, действия и панели](#docs/plugins-runtime). |
+| `on(name, handler)` | Подписаться на хук, событие или сообщение из других фреймов плагина. Возвращает функцию отписки. См. [Хуки, действия и панели](#info/plugins-runtime). |
 | `emit(name, detail)` | Отправить сообщение в другие фреймы плагина. |
 | `onComposerAction(id, fn)`, `onToolsAction(id, fn)`, `onMessageAction(id, fn)` | Обработчики действий из манифеста. Только в основном скрипте. |
 | `registerFileHandler(id, { extract })` | Зарегистрировать обработчик файлов. |
@@ -270,7 +270,7 @@ const summary = await glaze.generate('Перескажи разговор одн
 
 ## glaze.net
 
-`glaze.net.fetch(input, init?)` работает как `fetch`, но запрос отправляет приложение. Нужно `network`; действуют [правила доступа плагина в интернет](#docs/plugins-permissions/сеть).
+`glaze.net.fetch(input, init?)` работает как `fetch`, но запрос отправляет приложение. Нужно `network`; действуют [правила доступа плагина в интернет](#info/plugins-permissions/сеть).
 
 ```js
 const res = await glaze.net.fetch('https://api.example.com/v1/items', {

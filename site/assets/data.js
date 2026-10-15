@@ -51,11 +51,8 @@ window.GLAZE = {
       dl_latest: 'Последний релиз',
       status_latest: 'Последний',
       nav_overview: 'Обзор',
-      nav_features: 'Возможности',
-      nav_screenshots: 'Скриншоты',
       nav_articles: 'Статьи',
-      nav_docs: 'Документация',
-      navbar_docs: 'Доки',
+      nav_info: 'Информация',
       nav_roadmap: 'Роадмап',
       nav_download: 'Скачать',
       nav_resources: 'Ресурсы',
@@ -75,14 +72,16 @@ window.GLAZE = {
       kind_changelog: 'Чейнджлог',
       kind_news: 'Новости',
 
-      docs_title: 'Документация',
-      docs_lead: 'Как устроен Glaze и как писать для него.',
-      docs_back: 'Вся документация',
-      docs_loading: 'Загружаем страницу…',
-      docs_failed: 'Не удалось загрузить страницу.',
-      docs_not_found: 'Такой страницы нет.',
-      docs_prev: 'Назад',
-      docs_next: 'Дальше',
+      info_title: 'Информация',
+      info_lead: 'Что умеет Glaze, как он выглядит и как писать для него.',
+      info_back: 'Вся информация',
+      info_loading: 'Загружаем страницу…',
+      info_failed: 'Не удалось загрузить страницу.',
+      info_not_found: 'Такой страницы нет.',
+      info_prev: 'Назад',
+      info_next: 'Дальше',
+      menu_open: 'Открыть меню',
+      menu_close: 'Закрыть меню',
 
       screenshots_title: 'Как выглядит Glaze',
       screenshots_lead: 'Экраны приложения на телефоне и на ПК. Нажмите на скриншот, чтобы открыть его целиком.',
@@ -204,10 +203,8 @@ window.GLAZE = {
       dl_latest: 'Latest release',
       status_latest: 'Latest',
       nav_overview: 'Overview',
-      nav_features: 'Features',
-      nav_screenshots: 'Screenshots',
       nav_articles: 'Posts',
-      nav_docs: 'Docs',
+      nav_info: 'Info',
       nav_roadmap: 'Roadmap',
       nav_download: 'Download',
       nav_resources: 'Resources',
@@ -227,14 +224,16 @@ window.GLAZE = {
       kind_changelog: 'Changelog',
       kind_news: 'News',
 
-      docs_title: 'Docs',
-      docs_lead: 'How Glaze works and how to build for it.',
-      docs_back: 'All docs',
-      docs_loading: 'Loading the page…',
-      docs_failed: 'Could not load the page.',
-      docs_not_found: 'There is no such page.',
-      docs_prev: 'Previous',
-      docs_next: 'Next',
+      info_title: 'Info',
+      info_lead: 'What Glaze can do, what it looks like and how to build for it.',
+      info_back: 'All info',
+      info_loading: 'Loading the page…',
+      info_failed: 'Could not load the page.',
+      info_not_found: 'There is no such page.',
+      info_prev: 'Previous',
+      info_next: 'Next',
+      menu_open: 'Open the menu',
+      menu_close: 'Close the menu',
 
       screenshots_title: 'What Glaze looks like',
       screenshots_lead: 'The app on a phone and on a PC. Click a screenshot to see it in full.',
@@ -481,13 +480,35 @@ window.GLAZE = {
     hydall: { name: 'hydall', img: 'hydall.jpg', url: 'https://github.com/hydall' },
   },
 
-  // ── Docs ───────────────────────────────────────────────────────────────────
-  // Groups of pages, in reading order. Body: Markdown in
+  // ── Info ───────────────────────────────────────────────────────────────────
+  // Groups of pages, in reading order. A page with a `kind` is drawn from the
+  // data above (features, screenshots); any other is Markdown in
   // site/docs/<slug>.<lang>.md, one file per language.
-  docs: [
+  info: [
+    {
+      id: 'app',
+      icon: 'info',
+      title: { ru: 'О приложении', en: 'The app' },
+      pages: [
+        {
+          slug: 'features',
+          kind: 'features',
+          icon: 'widgets',
+          title: { ru: 'Возможности', en: 'Features' },
+          lead: { ru: 'Всё, что сейчас есть в приложении.', en: 'Everything the app does today.' },
+        },
+        {
+          slug: 'screenshots',
+          kind: 'screenshots',
+          icon: 'photo_library',
+          title: { ru: 'Скриншоты', en: 'Screenshots' },
+          lead: { ru: 'Как выглядит приложение на телефоне и на ПК.', en: 'What the app looks like on a phone and on a PC.' },
+        },
+      ],
+    },
     {
       id: 'plugins',
-      icon: 'widgets',
+      icon: 'extension',
       title: { ru: 'Плагины', en: 'Plugins' },
       lead: {
         ru: 'Как написать плагин для Glaze: пакет, манифест, разрешения и API glaze.*.',

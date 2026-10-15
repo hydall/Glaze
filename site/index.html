@@ -59,6 +59,7 @@
 <body>
   <header class="topbar" id="topbar">
     <div class="container topbar-inner">
+      <button class="menu-btn" id="menuBtn" type="button" data-drawer-open aria-controls="drawer" aria-expanded="false" aria-label="Menu"><span class="ms">menu</span></button>
       <a class="brand" href="#overview"><span class="logo" aria-hidden="true"></span>Glaze</a>
       <nav class="tab-bar" id="tabBar" aria-label="Sections"></nav>
       <div class="topbar-actions">
@@ -71,9 +72,7 @@
   <main>
     <section class="section hero" id="overview"></section>
     <section class="section" id="articles"></section>
-    <section class="section" id="docs"></section>
-    <section class="section" id="features"></section>
-    <section class="section" id="screenshots"></section>
+    <section class="section" id="info"></section>
     <section class="section" id="download"></section>
     <section class="section" id="roadmap"></section>
     <section class="section" id="resources"></section>
@@ -86,8 +85,9 @@
     </noscript>
   </main>
 
-  <!-- Phones: the app's floating GlassNavBar. -->
-  <nav class="nav-bar" id="navBar" aria-label="Sections"></nav>
+  <!-- Phones: the sections in a panel from the left, behind the menu button. -->
+  <div class="drawer-backdrop" id="drawerBackdrop"></div>
+  <aside class="drawer" id="drawer" inert></aside>
 
   <!-- A screenshot opened full screen. -->
   <div class="viewer" id="viewer" role="dialog" aria-modal="true" hidden></div>
