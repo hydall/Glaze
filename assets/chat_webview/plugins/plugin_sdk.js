@@ -697,6 +697,118 @@
     }
   });
 
+  /* ---------- Floating buttons stay reachable ---------- */
+  // A panel's draggable button could be dropped onto the message box or the
+  // system gesture strip, where a finger can no longer pick it up (the strip
+  // belongs to the OS, and dragging out of it is the home gesture) — and a
+  // plugin that saves its position put it back there on every open. Small
+  // fixed boxes are moved back between the status bar and the message box
+  // after a drag, when they appear and when the insets settle. Anything as
+  // large as half the screen is a panel meant to cover it, and stays put.
+  function keepFloatersReachable() {
+    var MARGIN = 8;
+    var MAX_SHARE = 0.5;
+    // A bottom inset this tall is the keyboard or a drawer: temporary, and
+    // moving buttons out from under it would strand them mid-screen.
+    var MAX_RESTING_INSET = 0.35;
+    var dragged = null;
+    var known = new Set();
+    var scanTimer = 0;
+
+    var band = function () {
+      return {
+        top: (insets.topSafe || 0) + MARGIN,
+        bottom: window.innerHeight - (insets.bottomInput || 0) - MARGIN,
+        left: MARGIN,
+        right: window.innerWidth - MARGIN,
+      };
+    };
+
+    // Moves [el] by [delta] through the edge the plugin anchors it by, so its
+    // next drag starts from the rescued spot instead of fighting a second one.
+    var shift = function (el, cs, delta, start, end) {
+      var s = el.style;
+      var set = function (p) { var v = s.getPropertyValue(p); return !!v && v !== 'auto'; };
+      if (set(end) && !set(start)) {
+        s.setProperty(end, (parseFloat(cs.getPropertyValue(end)) || 0) - delta + 'px');
+        return;
+      }
+      var hadStart = set(start);
+      s.setProperty(start, (parseFloat(cs.getPropertyValue(start)) || 0) + delta + 'px');
+      // Anchored by a stylesheet: let go of the other edge, or an auto-sized
+      // box would stretch instead of move.
+      if (!hadStart) s.setProperty(end, 'auto');
+    };
+
+    var rescue = function (el) {
+      if (!el.isConnected) return;
+      var cs = getComputedStyle(el);
+      if (cs.position !== 'fixed' || cs.display === 'none' || cs.visibility !== 'visible' ||
+          cs.pointerEvents === 'none') return;
+      var r = el.getBoundingClientRect();
+      if (r.width < 1 || r.height < 1) return;
+      var b = band();
+      if (r.height > (b.bottom - b.top) * MAX_SHARE || r.width > (b.right - b.left) * MAX_SHARE) return;
+      var dy = r.bottom > b.bottom ? b.bottom - r.bottom : r.top < b.top ? b.top - r.top : 0;
+      var dx = r.right > b.right ? b.right - r.right : r.left < b.left ? b.left - r.left : 0;
+      if (Math.abs(dy) >= 1) shift(el, cs, dy, 'top', 'bottom');
+      if (Math.abs(dx) >= 1) shift(el, cs, dx, 'left', 'right');
+    };
+
+    var scan = function () {
+      scanTimer = 0;
+      if ((insets.bottomInput || 0) > window.innerHeight * MAX_RESTING_INSET) return;
+      known.forEach(function (el) { if (!el.isConnected) known.delete(el); });
+      var seen = new Set(known);
+      var walk = function (el, depth) {
+        for (var c = el.firstElementChild; c; c = c.nextElementSibling) {
+          seen.add(c);
+          if (depth < 2) walk(c, depth + 1);
+        }
+      };
+      if (document.body) walk(document.body, 0);
+      seen.forEach(rescue);
+    };
+    var scheduleScan = function (ms) {
+      clearTimeout(scanTimer);
+      scanTimer = setTimeout(scan, ms);
+    };
+
+    window.addEventListener('pointerdown', function (e) {
+      dragged = null;
+      for (var n = e.target; n && n.nodeType === 1 && n !== document.body; n = n.parentElement) {
+        if (getComputedStyle(n).position === 'fixed') { dragged = n; break; }
+      }
+    }, true);
+    ['pointerup', 'pointercancel', 'touchend', 'mouseup'].forEach(function (type) {
+      window.addEventListener(type, function () {
+        var el = dragged;
+        if (!el) return;
+        dragged = null;
+        known.add(el);
+        // After the plugin's own release handler has placed it, and again
+        // after a snap-to-edge animation.
+        setTimeout(function () { rescue(el); }, 50);
+        setTimeout(function () { rescue(el); }, 450);
+      }, true);
+    });
+    var watch = function () {
+      new MutationObserver(function () { scheduleScan(300); })
+        .observe(document.body, { childList: true, subtree: true });
+      scheduleScan(300);
+    };
+    if (document.body) watch();
+    else document.addEventListener('DOMContentLoaded', watch);
+    insetListeners.add(function () { scheduleScan(500); });
+    // Width only: a rotation. A height-only change is the keyboard.
+    var lastWidth = window.innerWidth;
+    window.addEventListener('resize', function () {
+      if (window.innerWidth === lastWidth) return;
+      lastWidth = window.innerWidth;
+      scheduleScan(500);
+    });
+  }
+
   /* ---------- Layout reports ---------- */
   if (kind === 'panel') {
     // A chat panel covers the whole page, but only the boxes the plugin
@@ -765,6 +877,7 @@
     };
     if (document.documentElement) observe();
     else document.addEventListener('DOMContentLoaded', observe);
+    keepFloatersReachable();
   } else if (kind === 'message') {
     // Message panels sit in the message flow; the host sizes the frame to
     // the content height reported here.

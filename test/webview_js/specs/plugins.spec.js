@@ -577,3 +577,77 @@ test('a converted plugin sees only tavo, and nothing of the host', async ({ page
   // One script is the plugin's own, still running.
   await expect.poll(() => toasts(page)).toEqual(['undefined|undefined|1|true|true|true|0.93.0|930']);
 });
+
+// A draggable panel button the way plugins write one: inline left/top, moved
+// by its own pointer handlers. [top] is where it starts (or was restored to).
+function fabPanel(top, extra = '') {
+  return plugin('p', {
+    panels: [{
+      id: 'fab',
+      placement: 'chat',
+      html: `
+        <div id="fab" style="position:fixed;left:100px;top:${top}px;width:56px;height:56px;background:#7b5cd6;${extra}"></div>
+        <script>
+          const b = document.getElementById('fab');
+          let start = null;
+          b.addEventListener('pointerdown', (e) => {
+            start = { x: e.clientX, y: e.clientY, left: b.offsetLeft, top: b.offsetTop };
+            b.setPointerCapture(e.pointerId);
+          });
+          b.addEventListener('pointermove', (e) => {
+            if (!start) return;
+            b.style.left = start.left + e.clientX - start.x + 'px';
+            b.style.top = start.top + e.clientY - start.y + 'px';
+          });
+          b.addEventListener('pointerup', () => { start = null; });
+        <\/script>`,
+    }],
+  });
+}
+
+const fabRect = (page) => page.frameLocator('iframe[data-glaze-plugin="p"]')
+  .frameLocator('iframe').locator('#fab')
+  .evaluate((el) => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left }; });
+
+test('a panel button dragged onto the message box comes back above it', async ({ page }) => {
+  await page.setViewportSize({ width: 400, height: 700 });
+  await setup(page, [fabPanel(200)]);
+  const frame = page.locator('iframe[data-glaze-plugin="p"]');
+  await expect.poll(() => frame.evaluate((el) => el.style.clipPath)).toContain('path(');
+
+  await page.mouse.move(128, 228);
+  await page.mouse.down();
+  await page.mouse.move(128, 690, { steps: 6 });
+  await page.mouse.up();
+
+  // Bottom inset 80, 8 px margin: the button may end no lower than 612.
+  await expect.poll(async () => (await fabRect(page)).bottom).toBe(612);
+  expect((await fabRect(page)).left).toBe(100);
+});
+
+test('a panel button restored into the message box is moved out on open', async ({ page }) => {
+  await page.setViewportSize({ width: 400, height: 700 });
+  await setup(page, [fabPanel(660)]);
+  await expect.poll(async () => (await fabRect(page)).bottom).toBe(612);
+});
+
+test('a panel button anchored by bottom keeps that anchor', async ({ page }) => {
+  await page.setViewportSize({ width: 400, height: 700 });
+  await setup(page, [fabPanel(0, 'top:auto;bottom:4px;')]);
+  const style = () => page.frameLocator('iframe[data-glaze-plugin="p"]').frameLocator('iframe')
+    .locator('#fab').evaluate((el) => [el.style.top, el.style.bottom]);
+  await expect.poll(style).toEqual(['auto', '88px']);
+});
+
+test('a full-screen panel is left where the plugin put it', async ({ page }) => {
+  await page.setViewportSize({ width: 400, height: 700 });
+  await setup(page, [plugin('p', {
+    panels: [{ id: 'big', placement: 'chat', html: '<div id="big" style="position:fixed;inset:0;background:#000"></div>' }],
+  })]);
+  const frame = page.locator('iframe[data-glaze-plugin="p"]');
+  await expect.poll(() => frame.evaluate((el) => el.style.clipPath)).toContain('path(');
+  await page.waitForTimeout(500);
+  const style = await page.frameLocator('iframe[data-glaze-plugin="p"]').frameLocator('iframe')
+    .locator('#big').evaluate((el) => el.style.cssText);
+  expect(style).toBe('position: fixed; inset: 0px; background: rgb(0, 0, 0);');
+});

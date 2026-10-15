@@ -1795,6 +1795,10 @@ footer's `.msg-trailing-actions`. Package scripts, CSS and assets
 null-origin frame cannot fetch them. Layout insets are exposed as
 `--glaze-inset-*` CSS variables. The top bar inset is the status bar alone:
 panels draw over the app's header, which is cut out where they draw.
+A panel's small fixed boxes (floating buttons) are kept between the status
+bar and the message box by the SDK — after a drag, when they appear and when
+the insets settle — so one dropped on the gesture strip stays reachable;
+boxes half the screen or larger are left alone.
 
 **Hooks.** `PluginChatHost` (wraps the chat screen) starts the runtime once the
 chat bridge is published and registers a `PluginHookRunner` in
