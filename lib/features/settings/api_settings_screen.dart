@@ -376,6 +376,15 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     _saveTimer = Timer(const Duration(milliseconds: 800), _save);
   }
 
+  /// Saves a pick from a list (model, protocol, tokenizer) without the typing
+  /// debounce: the active connection's tokenizer follows the saved row, so it
+  /// switches — and starts downloading — the moment the pick lands.
+  void _saveNow() {
+    if (_loading) return;
+    _saveTimer?.cancel();
+    unawaited(_save());
+  }
+
   /// The endpoint and key the cached model lists were last valid for. A
   /// controller also notifies on cursor moves, so only a change of the text
   /// itself counts.
@@ -1268,7 +1277,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     void choose(String value) {
       Navigator.of(context, rootNavigator: true).pop();
       setState(() => _tokenizer = value);
-      _scheduleSave();
+      _saveNow();
       // Picking the tokenizer that just failed to download again does not
       // change the connection's request, so nothing else would retry it.
       final status = ref.read(tokenizerStatusProvider);
@@ -2398,6 +2407,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
               onTap: () {
                 Navigator.of(context, rootNavigator: true).pop();
                 _modelCtrl.text = m;
+                _saveNow();
               },
             ),
           )
@@ -2562,7 +2572,8 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
               _fetchedModels = [];
               _embFetchedModels = [];
             });
-            _scheduleSave();
+            // Auto falls back to the protocol's tokenizer for unknown models.
+            _saveNow();
           },
         );
       }).toList(),

@@ -4,9 +4,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/llm/prompt_isolate.dart';
+import '../../../core/llm/tokenizer.dart';
 import '../../../core/models/api_config.dart';
 import '../../../core/state/studio_feature_provider.dart';
 import '../../settings/api_list_provider.dart';
+import '../../settings/tokenizer_provider.dart';
 import '../chat_provider.dart';
 import '../providers/prompt_build_providers.dart';
 import 'cached_token_breakdown.dart';
@@ -77,7 +79,7 @@ final contextWindowStartProvider = Provider.autoDispose
 
 /// Recounts the open chat's prompt once the active connection's context budget
 /// changes — a new context size or reply budget, a different trim mode, another
-/// connection picked.
+/// connection picked — or once the tokenizer it counts with switches.
 ///
 /// The app drops every cached breakdown on such a change (it no longer
 /// describes the prompt the app would send); this puts the open chat's one back
@@ -89,17 +91,31 @@ final contextWindowRecountProvider = Provider.autoDispose.family<void, String>((
 ) {
   Timer? debounce;
   ref.onDispose(() => debounce?.cancel());
+  void scheduleRecount() {
+    debounce?.cancel();
+    debounce = Timer(
+      const Duration(milliseconds: 600),
+      () => unawaited(_recountBreakdown(ref, charId)),
+    );
+  }
+
   ref.listen<String>(
     activeApiConfigProvider.select(
       (config) => config?.contextBudgetSignature ?? '',
     ),
     (previous, next) {
       if (previous == null || previous.isEmpty || previous == next) return;
-      debounce?.cancel();
-      debounce = Timer(
-        const Duration(milliseconds: 600),
-        () => unawaited(_recountBreakdown(ref, charId)),
-      );
+      scheduleRecount();
+    },
+  );
+  // A model change within the same connection leaves the budget alone but
+  // moves the tokenizer, and the app drops the breakdown counted with the old
+  // one — without this the rule would vanish until the next generation.
+  ref.listen<TokenizerKind>(
+    tokenizerStatusProvider.select((status) => status.active),
+    (previous, next) {
+      if (previous == null || previous == next) return;
+      scheduleRecount();
     },
   );
 });
