@@ -356,14 +356,40 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
   Future<void> clearChat() => _messageOpsCtrl.clearChat();
 
-  Future<void> setSwipe(int messageIndex, int swipeId) =>
-      _swipeCtrl.setSwipe(messageIndex, swipeId);
+  Future<void> setSwipe(int messageIndex, int swipeId) async {
+    await _swipeCtrl.setSwipe(messageIndex, swipeId);
+    _dispatchSwipeScripts();
+  }
 
   Future<void> changeSwipe(
     int messageIndex,
     int dir, {
     bool fromSwipe = false,
-  }) => _swipeCtrl.changeSwipe(messageIndex, dir, fromSwipe: fromSwipe);
+  }) async {
+    await _swipeCtrl.changeSwipe(messageIndex, dir, fromSwipe: fromSwipe);
+    _dispatchSwipeScripts();
+  }
+
+  /// Ext-block scripts that answer to a swipe. They run on every swipe, to an
+  /// existing variant or to a new one, as in the original extension, and do
+  /// not hold up the swipe itself.
+  void _dispatchSwipeScripts() {
+    if (!ref.mounted) return;
+    final session = state.value?.session;
+    if (session == null || session.id.isEmpty) return;
+    unawaited(
+      ref
+          .read(extensionPostGenServiceProvider)
+          .runSwipeScripts(
+            charId: arg,
+            sessionId: session.id,
+            messages: session.messages,
+          )
+          .catchError((Object e) {
+            debugPrint('[ChatNotifier] swipe scripts failed: $e');
+          }),
+    );
+  }
 
   Future<void> changeAgentSwipe(
     int messageIndex,

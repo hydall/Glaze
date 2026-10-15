@@ -64,6 +64,13 @@ class ScriptBlockHandler implements BlockHandler {
     if (blockConfig.source == BlockSource.carried) {
       final carried = blockConfig.script.trim();
       if (carried.isEmpty) return finishEmpty('no script');
+      if (blockConfig.scriptType == ScriptType.stScript) {
+        return markBlockError(
+          context: context,
+          errorMessage:
+              'STscript blocks are not supported; only JavaScript runs.',
+        );
+      }
       return executeJsScript(context: context, script: carried);
     }
 

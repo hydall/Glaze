@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/db/repositories/info_blocks_repository.dart';
@@ -8,6 +9,7 @@ import '../../../core/models/persona.dart';
 import '../../../core/llm/prompt/main_model_context_snapshot.dart';
 import '../../../core/state/db_provider.dart';
 import '../models/block_config.dart';
+import '../models/block_modes.dart';
 import '../models/extension_preset.dart';
 import '../models/info_block.dart';
 import '../providers/extension_presets_provider.dart';
@@ -23,6 +25,7 @@ import 'blocks/generated_block_handler.dart';
 import 'blocks/js_block_executor.dart';
 import 'blocks/script_block_handler.dart';
 import 'blocks/block_status_tracker.dart';
+import 'blocks/block_trigger_rules.dart';
 import 'blocks/periodic_js_block_runner.dart';
 import 'blocks/single_block_runner.dart';
 import 'blocks/unsupported_block_handler.dart';
@@ -88,6 +91,10 @@ class ExtensionPostGenService {
 
   /// Runs all enabled preset blocks for [messageId]. Used after chat
   /// generation and from the manual "Запустить блоки" control.
+  ///
+  /// [respectTriggerConditions] applies each block's keyword or period to the
+  /// message, as an automatic run does. A manual run leaves it off: the user
+  /// asked for the blocks, so every one of them runs.
   Future<bool> runBlocksForMessage({
     required String charId,
     required String sessionId,
@@ -100,12 +107,17 @@ class ExtensionPostGenService {
     bool clearExisting = true,
     void Function()? onStarted,
     MainModelContextSnapshot? mainModelContextSnapshot,
+    bool respectTriggerConditions = false,
   }) async {
     final preset = _resolveActivePreset();
     if (preset == null) return false;
+    final where = respectTriggerConditions
+        ? _conditionsFor(messages, messageId, isUser: false)
+        : null;
     final blocks = _blockProcessor.selectBlocks(
       preset,
       BlockTrigger.afterAssistant,
+      where: where,
     );
     if (blocks.isEmpty) return false;
 
@@ -144,6 +156,7 @@ class ExtensionPostGenService {
         cancelToken: cancelToken,
         trigger: BlockTrigger.afterAssistant,
         mainModelContextSnapshot: mainModelContextSnapshot,
+        where: where,
       );
     } finally {
       _finishBlockRun(cancelToken);
@@ -230,6 +243,7 @@ class ExtensionPostGenService {
       persona: persona,
       onStarted: onStarted,
       mainModelContextSnapshot: mainModelContextSnapshot,
+      respectTriggerConditions: true,
     );
   }
 
@@ -262,6 +276,7 @@ class ExtensionPostGenService {
         persona: persona,
         cancelToken: cancelToken,
         trigger: BlockTrigger.afterUser,
+        where: _conditionsFor(session.messages, lastMessage.id, isUser: true),
       );
     } finally {
       _finishBlockRun(cancelToken);
@@ -272,6 +287,82 @@ class ExtensionPostGenService {
         lastMessage.swipeId,
         -1,
       );
+    }
+  }
+
+  /// Runs the script blocks marked to answer to a swipe, after the user
+  /// swiped [messages]' message to another variant or asked for a new one.
+  ///
+  /// Like the original, these run for their side effects only — variables,
+  /// injections, sounds — and leave nothing in the panel.
+  Future<void> runSwipeScripts({
+    required String charId,
+    required String sessionId,
+    required List<ChatMessage> messages,
+  }) => _runSideEffectScripts(
+    charId: charId,
+    sessionId: sessionId,
+    messages: messages,
+    reason: 'swipe',
+    select: (b) => b.triggerOnSwipe,
+  );
+
+  /// Runs the script blocks marked to run when a generation starts, before
+  /// the request goes out, so what they inject reaches this very reply.
+  Future<void> runGenerationStartScripts({
+    required String charId,
+    required String sessionId,
+    required List<ChatMessage> messages,
+  }) => _runSideEffectScripts(
+    charId: charId,
+    sessionId: sessionId,
+    messages: messages,
+    reason: 'generation start',
+    select: (b) => b.generationAfterCommands,
+  );
+
+  Future<void> _runSideEffectScripts({
+    required String charId,
+    required String sessionId,
+    required List<ChatMessage> messages,
+    required String reason,
+    required bool Function(BlockConfig block) select,
+  }) async {
+    final preset = _resolveActivePreset();
+    if (preset == null) return;
+    final blocks =
+        preset.blocks
+            .where(
+              (b) =>
+                  b.enabled &&
+                  !b.manualOnly &&
+                  b.type == BlockType.script &&
+                  select(b),
+            )
+            .toList()
+          ..sort((a, b) => a.order.compareTo(b.order));
+    for (final block in blocks) {
+      // Only code the block carries runs here: asking the model to write a
+      // script is a chain step with a panel to show it in, and STscript has
+      // no interpreter in this app.
+      if (block.source != BlockSource.carried ||
+          block.scriptType != ScriptType.js) {
+        debugPrint(
+          '[ExtPostGen] $reason script "${block.name}" skipped: '
+          'only carried JavaScript runs outside the chain',
+        );
+        continue;
+      }
+      try {
+        await runJsBlock(
+          charId: charId,
+          sessionId: sessionId,
+          block: block,
+          contextMessages: messages,
+        );
+      } catch (e) {
+        debugPrint('[ExtPostGen] $reason script "${block.name}" failed: $e');
+      }
     }
   }
 
@@ -470,11 +561,13 @@ class ExtensionPostGenService {
     required CancelToken cancelToken,
     BlockTrigger trigger = BlockTrigger.afterAssistant,
     MainModelContextSnapshot? mainModelContextSnapshot,
+    bool Function(BlockConfig block)? where,
   }) async {
     await _blockProcessor.run(
       preset: preset,
       trigger: trigger,
       cancelToken: cancelToken,
+      where: where,
       runBlock: ({required blockConfig, required previousOutput}) {
         return _runSingleBlock(
           charId: charId,
@@ -495,6 +588,25 @@ class ExtensionPostGenService {
       onBlockComplete: (result) {
         _ref.read(infoBlocksProvider(sessionId).notifier).addOrReplace(result);
       },
+    );
+  }
+
+  /// The keyword / period check for the message [messageId] in [messages].
+  /// A message that is not in the list fails every check, so nothing runs
+  /// against a message the chat no longer has.
+  bool Function(BlockConfig block) _conditionsFor(
+    List<ChatMessage> messages,
+    String messageId, {
+    required bool isUser,
+  }) {
+    final index = messages.indexWhere((m) => m.id == messageId);
+    if (index < 0) return (_) => false;
+    final text = messages[index].content;
+    return (block) => blockConditionsMet(
+      block,
+      messageIndex: index,
+      isUser: isUser,
+      messageText: text,
     );
   }
 

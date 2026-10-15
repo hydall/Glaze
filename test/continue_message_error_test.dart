@@ -1,6 +1,7 @@
 import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/models/character.dart';
@@ -44,6 +45,10 @@ class _ThrowingGenerationService extends ChatGenerationService {
 }
 
 void main() {
+  // A generation start reads the ExtBlocks settings for its scripts.
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUp(() => SharedPreferences.setMockInitialValues({}));
+
   test('continuation exception settles generation and allows retry', () async {
     final db = AppDatabase.forTesting(NativeDatabase.memory());
     late _ThrowingGenerationService generationService;

@@ -19,6 +19,7 @@ import '../../../core/state/lorebook_embedding_provider.dart';
 import '../../../core/utils/time_helpers.dart';
 import '../../../core/state/studio_turn_config_resolver.dart';
 import '../../chat_history/chat_history_provider.dart';
+import '../../extensions/services/extension_post_gen_service.dart';
 import '../abort_handler.dart';
 import '../chat_generation_service.dart';
 import '../chat_session_service.dart';
@@ -127,6 +128,10 @@ class GenerationPipeline {
       }
       final charRepo = ctx.ref.read(characterRepoProvider);
       final character = await charRepo.getById(ctx.charId);
+      if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) {
+        return null;
+      }
+      await _runGenerationStartScripts(session);
       if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) {
         return null;
       }
@@ -403,6 +408,23 @@ class GenerationPipeline {
       // (where setPhase is a no-op, so the newer run keeps its own label).
       ctx.setPhase(GenerationPhase.idle, genId: genId);
       await notificationLease?.release();
+    }
+  }
+
+  /// Ext-block scripts marked to run when a generation starts. They run before
+  /// the request is built, so a prompt they inject reaches this reply; one
+  /// that fails is logged and the reply goes ahead without it.
+  Future<void> _runGenerationStartScripts(ChatSession session) async {
+    try {
+      await ctx.ref
+          .read(extensionPostGenServiceProvider)
+          .runGenerationStartScripts(
+            charId: ctx.charId,
+            sessionId: session.id,
+            messages: session.messages,
+          );
+    } catch (e) {
+      debugPrint('[GenerationPipeline] generation start scripts failed: $e');
     }
   }
 

@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 import '../../models/block_config.dart';
 import '../../models/extension_preset.dart';
 import '../../models/info_block.dart';
+import 'block_trigger_rules.dart';
 
 typedef BlockRunner =
     Future<InfoBlock?> Function({
@@ -17,14 +18,22 @@ typedef BlockComplete = void Function(InfoBlock block);
 class BlockProcessor {
   const BlockProcessor();
 
-  List<BlockConfig> selectBlocks(ExtensionPreset preset, BlockTrigger trigger) {
+  /// The blocks that run automatically on [trigger], in chain order.
+  /// [where] narrows them further, e.g. to the ones whose keyword or period
+  /// matches the triggering message.
+  List<BlockConfig> selectBlocks(
+    ExtensionPreset preset,
+    BlockTrigger trigger, {
+    bool Function(BlockConfig block)? where,
+  }) {
     return preset.blocks
         .where(
           (b) =>
               b.enabled &&
-              b.trigger == trigger &&
+              b.runsOn(trigger) &&
               !b.manualOnly &&
-              b.type.isRunnable,
+              b.type.isRunnable &&
+              (where?.call(b) ?? true),
         )
         .toList()
       ..sort((a, b) => a.order.compareTo(b.order));
@@ -36,8 +45,9 @@ class BlockProcessor {
     required CancelToken cancelToken,
     required BlockRunner runBlock,
     required BlockComplete onBlockComplete,
+    bool Function(BlockConfig block)? where,
   }) async {
-    final blocks = selectBlocks(preset, trigger);
+    final blocks = selectBlocks(preset, trigger, where: where);
 
     if (blocks.isEmpty) {
       return;
