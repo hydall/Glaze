@@ -96,6 +96,10 @@ class ChatBridgeController {
   Map<String, String> _regexSessionVars = const {};
   Map<String, String> _regexGlobalVars = const {};
 
+  /// The ExtBlocks text shown inside a message (see `inlineExtBlocksText`),
+  /// supplied by the chat widget, which can read the blocks.
+  String Function(ChatMessage message)? inlineExtBlocksFor;
+
   /// Origin marker ("Created on" / "Branched on") for the current session,
   /// prepended by [MessageBridgeCommands.setMessages] as the first synthetic
   /// separator of a full batch. Refreshed on every rebuild before messages
@@ -127,6 +131,9 @@ class ChatBridgeController {
   Map<String, String> get regexSessionVars => _regexSessionVars;
   Map<String, String> get regexGlobalVars => _regexGlobalVars;
   JsBridgeService get extensionBridgeService => _jsBridgeService;
+
+  String inlineExtBlocks(ChatMessage message) =>
+      inlineExtBlocksFor?.call(message) ?? '';
 
   List<TriggeredEntry> triggeredRegexesFor(String messageId) =>
       _triggeredRegexesByMessageId[messageId] ?? const [];
@@ -265,10 +272,8 @@ class ChatBridgeController {
   /// from the next start onwards — and stays broken across a restart, because
   /// the port is gone. Every text the WebView hands back is therefore put into
   /// its stored spelling first: the served file, relative to the data root.
-  String restoreImgResults(String text) => ImageTagMarkup.rewriteResultPaths(
-    text,
-    restoreChatWebViewLocalFilePath,
-  );
+  String restoreImgResults(String text) =>
+      ImageTagMarkup.rewriteResultPaths(text, restoreChatWebViewLocalFilePath);
 
   String? resolveLocalFileUrl(String? source) {
     return chatWebViewResolveLocalFileUrl(source);
@@ -495,7 +500,8 @@ class ChatBridgeController {
       handlerName: 'pluginActionFailed',
       callback: (JavaScriptHandlerFunctionData data) {
         final raw = data.args.isNotEmpty ? data.args.first : null;
-        if (raw is Map) onPluginActionFailed?.call(Map<String, dynamic>.from(raw));
+        if (raw is Map)
+          onPluginActionFailed?.call(Map<String, dynamic>.from(raw));
         return null;
       },
     );
@@ -823,8 +829,7 @@ class ChatBridgeController {
   Future<void> updateMessageContent(String id, String text, bool isUser) =>
       messages.updateMessageContent(id, text, isUser);
   Future<void> removeMessage(String id) => messages.removeMessage(id);
-  Future<void> retireTypingPlaceholder() =>
-      messages.retireTypingPlaceholder();
+  Future<void> retireTypingPlaceholder() => messages.retireTypingPlaceholder();
   Future<void> setLastMessage(String? id) => messages.setLastMessage(id);
   Future<void> setContextWindowStart(String? id, {bool after = false}) =>
       messages.setContextWindowStart(id, after: after);
@@ -884,11 +889,8 @@ class ChatBridgeController {
     required String query,
     int activeIndex = -1,
     bool scroll = true,
-  }) => layout.setSearch(
-    query: query,
-    activeIndex: activeIndex,
-    scroll: scroll,
-  );
+  }) =>
+      layout.setSearch(query: query, activeIndex: activeIndex, scroll: scroll);
   Future<void> setBottomPadding(double px, {double viewportHeight = 0}) =>
       layout.setBottomPadding(px, viewportHeight: viewportHeight);
   Future<void> setTopPadding(double px) => layout.setTopPadding(px);

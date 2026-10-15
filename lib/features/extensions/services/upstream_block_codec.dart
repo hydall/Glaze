@@ -151,6 +151,8 @@ BlockConfig decodeUpstreamBlock(Map<String, dynamic> json, {int order = 0}) {
       _scriptTypes,
       ScriptType.stScript,
     ),
+    // The original shows a block's result inside the message it belongs to.
+    render: BlockRender.message,
     hideDisplay: upstreamBool(json['hide_display']),
     inject: upstreamBool(json['inject_block']),
     injectTarget: InjectionTarget.prompt,

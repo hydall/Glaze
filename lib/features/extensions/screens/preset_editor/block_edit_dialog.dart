@@ -432,6 +432,8 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
               const _HelpText('block_generated_help'),
             if (_type == BlockType.generated && _render == BlockRender.panel)
               const _HelpText('block_render_panel_help'),
+            if (_type == BlockType.generated && _render == BlockRender.message)
+              const _HelpText('block_render_message_help'),
             if (_type == BlockType.script) const _HelpText('block_script_help'),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -621,6 +623,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
   String _renderLabel(BlockRender render) => switch (render) {
     BlockRender.card => 'block_render_card'.tr(),
     BlockRender.panel => 'block_render_panel'.tr(),
+    BlockRender.message => 'block_render_message'.tr(),
   };
 
   Future<void> _pickRender() async {

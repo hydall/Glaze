@@ -37,6 +37,7 @@ import 'chat_webview_sync_dispatcher.dart';
 import 'message_scripts_prompt_sheet.dart';
 import 'webview_bridge_probe.dart';
 import 'webview_callbacks.dart';
+import 'chat_webview_inline_ext_blocks.dart';
 
 const String _kStreamingId = '__streaming__';
 
@@ -1380,6 +1381,10 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
         effectivePersona,
         sessionVars: session?.sessionVars ?? const {},
         globalVars: ref.watch(globalVarsProvider),
+      );
+      _bridge!.inlineExtBlocksFor = inlineExtBlocksReader(
+        ref,
+        widget.sessionId,
       );
       // Refresh the origin ("Created on" / "Branched on") marker before any
       // message sync dispatches, so a full setMessages picks up the current

@@ -6,6 +6,7 @@ import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/core/models/persona.dart';
 import 'package:glaze_flutter/core/models/preset.dart';
 import 'package:glaze_flutter/core/utils/think_tags.dart';
+import 'package:glaze_flutter/features/extensions/services/ext_blocks_inline_display.dart';
 
 part 'chat_message_mapper.freezed.dart';
 
@@ -86,11 +87,14 @@ class ChatMessageMapper {
     Persona? persona,
     Map<String, String> sessionVars = const {},
     Map<String, String> globalVars = const {},
+    String inlineExtBlocks = '',
   }) {
     final isAssistant = m.role == 'assistant' || m.role == 'character';
     final isUser = m.role == 'user';
 
-    String content = m.content;
+    // ExtBlocks shown in the message ride on the displayed text only, ahead
+    // of macros and display regexes, as the original's `display_text` does.
+    String content = withInlineExtBlocks(m.content, inlineExtBlocks);
     // Expand macros for display (mirrors reference Glaze ChatMessage.vue,
     // where replaceMacros runs on the rendered text before regexes). Without
     // this, macros typed manually into a sent/edited message stay literal in

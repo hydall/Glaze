@@ -5,10 +5,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/block_config.dart';
+import '../models/block_run_status.dart';
 import '../providers/extension_presets_provider.dart';
 import '../providers/extensions_settings_provider.dart';
 import '../providers/info_blocks_provider.dart';
 import 'blocks/block_trigger_rules.dart';
+import 'ext_blocks_inline_display.dart';
 
 typedef ExtBlocksPanelKey = ({
   String sessionId,
@@ -125,7 +127,12 @@ class ExtBlocksPanelBuilder {
 
     return [
       for (final cfg in enabledConfigs)
-        if (dbByBlockId[cfg.id] != null)
+        // A block shown inside the message leaves the panel once it is done;
+        // while it runs, fails or waits, its row here is where that shows.
+        if (showsInMessage(cfg) &&
+            dbByBlockId[cfg.id]?.status == BlockRunStatus.done)
+          ...const <Map<String, dynamic>>[]
+        else if (dbByBlockId[cfg.id] != null)
           {
             ...dbByBlockId[cfg.id]!.toMap(),
             if (cfg.type == BlockType.accumulation)

@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:collection/collection.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/llm/generation_phase.dart';
@@ -9,6 +11,7 @@ import '../../../core/models/preset.dart';
 import '../../../core/state/active_regex_provider.dart';
 import '../../../core/state/character_provider.dart';
 import '../../../core/state/persona_resolution.dart';
+import '../../extensions/models/extension_preset.dart';
 import '../../extensions/models/info_block.dart';
 import '../../extensions/providers/extension_presets_provider.dart';
 import '../../extensions/providers/extensions_settings_provider.dart';
@@ -23,6 +26,7 @@ import '../state/context_window_marker.dart';
 import '../state/generation_phase_provider.dart';
 import 'chat_message_sync.dart';
 import 'chat_streaming_bridge_sync.dart';
+import 'chat_webview_inline_ext_blocks.dart';
 import 'chat_webview_sync_dispatcher.dart';
 
 /// Wires the `build()`-side `ref.listen` plumbing for the chat
@@ -119,18 +123,21 @@ class ChatWebViewBuildListeners {
         // full re-render of every message. Preserve the current scroll position
         // so the chat stays put instead of jumping (see restoreAnchor in the
         // webview virtual list).
-        unawaited(() async {
-          onDomReset();
-          await b.setMessages(
-            messages,
-            visibleStartIndex: visibleStartIndex,
-            preserveScroll: true,
-          );
-          if (isCurrentBridge?.call(b) == false || !ready()) return;
-          await onReconcileActiveGeneration(b);
-        }());
+        unawaited(_rerenderAll(b));
       }
     });
+  }
+
+  /// Renders every message again, keeping the reading position.
+  Future<void> _rerenderAll(ChatBridgeController b) async {
+    onDomReset();
+    await b.setMessages(
+      messages,
+      visibleStartIndex: visibleStartIndex,
+      preserveScroll: true,
+    );
+    if (isCurrentBridge?.call(b) == false || !ready()) return;
+    await onReconcileActiveGeneration(b);
   }
 
   /// Keeps rendered messages in step with the persona roster. A user message
@@ -380,18 +387,56 @@ class ChatWebViewBuildListeners {
       for (final msgId in allIds) {
         unawaited(onRefreshExtBlocksPanel(sid, msgId));
       }
+      // A block shown inside the message changes the message's own text.
+      final b = bridge!;
+      for (final message in messagesWithChangedInlineBlocks(
+        preset: activeExtBlocksPreset(ref),
+        messages: messages,
+        prev: prev ?? const [],
+        next: next,
+      )) {
+        unawaited(b.updateMessage(message));
+      }
     });
   }
 
   void _listenExtSettingsAndPresets() {
-    ref.listen(extensionsSettingsProvider, (_, _) {
+    // Blocks shown inside messages are part of their text: another set of
+    // them means every message is shown again.
+    void rerenderIfInlineChanged(
+      String? prevId,
+      List<ExtensionPreset> prevPresets,
+      String? nextId,
+      List<ExtensionPreset> nextPresets,
+    ) {
+      String signature(String? id, List<ExtensionPreset> presets) =>
+          inlineExtBlocksSignature(
+            id == null ? null : presets.firstWhereOrNull((p) => p.id == id),
+          );
+      final b = bridge;
+      if (b == null) return;
+      if (signature(prevId, prevPresets) != signature(nextId, nextPresets)) {
+        unawaited(_rerenderAll(b));
+      }
+    }
+
+    ref.listen(extensionsSettingsProvider, (prev, next) {
       if (bridge != null && ready()) {
         unawaited(onSyncExtBlockPanels());
+        final presets = ref.read(extensionPresetsProvider);
+        rerenderIfInlineChanged(
+          prev?.activePresetId,
+          presets,
+          next.activePresetId,
+          presets,
+        );
       }
     });
-    ref.listen(extensionPresetsProvider, (_, _) {
+    ref.listen(extensionPresetsProvider, (prev, next) {
       if (bridge != null && ready()) {
         unawaited(onSyncExtBlockPanels());
+        final id = ref.read(extensionsSettingsProvider).activePresetId;
+        rerenderIfInlineChanged(id, prev ?? const [], id, next);
       }
     });
   }
@@ -410,7 +455,6 @@ class ChatWebViewBuildListeners {
     }
     return false;
   }
-
 }
 
 /// True when the two display-regex lists differ in a way a rendered message can

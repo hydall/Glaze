@@ -2083,6 +2083,8 @@
   "block_render_desc": "Where the finished content goes",
   "block_render_card": "Card in panel",
   "block_render_panel": "Interactive panel",
+  "block_render_message": "In the message text",
+  "block_render_message_help": "The finished block is added to the end of the reply as it is shown, in its tag and without a frame, like in the original extension. Display regexes and markdown treat it as part of the reply, so a regex can style it. The saved message does not change. While the block runs or if it fails, it shows in the panel.",
   "block_generated_help": "The block asks the model (or shows what you wrote), and any [IMG:GEN] tag in the result is drawn by the same image pipeline a chat message uses — Image Gen provider and key are in Settings → Image Gen.",
   "block_render_panel_help": "The panel is rendered below the assistant message as a persistent sandboxed iframe island. JS code inside can call glaze.setVariables, glaze.generateText, glaze.injectPrompt, etc. Calls go through the same bridge as in other blocks.",
   "block_script_help": "The model writes JavaScript from the prompt → code is extracted from ```js``` → the sandbox executes it (context.messages, context.character, context.previousOutput). The result is a returned string or HTML.",
