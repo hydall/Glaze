@@ -18,8 +18,17 @@ final _assetRef = RegExp(r'''(["'(])/plugins/([a-z0-9._-]+)/([^"')\s]+)''');
 
 /// Plugin frames have an opaque origin, so `/plugins/<id>/<path>` URLs
 /// cannot be served to them. Package scripts and stylesheets are inlined and
-/// other assets become data URLs, read from the installed packages.
-Future<String> inlinePluginAssets(String html, PluginFileReader read) async {
+/// other assets become data URLs, read from the installed packages. Only
+/// [pluginId]'s own package is read: a path into another plugin's package is
+/// left as it is, and so cannot load, since that package is not this
+/// plugin's to read.
+Future<String> inlinePluginAssets(
+  String html,
+  String pluginId,
+  PluginFileReader read,
+) async {
+  final reader = read;
+  read = (id, path) async => id == pluginId ? reader(id, path) : null;
   var out = await _replaceAsync(html, _scriptSrc, (m) async {
     final bytes = await read(m.group(2)!, Uri.decodeFull(m.group(3)!));
     if (bytes == null) {
@@ -39,7 +48,8 @@ Future<String> inlinePluginAssets(String html, PluginFileReader read) async {
     if (bytes == null) return '';
     final css = await inlinePluginAssets(
       utf8.decode(bytes, allowMalformed: true),
-      read,
+      pluginId,
+      reader,
     );
     return '<style>$css</style>';
   });

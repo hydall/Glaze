@@ -1809,7 +1809,8 @@ inside the page may only load `about:srcdoc`/`about:blank`
 (`chatWebViewNavigationPolicy`); iOS asks about those too. Message panels sit in `.msg-content-stack`, message actions in the
 footer's `.msg-trailing-actions`. Package scripts, CSS and assets
 (`/plugins/<id>/…`) are inlined by `plugin_html_inliner.dart`, since a
-null-origin frame cannot fetch them. Layout insets are exposed as
+null-origin frame cannot fetch them; only the plugin's own package is read, so
+a panel cannot pull in another plugin's files. Layout insets are exposed as
 `--glaze-inset-*` CSS variables. The top bar inset is the status bar alone:
 panels draw over the app's header, which is cut out where they draw.
 A panel's small fixed boxes (floating buttons) are kept between the status

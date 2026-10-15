@@ -74,6 +74,7 @@ class PluginRuntimePayloadBuilder {
       if (bytes == null) continue;
       final html = await inlinePluginAssets(
         utf8.decode(bytes, allowMalformed: true),
+        plugin.id,
         store.readPackageFile,
       );
       panels.add({

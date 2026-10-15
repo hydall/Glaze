@@ -930,8 +930,9 @@ void main() {
     };
     final html = await inlinePluginAssets(
       '<link rel="stylesheet" href="/plugins/p.one/ui/s.css">'
-      '<script defer src="/plugins/p.one/js/a.js"></script>'
-      '<img src="/plugins/p.one/img/bg.png">',
+          '<script defer src="/plugins/p.one/js/a.js"></script>'
+          '<img src="/plugins/p.one/img/bg.png">',
+      'p.one',
       (id, path) async => id == 'p.one' && files.containsKey(path)
           ? Uint8List.fromList(utf8.encode(files[path]!))
           : null,
@@ -940,5 +941,27 @@ void main() {
     expect(html, isNot(contains('src="/plugins')));
     expect(html, contains('<style>body{background:url(data:image/png;base64,'));
     expect(html, contains('<img src="data:image/png;base64,UE5H">'));
+  });
+
+  test("a panel cannot inline another plugin's package files", () async {
+    final read = <String>[];
+    final html = await inlinePluginAssets(
+      '<script src="/plugins/other/main.js"></script>'
+          '<link rel="stylesheet" href="/plugins/mine/s.css">'
+          '<img src="/plugins/other/key.txt">',
+      'mine',
+      (id, path) async {
+        read.add('$id/$path');
+        return Uint8List.fromList(
+          utf8.encode(
+            path == 's.css' ? '@import url(/plugins/other/x.css);' : 'secret',
+          ),
+        );
+      },
+    );
+    expect(read, ['mine/s.css']);
+    expect(html, isNot(contains('secret')));
+    expect(html, contains('<img src="/plugins/other/key.txt">'));
+    expect(html, contains('url(/plugins/other/x.css)'));
   });
 }
