@@ -1,14 +1,14 @@
 import '../../../../core/models/api_config.dart';
 import '../models/connection_profiles.dart';
 import '../models/extension_preset.dart';
+import '../models/profile_params.dart';
 
 /// Resolves the [ApiConfig] a JS `glaze.generateText({ preset })` call runs on.
 ///
-/// A Glaze extension preset has one connection, so the requested [profile]
-/// does not change the answer: every call goes to the preset's own connection.
-/// The argument is still accepted because blocks imported from the original
-/// extension carry `big` / `medium` / `small`, and rejecting it would break
-/// scripts that pass it.
+/// A Glaze extension preset has one connection, so every call goes to the
+/// preset's own connection; the requested [profile] picks the generation
+/// parameters it runs with (see [ProfileParams]), as the original's API
+/// presets do.
 ///
 /// The connection is opt-in: when the preset names none — or names one that no
 /// longer exists — the resolver falls back to [activeFallback]. That is the
@@ -29,10 +29,11 @@ class ConnectionProfileResolver {
     Iterable<ApiConfig> allConfigs,
   ) {
     final mappedId = preset?.apiConfigId ?? '';
+    var config = activeFallback;
     if (mappedId.isNotEmpty) {
-      final match = allConfigs.where((c) => c.id == mappedId).firstOrNull;
-      if (match != null) return match;
+      config = allConfigs.where((c) => c.id == mappedId).firstOrNull ?? config;
     }
-    return activeFallback;
+    if (config == null || preset == null) return config;
+    return profileParamsFor(preset.profileParams, profile).applyTo(config);
   }
 }

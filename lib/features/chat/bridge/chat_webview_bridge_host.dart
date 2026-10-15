@@ -27,6 +27,7 @@ import '../../extensions/services/runtime_prompt_injection_service.dart';
 import '../../extensions/services/trigger_generation_handler.dart';
 import '../../extensions/state/message_variables_notifier.dart';
 import '../../settings/api_list_provider.dart';
+import '../../extensions/models/profile_params.dart';
 
 /// Owns the chat WebView's bridge-side dependencies: the [JsBridgeService]
 /// handler implementations (generateText / injectPrompt / uninjectPrompt /
@@ -168,9 +169,11 @@ class ChatWebViewBridgeHost {
       transport.stream(
         request: ChatTransportRequest.fromApiConfig(
           apiConfig,
-          messages: [
-            {'role': 'user', 'content': prompt},
-          ],
+          // The profile's `confirmation_jb` turns, as for a block's request.
+          messages: profileParamsFor(preset?.profileParams ?? const {}, profile)
+              .withConfirmation([
+                {'role': 'user', 'content': prompt},
+              ]),
           stream: false,
           sessionId: _activeSessionId(),
         ),

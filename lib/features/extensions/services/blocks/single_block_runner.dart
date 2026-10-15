@@ -39,6 +39,7 @@ class SingleBlockRunner {
     required CancelToken cancelToken,
     String? reuseBlockId,
     MainModelContextSnapshot? mainModelContextSnapshot,
+    List<BlockConfig> group = const [],
   }) async {
     if (cancelToken.isCancelled) return null;
 
@@ -82,6 +83,7 @@ class SingleBlockRunner {
       placeholderId: placeholderId,
       placeholder: placeholder,
       mainModelContextSnapshot: mainModelContextSnapshot,
+      group: group,
     );
 
     try {

@@ -90,13 +90,18 @@ class GeneratedBlockHandler implements BlockHandler {
             preset: context.preset,
             swipeId: context.swipeId,
             cancelToken: context.cancelToken,
-            onStreamUpdate: makeStreamHandler(
-              blockConfig: blockConfig,
-              charId: context.charId,
-              sessionId: context.sessionId,
-              messageId: context.messageId,
-              placeholder: context.placeholder,
-            ),
+            group: context.group,
+            // A shared request streams the whole group's reply, which is no
+            // one block's content.
+            onStreamUpdate: context.group.length > 1
+                ? null
+                : makeStreamHandler(
+                    blockConfig: blockConfig,
+                    charId: context.charId,
+                    sessionId: context.sessionId,
+                    messageId: context.messageId,
+                    placeholder: context.placeholder,
+                  ),
           );
 
       if (context.cancelToken.isCancelled) return _stopped(context);
@@ -225,7 +230,9 @@ class GeneratedBlockHandler implements BlockHandler {
   }
 
   Future<InfoBlock> _settle(BlockContext context, InfoBlock block) async {
-    ref.read(infoBlocksProvider(context.sessionId).notifier).addOrReplace(block);
+    ref
+        .read(infoBlocksProvider(context.sessionId).notifier)
+        .addOrReplace(block);
     refreshPanelForMessage(
       context.charId,
       context.sessionId,

@@ -17,6 +17,7 @@ import '../../models/extension_context_policy.dart';
 import '../../services/accumulation/accumulation_service.dart';
 import '../../widgets/extension_context_policy_editor.dart';
 import 'widgets/block_type_picker.dart';
+import 'sections/profiles_section.dart';
 import 'sections/upstream_block_sections.dart';
 
 /// Editor for one block.
@@ -411,7 +412,25 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
             ..._sourceItems(),
             ..._outputItems(),
             ..._contextItems(),
-            if (_usesLlm)
+            if (_callsLlm)
+              MenuGroup(
+                items: [
+                  MenuSelectorItem(
+                    label: 'extblocks_block_profile'.tr(),
+                    description: 'extblocks_block_profile_desc'.tr(),
+                    currentValue: profileLabel(_apiPreset),
+                    onTap: () => pickBlockOption<ConnectionProfile>(
+                      context: context,
+                      title: 'extblocks_block_profile'.tr(),
+                      options: ConnectionProfile.values,
+                      current: _apiPreset,
+                      labelOf: profileLabel,
+                      onPicked: (v) => setState(() => _apiPreset = v),
+                    ),
+                  ),
+                ],
+              ),
+            if (_callsLlm)
               ApiSlotGroup(
                 header: 'block_api_section_label'.tr(),
                 apiConfigId: _apiConfigId,
@@ -731,6 +750,10 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
       _type == BlockType.generated || _type == BlockType.script;
 
   bool get _usesLlm => _producesContent && !_useStaticSource;
+
+  /// Whether the block sends a request to the model at all: a rewrite does,
+  /// with no content of its own.
+  bool get _callsLlm => _usesLlm || _type == BlockType.rewrite;
 }
 
 /// A muted paragraph under a type's settings, explaining what that type does.

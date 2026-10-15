@@ -22,6 +22,7 @@ import 'info_block_service.dart';
 import 'rewrite/rewrite_service.dart';
 import 'blocks/block_processor.dart';
 import 'blocks/block_context.dart';
+import 'blocks/block_grouping.dart';
 import 'blocks/block_handler.dart';
 import 'blocks/block_image_renderer.dart';
 import 'blocks/block_panel_updater.dart';
@@ -701,6 +702,16 @@ class ExtensionPostGenService {
     );
 
     var current = messages;
+    // Blocks of the ordinary chain that share one request, as the original
+    // groups them.
+    final groups = blockGroups(
+      eligible.where(
+        (b) =>
+            b.type != BlockType.rewrite &&
+            b.type != BlockType.accumulation &&
+            !isPhasedScript(b),
+      ),
+    );
     Future<InfoBlock?> runOne(BlockConfig blockConfig, String? previous) =>
         _runSingleBlock(
           charId: charId,
@@ -716,6 +727,7 @@ class ExtensionPostGenService {
           previousOutput: previous,
           cancelToken: cancelToken,
           mainModelContextSnapshot: mainModelContextSnapshot,
+          group: groups[blockConfig.id] ?? const [],
         );
 
     Future<void> runScripts(List<BlockConfig> scripts) async {
@@ -869,6 +881,7 @@ class ExtensionPostGenService {
     required CancelToken cancelToken,
     String? reuseBlockId,
     MainModelContextSnapshot? mainModelContextSnapshot,
+    List<BlockConfig> group = const [],
   }) =>
       SingleBlockRunner(
         statusTracker: _statusTracker,
@@ -889,6 +902,7 @@ class ExtensionPostGenService {
         cancelToken: cancelToken,
         reuseBlockId: reuseBlockId,
         mainModelContextSnapshot: mainModelContextSnapshot,
+        group: group,
       );
 
   BlockHandler _handlerFor(BlockType type) {
