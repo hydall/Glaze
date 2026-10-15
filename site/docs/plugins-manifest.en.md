@@ -118,7 +118,9 @@ A file handler turns an attached file into text for the message. For example, it
   { "type": "text", "key": "name", "label": "Name", "description": "Shown in replies" },
   { "type": "textarea", "key": "prompt", "label": "Prompt" },
   { "type": "note", "text": "Changes apply the next time the chat opens.", "icon": "info" },
-  { "type": "divider" }
+  { "type": "divider" },
+  { "type": "apiPreset", "key": "summary", "label": "Summaries", "description": "A cheap model is fine" },
+  { "type": "imagePreset", "key": "photos", "label": "Photos" }
 ]
 ```
 
@@ -130,8 +132,28 @@ A file handler turns an attached file into text for the message. For example, it
 | `text`, `textarea` | `key`, `label`, `description`, `default`. |
 | `note` | `text`, `icon`: `info` or `warning`. A note, stores nothing. |
 | `divider`, `group` | Splits the form. |
+| `apiPreset` | `key`, `label`, `description`. An API connection and model for one of the plugin's features. |
+| `imagePreset` | `key`, `label`, `description`. An API connection and image style for one of the plugin's images. |
 
 `label`, `description`, `text`, option labels and text defaults can be translation keys. The values are read with `glaze.plugin.settings.get(key)`. When the user changes a setting, the plugin's frames restart with the new values.
+
+### API presets
+
+A plugin often generates in several places, and each may want its own model: chat replies on a strong one, background scene reading on a quick cheap one, photos in a style different from other pictures. For each such feature, declare an `apiPreset` (text) or `imagePreset` (images) and name it in the call:
+
+```js
+await glaze.generate(prompt, { preset: 'summary' });
+await glaze.images.generate(prompt, { preset: 'photos' });
+```
+
+Each preset is drawn on the plugin's page as its own group, headed by its `label` and `description`, with the same rows as the other API slots in Glaze:
+
+- `apiPreset`: **API connection** and **Model**;
+- `imagePreset`: **API for images** (the connection that image providers working over the LLM endpoint borrow) and **Image style**. The style can follow the image generation settings, be "No style", or be one from the style library.
+
+Until the user picks something, and for calls without `preset`, Glaze uses the open chat's connection and the image settings, as before. If the chosen connection is deleted, the call falls back to the chat's. A `preset` that the manifest doesn't declare, or declares for the other kind of call, fails with `unknown_preset`. Glaze stores the pick with the plugin's other settings; the plugin doesn't need to read it.
+
+Preset settings appeared in Glaze 0.9.0 (Nightly). Older versions don't know these types and won't install the plugin, so set `minGlazeVersion` to `0.9.0`.
 
 ## A full example
 
