@@ -710,8 +710,8 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
         isLast: isLast,
         onToggleFolder: (enabled) => _toggleFolder(folder, enabled),
         onOptions: () => _showFolderOptions(folder),
-      onEdit: _openBlockEditorFor,
-      onToggleBlock: _setBlockEnabled,
+        onEdit: _openBlockEditorFor,
+        onToggleBlock: _setBlockEnabled,
         onSelectBlock: (blockId) => _selectFolderBlock(folder, blockId),
         onStash: (block) => _stashBlock(block.id),
         onMoveBlockIn: (blockId) => _moveBlockIntoFolder(blockId, folder),
@@ -993,6 +993,18 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
   }
 
   Widget _buildAdvancedPanel() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _advancedGroup(_buildReasoningSection()),
+        _advancedGroup(_buildNoAssistantSection()),
+        _advancedGroup(_buildImpersonationSection()),
+      ],
+    );
+  }
+
+  /// One bordered card inside Advanced Settings.
+  Widget _advancedGroup(List<Widget> children) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       child: GlassSurface(
@@ -1002,63 +1014,66 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
           padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const _SectionLabel('Reasoning', helpTerm: 'preset-reasoning'),
-              const SizedBox(height: 8),
-              _SettingsToggle(
-                label: 'label_parse_inline_reasoning'.tr(),
-                description: 'desc_parse_inline_reasoning'.tr(),
-                value: _parseInlineReasoning,
-                helpTerm: 'preset-reasoning-inline',
-                onChanged: (v) {
-                  setState(() => _parseInlineReasoning = v);
-                  _scheduleSave();
-                },
-              ),
-              if (_parseInlineReasoning) ...[
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: GlazeTextField(
-                        controller: _reasoningStartCtrl,
-                        hint: '<think>',
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: GlazeTextField(
-                        controller: _reasoningEndCtrl,
-                        hint: '</think>',
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-              const SizedBox(height: 20),
-              ..._buildNoAssistantSection(),
-              const SizedBox(height: 20),
-              _SectionLabel('section_impersonation'.tr()),
-              const SizedBox(height: 8),
-              Text(
-                'preset_impersonation_desc'.tr(),
-                style: TextStyle(
-                  color: context.cs.onSurfaceVariant,
-                  fontSize: 12,
-                ),
-              ),
-              const SizedBox(height: 8),
-              GlazeTextField(
-                controller: _impersonationPromptCtrl,
-                hint: '[Write {{user}}\'s next message.]',
-                minLines: 2,
-                maxLines: 5,
-              ),
-            ],
+            children: children,
           ),
         ),
       ),
     );
+  }
+
+  List<Widget> _buildReasoningSection() {
+    return [
+      const _SectionLabel('Reasoning', helpTerm: 'preset-reasoning'),
+      const SizedBox(height: 8),
+      _SettingsToggle(
+        label: 'label_parse_inline_reasoning'.tr(),
+        description: 'desc_parse_inline_reasoning'.tr(),
+        value: _parseInlineReasoning,
+        helpTerm: 'preset-reasoning-inline',
+        onChanged: (v) {
+          setState(() => _parseInlineReasoning = v);
+          _scheduleSave();
+        },
+      ),
+      if (_parseInlineReasoning) ...[
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: GlazeTextField(
+                controller: _reasoningStartCtrl,
+                hint: '<think>',
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: GlazeTextField(
+                controller: _reasoningEndCtrl,
+                hint: '</think>',
+              ),
+            ),
+          ],
+        ),
+      ],
+    ];
+  }
+
+  List<Widget> _buildImpersonationSection() {
+    return [
+      _SectionLabel('section_impersonation'.tr()),
+      const SizedBox(height: 8),
+      Text(
+        'preset_impersonation_desc'.tr(),
+        style: TextStyle(color: context.cs.onSurfaceVariant, fontSize: 12),
+      ),
+      const SizedBox(height: 8),
+      GlazeTextField(
+        controller: _impersonationPromptCtrl,
+        hint: '[Write {{user}}\'s next message.]',
+        minLines: 2,
+        maxLines: 5,
+      ),
+    ];
   }
 
   /// The Vue preset's "Prompt Postprocessing" group: NoAssistant and the
@@ -1949,8 +1964,7 @@ class _AuthorsNoteBlockEditor extends ConsumerWidget {
             context,
             charId: charId,
             content: content,
-            hint:
-                "Author's note content is tied to a chat. Open a chat to edit it.",
+            hint: "Author's note content is tied to a chat. Open a chat to edit it.",
             onEdit: () =>
                 showAuthorsNoteSheet(context, charId, presetId: presetId),
           ),
@@ -2068,7 +2082,11 @@ class _GuidedGenerationBlockEditor extends StatelessWidget {
   final PresetBlock block;
   final String generationPrompt;
   final String impersonationPrompt;
-  final void Function(PresetBlock block, String generation, String impersonation)
+  final void Function(
+    PresetBlock block,
+    String generation,
+    String impersonation,
+  )
   onSave;
 
   const _GuidedGenerationBlockEditor({
@@ -2159,11 +2177,7 @@ class _GuidedGenerationBlockEditor extends StatelessWidget {
           final blockJson = Map<String, dynamic>.from(values)
             ..remove(_generationKey)
             ..remove(_impersonationKey);
-          onSave(
-            PresetBlock.fromJson(blockJson),
-            generation,
-            impersonation,
-          );
+          onSave(PresetBlock.fromJson(blockJson), generation, impersonation);
         },
       ),
     );
