@@ -226,15 +226,13 @@ void main() {
       expect(block.type.isRunnable, isTrue);
     });
 
-    test(
-      'rewrite runs without a panel result; accumulation has no runtime',
-      () {
-        expect(BlockType.rewrite.isRunnable, isTrue);
-        expect(BlockType.rewrite.hasPanelResult, isFalse);
-        expect(BlockType.accumulation.isRunnable, isFalse);
-        expect(BlockType.script.isRunnable, isTrue);
-      },
-    );
+    test('rewrite and accumulation run without a panel result', () {
+      expect(BlockType.rewrite.isRunnable, isTrue);
+      expect(BlockType.rewrite.hasPanelResult, isFalse);
+      expect(BlockType.accumulation.isRunnable, isTrue);
+      expect(BlockType.accumulation.hasPanelResult, isFalse);
+      expect(BlockType.script.isRunnable, isTrue);
+    });
   });
 
   group('upstream round trip', () {

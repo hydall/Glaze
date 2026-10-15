@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:collection/collection.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/block_config.dart';
@@ -68,8 +71,9 @@ class ExtBlocksPanelBuilder {
   /// so only those blocks can ever fill a placeholder here. A user-only block
   /// stores its result under the user message (deliberately panel-less), a
   /// `periodic` block stores nothing at all, a `rewrite` block changes the
-  /// message instead of leaving a result, and `accumulation` blocks have no
-  /// runtime yet — listing them would leave a row stuck on "pending" forever,
+  /// message instead of leaving a result, and an `accumulation` block stores
+  /// state only under a message carrying its updater — listing them would
+  /// leave a row stuck on "pending" forever,
   /// with a run button that either re-binds the block to the wrong message or
   /// writes an error card.
   ///
@@ -122,7 +126,12 @@ class ExtBlocksPanelBuilder {
     return [
       for (final cfg in enabledConfigs)
         if (dbByBlockId[cfg.id] != null)
-          {...dbByBlockId[cfg.id]!.toMap(), 'manualOnly': cfg.manualOnly}
+          {
+            ...dbByBlockId[cfg.id]!.toMap(),
+            if (cfg.type == BlockType.accumulation)
+              'content': accumulationPanelHtml(dbByBlockId[cfg.id]!.content),
+            'manualOnly': cfg.manualOnly,
+          }
         else if (_canPlaceholder(cfg))
           {
             'blockId': cfg.id,
@@ -140,6 +149,15 @@ class ExtBlocksPanelBuilder {
   /// automatic `afterAssistant` chain would run is not finished. Manual-only
   /// blocks are excluded — Run All never runs them, so a panel holding nothing
   /// but a manual placeholder would offer a button that does nothing.
+  /// An accumulation block's YAML state as the panel shows it: kept as
+  /// written, line breaks and indentation included.
+  @visibleForTesting
+  static String accumulationPanelHtml(String yaml) {
+    if (yaml.trim().isEmpty) return '';
+    return '<pre class="ext-block-state">'
+        '${const HtmlEscape(HtmlEscapeMode.element).convert(yaml)}</pre>';
+  }
+
   static bool canRunAll(List<Map<String, dynamic>> blocks) {
     return blocks.any((b) {
       if (b['manualOnly'] == true) return false;

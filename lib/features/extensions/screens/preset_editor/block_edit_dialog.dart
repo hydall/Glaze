@@ -1,8 +1,10 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../../shared/widgets/glaze_toast.dart';
 import '../../../../shared/widgets/glaze_scaffold.dart';
 import '../../../../shared/widgets/menu_group.dart';
 import '../../../../shared/widgets/sheet_view.dart';
@@ -12,6 +14,7 @@ import '../../models/block_injection.dart';
 import '../../models/block_modes.dart';
 import '../../models/connection_profiles.dart';
 import '../../models/extension_context_policy.dart';
+import '../../services/accumulation/accumulation_service.dart';
 import '../../widgets/extension_context_policy_editor.dart';
 import 'widgets/block_type_picker.dart';
 import 'sections/upstream_block_sections.dart';
@@ -217,7 +220,10 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
       keywordIsRegex: _keywordIsRegex,
       hideDisplay: _hideDisplay,
       background: _background,
-      injectTarget: _injectTarget,
+      // Accumulation state only ever goes in as a prompt block.
+      injectTarget: _type == BlockType.accumulation
+          ? InjectionTarget.prompt
+          : _injectTarget,
       applyRegex: _applyRegex,
       injectionRole: _injectionRole,
       injectionPosition: _injectionPosition,
@@ -327,6 +333,12 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
                     description: 'block_updater_name_desc'.tr(),
                     controller: _updaterNameController,
                   ),
+                if (_type == BlockType.accumulation)
+                  MenuItem(
+                    icon: Icons.content_copy_rounded,
+                    label: 'extblocks_accumulation_copy_prompt'.tr(),
+                    onTap: _copyUpdaterPrompt,
+                  ),
                 MenuSwitchItem(
                   label: 'block_manual_only_title'.tr(),
                   description: 'block_manual_only_sub'.tr(),
@@ -371,9 +383,10 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
             ),
             // Placement only means something for a result injected as a
             // prompt block; one appended to replies sits where they are.
-            if (_type == BlockType.generated &&
-                _inject &&
-                _injectTarget == InjectionTarget.prompt)
+            if (_inject &&
+                (_type == BlockType.accumulation ||
+                    (_type == BlockType.generated &&
+                        _injectTarget == InjectionTarget.prompt)))
               BlockInjectionGroup(
                 role: _injectionRole,
                 position: _injectionPosition,
@@ -581,6 +594,13 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
           ),
         ],
       ],
+      if (_type == BlockType.accumulation)
+        MenuSwitchItem(
+          label: 'block_inject_title'.tr(),
+          description: 'block_inject_accumulation_desc'.tr(),
+          value: _inject,
+          onChanged: (v) => setState(() => _inject = v),
+        ),
       if (_usesLlm)
         MenuSwitchItem(
           label: 'block_stream_title'.tr(),
@@ -675,8 +695,23 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
         : BlockTrigger.afterAssistant;
   }
 
-  /// Whether this type produces something for the reader at all. Rewrite and
-  /// accumulation blocks are editable but have no runtime yet.
+  /// The original editor's "copy default prompt": how the model should write
+  /// this block's updater.
+  Future<void> _copyUpdaterPrompt() async {
+    await Clipboard.setData(
+      ClipboardData(
+        text: accumulationUpdaterPrompt(
+          _nameController.text,
+          _updaterNameController.text,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    GlazeToast.show(context, 'extblocks_accumulation_prompt_copied'.tr());
+  }
+
+  /// Whether this type produces something for the reader at all. A rewrite
+  /// changes the message and an accumulation block keeps state instead.
   bool get _producesContent =>
       _type == BlockType.generated || _type == BlockType.script;
 

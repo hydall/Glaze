@@ -195,7 +195,11 @@ class InfoBlockInjector {
       '{{name}}',
       blockConfig.name,
     );
-    if (template.isEmpty) return expanded;
+    // Accumulation state is stored bare and always goes in under its block's
+    // name, as the original injects it.
+    if (template.isEmpty && blockConfig.type != BlockType.accumulation) {
+      return expanded;
+    }
 
     final tag = blockTagName(blockConfig, template);
     final wrappedPattern = RegExp(

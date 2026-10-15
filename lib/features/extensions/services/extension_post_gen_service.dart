@@ -17,6 +17,7 @@ import '../models/info_block.dart';
 import '../providers/extension_presets_provider.dart';
 import '../providers/extensions_settings_provider.dart';
 import '../providers/info_blocks_provider.dart';
+import 'accumulation/accumulation_service.dart';
 import 'info_block_service.dart';
 import 'rewrite/rewrite_service.dart';
 import 'blocks/block_processor.dart';
@@ -119,12 +120,17 @@ class ExtensionPostGenService {
     final where = respectTriggerConditions
         ? _conditionsFor(messages, messageId, isUser: false)
         : null;
-    final blocks = _blockProcessor.selectBlocks(
-      preset,
-      BlockTrigger.afterAssistant,
-      where: where,
-    );
-    if (blocks.isEmpty) return false;
+    final blocks = _blockProcessor
+        .selectBlocks(preset, BlockTrigger.afterAssistant, where: where)
+        .where((b) => b.type != BlockType.accumulation)
+        .toList();
+    if (blocks.isEmpty &&
+        ExtBlocksAccumulator.blocksFor(
+          preset,
+          BlockTrigger.afterAssistant,
+        ).isEmpty) {
+      return false;
+    }
 
     onStarted?.call();
 
@@ -441,6 +447,36 @@ class ExtensionPostGenService {
     final blockConfig = preset.blocks.where((b) => b.id == blockId).firstOrNull;
     if (blockConfig == null) return;
 
+    final side =
+        messages.where((m) => m.id == messageId).firstOrNull?.role == 'user'
+        ? BlockTrigger.afterUser
+        : BlockTrigger.afterAssistant;
+    Future<void> rebuildAccumulation() => _ref
+        .read(extBlocksAccumulatorProvider)
+        .rebuildForMessage(
+          preset: preset,
+          side: side,
+          sessionId: sessionId,
+          messageId: messageId,
+          swipeId: swipeId,
+          agentSwipeId: agentSwipeId,
+          messages: messages,
+        );
+
+    // An accumulation block has no run of its own: running it again means
+    // rebuilding the message's state from its updaters.
+    if (blockConfig.type == BlockType.accumulation) {
+      await rebuildAccumulation();
+      _refreshPanelForMessage(
+        charId,
+        sessionId,
+        messageId,
+        swipeId,
+        agentSwipeId,
+      );
+      return;
+    }
+
     final cancelToken = _startBlockRun();
 
     final reuseBlockId = await _statusTracker.dedupeForConfig(
@@ -470,6 +506,10 @@ class ExtensionPostGenService {
 
       if (block != null) {
         _ref.read(infoBlocksProvider(sessionId).notifier).addOrReplace(block);
+      }
+      // A new generated result may carry a different updater.
+      if (blockConfig.type == BlockType.generated && !cancelToken.isCancelled) {
+        await rebuildAccumulation();
       }
     } finally {
       _finishBlockRun(cancelToken);
@@ -707,6 +747,34 @@ class ExtensionPostGenService {
           );
     }
 
+    // The original's first accumulation pass reads the message as it came;
+    // the state is rebuilt from the one before it, so a re-run applies each
+    // update once.
+    final accumulator = _ref.read(extBlocksAccumulatorProvider);
+    final accumulators = ExtBlocksAccumulator.blocksFor(preset, trigger);
+    final accumulationTarget = (
+      sessionId: sessionId,
+      messageId: messageId,
+      swipeId: swipeId,
+      agentSwipeId: agentSwipeId,
+      messages: messages,
+    );
+    if (accumulators.isNotEmpty) {
+      await accumulator.resetForMessage(
+        blocks: accumulators,
+        sessionId: sessionId,
+        messageId: messageId,
+        swipeId: swipeId,
+        agentSwipeId: agentSwipeId,
+      );
+      await accumulator.accumulate(
+        blocks: accumulators,
+        target: accumulationTarget,
+        text:
+            messages.where((m) => m.id == messageId).firstOrNull?.content ?? '',
+      );
+    }
+
     await runScripts(beforeScripts);
     await runRewrites(beforeRewrites);
     if (cancelToken.isCancelled) return;
@@ -718,6 +786,7 @@ class ExtensionPostGenService {
       where: (b) =>
           (where?.call(b) ?? true) &&
           b.type != BlockType.rewrite &&
+          b.type != BlockType.accumulation &&
           !isPhasedScript(b),
       runBlock: ({required blockConfig, required previousOutput}) =>
           runOne(blockConfig, previousOutput),
@@ -745,6 +814,21 @@ class ExtensionPostGenService {
 
     await runRewrites(afterRewrites);
     await runScripts(afterScripts);
+
+    // The second pass reads the generated blocks now under the message.
+    if (accumulators.isNotEmpty && !cancelToken.isCancelled) {
+      await accumulator.accumulate(
+        blocks: accumulators,
+        target: accumulationTarget,
+        text: await accumulator.generatedOutput(
+          preset: preset,
+          sessionId: sessionId,
+          messageId: messageId,
+          swipeId: swipeId,
+          agentSwipeId: agentSwipeId,
+        ),
+      );
+    }
   }
 
   /// The keyword / period check for the message [messageId] in [messages].
@@ -836,11 +920,11 @@ class ExtensionPostGenService {
           reason: 'Rewrite blocks rewrite the message and have no panel run.',
         );
       case BlockType.accumulation:
+        // Accumulation state is rebuilt from updaters around the chain, never
+        // by a panel run.
         return UnsupportedBlockHandler(
           markBlockError: _markContextBlockError,
-          reason:
-              'Accumulation blocks can be edited and exported, but are not '
-              'executed yet.',
+          reason: 'Accumulation blocks are updated by their updater block.',
         );
     }
   }
