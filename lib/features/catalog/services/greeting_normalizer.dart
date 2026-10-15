@@ -45,6 +45,35 @@ NormalizedGreetings normalizeGreetings({
   );
 }
 
+/// The greetings for a **locally extracted** JanitorAI card.
+///
+/// The chat object the capture created and the catalog metadata are the
+/// sources; the assistant turn in the captured prompt ([captured]) is a
+/// **fallback**, used only when neither of the other two carried a greeting.
+///
+/// The prompt always opens on one of the greetings the chat object already
+/// carries, so folding it in unconditionally listed that greeting a second
+/// time. Worse, [normalizeGreetings] could not fold the two away: the trigger
+/// can write lore into the first message, so the prompt's copy read as a
+/// different greeting and the opening line appeared twice. A fully withheld
+/// greeting survives only in the prompt, so it stays the last resort rather
+/// than an extra candidate.
+NormalizedGreetings normalizeExtractedGreetings({
+  List<String> chat = const [],
+  List<String?> catalog = const [],
+  String captured = '',
+}) {
+  final sources = <String?>[...chat, ...catalog];
+  final hasGreeting = sources.any((g) => (g ?? '').trim().isNotEmpty);
+  return normalizeGreetings(
+    primary: sources.isEmpty ? null : sources.first,
+    others: [
+      ...sources.skip(1),
+      if (!hasGreeting) captured,
+    ],
+  );
+}
+
 /// The strings in [value] when it is a list of them, else nothing.
 ///
 /// Providers answer these fields with a list, a null, an empty list, or (for a

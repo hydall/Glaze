@@ -284,17 +284,19 @@ class JanitorExtractor {
 
       // Greetings, best source first: the chat object the capture created (it
       // carries them verbatim even when a closed card withholds them from
-      // /hampter/characters), then the catalog metadata, then the assistant turn
-      // in the captured prompt — which is the character's opening line and the
-      // only place a fully withheld greeting survives.
-      final normalized = normalizeGreetings(
-        primary: capture.greetings.isEmpty ? null : macro(capture.greetings.first),
-        others: [
-          ...capture.greetings.skip(1).map(macro),
-          if (meta?['first_message'] is String) macro(meta!['first_message'] as String),
-          ...greetingList(meta?['first_messages']).map(macro),
-          macro(extractFirstMessage(cardSource)),
-        ],
+      // /hampter/characters), then the catalog metadata. The assistant turn in
+      // the captured prompt — the character's opening line — is only a
+      // fallback: it is the greeting the chat already opened on, so folding it
+      // in beside that one listed the opening line twice (see
+      // [normalizeExtractedGreetings]).
+      final normalized = normalizeExtractedGreetings(
+        chat: capture.greetings.map(macro).toList(),
+        catalog: [
+          if (meta?['first_message'] is String)
+            meta!['first_message'] as String,
+          ...greetingList(meta?['first_messages']),
+        ].map(macro).toList(),
+        captured: macro(extractFirstMessage(cardSource)),
       );
       final firstMes = normalized.firstMes;
       final alternateGreetings = normalized.alternates;
