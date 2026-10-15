@@ -1813,6 +1813,12 @@ null-origin frame cannot fetch them; only the plugin's own package is read, so
 a panel cannot pull in another plugin's files. Layout insets are exposed as
 `--glaze-inset-*` CSS variables. The top bar inset is the status bar alone:
 panels draw over the app's header, which is cut out where they draw.
+The soft keyboard lays over the WebView and shrinks only the page's visual
+viewport, never a frame's own, so the panel frame holding the focus is fitted
+to the visual viewport while the keyboard is up; plugins laid out on `100vh`,
+`innerHeight` or their own `visualViewport` stay above it. That frame's
+insets are measured from the keyboard's top and carry its height as
+`keyboard` (`--glaze-inset-keyboard`); other panels keep the full page.
 A panel's small fixed boxes (floating buttons) are kept between the status
 bar and the message box by the SDK — after a drag, when they appear and when
 the insets settle — so one dropped on the gesture strip stays reachable;

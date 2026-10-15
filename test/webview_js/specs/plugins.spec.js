@@ -697,3 +697,69 @@ test('a full-screen panel is left where the plugin put it', async ({ page }) => 
     .locator('#big').evaluate((el) => el.style.cssText);
   expect(style).toBe('position: fixed; inset: 0px; background: rgb(0, 0, 0);');
 });
+
+// Stands in for the WebView's visual viewport, which the soft keyboard
+// shrinks while the page keeps its full size. Plugin frames keep their own.
+async function fakeKeyboard(page) {
+  await page.addInitScript(() => {
+    if (window !== window.top) return;
+    const vv = new EventTarget();
+    let kb = 0;
+    Object.defineProperties(vv, {
+      height: { get: () => window.innerHeight - kb },
+      offsetTop: { get: () => 0 },
+      scale: { get: () => 1 },
+    });
+    Object.defineProperty(window, 'visualViewport', { configurable: true, get: () => vv });
+    window.__keyboard = (px) => { kb = px; vv.dispatchEvent(new Event('resize')); };
+  });
+}
+
+// A messenger the way Tavo panels write one: a composer pinned to the bottom
+// of the frame's own viewport.
+function composerPanel(id) {
+  return plugin(id, {
+    methods: ['ui.toast'],
+    panels: [{
+      id: 'chat',
+      placement: 'chat',
+      html: `
+        <input id="field" style="position:fixed;left:0;bottom:0;width:200px;height:40px">
+        <script>
+          window.addEventListener('resize', () => {
+            glaze.ui.toast(innerHeight + '|' + glaze.ui.insets().keyboard + '|' + glaze.ui.insets().bottomInput);
+          });
+        <\/script>`,
+    }],
+  });
+}
+
+const panelFrame = (page, id) => page.locator(`iframe[data-glaze-plugin="${id}"]`);
+
+test('the focused panel is fitted above the keyboard and back', async ({ page }) => {
+  await page.setViewportSize({ width: 400, height: 700 });
+  await fakeKeyboard(page);
+  await setup(page, [composerPanel('p')]);
+  await expect.poll(() => panelFrame(page, 'p').evaluate((el) => el.style.clipPath)).toContain('path(');
+  await page.frameLocator('iframe[data-glaze-plugin="p"]').frameLocator('iframe').locator('#field').focus();
+
+  await page.evaluate(() => window.__keyboard(300));
+  await expect.poll(() => panelFrame(page, 'p').evaluate((el) => el.style.height)).toBe('400px');
+  // The composer's 80 px are inside the 300 px the keyboard took.
+  await expect.poll(() => toasts(page)).toEqual(['400|300|0']);
+
+  await page.evaluate(() => window.__keyboard(0));
+  await expect.poll(() => panelFrame(page, 'p').evaluate((el) => el.style.height)).toBe('100%');
+  await expect.poll(() => toasts(page)).toEqual(['400|300|0', '700|0|80']);
+});
+
+test('the keyboard of something else leaves a panel full size', async ({ page }) => {
+  await page.setViewportSize({ width: 400, height: 700 });
+  await fakeKeyboard(page);
+  await setup(page, [composerPanel('p')]);
+  await expect.poll(() => panelFrame(page, 'p').evaluate((el) => el.style.clipPath)).toContain('path(');
+  await page.evaluate(() => window.__keyboard(300));
+  await page.waitForTimeout(300);
+  expect(await panelFrame(page, 'p').evaluate((el) => el.style.height)).toBe('100%');
+  expect(await toasts(page)).toEqual([]);
+});

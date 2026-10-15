@@ -650,9 +650,9 @@
   glaze.plugin = Object.freeze(plugin);
 
   /* ---------- UI insets ---------- */
-  var insets = Object.freeze(Object.assign({ topSafe: 0, topBar: 0, bottomInput: 0, bottomSafe: 0 }, boot.insets || {}));
+  var insets = Object.freeze(Object.assign({ topSafe: 0, topBar: 0, bottomInput: 0, bottomSafe: 0, keyboard: 0 }, boot.insets || {}));
   var insetListeners = new Set();
-  var INSET_VARS = { topSafe: 'top-safe', topBar: 'top-bar', bottomInput: 'bottom-input', bottomSafe: 'bottom-safe' };
+  var INSET_VARS = { topSafe: 'top-safe', topBar: 'top-bar', bottomInput: 'bottom-input', bottomSafe: 'bottom-safe', keyboard: 'keyboard' };
   function applyInsetVars() {
     var root = document.documentElement;
     // A converted plugin gets its own app's names from the compat layer.
@@ -872,7 +872,7 @@
   function keepFloatersReachable() {
     var MARGIN = 8;
     var MAX_SHARE = 0.5;
-    // A bottom inset this tall is the keyboard or a drawer: temporary, and
+    // The keyboard, or a bottom inset this tall (a drawer): temporary, and
     // moving buttons out from under it would strand them mid-screen.
     var MAX_RESTING_INSET = 0.35;
     var dragged = null;
@@ -921,7 +921,7 @@
 
     var scan = function () {
       scanTimer = 0;
-      if ((insets.bottomInput || 0) > window.innerHeight * MAX_RESTING_INSET) return;
+      if (insets.keyboard || (insets.bottomInput || 0) > window.innerHeight * MAX_RESTING_INSET) return;
       known.forEach(function (el) { if (!el.isConnected) known.delete(el); });
       var seen = new Set(known);
       var walk = function (el, depth) {

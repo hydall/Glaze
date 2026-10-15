@@ -28,7 +28,7 @@
   var wrappers = new Map(); // wrapper Window -> frame state
   var replySeq = 0;
   var pendingReplies = new Map();
-  var insets = { topSafe: 0, topBar: 0, bottomInput: 0, bottomSafe: 0 };
+  var insets = { topSafe: 0, topBar: 0, bottomInput: 0, bottomSafe: 0, keyboard: 0 };
   var messageList = []; // [{id, role}] in chat order
   var busy = false;
   var currentChatId = null;
@@ -256,6 +256,7 @@
   function removeFrame(state) {
     if (state.win) frames.delete(state.win);
     wrappers.delete(state.wrapper);
+    if (fitted === state) fitted = null;
     try { state.iframe.remove(); } catch (e) { /* already detached */ }
     if (state.holes) scheduleHoles();
   }
@@ -502,17 +503,82 @@
       topBar: round(safe.top),
       bottomInput: round(Math.max(safe.bottom, parseFloat(container.style.paddingBottom) || 0)),
       bottomSafe: round(safe.bottom),
+      keyboard: 0,
     };
     if (next.topSafe === insets.topSafe && next.topBar === insets.topBar &&
         next.bottomInput === insets.bottomInput && next.bottomSafe === insets.bottomSafe) return;
     insets = next;
-    wrappers.forEach(function (f) { if (f.kind === 'panel') send(f, { type: P + 'insets', insets: insets }); });
+    wrappers.forEach(function (f) { if (f.kind === 'panel') sendInsets(f); });
   }
 
   var insetRaf = 0;
   function scheduleInsets() {
     if (insetRaf) return;
     insetRaf = requestAnimationFrame(function () { insetRaf = 0; refreshInsets(); });
+  }
+
+  // A frame fitted above the keyboard measures its insets from the
+  // keyboard's top edge, which already covers the gesture strip.
+  function insetsFor(f) {
+    var kb = f.keyboard || 0;
+    if (!kb) return insets;
+    return Object.assign({}, insets, {
+      bottomInput: Math.max(0, insets.bottomInput - kb),
+      bottomSafe: Math.max(0, insets.bottomSafe - kb),
+      keyboard: kb,
+    });
+  }
+
+  function sendInsets(f) {
+    send(f, { type: P + 'insets', insets: insetsFor(f) });
+  }
+
+  /* ---------- Keyboard ---------- */
+  // The soft keyboard lays over the WebView instead of resizing it, and only
+  // this page's visual viewport shrinks for it: a frame's own viewport never
+  // does. A panel laid out on 100vh, innerHeight or its visualViewport would
+  // keep its fields under the keyboard, so the panel frame that has the focus
+  // is fitted to the visual viewport while the keyboard is up, the way a
+  // browser resizes a page for its own keyboard. Other panels keep the whole
+  // page: the keyboard of the message box or of a message edit is not
+  // theirs, and resizing them would move their buttons.
+  var KEYBOARD_MIN_PX = 8;
+  var fitted = null;
+
+  function fit(f, view) {
+    var style = f.iframe.style;
+    if (view) {
+      style.top = view.top + 'px';
+      style.height = view.height + 'px';
+    } else {
+      style.top = '0';
+      style.height = '100%';
+    }
+    var kb = view ? view.keyboard : 0;
+    if (kb === (f.keyboard || 0)) return;
+    f.keyboard = kb;
+    sendInsets(f);
+  }
+
+  function refreshKeyboard() {
+    var vv = window.visualViewport;
+    var kb = vv ? Math.round(window.innerHeight - vv.height) : 0;
+    var target = null;
+    if (kb >= KEYBOARD_MIN_PX) {
+      var active = document.activeElement;
+      wrappers.forEach(function (f) { if (f.kind === 'panel' && f.iframe === active) target = f; });
+    }
+    if (fitted && fitted !== target) fit(fitted, null);
+    fitted = target;
+    // Top as well as height: a browser that panned the page to reveal the
+    // caret moved the visible area down by offsetTop.
+    if (target) fit(target, { top: Math.max(0, Math.round(vv.offsetTop)), height: Math.round(vv.height), keyboard: kb });
+  }
+
+  var keyboardRaf = 0;
+  function scheduleKeyboard() {
+    if (keyboardRaf) return;
+    keyboardRaf = requestAnimationFrame(function () { keyboardRaf = 0; refreshKeyboard(); });
   }
 
   /* ---------- Message panels and message actions ---------- */
@@ -665,6 +731,14 @@
         .observe(container, { childList: true, subtree: true });
     }
     window.addEventListener('resize', scheduleInsets);
+    window.addEventListener('resize', scheduleKeyboard);
+    // Focus going into a frame blurs this window; coming back focuses it.
+    window.addEventListener('blur', scheduleKeyboard);
+    window.addEventListener('focus', scheduleKeyboard);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', scheduleKeyboard);
+      window.visualViewport.addEventListener('scroll', scheduleKeyboard);
+    }
     refreshInsets();
   }
 
