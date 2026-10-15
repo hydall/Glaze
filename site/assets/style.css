@@ -588,6 +588,85 @@ a.article-author:hover span { color: var(--accent-text); }
   .article-download { position: static; }
 }
 
+/* Code and tables, which docs pages carry. */
+.article-body pre {
+  margin: 0 0 16px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.28);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.article-body pre code { padding: 0; border-radius: 0; background: none; font-size: inherit; color: var(--on); }
+.table-wrap { margin: 0 0 16px; overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; }
+.article-body table { width: 100%; border-collapse: collapse; font-size: 14px; line-height: 1.5; }
+.article-body th, .article-body td { padding: 8px 12px; text-align: left; vertical-align: top; }
+.article-body th { color: var(--on); font-weight: 600; background: rgba(255, 255, 255, 0.04); }
+.article-body tr + tr td, .article-body tbody tr:first-child td { border-top: 1px solid var(--line); }
+.article-body td code { white-space: nowrap; }
+
+/* ── Docs ───────────────────────────────────────────────────────────────── */
+
+.docs-list { display: grid; gap: 16px; max-width: 820px; }
+.docs-group a.row:hover .tile-label { color: var(--accent-text); }
+.doc-page { max-width: var(--container); }
+/* The group's pages in a sticky column on the left, the open one with its
+   headings under it. */
+.doc-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 24px; align-items: start; }
+.doc-nav {
+  position: sticky;
+  top: calc(var(--topbar-h) + 16px);
+  max-height: calc(100vh - var(--topbar-h) - 32px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.doc-nav .caps {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--accent-text);
+}
+.doc-nav .caps .ms { font-size: 16px; }
+.doc-nav-link {
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--on-var);
+}
+.doc-nav-link:hover { color: var(--on); background: rgba(255, 255, 255, 0.05); }
+.doc-nav-link.active { color: var(--on); background: rgba(var(--accent-rgb), 0.16); }
+.doc-toc { display: flex; flex-direction: column; margin: 4px 0 8px 12px; padding-left: 10px; border-left: 1px solid var(--line); }
+.doc-toc-link { padding: 4px 8px; font-size: 13px; line-height: 1.4; color: var(--on-dim); border-radius: 8px; }
+.doc-toc-link:hover { color: var(--on); }
+.doc-main { min-width: 0; max-width: 860px; }
+.doc-steps { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+.doc-step { display: flex; flex-direction: column; gap: 4px; padding: 14px 18px; transition: border-color 0.2s ease; }
+.doc-step:hover { border-color: rgba(var(--accent-rgb), 0.55); }
+.doc-step.next { text-align: right; }
+.doc-step .caps { font-size: 12px; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase; color: var(--muted); }
+
+@media (max-width: 900px) {
+  .doc-layout { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .doc-nav { position: static; max-height: none; flex-direction: row; flex-wrap: wrap; gap: 6px; }
+  .doc-nav .caps { width: 100%; margin: 0 0 2px 4px; }
+  .doc-nav-link { padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 13px; }
+  .doc-toc { display: none; }
+}
+@media (max-width: 560px) {
+  .doc-steps { grid-template-columns: 1fr; }
+  .doc-step.next { text-align: left; }
+}
+
 /* ── Screenshots ────────────────────────────────────────────────────────── */
 
 .shots-group { margin-bottom: 28px; }
@@ -913,7 +992,8 @@ body.viewer-open { overflow: hidden; }
     flex-direction: column;
     align-items: center;
     gap: 2px;
-    flex: 1;
+    /* Sized to the label: equal cells cut the long ones into their neighbours. */
+    flex: 1 1 auto;
     min-width: 0;
     color: var(--secondary);
     transition: color 0.125s ease-in-out;
@@ -930,6 +1010,7 @@ body.viewer-open { overflow: hidden; }
   .article { padding: 20px 18px 24px; }
   .article h1 { font-size: 28px; }
   .article-body { font-size: 15px; }
+  .article-body td code { white-space: normal; overflow-wrap: anywhere; }
   .shots.phone .shots-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
   .shots.desktop .shots-grid { grid-template-columns: 1fr; }
   .viewer { grid-template-columns: minmax(0, 1fr); padding: 56px 12px 84px; }

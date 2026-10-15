@@ -2,11 +2,11 @@
   'use strict';
 
   const G = window.GLAZE;
-  const SECTIONS = ['overview', 'articles', 'features', 'screenshots', 'download', 'roadmap', 'resources'];
+  const SECTIONS = ['overview', 'articles', 'docs', 'features', 'screenshots', 'download', 'roadmap', 'resources'];
   // Download is reached through the header button, not a regular tab.
   const TABS = SECTIONS.filter((s) => s !== 'download');
   const LANGS = { ru: 'Русский', en: 'English' };
-  const SECTION_ICONS = { overview: 'home', features: 'widgets', screenshots: 'photo_library', articles: 'article', download: 'download', roadmap: 'timeline', resources: 'link' };
+  const SECTION_ICONS = { overview: 'home', features: 'widgets', screenshots: 'photo_library', articles: 'article', docs: 'menu_book', download: 'download', roadmap: 'timeline', resources: 'link' };
 
   const BRAND = {
     github: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>',
@@ -33,6 +33,8 @@
     shots: 'phone',          // phone | desktop, the Screenshots page's switch
     shot: -1,                // index into visibleShots() shown full screen, -1 when closed
     article: null,           // slug of the article open on the Articles page, null for the list
+    doc: null,               // slug of the docs page open, null for the list
+    docAnchor: null,         // id of the heading the docs page is scrolled to
     nightly: null,           // { run, sha, date, url, assets: [{ name, size, url }] }
     nightlyState: 'idle',    // idle | loading | live | failed
   };
@@ -249,8 +251,9 @@
       </div>`;
 
     $('#tabBar').innerHTML = TABS.map((s) => `<a class="tab" href="#${s}" data-section="${s}">${esc(t('nav_' + s))}</a>`).join('');
+    // The phone bar has less room per tab: a shorter label where one is set.
     $('#navBar').innerHTML = TABS.map((s) => `
-      <a class="nav-item" href="#${s}" data-section="${s}">${ms(SECTION_ICONS[s])}<span>${esc(t('nav_' + s))}</span></a>`).join('');
+      <a class="nav-item" href="#${s}" data-section="${s}">${ms(SECTION_ICONS[s])}<span>${esc(G.ui[state.lang]['navbar_' + s] ?? t('nav_' + s))}</span></a>`).join('');
 
   }
 
@@ -333,9 +336,10 @@
 
   // ── markdown ───────────────────────────────────────────────────────────
 
-  // Enough Markdown for an article: headings, paragraphs, lists, quotes, rules,
-  // images on their own line, and inline bold, italics, code and links. Source
-  // is escaped first, so an article can never inject markup of its own.
+  // Enough Markdown for an article or a docs page: headings, paragraphs,
+  // lists, quotes, rules, images on their own line, fenced code, pipe tables,
+  // and inline bold, italics, code and links. Source is escaped first, so a
+  // page can never inject markup of its own.
   function mdInline(text) {
     const code = [];
     return esc(text)
@@ -349,16 +353,46 @@
       .replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${code[i]}</code>`);
   }
 
+  // A heading's id, for links to it: its words joined by dashes.
+  const headingId = (html) => html.replace(/<[^>]+>/g, '').replace(/&[a-z#0-9]+;/g, '')
+    .toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '');
+
+  // The cells of a table row; a pipe inside `code` is not a border.
+  function tableCells(line) {
+    const cells = [];
+    let cell = '';
+    let code = false;
+    for (const ch of line.trim().replace(/^\||\|$/g, '')) {
+      if (ch === '`') code = !code;
+      if (ch === '|' && !code) { cells.push(cell.trim()); cell = ''; } else cell += ch;
+    }
+    cells.push(cell.trim());
+    return cells;
+  }
+
   function md(src) {
     const lines = src.replace(/\r\n?/g, '\n').split('\n');
     const out = [];
     let i = 0;
-    const isBlockStart = (l) => /^(#{1,6} |> ?|[-*] |\d+\. |---+\s*$|!\[|\s*$)/.test(l);
+    const isBlockStart = (l) => /^(#{1,6} |> ?|[-*] |\d+\. |---+\s*$|!\[|```|\||\s*$)/.test(l);
     while (i < lines.length) {
       const line = lines[i];
       if (!line.trim()) { i++; continue; }
       let m;
-      if ((m = line.match(/^!\[([^\]]*)\]\(([^)\s]+)\)\s*$/))) {
+      if (/^```/.test(line)) {
+        const code = [];
+        i++;
+        while (i < lines.length && !/^```\s*$/.test(lines[i])) code.push(lines[i++]);
+        i++;
+        out.push(`<pre><code>${esc(code.join('\n'))}</code></pre>`);
+      } else if (/^\|/.test(line) && /^\|?[\s:|-]+\|?\s*$/.test(lines[i + 1] || '') && lines[i + 1].includes('-')) {
+        const head = tableCells(line);
+        i += 2;
+        const rows = [];
+        while (i < lines.length && /^\|/.test(lines[i])) rows.push(tableCells(lines[i++]));
+        out.push(`<div class="table-wrap"><table><thead><tr>${head.map((c) => `<th>${mdInline(c)}</th>`).join('')}</tr></thead>`
+          + `<tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${mdInline(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`);
+      } else if ((m = line.match(/^!\[([^\]]*)\]\(([^)\s]+)\)\s*$/))) {
         // A relative path is an article's own file, under articles/.
         const src = /^https?:/.test(m[2]) ? m[2] : `${ROOT}articles/${m[2]}`;
         out.push(`<figure><img src="${esc(src)}" alt="${esc(m[1])}" loading="lazy" decoding="async"></figure>`);
@@ -366,7 +400,8 @@
       } else if ((m = line.match(/^(#{1,6}) +(.*)$/))) {
         // An article's own headings start at h3: h2 is the page title's level.
         const level = Math.min(m[1].length + 1, 6);
-        out.push(`<h${level}>${mdInline(m[2])}</h${level}>`);
+        const text = mdInline(m[2]);
+        out.push(`<h${level} id="${headingId(text)}">${text}</h${level}>`);
         i++;
       } else if (/^---+\s*$/.test(line)) {
         out.push('<hr>');
@@ -482,6 +517,104 @@
         ${content}
       </article>
       ${aside}
+      </div>
+    </div>`;
+  }
+
+  // ── docs ───────────────────────────────────────────────────────────────
+
+  // Pages come in groups (plugins, ...), each page a Markdown file per
+  // language under docs/. #docs/<slug> opens one, #docs/<slug>/<heading id>
+  // one of its headings.
+  const docCache = new Map(); // `${slug}.${lang}` -> html | 'loading' | 'failed'
+  const docPages = () => G.docs.flatMap((g) => g.pages.map((p) => ({ ...p, group: g })));
+
+  async function loadDoc(page) {
+    const key = `${page.slug}.${state.lang}`;
+    if (docCache.has(key)) return;
+    docCache.set(key, 'loading');
+    try {
+      const res = await fetch(`${ROOT}docs/${key}.md`);
+      if (!res.ok) throw new Error(res.status);
+      docCache.set(key, md(await res.text()));
+    } catch {
+      docCache.set(key, 'failed');
+    }
+    if (state.doc === page.slug) {
+      renderDocs();
+      scrollToDocAnchor();
+    }
+  }
+
+  function scrollToDocAnchor(smooth = false) {
+    const el = state.docAnchor && document.getElementById(state.docAnchor);
+    if (el) el.scrollIntoView({ behavior: smooth ? 'smooth' : 'instant', block: 'start' });
+  }
+
+  function renderDocs() {
+    if (!state.doc) {
+      const groups = G.docs.map((g) => group({
+        icon: g.icon,
+        title: pick(g.title),
+        desc: pick(g.lead),
+        cls: 'docs-group',
+        body: g.pages.map((p) => `
+          <a class="row tile-row" href="#docs/${encodeURIComponent(p.slug)}">
+            <span class="tile">${ms(p.icon)}</span>
+            <span class="row-text"><span class="tile-label">${esc(pick(p.title))}</span><span class="tile-sub">${esc(pick(p.lead))}</span></span>
+            ${ms('chevron_right', 'chevron')}
+          </a>`).join(''),
+      })).join('');
+      $('#docs').innerHTML = `<div class="container">
+        ${sectionHead('docs', t('docs_title'), t('docs_lead'))}
+        <div class="docs-list">${groups}</div>
+      </div>`;
+      return;
+    }
+    const pages = docPages();
+    const at = pages.findIndex((p) => p.slug === state.doc);
+    const back = `<a class="text-link article-back" href="#docs">${ms('arrow_back')}${esc(t('docs_back'))}</a>`;
+    if (at < 0) {
+      $('#docs').innerHTML = `<div class="container article-page">${back}<p class="article-status">${esc(t('docs_not_found'))}</p></div>`;
+      return;
+    }
+    const page = pages[at];
+    loadDoc(page);
+    const body = docCache.get(`${page.slug}.${state.lang}`);
+    const ready = body && body !== 'loading' && body !== 'failed';
+    const content = body === 'failed'
+      ? `<p class="article-status warn">${esc(t('docs_failed'))}</p>`
+      : !ready
+      ? `<p class="article-status">${esc(t('docs_loading'))}</p>`
+      : `<div class="article-body doc-body">${body}</div>`;
+    // The page's own headings, under its entry in the sidebar.
+    const toc = ready
+      ? [...body.matchAll(/<h3 id="([^"]*)">(.*?)<\/h3>/g)].map(([, id, html]) =>
+        `<a class="doc-toc-link" href="#docs/${encodeURIComponent(page.slug)}/${encodeURIComponent(id)}" data-doc-anchor="${esc(id)}">${html.replace(/<[^>]+>/g, '')}</a>`).join('')
+      : '';
+    const nav = page.group.pages.map((p) => `
+      <a class="doc-nav-link ${p.slug === page.slug ? 'active' : ''}" href="#docs/${encodeURIComponent(p.slug)}">${esc(pick(p.title))}</a>
+      ${p.slug === page.slug && toc ? `<div class="doc-toc">${toc}</div>` : ''}`).join('');
+    const step = (p, dir) => p && p.group === page.group
+      ? `<a class="group doc-step ${dir}" href="#docs/${encodeURIComponent(p.slug)}" data-glow>
+          <span class="caps">${esc(t(dir === 'prev' ? 'docs_prev' : 'docs_next'))}</span>
+          <span class="tile-label">${esc(pick(p.title))}</span>
+        </a>`
+      : '<span></span>';
+    $('#docs').innerHTML = `<div class="container doc-page">
+      <div class="article-tools">${back}</div>
+      <div class="doc-layout">
+        <aside class="doc-nav">
+          <div class="caps">${ms(page.group.icon)}${esc(pick(page.group.title))}</div>
+          ${nav}
+        </aside>
+        <div class="doc-main">
+          <article class="group article">
+            <h1>${esc(pick(page.title))}</h1>
+            ${content}
+          </article>
+          <nav class="doc-steps">${step(pages[at - 1], 'prev')}${step(pages[at + 1], 'next')}</nav>
+        </div>
       </div>
     </div>`;
   }
@@ -827,6 +960,7 @@
     renderDownload();
     renderRoadmap();
     renderArticles();
+    renderDocs();
     renderResources();
     markActive(state.active);
   }
@@ -886,10 +1020,19 @@
       state.article = article;
       renderArticles();
     }
+    const [doc = null, anchor = null] = id === 'docs' ? hash.split('/').slice(1) : [];
+    const docChanged = id === 'docs' && doc !== state.doc;
+    const anchorChanged = id === 'docs' && anchor !== state.docAnchor;
+    state.docAnchor = anchor;
+    if (docChanged) {
+      state.doc = doc;
+      renderDocs();
+    }
     const changed = id !== state.active;
     showTab(id, animate);
     if (hash.startsWith('roadmap/')) focusReleaseFromHash();
-    else if (changed || articleChanged || !animate) window.scrollTo({ top: 0, behavior: 'instant' });
+    else if (anchor && (docChanged || anchorChanged || changed || !animate)) scrollToDocAnchor(!docChanged && !changed);
+    else if (changed || articleChanged || docChanged || !animate) window.scrollTo({ top: 0, behavior: 'instant' });
   }
 
   function onScroll() {
@@ -920,7 +1063,9 @@
     const link = e.target.closest('a[href^="#"]');
     if (link && link.getAttribute('href') === (location.hash || '#overview')) {
       e.preventDefault();
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      // A link to the heading already in the address goes back to it.
+      if (link.dataset.docAnchor) scrollToDocAnchor(true);
+      else window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
     if (e.target.closest('[data-lang-menu]')) {

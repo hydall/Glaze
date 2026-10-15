@@ -54,6 +54,8 @@ window.GLAZE = {
       nav_features: 'Возможности',
       nav_screenshots: 'Скриншоты',
       nav_articles: 'Статьи',
+      nav_docs: 'Документация',
+      navbar_docs: 'Доки',
       nav_roadmap: 'Роадмап',
       nav_download: 'Скачать',
       nav_resources: 'Ресурсы',
@@ -72,6 +74,15 @@ window.GLAZE = {
       article_copied: 'Ссылка скопирована',
       kind_changelog: 'Чейнджлог',
       kind_news: 'Новости',
+
+      docs_title: 'Документация',
+      docs_lead: 'Как устроен Glaze и как писать для него.',
+      docs_back: 'Вся документация',
+      docs_loading: 'Загружаем страницу…',
+      docs_failed: 'Не удалось загрузить страницу.',
+      docs_not_found: 'Такой страницы нет.',
+      docs_prev: 'Назад',
+      docs_next: 'Дальше',
 
       screenshots_title: 'Как выглядит Glaze',
       screenshots_lead: 'Экраны приложения на телефоне и на ПК. Нажмите на скриншот, чтобы открыть его целиком.',
@@ -196,6 +207,7 @@ window.GLAZE = {
       nav_features: 'Features',
       nav_screenshots: 'Screenshots',
       nav_articles: 'Posts',
+      nav_docs: 'Docs',
       nav_roadmap: 'Roadmap',
       nav_download: 'Download',
       nav_resources: 'Resources',
@@ -214,6 +226,15 @@ window.GLAZE = {
       article_copied: 'Link copied',
       kind_changelog: 'Changelog',
       kind_news: 'News',
+
+      docs_title: 'Docs',
+      docs_lead: 'How Glaze works and how to build for it.',
+      docs_back: 'All docs',
+      docs_loading: 'Loading the page…',
+      docs_failed: 'Could not load the page.',
+      docs_not_found: 'There is no such page.',
+      docs_prev: 'Previous',
+      docs_next: 'Next',
 
       screenshots_title: 'What Glaze looks like',
       screenshots_lead: 'The app on a phone and on a PC. Click a screenshot to see it in full.',
@@ -459,6 +480,53 @@ window.GLAZE = {
   authors: {
     hydall: { name: 'hydall', img: 'hydall.jpg', url: 'https://github.com/hydall' },
   },
+
+  // ── Docs ───────────────────────────────────────────────────────────────────
+  // Groups of pages, in reading order. Body: Markdown in
+  // site/docs/<slug>.<lang>.md, one file per language.
+  docs: [
+    {
+      id: 'plugins',
+      icon: 'widgets',
+      title: { ru: 'Плагины', en: 'Plugins' },
+      lead: {
+        ru: 'Как написать плагин для Glaze: пакет, манифест, разрешения и API glaze.*.',
+        en: 'How to write a Glaze plugin: the package, the manifest, permissions and the glaze.* API.',
+      },
+      pages: [
+        {
+          slug: 'plugins',
+          icon: 'rocket_launch',
+          title: { ru: 'Начало работы', en: 'Getting started' },
+          lead: { ru: 'Что такое плагин, из чего состоит пакет и первый плагин.', en: 'What a plugin is, what goes in a package, and a first plugin.' },
+        },
+        {
+          slug: 'plugins-manifest',
+          icon: 'description',
+          title: { ru: 'Манифест plugin.json', en: 'The plugin.json manifest' },
+          lead: { ru: 'Все поля манифеста: действия, панели, обработчики файлов, настройки и переводы.', en: 'Every manifest field: actions, panels, file handlers, settings and translations.' },
+        },
+        {
+          slug: 'plugins-permissions',
+          icon: 'shield',
+          title: { ru: 'Разрешения и сеть', en: 'Permissions and network' },
+          lead: { ru: 'Что плагин может просить, как пользователь это разрешает и как работает доступ в интернет.', en: 'What a plugin can ask for, how the user grants it, and how internet access works.' },
+        },
+        {
+          slug: 'plugins-runtime',
+          icon: 'bolt',
+          title: { ru: 'Хуки, действия и панели', en: 'Hooks, actions and panels' },
+          lead: { ru: 'Где выполняется код плагина, как он встраивается в отправку и генерацию и как рисует интерфейс.', en: 'Where plugin code runs, how it hooks into sending and generation, and how it draws its interface.' },
+        },
+        {
+          slug: 'plugins-api',
+          icon: 'code',
+          title: { ru: 'Справочник API', en: 'API reference' },
+          lead: { ru: 'Все методы glaze.*: сообщения, переменные, файлы, генерация, сеть, библиотека и интерфейс.', en: 'Every glaze.* method: messages, variables, files, generation, network, the library and the interface.' },
+        },
+      ],
+    },
+  ],
 
   // ── Articles, newest first ─────────────────────────────────────────────────
   // Body: Markdown in site/articles/<slug>.<lang>.md. `langs` lists the
