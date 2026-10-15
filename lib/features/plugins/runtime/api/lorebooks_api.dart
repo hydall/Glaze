@@ -1,8 +1,10 @@
 import '../../../../core/import/st_lorebook_importer.dart';
+import '../../../../core/llm/lorebook_limits.dart';
 import '../../../../core/models/lorebook.dart';
 import '../../../../core/services/st_lorebook_exporter.dart';
 import '../../../../core/state/lorebook_provider.dart';
 import '../../../../core/utils/id_generator.dart';
+import '../../../chat/state/lorebook_coverage_provider.dart';
 import '../../models/plugin_manifest.dart';
 import '../plugin_api.dart';
 import 'library_io.dart';
@@ -15,6 +17,7 @@ Map<String, PluginMethod> lorebooksApi() => {
   'lorebooks.list': libraryRead(PluginPermission.lorebooksRead, _list),
   'lorebooks.get': libraryRead(PluginPermission.lorebooksRead, _get),
   'lorebooks.find': libraryRead(PluginPermission.lorebooksRead, _find),
+  'lorebooks.coverage': libraryRead(PluginPermission.lorebooksRead, _coverage),
   'lorebooks.create': libraryCreate(
     PluginPermission.lorebooksCreate,
     _create,
@@ -61,6 +64,56 @@ Future<Object?> _find(PluginCall c) async {
     for (final b in await _all(c))
       if (nameMatches(b.name, query, match)) b.toJson(),
   ];
+}
+
+/// The engine's own reading of which lorebook entries the open chat will
+/// inject, and why — the same [computeLorebookCoverage] dry run the Prompt
+/// Inspector and the context card use, so a tracker built on it can never
+/// disagree with the prompt the model receives. Reads the chat's messages,
+/// hence both `library.read.lorebooks` (the method's permission) and
+/// `messages`.
+///
+/// `entry.probability` is the one rule the dry run does not reproduce: it
+/// reports a sub-100% entry as it would be at 100%, so the same chat does not
+/// flip between calls.
+Future<Object?> _coverage(PluginCall c) async {
+  await c.require(PluginPermission.messages);
+  final result = await c.ref.read(
+    lorebookCoverageProvider(c.host.charId).future,
+  );
+  final settings = c.ref.read(lorebookSettingsProvider);
+  return {
+    'entries': [
+      for (final e in result.entries)
+        {
+          'id': e.id,
+          'comment': e.comment,
+          'content': e.content,
+          'position': e.position,
+          'order': e.order,
+          'lorebookId': e.lorebookId,
+          'lorebookName': e.lorebookName,
+          'constant': e.constant,
+          'activated': e.activated,
+          'matchedKeys': e.matchedKeys,
+          'matchedSecondaryKeys': e.matchedSecondaryKeys,
+          'matchMessageIndex': e.matchMessageIndex,
+          'cutOff': e.cutOff?.name,
+          'recursionPass': e.recursionPass,
+          'stickyHeld': e.stickyHeld,
+          'onCooldown': e.onCooldown,
+        },
+    ],
+    'totalCandidates': result.totalCandidates,
+    'activatedCount': result.activatedCount,
+    'cutOffCount': result.cutOffCount,
+    'injectedCount': result.injectedCount,
+    'inactiveCount': result.inactiveCount,
+    'settings': {
+      ...settings.toJson(),
+      'entryCap': resolveGlobalEntryCap(settings),
+    },
+  };
 }
 
 Lorebook _fromJson(Map<String, dynamic> data, String id) {
