@@ -27,9 +27,10 @@ String? buildMessagePreview(ChatMessage message) {
   try {
     final content = previewSource(message.content, message.continuationOffset);
     if (content.isNotEmpty) {
+      // Asterisks are emphasis and action narration — both are part of the
+      // reply, so only the markers go and the words they wrap stay.
       final text = content
-          .replaceAll(RegExp(r'\*\*[^*]+\*\*'), '')
-          .replaceAll(RegExp(r'\*[^*]+\*'), '')
+          .replaceAll(RegExp(r'\*+'), '')
           .replaceAll(RegExp(r'==[^=]+=='), '')
           .replaceAll(RegExp(r'<[^>]+>'), '')
           .replaceAll(RegExp(r'\s+'), ' ')
