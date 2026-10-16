@@ -279,6 +279,11 @@ class GenerationPipeline {
         return null;
       }
       if (regenOutcome != null) {
+        // The stream is over on every regen outcome — success, rollback or
+        // error — so empty it like the send and continue paths do. Left
+        // populated, the provider the WebView's streaming listener reads keeps
+        // the finished reply as if it were still streaming.
+        ctx.abortHandler.clearStreaming();
         // INV-EG1: extensions + image tags must run after successful regen too.
         if (regenSucceeded && result.session != null) {
           // The stream has ended. The coordinator acquires
