@@ -60,6 +60,7 @@ class BlockPanelUpdater {
       }
       final blocks = ExtBlocksPanelBuilder.build(
         _ref,
+        charId: charId,
         sessionId: sessionId,
         messageId: messageId,
         swipeId: swipeId,
@@ -213,7 +214,6 @@ class BlockPanelUpdater {
     }
     return false;
   }
-
 
   void Function(String)? makeStreamHandler({
     required BlockConfig blockConfig,

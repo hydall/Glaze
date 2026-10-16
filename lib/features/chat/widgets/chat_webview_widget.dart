@@ -1385,6 +1385,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       _bridge!.inlineExtBlocksFor = inlineExtBlocksReader(
         ref,
         widget.sessionId,
+        charId: widget.charId,
       );
       // Refresh the origin ("Created on" / "Branched on") marker before any
       // message sync dispatches, so a full setMessages picks up the current

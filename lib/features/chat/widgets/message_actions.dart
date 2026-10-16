@@ -39,7 +39,7 @@ void showMessageContextMenu({
   final isTypingTarget = isTyping && !isUser;
   final rewriteBlocks = ref
       .read(extensionPostGenServiceProvider)
-      .rewriteBlocks();
+      .rewriteBlocks(charId);
 
   final items = <BottomSheetItem>[
     if (isTypingTarget)

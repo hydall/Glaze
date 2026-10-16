@@ -169,7 +169,11 @@ class ChatWebViewInitializer {
           const {},
       globalVars: ref.read(globalVarsProvider),
     );
-    bridge.inlineExtBlocksFor = inlineExtBlocksReader(ref, input.sessionId);
+    bridge.inlineExtBlocksFor = inlineExtBlocksReader(
+      ref,
+      input.sessionId,
+      charId: input.charId,
+    );
 
     await _setIdentity();
     await applyTheme();

@@ -146,7 +146,7 @@ class DrawerItemLauncher {
           useRootNavigator: true,
           backgroundColor: Colors.transparent,
           isScrollControlled: true,
-          builder: (_) => const ExtBlocksSettingsSheet(),
+          builder: (_) => ExtBlocksSettingsSheet(charId: charId),
         );
     }
   }
@@ -175,7 +175,7 @@ class DrawerItemLauncher {
       'image-gen' => (_) => ImageGenSheet(charId: charId),
       'authors-note' => (_) => AuthorsNoteSheet(charId: charId),
       'glossary' => (_) => const GlossarySheet(startExpanded: true),
-      'ext-blocks' => (_) => const ExtBlocksSettingsSheet(),
+      'ext-blocks' => (_) => ExtBlocksSettingsSheet(charId: charId),
       _ => null,
     };
     return builder == null ? null : SidebarPanel(id: itemId, builder: builder);

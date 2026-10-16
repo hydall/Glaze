@@ -2114,6 +2114,8 @@
   "extblocks_preset_default_name": "Пресет {}",
   "extblocks_blocks_section": "Блоки",
   "extblocks_blocks_empty": "Блоков пока нет. Добавьте свой или импортируйте файл из оригинального расширения.",
+  "extblocks_card_blocks_section": "Блоки персонажа",
+  "extblocks_card_blocks_hint": "Блоки, которые хранятся в карточке персонажа, как в оригинале. Работают вместе с блоками пресета; блок с тем же именем заменяет блок пресета. Уходят вместе с карточкой при экспорте.",
   "extblocks_block_add": "Добавить блок",
   "extblocks_block_import": "Импортировать",
   "extblocks_block_create": "Создать новый",

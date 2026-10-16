@@ -16,6 +16,7 @@ import '../../extensions/models/info_block.dart';
 import '../../extensions/providers/extension_presets_provider.dart';
 import '../../extensions/providers/extensions_settings_provider.dart';
 import '../../extensions/providers/info_blocks_provider.dart';
+import '../../extensions/services/card_blocks.dart';
 import '../../personas/persona_list_provider.dart';
 import '../bridge/chat_bridge_controller.dart';
 import '../chat_provider.dart';
@@ -390,7 +391,7 @@ class ChatWebViewBuildListeners {
       // A block shown inside the message changes the message's own text.
       final b = bridge!;
       for (final message in messagesWithChangedInlineBlocks(
-        preset: activeExtBlocksPreset(ref),
+        preset: activeExtBlocksPreset(ref, charId),
         messages: messages,
         prev: prev ?? const [],
         next: next,
@@ -409,10 +410,16 @@ class ChatWebViewBuildListeners {
       String? nextId,
       List<ExtensionPreset> nextPresets,
     ) {
-      String signature(String? id, List<ExtensionPreset> presets) =>
-          inlineExtBlocksSignature(
-            id == null ? null : presets.firstWhereOrNull((p) => p.id == id),
-          );
+      final card = cardBlocksOf(ref.read(characterByIdProvider(charId)));
+      String signature(String? id, List<ExtensionPreset> presets) {
+        final preset = id == null
+            ? null
+            : presets.firstWhereOrNull((p) => p.id == id);
+        return inlineExtBlocksSignature(
+          preset == null ? null : withCardBlocks(preset, card),
+        );
+      }
+
       final b = bridge;
       if (b == null) return;
       if (signature(prevId, prevPresets) != signature(nextId, nextPresets)) {
@@ -439,6 +446,29 @@ class ChatWebViewBuildListeners {
         rerenderIfInlineChanged(id, prev ?? const [], id, next);
       }
     });
+    // The card's own blocks run alongside the preset's.
+    ref.listen(
+      characterByIdProvider(
+        charId,
+      ).select((character) => character?.extensions[cardBlocksKey]),
+      (prev, next) {
+        if (bridge == null || !ready()) return;
+        if (const DeepCollectionEquality().equals(prev, next)) return;
+        unawaited(onSyncExtBlockPanels());
+        final presets = ref.read(extensionPresetsProvider);
+        final id = ref.read(extensionsSettingsProvider).activePresetId;
+        final preset = id == null
+            ? null
+            : presets.firstWhereOrNull((p) => p.id == id);
+        if (preset == null) return;
+        String signature(Object? raw) => inlineExtBlocksSignature(
+          withCardBlocks(preset, decodeCardBlocks(raw)),
+        );
+        if (signature(prev) != signature(next)) {
+          unawaited(_rerenderAll(bridge!));
+        }
+      },
+    );
   }
 
   /// True when the roster changed in a way a rendered message can show: which

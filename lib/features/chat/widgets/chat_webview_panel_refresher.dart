@@ -53,12 +53,14 @@ class ChatWebViewPanelRefresher {
     final isGreeting = _isGreetingMessage(messageId);
     final isAssistant = _isAssistantMessage(messageId);
     final panelKey = (
+      charId: charId,
       sessionId: sessionId,
       messageId: messageId,
       swipeId: swipeId,
       agentSwipeId: agentSwipeId,
     );
     final visibilityKey = (
+      charId: charId,
       sessionId: sessionId,
       messageId: messageId,
       isAssistant: isAssistant,

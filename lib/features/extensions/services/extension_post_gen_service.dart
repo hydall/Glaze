@@ -14,8 +14,6 @@ import '../models/block_config.dart';
 import '../models/block_modes.dart';
 import '../models/extension_preset.dart';
 import '../models/info_block.dart';
-import '../providers/extension_presets_provider.dart';
-import '../providers/extensions_settings_provider.dart';
 import '../providers/info_blocks_provider.dart';
 import 'accumulation/accumulation_service.dart';
 import 'info_block_service.dart';
@@ -34,6 +32,7 @@ import 'blocks/block_trigger_rules.dart';
 import 'blocks/periodic_js_block_runner.dart';
 import 'blocks/single_block_runner.dart';
 import 'blocks/unsupported_block_handler.dart';
+import 'card_blocks.dart';
 
 final extensionPostGenServiceProvider = Provider<ExtensionPostGenService>(
   (ref) => ExtensionPostGenService(ref),
@@ -116,7 +115,7 @@ class ExtensionPostGenService {
     MainModelContextSnapshot? mainModelContextSnapshot,
     bool respectTriggerConditions = false,
   }) async {
-    final preset = _resolveActivePreset();
+    final preset = _resolveActivePreset(charId, character);
     if (preset == null) return false;
     final where = respectTriggerConditions
         ? _conditionsFor(messages, messageId, isUser: false)
@@ -208,8 +207,8 @@ class ExtensionPostGenService {
   }
 
   /// The active preset's enabled rewrite blocks, for the manual rewrite sheet.
-  List<BlockConfig> rewriteBlocks() {
-    final preset = _resolveActivePreset();
+  List<BlockConfig> rewriteBlocks(String charId) {
+    final preset = _resolveActivePreset(charId);
     if (preset == null) return const [];
     return [
       for (final block in preset.blocks)
@@ -232,7 +231,7 @@ class ExtensionPostGenService {
     String? textToRewrite,
     String additionalPrompt = '',
   }) async {
-    final preset = _resolveActivePreset();
+    final preset = _resolveActivePreset(charId, character);
     final block = preset?.blocks.where((b) => b.id == blockId).firstOrNull;
     if (preset == null || block == null || block.type != BlockType.rewrite) {
       return;
@@ -259,20 +258,17 @@ class ExtensionPostGenService {
     }
   }
 
-  ExtensionPreset? _resolveActivePreset() {
-    final settings = _ref.read(extensionsSettingsProvider);
-    final presetId = settings.activePresetId;
-    if (presetId == null || presetId.isEmpty) {
-      return null;
-    }
-    final preset = _ref
-        .read(extensionPresetsProvider)
-        .where((pr) => pr.id == presetId)
-        .firstOrNull;
-    if (preset == null) {
-      return null;
-    }
-    return preset;
+  /// The active preset with [charId]'s card blocks in it, as the original
+  /// runs them. [character] is read for the card when the caller has it.
+  ExtensionPreset? _resolveActivePreset(
+    String? charId, [
+    Character? character,
+  ]) {
+    if (character == null) return effectiveExtBlocksPreset(_ref.read, charId);
+    final preset = activeExtBlocksPresetOf(_ref.read);
+    return preset == null
+        ? null
+        : withCardBlocks(preset, cardBlocksOf(character));
   }
 
   /// Called by ExtBlocksStage after assistant message is finalised.
@@ -319,7 +315,7 @@ class ExtensionPostGenService {
     required Character character,
     required Persona? persona,
   }) async {
-    final preset = _resolveActivePreset();
+    final preset = _resolveActivePreset(charId, character);
     if (preset == null) return;
     if (session.id.isEmpty || session.messages.isEmpty) return;
     final lastMessage = session.messages.last;
@@ -392,7 +388,7 @@ class ExtensionPostGenService {
     required String reason,
     required bool Function(BlockConfig block) select,
   }) async {
-    final preset = _resolveActivePreset();
+    final preset = _resolveActivePreset(charId);
     if (preset == null) return;
     final blocks =
         preset.blocks
@@ -442,7 +438,7 @@ class ExtensionPostGenService {
     required Character character,
     required Persona? persona,
   }) async {
-    final preset = _resolveActivePreset();
+    final preset = _resolveActivePreset(charId, character);
     if (preset == null) return;
 
     final blockConfig = preset.blocks.where((b) => b.id == blockId).firstOrNull;
@@ -600,7 +596,7 @@ class ExtensionPostGenService {
     required Character character,
     required Persona? persona,
   }) async {
-    final preset = _resolveActivePreset();
+    final preset = _resolveActivePreset(charId, character);
     if (preset == null) return;
 
     final blockConfig = preset.blocks.where((b) => b.id == blockId).firstOrNull;

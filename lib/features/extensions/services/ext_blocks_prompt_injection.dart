@@ -8,8 +8,7 @@ import '../../../core/state/db_provider.dart';
 import '../../personas/persona_list_provider.dart';
 import '../models/extension_preset.dart';
 import '../models/info_block.dart';
-import '../providers/extension_presets_provider.dart';
-import '../providers/extensions_settings_provider.dart';
+import 'card_blocks.dart';
 import 'info_block_injector.dart';
 import 'macro_expander.dart';
 
@@ -23,14 +22,19 @@ class ExtBlocksPromptInjection {
 
   final Ref _ref;
 
-  ExtensionPreset? _resolveActivePreset() {
-    final settings = _ref.read(extensionsSettingsProvider);
-    final presetId = settings.activePresetId;
-    if (presetId == null || presetId.isEmpty) return null;
-    return _ref
-        .read(extensionPresetsProvider)
-        .where((p) => p.id == presetId)
-        .firstOrNull;
+  /// The active preset with the card blocks of [sessionId]'s character.
+  Future<ExtensionPreset?> _resolveActivePreset(String sessionId) async {
+    final preset = activeExtBlocksPresetOf(_ref.read);
+    if (preset == null) return null;
+    // Read from the database: the character list may not be loaded yet.
+    try {
+      final charId = await _ref.read(chatRepoProvider).characterIdOf(sessionId);
+      if (charId == null) return preset;
+      final character = await _ref.read(characterRepoProvider).getById(charId);
+      return withCardBlocks(preset, cardBlocksOf(character));
+    } catch (_) {
+      return preset;
+    }
   }
 
   /// Builds a [MacroContext] from the active persona. Used by
@@ -71,7 +75,7 @@ class ExtBlocksPromptInjection {
     required String sessionId,
     required List<ChatMessage> messages,
   }) async {
-    final preset = _resolveActivePreset();
+    final preset = await _resolveActivePreset(sessionId);
     if (preset == null || messages.isEmpty) return const {};
     final injector = InfoBlockInjector(
       _InfoBlocksRepoReader(_ref.read(infoBlocksRepoProvider)),
@@ -89,7 +93,7 @@ class ExtBlocksPromptInjection {
     required String sessionId,
     required List<ChatMessage> messages,
   }) async {
-    final preset = _resolveActivePreset();
+    final preset = await _resolveActivePreset(sessionId);
     if (preset == null || messages.isEmpty) {
       _promptBlocks.remove(sessionId);
       return messages;

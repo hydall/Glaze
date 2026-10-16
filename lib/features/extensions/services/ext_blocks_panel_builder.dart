@@ -1,18 +1,21 @@
 import 'dart:convert';
 
-import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../core/state/character_provider.dart';
 
 import '../models/block_config.dart';
 import '../models/block_run_status.dart';
 import '../providers/extension_presets_provider.dart';
 import '../providers/extensions_settings_provider.dart';
 import '../providers/info_blocks_provider.dart';
+import 'card_blocks.dart';
 import 'blocks/block_trigger_rules.dart';
 import 'ext_blocks_inline_display.dart';
 
 typedef ExtBlocksPanelKey = ({
+  String? charId,
   String sessionId,
   String messageId,
   int swipeId,
@@ -20,6 +23,7 @@ typedef ExtBlocksPanelKey = ({
 });
 
 typedef ExtBlocksPanelVisibilityKey = ({
+  String? charId,
   String sessionId,
   String messageId,
   bool isAssistant,
@@ -50,6 +54,7 @@ class ExtBlocksPanelBuilder {
     required bool isAssistant,
     required bool isLastAssistant,
     bool isGreeting = false,
+    String? charId,
   }) {
     if (!isAssistant || !extensionsActive(ref)) return false;
     // Never show the panel on greeting/first_mes messages that have no stored
@@ -57,6 +62,7 @@ class ExtBlocksPanelBuilder {
     if (isGreeting) return false;
     final blocks = build(
       ref,
+      charId: charId,
       sessionId: sessionId,
       messageId: messageId,
       swipeId: swipeId,
@@ -97,15 +103,10 @@ class ExtBlocksPanelBuilder {
     required String messageId,
     required int swipeId,
     int agentSwipeId = -1,
+    String? charId,
   }) {
-    final settings = ref.read(extensionsSettingsProvider);
-    final presetId = settings.activePresetId;
-    if (presetId == null || presetId.isEmpty) return [];
-
-    final preset = ref
-        .read(extensionPresetsProvider)
-        .where((p) => p.id == presetId)
-        .firstOrNull;
+    // The character's card blocks show here too, as they run.
+    final preset = effectiveExtBlocksPreset(ref.read, charId);
     if (preset == null) return [];
 
     final dbBlocks = ref
@@ -179,8 +180,10 @@ final extBlocksPanelBlocksProvider =
       ref.watch(infoBlocksProvider(key.sessionId));
       ref.watch(extensionsSettingsProvider);
       ref.watch(extensionPresetsProvider);
+      if (key.charId != null) ref.watch(characterByIdProvider(key.charId!));
       return ExtBlocksPanelBuilder.build(
         ref,
+        charId: key.charId,
         sessionId: key.sessionId,
         messageId: key.messageId,
         swipeId: key.swipeId,
@@ -193,8 +196,10 @@ final extBlocksPanelVisibleProvider =
       ref.watch(infoBlocksProvider(key.sessionId));
       ref.watch(extensionsSettingsProvider);
       ref.watch(extensionPresetsProvider);
+      if (key.charId != null) ref.watch(characterByIdProvider(key.charId!));
       return ExtBlocksPanelBuilder.shouldShowPanel(
         ref,
+        charId: key.charId,
         sessionId: key.sessionId,
         messageId: key.messageId,
         swipeId: key.swipeId,

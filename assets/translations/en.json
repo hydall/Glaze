@@ -2103,6 +2103,8 @@
   "extblocks_preset_default_name": "Preset {}",
   "extblocks_blocks_section": "Blocks",
   "extblocks_blocks_empty": "No blocks yet. Add one, or import a file from the original extension.",
+  "extblocks_card_blocks_section": "Character blocks",
+  "extblocks_card_blocks_hint": "Blocks stored in this character's card, as in the original. They run with the preset's blocks; a block with the same name replaces the preset's. They travel with the card when it is exported.",
   "extblocks_block_add": "Add block",
   "extblocks_block_import": "Import",
   "extblocks_block_create": "Create new",

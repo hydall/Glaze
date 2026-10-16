@@ -1,31 +1,28 @@
-import 'package:collection/collection.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/chat_message.dart';
 import '../../extensions/models/extension_preset.dart';
 import '../../extensions/models/info_block.dart';
-import '../../extensions/providers/extension_presets_provider.dart';
-import '../../extensions/providers/extensions_settings_provider.dart';
 import '../../extensions/providers/info_blocks_provider.dart';
+import '../../extensions/services/card_blocks.dart';
 import '../../extensions/services/ext_blocks_inline_display.dart';
 
-/// The active ExtBlocks preset, or `null` when none is picked.
-ExtensionPreset? activeExtBlocksPreset(WidgetRef ref) {
-  final id = ref.read(extensionsSettingsProvider).activePresetId;
-  if (id == null || id.isEmpty) return null;
-  return ref.read(extensionPresetsProvider).firstWhereOrNull((p) => p.id == id);
-}
+/// What runs in [charId]'s chat: the active ExtBlocks preset with the card's
+/// blocks in it, or `null` when no preset is picked.
+ExtensionPreset? activeExtBlocksPreset(WidgetRef ref, String? charId) =>
+    effectiveExtBlocksPreset(ref.read, charId);
 
 /// What the bridge appends to a message of [sessionId] when it maps it for
 /// display: its finished in-message ExtBlocks.
 String Function(ChatMessage message) inlineExtBlocksReader(
   WidgetRef ref,
-  String? sessionId,
-) {
+  String? sessionId, {
+  String? charId,
+}) {
   return (message) {
     if (sessionId == null || sessionId.isEmpty) return '';
     return inlineExtBlocksText(
-      preset: activeExtBlocksPreset(ref),
+      preset: activeExtBlocksPreset(ref, charId),
       rows: ref.read(infoBlocksProvider(sessionId)),
       message: message,
     );
