@@ -125,15 +125,24 @@ class RequestGroupCard extends StatelessWidget {
               : 'requests_turn_numbered'.tr(args: ['$turnNumber']))
         : requestFamilyLabel(group.leadFamily);
 
+    // The title wraps rather than truncates: a plugin or agent step name is
+    // the one thing that tells two rows apart, and its tail is often the part
+    // that differs.
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(requestFamilyIcon(group.leadFamily), size: 14, color: color),
+        Padding(
+          padding: const EdgeInsets.only(top: 1),
+          child: Icon(
+            requestFamilyIcon(group.leadFamily),
+            size: 14,
+            color: color,
+          ),
+        ),
         const SizedBox(width: 6),
-        Flexible(
+        Expanded(
           child: Text(
             title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w700,
@@ -143,9 +152,16 @@ class RequestGroupCard extends StatelessWidget {
         ),
         if (group.hasFailure) ...[
           const SizedBox(width: 6),
-          Icon(Icons.error_outline_rounded, size: 13, color: context.cs.error),
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Icon(
+              Icons.error_outline_rounded,
+              size: 13,
+              color: context.cs.error,
+            ),
+          ),
         ],
-        const Spacer(),
+        const SizedBox(width: 8),
         Text(
           formatRequestTime(started),
           style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant),
@@ -209,14 +225,12 @@ class _StepRow extends StatelessWidget {
               margin: const EdgeInsets.only(right: 8),
               decoration: BoxDecoration(color: color, shape: BoxShape.circle),
             ),
-            Flexible(
+            Expanded(
               child: Text(
                 requestStepLabel(
                   stage: entry.stage,
                   agentId: entry.capture.row.agentId,
                 ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
                 style: TextStyle(fontSize: 12, color: context.cs.onSurface),
               ),
             ),
@@ -239,8 +253,8 @@ class _StepRow extends StatelessWidget {
                 color: context.cs.error,
               ),
             ],
-            const Spacer(),
-            if (model.isNotEmpty)
+            if (model.isNotEmpty) ...[
+              const SizedBox(width: 8),
               Flexible(
                 child: Text(
                   model,
@@ -253,6 +267,7 @@ class _StepRow extends StatelessWidget {
                   ),
                 ),
               ),
+            ],
             Icon(
               Icons.chevron_right_rounded,
               size: 16,

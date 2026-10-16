@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/models/chat_message.dart';
 import '../../../../core/state/studio_feature_provider.dart';
 import '../../../../shared/theme/app_colors.dart';
+import '../../../../shared/widgets/glaze_filter_chip_bar.dart';
 import '../../../../shared/widgets/glaze_spinner.dart';
 import '../../chat_provider.dart';
 import '../../services/prompt_capture_view_service.dart';
@@ -17,6 +18,7 @@ import 'inspector_surface.dart';
 import 'request_detail_view.dart';
 import 'request_group_card.dart';
 import 'request_rows.dart';
+import 'request_stage_label.dart';
 
 /// Everything this chat has sent to a model since the app started, in one
 /// timeline: each turn with the stages it set off, and the background jobs
@@ -50,7 +52,8 @@ class RequestTimelineView extends ConsumerStatefulWidget {
   final bool initialCoverage;
 
   @override
-  ConsumerState<RequestTimelineView> createState() => RequestTimelineViewState();
+  ConsumerState<RequestTimelineView> createState() =>
+      RequestTimelineViewState();
 }
 
 /// Public so the inspector that hosts it can close a drill-down it opened with
@@ -61,6 +64,9 @@ class RequestTimelineViewState extends ConsumerState<RequestTimelineView> {
   PromptCaptureView? _openCapture;
   late bool _openPreview = widget.initialCoverage;
   final Set<String> _expandedGroups = {};
+
+  /// Request type the timeline is narrowed to; null shows everything.
+  RequestStageFamily? _familyFilter;
 
   bool get _inDetail => _openCapture != null || _openPreview;
 
@@ -195,6 +201,21 @@ class RequestTimelineViewState extends ConsumerState<RequestTimelineView> {
         ref.watch(chatProvider(widget.charId)).value?.messages ??
         const <ChatMessage>[];
 
+    // Only the types this session actually produced are offered, in enum
+    // order so the chips do not reshuffle as new requests land.
+    final present = {
+      for (final group in groups)
+        for (final entry in group.entries) entry.family,
+    };
+    final families = [
+      for (final family in RequestStageFamily.values)
+        if (present.contains(family)) family,
+    ];
+    // A filter whose type has dropped out of the list (refresh, new session)
+    // falls back to everything instead of showing an empty timeline.
+    final filter = present.contains(_familyFilter) ? _familyFilter : null;
+    final shown = filter == null ? groups : _filterGroups(groups, filter);
+
     return ListView(
       padding: withInspectorBottomInset(
         context,
@@ -212,7 +233,18 @@ class RequestTimelineViewState extends ConsumerState<RequestTimelineView> {
                 ref.invalidate(promptCaptureViewsProvider(sessionId)),
           ),
         ),
-        if (groups.isEmpty)
+        if (families.length > 1)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: GlazeFilterChipBar<RequestStageFamily?>(
+              current: filter,
+              options: [null, ...families],
+              labelBuilder: (f) =>
+                  f == null ? 'filter_all'.tr() : requestFamilyLabel(f),
+              onSelected: (f) => setState(() => _familyFilter = f),
+            ),
+          ),
+        if (shown.isEmpty)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 18),
             child: Text(
@@ -224,7 +256,7 @@ class RequestTimelineViewState extends ConsumerState<RequestTimelineView> {
             ),
           )
         else
-          for (final group in groups)
+          for (final group in shown)
             RequestGroupCard(
               group: group,
               expanded: _expandedGroups.contains(group.key),
@@ -240,6 +272,25 @@ class RequestTimelineViewState extends ConsumerState<RequestTimelineView> {
       ],
     );
   }
+
+  /// Keeps only the steps of [family]. A turn that also ran other stages
+  /// shows just the matching ones, and a group with none of them is dropped.
+  List<RequestGroup> _filterGroups(
+    List<RequestGroup> groups,
+    RequestStageFamily family,
+  ) => [
+    for (final group in groups)
+      if (group.entries.any((e) => e.family == family))
+        RequestGroup(
+          key: group.key,
+          kind: group.kind,
+          messageId: group.messageId,
+          entries: [
+            for (final entry in group.entries)
+              if (entry.family == family) entry,
+          ],
+        ),
+  ];
 
   /// Position of the turn's reply in the chat, so a row can be matched to a
   /// message on screen. Null when the message is gone (deleted, or scrolled out
