@@ -1017,8 +1017,13 @@ if (messageData.isEditing) classes.push('editing');
     let footerMeta = sectionEl.querySelector('.msg-meta');
 
     if (hasGen || hasTokens) {
-      let genStatBubble = bubbleMeta?.querySelector('.gen-stat');
-      let genStatFooter = footerMeta?.querySelector('.gen-stat');
+      // `:not(.msg-index)`: the bubble meta's `#N` chip shares the gen-stat
+      // class for its styling and comes first, so a bare `.gen-stat` matched
+      // it and the reconciled clock and count were written into the chip
+      // while the real stat row kept none — the count vanished after a
+      // Regenerate in bubble layout (and stayed hidden under Hide message ID).
+      let genStatBubble = bubbleMeta?.querySelector('.gen-stat:not(.msg-index)');
+      let genStatFooter = footerMeta?.querySelector('.gen-stat:not(.msg-index)');
 
       if (hasGen) {
         this._reconcileGenTime(genStatBubble, msg.genTime, '2px');
