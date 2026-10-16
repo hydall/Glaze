@@ -13,8 +13,10 @@ import '../../../../core/models/api_config.dart';
 import '../../../../core/models/chat_message.dart';
 import '../../../../core/state/db_provider.dart';
 import '../../../../core/state/persona_resolution.dart';
+import '../../../../core/utils/error_format.dart';
 import '../../../../core/utils/id_generator.dart';
 import '../../../chat/chat_provider.dart';
+import '../../../image_gen/image_gen_models.dart';
 import '../../../image_gen/image_gen_provider.dart';
 import '../../../settings/api_list_provider.dart';
 import '../../models/plugin_manifest.dart';
@@ -25,8 +27,8 @@ import 'files_api.dart';
 /// `glaze.generate(prompt, options)` (one-off text with the chat's
 /// connection) and `glaze.images.generate(prompt, options)` (Glaze image
 /// generation settings). `options.preset` names an `apiPreset` /
-/// `imagePreset` setting of the plugin to run on the connection, model and
-/// style the user picked for that feature instead.
+/// `imagePreset` setting of the plugin to run on the connection and model, or
+/// the image service and style, the user picked for that feature instead.
 Map<String, PluginMethod> generationApi() => {
   'generate': const PluginMethod(
     _generate,
@@ -199,7 +201,7 @@ Future<Object?> _generate(PluginCall c) async {
   } catch (e) {
     _recordOutcome(capture, started, error: e);
     if (e is PluginApiError) rethrow;
-    throw PluginApiError('generation_failed', '$e');
+    throw PluginApiError('generation_failed', formatError(e));
   }
 }
 
@@ -218,6 +220,12 @@ Future<Object?> _image(PluginCall c) async {
   final options = c.mapArg(1);
   final preset = _preset(c, options, PluginSettingType.imagePreset);
   var settings = await c.ref.read(imageGenSettingsProvider.future);
+  // The preset's image service; an unknown name (a newer Glaze's) follows
+  // the image settings.
+  final provider = ImageGenApiType.values
+      .where((t) => t.name == preset.provider)
+      .firstOrNull;
+  if (provider != null) settings = settings.copyWith(apiType: provider);
   // The preset's style: follow the image settings (empty), force none, or
   // draw in a named one of the library.
   if (preset.style == kPluginNoImageStyle) {
@@ -228,16 +236,21 @@ Future<Object?> _image(PluginCall c) async {
   final service = await c.ref
       .read(imageGenSettingsProvider.notifier)
       .getServiceAsync();
-  final api = await _resolveConfig(c, preset.copyWith(model: ''));
-  final character = await c.ref
-      .read(characterRepoProvider)
-      .getById(c.host.charId);
-  final persona = c.ref.read(
-    effectivePersonaForChatProvider((
-      charId: c.host.charId,
-      sessionId: c.host.sessionId,
-    )),
-  );
+  // Services that draw through the chat's endpoint use the chat's connection.
+  final api = await _resolveConfig(c, const PluginPresetValue());
+  // `character: false` / `persona: false`: that person is not in the picture,
+  // so neither their avatar nor their appearance goes along.
+  final character = options['character'] == false
+      ? null
+      : await c.ref.read(characterRepoProvider).getById(c.host.charId);
+  final persona = options['persona'] == false
+      ? null
+      : c.ref.read(
+          effectivePersonaForChatProvider((
+            charId: c.host.charId,
+            sessionId: c.host.sessionId,
+          )),
+        );
   final cancelToken = CancelToken();
   final capture = _capture(c, 'image.plugin');
   final started = DateTime.now();
@@ -266,7 +279,8 @@ Future<Object?> _image(PluginCall c) async {
     throw const PluginApiError('timeout', 'Image generation timed out');
   } catch (e) {
     _recordOutcome(capture, started, error: e);
-    throw PluginApiError('generation_failed', '$e');
+    // The provider's own message, not a Dio dump.
+    throw PluginApiError('generation_failed', formatError(e));
   }
   final mime = _imageMime(bytes);
   _recordOutcome(

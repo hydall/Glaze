@@ -16,8 +16,9 @@ import '../services/plugin_localizer.dart';
 
 /// Renders `contributes.settings.schema` as Glaze menu groups. `break`
 /// starts a new group; `divider` too, since groups are already separated.
-/// An `apiPreset` / `imagePreset` is a group of its own: the [ApiSlotGroup]
-/// every other auxiliary call binds its connection with.
+/// An `apiPreset` is a group of its own: the [ApiSlotGroup] every other
+/// auxiliary call binds its connection with. An `imagePreset` is a group with
+/// the image service and the style.
 class PluginSettingsForm extends ConsumerWidget {
   const PluginSettingsForm({
     super.key,
@@ -75,34 +76,42 @@ class PluginSettingsForm extends ConsumerWidget {
           : notifier.setConfigValue(plugin.id, key, json);
     }
 
-    final images = field.type == PluginSettingType.imagePreset;
+    if (field.type == PluginSettingType.imagePreset) {
+      return MenuGroup(
+        header: localizer.resolve(field.label),
+        description: field.description == null
+            ? 'plugins_generation_image_desc'.tr()
+            : localizer.resolve(field.description),
+        items: [
+          _ImageProviderRow(
+            provider: value.provider,
+            // Only the service and the style are drawn with; a connection
+            // stored by an earlier Glaze is dropped on the first change.
+            onChanged: (p) => set(value.copyWith(api: '', provider: p)),
+          ),
+          _ImageStyleRow(
+            style: value.style,
+            onChanged: (s) => set(value.copyWith(api: '', style: s)),
+          ),
+        ],
+      );
+    }
     return ApiSlotGroup(
       header: localizer.resolve(field.label),
       description: field.description == null
-          ? (images
-                ? 'plugins_generation_image_desc'.tr()
-                : 'plugins_generation_desc'.tr())
+          ? 'plugins_generation_desc'.tr()
           : localizer.resolve(field.description),
-      apiLabel: images ? 'plugins_generation_image_api'.tr() : null,
       apiConfigId: value.api,
       onApiConfigChanged: (id) => set(
         // A model chosen against the previous connection would not resolve.
         value.copyWith(api: id, model: id == value.api ? null : ''),
       ),
       modelRows: [
-        if (!images)
-          ApiSlotModelRow(
-            value: value.model,
-            description: 'plugins_generation_model_desc'.tr(),
-            onChanged: (m) => set(value.copyWith(model: m)),
-          ),
-      ],
-      trailingItems: [
-        if (images)
-          _ImageStyleRow(
-            style: value.style,
-            onChanged: (s) => set(value.copyWith(style: s)),
-          ),
+        ApiSlotModelRow(
+          value: value.model,
+          description: 'plugins_generation_model_desc'.tr(),
+          onChanged: (m) => set(value.copyWith(model: m)),
+        ),
       ],
     );
   }
@@ -217,6 +226,55 @@ class PluginSettingsForm extends ConsumerWidget {
       case PluginSettingType.imagePreset:
         return const SizedBox.shrink();
     }
+  }
+}
+
+/// The image service an `imagePreset` draws with: the one the image settings
+/// have active, or another one of those set up there (each keeps its own key,
+/// model and options in the image settings).
+class _ImageProviderRow extends ConsumerWidget {
+  const _ImageProviderRow({required this.provider, required this.onChanged});
+
+  final String provider;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final active = ref.watch(imageGenSettingsProvider).value?.apiType;
+    final picked = ImageGenApiType.values
+        .where((t) => t.name == provider)
+        .firstOrNull;
+    final follow = 'plugins_generation_provider_settings'.tr(
+      args: [active?.label ?? '—'],
+    );
+    void pick(String name) {
+      onChanged(name);
+      Navigator.of(context, rootNavigator: true).pop();
+    }
+
+    return MenuSelectorItem(
+      label: 'plugins_generation_provider'.tr(),
+      description: 'plugins_generation_provider_desc'.tr(),
+      currentValue: picked?.label ?? follow,
+      onReset: picked == null ? null : () => onChanged(''),
+      onTap: () => GlazeBottomSheet.show<void>(
+        context,
+        title: 'plugins_generation_provider'.tr(),
+        items: [
+          BottomSheetItem(
+            label: follow,
+            icon: picked == null ? Icons.check_rounded : null,
+            onTap: () => pick(''),
+          ),
+          for (final t in ImageGenApiType.values)
+            BottomSheetItem(
+              label: t.label,
+              icon: picked == t ? Icons.check_rounded : null,
+              onTap: () => pick(t.name),
+            ),
+        ],
+      ),
+    );
   }
 }
 

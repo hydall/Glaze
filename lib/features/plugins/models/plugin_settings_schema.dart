@@ -15,7 +15,7 @@ enum PluginSettingType {
   /// text on: `glaze.generate(prompt, {preset: key})`.
   apiPreset,
 
-  /// An API connection and image style one of the plugin's features draws
+  /// An image service and image style one of the plugin's features draws
   /// with: `glaze.images.generate(prompt, {preset: key})`.
   imagePreset,
 }
@@ -25,11 +25,17 @@ enum PluginSettingType {
 const String kPluginNoImageStyle = '@none';
 
 /// What an [PluginSettingType.apiPreset] / [PluginSettingType.imagePreset]
-/// field stores: the API connection ([api], empty follows the chat's), plus a
-/// model override for text or an image style ([style], empty follows the
-/// image settings, [kPluginNoImageStyle] forces none).
+/// field stores. Text: the API connection ([api], empty follows the chat's)
+/// and a model override. Images: the image service ([provider]) and style
+/// ([style]); empty follows the image settings, [kPluginNoImageStyle] forces
+/// no style.
 class PluginPresetValue {
-  const PluginPresetValue({this.api = '', this.model = '', this.style = ''});
+  const PluginPresetValue({
+    this.api = '',
+    this.model = '',
+    this.provider = '',
+    this.style = '',
+  });
 
   factory PluginPresetValue.parse(Object? raw) {
     if (raw is! Map) return const PluginPresetValue();
@@ -37,24 +43,40 @@ class PluginPresetValue {
     return PluginPresetValue(
       api: read('api'),
       model: read('model'),
+      provider: read('provider'),
       style: read('style'),
     );
   }
 
+  /// Connection id (`apiPreset`).
   final String api;
+
+  /// Model on [api] (`apiPreset`).
   final String model;
+
+  /// [ImageGenApiType] name the `imagePreset` draws with; empty follows the
+  /// image generation settings.
+  final String provider;
+
+  /// Image style id (`imagePreset`), or [kPluginNoImageStyle].
   final String style;
 
-  PluginPresetValue copyWith({String? api, String? model, String? style}) =>
-      PluginPresetValue(
-        api: api ?? this.api,
-        model: model ?? this.model,
-        style: style ?? this.style,
-      );
+  PluginPresetValue copyWith({
+    String? api,
+    String? model,
+    String? provider,
+    String? style,
+  }) => PluginPresetValue(
+    api: api ?? this.api,
+    model: model ?? this.model,
+    provider: provider ?? this.provider,
+    style: style ?? this.style,
+  );
 
   Map<String, Object?> toJson() => {
     if (api.isNotEmpty) 'api': api,
     if (model.isNotEmpty) 'model': model,
+    if (provider.isNotEmpty) 'provider': provider,
     if (style.isNotEmpty) 'style': style,
   };
 }

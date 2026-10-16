@@ -324,34 +324,36 @@ void main() {
     expect((context['error'] as Map)['code'], 'permission_denied');
   });
 
-  test('lorebook coverage needs both library.read.lorebooks and messages',
-      () async {
-    expect(
-      pluginMethodsFor(_plugin(const ['library.read.lorebooks'])),
-      contains('lorebooks.coverage'),
-    );
-    expect(
-      pluginMethodsFor(_plugin(const ['messages'])),
-      isNot(contains('lorebooks.coverage')),
-    );
+  test(
+    'lorebook coverage needs both library.read.lorebooks and messages',
+    () async {
+      expect(
+        pluginMethodsFor(_plugin(const ['library.read.lorebooks'])),
+        contains('lorebooks.coverage'),
+      );
+      expect(
+        pluginMethodsFor(_plugin(const ['messages'])),
+        isNot(contains('lorebooks.coverage')),
+      );
 
-    // The method's own permission is granted, but it also reads the chat's
-    // messages, which the manifest must ask for too.
-    final withoutMessages = service(const ['library.read.lorebooks']);
-    final denied = await call(withoutMessages, 'lorebooks.coverage');
-    expect((denied['error'] as Map)['code'], 'permission_denied');
+      // The method's own permission is granted, but it also reads the chat's
+      // messages, which the manifest must ask for too.
+      final withoutMessages = service(const ['library.read.lorebooks']);
+      final denied = await call(withoutMessages, 'lorebooks.coverage');
+      expect((denied['error'] as Map)['code'], 'permission_denied');
 
-    final both = service(const ['library.read.lorebooks', 'messages']);
-    final out = await call(both, 'lorebooks.coverage');
-    expect(out['ok'], isTrue, reason: '$out');
-    final result = out['result'] as Map;
-    expect(result['entries'], isA<List<Object?>>());
-    expect(result['totalCandidates'], isA<int>());
-    expect(result['activatedCount'], isA<int>());
-    expect(result['cutOffCount'], isA<int>());
-    expect((result['settings'] as Map)['searchType'], 'keyword');
-    expect((result['settings'] as Map)['entryCap'], isA<int>());
-  });
+      final both = service(const ['library.read.lorebooks', 'messages']);
+      final out = await call(both, 'lorebooks.coverage');
+      expect(out['ok'], isTrue, reason: '$out');
+      final result = out['result'] as Map;
+      expect(result['entries'], isA<List<Object?>>());
+      expect(result['totalCandidates'], isA<int>());
+      expect(result['activatedCount'], isA<int>());
+      expect(result['cutOffCount'], isA<int>());
+      expect((result['settings'] as Map)['searchType'], 'keyword');
+      expect((result['settings'] as Map)['entryCap'], isA<int>());
+    },
+  );
 
   test('a plugin\'s text request shows up in the chat\'s requests', () async {
     TestWidgetsFlutterBinding.ensureInitialized();
@@ -496,7 +498,7 @@ void main() {
         {'type': 'imagePreset', 'key': 'photos', 'label': 'Photos'},
       ],
       config: {
-        'photos': {'api': 'img', 'style': kPluginNoImageStyle},
+        'photos': {'provider': 'novelai', 'style': kPluginNoImageStyle},
       },
     );
     final fields = plugin.manifest.settings;
@@ -506,8 +508,12 @@ void main() {
     ]);
     expect(fields.every((f) => f.storesValue), isTrue);
     final photos = PluginPresetValue.parse(plugin.config['photos']);
-    expect(photos.api, 'img');
+    expect(photos.provider, 'novelai');
     expect(photos.style, kPluginNoImageStyle);
+    expect(photos.toJson(), {
+      'provider': 'novelai',
+      'style': kPluginNoImageStyle,
+    });
     expect(PluginPresetValue.parse(null).toJson(), isEmpty);
     expect(
       () => parsePluginManifest({
