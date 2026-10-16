@@ -2184,6 +2184,7 @@
   "perm_play_audio": "Воспроизведение звука",
   "perm_execute_command": "Запуск слэш-команды",
   "perm_show_toast": "Показ уведомления",
+  "perm_run_blocks": "Запуск блоков (скрипты оригинального ExtBlocks)",
   "perm_default_deny_hint": "Каждое разрешение открывает JS-блокам этого пресета один метод glaze.*. Пока разрешение не выдано, метод запрещён.",
   "block_sec_triggers": "Триггеры",
   "block_sec_basics": "Блок",

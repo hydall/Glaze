@@ -20,6 +20,7 @@ import '../../extensions/providers/preset_permissions_provider.dart';
 import '../../extensions/services/audio_bridge_service.dart';
 import '../../extensions/services/command_registry.dart';
 import '../../extensions/services/connection_profile_resolver.dart';
+import '../../extensions/services/ext_blocks_script_api.dart';
 import '../../extensions/services/generation_dispatcher.dart';
 import '../../extensions/services/js_bridge_service.dart';
 import '../../extensions/services/js_bridge_toast_controller.dart';
@@ -123,6 +124,15 @@ class ChatWebViewBridgeHost {
       executeCommand: (command, args, context) =>
           _executeBridgeCommand(commandRegistry, command, args, context),
       showToast: _showBridgeToast,
+      extBlocks: (method, params, context) {
+        _ensureActive();
+        return ref.read(extBlocksScriptApiProvider).handle(method, params, {
+          ...context,
+          if (context['sessionId'] == null) 'sessionId': _activeSessionId(),
+          if (context['characterId'] == null)
+            'characterId': _activeCharacterId(),
+        });
+      },
     );
     if (!active) return null;
     return bridge;

@@ -37,6 +37,7 @@ class _FakePostGen extends ExtensionPostGenService {
     required BlockConfig block,
     required List<ChatMessage> contextMessages,
     bool Function()? isAuthorized,
+    Map<String, dynamic>? extBlocks,
   }) async {
     tickBlockIds.add(block.id);
     tickContexts.add((charId, sessionId));

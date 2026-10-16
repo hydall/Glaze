@@ -2618,17 +2618,25 @@ export class Bridge {
         }
       };
 
+      // A script written for the original ExtBlocks may wait on block
+      // generation, which takes longer than a plain script is given.
+      let extBlocks = false;
+      try { extBlocks = !!JSON.parse(contextJson).extBlocks; } catch (_) {}
+      const limitMs = extBlocks ? 595000 : 55000;
       const timeoutId = setTimeout(() => {
         cleanup();
-        reject(new Error('JS runner timeout (55s)'));
-      }, 55000);
+        reject(new Error(`JS runner timeout (${limitMs / 1000}s)`));
+      }, limitMs);
 
       // Escape script and contextJson for safe embedding in srcdoc attribute.
       // We use a JSON string as the JS literal so that any quotes/backslashes
-      // inside the user script are properly escaped.
-      const escapedScript = JSON.stringify(script);
+      // inside the user script are properly escaped, and `<` is escaped so a
+      // `</script>` inside cannot close the tag.
+      const asLiteral = (text) => JSON.stringify(text).replace(/</g, '\\u003c');
+      const escapedScript = asLiteral(script);
       const escapedContext = contextJson;
-      const sdkSource = JSON.stringify(window.__glazeSdkSource || '');
+      const sdkSource = asLiteral(window.__glazeSdkSource || '');
+      const compatSource = asLiteral(extBlocks ? window.__extBlocksCompatSource || '' : '');
 
       const sandboxHtml = `<!DOCTYPE html><html><body><script>
 (function() {
@@ -2640,7 +2648,16 @@ export class Bridge {
     (new Function(glazeSdkSource))();
   }
   var userScript = ${escapedScript};
-  (new Function('context', '"use strict"; return (async function() { ' + userScript + ' })();'))(context)
+  var compatSource = ${compatSource};
+  var run;
+  try {
+    run = compatSource
+      ? (new Function('context', compatSource))(context).__run(userScript)
+      : (new Function('context', '"use strict"; return (async function() { ' + userScript + ' })();'))(context);
+  } catch (e) {
+    run = Promise.reject(e);
+  }
+  Promise.resolve(run)
     .then(function(r) {
       parent.postMessage({ ok: true, result: String(r !== undefined && r !== null ? r : '') }, '*');
     })

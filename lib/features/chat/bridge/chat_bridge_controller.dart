@@ -1119,6 +1119,7 @@ class ChatBridgeController {
     required String? previousOutput,
     int contextMessageCount = 10,
     CancelToken? cancelToken,
+    Map<String, dynamic>? extBlocks,
   }) async {
     if (cancelToken?.isCancelled == true) {
       throw Exception('Cancelled before JS execution');
@@ -1147,8 +1148,12 @@ class ChatBridgeController {
             }
           : null,
       'previousOutput': previousOutput,
+      // A script written for the original extension finds its variables and
+      // SillyTavern's chat here (see `extBlocksScriptScope`).
+      'extBlocks': ?extBlocks,
     };
-    final contextJson = jsonEncode(contextMap);
+    // Chat text may hold `</script>`; the sandbox embeds this in a script tag.
+    final contextJson = jsonEncode(contextMap).replaceAll('<', r'\u003c');
 
     final sdkSource = await rootBundle.loadString(
       'assets/chat_webview/glaze_sdk.js',
@@ -1156,6 +1161,19 @@ class ChatBridgeController {
     await _controller.evaluateJavascript(
       source: 'window.__glazeSdkSource = ${escapeJsonStr(sdkSource)};',
     );
+    if (extBlocks != null) {
+      final compatSource = await rootBundle.loadString(
+        'assets/chat_webview/extblocks_compat.js',
+      );
+      await _controller.evaluateJavascript(
+        source:
+            'window.__extBlocksCompatSource = ${escapeJsonStr(compatSource)};',
+      );
+    }
+
+    // A script of the original ExtBlocks may wait on block generation; the
+    // sandbox gives it 595 s.
+    final limit = Duration(seconds: extBlocks == null ? 60 : 600);
 
     // callAsyncJavaScript returns the JS Promise result.
     // bridge.runSandboxedScript returns a Promise<string>.
@@ -1167,11 +1185,8 @@ class ChatBridgeController {
           arguments: {'script': script, 'contextJson': contextJson},
         )
         .timeout(
-          const Duration(seconds: 60),
-          onTimeout: () => throw TimeoutException(
-            'JS runner timed out',
-            const Duration(seconds: 60),
-          ),
+          limit,
+          onTimeout: () => throw TimeoutException('JS runner timed out', limit),
         );
 
     if (result == null) return '';

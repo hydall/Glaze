@@ -173,6 +173,43 @@ staticContent ────┘
 
 Через API `window.glaze` скрипт также может работать с разрешёнными переменными, запускать генерацию, временно добавлять данные в промпт, воспроизводить звук, выполнять команды и показывать уведомления.
 
+### Скрипты оригинального расширения
+
+Готовый скрипт (а также скрипты на свайп и на старт генерации) запускается в
+области видимости оригинала, поэтому скрипты из SillyTavern работают без
+переделки. Данные собирает `blocks/ext_blocks_script_scope.dart` и передаёт в
+`context.extBlocks`; слой `assets/chat_webview/extblocks_compat.js` внутри
+песочницы превращает их в имена, которые ждёт скрипт:
+
+- переменные `messageId` (индекс сообщения в чате), `isUser`, `allBlocks`,
+  `triggeredBlocks`, `additionalMacro`, `is_separate` (всегда `false`);
+- `context` в форме SillyTavern: `chat` (`mes`, `is_user`, `name`,
+  `extra.extblocks` — сохранённые состояния блоков в тегах), `name1`, `name2`,
+  `generateRaw` / `generateQuietPrompt` (через `glaze.generateText`);
+  `saveChat` и `reloadCurrentChat` ничего не делают — Glaze сохраняет и
+  перерисовывает сам;
+- `BlockService` (`getAllBlocks`, `getAllEnabledBlocks`, `getBlocksByType`,
+  `getAllPreviousBlocks`, `injectBlock`, `addBlocksToExtra`,
+  `purgeBlocksExtra`), `ContextService.getPreviousBlockContextUnconditional`;
+- `GenerationService.handleBlocksGeneration`, `GeneratedPlugin`
+  (`execute`, `generateBlockContent`), `RewritePlugin` (`execute`,
+  `generateRewrite`), `ScriptPlugin.execute`, `AccumulationPlugin.execute`,
+  `ApiService.abortGeneration`, `extStates`, `toastr`, `SillyTavern.getContext`;
+- `executeST` бросает ошибку: STscript не поддерживается.
+
+Всё, что генерирует, переписывает или пишет в чат, идёт через методы
+`glaze.extBlocksRun` / `extBlocksGenerate` / `extBlocksRewrite` /
+`extBlocksStore` / `extBlocksAbort` (`services/ext_blocks_script_api.dart`) и
+требует разрешения пресета **«Запуск блоков»** (`run_blocks`, по умолчанию
+выключено). `injectBlock` и `toastr` идут через `injectPrompt` и `showToast` со
+своими разрешениями. Блоки ищутся по имени среди блоков пресета и карточки.
+
+Отличия от оригинала: блоки хранятся в базе, а не в `message.extra`, поэтому
+`context.chat` — снимок на момент запуска; объект оригинала нельзя менять, чтобы
+изменить чат. Скрипт такого вида получает до ~10 минут вместо 55 секунд, потому
+что может ждать генерацию блоков. Скрипт, который написала модель
+(`source: model`), запускается как раньше, в строгом режиме и без этого слоя.
+
 ## Rewrite
 
 `Rewrite` не оставляет результата в панели: модель переписывает само сообщение, и оно сохраняется с новым текстом. Блок работает как в оригинальном расширении.
@@ -552,7 +589,8 @@ JavaScript может временно создать prompt-block с:
 - временную инъекцию в промпт;
 - выполнение команд;
 - воспроизведение аудио;
-- показ уведомлений.
+- показ уведомлений;
+- запуск блоков из скриптов оригинального расширения («Запуск блоков»).
 
 Если проверка разрешения отсутствует, применяется правило **default deny**.
 

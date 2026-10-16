@@ -61,6 +61,12 @@ abstract class PresetPermissions with _$PresetPermissions {
     /// `glaze.showToast` — show a toast message. Default ALLOW
     /// (toasts are non-destructive).
     @Default(true) bool showToast,
+
+    /// The original ExtBlocks script API: generating, rewriting and storing
+    /// blocks from a script (`GenerationService`, `GeneratedPlugin`,
+    /// `RewritePlugin`, `BlockService.addBlocksToExtra`, …). Each call is an
+    /// LLM request or a write to the chat, so it is default-deny.
+    @Default(false) bool runBlocks,
   }) = _PresetPermissions;
 
   factory PresetPermissions.fromJson(Map<String, dynamic> json) =>
@@ -88,7 +94,8 @@ enum GlazeCapability {
   uninjectPrompt('uninject_prompt', 'Remove an injected prompt block'),
   playAudio('play_audio', 'Play audio'),
   executeCommand('execute_command', 'Run a slash command'),
-  showToast('show_toast', 'Show a toast');
+  showToast('show_toast', 'Show a toast'),
+  runBlocks('run_blocks', 'Run ExtBlocks blocks from a script');
 
   const GlazeCapability(this.id, this.label);
   final String id;
@@ -137,6 +144,8 @@ extension PresetPermissionsCapability on PresetPermissions {
         return executeCommand;
       case GlazeCapability.showToast:
         return showToast;
+      case GlazeCapability.runBlocks:
+        return runBlocks;
     }
   }
 
@@ -193,6 +202,8 @@ extension PresetPermissionsMutator on PresetPermissions {
         return copyWith(executeCommand: value);
       case GlazeCapability.showToast:
         return copyWith(showToast: value);
+      case GlazeCapability.runBlocks:
+        return copyWith(runBlocks: value);
     }
   }
 }

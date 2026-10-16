@@ -37,10 +37,12 @@
   function callParentBridge(method, params) {
     return new Promise((resolve, reject) => {
       const id = nextId();
+      // A script of the original ExtBlocks may wait on a block's generation.
+      const extBlocks = !!(window.__glazeContext && window.__glazeContext.extBlocks);
       const timeout = setTimeout(() => {
         window.removeEventListener('message', onMessage);
         reject(makeError(`glaze.${method} timed out`, 'timeout'));
-      }, 60000);
+      }, extBlocks ? 590000 : 60000);
 
       function onMessage(event) {
         // Answers come from the page; a sibling frame could guess the id.
@@ -120,6 +122,24 @@
     },
     playAudio(source, options) {
       return callBridge('playAudio', { source, options: options || {} });
+    },
+    // The original ExtBlocks script API, behind the preset's "run blocks"
+    // permission. Scripts written for the original reach these through
+    // extblocks_compat.js; messages are named by their index in the chat.
+    extBlocksRun(params) {
+      return callBridge('extBlocksRun', params || {});
+    },
+    extBlocksGenerate(params) {
+      return callBridge('extBlocksGenerate', params || {});
+    },
+    extBlocksRewrite(params) {
+      return callBridge('extBlocksRewrite', params || {});
+    },
+    extBlocksStore(params) {
+      return callBridge('extBlocksStore', params || {});
+    },
+    extBlocksAbort() {
+      return callBridge('extBlocksAbort', {});
     },
   });
 })();

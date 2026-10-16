@@ -12,7 +12,9 @@ import '../../models/block_run_status.dart';
 import '../../models/info_block.dart';
 import '../../providers/info_blocks_provider.dart';
 import '../block_context_builder.dart';
+import '../../models/block_modes.dart';
 import 'block_context.dart';
+import 'ext_blocks_script_scope.dart';
 import 'block_handler.dart';
 
 class JsBlockExecutor {
@@ -59,6 +61,18 @@ class JsBlockExecutor {
         sessionId: context.sessionId,
         previousOutput: context.previousOutput,
         cancelToken: context.cancelToken,
+        // Code carried on the block may be written for the original
+        // extension, so it gets that extension's scope.
+        extBlocks: blockConfig.source == BlockSource.carried
+            ? extBlocksScriptScope(
+                preset: context.preset,
+                messages: context.messages,
+                messageId: context.messageId,
+                rows: ref.read(infoBlocksProvider(context.sessionId)),
+                character: context.character,
+                persona: context.persona,
+              )
+            : null,
       );
 
       if (context.cancelToken.isCancelled) {
@@ -140,6 +154,7 @@ class JsBlockExecutor {
     required String sessionId,
     required String? previousOutput,
     required CancelToken cancelToken,
+    Map<String, dynamic>? extBlocks,
   }) async {
     final visualBridge = bridge;
     if (visualBridge == null) {
@@ -153,6 +168,7 @@ class JsBlockExecutor {
       previousOutput: previousOutput,
       contextMessageCount: -1,
       cancelToken: cancelToken,
+      extBlocks: extBlocks,
     );
   }
 

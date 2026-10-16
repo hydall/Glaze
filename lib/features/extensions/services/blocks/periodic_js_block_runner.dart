@@ -21,6 +21,7 @@ class PeriodicJsBlockRunner {
     required BlockConfig block,
     required List<ChatMessage> contextMessages,
     bool Function()? isAuthorized,
+    Map<String, dynamic>? extBlocks,
   }) async {
     if (!(isAuthorized?.call() ?? true)) return null;
     if (block.type != BlockType.script) {
@@ -66,6 +67,7 @@ class PeriodicJsBlockRunner {
         previousOutput: null,
         contextMessageCount: -1,
         cancelToken: cancelToken,
+        extBlocks: extBlocks,
       );
       return !cancelToken.isCancelled && (isAuthorized?.call() ?? true)
           ? result

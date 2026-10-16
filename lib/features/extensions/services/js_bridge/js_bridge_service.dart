@@ -18,6 +18,7 @@ import 'js_bridge_method_registry.dart';
 export 'js_bridge_context.dart'
     show
         ExecuteCommandHandler,
+        ExtBlocksBridgeHandler,
         GenerateTextHandler,
         InjectPromptHandler,
         MessageVariablesAccessor,
@@ -48,6 +49,7 @@ class JsBridgeService {
   final PlayAudioHandler _playAudio;
   final ExecuteCommandHandler _executeCommand;
   final ShowToastHandler _showToast;
+  final ExtBlocksBridgeHandler? _extBlocks;
 
   final VariablesHandler _variablesHandler;
   final GenerationHandler _generationHandler;
@@ -71,6 +73,7 @@ class JsBridgeService {
     required PlayAudioHandler playAudio,
     required ExecuteCommandHandler executeCommand,
     required ShowToastHandler showToast,
+    ExtBlocksBridgeHandler? extBlocks,
   }) : this._(
          chatRepo,
          characterRepo,
@@ -86,6 +89,7 @@ class JsBridgeService {
          playAudio,
          executeCommand,
          showToast,
+         extBlocks,
          const VariablesHandler(),
          const GenerationHandler(),
          const PromptInjectionHandler(),
@@ -109,6 +113,7 @@ class JsBridgeService {
     this._playAudio,
     this._executeCommand,
     this._showToast,
+    this._extBlocks,
     this._variablesHandler,
     this._generationHandler,
     this._promptInjectionHandler,
@@ -195,6 +200,16 @@ class JsBridgeService {
         return _promptInjectionHandler.uninjectPrompt(bridge);
       case JsBridgeOperation.generateText:
         return _generationHandler.generateText(bridge);
+      case JsBridgeOperation.extBlocksRun:
+      case JsBridgeOperation.extBlocksGenerate:
+      case JsBridgeOperation.extBlocksRewrite:
+      case JsBridgeOperation.extBlocksStore:
+      case JsBridgeOperation.extBlocksAbort:
+        final handler = _extBlocks;
+        if (handler == null) {
+          throw UnsupportedError('ExtBlocks scripts are not available here');
+        }
+        return handler(method, params, context);
     }
   }
 }

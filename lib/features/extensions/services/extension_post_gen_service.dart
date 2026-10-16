@@ -10,6 +10,8 @@ import '../../../core/models/character.dart';
 import '../../../core/models/persona.dart';
 import '../../../core/llm/prompt/main_model_context_snapshot.dart';
 import '../../../core/state/db_provider.dart';
+import '../../../core/state/character_provider.dart';
+import '../../../core/state/persona_resolution.dart';
 import '../models/block_config.dart';
 import '../models/block_modes.dart';
 import '../models/extension_preset.dart';
@@ -29,6 +31,7 @@ import 'blocks/js_block_executor.dart';
 import 'blocks/script_block_handler.dart';
 import 'blocks/block_status_tracker.dart';
 import 'blocks/block_trigger_rules.dart';
+import 'blocks/ext_blocks_script_scope.dart';
 import 'blocks/periodic_js_block_runner.dart';
 import 'blocks/single_block_runner.dart';
 import 'blocks/unsupported_block_handler.dart';
@@ -419,6 +422,21 @@ class ExtensionPostGenService {
           sessionId: sessionId,
           block: block,
           contextMessages: messages,
+          // Swipe and generation-start scripts come from the original, so
+          // they get its scope, on the last message as it has them.
+          extBlocks: extBlocksScriptScope(
+            preset: preset,
+            messages: messages,
+            messageId: null,
+            rows: _ref.read(infoBlocksProvider(sessionId)),
+            character: _ref.read(characterByIdProvider(charId)),
+            persona: _ref.read(
+              effectivePersonaForChatProvider((
+                charId: charId,
+                sessionId: sessionId,
+              )),
+            ),
+          ),
         );
       } catch (e) {
         debugPrint('[ExtPostGen] $reason script "${block.name}" failed: $e');
@@ -524,6 +542,16 @@ class ExtensionPostGenService {
   void cancelBlocks() {
     for (final token in _blocksCancelTokens.keys.toList()) {
       if (!token.isCancelled) token.cancel();
+    }
+  }
+
+  /// Runs [body] as a block run of its own, so Stop reaches it.
+  Future<T> withBlockRun<T>(Future<T> Function(CancelToken token) body) async {
+    final token = _startBlockRun();
+    try {
+      return await body(token);
+    } finally {
+      _finishBlockRun(token);
     }
   }
 
@@ -976,12 +1004,14 @@ class ExtensionPostGenService {
     required BlockConfig block,
     required List<ChatMessage> contextMessages,
     bool Function()? isAuthorized,
+    Map<String, dynamic>? extBlocks,
   }) => PeriodicJsBlockRunner(ref: _ref).run(
     charId: charId,
     sessionId: sessionId,
     block: block,
     contextMessages: contextMessages,
     isAuthorized: isAuthorized,
+    extBlocks: extBlocks,
   );
 }
 

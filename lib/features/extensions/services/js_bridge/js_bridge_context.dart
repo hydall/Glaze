@@ -60,6 +60,14 @@ typedef ExecuteCommandHandler =
       Map<String, dynamic> context,
     );
 
+/// The original ExtBlocks script API (`ExtBlocksScriptApi.handle`).
+typedef ExtBlocksBridgeHandler =
+    Future<Object?> Function(
+      String method,
+      Map<String, dynamic> params,
+      Map<String, dynamic> context,
+    );
+
 /// Toast surface. The MVP `JsBridgeToastController` logs when no overlay is
 /// available and calls `GlazeToast.show` when one is.
 typedef ShowToastHandler =
