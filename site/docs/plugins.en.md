@@ -68,6 +68,8 @@ In Glaze open **Tools → Plugins → Import plugin** and pick the file. Glaze s
 
 To update the plugin, raise `version` and import the file again. The plugin keeps its data and the permissions the user gave it; new permissions arrive switched off. A package with the same `id` but another `author` is installed as a new plugin and does not get the old one's data.
 
+The plugin's page and its menu in the list also have **Export data (JSON)** and **Import data (JSON)**. The file holds the plugin's settings, its `localStorage`, its variables (global, per chat and per message) and its `global` and chat files in base64; permissions stay with the device. Import replaces the plugin's data rather than merging, after the user confirms. The whole file is checked first: a file of another plugin, from a newer Glaze or over the plugin's limits changes nothing. Variables of chats the device doesn't have are skipped. This works for every plugin, nothing is needed on the plugin's side (Glaze 0.9.0 Nightly).
+
 What helps while developing:
 
 - The plugin's page in **Tools → Plugins** has its permissions, settings, network log and request history: what the plugin asked for and whether it was allowed.
