@@ -13,6 +13,7 @@ import '../models/lorebook.dart';
 import '../models/memory_book.dart';
 import '../models/persona.dart';
 import '../models/preset.dart';
+import '../models/summary_block.dart';
 import '../models/tracker.dart';
 import '../models/ledger_prompt_injection_policy.dart';
 import '../state/active_selection_provider.dart';
@@ -292,10 +293,16 @@ class PromptPayloadBuilder {
       throwIfAborted();
       runtimePromptBlocks = _readRuntimePromptBlocks(session.id);
 
-      final summaryService = _ref.read(summaryServiceProvider);
-      summaryContent = historicalWindow == null
-          ? await summaryService.getSummary(session.id)
+      // A historical request rebuilds the prompt an older reply saw; the
+      // summary of today does not belong in it.
+      final summaryView = historicalWindow == null
+          ? await _ref
+                .read(summaryServiceProvider)
+                .getPromptView(session.id, session.messages)
           : null;
+      summaryContent = summaryView?.content;
+      // Summarized messages are not sent: their block stands in for them.
+      history = SummaryChain.withoutCovered(history, summaryView);
       throwIfAborted();
 
       final memoryService = _ref.read(memoryInjectionServiceProvider);

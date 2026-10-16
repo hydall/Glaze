@@ -114,7 +114,7 @@ lib/
 │   │   ├── sse_client.dart           # SSE + non-streaming completions via Dio
 │   │   ├── stream_accumulator.dart   # Parses inline <think…> tags from stream
 │   │   ├── response_normalizer.dart  # Extracts content from non-streaming response body
-│   │   ├── summary_service.dart      # Reads/writes summaries, triggers LLM regeneration
+│   │   ├── summary_service.dart      # Summary blocks: storage, prompt view, retell/merge calls
 │   │   ├── tokenizer.dart            # estimateTokens() with LRU cache, base64 stripping
 │   │   ├── request_tokens.dart       # countRequestTokens(): one rule for the inspector's next and captured requests
 │   │   ├── macro_engine.dart         # SillyTavern-compatible macro replacement engine
@@ -880,7 +880,7 @@ finishes.
 - `{{reasoningPrefix}}`, `{{reasoningSuffix}}` — inline reasoning tag config
 
 **Dynamic content:**
-- `{{summary}}` — current chat summary (user-authored only)
+- `{{summary}}` — live summary blocks; the messages they cover are left out of the history (INV-S6)
 - `{{memory}}` — triggered memory book entries. Memory can enter the prompt three ways: a dedicated `memory` ("Memory Book") preset block (addable from the editor, resolves like the macro), the `{{memory}}` macro, or — with `injectionTarget='hard_block'` (default) — an auto-injected "Memory Book" system message. With `injectionTarget='macro'` and no `{{memory}}` macro or `memory` block present, memory is dropped and `memoryMacroMissing` is flagged. See INV-PS5.
 - `{{lorebooks}}` — triggered lorebook content
 - `{{guidance}}` — guided swipe instruction

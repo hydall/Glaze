@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../models/summary_block.dart';
 import '../models/api_config.dart';
 import '../models/chat_message.dart';
 import '../state/active_selection_provider.dart';
@@ -108,11 +109,12 @@ class PromptInputsCollector {
     final lorebookSettings = _ref.read(lorebookSettingsProvider);
     final lorebookActivations = _ref.read(lorebookActivationsProvider);
 
-    String? summaryContent;
-    if (session != null) {
-      final summaryService = _ref.read(summaryServiceProvider);
-      summaryContent = await summaryService.getSummary(session.id);
-    }
+    final summaryView = session == null
+        ? null
+        : await _ref
+              .read(summaryServiceProvider)
+              .getPromptView(session.id, session.messages);
+    final summaryContent = summaryView?.content;
 
     final memoryBook = session != null
         ? await _ref.read(memoryBookRepoProvider).getBySessionId(session.id)
@@ -125,6 +127,8 @@ class PromptInputsCollector {
     var runtimePromptBlocks = const <RuntimePromptBlock>[];
     if (session != null) {
       history = await _injectHistory(sessionId: session.id, messages: history);
+      // Summarized messages are not sent: their block stands in for them.
+      history = SummaryChain.withoutCovered(history, summaryView);
       runtimePromptBlocks = _readRuntimePromptBlocks(session.id);
     }
 

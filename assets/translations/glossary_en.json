@@ -247,7 +247,7 @@
                 {
                     "id": "summary",
                     "name": "Summary",
-                    "desc": "A block for a brief recap of the earlier parts of the chat. As conversations grow long, the oldest messages fall out of the AI's memory — a summary helps it stay aware of what happened earlier. You can write it yourself or generate it automatically with a button."
+                    "desc": "A brief recap of the earlier parts of the chat, made of blocks. When the chat fills the context, the oldest messages are retold as a block and sent in its place, so the AI remembers what happened without the full transcript. As blocks pile up, neighbouring ones are merged into larger ones. You can also compact by hand, edit blocks and add your own notes."
                 },
                 {
                     "id": "guided",

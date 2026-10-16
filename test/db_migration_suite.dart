@@ -81,7 +81,7 @@ void runDbMigrationTests() {
 
       // user_version matches the Drift schema version (app_db.dart schemaVersion).
       // Update this constant whenever a new migration step is added.
-      expect(version, 142);
+      expect(version, 143);
     });
   });
 
@@ -250,7 +250,7 @@ void runDbMigrationTests() {
         final version = await upgraded
             .customSelect('PRAGMA user_version')
             .get();
-        expect(version.first.read<int>('user_version'), 142);
+        expect(version.first.read<int>('user_version'), 143);
         expect(names, contains('variant_group_id'));
         expect(names, contains('hidden'));
       },
@@ -280,7 +280,7 @@ void runDbMigrationTests() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 142);
+      expect(version.read<int>('user_version'), 143);
     });
 
     test(
@@ -630,7 +630,7 @@ void runDbMigrationTests() {
     test('current schema includes atomic character fact tables', () async {
       final db = currentDatabase();
       final version = await db.customSelect('PRAGMA user_version').getSingle();
-      expect(version.read<int>('user_version'), 142);
+      expect(version.read<int>('user_version'), 143);
 
       final factColumns = await db
           .customSelect("PRAGMA table_info('character_knowledge_fact_rows')")
@@ -743,7 +743,7 @@ void runDbMigrationTests() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 142);
+      expect(version.read<int>('user_version'), 143);
     });
 
     test(
@@ -855,7 +855,7 @@ void runDbMigrationTests() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 142);
+      expect(version.read<int>('user_version'), 143);
     });
 
     test('v80 adds Responses API toggle defaulting to off', () async {
@@ -895,7 +895,7 @@ void runDbMigrationTests() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 142);
+      expect(version.read<int>('user_version'), 143);
     });
 
     test('v81 adds composite embedding source index', () async {
@@ -929,7 +929,7 @@ void runDbMigrationTests() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 142);
+      expect(version.read<int>('user_version'), 143);
     });
 
     test('v82 creates rewrite persistence schema and provenance columns', () async {
@@ -1003,7 +1003,7 @@ void runDbMigrationTests() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 142);
+      expect(version.read<int>('user_version'), 143);
     });
 
     test('v83 rebuilds interim text revision columns without losing rows', () async {
@@ -1458,7 +1458,7 @@ void runDbMigrationTests() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 142);
+      expect(version.read<int>('user_version'), 143);
 
       // Rows and payloads survive; legacy statuses pass through or are
       // normalized fail-closed, and new columns carry neutral defaults.
@@ -1663,7 +1663,7 @@ void runDbMigrationTests() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 142);
+      expect(version.read<int>('user_version'), 143);
       final row = await upgraded
           .customSelect(
             'SELECT blocks_json FROM studio_preset_rows WHERE preset_id = ?',
@@ -1779,7 +1779,7 @@ void runDbMigrationTests() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 142);
+      expect(version.read<int>('user_version'), 143);
       final check = await upgraded.customSelect('PRAGMA integrity_check').get();
       expect(check.single.read<String>('integrity_check'), 'ok');
     });
@@ -1903,12 +1903,14 @@ void runDbMigrationTests() {
         final version = await upgraded
             .customSelect('PRAGMA user_version')
             .getSingle();
-        expect(version.read<int>('user_version'), 142);
+        expect(version.read<int>('user_version'), 143);
         // v126 rebuilds the effects table and re-arms its immutability trigger.
-        final trigger = await upgraded.customSelect(
-          "SELECT name FROM sqlite_master WHERE type = 'trigger' "
-          "AND name = 'ledger_reconciliation_effects_no_update'",
-        ).get();
+        final trigger = await upgraded
+            .customSelect(
+              "SELECT name FROM sqlite_master WHERE type = 'trigger' "
+              "AND name = 'ledger_reconciliation_effects_no_update'",
+            )
+            .get();
         expect(trigger, hasLength(1));
       },
     );
@@ -1943,12 +1945,14 @@ void runDbMigrationTests() {
         final version = await upgraded
             .customSelect('PRAGMA user_version')
             .getSingle();
-        expect(version.read<int>('user_version'), 142);
+        expect(version.read<int>('user_version'), 143);
         // v128 creates the writer calls table and arms its trigger.
-        final trigger = await upgraded.customSelect(
-          "SELECT name FROM sqlite_master WHERE type = 'trigger' "
-          "AND name = 'card_evolution_writer_calls_completed_no_update'",
-        ).get();
+        final trigger = await upgraded
+            .customSelect(
+              "SELECT name FROM sqlite_master WHERE type = 'trigger' "
+              "AND name = 'card_evolution_writer_calls_completed_no_update'",
+            )
+            .get();
         expect(trigger, hasLength(1));
       },
     );
@@ -1983,12 +1987,14 @@ void runDbMigrationTests() {
           NativeDatabase.createInBackground(file),
         );
         addTearDown(() async => upgraded.close());
-        final restored = await upgraded.customSelect(
-          'SELECT name FROM sqlite_master WHERE name IN ('
-          "'idx_session_canon_checkpoint_sequence', "
-          "'idx_rewrite_job_session', "
-          "'card_evolution_writer_calls_completed_no_update')",
-        ).get();
+        final restored = await upgraded
+            .customSelect(
+              'SELECT name FROM sqlite_master WHERE name IN ('
+              "'idx_session_canon_checkpoint_sequence', "
+              "'idx_rewrite_job_session', "
+              "'card_evolution_writer_calls_completed_no_update')",
+            )
+            .get();
         expect(restored, hasLength(3));
       },
     );
@@ -2573,7 +2579,7 @@ void runDbMigrationTests() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 142);
+      expect(version.read<int>('user_version'), 143);
     });
 
     test(
@@ -2671,7 +2677,7 @@ void runDbMigrationTests() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 142);
+      expect(version.read<int>('user_version'), 143);
     });
 
     test('v118 defaults prompt post-processing without a preset', () async {
@@ -2801,7 +2807,7 @@ void runDbMigrationTests() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 142);
+      expect(version.read<int>('user_version'), 143);
     });
 
     test('v120 adds the ledger debug journal to an older database', () async {
@@ -2887,7 +2893,7 @@ void runDbMigrationTests() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 142);
+      expect(version.read<int>('user_version'), 143);
     });
 
     test('v121 adds the session canon timeline foundation', () async {
@@ -2947,7 +2953,7 @@ void runDbMigrationTests() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 142);
+      expect(version.read<int>('user_version'), 143);
     });
 
     test('v122 adds the embedding request rate limit', () async {
@@ -2986,7 +2992,7 @@ void runDbMigrationTests() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 142);
+      expect(version.read<int>('user_version'), 143);
     });
 
     test('v123 raises only the legacy Studio final history limit', () async {
@@ -3038,7 +3044,7 @@ void runDbMigrationTests() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 142);
+      expect(version.read<int>('user_version'), 143);
     });
 
     test('v124 and v125 add LLM capture history and linkage', () async {
@@ -3112,7 +3118,7 @@ void runDbMigrationTests() {
           'idx_llm_call_event_call_attempt',
         ]),
       );
-      expect(version.read<int>('user_version'), 142);
+      expect(version.read<int>('user_version'), 143);
     });
 
     test('v125 upgrades an existing v124 request capture table', () async {
@@ -3170,7 +3176,7 @@ void runDbMigrationTests() {
         contains('call_id'),
       );
       expect(eventColumns, isNotEmpty);
-      expect(version.read<int>('user_version'), 142);
+      expect(version.read<int>('user_version'), 143);
     });
 
     test('v126 adds immutable reconciliation effects', () async {
@@ -3221,7 +3227,7 @@ void runDbMigrationTests() {
         indexes.map((row) => row.read<String>('name')),
         contains('idx_reconciliation_effect_session_created'),
       );
-      expect(version.read<int>('user_version'), 142);
+      expect(version.read<int>('user_version'), 143);
     });
 
     test(
@@ -3298,7 +3304,7 @@ INSERT INTO card_evolution_collector_runs VALUES
         );
         // v132 intentionally resets pair-based Collector journals.
         expect(rows, isEmpty);
-        expect(version.read<int>('user_version'), 142);
+        expect(version.read<int>('user_version'), 143);
       },
     );
 
@@ -3387,7 +3393,7 @@ INSERT INTO card_evolution_claims VALUES
         writerIndexes.map((row) => row.read<String>('name')),
         contains('idx_card_evolution_writer_call_session_updated'),
       );
-      expect(version.read<int>('user_version'), 142);
+      expect(version.read<int>('user_version'), 143);
     });
 
     test('v129 adds active job and immutable audit guards', () async {
@@ -3464,7 +3470,7 @@ INSERT INTO card_evolution_claims VALUES
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 142);
+      expect(version.read<int>('user_version'), 143);
       await upgraded.customStatement(
         "INSERT INTO ledger_reconciliation_leases VALUES ('session', 'owner', 'normal', 2, 1)",
       );
@@ -3802,104 +3808,110 @@ INSERT INTO card_evolution_claims VALUES
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 142);
+      expect(version.read<int>('user_version'), 143);
     });
 
     for (final fromVersion in const [135, 136]) {
-      test('v137 adds the connection tokenizer column from v$fromVersion', () async {
-        final file = File(
-          '${Directory.systemTemp.path}/glaze_mig_tokenizer_${fromVersion}_'
-          '${DateTime.now().microsecondsSinceEpoch}.db',
-        );
-        addTearDown(() async {
-          if (file.existsSync()) await file.delete();
-        });
-        final seeded = AppDatabase.forTesting(
-          NativeDatabase.createInBackground(file),
-        );
-        await seeded.customSelect('SELECT 1').get();
-        await seeded.customStatement(
-          'ALTER TABLE api_configs DROP COLUMN tokenizer',
-        );
-        await seeded.customStatement(
-          "INSERT INTO api_configs (config_id, name, model) "
-          "VALUES ('api', 'Chat', 'claude-sonnet')",
-        );
-        await seeded.customStatement('PRAGMA user_version = $fromVersion');
-        await seeded.close();
+      test(
+        'v137 adds the connection tokenizer column from v$fromVersion',
+        () async {
+          final file = File(
+            '${Directory.systemTemp.path}/glaze_mig_tokenizer_${fromVersion}_'
+            '${DateTime.now().microsecondsSinceEpoch}.db',
+          );
+          addTearDown(() async {
+            if (file.existsSync()) await file.delete();
+          });
+          final seeded = AppDatabase.forTesting(
+            NativeDatabase.createInBackground(file),
+          );
+          await seeded.customSelect('SELECT 1').get();
+          await seeded.customStatement(
+            'ALTER TABLE api_configs DROP COLUMN tokenizer',
+          );
+          await seeded.customStatement(
+            "INSERT INTO api_configs (config_id, name, model) "
+            "VALUES ('api', 'Chat', 'claude-sonnet')",
+          );
+          await seeded.customStatement('PRAGMA user_version = $fromVersion');
+          await seeded.close();
 
-        final upgraded = AppDatabase.forTesting(
-          NativeDatabase.createInBackground(file),
-        );
-        addTearDown(() async => upgraded.close());
-        final row = await upgraded
-            .customSelect(
-              "SELECT model, tokenizer FROM api_configs WHERE config_id = 'api'",
-            )
-            .getSingle();
-        // Existing connections keep counting by model name.
-        expect(row.read<String>('tokenizer'), 'auto');
-        expect(row.read<String>('model'), 'claude-sonnet');
-        final version = await upgraded
-            .customSelect('PRAGMA user_version')
-            .getSingle();
-        expect(version.read<int>('user_version'), 142);
-      });
+          final upgraded = AppDatabase.forTesting(
+            NativeDatabase.createInBackground(file),
+          );
+          addTearDown(() async => upgraded.close());
+          final row = await upgraded
+              .customSelect(
+                "SELECT model, tokenizer FROM api_configs WHERE config_id = 'api'",
+              )
+              .getSingle();
+          // Existing connections keep counting by model name.
+          expect(row.read<String>('tokenizer'), 'auto');
+          expect(row.read<String>('model'), 'claude-sonnet');
+          final version = await upgraded
+              .customSelect('PRAGMA user_version')
+              .getSingle();
+          expect(version.read<int>('user_version'), 143);
+        },
+      );
     }
 
     for (final fromVersion in const [135, 138]) {
       // From v135 the v136 rebuild runs first and copies every declared
       // column, so it must add these before the rebuild.
-      test('v139 adds the NoAssistant columns turned off from v$fromVersion', () async {
-        final file = File(
-          '${Directory.systemTemp.path}/glaze_mig_no_assistant_${fromVersion}_'
-          '${DateTime.now().microsecondsSinceEpoch}.db',
-        );
-        addTearDown(() async {
-          if (file.existsSync()) await file.delete();
-        });
-        final seeded = AppDatabase.forTesting(
-          NativeDatabase.createInBackground(file),
-        );
-        await seeded.customSelect('SELECT 1').get();
-        for (final column in const [
-          'no_assistant',
-          'no_assistant_stop_string',
-          'no_assistant_user_prefix',
-          'no_assistant_char_prefix',
-          'no_assistant_squash_role',
-        ]) {
-          await seeded.customStatement(
-            'ALTER TABLE api_configs DROP COLUMN $column',
+      test(
+        'v139 adds the NoAssistant columns turned off from v$fromVersion',
+        () async {
+          final file = File(
+            '${Directory.systemTemp.path}/glaze_mig_no_assistant_${fromVersion}_'
+            '${DateTime.now().microsecondsSinceEpoch}.db',
           );
-        }
-        await seeded.customStatement(
-          "INSERT INTO api_configs (config_id, name) VALUES ('api', 'Chat')",
-        );
-        await seeded.customStatement('PRAGMA user_version = $fromVersion');
-        await seeded.close();
+          addTearDown(() async {
+            if (file.existsSync()) await file.delete();
+          });
+          final seeded = AppDatabase.forTesting(
+            NativeDatabase.createInBackground(file),
+          );
+          await seeded.customSelect('SELECT 1').get();
+          for (final column in const [
+            'no_assistant',
+            'no_assistant_stop_string',
+            'no_assistant_user_prefix',
+            'no_assistant_char_prefix',
+            'no_assistant_squash_role',
+          ]) {
+            await seeded.customStatement(
+              'ALTER TABLE api_configs DROP COLUMN $column',
+            );
+          }
+          await seeded.customStatement(
+            "INSERT INTO api_configs (config_id, name) VALUES ('api', 'Chat')",
+          );
+          await seeded.customStatement('PRAGMA user_version = $fromVersion');
+          await seeded.close();
 
-        final upgraded = AppDatabase.forTesting(
-          NativeDatabase.createInBackground(file),
-        );
-        addTearDown(() async => upgraded.close());
-        final row = await upgraded
-            .customSelect(
-              'SELECT no_assistant, no_assistant_stop_string, '
-              'no_assistant_user_prefix, no_assistant_char_prefix, '
-              "no_assistant_squash_role FROM api_configs WHERE config_id = 'api'",
-            )
-            .getSingle();
-        expect(row.read<bool>('no_assistant'), isFalse);
-        expect(row.read<String>('no_assistant_stop_string'), '');
-        expect(row.read<String>('no_assistant_user_prefix'), '');
-        expect(row.read<String>('no_assistant_char_prefix'), '');
-        expect(row.read<String>('no_assistant_squash_role'), 'assistant');
-        final version = await upgraded
-            .customSelect('PRAGMA user_version')
-            .getSingle();
-        expect(version.read<int>('user_version'), 142);
-      });
+          final upgraded = AppDatabase.forTesting(
+            NativeDatabase.createInBackground(file),
+          );
+          addTearDown(() async => upgraded.close());
+          final row = await upgraded
+              .customSelect(
+                'SELECT no_assistant, no_assistant_stop_string, '
+                'no_assistant_user_prefix, no_assistant_char_prefix, '
+                "no_assistant_squash_role FROM api_configs WHERE config_id = 'api'",
+              )
+              .getSingle();
+          expect(row.read<bool>('no_assistant'), isFalse);
+          expect(row.read<String>('no_assistant_stop_string'), '');
+          expect(row.read<String>('no_assistant_user_prefix'), '');
+          expect(row.read<String>('no_assistant_char_prefix'), '');
+          expect(row.read<String>('no_assistant_squash_role'), 'assistant');
+          final version = await upgraded
+              .customSelect('PRAGMA user_version')
+              .getSingle();
+          expect(version.read<int>('user_version'), 143);
+        },
+      );
     }
 
     test('v142 adds the character appearance column from v141', () async {
@@ -3934,7 +3946,46 @@ INSERT INTO card_evolution_claims VALUES
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 142);
+      expect(version.read<int>('user_version'), 143);
+    });
+
+    test('v143 adds summary blocks and keeps the old summary text', () async {
+      final file = File(
+        '${Directory.systemTemp.path}/glaze_mig_summary_blocks_'
+        '${DateTime.now().microsecondsSinceEpoch}.db',
+      );
+      addTearDown(() async {
+        if (file.existsSync()) await file.delete();
+      });
+      final seeded = AppDatabase.forTesting(
+        NativeDatabase.createInBackground(file),
+      );
+      await seeded.customSelect('SELECT 1').get();
+      await seeded.customStatement(
+        'ALTER TABLE chat_summaries DROP COLUMN blocks_json',
+      );
+      await seeded.customStatement(
+        "INSERT INTO chat_summaries (session_id, content) VALUES ('s', 'Old')",
+      );
+      await seeded.customStatement('PRAGMA user_version = 142');
+      await seeded.close();
+
+      final upgraded = AppDatabase.forTesting(
+        NativeDatabase.createInBackground(file),
+      );
+      addTearDown(() async => upgraded.close());
+      final row = await upgraded
+          .customSelect(
+            "SELECT content, blocks_json FROM chat_summaries "
+            "WHERE session_id = 's'",
+          )
+          .getSingle();
+      expect(row.read<String>('content'), 'Old');
+      expect(row.read<String?>('blocks_json'), isNull);
+      final version = await upgraded
+          .customSelect('PRAGMA user_version')
+          .getSingle();
+      expect(version.read<int>('user_version'), 143);
     });
 
     test('v132 resets pair-based Collector state only', () async {

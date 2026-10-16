@@ -211,6 +211,12 @@ class ChatSummaries extends Table {
   TextColumn get prompt => text().nullable()();
   IntColumn get updatedAt => integer().withDefault(const Constant(0))();
 
+  /// The summary as a chain of `SummaryBlock`s, JSON-encoded. Null on a row
+  /// written before blocks existed: its [content] is read as one note.
+  /// [content] keeps the active blocks rendered, for consumers that only read
+  /// text.
+  TextColumn get blocksJson => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {sessionId};
 }
