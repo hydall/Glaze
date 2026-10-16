@@ -30,6 +30,7 @@ import '../../extensions/models/extension_preset.dart';
 import '../../extensions/models/extensions_settings.dart';
 import '../../extensions/providers/extension_presets_provider.dart';
 import '../../extensions/providers/extensions_settings_provider.dart';
+import '../../plugins/providers/plugin_library_provider.dart';
 import '../../plugins/widgets/plugin_action_cards.dart';
 
 class MagicDrawerPanel extends ConsumerStatefulWidget {
@@ -318,8 +319,22 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
                       .firstOrNull
                       ?.name ??
                   'No preset',
+      'plugins' => _pluginsStatus(),
       _ => null,
     };
+  }
+
+  /// How many installed plugins are on, read during build so the card
+  /// follows a switch flipped in the sheet.
+  String? _pluginsStatus() {
+    final plugins = ref.watch(pluginLibraryProvider).value;
+    if (plugins == null) return null;
+    return 'plugins_drawer_status'.tr(
+      namedArgs: {
+        'on': '${plugins.where((x) => x.enabled).length}',
+        'total': '${plugins.length}',
+      },
+    );
   }
 
   Future<void> _removeItem(String id) async {

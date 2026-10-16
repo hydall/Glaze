@@ -90,17 +90,30 @@ PluginManifest parsePluginManifest(Object? json) {
       if (p is String) p,
   ]).toList();
 
+  // A host is a string, or `{ "host": ..., "description": ... }` saying what
+  // the plugin uses it for.
   final hosts = <String>[];
+  final hostDescriptions = <String, PluginText>{};
   final rawHosts = raw['hosts'];
   if (rawHosts != null && rawHosts is! List) {
     throw const PluginManifestException('hosts must be an array');
   }
   for (final h in (rawHosts as List?) ?? const []) {
-    final host = h is String ? normalizePluginHost(h) : null;
+    final name = h is Map ? h['host'] : h;
+    final host = name is String ? normalizePluginHost(name) : null;
     if (host == null) {
-      throw PluginManifestException('hosts has an invalid host: $h');
+      throw PluginManifestException('hosts has an invalid host: $name');
     }
     if (!hosts.contains(host)) hosts.add(host);
+    if (h is Map && h['description'] != null) {
+      final description = PluginText.tryParse(h['description']);
+      if (description == null) {
+        throw PluginManifestException(
+          'hosts has an invalid description for $host',
+        );
+      }
+      hostDescriptions[host] = description;
+    }
   }
 
   final contributes = raw['contributes'] is Map
@@ -236,6 +249,44 @@ PluginManifest parsePluginManifest(Object? json) {
     }
   }
 
+  final settingsTabs = <PluginSettingsTab>[];
+  final rawTabs = contributes['settingsTabs'];
+  if (rawTabs != null && rawTabs is! List) {
+    throw const PluginManifestException(
+      'contributes.settingsTabs must be an array',
+    );
+  }
+  for (final (i, t) in ((rawTabs as List?) ?? const []).indexed) {
+    if (t is! Map || t['id'] is! String || (t['id'] as String).isEmpty) {
+      throw PluginManifestException('settingsTabs[$i] needs an id');
+    }
+    final tabId = t['id'] as String;
+    if (settingsTabs.any((x) => x.id == tabId)) {
+      throw PluginManifestException('settingsTabs has a duplicate id: $tabId');
+    }
+    final label = PluginText.tryParse(t['label']);
+    if (label == null) {
+      throw PluginManifestException('settingsTabs[$i] needs a label');
+    }
+    settingsTabs.add(
+      PluginSettingsTab(
+        id: tabId,
+        label: label,
+        icon: path('settingsTabs[$i].icon', t['icon']),
+      ),
+    );
+  }
+  if (settingsTabs.length > PluginSettingsTab.max) {
+    throw const PluginManifestException(
+      'settingsTabs may have at most ${PluginSettingsTab.max} tabs',
+    );
+  }
+  for (final (i, field) in settings.indexed) {
+    if (field.tab case final tab? when !settingsTabs.any((x) => x.id == tab)) {
+      throw PluginManifestException('settings[$i] names an unknown tab: $tab');
+    }
+  }
+
   final author = raw['author'];
   final minVersion = raw['minGlazeVersion'];
   return PluginManifest(
@@ -255,11 +306,13 @@ PluginManifest parsePluginManifest(Object? json) {
     compat: compat,
     permissions: permissions,
     hosts: hosts,
+    hostDescriptions: hostDescriptions,
     composerActions: composerActions,
     toolsActions: toolsActions,
     messageActions: messageActions,
     panels: panels,
     fileHandlers: fileHandlers,
     settings: settings,
+    settingsTabs: settingsTabs,
   );
 }

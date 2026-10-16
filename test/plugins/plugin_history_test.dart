@@ -31,6 +31,10 @@ void main() {
     );
     expect(
       PluginPermissionCategory.of('network'),
+      PluginPermissionCategory.network,
+    );
+    expect(
+      PluginPermissionCategory.of('composer'),
       PluginPermissionCategory.general,
     );
   });

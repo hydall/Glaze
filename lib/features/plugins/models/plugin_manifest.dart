@@ -201,11 +201,13 @@ abstract final class PluginPermission {
 /// The broad kind of a permission, for sorting and filtering.
 enum PluginPermissionCategory {
   general,
+  network,
   variables,
   library,
   chats;
 
   static PluginPermissionCategory of(String permission) {
+    if (permission == PluginPermission.network) return network;
     if (permission == PluginPermission.variables ||
         permission == PluginPermission.variablesShared) {
       return variables;
@@ -330,12 +332,14 @@ class PluginManifest {
     this.compat,
     this.permissions = const [],
     this.hosts = const [],
+    this.hostDescriptions = const {},
     this.composerActions = const [],
     this.toolsActions = const [],
     this.messageActions = const [],
     this.panels = const [],
     this.fileHandlers = const [],
     this.settings = const [],
+    this.settingsTabs = const [],
   });
 
   final int format;
@@ -357,14 +361,22 @@ class PluginManifest {
   final List<String> permissions;
 
   /// Hosts the plugin says it needs (`example.com`, `*.example.com`); with
-  /// the `network` permission, a fresh install may reach only these.
+  /// the `network` permission and the listed-hosts mode, the plugin may reach
+  /// these unless the user switches one off.
   final List<String> hosts;
+
+  /// What the plugin uses a host in [hosts] for, by host.
+  final Map<String, PluginText> hostDescriptions;
   final List<PluginAction> composerActions;
   final List<PluginAction> toolsActions;
   final List<PluginAction> messageActions;
   final List<PluginPanel> panels;
   final List<PluginFileHandler> fileHandlers;
   final List<PluginSettingField> settings;
+
+  /// The plugin's own tabs, at most [PluginSettingsTab.max]; empty puts every
+  /// field on one Settings tab.
+  final List<PluginSettingsTab> settingsTabs;
 
   /// The manifest as read.
   final Map<String, dynamic> raw;

@@ -141,9 +141,9 @@ class PluginLibraryNotifier extends AsyncNotifier<List<InstalledPlugin>> {
     ),
   );
 
-  /// Off takes `network` away; listed keeps it to [InstalledPlugin.networkHosts]
-  /// (the manifest's hosts show up switched off); any lets it reach every
-  /// host.
+  /// Off takes `network` away; listed keeps it to
+  /// [InstalledPlugin.allowedHosts] (the manifest's hosts start switched on);
+  /// any lets it reach every host.
   Future<void> setNetworkMode(String id, PluginNetworkMode mode) => _update(
     id,
     (x) => x.copyWith(
@@ -162,15 +162,20 @@ class PluginLibraryNotifier extends AsyncNotifier<List<InstalledPlugin>> {
   Future<void> setLocalNetwork(String id, bool allowed) =>
       _update(id, (x) => x.copyWith(localNetwork: allowed));
 
-  /// Adds [host] to, or removes it from, the plugin's allowed hosts.
-  Future<void> setHostAllowed(String id, String host, bool allowed) => _update(
-    id,
-    (x) => x.copyWith(
-      networkHosts: () => allowed
-          ? {...?x.networkHosts, host}
-          : ({...?x.networkHosts}..remove(host)),
-    ),
-  );
+  /// Adds [host] to, or removes it from, the plugin's allowed hosts; a
+  /// manifest host is switched off rather than dropped.
+  Future<void> setHostAllowed(String id, String host, bool allowed) =>
+      _update(id, (x) {
+        final declared = x.manifest.hosts.contains(host);
+        return x.copyWith(
+          networkHosts: () => allowed && !declared
+              ? {...?x.networkHosts, host}
+              : ({...?x.networkHosts}..remove(host)),
+          blockedHosts: allowed || !declared
+              ? ({...x.blockedHosts}..remove(host))
+              : {...x.blockedHosts, host},
+        );
+      });
 
   /// For a permission that asks first: ask every time, allow for good, or
   /// take it away.

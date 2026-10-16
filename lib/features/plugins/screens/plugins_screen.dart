@@ -12,6 +12,7 @@ import '../../../shared/widgets/glaze_scaffold.dart';
 import '../../../shared/widgets/glaze_switch.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/menu_group.dart';
+import '../../../shared/widgets/sheet_view.dart';
 import '../../../shared/widgets/variation_chip.dart';
 import '../compat/tavo/tavo_hub.dart';
 import '../compat/tavo/tavo_manifest_converter.dart';
@@ -41,16 +42,10 @@ class PluginsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final library = ref.watch(pluginLibraryProvider);
-    final locale = context.locale.toLanguageTag();
     final topPad = DetachedShellHost.of(context)
         ? 0.0
         : MediaQuery.of(context).padding.top + 74.0;
     final bottomPad = MediaQuery.of(context).padding.bottom + 20.0;
-    final plugins = library.value ?? const <InstalledPlugin>[];
-    final updates =
-        ref.watch(pluginHubUpdatesProvider).value ?? const <String, Object>{};
-
     return GlazeScaffold(
       title: 'plugins_title'.tr(),
       showBackground: true,
@@ -58,78 +53,118 @@ class PluginsScreen extends ConsumerWidget {
       onBack: () => Navigator.of(context).pop(),
       body: ListView(
         padding: EdgeInsets.fromLTRB(0, topPad + 8, 0, bottomPad),
-        children: [
-          MenuGroup(
-            description: 'plugins_intro'.tr(),
-            items: [
-              MenuItem(
-                icon: Icons.file_open_outlined,
-                label: 'plugins_import'.tr(),
-                subtitle: 'plugins_import_hint'.tr(),
-                onTap: () => importPluginFromFile(context, ref),
-              ),
-              MenuItem(
-                icon: Icons.link_rounded,
-                label: 'plugins_install_from_link'.tr(),
-                subtitle: 'plugins_install_from_link_hint'.tr(),
-                onTap: () => _askForLink(context),
-              ),
-            ],
-          ),
-          MenuGroup(
-            header: 'plugins_installed'.tr(),
-            headerIcon: Icons.extension_rounded,
-            description: library.isLoading
-                ? null
-                : plugins.isEmpty
-                ? 'plugins_empty'.tr()
-                : null,
-            items: [
-              for (final plugin in plugins)
-                MenuItem(
-                  icon: Icons.extension_outlined,
-                  label: plugin.localizer(locale).resolve(plugin.manifest.name),
-                  subtitle: [
-                    if (plugin.manifest.author?.trim() case final a?
-                        when a.isNotEmpty)
-                      a,
-                    plugin.manifest.version,
-                  ].join(' · '),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Converted Tavo packages are marked; Glaze's own
-                      // plugins need no label.
-                      if (updates.containsKey(plugin.id)) ...[
-                        VariationChip(name: 'plugins_hub_update_chip'.tr()),
-                        const SizedBox(width: 6),
-                      ],
-                      if (plugin.manifest.compat == kTavoCompat) ...[
-                        const VariationChip(name: 'Tavo'),
-                        const SizedBox(width: 10),
-                      ],
-                      GlazeSwitch(
-                        value: plugin.enabled,
-                        onChanged: (v) => ref
-                            .read(pluginLibraryProvider.notifier)
-                            .setEnabled(plugin.id, v),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.more_vert_rounded),
-                        tooltip: 'plugins_more'.tr(),
-                        visualDensity: VisualDensity.compact,
-                        onPressed: () => _showPluginMenu(context, ref, plugin),
-                      ),
-                    ],
-                  ),
-                  onTap: () => openPluginDetailScreen(context, plugin.id),
-                ),
-            ],
-          ),
-        ],
+        children: pluginListGroups(context, ref),
       ),
     );
   }
+}
+
+/// The plugin list as a sheet, opened from the chat's Tools drawer.
+class PluginsSheet extends ConsumerWidget {
+  const PluginsSheet({super.key, this.startExpanded = false});
+
+  final bool startExpanded;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return SheetView(
+      title: 'plugins_title'.tr(),
+      startExpanded: startExpanded,
+      showRouteBackground: false,
+      // The header inset SheetView reports lives inside its own subtree, so
+      // the padding is read from a context below it.
+      body: Builder(
+        builder: (context) => ListView(
+          padding: EdgeInsets.fromLTRB(
+            0,
+            MediaQuery.paddingOf(context).top + 12,
+            0,
+            MediaQuery.paddingOf(context).bottom + 24,
+          ),
+          children: pluginListGroups(context, ref),
+        ),
+      ),
+    );
+  }
+}
+
+/// What the plugin screen and sheet list: the install rows, then every
+/// installed plugin with its switch and menu.
+List<Widget> pluginListGroups(BuildContext context, WidgetRef ref) {
+  final library = ref.watch(pluginLibraryProvider);
+  final locale = context.locale.toLanguageTag();
+  final plugins = library.value ?? const <InstalledPlugin>[];
+  final updates =
+      ref.watch(pluginHubUpdatesProvider).value ?? const <String, Object>{};
+  return [
+    MenuGroup(
+      description: 'plugins_intro'.tr(),
+      items: [
+        MenuItem(
+          icon: Icons.file_open_outlined,
+          label: 'plugins_import'.tr(),
+          subtitle: 'plugins_import_hint'.tr(),
+          onTap: () => importPluginFromFile(context, ref),
+        ),
+        MenuItem(
+          icon: Icons.link_rounded,
+          label: 'plugins_install_from_link'.tr(),
+          subtitle: 'plugins_install_from_link_hint'.tr(),
+          onTap: () => _askForLink(context),
+        ),
+      ],
+    ),
+    MenuGroup(
+      header: 'plugins_installed'.tr(),
+      headerIcon: Icons.extension_rounded,
+      description: library.isLoading
+          ? null
+          : plugins.isEmpty
+          ? 'plugins_empty'.tr()
+          : null,
+      items: [
+        for (final plugin in plugins)
+          MenuItem(
+            icon: Icons.extension_outlined,
+            label: plugin.localizer(locale).resolve(plugin.manifest.name),
+            subtitle: [
+              if (plugin.manifest.author?.trim() case final a?
+                  when a.isNotEmpty)
+                a,
+              plugin.manifest.version,
+            ].join(' · '),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Converted Tavo packages are marked; Glaze's own
+                // plugins need no label.
+                if (updates.containsKey(plugin.id)) ...[
+                  VariationChip(name: 'plugins_hub_update_chip'.tr()),
+                  const SizedBox(width: 6),
+                ],
+                if (plugin.manifest.compat == kTavoCompat) ...[
+                  const VariationChip(name: 'Tavo'),
+                  const SizedBox(width: 10),
+                ],
+                GlazeSwitch(
+                  value: plugin.enabled,
+                  onChanged: (v) => ref
+                      .read(pluginLibraryProvider.notifier)
+                      .setEnabled(plugin.id, v),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.more_vert_rounded),
+                  tooltip: 'plugins_more'.tr(),
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () => _showPluginMenu(context, ref, plugin),
+                ),
+              ],
+            ),
+            onTap: () => openPluginDetailScreen(context, plugin.id),
+          ),
+      ],
+    ),
+  ];
 }
 
 /// Export, data and uninstall for one plugin of the list.

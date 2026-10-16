@@ -81,6 +81,21 @@ class PluginPresetValue {
   };
 }
 
+/// One of the plugin's own tabs on its screen (`contributes.settingsTabs`),
+/// holding the settings fields that name it.
+class PluginSettingsTab {
+  const PluginSettingsTab({required this.id, required this.label, this.icon});
+
+  /// How many tabs a plugin may add.
+  static const max = 10;
+
+  final String id;
+  final PluginText label;
+
+  /// A package image.
+  final String? icon;
+}
+
 class PluginSelectOption {
   const PluginSelectOption({required this.value, required this.label});
   final String value;
@@ -100,6 +115,7 @@ class PluginSettingField {
     this.max,
     this.step,
     this.icon,
+    this.tab,
   });
 
   final PluginSettingType type;
@@ -118,6 +134,10 @@ class PluginSettingField {
 
   /// `note` only: `info` or `warning`.
   final String? icon;
+
+  /// The id of the [PluginSettingsTab] the field is on; null puts it on the
+  /// first one.
+  final String? tab;
 
   bool get storesValue => key != null;
 
@@ -138,6 +158,30 @@ class PluginSettingField {
     if (raw is! Map) {
       throw PluginManifestException('settings[$index] must be an object');
     }
+    final tab = raw['tab'];
+    if (tab != null && (tab is! String || tab.isEmpty)) {
+      throw PluginManifestException('settings[$index] has an invalid tab');
+    }
+    return _parse(raw, index)._onTab(tab as String?);
+  }
+
+  PluginSettingField _onTab(String? tab) => tab == null
+      ? this
+      : PluginSettingField(
+          type: type,
+          key: key,
+          label: label,
+          description: description,
+          defaultValue: defaultValue,
+          options: options,
+          min: min,
+          max: max,
+          step: step,
+          icon: icon,
+          tab: tab,
+        );
+
+  static PluginSettingField _parse(Map<dynamic, dynamic> raw, int index) {
     final type = _types[raw['type']];
     if (type == null) {
       throw PluginManifestException(

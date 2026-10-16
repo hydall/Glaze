@@ -202,6 +202,108 @@ void main() {
       );
       expect(normalizePluginHost('*.*.x.com'), isNull);
     });
+
+    test('may say what each is for', () {
+      final m = parsePluginManifest(
+        manifest({
+          'hosts': [
+            'cdn.io',
+            {'host': 'API.Example.com', 'description': 'Weather data'},
+            {
+              'host': '*.img.net',
+              'description': {'t': 'hosts.img'},
+            },
+          ],
+        }),
+      );
+      expect(m.hosts, ['cdn.io', 'api.example.com', '*.img.net']);
+      expect(m.hostDescriptions.keys, ['api.example.com', '*.img.net']);
+      expect(m.hostDescriptions['api.example.com']!.literal, 'Weather data');
+      expect(m.hostDescriptions['*.img.net']!.key, 'hosts.img');
+      expect(
+        () => parsePluginManifest(
+          manifest({
+            'hosts': [
+              {'host': 'a.io', 'description': 3},
+            ],
+          }),
+        ),
+        fails('hosts'),
+      );
+      expect(
+        () => parsePluginManifest(
+          manifest({
+            'hosts': [
+              {'description': 'No host'},
+            ],
+          }),
+        ),
+        fails('hosts'),
+      );
+    });
+  });
+
+  group('settingsTabs', () {
+    Map<String, dynamic> withTabs(List<Object?> tabs, List<Object?> settings) =>
+        manifest({
+          'contributes': {'settingsTabs': tabs, 'settings': settings},
+        });
+
+    test('fields go on the tabs they name', () {
+      final m = parsePluginManifest(
+        withTabs(
+          [
+            {'id': 'main', 'label': 'Main'},
+            {
+              'id': 'look',
+              'label': {'t': 'tabs.look'},
+              'icon': 'icons/look.svg',
+            },
+          ],
+          [
+            {'key': 'a', 'type': 'toggle', 'label': 'A'},
+            {'key': 'b', 'type': 'toggle', 'label': 'B', 'tab': 'look'},
+          ],
+        ),
+      );
+      expect(m.settingsTabs.map((t) => t.id), ['main', 'look']);
+      expect(m.settingsTabs[1].icon, 'icons/look.svg');
+      expect(m.settings.map((f) => f.tab), [null, 'look']);
+    });
+
+    test('are checked and capped', () {
+      expect(
+        () => parsePluginManifest(
+          withTabs(
+            [
+              {'id': 'main', 'label': 'Main'},
+            ],
+            [
+              {'key': 'a', 'type': 'toggle', 'label': 'A', 'tab': 'nope'},
+            ],
+          ),
+        ),
+        fails('unknown tab'),
+      );
+      expect(
+        () => parsePluginManifest(
+          withTabs([
+            {'id': 'x', 'label': 'X'},
+            {'id': 'x', 'label': 'Y'},
+          ], const []),
+        ),
+        fails('duplicate'),
+      );
+      expect(
+        () => parsePluginManifest(
+          withTabs([
+            for (var i = 0; i <= PluginSettingsTab.max; i++)
+              {'id': 't$i', 'label': 'T$i'},
+          ], const []),
+        ),
+        fails('at most'),
+      );
+    });
   });
 
   group('convertTavoManifest', () {
@@ -521,6 +623,16 @@ void main() {
       expect(updated.revoked, {'network'});
       expect(updated.config, {'on': false});
       expect(updated.networkHosts, isEmpty);
+    });
+
+    test('switched-off hosts are kept across reloads and updates', () async {
+      final first = await store.install(package(['network']));
+      await store.save(
+        first.copyWith(revoked: const {}, blockedHosts: const {'api.io'}),
+      );
+      expect((await store.loadAll()).single.blockedHosts, {'api.io'});
+      final updated = await store.install(package(['network']));
+      expect(updated.blockedHosts, {'api.io'});
     });
 
     test('a package from another author starts over', () async {

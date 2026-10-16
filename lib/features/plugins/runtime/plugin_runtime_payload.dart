@@ -102,9 +102,9 @@ class PluginRuntimePayloadBuilder {
       // true: any host; a list: only those hosts; false: none.
       'network': !plugin.allows(PluginPermission.network)
           ? false
-          : plugin.networkHosts == null
+          : plugin.allowedHosts == null
           ? true
-          : (plugin.networkHosts!.toList()..sort()),
+          : (plugin.allowedHosts!.toList()..sort()),
       'localNetwork':
           plugin.allows(PluginPermission.network) && plugin.localNetwork,
       'messageActions': await messageActions(plugin, localizer),

@@ -114,6 +114,7 @@ class PluginStore {
     final grants = record['grants'];
     final revoked = record['revoked'];
     final hosts = record['networkHosts'];
+    final blocked = record['blockedHosts'];
     return InstalledPlugin(
       manifest: manifest,
       directory: dir,
@@ -128,6 +129,9 @@ class PluginStore {
           ? _expandLegacy({for (final r in revoked) '$r'}, read: true)
           : const {},
       networkHosts: hosts is List ? {for (final h in hosts) '$h'} : null,
+      blockedHosts: blocked is List
+          ? {for (final h in blocked) '$h'}
+          : const {},
       localNetwork: record['localNetwork'] == true,
       hubSlug: record['hub'] is String ? record['hub'] as String : null,
       foundInCode: await _foundInCode(dir, manifest),
@@ -327,11 +331,16 @@ class PluginStore {
         if (oldRevoked is List) ...oldRevoked.map((x) => '$x'),
         ...added,
       }.toList(),
-      // Hosts start switched off; the manifest's show up to switch on. An
-      // update keeps what the user set up.
+      // The listed-hosts mode with the manifest's hosts on, behind the
+      // `network` permission that starts off. An update keeps what the user
+      // set up.
       'networkHosts':
           existing != null && !added.contains(PluginPermission.network)
           ? existing['networkHosts']
+          : const <String>[],
+      'blockedHosts':
+          existing != null && !added.contains(PluginPermission.network)
+          ? existing['blockedHosts'] ?? const <String>[]
           : const <String>[],
       'localNetwork':
           existing != null && !added.contains(PluginPermission.network)

@@ -27,8 +27,14 @@ class MagicDrawerListRow extends StatefulWidget {
 
   /// See [ActionGlyph.glyph].
   final String? glyph;
+
+  /// See [ActionGlyph.file].
+  final String? iconFile;
   final String label;
   final String? status;
+
+  /// See [MagicDrawerCardItem.statusIcon].
+  final IconData? statusIcon;
 
   /// Edit mode: the row takes the accent along its edge, as a grid card takes
   /// it on its border.
@@ -49,7 +55,9 @@ class MagicDrawerListRow extends StatefulWidget {
     required this.label,
     required this.onTap,
     this.glyph,
+    this.iconFile,
     this.status,
+    this.statusIcon,
     this.editing = false,
     this.hovered = false,
     this.trailing,
@@ -129,6 +137,7 @@ class _MagicDrawerListRowState extends State<MagicDrawerListRow> {
                 child: ActionGlyph(
                   icon: widget.icon,
                   glyph: widget.glyph,
+                  file: widget.iconFile,
                   size: 18,
                   color: Colors.white.withValues(
                     alpha: widget.muted ? 0.6 : 0.8,
@@ -154,10 +163,9 @@ class _MagicDrawerListRowState extends State<MagicDrawerListRow> {
                     ),
                     if (status != null) ...[
                       const SizedBox(height: 2),
-                      Text(
-                        status,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                      MagicStatusLine(
+                        text: status,
+                        icon: widget.statusIcon,
                         style: TextStyle(
                           fontSize: 11,
                           color: context.cs.onSurfaceVariant,
@@ -176,6 +184,39 @@ class _MagicDrawerListRowState extends State<MagicDrawerListRow> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// A card's status line, led by [icon] when it has one.
+class MagicStatusLine extends StatelessWidget {
+  final String text;
+  final IconData? icon;
+  final TextStyle style;
+
+  const MagicStatusLine({
+    super.key,
+    required this.text,
+    required this.style,
+    this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final label = Text(
+      text,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: style,
+    );
+    if (icon == null) return label;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: (style.fontSize ?? 11) + 1, color: style.color),
+        const SizedBox(width: 3),
+        Flexible(child: label),
+      ],
     );
   }
 }

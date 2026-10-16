@@ -92,6 +92,12 @@ List<MagicDrawerItemDef> buildMagicDrawerItems() => [
     icon: Icons.extension_outlined,
     category: MagicDrawerCategory.config,
   ),
+  MagicDrawerItemDef(
+    id: 'plugins',
+    label: 'plugins_title'.tr(),
+    icon: Icons.widgets_outlined,
+    category: MagicDrawerCategory.tools,
+  ),
 ];
 
 /// The catalog entry for [id], or null when a stored layout or a pinned button

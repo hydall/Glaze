@@ -135,6 +135,8 @@ InstalledPlugin _plugin(
   Set<String> grants = const {},
   Set<String> revoked = const {},
   Set<String>? networkHosts,
+  Set<String> blockedHosts = const {},
+  List<String> hosts = const [],
   bool localNetwork = false,
   List<Map<String, Object?>> settings = const [],
   Map<String, Object?> config = const {},
@@ -145,6 +147,7 @@ InstalledPlugin _plugin(
     'name': 'Test',
     'version': '1.0.0',
     'permissions': permissions,
+    'hosts': hosts,
     if (settings.isNotEmpty) 'contributes': {'settings': settings},
   }),
   config: config,
@@ -154,6 +157,7 @@ InstalledPlugin _plugin(
   grants: grants,
   revoked: revoked,
   networkHosts: networkHosts,
+  blockedHosts: blockedHosts,
   localNetwork: localNetwork,
 );
 
@@ -866,6 +870,35 @@ void main() {
     expect(listed.allowsHost('api.io'), isTrue);
     expect(listed.allowsHost('evil.io'), isFalse);
     expect(_plugin(const ['network']).allowsHost('anything.org'), isTrue);
+
+    // The manifest's hosts are on in the listed mode until switched off.
+    final declared = _plugin(
+      const ['network'],
+      hosts: const ['api.io', '*.cdn.net'],
+      networkHosts: const {'extra.org'},
+      blockedHosts: const {'api.io'},
+    );
+    expect(declared.allowedHosts, {'*.cdn.net', 'extra.org'});
+    expect(declared.allowsHost('img.cdn.net'), isTrue);
+    expect(declared.allowsHost('extra.org'), isTrue);
+    expect(declared.allowsHost('api.io'), isFalse);
+    expect(
+      _plugin(
+        const ['network'],
+        hosts: const ['api.io'],
+        networkHosts: const {},
+      ).allowsHost('api.io'),
+      isTrue,
+    );
+    // Any host ignores the switches.
+    expect(
+      _plugin(
+        const ['network'],
+        hosts: const ['api.io'],
+        blockedHosts: const {'api.io'},
+      ).allowsHost('api.io'),
+      isTrue,
+    );
     expect(
       _plugin(const ['network'], revoked: const {'network'}).allowsHost('a.io'),
       isFalse,

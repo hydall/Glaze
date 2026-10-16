@@ -14,7 +14,7 @@ import '../models/plugin_settings_schema.dart';
 import '../providers/plugin_library_provider.dart';
 import '../services/plugin_localizer.dart';
 
-/// Renders `contributes.settings.schema` as Glaze menu groups. `break`
+/// Renders `contributes.settings` (or one tab of it) as Glaze menu groups. `break`
 /// starts a new group; `divider` too, since groups are already separated.
 /// An `apiPreset` is a group of its own: the [ApiSlotGroup] every other
 /// auxiliary call binds its connection with. An `imagePreset` is a group with
@@ -24,31 +24,30 @@ class PluginSettingsForm extends ConsumerWidget {
     super.key,
     required this.plugin,
     required this.localizer,
+    this.tab,
   });
 
   final InstalledPlugin plugin;
   final PluginLocalizer localizer;
+
+  /// Only the fields on this [PluginSettingsTab]; null for every field.
+  final String? tab;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final values = plugin.effectiveConfig(localizer);
     final sections = <Widget>[];
     var items = <Widget>[];
-    var headed = false;
+    // The tab's name is in the screen's header; the groups need none.
     void close() {
       if (items.isEmpty) return;
-      sections.add(
-        MenuGroup(
-          header: headed ? null : 'plugins_settings'.tr(),
-          headerIcon: headed ? null : Icons.tune_rounded,
-          items: items,
-        ),
-      );
-      headed = true;
+      sections.add(MenuGroup(items: items));
       items = [];
     }
 
+    final firstTab = plugin.manifest.settingsTabs.firstOrNull?.id;
     for (final field in plugin.manifest.settings) {
+      if (tab != null && (field.tab ?? firstTab) != tab) continue;
       switch (field.type) {
         case PluginSettingType.group:
         case PluginSettingType.divider:

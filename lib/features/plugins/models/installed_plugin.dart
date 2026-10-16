@@ -14,6 +14,7 @@ class InstalledPlugin {
     this.grants = const {},
     this.revoked = const {},
     this.networkHosts,
+    this.blockedHosts = const {},
     this.localNetwork = false,
     this.hubSlug,
     this.foundInCode = const {},
@@ -37,9 +38,13 @@ class InstalledPlugin {
   /// Manifest permissions the user switched off.
   final Set<String> revoked;
 
-  /// With `network` allowed: the only hosts the plugin may reach, or null
-  /// for any host.
+  /// With `network` allowed: null for any host, else the listed-hosts mode
+  /// and the hosts the user allowed besides the manifest's.
   final Set<String>? networkHosts;
+
+  /// Manifest hosts the user switched off in the listed-hosts mode; the rest
+  /// of the manifest's hosts are allowed.
+  final Set<String> blockedHosts;
 
   /// With `network` allowed: whether the plugin may also reach devices on
   /// the user's own network (loopback, private and link-local addresses)
@@ -58,10 +63,22 @@ class InstalledPlugin {
   /// frames start over on the new data. Not saved.
   final int dataRevision;
 
+  /// The host rules the plugin may reach in the listed-hosts mode, or null
+  /// for any host.
+  Set<String>? get allowedHosts {
+    final extra = networkHosts;
+    if (extra == null) return null;
+    return {
+      for (final h in manifest.hosts)
+        if (!blockedHosts.contains(h)) h,
+      ...extra,
+    };
+  }
+
   /// Whether the plugin may reach [host] at all.
   bool allowsHost(String host) {
     if (!allows(PluginPermission.network)) return false;
-    final list = networkHosts;
+    final list = allowedHosts;
     return list == null || pluginHostAllowed(list, host);
   }
 
@@ -78,6 +95,7 @@ class InstalledPlugin {
     Set<String>? grants,
     Set<String>? revoked,
     Set<String>? Function()? networkHosts,
+    Set<String>? blockedHosts,
     bool? localNetwork,
     int? dataRevision,
   }) => InstalledPlugin(
@@ -90,6 +108,7 @@ class InstalledPlugin {
     grants: grants ?? this.grants,
     revoked: revoked ?? this.revoked,
     networkHosts: networkHosts == null ? this.networkHosts : networkHosts(),
+    blockedHosts: blockedHosts ?? this.blockedHosts,
     localNetwork: localNetwork ?? this.localNetwork,
     hubSlug: hubSlug,
     foundInCode: foundInCode,
@@ -132,6 +151,7 @@ class InstalledPlugin {
     'grants': grants.toList(),
     'revoked': revoked.toList(),
     'networkHosts': networkHosts?.toList(),
+    'blockedHosts': blockedHosts.toList(),
     'localNetwork': localNetwork,
     'hub': ?hubSlug,
   };

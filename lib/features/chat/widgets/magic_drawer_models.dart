@@ -19,6 +19,9 @@ class MagicDrawerItemDef {
   /// action, which types characters rather than opening a feature. Null on
   /// every ordinary card.
   final String? glyph;
+
+  /// See [ActionGlyph.file]; a plugin card's own icon.
+  final String? iconFile;
   final MagicDrawerCategory category;
 
   const MagicDrawerItemDef({
@@ -27,17 +30,22 @@ class MagicDrawerItemDef {
     required this.icon,
     required this.category,
     this.glyph,
+    this.iconFile,
   });
 }
 
 class MagicDrawerCardItem {
   final MagicDrawerItemDef def;
   final String? status;
+
+  /// Drawn before [status] — the puzzle piece that marks a plugin's card.
+  final IconData? statusIcon;
   final bool isAddButton;
 
   const MagicDrawerCardItem({
     required this.def,
     this.status,
+    this.statusIcon,
     this.isAddButton = false,
   });
 }
@@ -130,7 +138,8 @@ class MagicDrawerStats {
       regexCount: regexCount,
       summaryChars: summaryChars,
       promptTokens: promptTokens ?? this.promptTokens,
-      approximateHistoryTokens: approximateHistoryTokens ?? this.approximateHistoryTokens,
+      approximateHistoryTokens:
+          approximateHistoryTokens ?? this.approximateHistoryTokens,
       contextSize: contextSize ?? this.contextSize,
       characterTokens: characterTokens ?? this.characterTokens,
       presetTokens: presetTokens ?? this.presetTokens,

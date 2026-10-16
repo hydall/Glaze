@@ -419,7 +419,7 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
           for (final r in x.revoked.toList()..sort())
             if (!PluginPermission.asking.contains(r)) r,
         ],
-        x.networkHosts?.toList()?..sort(),
+        x.allowedHosts?.toList()?..sort(),
         x.localNetwork,
       ],
   ]);

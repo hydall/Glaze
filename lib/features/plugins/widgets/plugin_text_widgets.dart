@@ -12,9 +12,12 @@ import '../screens/plugin_hub_sheet.dart';
 /// Images are left out: a description must not make the app fetch from
 /// wherever its author points.
 class PluginMarkdown extends StatelessWidget {
-  const PluginMarkdown(this.text, {super.key});
+  const PluginMarkdown(this.text, {super.key, this.color});
 
   final String text;
+
+  /// Defaults to the theme's secondary text colour.
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
@@ -23,7 +26,7 @@ class PluginMarkdown extends StatelessWidget {
       style: TextStyle(
         fontSize: 13.5,
         height: 1.5,
-        color: context.cs.onSurfaceVariant,
+        color: color ?? context.cs.onSurfaceVariant,
       ),
       onLinkTap: (url, _) {
         final uri = Uri.tryParse(url);

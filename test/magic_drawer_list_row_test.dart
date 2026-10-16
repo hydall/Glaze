@@ -52,6 +52,45 @@ void main() {
     expect(taps, 1);
   });
 
+  testWidgets('a plugin card leads its status with the puzzle piece', (
+    tester,
+  ) async {
+    const plugin = MagicDrawerCardItem(
+      def: MagicDrawerItemDef(
+        id: 'plugin:a:b',
+        label: 'Roll dice',
+        icon: Icons.widgets_outlined,
+        // Missing on disk: the fallback icon stands in.
+        iconFile: '/nowhere/dice.png',
+        category: MagicDrawerCategory.tools,
+      ),
+      status: 'Dice',
+      statusIcon: Icons.extension_rounded,
+    );
+    for (final listRow in [true, false]) {
+      await pump(
+        tester,
+        MagicCard(
+          item: plugin,
+          editing: false,
+          hovered: false,
+          onTap: () {},
+          onDelete: () {},
+          listRow: listRow,
+        ),
+      );
+      // The file read is real IO, outside the fake clock.
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 200)),
+      );
+      await tester.pump();
+      expect(find.text('Roll dice'), findsOneWidget);
+      expect(find.text('Dice'), findsOneWidget);
+      expect(find.byIcon(Icons.extension_rounded), findsOneWidget);
+      expect(find.byIcon(Icons.widgets_outlined), findsOneWidget);
+    }
+  });
+
   for (final status in ['3 entries', null]) {
     testWidgets(
       'the icon sits where the desktop strip draws it (status: $status)',

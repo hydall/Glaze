@@ -14,17 +14,21 @@ import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_scaffold.dart';
 import '../../../shared/widgets/glaze_switch.dart';
 import '../../../shared/widgets/glaze_toast.dart';
+import '../../../shared/widgets/list_controls.dart';
 import '../../../shared/widgets/menu_group.dart';
 import '../../../core/services/file_export_service.dart';
+import '../../chat/widgets/action_glyph.dart';
 import '../compat/tavo/tavo_hub.dart';
 import '../compat/tavo/tavo_manifest_converter.dart';
 import '../models/installed_plugin.dart';
 import '../models/plugin_manifest.dart';
+import '../models/plugin_settings_schema.dart';
 import '../providers/plugin_history_provider.dart';
 import '../providers/plugin_hub_provider.dart';
 import '../providers/plugin_library_provider.dart';
 import '../providers/plugin_network_log_provider.dart';
 import '../services/plugin_data_transfer.dart';
+import '../services/plugin_localizer.dart';
 import 'plugin_history_screen.dart';
 import 'plugin_hub_sheet.dart';
 import 'plugin_settings_form.dart';
@@ -40,10 +44,10 @@ Future<void> openPluginDetailScreen(BuildContext context, String id) async {
 
 /// Groups of rows that set up what [plugin] may do: a switch per
 /// permission, the ask/always/off choice for consents and the internet mode.
-/// The first group, headed [header], holds the general permissions and
-/// [afterNetwork] under the internet rows; variables, the library and other
-/// chats follow, each in a group of its own. Every group's
-/// header has a switch that gives or takes away all of its permissions.
+/// The first group, headed [header], holds the general permissions; the
+/// internet, variables, the library and other chats follow, each in a group
+/// of its own. Every group's header has a switch that gives or takes away
+/// all of its permissions.
 List<Widget> pluginPermissionGroups(
   BuildContext context,
   WidgetRef ref,
@@ -51,7 +55,6 @@ List<Widget> pluginPermissionGroups(
   required String header,
   required IconData headerIcon,
   String? description,
-  List<Widget> afterNetwork = const [],
 }) {
   final notifier = ref.read(pluginLibraryProvider.notifier);
   final order = PluginPermission.all.toList();
@@ -73,6 +76,8 @@ List<Widget> pluginPermissionGroups(
       PluginDetailScreen._permissionItem(context, notifier, plugin, permission),
       if (permission == PluginPermission.network &&
           plugin.allows(PluginPermission.network)) ...[
+        if (PluginDetailScreen._networkMode(plugin) == PluginNetworkMode.listed)
+          _HostsBlock(plugin: plugin),
         MenuItem(
           icon: Icons.router_outlined,
           label: 'plugins_local_network'.tr(),
@@ -84,7 +89,6 @@ List<Widget> pluginPermissionGroups(
           onTap: () =>
               notifier.setLocalNetwork(plugin.id, !plugin.localNetwork),
         ),
-        ...afterNetwork,
       ],
     ]);
   }
@@ -118,6 +122,7 @@ List<Widget> pluginPermissionGroups(
 }
 
 const _groupIcons = {
+  PluginPermissionCategory.network: Icons.public_rounded,
   PluginPermissionCategory.variables: Icons.data_object_rounded,
   PluginPermissionCategory.library: Icons.library_books_outlined,
   PluginPermissionCategory.chats: Icons.forum_outlined,
@@ -145,9 +150,6 @@ class _PermissionsSheet extends ConsumerWidget {
     final name = plugin
         .localizer(context.locale.toLanguageTag())
         .resolve(plugin.manifest.name);
-    final notifier = ref.read(pluginLibraryProvider.notifier);
-    final listed =
-        PluginDetailScreen._networkMode(plugin) == PluginNetworkMode.listed;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: pluginPermissionGroups(
@@ -161,179 +163,20 @@ class _PermissionsSheet extends ConsumerWidget {
           if (plugin.foundInCode.isNotEmpty)
             'plugins_permissions_found_hint'.tr(),
         ].join('\n\n'),
-        // The hosts the plugin names, to switch on without leaving.
-        afterNetwork: [
-          if (listed)
-            for (final host in {
-              ...plugin.manifest.hosts,
-              ...?plugin.networkHosts,
-            }.toList()..sort())
-              MenuItem(
-                icon: Icons.language_rounded,
-                label: host,
-                trailing: GlazeSwitch(
-                  value: plugin.allowsHost(host),
-                  onChanged: (v) => notifier.setHostAllowed(plugin.id, host, v),
-                ),
-                onTap: () => notifier.setHostAllowed(
-                  plugin.id,
-                  host,
-                  !plugin.allowsHost(host),
-                ),
-              ),
-        ],
       ),
     );
   }
 }
 
-/// One installed plugin: what it is, what it may do, its settings form and
-/// the uninstall action.
-class PluginDetailScreen extends ConsumerWidget {
+/// One installed plugin, on tabs picked from the header's dropdown: what it
+/// is, what it may do, then the plugin's own settings tabs.
+class PluginDetailScreen extends ConsumerStatefulWidget {
   const PluginDetailScreen({super.key, required this.pluginId});
 
   final String pluginId;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final plugins = ref.watch(pluginLibraryProvider).value ?? const [];
-    final plugin = plugins.where((x) => x.id == pluginId).firstOrNull;
-    final topPad = DetachedShellHost.of(context)
-        ? 0.0
-        : MediaQuery.of(context).padding.top + 74.0;
-    final bottomPad = MediaQuery.of(context).padding.bottom + 20.0;
-    if (plugin == null) {
-      return GlazeScaffold(
-        title: 'plugins_title'.tr(),
-        showBackground: true,
-        onBack: () => Navigator.of(context).pop(),
-        body: const SizedBox.shrink(),
-      );
-    }
-    final localizer = plugin.localizer(context.locale.toLanguageTag());
-    final manifest = plugin.manifest;
-    final notifier = ref.read(pluginLibraryProvider.notifier);
-    final cover = manifest.icon;
-    final update = ref.watch(pluginHubUpdatesProvider).value?[plugin.id];
-    final description = manifest.description == null
-        ? ''
-        : localizer.resolve(manifest.description).trim();
-    final releaseNotes = manifest.releaseNotes == null
-        ? ''
-        : localizer.resolve(manifest.releaseNotes).trim();
-
-    return GlazeScaffold(
-      title: localizer.resolve(manifest.name),
-      showBackground: true,
-      extendBodyBehindHeader: true,
-      onBack: () => Navigator.of(context).pop(),
-      body: ListView(
-        padding: EdgeInsets.fromLTRB(0, topPad + 8, 0, bottomPad),
-        children: [
-          if (cover != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(16),
-                child: AspectRatio(
-                  aspectRatio: 16 / 9,
-                  child: Image.file(
-                    File(p.joinAll([plugin.directory, ...cover.split('/')])),
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, _, _) => const SizedBox.shrink(),
-                  ),
-                ),
-              ),
-            ),
-          MenuGroup(
-            header: 'plugins_about'.tr(),
-            headerIcon: Icons.info_outline_rounded,
-            items: [
-              MenuSwitchItem(
-                label: 'plugins_enabled'.tr(),
-                value: plugin.enabled,
-                onChanged: (v) => notifier.setEnabled(plugin.id, v),
-              ),
-              MenuItem(
-                icon: Icons.person_outline_rounded,
-                label: 'plugins_author'.tr(),
-                value: manifest.author ?? '—',
-                onTap: () {},
-              ),
-              if (description.isNotEmpty)
-                PluginDescriptionItem(text: description),
-              pluginVersionItem(
-                context,
-                version: manifest.version,
-                releaseNotes: releaseNotes.isEmpty ? null : releaseNotes,
-              ),
-              if (plugin.hubSlug case final slug?)
-                MenuItem(
-                  icon: Icons.storefront_outlined,
-                  label: 'plugins_hub_source'.tr(),
-                  subtitle: update == null
-                      ? null
-                      : 'plugins_hub_update_available'.tr(
-                          namedArgs: {'version': update.version},
-                        ),
-                  onTap: () => openPluginHubLink(
-                    context,
-                    Uri.https(kTavoHubSite, '/plugins/$slug'),
-                  ),
-                ),
-            ],
-          ),
-          ...pluginPermissionGroups(
-            context,
-            ref,
-            plugin,
-            header: 'plugins_permissions'.tr(),
-            headerIcon: Icons.verified_user_outlined,
-            description: manifest.permissions.isEmpty
-                ? 'plugins_permissions_none'.tr()
-                : null,
-          ),
-          _NetworkLog(plugin: plugin),
-          _History(plugin: plugin),
-          if (manifest.settings.isNotEmpty)
-            PluginSettingsForm(plugin: plugin, localizer: localizer),
-          MenuGroup(
-            items: [
-              MenuItem(
-                icon: Icons.ios_share_rounded,
-                label: 'plugins_export'.tr(),
-                subtitle: 'plugins_export_hint_${pluginExportFormat(plugin)}'
-                    .tr(),
-                onTap: () => exportPlugin(context, ref, plugin),
-              ),
-              MenuItem(
-                icon: Icons.data_object_rounded,
-                label: 'plugins_data_export'.tr(),
-                subtitle: 'plugins_data_export_hint'.tr(),
-                onTap: () => exportPluginData(context, ref, plugin),
-              ),
-              MenuItem(
-                icon: Icons.settings_backup_restore_rounded,
-                label: 'plugins_data_import'.tr(),
-                subtitle: 'plugins_data_import_hint'.tr(),
-                onTap: () => importPluginData(context, ref, plugin),
-              ),
-              MenuItem(
-                icon: Icons.delete_outline_rounded,
-                label: 'plugins_uninstall'.tr(),
-                onTap: () => confirmPluginUninstall(
-                  context,
-                  ref,
-                  plugin,
-                  closeScreen: true,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
+  ConsumerState<PluginDetailScreen> createState() => _PluginDetailScreenState();
 
   static const _icons = {
     PluginPermission.composer: Icons.edit_note_rounded,
@@ -412,7 +255,8 @@ class PluginDetailScreen extends ConsumerWidget {
       final mode = _networkMode(plugin);
       return MenuItem(
         icon: icon,
-        label: label,
+        // The group is already headed Internet.
+        label: 'plugins_network_access'.tr(),
         badge: source,
         subtitle: subtitle,
         value: 'plugins_network_mode_${mode.name}'.tr(),
@@ -494,14 +338,561 @@ class PluginDetailScreen extends ConsumerWidget {
   }
 }
 
-/// Asks before [plugin] and everything it stored go; [closeScreen] also
-/// leaves the plugin's own screen afterwards.
+/// A tab of the plugin screen: Info, Permissions, or one of the plugin's.
+typedef _PluginTab = ({
+  String id,
+  String label,
+  IconData icon,
+
+  /// A plugin tab's own icon in its package.
+  String? iconFile,
+});
+
+const _infoTab = '@info';
+
+const _tabSwitch = Duration(milliseconds: 360);
+const _permissionsTab = '@permissions';
+
+/// The tab of a plugin without `settingsTabs`, holding all its settings.
+const _settingsTab = '@settings';
+
+/// The last tab: the plugin and its data to and from files.
+const _dataTab = '@data';
+
+class _PluginDetailScreenState extends ConsumerState<PluginDetailScreen> {
+  String _tab = _infoTab;
+
+  List<_PluginTab> _tabs(InstalledPlugin plugin, PluginLocalizer localizer) {
+    final manifest = plugin.manifest;
+    final declared = manifest.settingsTabs;
+    // A tab without fields would open on nothing.
+    final used = {
+      for (final f in manifest.settings) f.tab ?? declared.firstOrNull?.id,
+    };
+    return [
+      (
+        id: _infoTab,
+        label: 'plugins_tab_info'.tr(),
+        icon: Icons.info_outline_rounded,
+        iconFile: null,
+      ),
+      (
+        id: _permissionsTab,
+        label: 'plugins_permissions'.tr(),
+        icon: Icons.verified_user_outlined,
+        iconFile: null,
+      ),
+      if (declared.isEmpty && manifest.settings.isNotEmpty)
+        (
+          id: _settingsTab,
+          label: 'plugins_settings'.tr(),
+          icon: Icons.tune_rounded,
+          iconFile: null,
+        ),
+      for (final t in declared.take(PluginSettingsTab.max))
+        if (used.contains(t.id))
+          (
+            id: t.id,
+            label: localizer.resolve(t.label, fallback: t.id),
+            icon: Icons.tune_rounded,
+            iconFile: t.icon == null
+                ? null
+                : p.joinAll([plugin.directory, ...t.icon!.split('/')]),
+          ),
+      (
+        id: _dataTab,
+        label: 'plugins_data_group'.tr(),
+        icon: Icons.inventory_2_outlined,
+        iconFile: null,
+      ),
+    ];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final plugins = ref.watch(pluginLibraryProvider).value ?? const [];
+    final plugin = plugins.where((x) => x.id == widget.pluginId).firstOrNull;
+    final topPad = DetachedShellHost.of(context)
+        ? 0.0
+        : MediaQuery.of(context).padding.top + 74.0;
+    final bottomPad = MediaQuery.of(context).padding.bottom + 20.0;
+    if (plugin == null) {
+      return GlazeScaffold(
+        title: 'plugins_title'.tr(),
+        showBackground: true,
+        onBack: () => Navigator.of(context).pop(),
+        body: const SizedBox.shrink(),
+      );
+    }
+    final localizer = plugin.localizer(context.locale.toLanguageTag());
+    final tabs = _tabs(plugin, localizer);
+    final tab = tabs.where((t) => t.id == _tab).firstOrNull ?? tabs.first;
+    final cover = plugin.manifest.icon;
+
+    return GlazeScaffold(
+      title: localizer.resolve(plugin.manifest.name),
+      showBackground: true,
+      extendBodyBehindHeader: true,
+      onBack: () => Navigator.of(context).pop(),
+      body: Stack(
+        children: [
+          // On Info the cover fills the screen behind everything, the header
+          // included; it fades out when another tab is picked.
+          if (cover != null)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: AnimatedOpacity(
+                  opacity: tab.id == _infoTab ? 1 : 0,
+                  duration: _tabSwitch,
+                  curve: Curves.easeOut,
+                  child: _CoverBackdrop(
+                    path: p.joinAll([plugin.directory, ...cover.split('/')]),
+                  ),
+                ),
+              ),
+            ),
+          // The tab dropdown sits right under the header and stays put, so
+          // the tabs are in sight however far the page scrolls.
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: EdgeInsets.fromLTRB(16, topPad + 8, 16, 12),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: GlazeDropdownChip(
+                    label: tab.label,
+                    leading: _tabGlyph(context, tab, size: 16),
+                    onTap: () => showGlazePickerSheet(
+                      context,
+                      title: localizer.resolve(plugin.manifest.name),
+                      items: [
+                        for (final t in tabs)
+                          GlazePickerItem(
+                            label: t.label,
+                            isActive: t.id == tab.id,
+                            value: t.id,
+                            iconWidget: _tabGlyph(context, t, size: 20),
+                          ),
+                      ],
+                      onSelect: (v) => setState(() => _tab = v as String),
+                    ),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: AnimatedSwitcher(
+                  duration: _tabSwitch,
+                  // Fade-through: the old tab is gone by halfway, then the
+                  // new one fades in rising into place; the two never overlap.
+                  transitionBuilder: (child, animation) {
+                    final phase = CurvedAnimation(
+                      parent: animation,
+                      curve: const Interval(0.5, 1, curve: Curves.easeOutCubic),
+                    );
+                    return FadeTransition(
+                      opacity: phase,
+                      child: SlideTransition(
+                        position: Tween(
+                          begin: const Offset(0, 0.03),
+                          end: Offset.zero,
+                        ).animate(phase),
+                        child: child,
+                      ),
+                    );
+                  },
+                  layoutBuilder: (current, previous) => Stack(
+                    fit: StackFit.expand,
+                    children: [...previous, ?current],
+                  ),
+                  child: KeyedSubtree(
+                    key: ValueKey(tab.id),
+                    child: _body(context, plugin, localizer, tab, bottomPad),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _body(
+    BuildContext context,
+    InstalledPlugin plugin,
+    PluginLocalizer localizer,
+    _PluginTab tab,
+    double bottomPad,
+  ) {
+    if (tab.id == _infoTab && plugin.manifest.icon != null) {
+      return _coverInfo(context, plugin, localizer, tab, bottomPad);
+    }
+    return ListView(
+      key: PageStorageKey(tab.id),
+      padding: EdgeInsets.fromLTRB(0, 0, 0, bottomPad),
+      children: switch (tab.id) {
+        _infoTab => _info(context, plugin, localizer),
+        _permissionsTab => [
+          ...pluginPermissionGroups(
+            context,
+            ref,
+            plugin,
+            // The tab is already named Permissions.
+            header: 'plugins_permission_category_general'.tr(),
+            headerIcon: Icons.verified_user_outlined,
+            description: plugin.manifest.permissions.isEmpty
+                ? 'plugins_permissions_none'.tr()
+                : null,
+          ),
+          _NetworkLog(plugin: plugin),
+          _History(plugin: plugin),
+        ],
+        _dataTab => [
+          MenuGroup(
+            items: [
+              MenuItem(
+                icon: Icons.ios_share_rounded,
+                label: 'plugins_export'.tr(),
+                subtitle: 'plugins_export_hint_${pluginExportFormat(plugin)}'
+                    .tr(),
+                onTap: () => exportPlugin(context, ref, plugin),
+              ),
+              MenuItem(
+                icon: Icons.data_object_rounded,
+                label: 'plugins_data_export'.tr(),
+                subtitle: 'plugins_data_export_hint'.tr(),
+                onTap: () => exportPluginData(context, ref, plugin),
+              ),
+              MenuItem(
+                icon: Icons.settings_backup_restore_rounded,
+                label: 'plugins_data_import'.tr(),
+                subtitle: 'plugins_data_import_hint'.tr(),
+                onTap: () => importPluginData(context, ref, plugin),
+              ),
+            ],
+          ),
+        ],
+        _ => [
+          PluginSettingsForm(
+            plugin: plugin,
+            localizer: localizer,
+            tab: tab.id == _settingsTab ? null : tab.id,
+          ),
+        ],
+      },
+    );
+  }
+
+  Widget _tabGlyph(
+    BuildContext context,
+    _PluginTab tab, {
+    required double size,
+  }) => ActionGlyph(
+    icon: tab.icon,
+    file: tab.iconFile,
+    size: size,
+    color: context.cs.primary,
+  );
+
+  /// Info over a cover: the hero fills the screen, so the description sits
+  /// at its bottom, with the hub link under it; it scrolls only when it
+  /// does not fit.
+  Widget _coverInfo(
+    BuildContext context,
+    InstalledPlugin plugin,
+    PluginLocalizer localizer,
+    _PluginTab tab,
+    double bottomPad,
+  ) {
+    final manifest = plugin.manifest;
+    final update = ref.watch(pluginHubUpdatesProvider).value?[plugin.id];
+    final releaseNotes = manifest.releaseNotes == null
+        ? ''
+        : localizer.resolve(manifest.releaseNotes).trim();
+    return CustomScrollView(
+      key: PageStorageKey(tab.id),
+      slivers: [
+        SliverFillRemaining(
+          hasScrollBody: false,
+          child: Padding(
+            padding: EdgeInsets.only(bottom: bottomPad),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  // The version is in the hero; a tap there opens the
+                  // release notes.
+                  child: _PluginHero(
+                    plugin: plugin,
+                    name: localizer.resolve(manifest.name),
+                    description: manifest.description == null
+                        ? ''
+                        : localizer.resolve(manifest.description).trim(),
+                    releaseNotes: releaseNotes.isEmpty ? null : releaseNotes,
+                  ),
+                ),
+                if (plugin.hubSlug case final slug?)
+                  MenuGroup(
+                    items: [
+                      MenuItem(
+                        icon: Icons.storefront_outlined,
+                        label: 'plugins_hub_source'.tr(),
+                        subtitle: update == null
+                            ? null
+                            : 'plugins_hub_update_available'.tr(
+                                namedArgs: {'version': update.version},
+                              ),
+                        onTap: () => openPluginHubLink(
+                          context,
+                          Uri.https(kTavoHubSite, '/plugins/$slug'),
+                        ),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// The About group of a plugin without a cover (see [_coverInfo]).
+  /// Switching the plugin on or off and removing it are the plugin list's.
+  List<Widget> _info(
+    BuildContext context,
+    InstalledPlugin plugin,
+    PluginLocalizer localizer,
+  ) {
+    final manifest = plugin.manifest;
+    final update = ref.watch(pluginHubUpdatesProvider).value?[plugin.id];
+    final description = manifest.description == null
+        ? ''
+        : localizer.resolve(manifest.description).trim();
+    final releaseNotes = manifest.releaseNotes == null
+        ? ''
+        : localizer.resolve(manifest.releaseNotes).trim();
+    final version = pluginVersionItem(
+      context,
+      version: manifest.version,
+      releaseNotes: releaseNotes.isEmpty ? null : releaseNotes,
+    );
+    final hub = switch (plugin.hubSlug) {
+      final slug? => MenuItem(
+        icon: Icons.storefront_outlined,
+        label: 'plugins_hub_source'.tr(),
+        subtitle: update == null
+            ? null
+            : 'plugins_hub_update_available'.tr(
+                namedArgs: {'version': update.version},
+              ),
+        onTap: () => openPluginHubLink(
+          context,
+          Uri.https(kTavoHubSite, '/plugins/$slug'),
+        ),
+      ),
+      null => null,
+    };
+    return [
+      MenuGroup(
+        header: 'plugins_about'.tr(),
+        headerIcon: Icons.info_outline_rounded,
+        items: [
+          MenuItem(
+            icon: Icons.person_outline_rounded,
+            label: 'plugins_author'.tr(),
+            value: manifest.author ?? '—',
+            onTap: () {},
+          ),
+          if (description.isNotEmpty) PluginDescriptionItem(text: description),
+          version,
+          ?hub,
+        ],
+      ),
+    ];
+  }
+}
+
+/// The plugin's cover filling the screen behind the Info tab, under a shade
+/// at the top for the header and fading out towards the bottom, where the
+/// groups sit on the app's own background.
+class _CoverBackdrop extends StatelessWidget {
+  const _CoverBackdrop({required this.path});
+
+  final String path;
+
+  @override
+  Widget build(BuildContext context) {
+    // The shade goes under the mask too, so the app's background below shows
+    // as it is rather than darkened.
+    return ShaderMask(
+      blendMode: BlendMode.dstIn,
+      shaderCallback: (rect) => const LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [Colors.white, Colors.white, Colors.transparent],
+        stops: [0, 0.5, 0.85],
+      ).createShader(rect),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.file(
+            File(path),
+            fit: BoxFit.cover,
+            alignment: Alignment.topCenter,
+            errorBuilder: (_, _, _) => const SizedBox.shrink(),
+          ),
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Color(0xB3000000),
+                  Color(0x26000000),
+                  Color(0x26000000),
+                  Color(0x99000000),
+                ],
+                stops: [0, 0.25, 0.4, 0.62],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Over the [_CoverBackdrop], as tall as it is given: the name, author and
+/// version at the top and the description at the bottom,
+/// leaving the picture room between them. The description is cut short and a
+/// tap opens all of it; a tap on the version opens the release notes.
+class _PluginHero extends StatelessWidget {
+  const _PluginHero({
+    required this.plugin,
+    required this.name,
+    required this.description,
+    this.releaseNotes,
+  });
+
+  final InstalledPlugin plugin;
+  final String name;
+  final String description;
+  final String? releaseNotes;
+
+  @override
+  Widget build(BuildContext context) {
+    final byline = [
+      if (plugin.manifest.author?.trim() case final a? when a.isNotEmpty) a,
+      plugin.manifest.version,
+    ].join(' · ');
+    const shadow = [Shadow(color: Color(0x99000000), blurRadius: 8)];
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 4, 16, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 26,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                        height: 1.15,
+                        shadows: shadow,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: releaseNotes == null
+                          ? null
+                          : () =>
+                                showPluginReleaseNotes(context, releaseNotes!),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(
+                            child: Text(
+                              byline,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 14,
+                                color: Colors.white70,
+                                shadows: shadow,
+                              ),
+                            ),
+                          ),
+                          if (releaseNotes != null) ...[
+                            const SizedBox(width: 4),
+                            const Icon(
+                              Icons.notes_rounded,
+                              size: 16,
+                              color: Colors.white70,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          // The picture shows between the two text blocks.
+          const Spacer(),
+          if (description.isNotEmpty)
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => GlazeBottomSheet.show<void>(
+                context,
+                title: 'plugins_description'.tr(),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                  child: PluginMarkdown(description),
+                ),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Expanded(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 120),
+                      child: ClipRect(
+                        child: PluginMarkdown(
+                          description,
+                          color: Colors.white.withValues(alpha: 0.92),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const Icon(Icons.expand_more_rounded, color: Colors.white70),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Asks before [plugin] and everything it stored go.
 void confirmPluginUninstall(
   BuildContext context,
   WidgetRef ref,
-  InstalledPlugin plugin, {
-  bool closeScreen = false,
-}) {
+  InstalledPlugin plugin,
+) {
   GlazeBottomSheet.show<void>(
     context,
     title: 'plugins_uninstall'.tr(),
@@ -513,9 +904,6 @@ void confirmPluginUninstall(
       onButtonTap: () async {
         Navigator.of(context, rootNavigator: true).pop();
         await ref.read(pluginLibraryProvider.notifier).uninstall(plugin.id);
-        if (closeScreen && context.mounted && Navigator.of(context).canPop()) {
-          Navigator.of(context).pop();
-        }
       },
     ),
   );
@@ -674,16 +1062,8 @@ class _NetworkLog extends ConsumerWidget {
         ref.watch(pluginNetworkLogProvider(plugin.id)).value ?? const {};
     final records = log.values.toList()
       ..sort((a, b) => b.lastSeen.compareTo(a.lastSeen));
-    // Allowed hosts not seen yet still belong on the list.
-    final unseen = [
-      for (final h in {
-        ...?plugin.networkHosts,
-        if (listed) ...plugin.manifest.hosts,
-      }.toList()..sort())
-        if (!log.containsKey(h)) h,
-    ];
     final format = DateFormat.MMMd(context.locale.toLanguageTag()).add_Hm();
-    final empty = records.isEmpty && unseen.isEmpty;
+    final empty = records.isEmpty;
     return MenuGroup(
       header: 'plugins_network'.tr(),
       headerIcon: Icons.public_rounded,
@@ -694,13 +1074,6 @@ class _NetworkLog extends ConsumerWidget {
           empty ? 'plugins_network_empty'.tr() : 'plugins_network_hint'.tr(),
       },
       items: [
-        for (final h in unseen)
-          _hostItem(
-            notifier,
-            h,
-            allowed: !listed || plugin.allowsHost(h),
-            listed: listed,
-          ),
         for (final r in records)
           // Not hosts: shown as they were, never switched per host.
           if (r.host == 'navigation' || r.host == 'webrtc')
@@ -725,12 +1098,6 @@ class _NetworkLog extends ConsumerWidget {
                 DateTime.fromMillisecondsSinceEpoch(r.lastSeen),
               ),
             ),
-        if (listed)
-          MenuItem(
-            icon: Icons.add_rounded,
-            label: 'plugins_network_add'.tr(),
-            onTap: () => _addHost(context, notifier),
-          ),
         if (records.isNotEmpty)
           MenuItem(
             icon: Icons.delete_sweep_outlined,
@@ -750,7 +1117,7 @@ class _NetworkLog extends ConsumerWidget {
     required bool listed,
     String? when,
   }) {
-    final rule = plugin.networkHosts?.contains(host) ?? false;
+    final rule = plugin.allowedHosts?.contains(host) ?? false;
     return MenuItem(
       icon: allowed ? Icons.language_rounded : Icons.block_rounded,
       label: host,
@@ -775,6 +1142,105 @@ class _NetworkLog extends ConsumerWidget {
           : () {},
     );
   }
+}
+
+/// The listed-hosts mode's hosts, closed to one row until tapped: the
+/// manifest's, each with what the plugin says it uses it for and on until
+/// switched off, then those the user added.
+class _HostsBlock extends ConsumerStatefulWidget {
+  const _HostsBlock({required this.plugin});
+
+  final InstalledPlugin plugin;
+
+  @override
+  ConsumerState<_HostsBlock> createState() => _HostsBlockState();
+}
+
+class _HostsBlockState extends ConsumerState<_HostsBlock> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final plugin = widget.plugin;
+    final notifier = ref.read(pluginLibraryProvider.notifier);
+    final localizer = plugin.localizer(context.locale.toLanguageTag());
+    final declared = plugin.manifest.hosts;
+    final added = [
+      for (final h
+          in (plugin.networkHosts ?? const <String>{}).toList()..sort())
+        if (!declared.contains(h)) h,
+    ];
+    final on =
+        declared.where((h) => !plugin.blockedHosts.contains(h)).length +
+        added.length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        MenuItem(
+          icon: Icons.dns_outlined,
+          label: 'plugins_network_hosts'.tr(),
+          value: '$on / ${declared.length + added.length}',
+          trailing: AnimatedRotation(
+            turns: _open ? 0.5 : 0,
+            duration: const Duration(milliseconds: 150),
+            child: Icon(
+              Icons.expand_more_rounded,
+              color: context.cs.onSurfaceVariant,
+            ),
+          ),
+          onTap: () => setState(() => _open = !_open),
+        ),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 180),
+          alignment: Alignment.topCenter,
+          child: !_open
+              ? const SizedBox(width: double.infinity)
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (final host in declared)
+                      _host(
+                        notifier,
+                        host,
+                        allowed: !plugin.blockedHosts.contains(host),
+                        subtitle: localizer
+                            .resolve(plugin.manifest.hostDescriptions[host])
+                            .trim(),
+                      ),
+                    for (final host in added)
+                      _host(
+                        notifier,
+                        host,
+                        allowed: true,
+                        subtitle: 'plugins_network_added'.tr(),
+                      ),
+                    MenuItem(
+                      icon: Icons.add_rounded,
+                      label: 'plugins_network_add'.tr(),
+                      onTap: () => _addHost(context, notifier),
+                    ),
+                  ],
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _host(
+    PluginLibraryNotifier notifier,
+    String host, {
+    required bool allowed,
+    required String subtitle,
+  }) => MenuItem(
+    icon: allowed ? Icons.language_rounded : Icons.block_rounded,
+    label: host,
+    subtitle: subtitle.isEmpty ? null : subtitle,
+    trailing: GlazeSwitch(
+      value: allowed,
+      onChanged: (v) => notifier.setHostAllowed(widget.plugin.id, host, v),
+    ),
+    onTap: () => notifier.setHostAllowed(widget.plugin.id, host, !allowed),
+  );
 
   void _addHost(BuildContext context, PluginLibraryNotifier notifier) {
     GlazeBottomSheet.show<void>(
@@ -794,7 +1260,7 @@ class _NetworkLog extends ConsumerWidget {
             return;
           }
           Navigator.of(context, rootNavigator: true).pop();
-          notifier.setHostAllowed(plugin.id, host, true);
+          notifier.setHostAllowed(widget.plugin.id, host, true);
         },
       ),
     );

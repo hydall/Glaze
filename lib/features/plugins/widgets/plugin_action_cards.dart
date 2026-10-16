@@ -1,6 +1,7 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path/path.dart' as p;
 
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../chat/widgets/magic_drawer_models.dart';
@@ -24,6 +25,9 @@ typedef PluginActionEntry = ({
   String pluginName,
   PluginAction action,
   String label,
+
+  /// The action's icon in the unpacked package, when it names one.
+  String? iconFile,
 });
 
 /// Actions of every enabled plugin for [kind], with localized labels.
@@ -44,6 +48,9 @@ List<PluginActionEntry> pluginActionEntries(
           pluginName: plugin.localizer(locale).resolve(plugin.manifest.name),
           action: action,
           label: plugin.localizer(locale).resolve(action.label),
+          iconFile: action.icon == null
+              ? null
+              : p.joinAll([plugin.directory, ...action.icon!.split('/')]),
         ),
   ];
 }
@@ -76,7 +83,10 @@ Future<void> runPluginAction(
   GlazeToast.show(context, message, isError: true);
 }
 
-/// Drawer cards for plugin actions, sized like the cards around them.
+/// Drawer cards for plugin actions, sized like the cards around them. The
+/// plugin picks a card's label and icon; the line under it is always the
+/// puzzle piece and the plugin's name, so a plugin's card cannot pass for
+/// one of Glaze's own.
 List<Widget> pluginActionCards(
   BuildContext context,
   WidgetRef ref, {
@@ -98,9 +108,11 @@ List<Widget> pluginActionCards(
               id: 'plugin:${entry.pluginId}:${entry.action.id}',
               label: entry.label,
               icon: Icons.widgets_outlined,
+              iconFile: entry.iconFile,
               category: MagicDrawerCategory.tools,
             ),
             status: entry.pluginName,
+            statusIcon: Icons.extension_rounded,
           ),
           editing: editing,
           hovered: false,

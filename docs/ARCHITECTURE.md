@@ -1651,8 +1651,26 @@ Code lives in `lib/features/plugins/` and `assets/chat_webview/plugins/`.
 `panels[{id, src, placement: chat|message, slot, role, position}]`,
 `fileHandlers[{id, extensions, mimeTypes, scripts, icon}]` and `settings[]`
 (`toggle`, `select`, `slider`, `text`, `textarea`, `note`, `divider`,
-`group`). Translatable text is a string or `{"t": key}`. Parsed by
-`plugin_manifest_parser.dart`; `readPluginPackage` also checks that every
+`group`). `composerActions` land in the chat drawer's Actions tab and
+`toolsActions` in its Tools tab, each `{id, label, icon}` with `icon` a package
+image (an SVG is tinted like the app's icons); the card's status line is always
+a puzzle piece and the plugin's name. The Tools tab also opens the plugin list
+itself as a sheet (`PluginsSheet`).
+
+**Plugin screen.** `PluginDetailScreen` is split into tabs, picked from a
+dropdown chip pinned under the header, with a fade-through between tabs:
+Info (the `icon` cover fills the screen behind it and fades out on the other
+tabs; over it the name, author, version — a tap opens the release notes — and
+the description pinned to the bottom of the screen, or the About group without a cover; then the hub link),
+Permissions (the permission groups, the network log, the request history),
+the plugin's own tabs, and last Data (export the package, export and import
+the plugin's data). Switching a plugin on or off and uninstalling it are only
+on the plugin list. `contributes.settingsTabs[{id, label, icon}]`
+declares up to `PluginSettingsTab.max` (10) tabs; each settings field puts
+itself on one with `tab`, a field without it lands on the first. Without
+`settingsTabs` every field sits on one Settings tab. A tab no field names is
+not shown. Translatable text is a string or
+`{"t": key}`. Parsed by `plugin_manifest_parser.dart`; `readPluginPackage` also checks that every
 referenced file exists and that no path escapes the package.
 
 **Permissions** (`PluginPermission`): `composer`, `messages`, `variables`
@@ -1702,11 +1720,14 @@ permission sheet (`showPluginPermissionsSheet`). Grants and revocations live in
 restarts the chat's frames. `images.generate` uses the app's own
 `ImageGenService`.
 
-**Network.** Internet access has three modes on the detail screen: off
-(`network` revoked), listed hosts (`InstalledPlugin.networkHosts`, a set of
-`example.com` / `*.example.com` rules) and any host (`networkHosts == null`).
-The hosts `plugin.json` names show up in the listed mode switched off; updates
-keep the user's setup. Local network access (`InstalledPlugin.localNetwork`) is
+**Network.** Internet access has three modes, set in the permissions' own
+Internet group: off (`network` revoked), listed hosts and any host
+(`networkHosts == null`). In the listed mode the plugin may reach
+`InstalledPlugin.allowedHosts`: the hosts `plugin.json` names (a string or
+`{ "host", "description" }` each, `example.com` / `*.example.com`), less those
+the user switched off (`blockedHosts`), plus those the user added
+(`networkHosts`). They sit in a collapsed block of the Internet group, each
+with its description; updates keep the user's setup. Local network access (`InstalledPlugin.localNetwork`) is
 a separate switch, off by default. Every plugin frame gets a
 Content-Security-Policy that allows inline code, `data:`/`blob:` URLs and the
 listed hosts (any port), or any https/wss host in the any-host mode; only with
