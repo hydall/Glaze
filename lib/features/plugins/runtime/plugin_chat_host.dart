@@ -413,6 +413,7 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
       [
         x.id,
         x.installedAt,
+        x.dataRevision,
         x.config,
         [
           for (final r in x.revoked.toList()..sort())

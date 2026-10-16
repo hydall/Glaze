@@ -132,7 +132,7 @@ class PluginsScreen extends ConsumerWidget {
   }
 }
 
-/// Export and uninstall for one plugin of the list.
+/// Export, data and uninstall for one plugin of the list.
 void _showPluginMenu(
   BuildContext context,
   WidgetRef ref,
@@ -152,6 +152,24 @@ void _showPluginMenu(
         onTap: () {
           Navigator.of(context, rootNavigator: true).pop();
           exportPlugin(context, ref, plugin);
+        },
+      ),
+      BottomSheetItem(
+        label: 'plugins_data_export'.tr(),
+        hint: 'plugins_data_export_hint'.tr(),
+        icon: Icons.data_object_rounded,
+        onTap: () {
+          Navigator.of(context, rootNavigator: true).pop();
+          exportPluginData(context, ref, plugin);
+        },
+      ),
+      BottomSheetItem(
+        label: 'plugins_data_import'.tr(),
+        hint: 'plugins_data_import_hint'.tr(),
+        icon: Icons.settings_backup_restore_rounded,
+        onTap: () {
+          Navigator.of(context, rootNavigator: true).pop();
+          importPluginData(context, ref, plugin);
         },
       ),
       BottomSheetItem(

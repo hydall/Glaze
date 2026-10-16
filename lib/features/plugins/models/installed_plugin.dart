@@ -17,6 +17,7 @@ class InstalledPlugin {
     this.localNetwork = false,
     this.hubSlug,
     this.foundInCode = const {},
+    this.dataRevision = 0,
   });
 
   final PluginManifest manifest;
@@ -53,6 +54,10 @@ class InstalledPlugin {
   /// and that were read off its scripts instead.
   final Set<String> foundInCode;
 
+  /// Bumped when the plugin's data is replaced from a file, so its running
+  /// frames start over on the new data. Not saved.
+  final int dataRevision;
+
   /// Whether the plugin may reach [host] at all.
   bool allowsHost(String host) {
     if (!allows(PluginPermission.network)) return false;
@@ -74,6 +79,7 @@ class InstalledPlugin {
     Set<String>? revoked,
     Set<String>? Function()? networkHosts,
     bool? localNetwork,
+    int? dataRevision,
   }) => InstalledPlugin(
     manifest: manifest,
     directory: directory,
@@ -87,6 +93,7 @@ class InstalledPlugin {
     localNetwork: localNetwork ?? this.localNetwork,
     hubSlug: hubSlug,
     foundInCode: foundInCode,
+    dataRevision: dataRevision ?? this.dataRevision,
   );
 
   PluginLocalizer localizer(String requestedLocale) => PluginLocalizer(

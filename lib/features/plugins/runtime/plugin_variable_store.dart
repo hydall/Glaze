@@ -131,6 +131,64 @@ class PluginVariableStore {
     }
   }
 
+  /// What [pluginId] keeps in every chat, by session id: `chat` is its chat
+  /// variables and `messages` its message variables by message id.
+  Future<Map<String, Map<String, dynamic>>> readChats(String pluginId) async {
+    final keys = {
+      'chat': chatKeyFor(pluginId),
+      'messages': messageKeyFor(pluginId),
+    };
+    final ids = {
+      for (final key in keys.values)
+        ...await chatRepo.sessionIdsWithVarsContaining(jsonEncode(key)),
+    };
+    final out = <String, Map<String, dynamic>>{};
+    for (final id in ids.toList()..sort()) {
+      final vars = (await chatRepo.getById(id))?.sessionVars ?? const {};
+      final entry = <String, dynamic>{
+        for (final e in keys.entries)
+          if (decodeVariableRoot(vars[e.value]) case final root
+              when root.isNotEmpty)
+            e.key: root,
+      };
+      if (entry.isNotEmpty) out[id] = entry;
+    }
+    return out;
+  }
+
+  /// Replaces what [pluginId] keeps in chats with [chats], shaped as
+  /// [readChats] returns it. Chats this device does not have are skipped;
+  /// returns how many were.
+  Future<int> replaceChats(
+    String pluginId,
+    Map<String, Map<String, dynamic>> chats,
+  ) async {
+    await forgetPlugin(pluginId);
+    final keys = {
+      'chat': chatKeyFor(pluginId),
+      'messages': messageKeyFor(pluginId),
+    };
+    var skipped = 0;
+    for (final e in chats.entries) {
+      if (await chatRepo.getById(e.key) == null) {
+        skipped++;
+        continue;
+      }
+      final encoded = {
+        for (final k in keys.entries)
+          if (e.value[k.key] case final Map<dynamic, dynamic> root
+              when root.isNotEmpty)
+            k.value: _checked(Map<String, dynamic>.from(root)),
+      };
+      if (encoded.isEmpty) continue;
+      await chatRepo.updateSessionVarsJson(
+        e.key,
+        (vars) => vars..addAll(encoded),
+      );
+    }
+    return skipped;
+  }
+
   /// Drops the message-scope variables of deleted messages.
   Future<void> forgetMessages(String sessionId, Set<String> messageIds) async {
     if (messageIds.isEmpty) return;

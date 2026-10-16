@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:easy_localization/easy_localization.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
@@ -22,6 +24,7 @@ import '../providers/plugin_history_provider.dart';
 import '../providers/plugin_hub_provider.dart';
 import '../providers/plugin_library_provider.dart';
 import '../providers/plugin_network_log_provider.dart';
+import '../services/plugin_data_transfer.dart';
 import 'plugin_history_screen.dart';
 import 'plugin_hub_sheet.dart';
 import 'plugin_settings_form.dart';
@@ -304,6 +307,18 @@ class PluginDetailScreen extends ConsumerWidget {
                 onTap: () => exportPlugin(context, ref, plugin),
               ),
               MenuItem(
+                icon: Icons.data_object_rounded,
+                label: 'plugins_data_export'.tr(),
+                subtitle: 'plugins_data_export_hint'.tr(),
+                onTap: () => exportPluginData(context, ref, plugin),
+              ),
+              MenuItem(
+                icon: Icons.settings_backup_restore_rounded,
+                label: 'plugins_data_import'.tr(),
+                subtitle: 'plugins_data_import_hint'.tr(),
+                onTap: () => importPluginData(context, ref, plugin),
+              ),
+              MenuItem(
                 icon: Icons.delete_outline_rounded,
                 label: 'plugins_uninstall'.tr(),
                 onTap: () => confirmPluginUninstall(
@@ -541,6 +556,105 @@ Future<void> exportPlugin(
       'plugins_export_failed'.tr(namedArgs: {'error': '$e'}),
       isError: true,
       showCopyButton: true,
+    );
+  }
+}
+
+/// Saves everything [plugin] keeps — settings, storage, variables and
+/// files — as one JSON file.
+Future<void> exportPluginData(
+  BuildContext context,
+  WidgetRef ref,
+  InstalledPlugin plugin,
+) async {
+  try {
+    final data = await ref
+        .read(pluginLibraryProvider.notifier)
+        .exportData(plugin.id);
+    final day = DateTime.now().toIso8601String().substring(0, 10);
+    final base = '${plugin.id}-data-$day'.replaceAll(
+      RegExp(r'[^A-Za-z0-9._-]'),
+      '_',
+    );
+    final path = await FileExportService.exportBytes(
+      bytes: utf8.encode(const JsonEncoder.withIndent(' ').convert(data)),
+      filename: '$base.json',
+      subfolder: 'plugins',
+    );
+    if (path.isEmpty || !context.mounted) return;
+    GlazeToast.show(
+      context,
+      'plugins_exported_toast'.tr(namedArgs: {'path': path}),
+    );
+  } catch (e) {
+    if (!context.mounted) return;
+    GlazeToast.show(
+      context,
+      'plugins_export_failed'.tr(namedArgs: {'error': '$e'}),
+      isError: true,
+      showCopyButton: true,
+    );
+  }
+}
+
+/// Picks a file made by [exportPluginData] and, once the user confirms,
+/// replaces [plugin]'s data with it.
+Future<void> importPluginData(
+  BuildContext context,
+  WidgetRef ref,
+  InstalledPlugin plugin,
+) async {
+  final result = await FilePicker.pickFiles(
+    type: Platform.isIOS ? FileType.any : FileType.custom,
+    allowedExtensions: Platform.isIOS ? null : const ['json'],
+    withData: true,
+  );
+  final picked = result?.files.singleOrNull;
+  if (picked == null || !context.mounted) return;
+  final proceed = await GlazeBottomSheet.show<bool>(
+    context,
+    title: 'plugins_data_import'.tr(),
+    bigInfo: BottomSheetBigInfo(
+      icon: Icons.settings_backup_restore_rounded,
+      description: 'plugins_data_import_confirm'.tr(),
+      buttonText: 'plugins_data_import_button'.tr(),
+      buttonIcon: Icons.settings_backup_restore_rounded,
+      onButtonTap: () => Navigator.of(context, rootNavigator: true).pop(true),
+    ),
+  );
+  if (proceed != true || !context.mounted) return;
+  try {
+    final bytes = picked.bytes ?? await File(picked.path!).readAsBytes();
+    Object? json;
+    try {
+      json = jsonDecode(utf8.decode(bytes));
+    } on FormatException {
+      throw const PluginDataException(PluginDataError.notPluginData);
+    }
+    final skipped = await ref
+        .read(pluginLibraryProvider.notifier)
+        .importData(plugin.id, json);
+    if (!context.mounted) return;
+    GlazeToast.show(
+      context,
+      skipped == 0
+          ? 'plugins_data_imported'.tr()
+          : 'plugins_data_imported_skipped'.tr(
+              namedArgs: {'count': '$skipped'},
+            ),
+    );
+  } catch (e) {
+    if (!context.mounted) return;
+    final reason = e is PluginDataException
+        ? 'plugins_data_error_${e.error.name}'.tr(
+            namedArgs: {'id': e.detail ?? ''},
+          )
+        : '$e';
+    GlazeToast.show(
+      context,
+      'plugins_data_import_failed'.tr(namedArgs: {'error': reason}),
+      isError: true,
+      showCopyButton: e is! PluginDataException,
     );
   }
 }

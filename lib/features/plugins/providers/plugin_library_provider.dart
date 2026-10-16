@@ -9,6 +9,7 @@ import '../../../core/utils/platform_paths.dart';
 import '../models/installed_plugin.dart';
 import '../models/plugin_manifest.dart';
 import '../runtime/plugin_variable_store.dart';
+import '../services/plugin_data_transfer.dart';
 import '../services/plugin_package_reader.dart';
 import '../services/plugin_store.dart';
 
@@ -187,6 +188,34 @@ class PluginLibraryNotifier extends AsyncNotifier<List<InstalledPlugin>> {
           ? {...x.grants, consent}
           : ({...x.grants}..remove(consent)),
     ),
+  );
+
+  /// Everything [id] keeps, for a JSON file.
+  Future<Map<String, Object?>> exportData(String id) async {
+    final plugin = (state.value ?? const <InstalledPlugin>[]).firstWhere(
+      (x) => x.id == id,
+    );
+    return (await _dataTransfer).export(plugin);
+  }
+
+  /// Replaces what [id] keeps with a file made by [exportData] and starts
+  /// its frames over. Returns how many chats in the file were not found.
+  Future<int> importData(String id, Object? json) async {
+    final plugin = (state.value ?? const <InstalledPlugin>[]).firstWhere(
+      (x) => x.id == id,
+    );
+    final result = await (await _dataTransfer).import(plugin, json);
+    await _update(
+      id,
+      (x) =>
+          x.copyWith(config: result.config, dataRevision: x.dataRevision + 1),
+    );
+    return result.skippedChats;
+  }
+
+  Future<PluginDataTransfer> get _dataTransfer async => PluginDataTransfer(
+    store: await _store,
+    variables: await ref.read(pluginVariableStoreProvider.future),
   );
 
   Future<void> resetConfigValue(String id, String key) =>
