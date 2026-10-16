@@ -13,8 +13,10 @@ import 'package:file_picker/file_picker.dart';
 import '../../../core/services/file_export_service.dart';
 import '../../../core/utils/id_generator.dart';
 import '../models/block_config.dart';
+import '../models/block_context_item.dart';
 import '../models/extension_preset.dart';
 import 'upstream_block_codec.dart';
+import 'upstream_context_codec.dart';
 import 'upstream_preset_codec.dart';
 
 /// Outcome of reading one or more files.
@@ -191,6 +193,28 @@ class BlockTransferService {
         '${_safeFileName(preset.name.isEmpty ? 'extblocks' : preset.name)}.json',
     subfolder: 'ExtBlocks',
   );
+
+  /// Asks for one context file, the original's `context.json`. Null when the
+  /// picker was dismissed; an empty list when the file held no items.
+  Future<List<BlockContextItem>?> importContextItems() async {
+    final files = await _pickJsonFiles(allowMultiple: false);
+    if (files == null || files.isEmpty) return null;
+    final text = await _readFile(files.first);
+    if (text == null) return const [];
+    try {
+      return decodeContextItemsFile(jsonDecode(text)) ?? const [];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// Writes a block's context list out as the original's `context.json`.
+  Future<String> exportContextItems(List<BlockContextItem> items) =>
+      FileExportService.export(
+        data: _pretty(encodeContextItemsFile(items)),
+        filename: 'context.json',
+        subfolder: 'ExtBlocks',
+      );
 
   Future<List<PlatformFile>?> _pickJsonFiles({bool allowMultiple = true}) async {
     try {

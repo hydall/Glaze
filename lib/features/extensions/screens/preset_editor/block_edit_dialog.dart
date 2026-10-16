@@ -10,6 +10,7 @@ import '../../../../shared/widgets/menu_group.dart';
 import '../../../../shared/widgets/sheet_view.dart';
 import '../../../settings/widgets/api_slot_group.dart';
 import '../../models/block_config.dart';
+import '../../models/block_context_item.dart';
 import '../../models/block_injection.dart';
 import '../../models/block_modes.dart';
 import '../../models/connection_profiles.dart';
@@ -17,6 +18,7 @@ import '../../models/extension_context_policy.dart';
 import '../../services/accumulation/accumulation_service.dart';
 import '../../widgets/extension_context_policy_editor.dart';
 import 'widgets/block_type_picker.dart';
+import 'sections/context_list_section.dart';
 import 'sections/profiles_section.dart';
 import 'sections/upstream_block_sections.dart';
 
@@ -62,6 +64,10 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
   late bool _useStaticSource;
   late bool _manualOnly;
   late ExtensionContextPolicy _contextPolicy;
+
+  /// The original's ordered context list. With an enabled item it alone
+  /// builds the request, and the settings below it go unused.
+  late List<BlockContextItem> _contextList;
 
   /// The connection and model this block overrides to. Empty means it follows
   /// the preset's own connection.
@@ -133,6 +139,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
     _streamToPanel = b.streamToPanel;
     _manualOnly = b.manualOnly;
     _contextPolicy = b.contextPolicy;
+    _contextList = b.context;
     _useStaticSource = b.source == BlockSource.carried;
 
     _periodController = TextEditingController(text: b.period.toString());
@@ -207,6 +214,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
       previousBlocksCount: _previousBlocksCount,
       contextSystemPrompt: _contextSystemPromptController.text,
       contextPolicy: _contextPolicy,
+      context: _contextList,
       streamToPanel: _streamToPanel,
       manualOnly: _manualOnly,
       triggerOnUser: _triggerOnUser,
@@ -677,14 +685,27 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
     );
   }
 
-  /// What the block's own request is built from.
+  /// What the block's own request is built from: the original's context
+  /// list, for the types the original builds one for, and our own settings.
   List<Widget> _contextItems() {
-    if (!_usesLlm) return const [];
+    final list =
+        (_type == BlockType.generated && _usesLlm) || _type == BlockType.rewrite
+        ? BlockContextListGroup(
+            items: _contextList,
+            onChanged: (items) => setState(() => _contextList = items),
+          )
+        : null;
+    final listInUse =
+        list != null && _contextList.any((item) => !item.disabled);
+    if (!_usesLlm || listInUse) {
+      return [?list, if (listInUse) const _HelpText('ctx_list_active_help')];
+    }
     final policy = ExtensionContextPolicyEditor(
       policy: _contextPolicy,
       onChanged: (value) => setState(() => _contextPolicy = value),
     );
     return [
+      ?list,
       MenuGroup(
         header: 'block_sec_context'.tr(),
         items: [
