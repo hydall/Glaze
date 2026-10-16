@@ -264,12 +264,13 @@ The request is not streamed and doesn't appear in the chat; it is in the Prompt 
 
 | Option | What it does |
 |---|---|
-| `preset` | The `key` of an `imagePreset` setting: the connection and style the user picked for these images ([API presets](#info/plugins-manifest/api-presets)). |
+| `preset` | The `key` of an `imagePreset` setting: the image service and style the user picked for these images ([API presets](#info/plugins-manifest/api-presets)). |
+| `character`, `persona` | `false` leaves that person's avatar and appearance out of the request. By default both go along as references, so pass `false` for a picture the character or the user is not in. |
 | `aspectRatio`, `size` | Passed to the generator, if it supports them. |
 | `timeout` | In milliseconds. |
 | `saveAs`, `scope` | Save into the plugin's files under this name (needs `files`). |
 
-Returns a `data:` URL of the image, or its path with `saveAs`.
+Returns a `data:` URL of the image, or its path with `saveAs`. A failed generation rejects with the provider's status and message.
 
 ## glaze.net
 

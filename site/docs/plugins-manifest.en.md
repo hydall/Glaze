@@ -133,7 +133,7 @@ A file handler turns an attached file into text for the message. For example, it
 | `note` | `text`, `icon`: `info` or `warning`. A note, stores nothing. |
 | `divider`, `group` | Splits the form. |
 | `apiPreset` | `key`, `label`, `description`. An API connection and model for one of the plugin's features. |
-| `imagePreset` | `key`, `label`, `description`. An API connection and image style for one of the plugin's images. |
+| `imagePreset` | `key`, `label`, `description`. An image service and image style for one of the plugin's images. |
 
 `label`, `description`, `text`, option labels and text defaults can be translation keys. The values are read with `glaze.plugin.settings.get(key)`. When the user changes a setting, the plugin's frames restart with the new values.
 
@@ -149,7 +149,7 @@ await glaze.images.generate(prompt, { preset: 'photos' });
 Each preset is drawn on the plugin's page as its own group, headed by its `label` and `description`, with the same rows as the other API slots in Glaze:
 
 - `apiPreset`: **API connection** and **Model**;
-- `imagePreset`: **API for images** (the connection that image providers working over the LLM endpoint borrow) and **Image style**. The style can follow the image generation settings, be "No style", or be one from the style library.
+- `imagePreset`: **Image service** and **Image style**. The service can follow the image generation settings or be any of the services set up there (NovelAI, Naistera and the others); it draws with that service's own key, model and options from the image settings. Services that draw through the LLM endpoint use the open chat's connection. The style can follow the image generation settings, be "No style", or be one from the style library.
 
 Until the user picks something, and for calls without `preset`, Glaze uses the open chat's connection and the image settings, as before. If the chosen connection is deleted, the call falls back to the chat's. A `preset` that the manifest doesn't declare, or declares for the other kind of call, fails with `unknown_preset`. Glaze stores the pick with the plugin's other settings; the plugin doesn't need to read it.
 
