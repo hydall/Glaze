@@ -7,6 +7,12 @@
 // message) owns each frame window and stamps that identity on every request
 // it forwards to Dart (`pluginBridge` handler), so a plugin cannot speak for
 // another one.
+//
+// Where the app can lay a second, transparent WebView over its own controls
+// (the plugin layer, `plugin_layer.html`), chat panels live there instead, so
+// they draw over the header and the message box rather than under them. Both
+// pages then run this host: `setup` says which `layer` this page is, and what
+// crosses between them (emits, insets) goes through Dart.
 (function () {
   'use strict';
 
@@ -32,6 +38,15 @@
   var messageList = []; // [{id, role}] in chat order
   var busy = false;
   var currentChatId = null;
+  // 'all': every frame here. 'chat': all but chat panels, which are in the
+  // plugin layer. 'panels': this is the plugin layer, chat panels only.
+  var layer = 'all';
+
+  function callHandler(name, arg) {
+    if (window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
+      window.flutter_inappwebview.callHandler(name, arg);
+    }
+  }
 
   /* ---------- Frames ---------- */
   function jsonForScript(value) {
@@ -211,7 +226,7 @@
       style.height = '100%';
       style.zIndex = String(FRAME_Z + (opts.order || 0));
       style.pointerEvents = 'none';
-      style.clipPath = 'polygon(0 0, 0 0, 0 0)';
+      style.clipPath = layer === 'panels' ? 'none' : 'polygon(0 0, 0 0, 0 0)';
     } else {
       style.display = 'block';
       style.width = '100%';
@@ -258,7 +273,7 @@
     wrappers.delete(state.wrapper);
     if (fitted === state) fitted = null;
     try { state.iframe.remove(); } catch (e) { /* already detached */ }
-    if (state.holes) scheduleHoles();
+    if (state.holes) { refreshClips(); scheduleHoles(); }
   }
 
   function send(state, msg) {
@@ -278,30 +293,47 @@
 
   /* ---------- Hit regions (chat panels) ---------- */
   function applyHitRects(state, rects) {
-    var style = state.iframe.style;
     if (!Array.isArray(rects) || !rects.length) {
-      style.clipPath = 'polygon(0 0, 0 0, 0 0)';
-      style.pointerEvents = 'none';
       state.holes = null;
-      scheduleHoles();
-      return;
+    } else {
+      // A few px of slack keeps soft shadows and glows from being cut square.
+      var pad = HIT_SLACK_PX;
+      state.holes = rects.map(function (r) {
+        var x = Math.max(0, (+r[0] || 0) - pad), y = Math.max(0, (+r[1] || 0) - pad);
+        return [x, y, Math.max(0, +r[2] || 0) + 2 * pad, Math.max(0, +r[3] || 0) + 2 * pad];
+      });
     }
-    // A few px of slack keeps soft shadows and glows from being cut square.
-    var pad = HIT_SLACK_PX;
-    var boxes = rects.map(function (r) {
-      var x = Math.max(0, (+r[0] || 0) - pad), y = Math.max(0, (+r[1] || 0) - pad);
-      return [x, y, Math.max(0, +r[2] || 0) + 2 * pad, Math.max(0, +r[3] || 0) + 2 * pad];
-    });
-    style.clipPath = 'path(\'' + boxes.map(function (b) {
-      return 'M' + b[0] + ' ' + b[1] + 'h' + b[2] + 'v' + b[3] + 'h' + (-b[2]) + 'Z';
-    }).join(' ') + '\')';
-    style.pointerEvents = 'auto';
-    state.holes = boxes;
+    refreshClips();
     scheduleHoles();
   }
 
-  // What chat panels draw goes over the app's own controls laid over the
-  // page (header, message box): the app leaves these areas to the page.
+  // A panel frame covers the whole page, so only its hit boxes may take
+  // touches: the frame is clipped to them, which cuts what it draws there
+  // too. In the plugin layer nothing of the page is under the frames, so a
+  // frame is only clipped where another one takes touches as well; the app
+  // itself lets touches into the layer only inside the boxes.
+  function clipTo(style, boxes) {
+    style.clipPath = 'path(\'' + boxes.map(function (b) {
+      return 'M' + b[0] + ' ' + b[1] + 'h' + b[2] + 'v' + b[3] + 'h' + (-b[2]) + 'Z';
+    }).join(' ') + '\')';
+  }
+
+  function refreshClips() {
+    var touched = 0;
+    wrappers.forEach(function (f) { if (f.kind === 'panel' && f.holes) touched++; });
+    wrappers.forEach(function (f) {
+      if (f.kind !== 'panel') return;
+      var style = f.iframe.style;
+      style.pointerEvents = f.holes ? 'auto' : 'none';
+      if (layer === 'panels' && touched < 2) style.clipPath = 'none';
+      else if (f.holes) clipTo(style, f.holes);
+      else style.clipPath = layer === 'panels' ? 'none' : 'polygon(0 0, 0 0, 0 0)';
+    });
+  }
+
+  // What chat panels draw goes over the app's own controls (header, message
+  // box): the plugin layer takes touches only in these areas, or else the
+  // app cuts its controls out there.
   var holesKey = '[]';
   var holesTimer = 0;
   function reportHoles() {
@@ -434,6 +466,10 @@
         framesOf(state.plugin.pluginId).forEach(function (f) {
           if (f !== state) send(f, { type: P + 'emit', event: d.event, detail: d.detail });
         });
+        // The plugin's frames in the other page.
+        if (layer !== 'all') {
+          callHandler('pluginEmit', { pluginId: state.plugin.pluginId, event: d.event, detail: d.detail });
+        }
         return;
       case 'net':
         if (typeof d.host === 'string' && d.host) reportNetwork(state.plugin.pluginId, d.host, d.blocked);
@@ -496,8 +532,7 @@
     var safe = readSafeArea();
     var round = function (v) { return Math.round(v * 100) / 100; };
     // Nothing of the app's top bar is to be avoided: what panels draw goes
-    // over it (the app cuts its controls out there), so the top bar inset
-    // is the status bar alone.
+    // over it, so the top bar inset is the status bar alone.
     var next = {
       topSafe: round(safe.top),
       topBar: round(safe.top),
@@ -507,8 +542,27 @@
     };
     if (next.topSafe === insets.topSafe && next.topBar === insets.topBar &&
         next.bottomInput === insets.bottomInput && next.bottomSafe === insets.bottomSafe) return;
+    applyInsets(next);
+  }
+
+  function applyInsets(next) {
     insets = next;
     wrappers.forEach(function (f) { if (f.kind === 'panel') sendInsets(f); });
+    // The plugin layer has no message box to measure: it gets the chat's.
+    if (layer === 'chat') callHandler('pluginInsets', insets);
+  }
+
+  // The plugin layer's insets, as the chat page measured them.
+  function setInsets(next) {
+    if (layer !== 'panels' || !next) return;
+    var num = function (v) { return Math.max(0, +v || 0); };
+    applyInsets({
+      topSafe: num(next.topSafe),
+      topBar: num(next.topBar),
+      bottomInput: num(next.bottomInput),
+      bottomSafe: num(next.bottomSafe),
+      keyboard: 0,
+    });
   }
 
   var insetRaf = 0;
@@ -586,7 +640,7 @@
   var reconcileScheduled = false;
 
   function scheduleReconcile() {
-    if (reconcileScheduled) return;
+    if (reconcileScheduled || layer === 'panels') return;
     reconcileScheduled = true;
     requestAnimationFrame(function () { reconcileScheduled = false; reconcileMessages(); });
   }
@@ -758,10 +812,15 @@
     payload = payload || {};
     teardown();
     P = 'p' + randomId() + ':';
+    layer = payload.layer === 'chat' || payload.layer === 'panels' ? payload.layer : 'all';
     if (typeof payload.sdk === 'string') sdkSource = payload.sdk;
     rtcToken = typeof payload.rtcToken === 'string' ? payload.rtcToken : null;
     compatSources = payload.compat || {};
     refreshInsets();
+    // The plugin layer is set up first and waits for these.
+    if (layer === 'chat') callHandler('pluginInsets', insets);
+    var mainHere = layer !== 'panels';
+    var panelsHere = layer !== 'chat';
     (payload.plugins || []).forEach(function (p) {
       var plugin = Object.assign({}, p, {
         subscriptions: new Set(),
@@ -770,11 +829,11 @@
         refused: new Set(),
       });
       plugins.set(plugin.pluginId, plugin);
-      if (typeof plugin.main === 'string' && plugin.main) {
+      if (mainHere && typeof plugin.main === 'string' && plugin.main) {
         mountFrame(plugin, 'main', runScriptsDoc(plugin, bootFor(plugin, 'main'), [{ name: 'main.js', source: plugin.main }]));
       }
       (plugin.panels || []).forEach(function (panel) {
-        if (panel.placement !== 'chat') return;
+        if (!panelsHere || panel.placement !== 'chat') return;
         mountFrame(plugin, 'panel', panelDoc(plugin, bootFor(plugin, 'panel', { panelId: panel.id }), panel.html), {
           panelId: panel.id, order: panel.order,
         });
@@ -795,6 +854,13 @@
 
   function pushVars(pluginId, scope, value) {
     framesOf(pluginId).forEach(function (f) { send(f, { type: P + 'vars', scope: scope, value: value || {} }); });
+  }
+
+  // An emit of one of the plugin's frames in the other page.
+  function relayEmit(pluginId, event, detail) {
+    framesOf(String(pluginId)).forEach(function (f) {
+      send(f, { type: P + 'emit', event: event, detail: detail });
+    });
   }
 
   function setMessages(list, isBusy, chatId) {
@@ -875,6 +941,8 @@
     teardown: teardown,
     dispatchEvent: dispatchEvent,
     pushVars: pushVars,
+    relayEmit: relayEmit,
+    setInsets: setInsets,
     setMessages: setMessages,
     intercept: intercept,
     hasSubscribers: hasSubscribers,

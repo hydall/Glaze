@@ -1820,12 +1820,23 @@ frame, or a frame nested in one, posts, so plugins cannot use those relays.
 Replies to hooks, actions and file runs carry random ids and are accepted only
 from the frame that was asked. `PluginBridgeService` rejects disabled
 plugins and methods whose permission is missing or switched off;
-`plugin_sdk.js` only builds the methods the manifest asks for into `glaze`. Chat panels cover the page but are
-clipped (`clip-path`) to the boxes the plugin draws, so the chat keeps its
-taps. The same boxes go to the app (`pluginHoles` → `PluginHoles`), and the
-Flutter controls over the page (header, message box, buttons) are cut out
-there by `PluginHolesCutter`: panels are laid out for the whole screen, so
-what they draw shows, and takes taps, over the app's own chrome. Frames
+`plugin_sdk.js` only builds the methods the manifest asks for into `glaze`.
+Chat panels are laid out for the whole screen and draw over the app's own
+chrome (header, message box, buttons). On Android, Windows and Linux they live
+in the plugin layer (`PluginLayer`, `plugin_layer.html`): a second,
+transparent WebView over the whole chat screen, above the Flutter controls.
+It runs the same `plugin_host.js`, set up with `layer: 'panels'` while the
+chat page gets `layer: 'chat'` (main, message and file frames); emits and the
+chat's insets cross between the two through Dart (`pluginEmit`,
+`pluginInsets`). The panels report the boxes they draw (`pluginHoles` →
+`PluginHoles`), and the layer takes touches only there
+(`PluginHolesHitArea`); everything else goes down to the controls and the
+chat page, which the app routes itself on those platforms. A lone panel in
+the layer is not clipped at all; with several, each is clipped (`clip-path`)
+to its boxes so it only takes its own taps. On iOS and macOS a touch goes to
+the topmost native view and cannot be passed down, so the panels stay in the
+chat page there, clipped to their boxes, and the Flutter controls are cut out
+where they draw (`PluginHolesCutter`). Frames
 inside the page may only load `about:srcdoc`/`about:blank`
 (`chatWebViewNavigationPolicy`); iOS asks about those too. Message panels sit in `.msg-content-stack`, message actions in the
 footer's `.msg-trailing-actions`. Package scripts, CSS and assets
@@ -1833,7 +1844,7 @@ footer's `.msg-trailing-actions`. Package scripts, CSS and assets
 null-origin frame cannot fetch them; only the plugin's own package is read, so
 a panel cannot pull in another plugin's files. Layout insets are exposed as
 `--glaze-inset-*` CSS variables. The top bar inset is the status bar alone:
-panels draw over the app's header, which is cut out where they draw.
+panels draw over the app's header.
 The soft keyboard lays over the WebView and shrinks only the page's visual
 viewport, never a frame's own, so the panel frame holding the focus is fitted
 to the visual viewport while the keyboard is up; plugins laid out on `100vh`,

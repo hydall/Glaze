@@ -52,9 +52,10 @@ bool chatWebViewUsesAndroidAssetLoader() {
 }
 
 /// HTTPS URL for the chat WebView entry page on Android, or `null` elsewhere.
-String? chatWebViewAndroidAssetUrl() {
+/// [page] is a page next to it, such as the plugin layer's.
+String? chatWebViewAndroidAssetUrl([String page = 'index.html']) {
   if (!chatWebViewUsesAndroidAssetLoader()) return null;
-  return kChatWebViewAndroidAssetUrl;
+  return Uri.parse(kChatWebViewAndroidAssetUrl).resolve(page).toString();
 }
 
 /// Android [WebViewAssetLoader] for bundled chat assets, or `null` elsewhere.

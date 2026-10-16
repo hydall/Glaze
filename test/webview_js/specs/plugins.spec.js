@@ -763,3 +763,100 @@ test('the keyboard of something else leaves a panel full size', async ({ page })
   expect(await panelFrame(page, 'p').evaluate((el) => el.style.height)).toBe('100%');
   expect(await toasts(page)).toEqual([]);
 });
+
+/* ---------- The plugin layer ---------- */
+// Where the app lays the plugin layer over its controls, the chat page keeps
+// main and message frames and the layer holds the chat panels; Dart carries
+// emits and insets between the two.
+
+const LAYER_URL = '/assets/chat_webview/plugin_layer.html';
+
+// The layer page with the same stub of the Flutter side as the harness.
+async function setupLayer(page, plugins) {
+  await page.addInitScript(() => {
+    window.__calls = [];
+    window.flutter_inappwebview = {
+      callHandler: async (name, request) => {
+        window.__calls.push({ name, request });
+        return { ok: true, result: null };
+      },
+    };
+  });
+  await page.goto(LAYER_URL);
+  return page.evaluate(async (list) => {
+    const sdk = await (await fetch('/assets/chat_webview/plugins/plugin_sdk.js')).text();
+    return window.glazePlugins.setup({ sdk, compat: {}, plugins: list, layer: 'panels' });
+  }, plugins);
+}
+
+const handlerCalls = (page, name) =>
+  page.evaluate((n) => window.__calls.filter((c) => c.name === n).map((c) => c.request), name);
+
+function layeredPlugin(id) {
+  return plugin(id, {
+    main: `glaze.plugin.on('chat:opened', (e) => glaze.plugin.emit('ping', { chat: e.chatId }));`,
+    panels: [{
+      id: 'f',
+      placement: 'chat',
+      order: 10,
+      html: `
+        <style>#fab { position: fixed; right: 20px; bottom: calc(var(--glaze-inset-bottom-input, 0px) + 10px); width: 80px; height: 40px; box-shadow: 0 0 30px red; }</style>
+        <button id="fab" onclick="glaze.ui.toast('fab')">fab</button>
+        <script>
+          glaze.plugin.on('ping', (d) => glaze.ui.toast('got ' + d.chat));
+          glaze.plugin.on('chat:opened', () => glaze.plugin.emit('pong', {}));
+        <\/script>`,
+    }],
+  });
+}
+
+test('with a plugin layer the chat page leaves chat panels to it', async ({ page }) => {
+  await setup(page, [layeredPlugin('p')], { layer: 'chat' });
+  await expect.poll(() => page.locator('iframe[data-glaze-plugin-kind="main"]').count()).toBe(1);
+  expect(await page.locator('iframe[data-glaze-plugin-kind="panel"]').count()).toBe(0);
+  // The layer is told the insets it cannot measure.
+  await expect.poll(async () => (await handlerCalls(page, 'pluginInsets')).at(-1))
+    .toMatchObject({ bottomInput: 80 });
+  // What main emits goes to the layer too, stamped with the plugin.
+  await page.evaluate(() => window.glazePlugins.dispatchEvent('chat:opened', { chatId: 'c1' }));
+  await expect.poll(() => handlerCalls(page, 'pluginEmit'))
+    .toEqual([{ pluginId: 'p', event: 'ping', detail: { chat: 'c1' } }]);
+});
+
+test('the plugin layer holds chat panels only, drawn whole', async ({ page }) => {
+  await page.setViewportSize({ width: 400, height: 700 });
+  expect(await setupLayer(page, [layeredPlugin('p')])).toBe(1);
+  const frames = page.locator('iframe[data-glaze-plugin]');
+  await expect.poll(() => frames.count()).toBe(1);
+  expect(await frames.getAttribute('data-glaze-plugin-kind')).toBe('panel');
+  await page.evaluate(() => window.glazePlugins.setInsets({ topSafe: 0, topBar: 0, bottomInput: 80, bottomSafe: 0 }));
+  // Takes taps where it draws, and is not clipped: its shadow stays whole.
+  await expect.poll(async () => (await handlerCalls(page, 'pluginHoles')).at(-1)).toEqual([[294, 564, 92, 52]]);
+  expect(await frames.evaluate((el) => [el.style.clipPath, el.style.pointerEvents])).toEqual(['none', 'auto']);
+  await page.mouse.click(340, 590);
+  await expect.poll(async () => (await handlerCalls(page, 'pluginBridge')).map((r) => r.params[0])).toEqual(['fab']);
+  // An emit from the chat page reaches the panel; the panel's goes back.
+  await page.evaluate(() => window.glazePlugins.relayEmit('p', 'ping', { chat: 'c1' }));
+  await expect.poll(async () => (await handlerCalls(page, 'pluginBridge')).map((r) => r.params[0])).toEqual(['fab', 'got c1']);
+  await page.evaluate(() => window.glazePlugins.dispatchEvent('chat:opened', { chatId: 'c1' }));
+  await expect.poll(() => handlerCalls(page, 'pluginEmit')).toEqual([{ pluginId: 'p', event: 'pong', detail: {} }]);
+});
+
+test('two panels in the plugin layer are clipped to take their own taps', async ({ page }) => {
+  await page.setViewportSize({ width: 400, height: 700 });
+  const fab = (id, side) => plugin(id, {
+    panels: [{
+      id: 'f',
+      placement: 'chat',
+      order: 10,
+      html: `<button style="position:fixed;${side}:20px;top:100px;width:80px;height:40px" onclick="glaze.ui.toast('${id}')">x</button>`,
+    }],
+  });
+  await setupLayer(page, [fab('a', 'left'), fab('b', 'right')]);
+  const frame = (id) => page.locator(`iframe[data-glaze-plugin="${id}"]`);
+  await expect.poll(() => frame('a').evaluate((el) => el.style.clipPath)).toContain('path(');
+  await expect.poll(() => frame('b').evaluate((el) => el.style.clipPath)).toContain('path(');
+  await page.mouse.click(60, 120);
+  await page.mouse.click(340, 120);
+  await expect.poll(async () => (await handlerCalls(page, 'pluginBridge')).map((r) => r.pluginId)).toEqual(['a', 'b']);
+});

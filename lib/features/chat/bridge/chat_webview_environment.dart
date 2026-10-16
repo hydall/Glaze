@@ -123,18 +123,25 @@ UnmodifiableListView<UserScript> chatWebViewUserScripts() =>
       ),
     ]);
 
-String? chatWebViewInitialFile() {
+/// The chat page's own page; the plugin layer passes
+/// [kPluginLayerPage] for [page] in the functions below.
+const String kChatWebViewPage = 'index.html';
+
+/// The plugin layer's page, next to the chat page (see `PluginLayer`).
+const String kPluginLayerPage = 'plugin_layer.html';
+
+String? chatWebViewInitialFile([String page = kChatWebViewPage]) {
   if (_chatWebViewAssetBaseUrl != null) return null;
   if (chatWebViewUsesAndroidAssetLoader()) return null;
-  return 'assets/chat_webview/index.html';
+  return 'assets/chat_webview/$page';
 }
 
-URLRequest? chatWebViewInitialUrlRequest() {
+URLRequest? chatWebViewInitialUrlRequest([String page = kChatWebViewPage]) {
   final baseUrl = _chatWebViewAssetBaseUrl;
   if (baseUrl != null) {
-    return URLRequest(url: WebUri.uri(baseUrl.uriValue.resolve('index.html')));
+    return URLRequest(url: WebUri.uri(baseUrl.uriValue.resolve(page)));
   }
-  final androidUrl = chatWebViewAndroidAssetUrl();
+  final androidUrl = chatWebViewAndroidAssetUrl(page);
   if (androidUrl != null) {
     return URLRequest(url: WebUri(androidUrl));
   }
@@ -149,6 +156,7 @@ URLRequest? chatWebViewInitialUrlRequest() {
 NavigationActionPolicy chatWebViewNavigationPolicy(
   WebUri? url, {
   bool mainFrame = true,
+  String page = kChatWebViewPage,
 }) {
   if (url == null) return NavigationActionPolicy.CANCEL;
 
@@ -160,14 +168,14 @@ NavigationActionPolicy chatWebViewNavigationPolicy(
         : NavigationActionPolicy.CANCEL;
   }
 
-  final initialUrl = chatWebViewInitialUrlRequest()?.url;
+  final initialUrl = chatWebViewInitialUrlRequest(page)?.url;
   if (initialUrl != null && url == initialUrl) {
     return NavigationActionPolicy.ALLOW;
   }
 
   if (initialUrl == null &&
       url.scheme == 'file' &&
-      url.path.endsWith('/assets/chat_webview/index.html')) {
+      url.path.endsWith('/assets/chat_webview/$page')) {
     return NavigationActionPolicy.ALLOW;
   }
 

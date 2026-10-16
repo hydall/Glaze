@@ -4,15 +4,18 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 /// Where the plugins of one chat draw over its WebView. Plugin panels are
-/// laid out for the whole screen and expect nothing on top of them, so the
-/// app's own controls over the page leave these areas out
-/// ([PluginHolesCutter]): not drawn there, and taps there reach the page.
+/// laid out for the whole screen and expect nothing on top of them. Where the
+/// panels live in the plugin layer over the app's controls, only these areas
+/// of the layer take taps ([PluginHolesHitArea]); elsewhere the app's own
+/// controls over the page leave them out ([PluginHolesCutter]): not drawn
+/// there, and taps there reach the page.
 class PluginHoles extends ChangeNotifier {
   static const int _maxRects = 256;
 
   List<Rect> _rects = const [];
 
-  /// The page the rects are measured in: the chat WebView's box.
+  /// The page the rects are measured in: the box of the WebView the panels
+  /// are in.
   BuildContext? Function()? page;
 
   /// In WebView page pixels.
@@ -48,6 +51,18 @@ class PluginHoles extends ChangeNotifier {
   }
 }
 
+/// [holes] in [box]'s coordinates, only those that touch it.
+List<Rect> _holesIn(RenderBox box, PluginHoles holes) {
+  final global = holes.globalRects();
+  if (global.isEmpty || !box.hasSize) return const [];
+  final origin = box.localToGlobal(Offset.zero);
+  final bounds = Offset.zero & box.size;
+  return [
+    for (final r in global)
+      if (r.shift(-origin).overlaps(bounds)) r.shift(-origin),
+  ];
+}
+
 final pluginHolesProvider = Provider.family<PluginHoles, String>((ref, charId) {
   final holes = PluginHoles();
   ref.onDispose(holes.dispose);
@@ -55,27 +70,44 @@ final pluginHolesProvider = Provider.family<PluginHoles, String>((ref, charId) {
 });
 
 /// Leaves the areas plugins draw in out of [child]: it is not painted there
-/// and does not take taps there.
+/// and does not take taps there. Unless not [enabled]: where the panels are
+/// in the plugin layer, they draw over [child] whole.
 class PluginHolesCutter extends SingleChildRenderObjectWidget {
-  const PluginHolesCutter({super.key, required this.holes, super.child});
+  const PluginHolesCutter({
+    super.key,
+    required this.holes,
+    this.enabled = true,
+    super.child,
+  });
 
   final PluginHoles holes;
+  final bool enabled;
 
   @override
   RenderObject createRenderObject(BuildContext context) =>
-      RenderPluginHolesCutter(holes);
+      RenderPluginHolesCutter(holes, enabled: enabled);
 
   @override
   void updateRenderObject(
     BuildContext context,
     RenderPluginHolesCutter renderObject,
   ) {
-    renderObject.holes = holes;
+    renderObject
+      ..holes = holes
+      ..enabled = enabled;
   }
 }
 
 class RenderPluginHolesCutter extends RenderProxyBox {
-  RenderPluginHolesCutter(this._holes);
+  RenderPluginHolesCutter(this._holes, {bool enabled = true})
+    : _enabled = enabled;
+
+  bool _enabled;
+  set enabled(bool value) {
+    if (value == _enabled) return;
+    _enabled = value;
+    markNeedsPaint();
+  }
 
   PluginHoles _holes;
   set holes(PluginHoles value) {
@@ -108,17 +140,7 @@ class RenderPluginHolesCutter extends RenderProxyBox {
     super.dispose();
   }
 
-  /// The holes in this box's coordinates, only those that touch it.
-  List<Rect> _localHoles() {
-    final global = _holes.globalRects();
-    if (global.isEmpty || !hasSize) return const [];
-    final origin = localToGlobal(Offset.zero);
-    final bounds = Offset.zero & size;
-    return [
-      for (final r in global)
-        if (r.shift(-origin).overlaps(bounds)) r.shift(-origin),
-    ];
-  }
+  List<Rect> _localHoles() => _enabled ? _holesIn(this, _holes) : const [];
 
   @override
   bool hitTest(BoxHitTestResult result, {required Offset position}) {
@@ -154,5 +176,41 @@ class RenderPluginHolesCutter extends RenderProxyBox {
       super.paint,
       oldLayer: _clip.layer,
     );
+  }
+}
+
+/// Takes taps only in the areas plugins draw in: anywhere else they go to
+/// what is under [child], the plugin layer.
+class PluginHolesHitArea extends SingleChildRenderObjectWidget {
+  const PluginHolesHitArea({super.key, required this.holes, super.child});
+
+  final PluginHoles holes;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      RenderPluginHolesHitArea(holes);
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    RenderPluginHolesHitArea renderObject,
+  ) {
+    renderObject.holes = holes;
+  }
+}
+
+class RenderPluginHolesHitArea extends RenderProxyBox {
+  RenderPluginHolesHitArea(this.holes);
+
+  PluginHoles holes;
+
+  @override
+  bool hitTest(BoxHitTestResult result, {required Offset position}) {
+    for (final r in _holesIn(this, holes)) {
+      if (r.contains(position)) {
+        return super.hitTest(result, position: position);
+      }
+    }
+    return false;
   }
 }

@@ -115,6 +115,14 @@ void main() {
         chatWebViewInitialUrlRequest()?.url.toString(),
         kChatWebViewAndroidAssetUrl,
       );
+      // The plugin layer's page sits next to it.
+      expect(
+        chatWebViewInitialUrlRequest(kPluginLayerPage)?.url.toString(),
+        kChatWebViewAndroidAssetUrl.replaceFirst(
+          'index.html',
+          'plugin_layer.html',
+        ),
+      );
     });
 
     test('allows loopback image URLs via mixed content compatibility mode', () {
@@ -202,6 +210,26 @@ void main() {
       expect(
         chatWebViewInitialUrlRequest()?.url.toString(),
         'http://127.0.0.1:51234/index.html',
+      );
+    });
+
+    test('the plugin layer may load its own page only', () {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      setChatWebViewAssetBaseUrlForTesting(WebUri('http://127.0.0.1:51234/'));
+
+      expect(
+        chatWebViewNavigationPolicy(
+          WebUri('http://127.0.0.1:51234/plugin_layer.html'),
+          page: kPluginLayerPage,
+        ),
+        NavigationActionPolicy.ALLOW,
+      );
+      expect(
+        chatWebViewNavigationPolicy(
+          WebUri('http://127.0.0.1:51234/index.html'),
+          page: kPluginLayerPage,
+        ),
+        NavigationActionPolicy.CANCEL,
       );
     });
 

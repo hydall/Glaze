@@ -30,6 +30,7 @@ import 'plugin_message_diff.dart';
 import 'plugin_runtime_payload.dart';
 import 'plugin_request_capture.dart';
 import '../widgets/plugin_holes.dart';
+import '../widgets/plugin_layer.dart';
 
 /// The running plugin runtime of a chat, by character id; null while the
 /// chat has no WebView bridge or no enabled plugins.
@@ -113,6 +114,12 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
     runtime.bridge.onPluginNetwork = null;
     runtime.bridge.onPluginHttpRequest = null;
     runtime.bridge.onPluginHoles = null;
+    final layer = runtime.layer;
+    if (layer != null) {
+      layer.onPluginNetwork = null;
+      layer.onPluginHttpRequest = null;
+      layer.onPluginHoles = null;
+    }
     _holes.clear();
     runtime.dispose();
   }
@@ -125,8 +132,14 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
     final bridge = ref.read(chatBridgeRegistryProvider(widget.charId));
     final plugins = ref.read(enabledPluginsProvider);
     if (bridge == null || plugins.isEmpty) return;
+    // The chat screen lays the layer out for these plugins; they start once
+    // its page is up.
+    final layer = pluginsUseLayer(plugins)
+        ? ref.read(pluginLayerRegistryProvider(widget.charId))
+        : null;
+    if (layer == null && pluginsUseLayer(plugins)) return;
     try {
-      await _attach(bridge, plugins, epoch);
+      await _attach(bridge, layer, plugins, epoch);
     } catch (e) {
       debugPrint('[PluginChatHost] start failed: $e');
     }
@@ -137,6 +150,7 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
 
   Future<void> _attach(
     ChatBridgeController bridge,
+    PluginLayerController? layer,
     List<InstalledPlugin> plugins,
     int epoch,
   ) async {
@@ -173,6 +187,7 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
     ];
     runtime = PluginChatRuntime(
       bridge: bridge,
+      layer: layer,
       service: PluginBridgeService(
         host: host,
         // Read live: "always allow" answers land in the library without
@@ -208,8 +223,13 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
         }
       },
     );
-    bridge.onPluginHoles = _holes.update;
-    bridge.onPluginNetwork = (report) {
+    // Where the panels are, there their holes come from.
+    if (layer == null) {
+      bridge.onPluginHoles = _holes.update;
+    } else {
+      layer.onPluginHoles = _holes.update;
+    }
+    void onNetwork(Map<String, dynamic> report) {
       final id = report['pluginId'];
       final host = report['host'];
       if (id is! String || host is! String || host.isEmpty) return;
@@ -219,12 +239,18 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
             .read(pluginNetworkLogProvider(id).notifier)
             .record(host, blocked: report['blocked'] == true),
       );
-    };
-    bridge.onPluginHttpRequest = (report) {
+    }
+
+    void onHttpRequest(Map<String, dynamic> report) {
       final id = report['pluginId'];
       if (id is! String || !plugins.any((x) => x.id == id)) return;
       recordFramePluginRequest(id, _sessionId, report);
-    };
+    }
+
+    bridge.onPluginNetwork = onNetwork;
+    bridge.onPluginHttpRequest = onHttpRequest;
+    layer?.onPluginNetwork = onNetwork;
+    layer?.onPluginHttpRequest = onHttpRequest;
     bridge.onPluginActionFailed = (failure) {
       if (!mounted) return;
       GlazeToast.show(
@@ -427,6 +453,9 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
   @override
   Widget build(BuildContext context) {
     ref.listen(chatBridgeRegistryProvider(widget.charId), (prev, next) {
+      if (!identical(prev, next)) unawaited(_restart());
+    });
+    ref.listen(pluginLayerRegistryProvider(widget.charId), (prev, next) {
       if (!identical(prev, next)) unawaited(_restart());
     });
     ref.listen(enabledPluginsProvider, (prev, next) {

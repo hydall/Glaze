@@ -447,6 +447,13 @@ class ChatBridgeController {
   /// leaves these areas of its controls over the page to the plugins.
   void Function(List<Object?> rects)? onPluginHoles;
 
+  /// What a plugin frame here emitted to the plugin's other frames
+  /// (`{pluginId, event, detail}`), for those in the plugin layer.
+  void Function(Map<String, dynamic> emit)? onPluginEmit;
+
+  /// The insets chat panels lay out against, for the plugin layer.
+  void Function(Map<String, dynamic> insets)? onPluginInsets;
+
   /// Awaits a JS function body with [arguments] bound as parameters and
   /// returns its resolved value. Null when the page is gone or the body threw.
   Future<Object?> callAsyncJs(
@@ -510,6 +517,22 @@ class ChatBridgeController {
       callback: (JavaScriptHandlerFunctionData data) {
         final raw = data.args.isNotEmpty ? data.args.first : null;
         onPluginHoles?.call(raw is List ? raw : const []);
+        return null;
+      },
+    );
+    _controller.addJavaScriptHandler(
+      handlerName: 'pluginEmit',
+      callback: (JavaScriptHandlerFunctionData data) {
+        final raw = data.args.isNotEmpty ? data.args.first : null;
+        if (raw is Map) onPluginEmit?.call(Map<String, dynamic>.from(raw));
+        return null;
+      },
+    );
+    _controller.addJavaScriptHandler(
+      handlerName: 'pluginInsets',
+      callback: (JavaScriptHandlerFunctionData data) {
+        final raw = data.args.isNotEmpty ? data.args.first : null;
+        if (raw is Map) onPluginInsets?.call(Map<String, dynamic>.from(raw));
         return null;
       },
     );

@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../../../core/plugins/plugin_hooks.dart';
 import '../../chat/bridge/chat_bridge_controller.dart';
 import '../models/plugin_manifest.dart';
+import '../widgets/plugin_layer.dart';
 import 'api/files_api.dart';
 import 'plugin_bridge_service.dart';
 
@@ -41,23 +42,46 @@ class PluginFileResult {
   bool get ok => content != null;
 }
 
-/// Drives the plugin frames inside one chat WebView: setup/teardown, event
-/// fan-out, blocking hooks, actions and file handlers. Owns no Riverpod
-/// state; the host widget feeds it.
+/// Drives the plugin frames inside one chat WebView, and the plugin layer
+/// over it when there is one: setup/teardown, event fan-out, blocking hooks,
+/// actions and file handlers. Owns no Riverpod state; the host widget feeds
+/// it.
 class PluginChatRuntime implements PluginHookRunner {
   PluginChatRuntime({
     required this.bridge,
     required this.service,
     required this.chatId,
     required this.onCancelledSend,
+    this.layer,
     this.fileHandlers = const [],
     this.stageFile,
   }) {
     bridge.onPluginRequest = service.dispatch;
+    final layer = this.layer;
+    if (layer == null) return;
+    layer.onPluginRequest = service.dispatch;
+    // What crosses between the two pages.
+    bridge.onPluginEmit = (emit) => _relayEmit(layer.callAsyncJs, emit);
+    layer.onPluginEmit = (emit) => _relayEmit(bridge.callAsyncJs, emit);
+    bridge.onPluginInsets = (insets) {
+      if (_disposed) return;
+      unawaited(
+        layer
+            .callAsyncJs(
+              'window.glazePlugins.setInsets(insets); return true;',
+              arguments: {'insets': insets},
+            )
+            .catchError((Object _) => null),
+      );
+    };
   }
 
   final ChatBridgeController bridge;
   final PluginBridgeService service;
+
+  /// The plugin layer holding the chat panels; null when they are in the
+  /// chat page.
+  final PluginLayerController? layer;
 
   /// Current session id; read on every event.
   final String? Function() chatId;
@@ -85,9 +109,28 @@ class PluginChatRuntime implements PluginHookRunner {
   /// (Re)creates every plugin frame from [payload]. Main scripts rerun.
   Future<void> setup(Map<String, Object?> payload) async {
     if (_disposed) return;
+    const body =
+        'return window.glazePlugins ? window.glazePlugins.setup(payload) : -1;';
+    final layer = this.layer;
+    // The layer first: the chat page tells it its insets as it sets up, and
+    // its main scripts may emit to the panels right away.
+    if (layer != null) {
+      final count = await layer.callAsyncJs(
+        body,
+        arguments: {
+          'payload': {...payload, 'layer': 'panels'},
+        },
+      );
+      if (count is! num || count < 0) {
+        debugPrint('[PluginRuntime] plugin host missing in the plugin layer');
+      }
+      if (_disposed) return;
+    }
     final count = await bridge.callAsyncJs(
-      'return window.glazePlugins ? window.glazePlugins.setup(payload) : -1;',
-      arguments: {'payload': payload},
+      body,
+      arguments: {
+        'payload': layer == null ? payload : {...payload, 'layer': 'chat'},
+      },
     );
     _ready = count is num && count >= 0;
     if (!_ready) debugPrint('[PluginRuntime] plugin host missing in WebView');
@@ -95,9 +138,12 @@ class PluginChatRuntime implements PluginHookRunner {
 
   Future<void> teardown() async {
     _ready = false;
-    await bridge.callAsyncJs(
-      'if (window.glazePlugins) window.glazePlugins.teardown(); return true;',
-    );
+    const body =
+        'if (window.glazePlugins) window.glazePlugins.teardown(); return true;';
+    await Future.wait([
+      bridge.callAsyncJs(body),
+      if (layer != null) layer!.callAsyncJs(body),
+    ]);
   }
 
   void dispose() {
@@ -106,9 +152,36 @@ class PluginChatRuntime implements PluginHookRunner {
     if (identical(bridge.onPluginRequest, service.dispatch)) {
       bridge.onPluginRequest = null;
     }
+    final layer = this.layer;
+    if (layer != null) {
+      bridge.onPluginEmit = null;
+      bridge.onPluginInsets = null;
+      layer.onPluginEmit = null;
+      if (identical(layer.onPluginRequest, service.dispatch)) {
+        layer.onPluginRequest = null;
+      }
+    }
     unawaited(teardown().catchError((Object _) {}));
   }
 
+  void _relayEmit(
+    Future<Object?> Function(String, {Map<String, dynamic> arguments}) call,
+    Map<String, dynamic> emit,
+  ) {
+    if (_disposed || emit['pluginId'] is! String) return;
+    unawaited(
+      call(
+        'window.glazePlugins.relayEmit(pluginId, event, detail); return true;',
+        arguments: {
+          'pluginId': emit['pluginId'],
+          'event': emit['event'],
+          'detail': emit['detail'],
+        },
+      ).catchError((Object _) => null),
+    );
+  }
+
+  /// Runs [body] in the chat page only.
   void _fire(String body, Map<String, dynamic> arguments) {
     if (!isReady) return;
     unawaited(
@@ -118,14 +191,26 @@ class PluginChatRuntime implements PluginHookRunner {
     );
   }
 
+  /// Runs [body] in the chat page and in the plugin layer.
+  void _fireAll(String body, Map<String, dynamic> arguments) {
+    _fire(body, arguments);
+    final layer = this.layer;
+    if (!isReady || layer == null) return;
+    unawaited(
+      layer
+          .callAsyncJs('$body return true;', arguments: arguments)
+          .catchError((Object _) => null),
+    );
+  }
+
   void dispatchEvent(String type, Map<String, Object?> payload) =>
-      _fire('window.glazePlugins.dispatchEvent(type, payload);', {
+      _fireAll('window.glazePlugins.dispatchEvent(type, payload);', {
         'type': type,
         'payload': {...payload, 'at': DateTime.now().toUtc().toIso8601String()},
       });
 
   void pushVars(String pluginId, String scope, Map<String, dynamic> root) =>
-      _fire('window.glazePlugins.pushVars(pluginId, scope, value);', {
+      _fireAll('window.glazePlugins.pushVars(pluginId, scope, value);', {
         'pluginId': pluginId,
         'scope': scope,
         'value': root,
@@ -144,10 +229,11 @@ class PluginChatRuntime implements PluginHookRunner {
 
   Future<void> updateLocalization(List<Map<String, Object?>> entries) async {
     if (!isReady) return;
-    await bridge.callAsyncJs(
-      'window.glazePlugins.updateLocalization(list); return true;',
-      arguments: {'list': entries},
-    );
+    const body = 'window.glazePlugins.updateLocalization(list); return true;';
+    await Future.wait([
+      bridge.callAsyncJs(body, arguments: {'list': entries}),
+      if (layer != null) layer!.callAsyncJs(body, arguments: {'list': entries}),
+    ]);
   }
 
   Future<Map<String, dynamic>?> _intercept(

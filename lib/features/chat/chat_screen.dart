@@ -88,7 +88,9 @@ import '../../core/state/db_provider.dart';
 import 'widgets/session_lifecycle_tracker.dart';
 import '../../shared/widgets/glaze_sheet.dart';
 import '../plugins/runtime/plugin_chat_host.dart';
+import '../plugins/providers/plugin_library_provider.dart';
 import '../plugins/widgets/plugin_holes.dart';
+import '../plugins/widgets/plugin_layer.dart';
 
 String _chatWebViewThemeSyncKey(
   ThemePreset preset,
@@ -485,9 +487,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         // (mirrored via the 'header' region in _measureBlurRegions).
         headerBlurViaWebView: !_blurIsFlutterSide,
         headerBackdropKey: _blurIsFlutterSide ? _chromeBackdropKey : null,
-        // What plugins draw over the page goes over the header too.
+        // What plugins draw over the page goes over the header too: in the
+        // plugin layer above it, or else through holes cut out of it.
         headerWrapper: (header) => PluginHolesCutter(
           holes: ref.watch(pluginHolesProvider(charId)),
+          enabled: !pluginLayerSupported(),
           child: header,
         ),
         // Desktop paints a tab's header edge to edge (see the shell's
@@ -610,10 +614,23 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         body: body,
       ),
     );
+    // Chat panels of plugins draw over everything of the chat screen.
+    final useLayer = pluginsUseLayer(ref.watch(enabledPluginsProvider));
     return PluginChatHost(
       key: ValueKey('plugins-$charId'),
       charId: charId,
-      child: tracked,
+      child: useLayer
+          ? Stack(
+              fit: StackFit.expand,
+              children: [
+                tracked,
+                PluginLayer(
+                  key: ValueKey('plugin-layer-$charId'),
+                  charId: charId,
+                ),
+              ],
+            )
+          : tracked,
     );
   }
 
@@ -1010,9 +1027,12 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _bindDrawerListenable();
-    // Plugins report where they draw in the WebView's own coordinates.
-    ref.read(pluginHolesProvider(widget.charId)).page = () =>
-        _webViewStateKey.currentContext;
+    // Plugins report where they draw in the WebView's own coordinates. In
+    // the plugin layer, that is the layer's (see [PluginLayer]).
+    if (!pluginLayerSupported()) {
+      ref.read(pluginHolesProvider(widget.charId)).page = () =>
+          _webViewStateKey.currentContext;
+    }
     // Re-measure when the input bar swaps tracked elements (e.g. entering
     // search/selection mode) without this widget rebuilding.
     _blurRegistry.addListener(_scheduleBlurMeasure);
@@ -2338,6 +2358,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
               right: column?.gutter ?? 0,
               child: PluginHolesCutter(
                 holes: ref.watch(pluginHolesProvider(widget.charId)),
+                enabled: !pluginLayerSupported(),
                 child: Stack(
                 children: [
                   // Fades under the header and the input area. Dropped on desktop:
