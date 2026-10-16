@@ -21,6 +21,7 @@ PromptResult buildFallbackPrompt(PromptPayload payload) {
     gameTime: payload.gameTime,
     gameDate: payload.gameDate,
     gameDay: payload.gameDay,
+    extBlocks: extBlocksMacroValues(payload.runtimePromptBlocks),
   );
 
   const systemMessage = PromptMessage(

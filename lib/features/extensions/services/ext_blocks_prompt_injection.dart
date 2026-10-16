@@ -65,6 +65,26 @@ class ExtBlocksPromptInjection {
   List<RuntimePromptBlock> promptBlocksFor(String sessionId) =>
       _promptBlocks[sessionId] ?? const [];
 
+  /// What `{{ExtBlocks::name}}` stands for inside a block's own prompt, for
+  /// [sessionId] as [messages] show it: each block's latest state, by name.
+  Future<Map<String, String>> blockMacroValues({
+    required String sessionId,
+    required List<ChatMessage> messages,
+  }) async {
+    final preset = _resolveActivePreset();
+    if (preset == null || messages.isEmpty) return const {};
+    final injector = InfoBlockInjector(
+      _InfoBlocksRepoReader(_ref.read(infoBlocksRepoProvider)),
+    );
+    return extBlocksMacroValues(
+      await injector.buildMacroBlocks(
+        messages: messages,
+        sessionId: sessionId,
+        preset: preset,
+      ),
+    );
+  }
+
   Future<List<ChatMessage>> injectIntoHistory({
     required String sessionId,
     required List<ChatMessage> messages,
@@ -81,11 +101,19 @@ class ExtBlocksPromptInjection {
       _InfoBlocksRepoReader(repo),
       macroContextResolver: () => macroCtx,
     );
-    _promptBlocks[sessionId] = await injector.buildPromptBlocks(
-      messages: messages,
-      sessionId: sessionId,
-      preset: preset,
-    );
+    _promptBlocks[sessionId] = [
+      ...await injector.buildPromptBlocks(
+        messages: messages,
+        sessionId: sessionId,
+        preset: preset,
+      ),
+      // `{{ExtBlocks::name}}` values ride along, placed nowhere.
+      ...await injector.buildMacroBlocks(
+        messages: messages,
+        sessionId: sessionId,
+        preset: preset,
+      ),
+    ];
     return injector.injectBlocks(
       messages: messages,
       sessionId: sessionId,

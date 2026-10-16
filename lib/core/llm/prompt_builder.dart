@@ -206,6 +206,7 @@ PromptResult _buildPromptOnce(PromptPayload payload) {
     gameTime: payload.gameTime,
     gameDate: payload.gameDate,
     gameDay: payload.gameDay,
+    extBlocks: extBlocksMacroValues(payload.runtimePromptBlocks),
   );
 
   var currentSessionVars = Map<String, String>.from(payload.sessionVars);
@@ -385,6 +386,7 @@ PromptResult _buildPromptOnce(PromptPayload payload) {
   final beforeMain = <ResolvedRelativeBlock>[];
   final afterMain = <ResolvedRelativeBlock>[];
   for (final block in payload.runtimePromptBlocks) {
+    if (block.placement == RuntimePromptPlacement.macro) continue;
     final content = replaceMacros(block.content, currentMacroCtx).text.trim();
     if (content.isEmpty) continue;
     final id = 'runtime_prompt:${block.id}';
@@ -399,6 +401,8 @@ PromptResult _buildPromptOnce(PromptPayload payload) {
             depth: block.depth,
           ),
         );
+      case RuntimePromptPlacement.macro:
+        break;
       case RuntimePromptPlacement.afterMain:
       case RuntimePromptPlacement.beforeMain:
         final resolvedBlock = ResolvedRelativeBlock(
@@ -681,6 +685,7 @@ PromptResult _assembleMessages({
         charId: macroCtx.charId,
         sessionId: macroCtx.sessionId,
         macroName: macroCtx.macroName,
+        extBlocks: macroCtx.extBlocks,
       );
       final historyMsgs = HistoryAssembler(historyMacroCtx).assemble(history);
       final appendedForHistory = appendedEntries

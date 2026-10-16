@@ -126,23 +126,11 @@ class InfoBlockInjector {
         .toList();
     if (blocks.isEmpty) return const [];
 
-    final latest = <String, String>{};
-    for (var i = messages.length - 1; i >= 0; i--) {
-      if (latest.length == blocks.length) break;
-      final msg = messages[i];
-      if (msg.isTyping) continue;
-      final rows = await _repository.getByMessageId(
-        sessionId,
-        msg.id,
-        swipeId: msg.swipeId,
-      );
-      for (final row in rows) {
-        if (row.status != BlockRunStatus.done) continue;
-        if (latest.containsKey(row.blockId)) continue;
-        if (row.content.trim().isEmpty) continue;
-        latest[row.blockId] = row.content;
-      }
-    }
+    final latest = await _latestContents(
+      messages: messages,
+      sessionId: sessionId,
+      blockIds: {for (final b in blocks) b.id},
+    );
 
     final macroCtx = _macroContext();
     final result = <RuntimePromptBlock>[];
@@ -170,6 +158,69 @@ class InfoBlockInjector {
       );
     }
     return result;
+  }
+
+  /// What `{{ExtBlocks::name}}` stands for in this request: the latest
+  /// finished state of every enabled block that leaves one, in its tag, as
+  /// [RuntimePromptPlacement.macro] blocks named after the block.
+  Future<List<RuntimePromptBlock>> buildMacroBlocks({
+    required List<ChatMessage> messages,
+    required String sessionId,
+    required ExtensionPreset preset,
+  }) async {
+    final blocks = preset.blocks
+        .where(
+          (b) =>
+              b.enabled &&
+              (b.type == BlockType.generated ||
+                  b.type == BlockType.accumulation),
+        )
+        .toList();
+    if (blocks.isEmpty) return const [];
+    final latest = await _latestContents(
+      messages: messages,
+      sessionId: sessionId,
+      blockIds: {for (final b in blocks) b.id},
+    );
+    return [
+      for (final block in blocks)
+        if (latest[block.id] case final content?)
+          RuntimePromptBlock(
+            id: block.name,
+            content: wrapInBlockTag(block, content),
+            depth: 0,
+            role: 'system',
+            placement: RuntimePromptPlacement.macro,
+          ),
+    ];
+  }
+
+  /// The latest finished, non-empty content of each of [blockIds], searched
+  /// from the newest message back on the swipes the chat shows.
+  Future<Map<String, String>> _latestContents({
+    required List<ChatMessage> messages,
+    required String sessionId,
+    required Set<String> blockIds,
+  }) async {
+    final latest = <String, String>{};
+    for (var i = messages.length - 1; i >= 0; i--) {
+      if (latest.length == blockIds.length) break;
+      final msg = messages[i];
+      if (msg.isTyping) continue;
+      final rows = await _repository.getByMessageId(
+        sessionId,
+        msg.id,
+        swipeId: msg.swipeId,
+      );
+      for (final row in rows) {
+        if (!blockIds.contains(row.blockId)) continue;
+        if (row.status != BlockRunStatus.done) continue;
+        if (latest.containsKey(row.blockId)) continue;
+        if (row.content.trim().isEmpty) continue;
+        latest[row.blockId] = row.content;
+      }
+    }
+    return latest;
   }
 
   /// Text after the blank line and before [blockBody] in injected history.

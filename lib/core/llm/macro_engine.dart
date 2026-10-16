@@ -36,6 +36,10 @@ class MacroContext {
   /// Zero-based in-game day number from the ledger (`world:day`). `{{gameday}}`.
   final String? gameDay;
 
+  /// The latest state of each ExtBlocks block, in its tag, by block name —
+  /// what `{{ExtBlocks::name}}` stands for, as in the original extension.
+  final Map<String, String> extBlocks;
+
   const MacroContext({
     required this.charName,
     this.charDescription,
@@ -61,6 +65,7 @@ class MacroContext {
     this.gameTime,
     this.gameDate,
     this.gameDay,
+    this.extBlocks = const {},
   });
 
   /// Context for preset-only token accounting: external injections (character,
@@ -106,6 +111,7 @@ class MacroContext {
     Object? arcContent = _sentinel,
     Object? entitiesContent = _sentinel,
     Object? studioSessionState = _sentinel,
+    Map<String, String>? extBlocks,
     Object? gameTime = _sentinel,
     Object? gameDate = _sentinel,
     Object? gameDay = _sentinel,
@@ -155,6 +161,7 @@ class MacroContext {
       gameDay: identical(gameDay, _sentinel)
           ? this.gameDay
           : gameDay as String?,
+      extBlocks: extBlocks ?? this.extBlocks,
     );
   }
 
@@ -185,6 +192,7 @@ class MacroContext {
     'gameTime': gameTime,
     'gameDate': gameDate,
     'gameDay': gameDay,
+    'extBlocks': extBlocks,
   };
 
   factory MacroContext.fromJson(Map<String, dynamic> json) => MacroContext(
@@ -212,6 +220,7 @@ class MacroContext {
     gameTime: json['gameTime'] as String?,
     gameDate: json['gameDate'] as String?,
     gameDay: json['gameDay'] as String?,
+    extBlocks: Map<String, String>.from(json['extBlocks'] as Map? ?? {}),
   );
 }
 
@@ -243,6 +252,8 @@ MacroResult replaceMacros(String text, MacroContext ctx) {
   );
 
   result = result.replaceAllMapped(RegExp(r'\{\{\/\/[^}]*\}\}'), (_) => '');
+
+  result = replaceExtBlocksMacros(result, ctx.extBlocks);
 
   final resolvedCharName = ctx.macroName ?? ctx.charName;
 
@@ -806,4 +817,18 @@ String _replaceSetVar(
     i = pos + 2;
   }
   return buf.toString();
+}
+
+/// `{{ExtBlocks::name}}` and its alias `{{ExtBlocks-GetBlockByName::name}}`:
+/// the latest state of the ExtBlocks block [name], tags included, or `''`
+/// when it has none — the original extension's macro.
+String replaceExtBlocksMacros(String text, Map<String, String> blocks) {
+  if (!text.contains('::')) return text;
+  return text.replaceAllMapped(
+    RegExp(
+      r'\{\{\s*ExtBlocks(?:-GetBlockByName)?\s*::([\s\S]*?)\}\}',
+      caseSensitive: false,
+    ),
+    (m) => blocks[m.group(1)!.trim()] ?? '',
+  );
 }

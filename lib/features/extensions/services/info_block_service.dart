@@ -24,6 +24,7 @@ import 'blocks/block_grouping.dart';
 import 'blocks/block_llm_runner.dart';
 import 'blocks/context_item_builder.dart';
 import 'block_content_extractor.dart';
+import 'block_request_macros.dart';
 import 'block_context_builder.dart';
 import 'ext_blocks_prompt_injection.dart';
 import 'macro_expander.dart';
@@ -107,6 +108,21 @@ class InfoBlockService {
     String? systemPromptOverride,
   }) async {
     if (cancelToken?.isCancelled == true) return (content: null, error: null);
+
+    // `{{ExtBlocks::name}}` in the block's own prompt, as the original
+    // resolves it there too. Read only when something asks for it.
+    if (_mentionsBlockMacro([blockConfig, ...group])) {
+      final states = await _ref
+          .read(extBlocksPromptInjectionProvider)
+          .blockMacroValues(sessionId: sessionId, messages: messages);
+      dynamicMacros = {
+        for (final e in states.entries) ...{
+          'ExtBlocks::${e.key}': e.value,
+          'ExtBlocks-GetBlockByName::${e.key}': e.value,
+        },
+        ...dynamicMacros,
+      };
+    }
 
     // A block grouped with others (see `blockGroups`) shares one request with
     // them, as in the original: the group's first block asks for all of them,
@@ -344,6 +360,18 @@ class InfoBlockService {
 
     if (cancelToken?.isCancelled == true) return (content: null, error: null);
 
+    // The original's `checkAllMacros`: world info and the main prompt, filled
+    // into the finished request.
+    final requestMessages = await _ref
+        .read(blockRequestMacrosProvider)
+        .apply(
+          assembly.messages,
+          character: character,
+          sessionId: sessionId,
+          userName: personaModel?.name ?? persona ?? 'User',
+        );
+    if (cancelToken?.isCancelled == true) return (content: null, error: null);
+
     final callId = 'extblock:${blockConfig.id}:$messageId#$swipeId';
     String? rawResponse;
     try {
@@ -353,7 +381,7 @@ class InfoBlockService {
         model: blockConfig.model.isNotEmpty
             ? blockConfig.model
             : preset?.apiModel,
-        requestMessages: profile.withConfirmation(assembly.messages),
+        requestMessages: profile.withConfirmation(requestMessages),
         charName: character?.name,
         userName: personaModel?.name ?? persona ?? 'User',
         cancelToken: cancelToken,
@@ -559,6 +587,14 @@ class InfoBlockService {
     ];
     return ExtensionContextAssembly(messages: assembled, reconstructed: true);
   }
+
+  static bool _mentionsBlockMacro(List<BlockConfig> blocks) => blocks.any(
+    (b) =>
+        '${b.prompt}${b.template}${b.contextSystemPrompt}'
+                '${b.context.map((item) => item.text).join()}'
+            .toLowerCase()
+            .contains('{{extblocks'),
+  );
 
   /// Every stored block of the session, keyed by the message that owns it —
   /// the lookup the `previous_block` and `last_messages_by_block` items need.

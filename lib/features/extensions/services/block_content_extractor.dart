@@ -2,8 +2,9 @@ import '../models/block_config.dart';
 
 /// Opening tag name from [BlockConfig.template] (e.g. `loomledger`), or [BlockConfig.name].
 String blockTagName(BlockConfig blockConfig, String resolvedTemplate) {
-  final fromTemplate =
-      RegExp(r'<([a-zA-Z][\w-]*)').firstMatch(resolvedTemplate)?.group(1);
+  final fromTemplate = RegExp(
+    r'<([a-zA-Z][\w-]*)',
+  ).firstMatch(resolvedTemplate)?.group(1);
   if (fromTemplate != null && fromTemplate.isNotEmpty) return fromTemplate;
   return blockConfig.name.trim();
 }
@@ -67,4 +68,16 @@ String? resolveBlockContent({
 
   if (!isBlankBlockContent(trimmed)) return trimmed;
   return null;
+}
+
+/// [content] in [block]'s tag, the way the original stores a block's result:
+/// as it is when it already opens with that tag, wrapped otherwise.
+String wrapInBlockTag(BlockConfig block, String content) {
+  final tag = blockTagName(
+    block,
+    block.template.replaceAll('{{name}}', block.name),
+  );
+  final trimmed = content.trim();
+  if (tag.isEmpty || trimmed.contains('<$tag')) return trimmed;
+  return '<$tag>\n$trimmed\n</$tag>';
 }

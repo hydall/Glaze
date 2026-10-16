@@ -47,13 +47,7 @@ String inlineExtBlocksText({
     if (row == null || row.status != BlockRunStatus.done) continue;
     final content = row.content.trim();
     if (content.isEmpty) continue;
-    final tag = blockTagName(
-      config,
-      config.template.replaceAll('{{name}}', config.name),
-    );
-    parts.add(
-      content.contains('<$tag') ? content : '<$tag>\n$content\n</$tag>',
-    );
+    parts.add(wrapInBlockTag(config, content));
   }
   return parts.join('\n');
 }
