@@ -11,17 +11,17 @@
 | `author` | no | Author. An update from a different author is installed as a separate plugin. |
 | `description` | no | Short description. Text or a translation key. |
 | `releaseNotes` | no | What changed in this version; shown on the plugin's page. |
-| `icon` | no | Path to an image in the package, shown as the cover on the plugin's page. |
+| `icon` | no | Path to an image in the package: the cover of the Info tab on the plugin's page, filling the screen behind the name and description. |
 | `main` | no | Path to the main script. Required if the plugin has actions. |
 | `permissions` | no | What the plugin asks for. See [Permissions and network](#info/plugins-permissions). |
-| `hosts` | no | Internet hosts the plugin needs: `api.example.com` or `*.example.com`. |
+| `hosts` | no | Internet hosts the plugin needs: `api.example.com` or `*.example.com`, each a string or `{ "host", "description" }`. See [Network](#info/plugins-permissions/network). |
 | `locales` | no | Translation files, see below. |
 | `minGlazeVersion` | no | Lowest Glaze version the plugin is written for. Glaze does not check it yet. |
-| `contributes` | no | What the plugin adds to the interface: actions, panels, file handlers, settings. |
+| `contributes` | no | What the plugin adds to the interface: actions, panels, file handlers, settings and their tabs. |
 
 ## Translatable text
 
-Wherever the manifest takes user-facing text (`name`, `description`, action labels, settings), you can write a string or a key into the translation files:
+Wherever the manifest takes user-facing text (`name`, `description`, action labels, settings, tab names, host descriptions), you can write a string or a key into the translation files:
 
 ```json
 "name": { "t": "plugin.name" }
@@ -69,6 +69,8 @@ Actions are buttons the plugin adds to the chat. Each has an `id` (unique within
 | `toolsActions` | The Tools tab of the same drawer. |
 | `messageActions` | A round button in the footer of the last message. `role`: `character` (default), `user` or `any`, whose message it appears on. Without an icon the button shows the first letter of the label. |
 
+In the chat drawer an SVG icon is tinted like the app's own icons; other images keep their colours. Without an icon the card shows a standard one. Under the label every plugin card has a puzzle piece and the plugin's name.
+
 A tap runs the handler the main script registered for that `id`; see [Hooks, actions and panels](#info/plugins-runtime/actions).
 
 ## Panels
@@ -107,7 +109,7 @@ A file handler turns an attached file into text for the message. For example, it
 
 ## Settings
 
-`settings` describes a form on the plugin's page in **Tools → Plugins**. Glaze draws it, stores the values and passes them to the plugin. Fields are shown in the order they are listed.
+`settings` describes a form on the plugin's page in **Tools → Plugins**. Glaze draws it, stores the values and passes them to the plugin. Fields are shown in the order they are listed, all on one **Settings** tab, unless the plugin splits them into [tabs](#info/plugins-manifest/tabs).
 
 ```json
 "settings": [
@@ -135,6 +137,8 @@ A file handler turns an attached file into text for the message. For example, it
 | `apiPreset` | `key`, `label`, `description`. An API connection and model for one of the plugin's features. |
 | `imagePreset` | `key`, `label`, `description`. An image service and image style for one of the plugin's images. |
 
+Any field can also have `tab`, see below.
+
 `label`, `description`, `text`, option labels and text defaults can be translation keys. The values are read with `glaze.plugin.settings.get(key)`. When the user changes a setting, the plugin's frames restart with the new values.
 
 ### API presets
@@ -155,6 +159,33 @@ Until the user picks something, and for calls without `preset`, Glaze uses the o
 
 Preset settings appeared in Glaze 0.9.0 (Nightly). Older versions don't know these types and won't install the plugin, so set `minGlazeVersion` to `0.9.0`.
 
+### Tabs
+
+The plugin's page has the tabs **Info**, **Permissions** and **Data**; a plugin with settings adds its own between Permissions and Data. Without `settingsTabs` that is one **Settings** tab with every field. To split the fields, list up to 10 tabs in `contributes.settingsTabs` and name a tab in each field's `tab`:
+
+```json
+"contributes": {
+  "settingsTabs": [
+    { "id": "main", "label": "General" },
+    { "id": "look", "label": { "t": "tabs.look" }, "icon": "icons/palette.svg" }
+  ],
+  "settings": [
+    { "type": "toggle", "key": "auto", "label": "Run on every reply", "default": true },
+    { "type": "select", "key": "theme", "label": "Panel theme", "tab": "look", "options": ["light", "dark"] }
+  ]
+}
+```
+
+| Field | What it is |
+|---|---|
+| `id` | Tab id, unique among the tabs. |
+| `label` | Tab name. Text or a translation key. |
+| `icon` | Optional path to an image in the package; without it the tab has a standard icon. |
+
+A field without `tab` goes on the first tab. A `tab` that names no tab in the list, a repeated `id` or more than 10 tabs make the manifest invalid. A tab no field is on is not shown. The user switches tabs from the menu under the page's header.
+
+Tabs appeared in Glaze 0.9.0 (Nightly); older versions ignore `settingsTabs` and `tab` and show every field on one page.
+
 ## A full example
 
 ```json
@@ -167,8 +198,9 @@ Preset settings appeared in Glaze 0.9.0 (Nightly). Older versions don't know the
   "description": { "t": "plugin.description" },
   "icon": "icon.png",
   "main": "main.js",
+  "minGlazeVersion": "0.9.0",
   "permissions": ["messages", "variables", "generate", "network"],
-  "hosts": ["api.example.com"],
+  "hosts": [{ "host": "api.example.com", "description": { "t": "hosts.api" } }],
   "locales": {
     "default": "en",
     "files": { "en": "locales/en.json", "ru": "locales/ru.json" }

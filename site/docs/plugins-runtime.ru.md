@@ -110,6 +110,7 @@ glaze.plugin.on('mood:set', ({ mood }) => glaze.variables.set('mood', mood));
 | `--glaze-inset-top-bar` | `topBar` | Откуда сверху можно начинать содержимое. Пока совпадает со строкой состояния: панели рисуются поверх шапки приложения. |
 | `--glaze-inset-bottom-input` | `bottomInput` | Поле ввода (и клавиатура, когда она открыта). |
 | `--glaze-inset-bottom-safe` | `bottomSafe` | Системная область жестов. |
+| `--glaze-inset-keyboard` | `keyboard` | Экранная клавиатура, пока фокус в поле этой панели: тогда фрейм панели ужимается до места над клавиатурой, а `bottomInput` и `bottomSafe` отсчитываются от её верхнего края. В остальное время `0`. |
 
 ```css
 .hud {

@@ -110,6 +110,7 @@ The chat has the app's controls over it: the status bar, the header, the message
 | `--glaze-inset-top-bar` | `topBar` | Where content may start at the top. For now the same as the status bar: panels draw over the app's header. |
 | `--glaze-inset-bottom-input` | `bottomInput` | Message box (and the keyboard, when it is open). |
 | `--glaze-inset-bottom-safe` | `bottomSafe` | System gesture area. |
+| `--glaze-inset-keyboard` | `keyboard` | The soft keyboard, while a field in this panel has the focus: the panel's frame is then fitted above the keyboard, and `bottomInput` and `bottomSafe` are counted from its top edge. Otherwise `0`. |
 
 ```css
 .hud {
