@@ -1,4 +1,5 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
+import 'package:glaze_flutter/core/llm/display_regex_worker.dart';
 import 'package:glaze_flutter/core/llm/macro_engine.dart';
 import 'package:glaze_flutter/core/llm/regex_service.dart';
 import 'package:glaze_flutter/core/models/character.dart';
@@ -76,6 +77,61 @@ abstract class ChatMessageMapperContext with _$ChatMessageMapperContext {
 }
 
 class ChatMessageMapper {
+  /// The text the display regexes run on: the message with its inline
+  /// ExtBlocks, macros expanded.
+  ///
+  /// ExtBlocks shown in the message ride on the displayed text only, ahead of
+  /// macros and display regexes, as the original's `display_text` does. Macros
+  /// are expanded for display (mirrors reference Glaze ChatMessage.vue, where
+  /// replaceMacros runs on the rendered text before regexes). Without this,
+  /// macros typed manually into a sent/edited message stay literal in the chat
+  /// even though they resolve in the prompt sent to the LLM.
+  static String displaySource(
+    ChatMessage m, {
+    Character? character,
+    Persona? persona,
+    Map<String, String> sessionVars = const {},
+    Map<String, String> globalVars = const {},
+    String inlineExtBlocks = '',
+  }) {
+    final content = withInlineExtBlocks(m.content, inlineExtBlocks);
+    if (character == null) return content;
+    return replaceMacros(
+      content,
+      MacroContext(
+        charName: character.name,
+        charDescription: character.description,
+        charScenario: character.scenario,
+        charPersonality: character.personality,
+        charMesExample: character.mesExample,
+        userName: persona?.name ?? 'User',
+        personaPrompt: persona?.prompt,
+        sessionVars: sessionVars,
+        globalVars: globalVars,
+        charId: character.id,
+        sessionId: '',
+        macroName: character.macroName,
+      ),
+    ).text;
+  }
+
+  /// The regex placement [m] is filtered by: 1 user input, 2 AI output.
+  static int regexPlacement(ChatMessage m) => m.role == 'user' ? 1 : 2;
+
+  static RegexApplyContext regexContext({
+    Character? character,
+    Persona? persona,
+    Map<String, String> sessionVars = const {},
+    Map<String, String> globalVars = const {},
+  }) => RegexApplyContext(
+    char: character,
+    persona: persona,
+    sessionVars: sessionVars,
+    globalVars: globalVars,
+  );
+
+  /// [regexed] carries the display text with the regexes already applied
+  /// (see `DisplayRegexWorker`); without it they run here, inline.
   static Map<String, dynamic> toMap(
     ChatMessage m,
     ChatMessageMapperContext ctx, {
@@ -88,54 +144,41 @@ class ChatMessageMapper {
     Map<String, String> sessionVars = const {},
     Map<String, String> globalVars = const {},
     String inlineExtBlocks = '',
+    DisplayRegexResult? regexed,
   }) {
     final isAssistant = m.role == 'assistant' || m.role == 'character';
     final isUser = m.role == 'user';
 
-    // ExtBlocks shown in the message ride on the displayed text only, ahead
-    // of macros and display regexes, as the original's `display_text` does.
-    String content = withInlineExtBlocks(m.content, inlineExtBlocks);
-    // Expand macros for display (mirrors reference Glaze ChatMessage.vue,
-    // where replaceMacros runs on the rendered text before regexes). Without
-    // this, macros typed manually into a sent/edited message stay literal in
-    // the chat even though they resolve in the prompt sent to the LLM.
-    if (character != null) {
-      content = replaceMacros(
-        content,
-        MacroContext(
-          charName: character.name,
-          charDescription: character.description,
-          charScenario: character.scenario,
-          charPersonality: character.personality,
-          charMesExample: character.mesExample,
-          userName: persona?.name ?? 'User',
-          personaPrompt: persona?.prompt,
-          sessionVars: sessionVars,
-          globalVars: globalVars,
-          charId: character.id,
-          sessionId: '',
-          macroName: character.macroName,
-        ),
-      ).text;
-    }
+    String content;
     final List<TriggeredEntry> triggeredRegexes = [];
-    if (displayRegexes != null && displayRegexes.isNotEmpty) {
-      final placement = isUser ? 1 : 2;
-      final regexCtx = RegexApplyContext(
-        char: character,
+    if (regexed != null) {
+      content = regexed.text;
+      triggeredRegexes.addAll(regexed.triggered);
+    } else {
+      content = displaySource(
+        m,
+        character: character,
         persona: persona,
         sessionVars: sessionVars,
         globalVars: globalVars,
+        inlineExtBlocks: inlineExtBlocks,
       );
-      content = applyRegexes(
-        content,
-        placement,
-        1,
-        displayRegexes,
-        regexCtx,
-        isMarkdown: true,
-        triggered: triggeredRegexes,
-      );
+      if (displayRegexes != null && displayRegexes.isNotEmpty) {
+        content = applyRegexes(
+          content,
+          regexPlacement(m),
+          1,
+          displayRegexes,
+          regexContext(
+            character: character,
+            persona: persona,
+            sessionVars: sessionVars,
+            globalVars: globalVars,
+          ),
+          isMarkdown: true,
+          triggered: triggeredRegexes,
+        );
+      }
     }
 
     final messagePersonaName = m.personaName?.trim();

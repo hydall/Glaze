@@ -27,6 +27,26 @@ class RegexApplyContext {
   });
 }
 
+/// Scripts stopped for running too long on a chat's text (see
+/// `DisplayRegexWorker`). Every pass skips them until the app restarts: a
+/// pattern that hung once on a message hangs again on it, and in the passes
+/// that run on the main isolate that is a frozen app. Keyed by id *and*
+/// pattern, so a fixed pattern runs again at once.
+final Set<String> _stoppedScripts = {};
+
+String _stoppedKey(PresetRegex script) => '${script.id}\u0000${script.regex}';
+
+void markRegexScriptStopped(PresetRegex script) =>
+    _stoppedScripts.add(_stoppedKey(script));
+
+bool isRegexScriptStopped(PresetRegex script) =>
+    _stoppedScripts.contains(_stoppedKey(script));
+
+@visibleForTesting
+void resetStoppedRegexScripts() => _stoppedScripts.clear();
+
+/// [onScript] is told about each script just before it runs on [text], which
+/// is how the display worker knows which one to blame when time runs out.
 String applyRegexes(
   String text,
   int placementFilter,
@@ -37,11 +57,13 @@ String applyRegexes(
   bool isPrompt = false,
   bool ignoreEphemerality = false,
   List<TriggeredEntry>? triggered,
+  void Function(PresetRegex script)? onScript,
 }) {
   var result = text;
 
   for (final script in scripts) {
     if (script.disabled) continue;
+    if (isRegexScriptStopped(script)) continue;
 
     final sPlacement = script.placement;
     if (sPlacement.isNotEmpty && !sPlacement.contains(placementFilter)) {
@@ -80,6 +102,7 @@ String applyRegexes(
       if (maxD != null && ctx.depth! > maxD) continue;
     }
 
+    onScript?.call(script);
     final before = result;
     result = _applySingleScript(result, script, ctx);
 
