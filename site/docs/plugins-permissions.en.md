@@ -27,7 +27,7 @@ Short forms: `library.read` (and `create`, `update`, `delete`) means that action
 
 ## Permissions that ask
 
-Permissions marked "Asks" are confirmed by the user on every call: Glaze shows a sheet with the plugin's name and what it wants to do, and the user picks **Allow once**, **Always allow** or **Deny**. Deny switches the permission off. On the plugin's page each of them can be set to Ask, Always or Off.
+Permissions marked "Asks" are confirmed by the user on every call: Glaze shows a sheet with the plugin's name and what it wants to do, and the user picks **Allow once**, **Always allow** or **Deny**. Deny switches the permission off. On the plugin's Permissions tab each of them can be set to Ask, Always or Off.
 
 The call waits for the answer. If the sheet is dismissed, the call is refused.
 
@@ -53,26 +53,31 @@ Hooks and events need permissions too. A plugin without `composer` gets no `send
 
 ## Network
 
-Without the `network` permission a plugin has no internet at all: its frames can't load anything from outside, and `glaze.net.fetch` is refused. If the plugin asks for it, the user sets it on the plugin's page to one of three modes:
+Without the `network` permission a plugin has no internet at all: its frames can't load anything from outside, and `glaze.net.fetch` is refused. If the plugin asks for it, the user sets it in the **Internet** group on the plugin's Permissions tab, under **Access**, to one of three modes:
 
 | Mode | What the plugin can reach |
 |---|---|
 | Off | Nothing. |
-| Listed hosts | Only the hosts the user switched on. Hosts from `hosts` in the manifest are listed, switched off. |
+| Listed hosts | The hosts from `hosts` in the manifest, except those the user switched off, and the hosts the user added. |
 | Any host | Anything on the internet. |
 
-List your hosts in the manifest:
+List your hosts in the manifest. A host is a string, or an object with a `description` that tells the user what the plugin uses it for (text or a translation key):
 
 ```json
 "permissions": ["network"],
-"hosts": ["api.example.com", "*.cdn.example.com"]
+"hosts": [
+  "*.cdn.example.com",
+  { "host": "api.example.com", "description": "Weather forecasts" }
+]
 ```
 
 `*.example.com` covers subdomains, but not `example.com` itself.
 
+The `network` permission starts off, as every permission does. When the user turns it on, the mode is "Listed hosts" with every manifest host on. In that mode the Internet group has a **Hosts** row that opens the list: the manifest's hosts with their descriptions, each with a switch, then the hosts the user added (**Add a host**). An update keeps what the user set up. Host objects need Glaze 0.9.0 (Nightly): older versions refuse such a manifest.
+
 The rules apply to everything the plugin does: `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, images, scripts and styles from the internet, and requests through `glaze.net.fetch`. Without the local network switch only https on the internet works. The local network (localhost, `192.168.*`, `*.local` and so on) and plain http need a separate switch, off by default. WebRTC is available only in the "Any host" mode.
 
-The plugin's page lists every host its frames loaded from or were stopped from loading, and in the "Listed hosts" mode the user can allow or block each one right there.
+The **Network** group on the Permissions tab lists every host the plugin's frames loaded from or were stopped from loading, and in the "Listed hosts" mode the user can allow or block each one right there.
 
 ## Requests through the app
 

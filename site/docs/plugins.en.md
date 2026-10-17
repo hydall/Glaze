@@ -64,15 +64,15 @@ Zip the two files (the files themselves, not the folder they are in) and rename 
 
 ## Installing and testing
 
-In Glaze open **Tools → Plugins → Import plugin** and pick the file. Glaze shows the permissions the plugin asks for; switch on the ones it needs. Open a chat: the action appears in the Tools tab of the chat drawer (the button next to the message box).
+In Glaze open **Tools → Plugins → Import plugin** and pick the file. Glaze shows the permissions the plugin asks for; switch on the ones it needs. Open a chat: the action appears in the Tools tab of the chat drawer (the button next to the message box). The same tab has a **Plugins** card that opens the plugin list without leaving the chat.
 
 To update the plugin, raise `version` and import the file again. The plugin keeps its data and the permissions the user gave it; new permissions arrive switched off. A package with the same `id` but another `author` is installed as a new plugin and does not get the old one's data.
 
-The plugin's page and its menu in the list also have **Export data (JSON)** and **Import data (JSON)**. The file holds the plugin's settings, its `localStorage`, its variables (global, per chat and per message) and its `global` and chat files in base64; permissions stay with the device. Import replaces the plugin's data rather than merging, after the user confirms. The whole file is checked first: a file of another plugin, from a newer Glaze or over the plugin's limits changes nothing. Variables of chats the device doesn't have are skipped. This works for every plugin, nothing is needed on the plugin's side (Glaze 0.9.0 Nightly).
+The **Data** tab of the plugin's page and the plugin's menu in the list have **Export data (JSON)** and **Import data (JSON)**. The file holds the plugin's settings, its `localStorage`, its variables (global, per chat and per message) and its `global` and chat files in base64; permissions stay with the device. Import replaces the plugin's data rather than merging, after the user confirms. The whole file is checked first: a file of another plugin, from a newer Glaze or over the plugin's limits changes nothing. Variables of chats the device doesn't have are skipped. This works for every plugin, nothing is needed on the plugin's side (Glaze 0.9.0 Nightly).
 
 What helps while developing:
 
-- The plugin's page in **Tools → Plugins** has its permissions, settings, network log and request history: what the plugin asked for and whether it was allowed.
+- The plugin's page in **Tools → Plugins** is split into tabs, picked from the menu under the header: **Info**, **Permissions** (the permissions, the network log and the request history: what the plugin asked for and whether it was allowed), the plugin's settings and **Data**. Switching a plugin on or off and uninstalling it are in the plugin list.
 - Requests a plugin sends (`glaze.generate`, `glaze.net.fetch`, `fetch` in its frames) show in the chat's Prompt Inspector, on the Requests tab.
 - A refused call rejects with an error whose `code` is `permission_denied`, and the user sees a notice once.
 

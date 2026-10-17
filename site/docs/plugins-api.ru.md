@@ -59,7 +59,7 @@ glaze.plugin.i18n.onChange(() => redraw()); // пользователь смен
 | `ask({ question, options?, allowOther?, placeholder?, defaultValue? })` | `{ status, answer?, source? }` | Вопрос с вариантами ответа и/или полем для текста. |
 | `openUrl(url)` | | Открывает http(s)-ссылку в браузере. |
 | `preview(source)` | | Открывает картинку на весь экран: data URL, http(s)-ссылка, путь к файлу плагина или base64. |
-| `insets()` | `{ topSafe, topBar, bottomInput, bottomSafe }` | Размеры элементов приложения поверх чата, в пикселях. |
+| `insets()` | `{ topSafe, topBar, bottomInput, bottomSafe, keyboard }` | Размеры элементов приложения поверх чата, в пикселях. |
 | `onInsetsChanged(fn)` | функция отписки | Вызывается, когда они меняются. |
 
 Вариант — строка или `{ value, label, description? }`. `ask` возвращает `{ status: 'answered', answer, source: 'option' | 'custom' }` или `{ status: 'cancelled' }`. Если не передать `allowOther: false`, пользователь может ещё и написать свой ответ.

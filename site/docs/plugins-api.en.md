@@ -59,7 +59,7 @@ No permission needed. Sheets and notices are signed with the plugin's name.
 | `ask({ question, options?, allowOther?, placeholder?, defaultValue? })` | `{ status, answer?, source? }` | A question with answer options and/or a text field. |
 | `openUrl(url)` | | Opens an http(s) link in the browser. |
 | `preview(source)` | | Opens an image full screen: a data URL, an http(s) link, a plugin file path or base64. |
-| `insets()` | `{ topSafe, topBar, bottomInput, bottomSafe }` | Sizes of the app's controls over the chat, in pixels. |
+| `insets()` | `{ topSafe, topBar, bottomInput, bottomSafe, keyboard }` | Sizes of the app's controls over the chat, in pixels. |
 | `onInsetsChanged(fn)` | unsubscribe function | Called when they change. |
 
 An option is a string or `{ value, label, description? }`. `ask` returns `{ status: 'answered', answer, source: 'option' | 'custom' }` or `{ status: 'cancelled' }`. Without `allowOther: false` the user can also type their own answer.
