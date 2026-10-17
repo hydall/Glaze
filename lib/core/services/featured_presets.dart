@@ -34,6 +34,13 @@ class FeaturedPreset {
   /// shipped an update.
   final int revision;
 
+  /// The bundled JSON and cover of the revision before [revision], kept so the
+  /// seeder can tell whether the user edited it. An edited copy is kept next
+  /// to the update as "Old `name`" instead of being overwritten. Without them
+  /// an update simply replaces the stored preset.
+  final String? previousJsonAsset;
+  final String? previousImageAsset;
+
   const FeaturedPreset({
     required this.id,
     required this.name,
@@ -46,6 +53,8 @@ class FeaturedPreset {
     this.reasoningStart,
     this.reasoningEnd,
     this.revision = 1,
+    this.previousJsonAsset,
+    this.previousImageAsset,
   });
 }
 
@@ -93,6 +102,10 @@ const featuredPresets = <FeaturedPreset>[
     jsonAsset: 'assets/presets/renri.json',
     imageAsset: 'assets/presets/renri.jpg',
     createdAt: 4,
+    // v2: Renri Dream Engine GODDESS LITE 5.51.
+    revision: 2,
+    previousJsonAsset: 'assets/presets/renri_old.json',
+    previousImageAsset: 'assets/presets/renri_old.jpg',
   ),
   FeaturedPreset(
     id: 'default_norimyn',
@@ -126,8 +139,10 @@ bool isFeaturedPreset(String? presetId) =>
 
 /// Loads and parses a featured preset's bundled ST JSON into a [Preset],
 /// stamping the fixed id/name/author/metadata so re-seeding is idempotent.
-Future<Preset> loadFeaturedPreset(FeaturedPreset f) async {
-  final raw = await rootBundle.loadString(f.jsonAsset);
+/// [jsonAsset] loads another bundled revision of it, such as
+/// [FeaturedPreset.previousJsonAsset].
+Future<Preset> loadFeaturedPreset(FeaturedPreset f, {String? jsonAsset}) async {
+  final raw = await rootBundle.loadString(jsonAsset ?? f.jsonAsset);
   final json = jsonDecode(raw) as Map<String, dynamic>;
   final parsed = parseSillyTavernPreset(json, f.name);
   return parsed.copyWith(

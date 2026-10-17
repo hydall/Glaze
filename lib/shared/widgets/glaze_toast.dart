@@ -32,6 +32,7 @@ class GlazeToast {
     bool isError = false,
     bool isWarning = false,
     bool showCopyButton = false,
+    String? source,
   }) {
     final overlay = _resolveOverlay(context);
     if (overlay != null) {
@@ -43,6 +44,7 @@ class GlazeToast {
         isError: isError,
         isWarning: isWarning,
         showCopyButton: showCopyButton,
+        source: source,
       );
     }
   }
@@ -55,6 +57,7 @@ class GlazeToast {
     bool isError = false,
     bool isWarning = false,
     bool showCopyButton = false,
+    String? source,
   }) {
     _current?.dismiss();
 
@@ -69,6 +72,7 @@ class GlazeToast {
         isError: isError,
         isWarning: isWarning,
         showCopyButton: showCopyButton,
+        source: source,
         visibleDuration: Duration(milliseconds: duration),
         onDismissRequest: () => toast.dismiss(),
         onRemove: () => toast.remove(),
@@ -95,6 +99,7 @@ class GlazeToast {
     ToastPosition position = ToastPosition.bottom,
     bool isError = false,
     bool isWarning = false,
+    bool showCopyButton = false,
   }) {
     final overlay = _resolveOverlay(null);
     if (overlay != null) {
@@ -105,6 +110,7 @@ class GlazeToast {
         position: position,
         isError: isError,
         isWarning: isWarning,
+        showCopyButton: showCopyButton,
       );
     }
   }
@@ -228,6 +234,7 @@ class _ToastAnimator extends StatefulWidget {
   final bool isError;
   final bool isWarning;
   final bool showCopyButton;
+  final String? source;
 
   /// How long the chip stays up once it is actually on screen.
   final Duration visibleDuration;
@@ -245,6 +252,7 @@ class _ToastAnimator extends StatefulWidget {
     this.isError = false,
     this.isWarning = false,
     this.showCopyButton = false,
+    this.source,
     required this.visibleDuration,
     required this.onDismissRequest,
     required this.onRemove,
@@ -354,6 +362,7 @@ class _ToastAnimatorState extends State<_ToastAnimator>
                       isError: widget.isError,
                       isWarning: widget.isWarning,
                       showCopyButton: widget.showCopyButton,
+                      source: widget.source,
                     ),
                   ),
                 ),
@@ -375,12 +384,17 @@ class _ToastChip extends ConsumerStatefulWidget {
   final bool isWarning;
   final bool showCopyButton;
 
+  /// Who is speaking when it is not the app — a plugin's name, set small and
+  /// grey in the chip's corner.
+  final String? source;
+
   const _ToastChip({
     required this.text,
     required this.onTap,
     this.isError = false,
     this.isWarning = false,
     this.showCopyButton = false,
+    this.source,
   });
 
   @override
@@ -463,19 +477,7 @@ class _ToastChipState extends ConsumerState<_ToastChip> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Flexible(
-            child: Text(
-              widget.text,
-              textAlign: TextAlign.left,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: textColor,
-                height: 1.3,
-                decoration: TextDecoration.none,
-              ),
-            ),
-          ),
+          Flexible(child: _text(textColor)),
           if (widget.showCopyButton) ...[
             const SizedBox(width: 8),
             MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
@@ -503,6 +505,45 @@ class _ToastChipState extends ConsumerState<_ToastChip> {
               ),
             )),
           ],
+        ],
+      ),
+    );
+  }
+
+  Widget _text(Color color) {
+    final text = Text(
+      widget.text,
+      textAlign: TextAlign.left,
+      style: TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w500,
+        color: color,
+        height: 1.3,
+        decoration: TextDecoration.none,
+      ),
+    );
+    final source = widget.source;
+    if (source == null) return text;
+    return IntrinsicWidth(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          text,
+          const SizedBox(height: 2),
+          Text(
+            source,
+            textAlign: TextAlign.right,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w500,
+              color: color.withValues(alpha: 0.5),
+              height: 1.2,
+              decoration: TextDecoration.none,
+            ),
+          ),
         ],
       ),
     );

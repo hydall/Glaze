@@ -115,6 +115,14 @@ void main() {
         chatWebViewInitialUrlRequest()?.url.toString(),
         kChatWebViewAndroidAssetUrl,
       );
+      // The plugin layer's page sits next to it.
+      expect(
+        chatWebViewInitialUrlRequest(kPluginLayerPage)?.url.toString(),
+        kChatWebViewAndroidAssetUrl.replaceFirst(
+          'index.html',
+          'plugin_layer.html',
+        ),
+      );
     });
 
     test('allows loopback image URLs via mixed content compatibility mode', () {
@@ -205,6 +213,26 @@ void main() {
       );
     });
 
+    test('the plugin layer may load its own page only', () {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      setChatWebViewAssetBaseUrlForTesting(WebUri('http://127.0.0.1:51234/'));
+
+      expect(
+        chatWebViewNavigationPolicy(
+          WebUri('http://127.0.0.1:51234/plugin_layer.html'),
+          page: kPluginLayerPage,
+        ),
+        NavigationActionPolicy.ALLOW,
+      );
+      expect(
+        chatWebViewNavigationPolicy(
+          WebUri('http://127.0.0.1:51234/index.html'),
+          page: kPluginLayerPage,
+        ),
+        NavigationActionPolicy.CANCEL,
+      );
+    });
+
     test('allows the loopback bootstrap navigation and blocks others', () {
       debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
       setChatWebViewAssetBaseUrlForTesting(WebUri('http://127.0.0.1:51234/'));
@@ -219,6 +247,36 @@ void main() {
         chatWebViewNavigationPolicy(WebUri('https://example.com/')),
         NavigationActionPolicy.CANCEL,
       );
+    });
+
+    test('lets frames inside the page load only inline content', () {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      setChatWebViewAssetBaseUrlForTesting(WebUri('http://127.0.0.1:51234/'));
+
+      for (final url in ['about:srcdoc', 'about:blank']) {
+        expect(
+          chatWebViewNavigationPolicy(WebUri(url), mainFrame: false),
+          NavigationActionPolicy.ALLOW,
+          reason: url,
+        );
+        expect(
+          chatWebViewNavigationPolicy(WebUri(url)),
+          NavigationActionPolicy.CANCEL,
+          reason: url,
+        );
+      }
+      for (final url in [
+        'https://example.com/',
+        'http://127.0.0.1:51234/index.html',
+        'data:text/html,hi',
+        'about:blank?x',
+      ]) {
+        expect(
+          chatWebViewNavigationPolicy(WebUri(url), mainFrame: false),
+          NavigationActionPolicy.CANCEL,
+          reason: url,
+        );
+      }
     });
 
     test('allows the loopback bootstrap navigation on Windows', () {

@@ -235,10 +235,19 @@ class ImageGenService {
     // A model without reference support has no other way to carry the
     // character, so the text is sent even if the stored source still says
     // "image" (the UI only ever offers the text option for those models).
+    final noReferences = providerMaxReferences(settings) == 0;
     final sendAppearanceText =
         settings.sendCharAvatar &&
-        (settings.charAppearanceSource == CharacterAppearanceSource.description ||
-            providerMaxReferences(settings) == 0);
+        (settings.charAppearanceSource ==
+                CharacterAppearanceSource.description ||
+            noReferences);
+    // The persona travels along with the character's text. Without reference
+    // support its avatar has no other way in; with it, only when the user
+    // asked for the persona — the builder skips it if its avatar went as an
+    // image.
+    final userAppearanceText = noReferences || settings.sendUserAvatar
+        ? userDescription
+        : '';
 
     if (isNaistera && settings.sendRefDescriptions && !sendAppearanceText) {
       finalPrompt = appendPromptBlock(
@@ -250,7 +259,7 @@ class ImageGenService {
           userDescription: userDescription,
         ),
       );
-    } else if (sendAppearanceText && charDescription.isNotEmpty) {
+    } else if (sendAppearanceText) {
       // Models without reference support — and an explicit "text description"
       // choice on a model that has them — carry the character card's
       // appearance in the prompt instead of as an image.
@@ -260,6 +269,7 @@ class ImageGenService {
           mode: CharacterDescriptionsMode.asIs,
           references: references,
           charDescription: charDescription,
+          userDescription: userAppearanceText,
         ),
       );
     }
@@ -267,6 +277,13 @@ class ImageGenService {
       finalPrompt,
       settings,
       hasReferences: references.isNotEmpty,
+    );
+    // The blocks above label people as {{char}} / {{user}}; an image model
+    // has no macro engine, so it gets the names.
+    finalPrompt = withParticipantNames(
+      finalPrompt,
+      charName: character?.name,
+      userName: persona?.name,
     );
 
     return _dispatcher.generate(

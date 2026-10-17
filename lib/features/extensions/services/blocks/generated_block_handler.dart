@@ -1,7 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/db/repositories/info_blocks_repository.dart';
-import '../../../../core/llm/regex_service.dart';
 import '../../../../core/state/active_selection_provider.dart';
 import '../../../chat/chat_provider.dart';
 import '../../models/block_config.dart';
@@ -13,6 +12,7 @@ import '../info_block_service.dart';
 import '../macro_expander.dart';
 import '../panel_host_service.dart';
 import 'block_context.dart';
+import 'block_prompt_regex.dart';
 import 'block_handler.dart';
 import 'block_image_renderer.dart';
 
@@ -90,13 +90,18 @@ class GeneratedBlockHandler implements BlockHandler {
             preset: context.preset,
             swipeId: context.swipeId,
             cancelToken: context.cancelToken,
-            onStreamUpdate: makeStreamHandler(
-              blockConfig: blockConfig,
-              charId: context.charId,
-              sessionId: context.sessionId,
-              messageId: context.messageId,
-              placeholder: context.placeholder,
-            ),
+            group: context.group,
+            // A shared request streams the whole group's reply, which is no
+            // one block's content.
+            onStreamUpdate: context.group.length > 1
+                ? null
+                : makeStreamHandler(
+                    blockConfig: blockConfig,
+                    charId: context.charId,
+                    sessionId: context.sessionId,
+                    messageId: context.messageId,
+                    placeholder: context.placeholder,
+                  ),
           );
 
       if (context.cancelToken.isCancelled) return _stopped(context);
@@ -148,33 +153,14 @@ class GeneratedBlockHandler implements BlockHandler {
     return _finish(context, content);
   }
 
-  /// Mirrors the original extension's `getRegexedString(content, 2, { depth: 0,
-  /// isPrompt: true })` for a block with `applyRegex`: the active prompt regex
-  /// set (active preset plus global scripts) runs at depth 0, and the
-  /// transformed text is what gets stored.
-  Future<String> _applyBlockRegexes(
-    BlockContext context,
-    String content,
-  ) async {
-    if (content.isEmpty) return content;
-    final regexes = await ref.read(activeRegexesProvider.future);
-    if (regexes.isEmpty) return content;
-    final session = ref.read(chatProvider(context.charId)).value?.session;
-    return applyRegexes(
-      content,
-      2,
-      2,
-      regexes,
-      RegexApplyContext(
-        char: context.character,
+  Future<String> _applyBlockRegexes(BlockContext context, String content) =>
+      applyExtBlockPromptRegexes(
+        ref,
+        charId: context.charId,
+        character: context.character,
         persona: context.persona,
-        sessionVars: session?.sessionVars ?? const {},
-        globalVars: ref.read(globalVarsProvider),
-        depth: 0,
-      ),
-      isPrompt: true,
-    );
-  }
+        content: content,
+      );
 
   /// Hands the block's markup to the sandboxed iframe host.
   ///
@@ -244,7 +230,9 @@ class GeneratedBlockHandler implements BlockHandler {
   }
 
   Future<InfoBlock> _settle(BlockContext context, InfoBlock block) async {
-    ref.read(infoBlocksProvider(context.sessionId).notifier).addOrReplace(block);
+    ref
+        .read(infoBlocksProvider(context.sessionId).notifier)
+        .addOrReplace(block);
     refreshPanelForMessage(
       context.charId,
       context.sessionId,

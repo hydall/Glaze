@@ -39,6 +39,8 @@ class PresetEditorScreen extends ConsumerWidget {
           PermissionsSection(preset: preset),
           const SizedBox(height: 24),
           ProfilesSection(preset: preset),
+          const SizedBox(height: 24),
+          GenerationProfilesSection(preset: preset),
         ],
       ),
     );

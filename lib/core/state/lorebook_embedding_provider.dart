@@ -9,6 +9,9 @@ import '../llm/embedding_service.dart';
 import '../llm/lorebook_embedding_service.dart';
 import '../llm/lorebook_vector_search.dart';
 import '../llm/session_lorebook_embedding_worker.dart';
+import '../llm/transport/endpoint_normalizer.dart';
+import '../llm/transport/known_api_hosts.dart';
+import '../llm/transport/llm_protocol.dart';
 import '../models/api_config.dart';
 import 'db_provider.dart';
 
@@ -90,9 +93,10 @@ EmbeddingConfig resolveEmbeddingConfig(
     return EmbeddingConfig(
       endpoint: source.endpoint,
       apiKey: source.apiKey,
-      model: embeddingConfig.embeddingModel.isNotEmpty
-          ? embeddingConfig.embeddingModel
-          : source.model,
+      model: embeddingModelForBorrowedLlm(
+        embeddingConfig.embeddingModel,
+        source,
+      ),
       maxChunkTokens: embeddingConfig.embeddingMaxChunkTokens,
       requestsPerMinute: embeddingConfig.embeddingRequestsPerMinute,
     );
@@ -105,6 +109,32 @@ EmbeddingConfig resolveEmbeddingConfig(
       requestsPerMinute: embeddingConfig.embeddingRequestsPerMinute,
     );
   }
+}
+
+/// The model an embedding request sends while it borrows [source]'s endpoint.
+///
+/// The borrowed request always goes to the OpenAI-compatible `/embeddings`
+/// route of [source]'s host — Gemini's `generateContent` URL resolves to
+/// `/v1beta/openai/embeddings`, OpenRouter's to `/api/v1/embeddings` — so only
+/// the model has to be an embedding one. A hosted provider's chat model never
+/// is, and sending it was a bare HTTP 400; only a self-hosted server (Ollama,
+/// llama.cpp, LM Studio) may embed with the model it chats with, so only there
+/// is it a fallback. Such servers are often set up under the "OpenAI" protocol,
+/// so the host decides, not the protocol — except for the protocols whose
+/// chat models never embed.
+String embeddingModelForBorrowedLlm(String embeddingModel, ApiConfig source) {
+  final model = embeddingModel.trim();
+  if (model.isNotEmpty) return model;
+  if (source.protocol == LlmProtocol.anthropic ||
+      source.protocol == LlmProtocol.gemini ||
+      source.protocol == LlmProtocol.openrouter) {
+    return '';
+  }
+  final host = Uri.tryParse(
+    EndpointNormalizer.embeddingsUrl(source.endpoint),
+  )?.host;
+  if (host == null || host.isEmpty) return '';
+  return KnownApiHosts.basePathFor(host) != null ? '' : source.model.trim();
 }
 
 final lorebookVectorSearchProvider = Provider<LorebookVectorSearch>((ref) {

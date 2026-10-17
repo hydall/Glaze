@@ -1,14 +1,15 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/db/repositories/info_blocks_repository.dart';
+import '../../../core/llm/prompt/runtime_prompt_block.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../core/state/active_selection_provider.dart';
 import '../../../core/state/db_provider.dart';
 import '../../personas/persona_list_provider.dart';
 import '../models/extension_preset.dart';
 import '../models/info_block.dart';
-import '../providers/extension_presets_provider.dart';
-import '../providers/extensions_settings_provider.dart';
+import 'card_blocks.dart';
 import 'info_block_injector.dart';
 import 'macro_expander.dart';
 
@@ -22,33 +23,87 @@ class ExtBlocksPromptInjection {
 
   final Ref _ref;
 
-  ExtensionPreset? _resolveActivePreset() {
-    final settings = _ref.read(extensionsSettingsProvider);
-    final presetId = settings.activePresetId;
-    if (presetId == null || presetId.isEmpty) return null;
-    return _ref
-        .read(extensionPresetsProvider)
-        .where((p) => p.id == presetId)
-        .firstOrNull;
+  /// The character [sessionId] belongs to, read from the database: the
+  /// character list may not be loaded yet.
+  Future<String?> _characterIdOf(String sessionId) async {
+    try {
+      return await _ref.read(chatRepoProvider).characterIdOf(sessionId);
+    } catch (_) {
+      return null;
+    }
   }
 
-  /// Builds a [MacroContext] from the active persona. Used by
+  /// The active preset with the card blocks of [sessionId]'s character.
+  Future<ExtensionPreset?> _resolveActivePreset(
+    String sessionId, {
+    String? charId,
+  }) async {
+    final preset = activeExtBlocksPresetOf(_ref.read);
+    if (preset == null) return null;
+    charId ??= await _characterIdOf(sessionId);
+    if (charId == null) return preset;
+    try {
+      final character = await _ref.read(characterRepoProvider).getById(charId);
+      return withCardBlocks(preset, cardBlocksOf(character));
+    } catch (_) {
+      return preset;
+    }
+  }
+
+  /// Builds a [MacroContext] from the chat's persona. Used by
   /// [InfoBlockInjector] to expand `{{user}}` in stored block content
   /// before injecting it into the chat history.
   ///
-  /// Character is not resolved here because the inject path is called
-  /// per-session and the character is implied by the session. Future
-  /// enhancement: pass `charId` through `injectIntoHistory` so
-  /// `{{char}}` / `{{description}}` / `{{personality}}` / `{{scenario}}`
-  /// can also be expanded here.
-  MacroContext _resolveMacroContext() {
-    final personaId = _ref.read(activePersonaIdProvider);
-    if (personaId == null) return MacroContext.empty;
+  /// The persona is the one the prompt the blocks are injected into speaks
+  /// as: [sessionId]'s binding, then [charId]'s, then the global one.
+  /// `{{char}}` / `{{description}}` / `{{personality}}` / `{{scenario}}` are
+  /// not expanded on this path yet.
+  @visibleForTesting
+  MacroContext resolveMacroContext(String sessionId, String? charId) {
     final personas = _ref.read(personaListProvider).value ?? const [];
-    final persona = personas.where((p) => p.id == personaId).firstOrNull;
+    final persona = getEffectivePersona(
+      personas,
+      charId,
+      sessionId,
+      _ref.read(activePersonaIdProvider),
+      _ref.read(personaConnectionsProvider),
+    );
+    if (persona == null) return MacroContext.empty;
     return MacroContext(
-      persona: persona?.name,
-      personaDescription: persona?.prompt,
+      persona: persona.name,
+      personaDescription: persona.prompt,
+    );
+  }
+
+  /// Prompt blocks the last [injectIntoHistory] call computed per session.
+  final Map<String, List<RuntimePromptBlock>> _promptBlocks = {};
+
+  /// The blocks injected the original extension's way — as prompt blocks
+  /// rather than inside the history — for [sessionId]'s current request.
+  ///
+  /// Computed by [injectIntoHistory], which every prompt build runs first;
+  /// reading them is synchronous so they ride along with the runtime
+  /// injections JavaScript makes.
+  List<RuntimePromptBlock> promptBlocksFor(String sessionId) =>
+      _promptBlocks[sessionId] ?? const [];
+
+  /// What `{{ExtBlocks::name}}` stands for inside a block's own prompt, for
+  /// [sessionId] as [messages] show it: each block's latest state, by name.
+  Future<Map<String, String>> blockMacroValues({
+    required String sessionId,
+    required List<ChatMessage> messages,
+  }) async {
+    final preset = await _resolveActivePreset(sessionId);
+    if (preset == null || messages.isEmpty) return const {};
+    final injector = InfoBlockInjector(
+      _InfoBlocksRepoReader(_ref.read(infoBlocksRepoProvider)),
+    );
+    return extBlocksMacroValues(
+      await injector.buildMacroBlocks(
+        messages: messages,
+        sessionId: sessionId,
+        preset: preset,
+      ),
     );
   }
 
@@ -56,15 +111,34 @@ class ExtBlocksPromptInjection {
     required String sessionId,
     required List<ChatMessage> messages,
   }) async {
-    final preset = _resolveActivePreset();
-    if (preset == null || messages.isEmpty) return messages;
+    final charId = activeExtBlocksPresetOf(_ref.read) == null
+        ? null
+        : await _characterIdOf(sessionId);
+    final preset = await _resolveActivePreset(sessionId, charId: charId);
+    if (preset == null || messages.isEmpty) {
+      _promptBlocks.remove(sessionId);
+      return messages;
+    }
 
     final repo = _ref.read(infoBlocksRepoProvider);
-    final macroCtx = _resolveMacroContext();
+    final macroCtx = resolveMacroContext(sessionId, charId);
     final injector = InfoBlockInjector(
       _InfoBlocksRepoReader(repo),
       macroContextResolver: () => macroCtx,
     );
+    _promptBlocks[sessionId] = [
+      ...await injector.buildPromptBlocks(
+        messages: messages,
+        sessionId: sessionId,
+        preset: preset,
+      ),
+      // `{{ExtBlocks::name}}` values ride along, placed nowhere.
+      ...await injector.buildMacroBlocks(
+        messages: messages,
+        sessionId: sessionId,
+        preset: preset,
+      ),
+    ];
     return injector.injectBlocks(
       messages: messages,
       sessionId: sessionId,

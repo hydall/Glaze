@@ -36,14 +36,19 @@ enum BlockType {
   accumulation,
 }
 
-/// Whether the runtime can execute a block of this type.
-///
-/// Rewrite and accumulation blocks come in from the original extension's
-/// exports and are fully editable here, but nothing runs them yet. Keeping
-/// them out of the automatic chain is what stops an imported preset from
-/// stamping an error card onto every message.
+/// Whether the runtime can execute a block of this type. Every type now can.
 extension BlockTypeRunnable on BlockType {
   bool get isRunnable => switch (this) {
+    BlockType.generated ||
+    BlockType.script ||
+    BlockType.rewrite ||
+    BlockType.accumulation => true,
+  };
+
+  /// Whether every run leaves a result in the message's panel. A rewrite
+  /// changes the message itself instead, and an accumulation block only
+  /// stores state under a message that carries its updater.
+  bool get hasPanelResult => switch (this) {
     BlockType.generated || BlockType.script => true,
     BlockType.rewrite || BlockType.accumulation => false,
   };
@@ -83,8 +88,10 @@ Map<String, dynamic> migrateLegacyBlockJson(Map<String, dynamic> json) =>
 ///
 /// Reproduces what the runtime used to infer: a block with nothing to ask the
 /// model and something of its own to show was showing its own content.
-BlockSource inferBlockSource({required String prompt, required String carried}) =>
-    prompt.trim().isEmpty && carried.trim().isNotEmpty
+BlockSource inferBlockSource({
+  required String prompt,
+  required String carried,
+}) => prompt.trim().isEmpty && carried.trim().isNotEmpty
     ? BlockSource.carried
     : BlockSource.model;
 
@@ -98,7 +105,10 @@ Map<String, dynamic> _withExplicitSource(Map<String, dynamic> json) {
     prompt: prompt is String ? prompt : '',
     carried: carried,
   );
-  return {...json, 'source': source == BlockSource.carried ? 'carried' : 'model'};
+  return {
+    ...json,
+    'source': source == BlockSource.carried ? 'carried' : 'model',
+  };
 }
 
 Map<String, dynamic> _withUnifiedType(Map<String, dynamic> json) {
@@ -205,6 +215,7 @@ abstract class BlockConfig with _$BlockConfig {
     /// so a new run can continue/update the prior state instead of starting
     /// from scratch. 0 = disabled (default).
     @Default(0) int previousBlocksCount,
+
     /// Script blocks: the code the block carries itself, run when [source] is
     /// [BlockSource.carried] instead of asking the model to write one.
     @Default('') String script,
@@ -262,6 +273,11 @@ abstract class BlockConfig with _$BlockConfig {
 
     /// Put the result through the user's own text replacements.
     @Default(false) bool applyRegex,
+
+    /// How [inject] places the result: appended to recent replies, or as a
+    /// prompt block the way the original extension does. Imported blocks
+    /// come in as [InjectionTarget.prompt].
+    @Default(InjectionTarget.history) InjectionTarget injectTarget,
 
     /// Role the injected result is attributed to.
     @Default(InjectionRole.system) InjectionRole injectionRole,

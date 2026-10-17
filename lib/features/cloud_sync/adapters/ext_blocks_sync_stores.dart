@@ -182,6 +182,7 @@ class ChatSummarySyncStore implements SyncChatSummaryStore {
       'messageCount': row.messageCount,
       'prompt': row.prompt,
       'updatedAt': row.updatedAt,
+      'blocksJson': row.blocksJson,
     };
   }
 
@@ -196,6 +197,7 @@ class ChatSummarySyncStore implements SyncChatSummaryStore {
       enabled: summary['enabled'] as bool? ?? true,
       prompt: summary['prompt'] as String?,
       updatedAt: summary['updatedAt'] as int? ?? 0,
+      blocksJson: summary['blocksJson'] as String?,
     );
   }
 

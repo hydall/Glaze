@@ -31,6 +31,7 @@ import 'services/impersonation_service.dart';
 import 'state/chat_session_write_queue.dart';
 import 'state/generation_phase_provider.dart';
 import '../extensions/services/extension_post_gen_service.dart';
+import '../../core/plugins/plugin_hooks.dart';
 
 final chatProvider =
     AsyncNotifierProvider.family<ChatNotifier, ChatState, String>(
@@ -319,6 +320,11 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     tagEnd: tagEnd,
   );
 
+  /// Replaces a message's text for an ext-block rewrite; see
+  /// [ChatMessageOpsController.replaceMessageText].
+  Future<ChatSession?> replaceMessageText(String messageId, String text) =>
+      _messageOpsCtrl.replaceMessageText(messageId, text);
+
   Future<void> moveMessage(int fromIndex, int toIndex) =>
       _messageOpsCtrl.moveMessage(fromIndex, toIndex);
 
@@ -326,6 +332,21 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
   Future<void> deleteMessages(Set<int> indices) =>
       _messageOpsCtrl.deleteMessages(indices);
+
+  /// Plugin message writes (`glaze.messages.*`). Refused while a reply is
+  /// being generated so a plugin cannot race the stream.
+  Future<ChatSession?> mutateMessagesForPlugin(
+    List<ChatMessage> Function(List<ChatMessage> latest) mutate,
+  ) {
+    final current = state.value;
+    if (current == null ||
+        current.isGenerating ||
+        current.isSendPending ||
+        current.isPostGenRunning) {
+      throw StateError('The chat is busy generating');
+    }
+    return _messageOpsCtrl.mutateMessages(mutate);
+  }
 
   Future<void> toggleMessageHidden(int index) =>
       _messageOpsCtrl.toggleMessageHidden(index);
@@ -340,14 +361,40 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
   Future<void> clearChat() => _messageOpsCtrl.clearChat();
 
-  Future<void> setSwipe(int messageIndex, int swipeId) =>
-      _swipeCtrl.setSwipe(messageIndex, swipeId);
+  Future<void> setSwipe(int messageIndex, int swipeId) async {
+    await _swipeCtrl.setSwipe(messageIndex, swipeId);
+    _dispatchSwipeScripts();
+  }
 
   Future<void> changeSwipe(
     int messageIndex,
     int dir, {
     bool fromSwipe = false,
-  }) => _swipeCtrl.changeSwipe(messageIndex, dir, fromSwipe: fromSwipe);
+  }) async {
+    await _swipeCtrl.changeSwipe(messageIndex, dir, fromSwipe: fromSwipe);
+    _dispatchSwipeScripts();
+  }
+
+  /// Ext-block scripts that answer to a swipe. They run on every swipe, to an
+  /// existing variant or to a new one, as in the original extension, and do
+  /// not hold up the swipe itself.
+  void _dispatchSwipeScripts() {
+    if (!ref.mounted) return;
+    final session = state.value?.session;
+    if (session == null || session.id.isEmpty) return;
+    unawaited(
+      ref
+          .read(extensionPostGenServiceProvider)
+          .runSwipeScripts(
+            charId: arg,
+            sessionId: session.id,
+            messages: session.messages,
+          )
+          .catchError((Object e) {
+            debugPrint('[ChatNotifier] swipe scripts failed: $e');
+          }),
+    );
+  }
 
   Future<void> changeAgentSwipe(
     int messageIndex,
@@ -495,12 +542,24 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       // the model, the saved history and the context all get the translation
       // rather than the original. A failure keeps the original text.
       final translation = ref.read(pipelineSettingsProvider).translation;
-      var outgoingText = text;
+      // Plugins see the text exactly as typed, before translation, and may
+      // rewrite it or cancel the send (`send:before`). The runtime shows
+      // the plugin's reason; a rejected send puts the text back in the
+      // composer.
+      final pluginHooks = ref.read(pluginHookRegistryProvider).forChat(arg);
+      var hookedText = text;
+      if (pluginHooks != null) {
+        final hook = await pluginHooks.beforeSend(text, source: 'ui');
+        if (!ref.mounted || hook.cancelled) return;
+        hookedText = hook.text;
+        if (hookedText.trim().isEmpty && imageDataUrls.isEmpty) return;
+      }
+      var outgoingText = hookedText;
       if (translation.enabled &&
           translation.autoTranslateUser &&
-          text.trim().isNotEmpty) {
+          hookedText.trim().isNotEmpty) {
         outgoingText = await _autoTranslateOutgoing(
-          text,
+          hookedText,
           translation.inputLanguage,
           sessionId: current.session!.id,
         );
@@ -646,10 +705,24 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         ),
       );
 
-      // Dispatch `afterUser` extension blocks. This is fire-and-forget — the
-      // generation pipeline starts immediately, the post-gen service runs
-      // the chain in the background and persists its own InfoBlocks.
-      unawaited(_dispatchAfterUserBlocks(updatedSession));
+      // Run the `afterUser` extension blocks before the reply, as the
+      // original extension does, so what they produce or inject reaches it.
+      // A block marked background does not hold this up; a failing one is
+      // logged and the reply goes ahead.
+      await _dispatchAfterUserBlocks(updatedSession);
+      if (!ref.mounted) return;
+      // Stopping while those blocks ran stops the reply too.
+      final afterUserBlocks = state.value;
+      if (afterUserBlocks == null ||
+          !afterUserBlocks.isGenerating ||
+          afterUserBlocks.session?.id != updatedSession.id) {
+        return;
+      }
+      pluginHooks?.notify('send:after', {
+        'chatId': updatedSession.id,
+        'source': 'ui',
+        'text': outgoingText,
+      });
 
       try {
         // Commit the exact visible green/blue swipe, never whichever Ledger
@@ -683,8 +756,12 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           }
         }
 
+        // A user-side rewrite block may have changed the message just sent.
+        final latestSession = state.value?.session;
         await _runGeneration(
-          updatedSession,
+          latestSession?.id == updatedSession.id
+              ? latestSession!
+              : updatedSession,
           current,
           guidanceText: guidanceText,
         );

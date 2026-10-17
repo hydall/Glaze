@@ -6,13 +6,25 @@ import '../../../core/models/character.dart';
 /// Riverpod, no DB, no async) — call sites fetch the snapshot from their
 /// own provider and pass it in.
 class MacroContext {
-  const MacroContext({this.character, this.persona, this.personaDescription});
+  const MacroContext({
+    this.character,
+    this.persona,
+    this.personaDescription,
+    this.dynamicMacros = const {},
+  });
 
   final Character? character;
   final String? persona;
 
   /// The persona's description (its prompt), for `{{persona}}`.
   final String? personaDescription;
+
+  /// Per-call macros the original extension passes as `dynamicMacros`:
+  /// `{{textToRewrite}}` for a rewrite, `{{additionalPrompt}}` for a call
+  /// with an extra instruction. Keys are matched case-insensitively, and
+  /// their values are inserted as they are — a `{{user}}` inside the text
+  /// being rewritten is left alone.
+  final Map<String, String> dynamicMacros;
 
   static const empty = MacroContext();
 }
@@ -39,12 +51,23 @@ class MacroContext {
 String expand(String text, MacroContext ctx) {
   if (text.isEmpty) return text;
   var result = text;
+  // Dynamic values go in last, through markers, so the other macros never
+  // run over text that came from the chat.
+  final dynamicValues = <String>[];
+  for (final entry in ctx.dynamicMacros.entries) {
+    final marker = '\u0000${dynamicValues.length}\u0000';
+    dynamicValues.add(entry.value);
+    result = _replaceCi(result, '{{${entry.key}}}', marker);
+  }
   result = _replaceCi(result, '{{char}}', ctx.character?.name ?? '');
   result = _replaceCi(result, '{{user}}', ctx.persona ?? '');
   result = _replaceCi(result, '{{persona}}', ctx.personaDescription ?? '');
   result = _replaceCi(result, '{{description}}', ctx.character?.description ?? '');
   result = _replaceCi(result, '{{personality}}', ctx.character?.personality ?? '');
   result = _replaceCi(result, '{{scenario}}', ctx.character?.scenario ?? '');
+  for (var i = 0; i < dynamicValues.length; i++) {
+    result = result.replaceAll('\u0000$i\u0000', dynamicValues[i]);
+  }
   return result;
 }
 

@@ -32,6 +32,23 @@ class DeepLinkService {
   AppLinks? _appLinks;
   StreamSubscription<Uri>? _subscription;
 
+  /// Opens a web link the app handles itself (a plugin page); false when
+  /// the link is not one. Set once the UI is up.
+  bool Function(Uri uri)? _openWebLink;
+
+  /// A web link that arrived before [_openWebLink] was set — the app was
+  /// started *by* it.
+  Uri? _pendingWebLink;
+
+  /// Starts handing web links to [open], beginning with one that cold-started
+  /// the app.
+  void setWebLinkHandler(bool Function(Uri uri) open) {
+    _openWebLink = open;
+    final pending = _pendingWebLink;
+    _pendingWebLink = null;
+    if (pending != null) open(pending);
+  }
+
   Future<void> init() async {
     // Guard against repeated init (widget tests pump the app multiple
     // times, and `_appLinks` is a process-wide singleton). The first
@@ -56,7 +73,16 @@ class DeepLinkService {
   void handleDeepLink(Uri uri) {
     debugPrint('DeepLinkService: received $uri');
     final provider = _providerFor(uri);
-    if (provider != null) _deliverOAuth(provider, uri);
+    if (provider != null) {
+      _deliverOAuth(provider, uri);
+    } else if (uri.scheme == 'https') {
+      final open = _openWebLink;
+      if (open == null) {
+        _pendingWebLink = uri;
+      } else {
+        open(uri);
+      }
+    }
   }
 
   String? _providerFor(Uri uri) {
@@ -200,5 +226,7 @@ class DeepLinkService {
   void resetForTest() {
     _pendingOAuth.clear();
     _earlyCallbacks.clear();
+    _openWebLink = null;
+    _pendingWebLink = null;
   }
 }

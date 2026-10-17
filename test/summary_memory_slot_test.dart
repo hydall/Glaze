@@ -13,6 +13,8 @@ import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/core/models/memory_book_api_settings.dart';
 import 'package:glaze_flutter/core/state/db_provider.dart';
+import 'package:glaze_flutter/core/services/memory_prompt_presets.dart'
+    show MemoryPromptPreset;
 import 'package:glaze_flutter/core/state/summary_providers.dart';
 import 'package:glaze_flutter/features/chat/services/summary_generation_service.dart';
 import 'package:glaze_flutter/features/settings/api_list_provider.dart';
@@ -23,6 +25,7 @@ class _RecordingAuxLlmClient extends AuxLlmClient {
   AuxApiConfig? config;
   double? temperature;
   int? maxTokens;
+  String? system;
 
   @override
   Future<String> callOnce({
@@ -39,6 +42,7 @@ class _RecordingAuxLlmClient extends AuxLlmClient {
     this.config = config;
     this.temperature = temperature;
     this.maxTokens = maxTokens;
+    system ??= messages?.firstWhere((m) => m['role'] == 'system')['content'];
     return 'summary';
   }
 }
@@ -60,11 +64,20 @@ const _memoryConfig = ApiConfig(
   maxTokens: 4096,
 );
 
-const _session = ChatSession(
+// Long enough that the oldest messages fall outside the fresh tail (a quarter
+// of the chat connection's window), so a forced compaction has a run to send.
+final _session = ChatSession(
   id: 'session',
   characterId: 'char',
   sessionIndex: 0,
-  messages: [ChatMessage(id: 'm1', role: 'user', content: 'Hello')],
+  messages: [
+    for (var i = 0; i < 6; i++)
+      ChatMessage(
+        id: 'm$i',
+        role: i.isEven ? 'user' : 'assistant',
+        content: 'They walked on through the snow. ' * 500,
+      ),
+  ],
 );
 
 typedef _Harness = ({ProviderContainer container, _RecordingAuxLlmClient llm});
@@ -106,7 +119,7 @@ Future<_Harness> _harness({MemoryBookApiSettings? slot}) async {
 
 Future<void> _summarize(ProviderContainer container) => container
     .read(summaryGenerationServiceProvider)
-    .generate(charId: 'char', session: _session);
+    .compact(charId: 'char', session: _session, force: true);
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -198,5 +211,44 @@ void main() {
     expect(h.llm.config?.endpoint, 'https://proxy.example.com/v1');
     expect(h.llm.config?.model, 'proxy-model');
     expect(h.llm.config?.protocol, LlmProtocol.customChatCompletion);
+  });
+
+  test('retelling runs on the chosen prompt preset', () async {
+    final h = await _harness();
+    const mine = MemoryPromptPreset(
+      key: 'mine',
+      label: 'Mine',
+      prompt: 'Retell it as a ship log.',
+    );
+    await h.container.read(summaryCustomPromptsProvider.notifier).save([mine]);
+    await h.container
+        .read(summaryPromptSelectionProvider.notifier)
+        .save(const SummaryPromptSelection(retellKey: 'mine'));
+
+    await _summarize(h.container);
+
+    expect(h.llm.system, startsWith('Retell it as a ship log.'));
+  });
+
+  test("a chat's own prompt text still wins over the preset", () async {
+    final h = await _harness();
+    await h.container
+        .read(summaryServiceProvider)
+        .setSummaryPrompt(sessionId: 'session', prompt: 'Only this chat.');
+
+    await _summarize(h.container);
+
+    expect(h.llm.system, startsWith('Only this chat.'));
+  });
+
+  test('a preset key that names nothing falls back to the default', () async {
+    final h = await _harness();
+    await h.container
+        .read(summaryPromptSelectionProvider.notifier)
+        .save(const SummaryPromptSelection(retellKey: 'gone'));
+
+    await _summarize(h.container);
+
+    expect(h.llm.system, startsWith(defaultSummaryPrompt));
   });
 }

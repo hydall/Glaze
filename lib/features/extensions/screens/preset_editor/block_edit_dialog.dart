@@ -1,19 +1,25 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../../shared/widgets/glaze_toast.dart';
 import '../../../../shared/widgets/glaze_scaffold.dart';
 import '../../../../shared/widgets/menu_group.dart';
 import '../../../../shared/widgets/sheet_view.dart';
 import '../../../settings/widgets/api_slot_group.dart';
 import '../../models/block_config.dart';
+import '../../models/block_context_item.dart';
 import '../../models/block_injection.dart';
 import '../../models/block_modes.dart';
 import '../../models/connection_profiles.dart';
 import '../../models/extension_context_policy.dart';
+import '../../services/accumulation/accumulation_service.dart';
 import '../../widgets/extension_context_policy_editor.dart';
 import 'widgets/block_type_picker.dart';
+import 'sections/context_list_section.dart';
+import 'sections/profiles_section.dart';
 import 'sections/upstream_block_sections.dart';
 
 /// Editor for one block.
@@ -59,6 +65,10 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
   late bool _manualOnly;
   late ExtensionContextPolicy _contextPolicy;
 
+  /// The original's ordered context list. With an enabled item it alone
+  /// builds the request, and the settings below it go unused.
+  late List<BlockContextItem> _contextList;
+
   /// The connection and model this block overrides to. Empty means it follows
   /// the preset's own connection.
   late String _apiConfigId;
@@ -78,6 +88,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
   late bool _hideDisplay;
   late bool _background;
   late bool _applyRegex;
+  late InjectionTarget _injectTarget;
   late InjectionRole _injectionRole;
   late InjectionPosition _injectionPosition;
   late BlockRunOrder _generationOrder;
@@ -128,6 +139,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
     _streamToPanel = b.streamToPanel;
     _manualOnly = b.manualOnly;
     _contextPolicy = b.contextPolicy;
+    _contextList = b.context;
     _useStaticSource = b.source == BlockSource.carried;
 
     _periodController = TextEditingController(text: b.period.toString());
@@ -145,6 +157,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
     _hideDisplay = b.hideDisplay;
     _background = b.background;
     _applyRegex = b.applyRegex;
+    _injectTarget = b.injectTarget;
     _injectionRole = b.injectionRole;
     _injectionPosition = b.injectionPosition;
     _generationOrder = b.generationOrder;
@@ -201,6 +214,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
       previousBlocksCount: _previousBlocksCount,
       contextSystemPrompt: _contextSystemPromptController.text,
       contextPolicy: _contextPolicy,
+      context: _contextList,
       streamToPanel: _streamToPanel,
       manualOnly: _manualOnly,
       triggerOnUser: _triggerOnUser,
@@ -215,6 +229,10 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
       keywordIsRegex: _keywordIsRegex,
       hideDisplay: _hideDisplay,
       background: _background,
+      // Accumulation state only ever goes in as a prompt block.
+      injectTarget: _type == BlockType.accumulation
+          ? InjectionTarget.prompt
+          : _injectTarget,
       applyRegex: _applyRegex,
       injectionRole: _injectionRole,
       injectionPosition: _injectionPosition,
@@ -324,6 +342,12 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
                     description: 'block_updater_name_desc'.tr(),
                     controller: _updaterNameController,
                   ),
+                if (_type == BlockType.accumulation)
+                  MenuItem(
+                    icon: Icons.content_copy_rounded,
+                    label: 'extblocks_accumulation_copy_prompt'.tr(),
+                    onTap: _copyUpdaterPrompt,
+                  ),
                 MenuSwitchItem(
                   label: 'block_manual_only_title'.tr(),
                   description: 'block_manual_only_sub'.tr(),
@@ -366,9 +390,12 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
               onBackgroundChanged: (v) => setState(() => _background = v),
               onApplyRegexChanged: (v) => setState(() => _applyRegex = v),
             ),
-            // A rewrite block replaces the reply instead of being injected
-            // alongside it, so placement settings would mean nothing for it.
-            if (_type != BlockType.rewrite)
+            // Placement only means something for a result injected as a
+            // prompt block; one appended to replies sits where they are.
+            if (_inject &&
+                (_type == BlockType.accumulation ||
+                    (_type == BlockType.generated &&
+                        _injectTarget == InjectionTarget.prompt)))
               BlockInjectionGroup(
                 role: _injectionRole,
                 position: _injectionPosition,
@@ -393,7 +420,25 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
             ..._sourceItems(),
             ..._outputItems(),
             ..._contextItems(),
-            if (_usesLlm)
+            if (_callsLlm)
+              MenuGroup(
+                items: [
+                  MenuSelectorItem(
+                    label: 'extblocks_block_profile'.tr(),
+                    description: 'extblocks_block_profile_desc'.tr(),
+                    currentValue: profileLabel(_apiPreset),
+                    onTap: () => pickBlockOption<ConnectionProfile>(
+                      context: context,
+                      title: 'extblocks_block_profile'.tr(),
+                      options: ConnectionProfile.values,
+                      current: _apiPreset,
+                      labelOf: profileLabel,
+                      onPicked: (v) => setState(() => _apiPreset = v),
+                    ),
+                  ),
+                ],
+              ),
+            if (_callsLlm)
               ApiSlotGroup(
                 header: 'block_api_section_label'.tr(),
                 apiConfigId: _apiConfigId,
@@ -414,6 +459,11 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
               const _HelpText('block_generated_help'),
             if (_type == BlockType.generated && _render == BlockRender.panel)
               const _HelpText('block_render_panel_help'),
+            if (_type == BlockType.generated && _render == BlockRender.message)
+              const _HelpText('block_render_message_help'),
+            if (_type == BlockType.accumulation &&
+                _render == BlockRender.message)
+              const _HelpText('block_render_message_accumulation_help'),
             if (_type == BlockType.script) const _HelpText('block_script_help'),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -518,12 +568,21 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
   /// back into the prompt, whether it streams.
   List<Widget> _outputItems() {
     final items = <Widget>[
+      // Accumulation state is text: a card or the message, never an iframe.
+      if (_type == BlockType.accumulation)
+        MenuSelectorItem(
+          label: 'block_render_label'.tr(),
+          currentValue: _renderLabel(_render),
+          description: 'block_render_desc'.tr(),
+          onTap: () =>
+              _pickRender(const [BlockRender.card, BlockRender.message]),
+        ),
       if (_type == BlockType.generated) ...[
         MenuSelectorItem(
           label: 'block_render_label'.tr(),
           currentValue: _renderLabel(_render),
           description: 'block_render_desc'.tr(),
-          onTap: _pickRender,
+          onTap: () => _pickRender(BlockRender.values),
         ),
         if (_render == BlockRender.panel)
           MenuFieldItem(
@@ -547,7 +606,20 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
           value: _inject,
           onChanged: _onInjectChanged,
         ),
-        if (_inject) ...[
+        if (_inject)
+          MenuSelectorItem(
+            label: 'block_inject_target'.tr(),
+            currentValue: _injectTargetLabel(_injectTarget),
+            onTap: () => pickBlockOption<InjectionTarget>(
+              context: context,
+              title: 'block_inject_target'.tr(),
+              options: InjectionTarget.values,
+              current: _injectTarget,
+              labelOf: _injectTargetLabel,
+              onPicked: (v) => setState(() => _injectTarget = v),
+            ),
+          ),
+        if (_inject && _injectTarget == InjectionTarget.history) ...[
           MenuFieldItem(
             label: 'block_inject_last_n_label'.tr(),
             helper: 'block_inject_last_n_helper'.tr(),
@@ -563,6 +635,13 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
           ),
         ],
       ],
+      if (_type == BlockType.accumulation)
+        MenuSwitchItem(
+          label: 'block_inject_title'.tr(),
+          description: 'block_inject_accumulation_desc'.tr(),
+          value: _inject,
+          onChanged: (v) => setState(() => _inject = v),
+        ),
       if (_usesLlm)
         MenuSwitchItem(
           label: 'block_stream_title'.tr(),
@@ -575,17 +654,23 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
     return [MenuGroup(header: 'block_sec_output'.tr(), items: items)];
   }
 
+  String _injectTargetLabel(InjectionTarget target) => switch (target) {
+    InjectionTarget.history => 'block_inject_target_history'.tr(),
+    InjectionTarget.prompt => 'block_inject_target_prompt'.tr(),
+  };
+
   String _renderLabel(BlockRender render) => switch (render) {
     BlockRender.card => 'block_render_card'.tr(),
     BlockRender.panel => 'block_render_panel'.tr(),
+    BlockRender.message => 'block_render_message'.tr(),
   };
 
-  Future<void> _pickRender() async {
+  Future<void> _pickRender(List<BlockRender> options) async {
     await GlazeBottomSheet.show<void>(
       context,
       title: 'block_render_label'.tr(),
       items: [
-        for (final option in BlockRender.values)
+        for (final option in options)
           BottomSheetItem(
             label: _renderLabel(option),
             icon: _render == option
@@ -600,14 +685,27 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
     );
   }
 
-  /// What the block's own request is built from.
+  /// What the block's own request is built from: the original's context
+  /// list, for the types the original builds one for, and our own settings.
   List<Widget> _contextItems() {
-    if (!_usesLlm) return const [];
+    final list =
+        (_type == BlockType.generated && _usesLlm) || _type == BlockType.rewrite
+        ? BlockContextListGroup(
+            items: _contextList,
+            onChanged: (items) => setState(() => _contextList = items),
+          )
+        : null;
+    final listInUse =
+        list != null && _contextList.any((item) => !item.disabled);
+    if (!_usesLlm || listInUse) {
+      return [?list, if (listInUse) const _HelpText('ctx_list_active_help')];
+    }
     final policy = ExtensionContextPolicyEditor(
       policy: _contextPolicy,
       onChanged: (value) => setState(() => _contextPolicy = value),
     );
     return [
+      ?list,
       MenuGroup(
         header: 'block_sec_context'.tr(),
         items: [
@@ -652,12 +750,31 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
         : BlockTrigger.afterAssistant;
   }
 
-  /// Whether this type produces something for the reader at all. Rewrite and
-  /// accumulation blocks are editable but have no runtime yet.
+  /// The original editor's "copy default prompt": how the model should write
+  /// this block's updater.
+  Future<void> _copyUpdaterPrompt() async {
+    await Clipboard.setData(
+      ClipboardData(
+        text: accumulationUpdaterPrompt(
+          _nameController.text,
+          _updaterNameController.text,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    GlazeToast.show(context, 'extblocks_accumulation_prompt_copied'.tr());
+  }
+
+  /// Whether this type produces something for the reader at all. A rewrite
+  /// changes the message and an accumulation block keeps state instead.
   bool get _producesContent =>
       _type == BlockType.generated || _type == BlockType.script;
 
   bool get _usesLlm => _producesContent && !_useStaticSource;
+
+  /// Whether the block sends a request to the model at all: a rewrite does,
+  /// with no content of its own.
+  bool get _callsLlm => _usesLlm || _type == BlockType.rewrite;
 }
 
 /// A muted paragraph under a type's settings, explaining what that type does.

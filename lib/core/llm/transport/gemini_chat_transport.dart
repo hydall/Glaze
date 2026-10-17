@@ -120,6 +120,9 @@ class GeminiChatTransport implements ChatTransport {
     if (!request.omitTopK && request.topK > 0) {
       generationConfig['topK'] = request.topK;
     }
+    if (request.stop.isNotEmpty) {
+      generationConfig['stopSequences'] = request.stop;
+    }
 
     // Thinking config: only emit for known 2.5+ / 3.x thinking models.
     final useThinking = request.requestReasoning && !request.omitReasoning;

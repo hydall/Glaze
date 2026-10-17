@@ -2,6 +2,7 @@ import 'package:freezed_annotation/freezed_annotation.dart';
 
 import 'block_config.dart';
 import 'extension_context_policy.dart';
+import 'profile_params.dart';
 import 'preset_permissions.dart';
 
 part 'extension_preset.freezed.dart';
@@ -22,6 +23,11 @@ abstract class ExtensionPreset with _$ExtensionPreset {
 
     /// Model override for that connection. Empty means the connection's own.
     @Default('') String apiModel,
+
+    /// Parameters of the original's API presets, by profile name (`big`,
+    /// `medium`, `small`). A block's [BlockConfig.apiPreset] picks one.
+    @Default(<String, ProfileParams>{})
+    Map<String, ProfileParams> profileParams,
   }) = _ExtensionPreset;
 
   factory ExtensionPreset.fromJson(Map<String, dynamic> json) =>

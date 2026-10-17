@@ -133,11 +133,12 @@ void main() {
       expect(book.enabled, isFalse);
     });
 
-    test('a book imported on its own is globally enabled', () {
-      // The Lorebooks tab's own import has nothing to scope to, so the Global
-      // switch is the only thing that can make it fire at all.
+    test('a book imported on its own is saved switched off', () {
+      // A "Lorebooks only" import has no character to scope to; turning the
+      // Global switch on would put it in every chat, so the user decides where
+      // it goes instead.
       final book = convertJanitorScript(_entries(), name: 'World Lore');
-      expect(book.enabled, isTrue);
+      expect(book.enabled, isFalse);
       expect(book.activationScope, 'global');
       expect(book.activationTargetId, isNull);
     });

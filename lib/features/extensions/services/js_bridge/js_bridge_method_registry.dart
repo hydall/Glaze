@@ -20,6 +20,11 @@ enum JsBridgeOperation {
   injectPrompt,
   uninjectPrompt,
   generateText,
+  extBlocksRun,
+  extBlocksGenerate,
+  extBlocksRewrite,
+  extBlocksStore,
+  extBlocksAbort,
 }
 
 class JsBridgeMethodDefinition {
@@ -108,6 +113,15 @@ abstract final class JsBridgeMethodRegistry {
       capabilityResolver: _generateTextCapability,
       hosts: _allHosts,
     ),
+    // The original ExtBlocks script API, reached through `glaze.bridge` by
+    // the sandbox's compatibility layer rather than as `glaze.*` methods.
+    for (final operation in extBlocksBridgeOperations)
+      JsBridgeMethodDefinition(
+        name: operation.name,
+        operation: operation,
+        capabilityResolver: _runBlocksCapability,
+        hosts: _allHosts,
+      ),
   ]);
 
   static final Map<String, JsBridgeMethodDefinition> _byName =
@@ -142,3 +156,14 @@ String _playAudioCapability(Map<String, dynamic> _) => 'play_audio';
 String _injectPromptCapability(Map<String, dynamic> _) => 'inject_prompt';
 String _uninjectPromptCapability(Map<String, dynamic> _) => 'uninject_prompt';
 String _generateTextCapability(Map<String, dynamic> _) => 'generate_text';
+String _runBlocksCapability(Map<String, dynamic> _) => 'run_blocks';
+
+/// Operations of the original ExtBlocks script API; each is a bridge method
+/// of the same name (`ExtBlocksScriptMethods`).
+const extBlocksBridgeOperations = {
+  JsBridgeOperation.extBlocksRun,
+  JsBridgeOperation.extBlocksGenerate,
+  JsBridgeOperation.extBlocksRewrite,
+  JsBridgeOperation.extBlocksStore,
+  JsBridgeOperation.extBlocksAbort,
+};

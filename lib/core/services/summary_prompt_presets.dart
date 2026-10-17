@@ -1,19 +1,17 @@
 import '../llm/summary_service.dart';
 import 'memory_prompt_presets.dart' show MemoryPromptPreset;
 
-/// Ready-made summarization prompts, the way Memory Books has ready-made
-/// drafting prompts.
+/// Ready-made prompts for retelling a run of messages as a summary block, the
+/// way Memory Books has ready-made drafting prompts.
 ///
-/// The session stores the template itself, not a preset key, so a preset is
-/// simply a text to start from: picking one fills the field, and editing it
-/// afterwards is expected. [labelFor] is what tells the settings sheet which
-/// preset the stored text still matches.
+/// Chosen by key, like a Memory Books prompt: the selection is global
+/// ([SummaryPromptSelection]) and editing a saved prompt changes it wherever
+/// it is used. Built-ins are read-only; copy one to change it.
 ///
 /// They carry no `{{history}}` or `{{previous_summary}}` on purpose. The
-/// transcript is appended, and the summary being replaced is handed over under
-/// its own heading only when there is one — a preset that placed the
-/// placeholder itself would leave an empty label behind on the first run. A
-/// hand-written prompt can still use both; see `SummaryService`.
+/// transcript goes in the user message, and the earlier summary is handed over
+/// under its own heading only when there is one. A saved prompt can still use
+/// both; see `SummaryService`.
 ///
 /// Reuses [MemoryPromptPreset] as the record type — it is a key/label/prompt
 /// triple with no memory in it beyond the name.
@@ -50,9 +48,15 @@ class SummaryPromptPresets {
     ...?custom,
   ];
 
-  /// The preset [template] still is, or null when it has been edited into
-  /// something of its own. An empty template is the built-in default, which is
-  /// what an unset session prompt resolves to.
+  /// The preset [key] names; the built-in default when it names none.
+  static MemoryPromptPreset resolve(
+    String? key, [
+    List<MemoryPromptPreset>? custom,
+  ]) => _find(all(custom), key) ?? builtIn.first;
+
+  /// The preset [template] still is, or null when it is text of its own. An
+  /// empty template is the built-in default, which is what an unset session
+  /// prompt resolves to.
   static MemoryPromptPreset? match(
     String? template, [
     List<MemoryPromptPreset>? custom,
@@ -88,3 +92,46 @@ Extract what is established in this roleplay as a flat list of facts, in the lan
 Summarize this roleplay in two or three sentences, in the language the roleplay is written in: where the story stands, and the one or two things that matter most for what happens next. Keep proper names exactly as they appear. No preamble.
 ''';
 }
+
+/// Ready-made prompts for merging adjacent summary blocks a level up. Same
+/// rules as [SummaryPromptPresets]: chosen by key, built-ins read-only.
+///
+/// `{{target_tokens}}` places the size target; without it the target is
+/// appended.
+class SummaryMergePromptPresets {
+  const SummaryMergePromptPresets._();
+
+  static const fallbackKey = 'continuity';
+
+  static const builtIn = [
+    MemoryPromptPreset(
+      key: fallbackKey,
+      label: 'Keep continuity (recommended)',
+      prompt: summaryMergePrompt,
+    ),
+    MemoryPromptPreset(key: 'tight', label: 'Tight', prompt: _tight),
+  ];
+
+  static List<MemoryPromptPreset> all([List<MemoryPromptPreset>? custom]) => [
+    ...builtIn,
+    ...?custom,
+  ];
+
+  static MemoryPromptPreset resolve(
+    String? key, [
+    List<MemoryPromptPreset>? custom,
+  ]) => _find(all(custom), key) ?? builtIn.first;
+
+  static const _tight = '''
+You are given consecutive parts of the summary of one roleplay, oldest first. Merge them into one short summary, in the language they are written in.
+
+- Keep only what the story still needs: where things stand, who is who to each other, what is still open, and what caused the big changes.
+- Retell finished events in a line each, by their outcome.
+- Never present a thread that was resolved as open again.
+- Keep proper names and established terms exactly as written.
+- Add nothing that the parts do not say. No preamble.
+''';
+}
+
+MemoryPromptPreset? _find(List<MemoryPromptPreset> presets, String? key) =>
+    key == null ? null : presets.where((p) => p.key == key).firstOrNull;

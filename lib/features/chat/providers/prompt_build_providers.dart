@@ -33,11 +33,21 @@ final promptInputsCollectorProvider = Provider<PromptInputsCollector>((ref) {
     injectHistory: ({required sessionId, required messages}) => ref
         .read(extBlocksPromptInjectionProvider)
         .injectIntoHistory(sessionId: sessionId, messages: messages),
-    readRuntimePromptBlocks: (sessionId) => mapRuntimePromptBlocks(
-      ref.read(runtimePromptInjectionProvider.notifier).bySession(sessionId),
-    ),
+    readRuntimePromptBlocks: (sessionId) =>
+        _readRuntimePromptBlocks(ref, sessionId),
   );
 });
+
+/// Prompt blocks injected at runtime: the ones JavaScript asked for and the
+/// ext-block results injected the original extension's way. The latter are
+/// computed by the history injection that runs just before this is read.
+List<RuntimePromptBlock> _readRuntimePromptBlocks(Ref ref, String sessionId) =>
+    List.unmodifiable([
+      ...mapRuntimePromptBlocks(
+        ref.read(runtimePromptInjectionProvider.notifier).bySession(sessionId),
+      ),
+      ...ref.read(extBlocksPromptInjectionProvider).promptBlocksFor(sessionId),
+    ]);
 
 final promptPayloadBuilderProvider = Provider<PromptPayloadBuilder>((ref) {
   Future<void> initializeApiConfigs() async {
@@ -51,9 +61,7 @@ final promptPayloadBuilderProvider = Provider<PromptPayloadBuilder>((ref) {
       .read(extBlocksPromptInjectionProvider)
       .injectIntoHistory(sessionId: sessionId, messages: messages);
   List<RuntimePromptBlock> readRuntimePromptBlocks(String sessionId) =>
-      mapRuntimePromptBlocks(
-        ref.read(runtimePromptInjectionProvider.notifier).bySession(sessionId),
-      );
+      _readRuntimePromptBlocks(ref, sessionId);
 
   return PromptPayloadBuilder(
     ref,

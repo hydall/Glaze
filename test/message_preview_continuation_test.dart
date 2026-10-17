@@ -43,7 +43,7 @@ void main() {
       ),
     ];
 
-    expect(buildMessagePreview(messages.last), 'and and text.');
+    expect(buildMessagePreview(messages.last), 'Bold and soft and text.');
   });
 
   test('the 80-character cap applies to the continuation slice', () {
@@ -120,5 +120,19 @@ void main() {
     ];
 
     expect(findNotificationMessage(messages, 'u'), isNull);
+  });
+
+  test('text wrapped in asterisks stays in the preview', () {
+    const message = ChatMessage(
+      id: 'a',
+      role: 'assistant',
+      content: '*She tilts her head.* "You *really* asked me that?" '
+          '***Very*** **bold**.',
+    );
+
+    expect(
+      buildMessagePreview(message),
+      'She tilts her head. "You really asked me that?" Very bold.',
+    );
   });
 }

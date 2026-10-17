@@ -71,6 +71,7 @@ class TestJsBridge {
     PlayAudioHandler? playAudio,
     ExecuteCommandHandler? executeCommand,
     ShowToastHandler? showToast,
+    ExtBlocksBridgeHandler? extBlocks,
   }) {
     final db = AppDatabase.forTesting(NativeDatabase.memory());
     TestWidgetsFlutterBinding.ensureInitialized();
@@ -99,6 +100,7 @@ class TestJsBridge {
       executeCommand:
           executeCommand ?? (_, _, _) => throw UnsupportedError('unwired'),
       showToast: showToast ?? (_, _) {},
+      extBlocks: extBlocks,
     );
   }
 }

@@ -414,7 +414,9 @@ Future<Lorebook> rebuildLorebookWithActiveLlm(
   return Lorebook(
     id: generateId(),
     name: name,
-    enabled: true,
+    // Never global: scoped to [characterId] when there is one, otherwise saved
+    // switched off. See `convertJanitorScript`.
+    enabled: false,
     activationScope: characterId != null ? 'character' : 'global',
     activationTargetId: characterId,
     entries: entries,

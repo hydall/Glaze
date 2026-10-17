@@ -80,6 +80,7 @@ class _ChatWebViewPreloaderState extends State<ChatWebViewPreloader> {
                   initialFile: chatWebViewInitialFile(),
                   initialUrlRequest: chatWebViewInitialUrlRequest(),
                   initialSettings: _webViewSettings,
+                  initialUserScripts: chatWebViewUserScripts(),
                   onLoadStop: (_, _) {
                     if (mounted) setState(() => _preloaded = true);
                   },
@@ -97,7 +98,10 @@ class _ChatWebViewPreloaderState extends State<ChatWebViewPreloader> {
                     _handlePreloadProcessGone();
                   },
                   shouldOverrideUrlLoading: (controller, request) async {
-                    return chatWebViewNavigationPolicy(request.request.url);
+                    return chatWebViewNavigationPolicy(
+                      request.request.url,
+                      mainFrame: request.isForMainFrame,
+                    );
                   },
                 ),
               ),

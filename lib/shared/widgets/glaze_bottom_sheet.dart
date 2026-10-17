@@ -203,6 +203,10 @@ class GlazeBottomSheet {
   static Future<T?> show<T>(
     BuildContext context, {
     String? title,
+
+    /// Who opened the sheet when it is not the app — a plugin's name, shown
+    /// small and grey under the title.
+    String? source,
     Widget? headerAction,
     List<BottomSheetItem>? items,
     int? itemCount,
@@ -271,6 +275,7 @@ class GlazeBottomSheet {
         input == null &&
         child == null &&
         headerAction == null &&
+        source == null &&
         !searchable;
     if (isPlainMenu && isDesktopLayout(context)) {
       return showDesktopPopup<T>(
@@ -315,6 +320,7 @@ class GlazeBottomSheet {
       windowChrome: false,
       builder: (_) => _GlazeBottomSheetContent(
         title: title,
+        source: source,
         headerAction: headerAction,
         items: items,
         itemCount: itemCount,
@@ -395,6 +401,7 @@ class GlazeBottomSheetFrame extends ConsumerWidget {
 
 class _GlazeBottomSheetContent extends ConsumerStatefulWidget {
   final String? title;
+  final String? source;
   final Widget? headerAction;
   final List<BottomSheetItem>? items;
   final int? itemCount;
@@ -414,6 +421,7 @@ class _GlazeBottomSheetContent extends ConsumerStatefulWidget {
 
   const _GlazeBottomSheetContent({
     this.title,
+    this.source,
     this.headerAction,
     this.items,
     this.itemCount,
@@ -526,7 +534,10 @@ class _GlazeBottomSheetContentState
     super.dispose();
   }
 
-  bool get _hasHeader => widget.title != null || widget.headerAction != null;
+  bool get _hasHeader =>
+      widget.title != null ||
+      widget.source != null ||
+      widget.headerAction != null;
 
   void _onSearchChanged(String value) {
     setState(() {
@@ -765,6 +776,7 @@ class _GlazeBottomSheetContentState
                       if (_hasHeader)
                         _Header(
                           title: widget.title,
+                          source: widget.source,
                           action: widget.headerAction,
                         ),
                       if (widget.searchable)
@@ -1020,25 +1032,60 @@ class _HandleBar extends StatelessWidget {
 
 class _Header extends StatelessWidget {
   final String? title;
+  final String? source;
   final Widget? action;
 
-  const _Header({this.title, this.action});
+  const _Header({this.title, this.source, this.action});
 
   @override
   Widget build(BuildContext context) {
+    final title = Text(
+      this.title ?? '',
+      style: TextStyle(
+        fontSize: 18,
+        fontWeight: FontWeight.w700,
+        color: context.cs.onSurface,
+      ),
+    );
+    final source = this.source;
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 0, 12, 16),
       child: Row(
         children: [
           Expanded(
-            child: Text(
-              title ?? '',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: context.cs.onSurface,
-              ),
-            ),
+            child: source == null
+                ? title
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (this.title != null) ...[
+                        title,
+                        const SizedBox(height: 4),
+                      ],
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.extension_outlined,
+                            size: 13,
+                            color: context.cs.onSurfaceVariant,
+                          ),
+                          const SizedBox(width: 5),
+                          Flexible(
+                            child: Text(
+                              source,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: context.cs.onSurfaceVariant,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
           ),
           ?action,
         ],

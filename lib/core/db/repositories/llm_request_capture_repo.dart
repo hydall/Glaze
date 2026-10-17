@@ -38,6 +38,12 @@ final class LlmRequestCaptureRepo
   static const int maxBytesPerSession = 6 * 1024 * 1024;
   static const int minRowsPerSession = 8;
   static const int maxRowsWithoutSession = 100;
+
+  /// A plugin's own HTTP requests (`plugin.net`) have a budget of their own:
+  /// a plugin polling a server must not evict the model requests of the
+  /// chat, nor they its.
+  static const int maxPluginRequestsPerSession = 100;
+  static const int maxPluginRequestBytesPerSession = 4 * 1024 * 1024;
   static const int maxRowsTotal = 2000;
   static const int maxBytesTotal = 24 * 1024 * 1024;
   static const int maxEventBytes = 1024 * 1024;
@@ -269,6 +275,9 @@ final class LlmRequestCaptureRepo
               ),
             );
         await _trimContext(context?.sessionId);
+        if (context?.stage == 'plugin.net') {
+          await _trimPluginRequests(context?.sessionId);
+        }
         await _trimGlobal();
       });
     } catch (error) {
@@ -328,8 +337,23 @@ final class LlmRequestCaptureRepo
       rowCeiling: rowCeiling,
       byteBudget: maxBytesPerSession,
       minRows: minRowsPerSession,
+      // Embedding captures are diagnostics of their own stream — indexing, a
+      // vector search — and a chat can emit many of them per turn. Counting
+      // them against the request budget let them evict the generation requests
+      // a reader actually came to see, so they sit outside it.
+      exemptStagesLike: const ['embedding%', 'plugin.net'],
     );
   }
+
+  Future<void> _trimPluginRequests(String? sessionId) => _trimTo(
+    predicate:
+        "${sessionId == null ? 'session_id IS NULL' : 'session_id = ?'} "
+        "AND stage = 'plugin.net'",
+    args: [?sessionId],
+    rowCeiling: maxPluginRequestsPerSession,
+    byteBudget: maxPluginRequestBytesPerSession,
+    minRows: minRowsPerSession,
+  );
 
   Future<void> _trimGlobal() => _trimTo(
     predicate: '1 = 1',
@@ -346,24 +370,30 @@ final class LlmRequestCaptureRepo
   /// characters and would under-count every non-ASCII prompt). A row is dropped
   /// when it is past the row ceiling, or when it is past [minRows] *and* the
   /// running total has already exceeded the byte budget.
+  ///
+  /// [exemptStagesLike] leaves rows of those stage patterns out of both the
+  /// accounting and the deletion: they are never counted against the budget and
+  /// never removed by it. They remain bounded by the global trim.
   Future<void> _trimTo({
     required String predicate,
     required List<Object?> args,
     required int rowCeiling,
     required int byteBudget,
     required int minRows,
+    List<String> exemptStagesLike = const [],
   }) => db.customStatement(
     'DELETE FROM llm_request_capture_rows WHERE id IN ('
     'SELECT id FROM ('
     'SELECT id, '
     'ROW_NUMBER() OVER w AS rn, '
     'SUM(LENGTH(CAST(event_json AS BLOB))) OVER w AS running_bytes '
-    'FROM llm_request_capture_rows WHERE $predicate '
+    'FROM llm_request_capture_rows WHERE $predicate'
+    '${exemptStagesLike.map((_) => ' AND (stage IS NULL OR stage NOT LIKE ?)').join()} '
     'WINDOW w AS (ORDER BY created_at_ms DESC, id DESC '
     'ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)'
     ') WHERE rn > ? OR (rn > ? AND running_bytes > ?)'
     ')',
-    [...args, rowCeiling, minRows, byteBudget],
+    [...args, ...exemptStagesLike, rowCeiling, minRows, byteBudget],
   );
 
   static _EncodedCapture _encodeBounded(LlmRequestCaptureEvent event) {

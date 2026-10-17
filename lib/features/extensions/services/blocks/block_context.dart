@@ -25,6 +25,10 @@ class BlockContext {
   final InfoBlock placeholder;
   final MainModelContextSnapshot? mainModelContextSnapshot;
 
+  /// The blocks this one shares its request with (see `blockGroups`), itself
+  /// included; empty when it asks alone.
+  final List<BlockConfig> group;
+
   const BlockContext({
     required this.charId,
     required this.sessionId,
@@ -41,5 +45,6 @@ class BlockContext {
     required this.placeholderId,
     required this.placeholder,
     this.mainModelContextSnapshot,
+    this.group = const [],
   });
 }

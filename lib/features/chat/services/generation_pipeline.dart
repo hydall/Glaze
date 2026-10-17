@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/llm/generation_phase.dart';
 import '../../../core/models/character.dart';
 import '../../../core/models/chat_message.dart';
+import '../../../core/plugins/plugin_hooks.dart';
 import '../../../core/db/repositories/lorebook_use_manifest_repo.dart';
 import '../../../core/llm/prompt/exact_lorebook_manifest.dart';
 import '../../../core/llm/studio/studio_history_limiter.dart';
@@ -18,6 +19,7 @@ import '../../../core/state/lorebook_embedding_provider.dart';
 import '../../../core/utils/time_helpers.dart';
 import '../../../core/state/studio_turn_config_resolver.dart';
 import '../../chat_history/chat_history_provider.dart';
+import '../../extensions/services/extension_post_gen_service.dart';
 import '../abort_handler.dart';
 import '../chat_generation_service.dart';
 import '../chat_session_service.dart';
@@ -129,6 +131,10 @@ class GenerationPipeline {
       if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) {
         return null;
       }
+      await _runGenerationStartScripts(session);
+      if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) {
+        return null;
+      }
       final service = ctx.ref.read(chatGenerationServiceProvider);
       var result = await service.generate(
         session: session,
@@ -178,6 +184,22 @@ class GenerationPipeline {
         return null;
       }
 
+      result = await _applyPluginSuccess(
+        result,
+        messageId: continueTargetId == null
+            ? completedMessageId
+            : result.session!.messages.lastOrNull?.id,
+        source: continueTargetId != null
+            ? 'continuation'
+            : regenTargetId != null
+            ? 'regeneration'
+            : 'reply',
+        genId: genId,
+      );
+      if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) {
+        return null;
+      }
+
       // Continue mode extends an existing assistant message instead of adding
       // a turn, so it owns its own commit + post-gen tail (INV-CM1). Awaited
       // rather than returned directly: the notification lease is released in
@@ -218,6 +240,10 @@ class GenerationPipeline {
           regenTargetId == null &&
           result.session!.messages.lastOrNull?.isError == true;
       if (generationErrored) {
+        _notifyPluginError(
+          genId,
+          result.session!.messages.lastOrNull?.content ?? '',
+        );
         ctx.abortHandler.clearStreaming();
         ctx.abortHandler.restorationMessage = null;
         final settled = result.copyWith(
@@ -239,6 +265,9 @@ class GenerationPipeline {
           regenMsg != null &&
           !regenMsg.isError &&
           !regenMsg.isTyping;
+      if (regenMsg != null && regenMsg.isError) {
+        _notifyPluginError(genId, regenMsg.content);
+      }
       final regenOutcome = await _regenResolver.resolve(
         result: result,
         regenTargetId: regenTargetId,
@@ -250,6 +279,11 @@ class GenerationPipeline {
         return null;
       }
       if (regenOutcome != null) {
+        // The stream is over on every regen outcome — success, rollback or
+        // error — so empty it like the send and continue paths do. Left
+        // populated, the provider the WebView's streaming listener reads keeps
+        // the finished reply as if it were still streaming.
+        ctx.abortHandler.clearStreaming();
         // INV-EG1: extensions + image tags must run after successful regen too.
         if (regenSucceeded && result.session != null) {
           // The stream has ended. The coordinator acquires
@@ -380,6 +414,75 @@ class GenerationPipeline {
       ctx.setPhase(GenerationPhase.idle, genId: genId);
       await notificationLease?.release();
     }
+  }
+
+  /// Ext-block scripts marked to run when a generation starts. They run before
+  /// the request is built, so a prompt they inject reaches this reply; one
+  /// that fails is logged and the reply goes ahead without it.
+  Future<void> _runGenerationStartScripts(ChatSession session) async {
+    try {
+      await ctx.ref
+          .read(extensionPostGenServiceProvider)
+          .runGenerationStartScripts(
+            charId: ctx.charId,
+            sessionId: session.id,
+            messages: session.messages,
+          );
+    } catch (e) {
+      debugPrint('[GenerationPipeline] generation start scripts failed: $e');
+    }
+  }
+
+  PluginHookRunner? get _pluginHooks =>
+      ctx.ref.read(pluginHookRegistryProvider).forChat(ctx.charId);
+
+  /// Plugins may rewrite the finished reply [messageId] before it is saved
+  /// (`generation:success`). The active swipe keeps in step with `content`.
+  Future<ChatState> _applyPluginSuccess(
+    ChatState result, {
+    required String? messageId,
+    required String source,
+    required int genId,
+  }) async {
+    final hooks = _pluginHooks;
+    final session = result.session;
+    if (hooks == null || session == null || messageId == null) return result;
+    final index = session.messages.indexWhere((m) => m.id == messageId);
+    if (index < 0) return result;
+    final message = session.messages[index];
+    if (message.role != 'assistant' ||
+        message.isError ||
+        message.content.trim().isEmpty) {
+      return result;
+    }
+    final String text;
+    try {
+      text = await hooks.finishGeneration(
+        message.content,
+        source: source,
+        generationId: '${ctx.charId}:$genId',
+      );
+    } catch (e) {
+      debugPrint('[GenerationPipeline] plugin generation:success failed: $e');
+      return result;
+    }
+    if (text == message.content) return result;
+    final swipes = [...message.swipes];
+    if (message.swipeId >= 0 &&
+        message.swipeId < swipes.length &&
+        swipes[message.swipeId] == message.content) {
+      swipes[message.swipeId] = text;
+    }
+    final messages = [...session.messages];
+    messages[index] = message.copyWith(content: text, swipes: swipes);
+    return result.copyWith(session: session.copyWith(messages: messages));
+  }
+
+  void _notifyPluginError(int genId, String error) {
+    _pluginHooks?.notify('generation:error', {
+      'generationId': '${ctx.charId}:$genId',
+      'error': error,
+    });
   }
 
   /// Continue mode tail: fold the generated block into the assistant message
@@ -628,6 +731,7 @@ class GenerationPipeline {
   }) async {
     if (!ctx.ref.mounted) return;
     if (!ctx.abortHandler.isCurrentGen(genId)) return;
+    _notifyPluginError(genId, e.toString());
     final current = ctx.getState().value;
     // A continuation that threw leaves the message it was extending untouched
     // and settles through the toast instead of an error block (INV-CM4).

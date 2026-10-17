@@ -153,6 +153,42 @@ test('the elapsed time keeps updating across the same window', async ({
   expect(await settledTimeBadges(page, '6.5s')).toBeGreaterThan(0);
 });
 
+test('bubble layout: the count returns to the stat row, not the #N chip', async ({
+  page,
+}) => {
+  await boot(page);
+  // The bubble meta leads with the `#N` chip, which carries the gen-stat class
+  // too. Reconciling against the first `.gen-stat` wrote the regenerated
+  // reply's clock and count into that chip and left the stat row without one.
+  await page.evaluate(() => {
+    window.bridge.applyLayout('bubble');
+    window.bridge.setMessages(
+      JSON.stringify([
+        JSON.parse(window.__M('a1', 'assistant', 'She set the lamp down.', {
+          genTime: '4.0s',
+          tokens: 120,
+          messageIndex: 0,
+        })),
+      ]),
+    );
+  });
+  await page.waitForTimeout(60);
+  await update(page, { isTyping: true, text: '' });
+  await update(page, { isTyping: false, genTime: '3.0s', tokens: 99 });
+
+  const meta = await page.evaluate(() => {
+    const bubble = document.querySelector('[data-message-id="a1"] .bubble-meta');
+    return {
+      index: bubble.querySelector('.msg-index').textContent.trim(),
+      stat: bubble
+        .querySelector('.gen-stat:not(.msg-index) .token-count-inline')
+        ?.textContent.trim(),
+    };
+  });
+  expect(meta.index).toBe('#1');
+  expect(meta.stat).toBe('99t');
+});
+
 test('the clock leads the row it is rebuilt into', async ({ page }) => {
   await boot(page);
   // A reply with a count but no measurable time: the row exists without a

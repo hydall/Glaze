@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:file_picker/file_picker.dart';
@@ -70,14 +71,22 @@ class FileExportService {
   /// action, where the file should land where the user expects in one click.
   ///
   /// Android writes to the well-known public Downloads path (see
-  /// [_androidGlazeDir]); desktop uses the platform downloads directory; iOS
-  /// has no public downloads folder, so it falls back to the app's documents.
+  /// [_androidGlazeDir]); desktop uses the platform downloads directory. iOS
+  /// has no public downloads folder: an image goes into Photos through
+  /// [saveImageToPhotos], anything else falls back to the app's documents.
   /// Returns the saved path, or the empty string when no location is available.
   static Future<String> saveBytesToGlaze({
     required List<int> bytes,
     required String filename,
     required String subfolder,
   }) async {
+    if (Platform.isIOS && _isImageFile(filename)) {
+      // The documents fallback below is invisible to both Photos and Files.
+      return saveImageToPhotos(
+        bytes: Uint8List.fromList(bytes),
+        filename: filename,
+      );
+    }
     Directory? dir;
     if (Platform.isAndroid) {
       dir = await _androidGlazeDir(subfolder);
@@ -98,6 +107,11 @@ class FileExportService {
     await file.writeAsBytes(bytes);
     if (Platform.isAndroid) await registerWithMediaStore(file.path);
     return file.path;
+  }
+
+  static bool _isImageFile(String filename) {
+    final lower = filename.toLowerCase();
+    return const ['.png', '.jpg', '.jpeg', '.webp', '.gif'].any(lower.endsWith);
   }
 
   static Future<String> _saveWithPicker({

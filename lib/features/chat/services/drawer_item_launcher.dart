@@ -18,6 +18,7 @@ import '../../glossary/glossary_sheet.dart';
 import '../../image_gen/widgets/image_gen_sheet.dart';
 import '../../lorebooks/lorebook_list_screen.dart';
 import '../../personas/persona_list_screen.dart';
+import '../../plugins/screens/plugins_screen.dart';
 import '../../presets/preset_list_screen.dart';
 import '../../regex/regex_sheet.dart';
 import '../../settings/api_settings_screen.dart';
@@ -126,7 +127,7 @@ class DrawerItemLauncher {
           useRootNavigator: true,
           isScrollControlled: true,
           backgroundColor: Colors.transparent,
-          builder: (_) => const PersonaListScreen(),
+          builder: (_) => const PersonaListScreen(forChat: true),
         );
       case 'image-gen':
         await showGlazeSheet<void>(
@@ -146,7 +147,16 @@ class DrawerItemLauncher {
           useRootNavigator: true,
           backgroundColor: Colors.transparent,
           isScrollControlled: true,
-          builder: (_) => const ExtBlocksSettingsSheet(),
+          builder: (_) => ExtBlocksSettingsSheet(charId: charId),
+        );
+      case 'plugins':
+        await showGlazeSheet<void>(
+          context: context,
+          useRootNavigator: true,
+          backgroundColor: Colors.transparent,
+          barrierColor: Colors.black54,
+          isScrollControlled: true,
+          builder: (_) => const PluginsSheet(),
         );
     }
   }
@@ -171,11 +181,13 @@ class DrawerItemLauncher {
       'regex' => (_) => const RegexSheet(startExpanded: true),
       'api' => (_) => const ApiSettingsScreen(startExpanded: true),
       'presets' => (_) => PresetListScreen(startExpanded: true, charId: charId),
-      'personas' => (_) => const PersonaListScreen(startExpanded: true),
+      'personas' => (_) =>
+          const PersonaListScreen(startExpanded: true, forChat: true),
       'image-gen' => (_) => ImageGenSheet(charId: charId),
       'authors-note' => (_) => AuthorsNoteSheet(charId: charId),
       'glossary' => (_) => const GlossarySheet(startExpanded: true),
-      'ext-blocks' => (_) => const ExtBlocksSettingsSheet(),
+      'ext-blocks' => (_) => ExtBlocksSettingsSheet(charId: charId),
+      'plugins' => (_) => const PluginsSheet(startExpanded: true),
       _ => null,
     };
     return builder == null ? null : SidebarPanel(id: itemId, builder: builder);

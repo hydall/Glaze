@@ -17,7 +17,6 @@ import '../../shared/widgets/glaze_toast.dart';
 import '../chat_history/chat_history_provider.dart';
 import 'chat_session_service.dart';
 import 'chat_provider.dart';
-import 'services/summary_generation_service.dart';
 
 final chatActionsServiceProvider = Provider<ChatActionsService>((ref) {
   return ChatActionsService(ref);
@@ -39,17 +38,6 @@ class ChatActionsService {
   final Ref _ref;
 
   ChatActionsService(this._ref);
-
-  Future<String> generateSummary(String charId) async {
-    final chatState = _ref.read(chatProvider(charId)).value;
-    if (chatState == null || chatState.session == null) {
-      throw StateError('No active chat session');
-    }
-
-    return _ref
-        .read(summaryGenerationServiceProvider)
-        .generate(charId: charId, session: chatState.session!);
-  }
 
   Future<String> exportChat(String charId) async {
     final chatState = _ref.read(chatProvider(charId)).value;

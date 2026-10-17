@@ -42,6 +42,8 @@ export const SHADOW_STYLE = `
     color: var(--current-italic-color, var(--italic-color, #888));
     font-style: italic;
   }
+  /* Emphasis inside dialogue stays dialogue: italic, in the quote colour. */
+  .glaze-message .chat-quote-text .chat-italic { color: inherit; }
   .glaze-message a { color: var(--primary-color, #C42A4A); text-decoration: underline; }
   .glaze-message img { max-width: 100%; height: auto; border-radius: 8px; margin: 8px 0; }
   /* Media Chromium lays out at a fixed intrinsic width. An audio element is

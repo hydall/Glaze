@@ -13,6 +13,7 @@ enum RequestStageFamily {
   summary,
   embedding,
   image,
+  plugin,
   other,
 }
 
@@ -30,6 +31,7 @@ RequestStageFamily requestStageFamily(String? stage) {
   if (stage.startsWith('image')) return RequestStageFamily.image;
   if (stage.startsWith('memory')) return RequestStageFamily.memory;
   if (stage.startsWith('summary')) return RequestStageFamily.summary;
+  if (stage.startsWith('plugin')) return RequestStageFamily.plugin;
   return RequestStageFamily.other;
 }
 

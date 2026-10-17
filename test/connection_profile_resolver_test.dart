@@ -12,11 +12,14 @@
 //   * When the active fallback is also `null`, the resolver returns
 //     `null` and the bridge surfaces a `StateError`.
 
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/features/extensions/models/connection_profiles.dart';
 import 'package:glaze_flutter/features/extensions/models/extension_preset.dart';
+import 'package:glaze_flutter/features/extensions/models/profile_params.dart';
 import 'package:glaze_flutter/features/extensions/services/connection_profile_resolver.dart';
 
 ApiConfig _config(String id, String name) => ApiConfig(
@@ -96,6 +99,73 @@ void main() {
           reason: 'the requested profile does not change the connection',
         );
       }
+    });
+
+    test('the requested profile picks its own parameters', () {
+      final preset = ExtensionPreset(
+        id: 'p1',
+        name: 'Profiles',
+        blocks: const [],
+        apiConfigId: 'b',
+        profileParams: const {
+          'small': ProfileParams(
+            temperature: 0.2,
+            topP: 0.9,
+            maxTokens: 300,
+            reasoningEffort: 'low',
+          ),
+        },
+      );
+      final small = resolver.resolve(
+        preset,
+        ConnectionProfile.small,
+        activeFallback,
+        configs,
+      )!;
+      expect(small.id, 'b');
+      expect(small.temperature, 0.2);
+      expect(small.omitTemperature, isFalse);
+      expect(small.topP, 0.9);
+      expect(small.omitTopP, isFalse);
+      expect(small.maxTokens, 300);
+      expect(small.reasoningEffort, 'low');
+      expect(
+        resolver.resolve(
+          preset,
+          ConnectionProfile.big,
+          activeFallback,
+          configs,
+        ),
+        same(configs[1]),
+        reason: 'a profile with nothing set keeps the connection as it is',
+      );
+    });
+
+    test('profile parameters survive a JSON round trip', () {
+      final preset = ExtensionPreset(
+        id: 'p1',
+        name: 'Profiles',
+        blocks: const [],
+        profileParams: const {
+          'big': ProfileParams(maxTokens: 4096, confirmationJb: true),
+        },
+      );
+      final decoded = ExtensionPreset.fromJson(
+        jsonDecode(jsonEncode(preset.toJson())) as Map<String, dynamic>,
+      );
+      expect(decoded.profileParams, preset.profileParams);
+    });
+
+    test('confirmation turns are appended only when asked for', () {
+      const ask = [
+        {'role': 'user', 'content': 'go'},
+      ];
+      expect(const ProfileParams().withConfirmation(ask), ask);
+      expect(const ProfileParams(confirmationJb: true).withConfirmation(ask), [
+        ...ask,
+        ...confirmationJbMessages,
+      ]);
+      expect(confirmationJbMessages.last['content'], '[I confirm]');
     });
 
     test('a preset stored with connection profiles keeps its connection', () {

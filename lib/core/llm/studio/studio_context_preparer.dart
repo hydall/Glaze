@@ -13,6 +13,7 @@ import '../prompt/lorebook_context_resolver.dart';
 import '../prompt/memory_block_injector.dart' show finalizeMemoryCoverage;
 import '../prompt/memory_context_resolver.dart';
 import '../prompt/recalled_messages_resolver.dart';
+import '../prompt/runtime_prompt_block.dart';
 import '../prompt/effective_canon_prompt_materializer.dart';
 import '../prompt/exact_lorebook_manifest.dart';
 import '../prompt/selective_ledger_projection_filter.dart';
@@ -106,6 +107,7 @@ final class StudioContextPreparer {
       gameTime: inputs.gameTime,
       gameDate: inputs.gameDate,
       gameDay: inputs.gameDay,
+      extBlocks: extBlocksMacroValues(inputs.runtimePromptBlocks),
     );
     final lore = const LorebookContextResolver().resolve(
       history: inputs.history,
@@ -176,7 +178,6 @@ final class StudioContextPreparer {
             excerptChunksPerEntry: inputs.memoryExcerptChunksPerEntry,
             chunkFirstTopEntries: inputs.chunkFirstTopEntries,
             chunkFirstTopChunks: inputs.chunkFirstTopChunks,
-            summaryExcerpt: inputs.summaryContent,
             gameTime: gameTimeState,
           );
     final memoryHardContent = memory?.content?.hardBlockContent;
@@ -283,6 +284,7 @@ final class StudioContextPreparer {
     add(StudioContextSlot.runtimeDynamic, arcContent);
     add(StudioContextSlot.runtimeDynamic, inputs.entitiesContent);
     for (final block in inputs.runtimePromptBlocks) {
+      if (block.placement == RuntimePromptPlacement.macro) continue;
       final content = replaceMacros(block.content, macroContext).text;
       add(
         StudioContextSlot.runtimeDynamic,

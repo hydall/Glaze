@@ -556,3 +556,25 @@ test('an audio embed shrinks to the message instead of overhanging it', async ({
   expect(shape.overhang, 'the player paints outside the message').toBeLessThanOrEqual(0);
   expect(shape.width).toBeLessThanOrEqual(shape.host);
 });
+
+test('emphasis inside dialogue keeps the quote colour', async ({ page }) => {
+  await render(page, '*She tilts her head.* "You *really* asked me that?"');
+  const shape = await page.evaluate(() => {
+    const root = window.harness.currentRoot();
+    const quoted = root.querySelector('.chat-quote-text');
+    const inner = quoted ? quoted.querySelector('em.chat-italic') : null;
+    const narration = Array.from(root.querySelectorAll('em.chat-italic'))
+      .find((em) => !em.closest('.chat-quote-text'));
+    return {
+      innerText: inner ? inner.textContent : '',
+      innerStyle: inner ? getComputedStyle(inner).fontStyle : '',
+      innerColor: inner ? getComputedStyle(inner).color : '',
+      quoteColor: quoted ? getComputedStyle(quoted).color : '',
+      narrationColor: narration ? getComputedStyle(narration).color : '',
+    };
+  });
+  expect(shape.innerText).toBe('really');
+  expect(shape.innerStyle).toBe('italic');
+  expect(shape.innerColor).toBe(shape.quoteColor);
+  expect(shape.narrationColor).not.toBe(shape.quoteColor);
+});

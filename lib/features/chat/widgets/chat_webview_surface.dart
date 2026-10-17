@@ -303,6 +303,7 @@ class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
                       initialFile: chatWebViewInitialFile(),
                       initialUrlRequest: chatWebViewInitialUrlRequest(),
                       initialSettings: _webViewSettings,
+                      initialUserScripts: chatWebViewUserScripts(),
                       onWebViewCreated: _onWebViewCreated,
                       onLoadStop: _onLoadStop,
                       // Android 26+. Until this was handled, a killed render
@@ -325,7 +326,10 @@ class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
                         }
                       },
                       shouldOverrideUrlLoading: (controller, request) async {
-                        return chatWebViewNavigationPolicy(request.request.url);
+                        return chatWebViewNavigationPolicy(
+                          request.request.url,
+                          mainFrame: request.isForMainFrame,
+                        );
                       },
                     ),
                   )

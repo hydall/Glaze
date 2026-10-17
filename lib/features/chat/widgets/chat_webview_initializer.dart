@@ -15,6 +15,7 @@ import '../bridge/chat_overlay_blur_region.dart';
 import '../chat_provider.dart';
 import '../state/context_window_marker.dart';
 import '../state/generation_phase_provider.dart';
+import 'chat_webview_inline_ext_blocks.dart';
 
 /// Snapshot of the [ChatWebViewWidget] fields needed by
 /// [ChatWebViewInitializer]. Pure data — no `BuildContext` or
@@ -167,6 +168,11 @@ class ChatWebViewInitializer {
           ref.read(chatProvider(input.charId)).value?.session?.sessionVars ??
           const {},
       globalVars: ref.read(globalVarsProvider),
+    );
+    bridge.inlineExtBlocksFor = inlineExtBlocksReader(
+      ref,
+      input.sessionId,
+      charId: input.charId,
     );
 
     await _setIdentity();

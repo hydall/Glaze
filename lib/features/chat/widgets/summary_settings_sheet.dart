@@ -2,13 +2,14 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/llm/summary_service.dart';
 import '../../../core/models/preset.dart';
 import '../../../core/services/memory_prompt_presets.dart'
     show MemoryPromptPreset;
 import '../../../core/services/summary_prompt_presets.dart';
 import '../../../core/state/preset_resolution.dart';
 import '../../../core/state/summary_providers.dart';
+import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/list_controls.dart';
@@ -23,7 +24,7 @@ import '../../../shared/widgets/glaze_sheet.dart';
 ///
 /// The Summary tab used to be one long form: the text, the master switch (in
 /// the sheet header, as a bare `Switch`), the prompt template, the auto
-/// interval and the injection point, all in one scroll. Only the first of
+/// compaction and the injection point, all in one scroll. Only the first of
 /// those is read or edited day to day. They live behind the header's settings
 /// button now, the way the Memory Books tab's do, so the tab itself is the
 /// summary and the one button that rewrites it.
@@ -62,15 +63,21 @@ class SummarySettingsSheet extends ConsumerStatefulWidget {
 
 class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
   final ScrollController _scrollController = ScrollController();
-  final TextEditingController _promptCtrl = TextEditingController();
 
   bool _loading = true;
   bool _enabled = true;
-  int _autoInterval = 0;
+  SummaryCompactionSettings _compaction = const SummaryCompactionSettings();
 
   /// Saved prompts, buffered like the rest of the form so the manager sheet
   /// and the picker agree before anything is written.
   List<MemoryPromptPreset> _customPrompts = const [];
+  List<MemoryPromptPreset> _customMergePrompts = const [];
+
+  SummaryPromptSelection _selection = const SummaryPromptSelection();
+
+  /// The chat's own retelling text, kept from before prompts were chosen by
+  /// key. It wins over [_selection] until a preset is picked, which clears it.
+  String? _ownPrompt;
 
   /// Null until the effective preset is resolved, or when it carries no
   /// `summary` block — the injection section stays hidden in both cases.
@@ -82,10 +89,12 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
   /// The saved prompts as they were loaded, by identity: the manager sheet
   /// hands back a new list only when something changed.
   List<MemoryPromptPreset> _loadedPrompts = const [];
+  List<MemoryPromptPreset> _loadedMergePrompts = const [];
 
   /// What was loaded, so Save writes only what actually changed. Writing the
-  /// prompt unconditionally would be harmless; writing the interval or the
-  /// preset back is not — both are global state other chats read.
+  /// prompt unconditionally would be harmless; writing the compaction
+  /// settings or the preset back is not — both are global state other chats
+  /// read.
   late _SummarySettings _loaded;
 
   @override
@@ -97,7 +106,6 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
   @override
   void dispose() {
     _scrollController.dispose();
-    _promptCtrl.dispose();
     super.dispose();
   }
 
@@ -105,8 +113,12 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
     final service = ref.read(summaryServiceProvider);
     final enabled = await service.isSummaryEnabled(widget.sessionId);
     final prompt = await service.getSummaryPrompt(widget.sessionId);
-    final interval = await ref.read(summaryAutoIntervalProvider.future);
+    final compaction = await ref.read(summaryCompactionSettingsProvider.future);
     final customPrompts = await ref.read(summaryCustomPromptsProvider.future);
+    final customMergePrompts = await ref.read(
+      summaryCustomMergePromptsProvider.future,
+    );
+    final selection = await ref.read(summaryPromptSelectionProvider.future);
     // The preset list loads lazily; effectivePresetForChatProvider reads null
     // until it resolves, which would leave the injection section hidden.
     await ref.read(presetListProvider.future);
@@ -119,11 +131,14 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
     );
     final block = preset?.blocks.where((b) => b.id == 'summary').firstOrNull;
 
-    _promptCtrl.text = prompt ?? '';
     setState(() {
       _enabled = enabled;
-      _autoInterval = interval;
+      _compaction = compaction;
+      _ownPrompt = prompt;
+      _selection = selection;
       _customPrompts = customPrompts;
+      _customMergePrompts = customMergePrompts;
+      _loadedMergePrompts = customMergePrompts;
       _presetId = block == null ? null : preset?.id;
       _role = block?.role ?? _role;
       _insertionMode = block?.insertionMode ?? _insertionMode;
@@ -136,8 +151,9 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
 
   _SummarySettings _current() => _SummarySettings(
     enabled: _enabled,
-    autoInterval: _autoInterval,
-    prompt: _promptCtrl.text,
+    compaction: _compaction,
+    ownPrompt: _ownPrompt,
+    selection: _selection,
     role: _role,
     insertionMode: _insertionMode,
     depth: _depth,
@@ -159,24 +175,34 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
         enabled: current.enabled,
       );
     }
-    if (current.prompt.trim() != loaded.prompt.trim()) {
+    if (current.ownPrompt != loaded.ownPrompt) {
       await ref
           .read(summaryServiceProvider)
           .setSummaryPrompt(
             sessionId: widget.sessionId,
-            prompt: current.prompt,
+            prompt: current.ownPrompt,
           );
       ref.read(summaryRevisionProvider.notifier).state++;
     }
-    if (current.autoInterval != loaded.autoInterval) {
+    if (current.selection != loaded.selection) {
       await ref
-          .read(summaryAutoIntervalProvider.notifier)
-          .set(current.autoInterval);
+          .read(summaryPromptSelectionProvider.notifier)
+          .save(current.selection);
+    }
+    if (current.compaction != loaded.compaction) {
+      await ref
+          .read(summaryCompactionSettingsProvider.notifier)
+          .save(current.compaction);
     }
     if (!identical(_customPrompts, _loadedPrompts)) {
       await ref
           .read(summaryCustomPromptsProvider.notifier)
           .save(_customPrompts);
+    }
+    if (!identical(_customMergePrompts, _loadedMergePrompts)) {
+      await ref
+          .read(summaryCustomMergePromptsProvider.notifier)
+          .save(_customMergePrompts);
     }
     await _saveBlockSettings(current, loaded);
     if (!mounted) return;
@@ -256,17 +282,72 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                   MenuGroup(
                     header: 'summary_generation_section'.tr(),
                     items: [
+                      MenuSwitchItem(
+                        label: 'summary_auto_label'.tr(),
+                        description: 'summary_auto_hint'.tr(),
+                        value: _compaction.autoEnabled,
+                        onChanged: (v) => setState(
+                          () => _compaction = _compaction.copyWith(
+                            autoEnabled: v,
+                          ),
+                        ),
+                      ),
                       MenuRangeItem(
-                        label: 'summary_auto_interval_label'.tr(),
-                        description: 'summary_auto_interval_hint'.tr(),
-                        value: _autoInterval.toDouble(),
-                        min: 0,
-                        max: 100,
-                        divisions: 100,
+                        label: 'summary_trigger_label'.tr(),
+                        unit: '%',
+                        description: 'summary_trigger_hint'.tr(),
+                        value: _compaction.triggerPercent.toDouble(),
+                        min: SummaryCompactionSettings.minTriggerPercent
+                            .toDouble(),
+                        max: SummaryCompactionSettings.maxTriggerPercent
+                            .toDouble(),
+                        divisions:
+                            SummaryCompactionSettings.maxTriggerPercent -
+                            SummaryCompactionSettings.minTriggerPercent,
                         decimalPlaces: 0,
                         editableValue: true,
-                        onChanged: (v) =>
-                            setState(() => _autoInterval = v.round()),
+                        onChanged: (v) => setState(
+                          () => _compaction = _compaction.copyWith(
+                            triggerPercent: v.round(),
+                          ),
+                        ),
+                      ),
+                      MenuRangeItem(
+                        label: 'summary_block_target_label'.tr(),
+                        description: 'summary_block_target_hint'.tr(),
+                        value: _compaction.blockTargetTokens.toDouble(),
+                        min: SummaryCompactionSettings.minBlockTargetTokens
+                            .toDouble(),
+                        max: SummaryCompactionSettings.maxBlockTargetTokens
+                            .toDouble(),
+                        divisions: 38,
+                        decimalPlaces: 0,
+                        editableValue: true,
+                        onChanged: (v) => setState(
+                          () => _compaction = _compaction.copyWith(
+                            blockTargetTokens: v.round(),
+                          ),
+                        ),
+                      ),
+                      MenuRangeItem(
+                        label: 'summary_merge_label'.tr(),
+                        unit: '%',
+                        description: 'summary_merge_hint'.tr(),
+                        value: _compaction.mergePercent.toDouble(),
+                        min: SummaryCompactionSettings.minMergePercent
+                            .toDouble(),
+                        max: SummaryCompactionSettings.maxMergePercent
+                            .toDouble(),
+                        divisions:
+                            SummaryCompactionSettings.maxMergePercent -
+                            SummaryCompactionSettings.minMergePercent,
+                        decimalPlaces: 0,
+                        editableValue: true,
+                        onChanged: (v) => setState(
+                          () => _compaction = _compaction.copyWith(
+                            mergePercent: v.round(),
+                          ),
+                        ),
                       ),
                       MenuItem(
                         icon: Icons.cable_rounded,
@@ -274,24 +355,47 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                         subtitle: 'summary_connection_hint'.tr(),
                         onTap: _openApiSettings,
                       ),
+                    ],
+                  ),
+                  MenuGroup(
+                    header: 'summary_prompts_section'.tr(),
+                    items: [
                       MenuSelectorItem(
-                        label: 'summary_prompt_preset_label'.tr(),
-                        currentValue: _presetLabel(),
-                        description: 'summary_prompt_preset_hint'.tr(),
-                        onTap: _pickPreset,
+                        key: const Key('summary_prompt_retell'),
+                        label: 'summary_prompt_retell_label'.tr(),
+                        currentValue: _ownPrompt != null
+                            ? 'summary_prompt_chat_own'.tr()
+                            : _retellPreset().label,
+                        description: _ownPrompt != null
+                            ? 'summary_prompt_chat_own_hint'.tr()
+                            : 'summary_prompt_retell_hint'.tr(),
+                        onTap: _pickRetell,
+                      ),
+                      MenuSelectorItem(
+                        key: const Key('summary_prompt_merge'),
+                        label: 'summary_prompt_merge_label'.tr(),
+                        currentValue: _mergePreset().label,
+                        description: 'summary_prompt_merge_hint'.tr(),
+                        onTap: _pickMerge,
                       ),
                       MenuItem(
-                        icon: Icons.edit_note_rounded,
-                        label: 'memory_prompt_presets_title'.tr(),
-                        onTap: _openPromptManager,
+                        key: const Key('summary_view_current_prompts'),
+                        icon: Icons.visibility_outlined,
+                        label: 'summary_prompt_view_current'.tr(),
+                        onTap: _viewPrompts,
                       ),
-                      MenuFieldItem(
-                        label: 'summary_prompt_label'.tr(),
-                        description: 'summary_prompt_hint'.tr(),
-                        controller: _promptCtrl,
-                        placeholder: defaultSummaryPrompt,
-                        maxLines: 6,
-                        onChanged: (_) => setState(() {}),
+                      MenuItem(
+                        key: const Key('summary_manage_prompts'),
+                        icon: Icons.edit_note_rounded,
+                        label: 'memory_prompt_manage'.tr(),
+                        trailing: Icon(
+                          Icons.chevron_right,
+                          size: 22,
+                          color: context.cs.onSurfaceVariant.withValues(
+                            alpha: 0.5,
+                          ),
+                        ),
+                        onTap: _managePrompts,
                       ),
                     ],
                   ),
@@ -329,28 +433,117 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
     );
   }
 
-  /// Which preset the field still holds — or "custom" once it has been edited
-  /// into something of its own.
-  String _presetLabel() {
-    final preset = SummaryPromptPresets.match(_promptCtrl.text, _customPrompts);
-    return preset?.label ?? 'summary_prompt_preset_custom'.tr();
-  }
+  MemoryPromptPreset _retellPreset() =>
+      SummaryPromptPresets.resolve(_selection.retellKey, _customPrompts);
 
-  /// Picking a preset fills the field with its text. The session stores the
-  /// template itself, so a preset is a starting point rather than a binding —
-  /// edit it afterwards and the picker simply reads "custom".
-  void _pickPreset() {
+  MemoryPromptPreset _mergePreset() => SummaryMergePromptPresets.resolve(
+    _selection.mergeKey,
+    _customMergePrompts,
+  );
+
+  /// Picking a preset also lets go of the chat's own text, if it had one.
+  void _pickRetell() {
     showPromptPresetPicker(
       context,
-      title: 'summary_prompt_preset_label'.tr(),
+      title: 'summary_prompt_retell_label'.tr(),
       builtIn: SummaryPromptPresets.builtIn,
       custom: _customPrompts,
-      activeKey: SummaryPromptPresets.match(
-        _promptCtrl.text,
-        _customPrompts,
-      )?.key,
-      onPick: (preset) => setState(() => _promptCtrl.text = preset.prompt),
+      activeKey: _ownPrompt != null ? null : _retellPreset().key,
+      onPick: (preset) => setState(() {
+        _selection = _selection.copyWith(retellKey: preset.key);
+        _ownPrompt = null;
+      }),
     );
+  }
+
+  void _pickMerge() {
+    showPromptPresetPicker(
+      context,
+      title: 'summary_prompt_merge_label'.tr(),
+      builtIn: SummaryMergePromptPresets.builtIn,
+      custom: _customMergePrompts,
+      activeKey: _mergePreset().key,
+      onPick: (preset) => setState(
+        () => _selection = _selection.copyWith(mergeKey: preset.key),
+      ),
+    );
+  }
+
+  Future<void> _viewPrompts() => GlazeBottomSheet.show<void>(
+    context,
+    title: 'summary_prompt_view_current'.tr(),
+    child: _CurrentPromptsPreview(
+      sections: [
+        (
+          title: 'summary_prompt_retell_label'.tr(),
+          label: _ownPrompt != null
+              ? 'summary_prompt_chat_own'.tr()
+              : _retellPreset().label,
+          prompt: _ownPrompt ?? _retellPreset().prompt,
+        ),
+        (
+          title: 'summary_prompt_merge_label'.tr(),
+          label: _mergePreset().label,
+          prompt: _mergePreset().prompt,
+        ),
+      ],
+    ),
+  );
+
+  /// Two libraries, one entry point: which one to manage is asked first.
+  void _managePrompts() {
+    showGlazePickerSheet(
+      context,
+      title: 'memory_prompt_manage'.tr(),
+      items: [
+        GlazePickerItem(
+          label: 'summary_prompt_retell_label'.tr(),
+          isActive: false,
+          value: false,
+        ),
+        GlazePickerItem(
+          label: 'summary_prompt_merge_label'.tr(),
+          isActive: false,
+          value: true,
+        ),
+      ],
+      onSelect: (merge) => merge == true ? _manageMerge() : _manageRetell(),
+    );
+  }
+
+  Future<void> _manageRetell() async {
+    final result = await GlazeBottomSheet.show<List<MemoryPromptPreset>>(
+      context,
+      title: 'memory_prompt_manage'.tr(),
+      child: CustomPromptManagerSheet(
+        customPrompts: _customPrompts,
+        builtIn: SummaryPromptPresets.builtIn,
+        title: 'summary_prompt_presets_title'.tr(),
+      ),
+    );
+    if (!mounted || result == null) return;
+    setState(() {
+      _customPrompts = result;
+      // A deleted preset leaves the selection on the built-in default.
+      _selection = _selection.copyWith(retellKey: _retellPreset().key);
+    });
+  }
+
+  Future<void> _manageMerge() async {
+    final result = await GlazeBottomSheet.show<List<MemoryPromptPreset>>(
+      context,
+      title: 'memory_prompt_manage'.tr(),
+      child: CustomPromptManagerSheet(
+        customPrompts: _customMergePrompts,
+        builtIn: SummaryMergePromptPresets.builtIn,
+        title: 'summary_merge_prompt_presets_title'.tr(),
+      ),
+    );
+    if (!mounted || result == null) return;
+    setState(() {
+      _customMergePrompts = result;
+      _selection = _selection.copyWith(mergeKey: _mergePreset().key);
+    });
   }
 
   /// Summarizing runs on the Memory slot, the same connection memory drafts
@@ -360,20 +553,6 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
     context,
     focusSection: ApiSettingsSection.memoryBook,
   );
-
-  Future<void> _openPromptManager() async {
-    final result = await GlazeBottomSheet.show<List<MemoryPromptPreset>>(
-      context,
-      title: 'memory_prompt_presets_title'.tr(),
-      child: CustomPromptManagerSheet(
-        customPrompts: _customPrompts,
-        builtIn: SummaryPromptPresets.builtIn,
-        title: 'summary_prompt_presets_title'.tr(),
-      ),
-    );
-    if (!mounted || result == null) return;
-    setState(() => _customPrompts = result);
-  }
 
   static String _roleLabel(String role) => switch (role) {
     'user' => 'User',
@@ -420,18 +599,79 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
 /// One snapshot of the form, for telling a real edit from a reopen.
 class _SummarySettings {
   final bool enabled;
-  final int autoInterval;
-  final String prompt;
+  final SummaryCompactionSettings compaction;
+  final String? ownPrompt;
+  final SummaryPromptSelection selection;
   final String role;
   final String insertionMode;
   final int depth;
 
   const _SummarySettings({
     required this.enabled,
-    required this.autoInterval,
-    required this.prompt,
+    required this.compaction,
+    required this.ownPrompt,
+    required this.selection,
     required this.role,
     required this.insertionMode,
     required this.depth,
   });
+}
+
+/// The prompts summarizing runs on right now, each under what it is for.
+class _CurrentPromptsPreview extends StatelessWidget {
+  final List<({String title, String label, String prompt})> sections;
+
+  const _CurrentPromptsPreview({required this.sections});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 480),
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final section in sections) ...[
+                    Text(
+                      '${section.title} · ${section.label}',
+                      style: TextStyle(
+                        color: context.cs.primary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    SelectableText(
+                      section.prompt.trim(),
+                      style: TextStyle(
+                        color: context.cs.onSurface,
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              GlazeActionButton(
+                icon: Icons.close_rounded,
+                label: 'btn_close'.tr(),
+                onTap: () => Navigator.pop(context),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 }

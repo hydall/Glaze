@@ -70,6 +70,8 @@
 	</array>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Glaze needs access to your photo library to import character card images.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Glaze saves chat images to your photo library.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<!-- The chat WebView is served from a loopback HTTP server

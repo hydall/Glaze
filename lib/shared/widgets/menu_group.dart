@@ -443,6 +443,10 @@ class MenuItem extends StatefulWidget {
   final Widget? trailing;
   final VoidCallback onTap;
 
+  /// Shown under [label], above [subtitle], e.g. a chip marking where the
+  /// row comes from.
+  final Widget? badge;
+
   const MenuItem({
     super.key,
     this.icon,
@@ -451,6 +455,7 @@ class MenuItem extends StatefulWidget {
     this.subtitle,
     this.value,
     this.trailing,
+    this.badge,
     required this.onTap,
   });
 
@@ -497,6 +502,10 @@ class _MenuItemState extends State<MenuItem> {
                       fontWeight: FontWeight.w400,
                     ),
                   ),
+                  if (widget.badge != null) ...[
+                    const SizedBox(height: 4),
+                    widget.badge!,
+                  ],
                   if (widget.subtitle != null &&
                       widget.subtitle!.isNotEmpty) ...[
                     const SizedBox(height: 2),

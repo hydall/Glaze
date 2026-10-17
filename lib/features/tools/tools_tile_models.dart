@@ -152,6 +152,13 @@ List<ToolsTileDef> buildToolsTileCatalog() => [
     icon: Icons.extension_outlined,
     defaultSize: ToolsTileSize.small,
   ),
+  ToolsTileDef(
+    id: 'plugins',
+    titleKey: 'menu_plugins',
+    subtitleKey: 'tools_plugins_subtitle',
+    icon: Icons.widgets_outlined,
+    defaultSize: ToolsTileSize.small,
+  ),
 ];
 
 /// The catalog entry for [id], or null when a stored layout still names a tile

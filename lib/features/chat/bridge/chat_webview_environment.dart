@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
@@ -72,35 +74,108 @@ Future<String?> _deriveMobileJanitorWebViewUA() async {
   }
 }
 
-String? chatWebViewInitialFile() {
+/// Key that gives WebRTC back to a subframe (see [_subframeGuardSource]);
+/// one per app run, handed only to plugins allowed to reach any host.
+final String chatWebViewRtcToken = () {
+  final random = Random.secure();
+  return List.generate(32, (_) => random.nextInt(16).toRadixString(16)).join();
+}();
+
+/// Takes WebRTC away from every frame below the chat page — the plugin
+/// frames and anything they nest. Peer connections reach the network over
+/// STUN/TURN and to any address the page puts in a session description,
+/// which no Content-Security-Policy covers, so a plugin without internet
+/// access could otherwise still talk to a server of its choosing.
+///
+/// Injected by the WebView itself at document start in every frame, before
+/// any page script, so a plugin cannot run first. The constructors are kept
+/// behind `__rtcGate(key)`, which the plugin SDK calls for plugins allowed
+/// to reach any host; it is a bound function, so its source (and the key)
+/// cannot be read back. The chat page keeps WebRTC.
+String _subframeGuardSource() =>
+    '''
+(function () {
+  if (window === window.top) return;
+  var kept = {};
+  Object.getOwnPropertyNames(window).forEach(function (name) {
+    if (!/^(webkit)?RTC/.test(name)) return;
+    kept[name] = window[name];
+    try { delete window[name]; } catch (e) {}
+    if (name in window) {
+      try { Object.defineProperty(window, name, { value: undefined, configurable: false, writable: false }); } catch (e) {}
+    }
+  });
+  var give = function (key) { return key === '$chatWebViewRtcToken' ? kept : null; };
+  Object.defineProperty(window, '__rtcGate', { value: give.bind(null), configurable: true });
+})();
+''';
+
+/// User scripts for both chat WebViews (the visible one and the preloaded
+/// one it may inherit through `keepAlive`).
+UnmodifiableListView<UserScript> chatWebViewUserScripts() =>
+    UnmodifiableListView([
+      UserScript(
+        groupName: 'glaze_subframe_guard',
+        source: _subframeGuardSource(),
+        injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+        forMainFrameOnly: false,
+        allowedOriginRules: {'*'},
+      ),
+    ]);
+
+/// The chat page's own page; the plugin layer passes
+/// [kPluginLayerPage] for [page] in the functions below.
+const String kChatWebViewPage = 'index.html';
+
+/// The plugin layer's page, next to the chat page (see `PluginLayer`).
+const String kPluginLayerPage = 'plugin_layer.html';
+
+String? chatWebViewInitialFile([String page = kChatWebViewPage]) {
   if (_chatWebViewAssetBaseUrl != null) return null;
   if (chatWebViewUsesAndroidAssetLoader()) return null;
-  return 'assets/chat_webview/index.html';
+  return 'assets/chat_webview/$page';
 }
 
-URLRequest? chatWebViewInitialUrlRequest() {
+URLRequest? chatWebViewInitialUrlRequest([String page = kChatWebViewPage]) {
   final baseUrl = _chatWebViewAssetBaseUrl;
   if (baseUrl != null) {
-    return URLRequest(url: WebUri.uri(baseUrl.uriValue.resolve('index.html')));
+    return URLRequest(url: WebUri.uri(baseUrl.uriValue.resolve(page)));
   }
-  final androidUrl = chatWebViewAndroidAssetUrl();
+  final androidUrl = chatWebViewAndroidAssetUrl(page);
   if (androidUrl != null) {
     return URLRequest(url: WebUri(androidUrl));
   }
   return null;
 }
 
-NavigationActionPolicy chatWebViewNavigationPolicy(WebUri? url) {
+/// Whether the chat WebView may go to [url]. Only the page itself loads in
+/// the main frame. A frame inside it may only take inline content
+/// (`about:srcdoc`, `about:blank`): message HTML and plugin frames are all
+/// built that way. iOS asks about those too, and turning them down left
+/// every such frame empty there.
+NavigationActionPolicy chatWebViewNavigationPolicy(
+  WebUri? url, {
+  bool mainFrame = true,
+  String page = kChatWebViewPage,
+}) {
   if (url == null) return NavigationActionPolicy.CANCEL;
 
-  final initialUrl = chatWebViewInitialUrlRequest()?.url;
+  if (!mainFrame) {
+    return url.scheme == 'about' &&
+            (url.path == 'srcdoc' || url.path == 'blank') &&
+            !url.hasQuery
+        ? NavigationActionPolicy.ALLOW
+        : NavigationActionPolicy.CANCEL;
+  }
+
+  final initialUrl = chatWebViewInitialUrlRequest(page)?.url;
   if (initialUrl != null && url == initialUrl) {
     return NavigationActionPolicy.ALLOW;
   }
 
   if (initialUrl == null &&
       url.scheme == 'file' &&
-      url.path.endsWith('/assets/chat_webview/index.html')) {
+      url.path.endsWith('/assets/chat_webview/$page')) {
     return NavigationActionPolicy.ALLOW;
   }
 

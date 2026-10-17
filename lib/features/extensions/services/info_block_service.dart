@@ -20,14 +20,17 @@ import '../models/block_config.dart';
 import '../models/extension_preset.dart';
 import '../models/info_block.dart';
 import '../models/extension_context_policy.dart';
+import 'blocks/block_grouping.dart';
 import 'blocks/block_llm_runner.dart';
 import 'blocks/context_item_builder.dart';
 import 'block_content_extractor.dart';
+import 'block_request_macros.dart';
 import 'block_context_builder.dart';
 import 'ext_blocks_prompt_injection.dart';
 import 'macro_expander.dart';
 import 'extension_context_assembler.dart';
 import 'runtime_prompt_injection_service.dart';
+import '../models/profile_params.dart';
 
 final infoBlockServiceProvider = Provider<InfoBlockService>(
   (ref) => InfoBlockService(ref),
@@ -72,6 +75,11 @@ class InfoBlockService {
   final Ref _ref;
   final BlockLlmRunner _llmRunner;
 
+  /// A grouped request's reply, shared by every block of the group, per run.
+  /// Keyed by the run's cancel token so it goes away with the run.
+  final Expando<Map<String, Future<({String? content, String? error})>>>
+  _groupReplies = Expando();
+
   /// Generates the text content for a single infoblock block.
   /// Returns `(content, error)` — on success `error` is null; on failure
   /// `content` is null and `error` describes what went wrong.
@@ -93,8 +101,83 @@ class InfoBlockService {
     int swipeId = 0,
     CancelToken? cancelToken,
     void Function(String partial)? onStreamUpdate,
+    Map<String, String> dynamicMacros = const {},
+    String? leadingSystemPrompt,
+    bool returnRawResponse = false,
+    List<BlockConfig> group = const [],
+    String? systemPromptOverride,
   }) async {
     if (cancelToken?.isCancelled == true) return (content: null, error: null);
+
+    // `{{ExtBlocks::name}}` in the block's own prompt, as the original
+    // resolves it there too. Read only when something asks for it.
+    if (_mentionsBlockMacro([blockConfig, ...group])) {
+      final states = await _ref
+          .read(extBlocksPromptInjectionProvider)
+          .blockMacroValues(sessionId: sessionId, messages: messages);
+      dynamicMacros = {
+        for (final e in states.entries) ...{
+          'ExtBlocks::${e.key}': e.value,
+          'ExtBlocks-GetBlockByName::${e.key}': e.value,
+        },
+        ...dynamicMacros,
+      };
+    }
+
+    // A block grouped with others (see `blockGroups`) shares one request with
+    // them, as in the original: the group's first block asks for all of them,
+    // and each takes its own tag out of the reply.
+    if (group.length > 1 && cancelToken != null) {
+      final replies = _groupReplies[cancelToken] ??= {};
+      final key = '$messageId#$swipeId:${group.map((b) => b.id).join(',')}';
+      final reply = await (replies[key] ??= generateSingleBlockContent(
+        sessionId: sessionId,
+        messageId: messageId,
+        messages: messages,
+        blockConfig: group.first,
+        character: character,
+        persona: persona,
+        personaPrompt: personaPrompt,
+        previousOutput: null,
+        sessionVars: sessionVars,
+        globalVars: globalVars,
+        contextPolicy: group.first.contextPolicy,
+        mainModelContextSnapshot: mainModelContextSnapshot,
+        personaModel: personaModel,
+        preset: preset,
+        swipeId: swipeId,
+        cancelToken: cancelToken,
+        dynamicMacros: dynamicMacros,
+        returnRawResponse: true,
+        systemPromptOverride: upstreamBlocksHeader(
+          group,
+          _macroContext(
+            character: character,
+            persona: persona,
+            personaDescription: personaModel?.prompt ?? personaPrompt,
+            dynamicMacros: dynamicMacros,
+          ),
+        ),
+      ));
+      final raw = reply.content;
+      if (raw == null) return reply;
+      final template = _resolveTemplate(blockConfig);
+      final content = resolveBlockContent(
+        rawResponse: _withoutCodeFence(raw),
+        blockConfig: blockConfig,
+        resolvedTemplate: template,
+      );
+      // The reply as a whole belongs to the group; a block whose tag is not in
+      // it has nothing of its own.
+      final tag = blockTagName(blockConfig, template);
+      if (content == null || (template.isNotEmpty && !raw.contains('<$tag'))) {
+        return (
+          content: null,
+          error: 'LLM returned no <$tag> block in the grouped reply',
+        );
+      }
+      return (content: content, error: null);
+    }
 
     // Pull this block's own prior outputs (same name, earlier messages) so the
     // model can continue/update the existing state instead of regenerating from
@@ -113,13 +196,34 @@ class InfoBlockService {
     // which is what the image and JS types used to get from a type check.
     final resolvedTemplate = _resolveTemplate(blockConfig);
     final personaDescription = personaModel?.prompt ?? personaPrompt;
-    final systemContent = _buildSystemMessage(
-      blockConfig: blockConfig,
-      template: resolvedTemplate,
-      character: character,
-      persona: persona,
-      personaDescription: personaDescription,
-    );
+    // A block with a context list is the original's own kind, and is asked
+    // the way the original asks it.
+    final hasContextItems = blockConfig.context.any((item) => !item.disabled);
+    final blockSystemContent =
+        systemPromptOverride ??
+        (hasContextItems
+            ? upstreamBlocksHeader(
+                [blockConfig],
+                _macroContext(
+                  character: character,
+                  persona: persona,
+                  personaDescription: personaDescription,
+                  dynamicMacros: dynamicMacros,
+                ),
+              )
+            : _buildSystemMessage(
+                blockConfig: blockConfig,
+                template: resolvedTemplate,
+                character: character,
+                persona: persona,
+                personaDescription: personaDescription,
+                dynamicMacros: dynamicMacros,
+              ));
+    // A caller's own preamble (a rewrite's diff protocol) leads the block's
+    // instructions, the way the original prepends it to the request.
+    final systemContent = leadingSystemPrompt == null
+        ? blockSystemContent
+        : '$leadingSystemPrompt\n\n$blockSystemContent';
     final supplementalContent = _buildSupplementalMessage(
       blockConfig: blockConfig,
       character: character,
@@ -127,6 +231,7 @@ class InfoBlockService {
       personaDescription: personaDescription,
       previousOutput: previousOutput,
       previousBlocks: previousBlocks,
+      dynamicMacros: dynamicMacros,
     );
     final canUseSnapshot = contextPolicy.useMainModelContext
         ? mainModelContextSnapshot != null
@@ -162,7 +267,6 @@ class InfoBlockService {
     // An explicit context list is the original extension's own way of saying
     // what to send; when the block carries one it is authoritative and the
     // policy/snapshot assembly is skipped, exactly as in the original.
-    final hasContextItems = blockConfig.context.any((item) => !item.disabled);
     var assembly = hasContextItems
         ? await _assembleFromContextItems(
             sessionId: sessionId,
@@ -175,6 +279,7 @@ class InfoBlockService {
             globalVars: globalVars,
             systemInstruction: systemContent,
             supplementalInstruction: supplementalContent,
+            dynamicMacros: dynamicMacros,
           )
         : const ExtensionContextAssembler().assemble(
             policy: contextPolicy,
@@ -230,11 +335,19 @@ class InfoBlockService {
     // editor labels the empty row exactly that way — so an empty id must mean
     // "follow the selection", never "misconfigured".
     final apiConfigs = await _ref.read(apiListProvider.future);
-    final apiConfig = _resolveApiConfig(
+    // The block's `api_preset` picks the generation parameters it runs with.
+    final profile = profileParamsFor(
+      preset?.profileParams ?? const {},
+      blockConfig.apiPreset,
+    );
+    final resolvedApiConfig = _resolveApiConfig(
       blockConfig: blockConfig,
       preset: preset,
       apiConfigs: apiConfigs,
     );
+    final apiConfig = resolvedApiConfig == null
+        ? null
+        : profile.applyTo(resolvedApiConfig);
     if (apiConfig == null) {
       debugPrint(
         '[InfoBlockService] No API config for block "${blockConfig.name}"',
@@ -247,14 +360,28 @@ class InfoBlockService {
 
     if (cancelToken?.isCancelled == true) return (content: null, error: null);
 
+    // The original's `checkAllMacros`: world info and the main prompt, filled
+    // into the finished request.
+    final requestMessages = await _ref
+        .read(blockRequestMacrosProvider)
+        .apply(
+          assembly.messages,
+          character: character,
+          sessionId: sessionId,
+          userName: personaModel?.name ?? persona ?? 'User',
+        );
+    if (cancelToken?.isCancelled == true) return (content: null, error: null);
+
     final callId = 'extblock:${blockConfig.id}:$messageId#$swipeId';
     String? rawResponse;
     try {
       rawResponse = await _callLLM(
         apiConfig: apiConfig,
         blockConfig: blockConfig,
-        model: blockConfig.model.isNotEmpty ? blockConfig.model : preset?.apiModel,
-        requestMessages: assembly.messages,
+        model: blockConfig.model.isNotEmpty
+            ? blockConfig.model
+            : preset?.apiModel,
+        requestMessages: profile.withConfirmation(requestMessages),
         charName: character?.name,
         userName: personaModel?.name ?? persona ?? 'User',
         cancelToken: cancelToken,
@@ -292,6 +419,9 @@ class InfoBlockService {
     if (rawResponse == null || rawResponse.trim().isEmpty) {
       return (content: null, error: 'LLM returned empty response');
     }
+    if (returnRawResponse) {
+      return (content: rawResponse.trim(), error: null);
+    }
 
     final content = resolveBlockContent(
       rawResponse: _withoutCodeFence(rawResponse),
@@ -321,11 +451,13 @@ class InfoBlockService {
     Character? character,
     String? persona,
     String? personaDescription,
+    Map<String, String> dynamicMacros = const {},
   }) {
     return MacroContext(
       character: character,
       persona: persona,
       personaDescription: personaDescription,
+      dynamicMacros: dynamicMacros,
     );
   }
 
@@ -417,6 +549,7 @@ class InfoBlockService {
     required Map<String, String> globalVars,
     required String systemInstruction,
     required String supplementalInstruction,
+    Map<String, String> dynamicMacros = const {},
   }) async {
     final blocksByMessageId = await _loadBlocksByMessageId(sessionId);
     final promptRegexes = await _ref.read(activeRegexesProvider.future);
@@ -430,19 +563,38 @@ class InfoBlockService {
       globalVars: globalVars,
       promptRegexes: promptRegexes,
       blocksByMessageId: blocksByMessageId,
+      dynamicMacros: dynamicMacros,
     );
     if (itemMessages.isEmpty) {
       return const ExtensionContextAssembly(messages: [], reconstructed: true);
     }
+    // The original puts its instruction at the head of the first context
+    // message when that one is a system message, and ahead of it otherwise.
+    final instruction = systemInstruction.trim();
+    final leadsWithSystem =
+        instruction.isNotEmpty && itemMessages.first['role'] == 'system';
     final assembled = <Map<String, dynamic>>[
-      if (systemInstruction.trim().isNotEmpty)
-        {'role': 'system', 'content': systemInstruction},
-      ...itemMessages,
+      if (leadsWithSystem)
+        {
+          ...itemMessages.first,
+          'content': '$instruction\n\n${itemMessages.first['content']}',
+        }
+      else if (instruction.isNotEmpty)
+        {'role': 'system', 'content': instruction},
+      ...itemMessages.skip(leadsWithSystem ? 1 : 0),
       if (supplementalInstruction.trim().isNotEmpty)
         {'role': 'user', 'content': supplementalInstruction},
     ];
     return ExtensionContextAssembly(messages: assembled, reconstructed: true);
   }
+
+  static bool _mentionsBlockMacro(List<BlockConfig> blocks) => blocks.any(
+    (b) =>
+        '${b.prompt}${b.template}${b.contextSystemPrompt}'
+                '${b.context.map((item) => item.text).join()}'
+            .toLowerCase()
+            .contains('{{extblocks'),
+  );
 
   /// Every stored block of the session, keyed by the message that owns it —
   /// the lookup the `previous_block` and `last_messages_by_block` items need.
@@ -481,15 +633,16 @@ class InfoBlockService {
     Character? character,
     String? persona,
     String? personaDescription,
+    Map<String, String> dynamicMacros = const {},
   }) {
-    final instructions = expand(
-      blockConfig.prompt.trim(),
-      _macroContext(
-        character: character,
-        persona: persona,
-        personaDescription: personaDescription,
-      ),
+    final macros = _macroContext(
+      character: character,
+      persona: persona,
+      personaDescription: personaDescription,
+      dynamicMacros: dynamicMacros,
     );
+    final instructions = expand(blockConfig.prompt.trim(), macros);
+    template = expand(template, macros);
 
     // No template means the block's prompt is the whole instruction. An image
     // agent's prompt is written that way — it fixes its own output shape — and
@@ -542,6 +695,7 @@ class InfoBlockService {
     String? personaDescription,
     required String? previousOutput,
     List<InfoBlock> previousBlocks = const [],
+    Map<String, String> dynamicMacros = const {},
   }) {
     final buffer = StringBuffer();
 
@@ -552,6 +706,7 @@ class InfoBlockService {
           character: character,
           persona: persona,
           personaDescription: personaDescription,
+          dynamicMacros: dynamicMacros,
         ),
       );
       buffer.writeln(sysPrompt);

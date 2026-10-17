@@ -30,6 +30,8 @@ import '../../extensions/models/extension_preset.dart';
 import '../../extensions/models/extensions_settings.dart';
 import '../../extensions/providers/extension_presets_provider.dart';
 import '../../extensions/providers/extensions_settings_provider.dart';
+import '../../plugins/providers/plugin_library_provider.dart';
+import '../../plugins/widgets/plugin_action_cards.dart';
 
 class MagicDrawerPanel extends ConsumerStatefulWidget {
   final String charId;
@@ -317,8 +319,22 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
                       .firstOrNull
                       ?.name ??
                   'No preset',
+      'plugins' => _pluginsStatus(),
       _ => null,
     };
+  }
+
+  /// How many installed plugins are on, read during build so the card
+  /// follows a switch flipped in the sheet.
+  String? _pluginsStatus() {
+    final plugins = ref.watch(pluginLibraryProvider).value;
+    if (plugins == null) return null;
+    return 'plugins_drawer_status'.tr(
+      namedArgs: {
+        'on': '${plugins.where((x) => x.enabled).length}',
+        'total': '${plugins.length}',
+      },
+    );
   }
 
   Future<void> _removeItem(String id) async {
@@ -428,6 +444,9 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
       if (prev != next) _scheduleRefresh();
     });
     ref.listen(activePersonaIdProvider, (prev, next) {
+      if (prev != next) _scheduleRefresh();
+    });
+    ref.listen(personaConnectionsProvider, (prev, next) {
       if (prev != next) _scheduleRefresh();
     });
     ref.listen(lorebookActivationsProvider, (prev, next) {
@@ -597,6 +616,17 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
             ),
           );
         }),
+        // Sidebar actions of enabled plugins.
+        ...pluginActionCards(
+          context,
+          ref,
+          charId: widget.charId,
+          kind: PluginActionKind.tools,
+          itemWidth: itemWidth,
+          listRow: list,
+          editing: widget.editing,
+          beforeRun: widget.onClose,
+        ),
         // The add tile is always the last cell rather than a header
         // button revealed by edit mode: a "+" sitting in the grid is
         // how a new user finds out the row is theirs to change.

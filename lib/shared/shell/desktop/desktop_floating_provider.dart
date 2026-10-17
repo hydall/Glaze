@@ -18,6 +18,11 @@ const desktopFloatingViews = <String, String?>{
   'theme-settings': '/menu/themes',
   'theme-editor': null,
   'third-party-providers': null,
+  'plugins': null,
+  // `?id=<plugin>`.
+  'plugin-detail': null,
+  // `?id=<plugin>`.
+  'plugin-history': null,
   // `?id=<character>`, or `?new=<id>` for a character not yet created.
   'character-editor': null,
   // `?preset=<id>&block=<id>`: works on the preset editor it was opened from.

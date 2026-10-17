@@ -27,3 +27,16 @@ enum InjectionPosition {
   @JsonValue(2)
   beforeMainPrompt,
 }
+
+/// How an injected block reaches the main request.
+enum InjectionTarget {
+  /// Appended to the last [BlockConfig.injectLastN] replies in the history,
+  /// each carrying its own result. This app's own model.
+  @JsonValue('history')
+  history,
+
+  /// The latest result as one prompt block, placed by [InjectionRole],
+  /// [InjectionPosition] and depth — the original extension's model.
+  @JsonValue('prompt')
+  prompt,
+}

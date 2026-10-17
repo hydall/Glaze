@@ -233,24 +233,32 @@ void editBlockSheet(
   WidgetRef ref,
   ExtensionPreset preset,
   BlockConfig block,
-) {
+) => showBlockEditSheet(
+  context,
+  block,
+  onSave: (updated) {
+    final newPreset = preset.copyWith(
+      blocks: [
+        for (final b in preset.blocks)
+          if (b.id == updated.id) updated else b,
+      ],
+    );
+    ref.read(extensionPresetsProvider.notifier).update(newPreset);
+  },
+);
+
+/// Opens one block's settings as a sheet; [onSave] gets the edited block.
+void showBlockEditSheet(
+  BuildContext context,
+  BlockConfig block, {
+  required ValueChanged<BlockConfig> onSave,
+}) {
   showGlazeSheet<void>(
     context: context,
     isScrollControlled: true,
     useRootNavigator: true,
     useSafeArea: true,
     backgroundColor: Colors.transparent,
-    builder: (ctx) => BlockEditDialog(
-      block: block,
-      onSave: (updated) {
-        final newPreset = preset.copyWith(
-          blocks: [
-            for (final b in preset.blocks)
-              if (b.id == updated.id) updated else b,
-          ],
-        );
-        ref.read(extensionPresetsProvider.notifier).update(newPreset);
-      },
-    ),
+    builder: (ctx) => BlockEditDialog(block: block, onSave: onSave),
   );
 }

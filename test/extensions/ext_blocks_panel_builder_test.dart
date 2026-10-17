@@ -22,6 +22,7 @@ const _messageId = 'm1';
 /// message, whose freezed default is 0 even when its blocks were stored with
 /// the legacy -1 binding.
 const ExtBlocksPanelKey _messageKey = (
+  charId: null,
   sessionId: _sessionId,
   messageId: _messageId,
   swipeId: 0,
@@ -58,63 +59,73 @@ void main() {
     String blockType = 'infoblock',
     BlockRunStatus status = BlockRunStatus.done,
   }) async {
-    await container.read(infoBlocksRepoProvider).insert(
-      InfoBlock(
-        id: 'row-$blockId',
-        sessionId: _sessionId,
-        messageId: _messageId,
-        agentSwipeId: agentSwipeId,
-        blockId: blockId,
-        blockName: blockId,
-        blockType: blockType,
-        content: 'stored',
-        createdAt: 1,
-        status: status,
-      ),
-    );
+    await container
+        .read(infoBlocksRepoProvider)
+        .insert(
+          InfoBlock(
+            id: 'row-$blockId',
+            sessionId: _sessionId,
+            messageId: _messageId,
+            agentSwipeId: agentSwipeId,
+            blockId: blockId,
+            blockName: blockId,
+            blockType: blockType,
+            content: 'stored',
+            createdAt: 1,
+            status: status,
+          ),
+        );
     await container.read(infoBlocksProvider(_sessionId).notifier).refresh();
   }
 
   List<String> statusesOf(ProviderContainer container) => [
-    for (final block in container.read(extBlocksPanelBlocksProvider(_messageKey)))
+    for (final block in container.read(
+      extBlocksPanelBlocksProvider(_messageKey),
+    ))
       '${block['blockId']}:${block['status']}',
   ];
 
-  test('running a pending block keeps its legacy-bound siblings visible', () async {
-    final container = await containerWith(const [
-      BlockConfig(id: 'b1', name: 'First', order: 0),
-      BlockConfig(id: 'b2', name: 'Second', order: 1),
-    ]);
-    // The first block ran through the no-cleaner path, so it is stored at -1
-    // while the message itself carries agentSwipeId 0.
-    await storeRow(container, blockId: 'b1', agentSwipeId: -1);
+  test(
+    'running a pending block keeps its legacy-bound siblings visible',
+    () async {
+      final container = await containerWith(const [
+        BlockConfig(id: 'b1', name: 'First', order: 0),
+        BlockConfig(id: 'b2', name: 'Second', order: 1),
+      ]);
+      // The first block ran through the no-cleaner path, so it is stored at -1
+      // while the message itself carries agentSwipeId 0.
+      await storeRow(container, blockId: 'b1', agentSwipeId: -1);
 
-    expect(statusesOf(container), ['b1:done', 'b2:pending']);
+      expect(statusesOf(container), ['b1:done', 'b2:pending']);
 
-    final notifier = container.read(infoBlocksProvider(_sessionId).notifier);
-    final binding = notifier.resolveAgentSwipeId(
-      _messageId,
-      agentSwipeId: _messageKey.agentSwipeId,
-    );
-    expect(binding, -1);
+      final notifier = container.read(infoBlocksProvider(_sessionId).notifier);
+      final binding = notifier.resolveAgentSwipeId(
+        _messageId,
+        agentSwipeId: _messageKey.agentSwipeId,
+      );
+      expect(binding, -1);
 
-    // The second block's own first run writes its row under the resolved
-    // binding, so both blocks stay in the panel.
-    await storeRow(container, blockId: 'b2', agentSwipeId: binding);
-    expect(statusesOf(container), ['b1:done', 'b2:done']);
-  });
+      // The second block's own first run writes its row under the resolved
+      // binding, so both blocks stay in the panel.
+      await storeRow(container, blockId: 'b2', agentSwipeId: binding);
+      expect(statusesOf(container), ['b1:done', 'b2:done']);
+    },
+  );
 
-  test('resolveAgentSwipeId keeps the exact binding when rows already use it', () async {
-    final container = await containerWith(const [
-      BlockConfig(id: 'b1', name: 'First'),
-    ]);
-    final notifier = container.read(infoBlocksProvider(_sessionId).notifier);
+  test(
+    'resolveAgentSwipeId keeps the exact binding when rows already use it',
+    () async {
+      final container = await containerWith(const [
+        BlockConfig(id: 'b1', name: 'First'),
+      ]);
+      final notifier = container.read(infoBlocksProvider(_sessionId).notifier);
 
-    expect(notifier.resolveAgentSwipeId(_messageId, agentSwipeId: 0), 0);
+      expect(notifier.resolveAgentSwipeId(_messageId, agentSwipeId: 0), 0);
 
-    await storeRow(container, blockId: 'b1', agentSwipeId: 0);
-    expect(notifier.resolveAgentSwipeId(_messageId, agentSwipeId: 0), 0);
-  });
+      await storeRow(container, blockId: 'b1', agentSwipeId: 0);
+      expect(notifier.resolveAgentSwipeId(_messageId, agentSwipeId: 0), 0);
+    },
+  );
 
   test('only blocks that can run here get a pending placeholder', () async {
     final container = await containerWith(const [
@@ -147,16 +158,22 @@ void main() {
     expect(statusesOf(container), ['assistant:pending', 'user:done']);
   });
 
-  test('run-all stays hidden when only a manual-only block is unfinished', () async {
-    final container = await containerWith(const [
-      BlockConfig(id: 'auto', name: 'Auto', order: 0),
-      BlockConfig(id: 'manual', name: 'Manual', manualOnly: true, order: 1),
-    ]);
-    await storeRow(container, blockId: 'auto', agentSwipeId: -1);
+  test(
+    'run-all stays hidden when only a manual-only block is unfinished',
+    () async {
+      final container = await containerWith(const [
+        BlockConfig(id: 'auto', name: 'Auto', order: 0),
+        BlockConfig(id: 'manual', name: 'Manual', manualOnly: true, order: 1),
+      ]);
+      await storeRow(container, blockId: 'auto', agentSwipeId: -1);
 
-    expect(statusesOf(container), ['auto:done', 'manual:pending']);
-    expect(container.read(extBlocksPanelCanRunAllProvider(_messageKey)), isFalse);
-  });
+      expect(statusesOf(container), ['auto:done', 'manual:pending']);
+      expect(
+        container.read(extBlocksPanelCanRunAllProvider(_messageKey)),
+        isFalse,
+      );
+    },
+  );
 
   test('run-all shows up while an automatic block is unfinished', () async {
     final container = await containerWith(const [
@@ -165,6 +182,33 @@ void main() {
     ]);
     await storeRow(container, blockId: 'auto', agentSwipeId: -1);
 
-    expect(container.read(extBlocksPanelCanRunAllProvider(_messageKey)), isTrue);
+    expect(
+      container.read(extBlocksPanelCanRunAllProvider(_messageKey)),
+      isTrue,
+    );
+  });
+
+  test(
+    'a hidden block stays out of the panel even with a stored row',
+    () async {
+      final container = await containerWith(const [
+        BlockConfig(id: 'shown', name: 'Shown', order: 0),
+        BlockConfig(id: 'hidden', name: 'Hidden', hideDisplay: true, order: 1),
+      ]);
+      await storeRow(container, blockId: 'hidden', agentSwipeId: -1);
+
+      expect(statusesOf(container), ['shown:pending']);
+    },
+  );
+
+  test('a keyword- or period-gated block is not shown as pending', () async {
+    final container = await containerWith(const [
+      BlockConfig(id: 'every', name: 'Every', order: 0),
+      BlockConfig(id: 'keyword', name: 'Keyword', keyword: 'x', order: 1),
+      BlockConfig(id: 'sparse', name: 'Sparse', period: 4, order: 2),
+      BlockConfig(id: 'both', name: 'Both', triggerOnUser: true, order: 3),
+    ]);
+
+    expect(statusesOf(container), ['every:pending', 'both:pending']);
   });
 }

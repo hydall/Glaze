@@ -6,9 +6,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app.dart';
 import '../../core/services/backup/backup_cancel.dart';
+import '../../core/services/backup/backup_secrets.dart';
 import '../../core/services/backup/tavo_backup_importer.dart';
 import '../../core/services/backup_service.dart';
 import '../../core/services/onboarding_service.dart';
+import '../../core/state/shared_prefs_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_spinner.dart';
@@ -29,6 +31,7 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
   static const int _totalStages = 5;
 
   bool _isExporting = false;
+  bool _includeApiKeys = false;
   bool _isImporting = false;
   bool _importComplete = false;
   bool _hasCleared = false;
@@ -38,6 +41,26 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
   bool get _isBusy => _isExporting || (_isImporting && !_importComplete);
 
   bool get _canCancel => _isImporting && !_hasCleared;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadIncludeApiKeys();
+  }
+
+  Future<void> _loadIncludeApiKeys() async {
+    final prefs = await ref.read(sharedPreferencesProvider.future);
+    if (!mounted) return;
+    setState(() {
+      _includeApiKeys = prefs.get(BackupSecrets.includeApiKeysPrefKey) == true;
+    });
+  }
+
+  Future<void> _setIncludeApiKeys(bool value) async {
+    setState(() => _includeApiKeys = value);
+    final prefs = await ref.read(sharedPreferencesProvider.future);
+    await prefs.setBool(BackupSecrets.includeApiKeysPrefKey, value);
+  }
 
   void _blockClose() {
     GlazeToast.show(
@@ -110,6 +133,8 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
     return _NormalView(
       key: const ValueKey('normal'),
       isExporting: _isExporting,
+      includeApiKeys: _includeApiKeys,
+      onIncludeApiKeysChanged: _setIncludeApiKeys,
       onExport: _performExport,
       onImport: _triggerImport,
       showExport: !widget.fromOnboarding,
@@ -120,7 +145,7 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
     setState(() => _isExporting = true);
     try {
       final service = await ref.read(backupServiceProvider.future);
-      final path = await service.exportBackup();
+      final path = await service.exportBackup(includeApiKeys: _includeApiKeys);
 
       if (path.isEmpty) return; // user cancelled the save dialog
       if (mounted) {
@@ -319,6 +344,8 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
 
 class _NormalView extends StatelessWidget {
   final bool isExporting;
+  final bool includeApiKeys;
+  final ValueChanged<bool> onIncludeApiKeysChanged;
   final VoidCallback onExport;
   final VoidCallback onImport;
 
@@ -330,6 +357,8 @@ class _NormalView extends StatelessWidget {
   const _NormalView({
     super.key,
     required this.isExporting,
+    required this.includeApiKeys,
+    required this.onIncludeApiKeysChanged,
     required this.onExport,
     required this.onImport,
     required this.showExport,
@@ -386,10 +415,70 @@ class _NormalView extends StatelessWidget {
                     ),
                   ],
                 ),
+                _IncludeKeysToggle(
+                  value: includeApiKeys,
+                  onChanged: isExporting ? null : onIncludeApiKeysChanged,
+                ),
               ],
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+class _IncludeKeysToggle extends StatelessWidget {
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+
+  const _IncludeKeysToggle({required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    final onChanged = this.onChanged;
+    return MouseRegion(
+      cursor: onChanged == null
+          ? SystemMouseCursors.basic
+          : SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: onChanged == null ? null : () => onChanged(!value),
+        child: Container(
+          padding: const EdgeInsets.only(left: 4, top: 4, bottom: 4),
+          color: Colors.transparent,
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'label_backup_include_keys'.tr(),
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w500,
+                        color: context.cs.onSurface,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'desc_backup_include_keys'.tr(),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: context.cs.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Switch(
+                value: value,
+                onChanged: onChanged,
+                activeThumbColor: context.colors.accent,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

@@ -20,6 +20,7 @@ import '../../extensions/providers/preset_permissions_provider.dart';
 import '../../extensions/services/audio_bridge_service.dart';
 import '../../extensions/services/command_registry.dart';
 import '../../extensions/services/connection_profile_resolver.dart';
+import '../../extensions/services/ext_blocks_script_api.dart';
 import '../../extensions/services/generation_dispatcher.dart';
 import '../../extensions/services/js_bridge_service.dart';
 import '../../extensions/services/js_bridge_toast_controller.dart';
@@ -27,6 +28,7 @@ import '../../extensions/services/runtime_prompt_injection_service.dart';
 import '../../extensions/services/trigger_generation_handler.dart';
 import '../../extensions/state/message_variables_notifier.dart';
 import '../../settings/api_list_provider.dart';
+import '../../extensions/models/profile_params.dart';
 
 /// Owns the chat WebView's bridge-side dependencies: the [JsBridgeService]
 /// handler implementations (generateText / injectPrompt / uninjectPrompt /
@@ -122,6 +124,15 @@ class ChatWebViewBridgeHost {
       executeCommand: (command, args, context) =>
           _executeBridgeCommand(commandRegistry, command, args, context),
       showToast: _showBridgeToast,
+      extBlocks: (method, params, context) {
+        _ensureActive();
+        return ref.read(extBlocksScriptApiProvider).handle(method, params, {
+          ...context,
+          if (context['sessionId'] == null) 'sessionId': _activeSessionId(),
+          if (context['characterId'] == null)
+            'characterId': _activeCharacterId(),
+        });
+      },
     );
     if (!active) return null;
     return bridge;
@@ -168,9 +179,11 @@ class ChatWebViewBridgeHost {
       transport.stream(
         request: ChatTransportRequest.fromApiConfig(
           apiConfig,
-          messages: [
-            {'role': 'user', 'content': prompt},
-          ],
+          // The profile's `confirmation_jb` turns, as for a block's request.
+          messages: profileParamsFor(preset?.profileParams ?? const {}, profile)
+              .withConfirmation([
+                {'role': 'user', 'content': prompt},
+              ]),
           stream: false,
           sessionId: _activeSessionId(),
         ),

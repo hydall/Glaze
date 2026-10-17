@@ -2,6 +2,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/state/character_provider.dart';
 import '../../../core/utils/id_generator.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
@@ -18,6 +19,7 @@ import '../providers/extensions_settings_provider.dart';
 import '../screens/preset_editor/sections/blocks_section.dart';
 import '../screens/preset_editor/sections/profiles_section.dart';
 import '../services/block_transfer_service.dart';
+import '../services/card_blocks.dart';
 import 'ext_blocks_permissions_sheet.dart';
 
 /// Which way the add-block sheet was answered.
@@ -30,7 +32,11 @@ enum _AddBlockChoice { import, create }
 /// lives behind the pill. There is no master on/off switch: the feature is
 /// always available, and which preset runs is the only choice to make.
 class ExtBlocksSettingsSheet extends ConsumerWidget {
-  const ExtBlocksSettingsSheet({super.key});
+  const ExtBlocksSettingsSheet({this.charId, super.key});
+
+  /// The chat's character, when the panel is opened from a chat: its card's
+  /// own blocks are listed under the preset's.
+  final String? charId;
 
   static const _transfer = BlockTransferService();
 
@@ -104,9 +110,21 @@ class ExtBlocksSettingsSheet extends ConsumerWidget {
             else ...[
               ProfilesSection(preset: activePreset),
               _BlocksGroup(
-                preset: activePreset,
-                onAdd: () => _addBlock(context, ref, activePreset),
+                header: 'extblocks_blocks_section'.tr(),
+                blocks: activePreset.blocks,
+                save: (blocks) => ref
+                    .read(extensionPresetsProvider.notifier)
+                    .update(activePreset.copyWith(blocks: blocks)),
               ),
+              if (charId case final charId?)
+                _BlocksGroup(
+                  header: 'extblocks_card_blocks_section'.tr(),
+                  blocks: cardBlocksOf(
+                    ref.watch(characterByIdProvider(charId)),
+                  ),
+                  save: (blocks) => saveCardBlocks(ref.read, charId, blocks),
+                  hint: 'extblocks_card_blocks_hint'.tr(),
+                ),
             ],
           ],
         ),
@@ -260,16 +278,130 @@ class ExtBlocksSettingsSheet extends ConsumerWidget {
       GlazeToast.show(context, 'extblocks_export_failed'.tr(args: ['$e']));
     }
   }
+}
+
+/// Blocks saved together — the active preset's, or the card's own. Tapping
+/// one opens its settings; the overflow menu holds the file and lifecycle
+/// actions.
+class _BlocksGroup extends ConsumerWidget {
+  const _BlocksGroup({
+    required this.header,
+    required this.blocks,
+    required this.save,
+    this.hint,
+  });
+
+  final String header;
+  final List<BlockConfig> blocks;
+  final Future<void> Function(List<BlockConfig> blocks) save;
+
+  /// Shown under the header while the group is empty.
+  final String? hint;
+
+  static const _transfer = BlockTransferService();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final sorted = blocks.toList()..sort((a, b) => a.order.compareTo(b.order));
+
+    return MenuGroup(
+      header: '$header (${sorted.length})',
+      items: [
+        if (sorted.isEmpty)
+          _Hint(text: hint ?? 'extblocks_blocks_empty'.tr())
+        else
+          for (final block in sorted)
+            MenuScriptItem(
+              name: block.name.isEmpty
+                  ? 'extblocks_block_unnamed'.tr()
+                  : block.name,
+              subtitle: _subtitle(block),
+              enabled: block.enabled,
+              onToggle: (value) => _replace(block.copyWith(enabled: value)),
+              onTap: () => showBlockEditSheet(context, block, onSave: _replace),
+              onMore: () => _showActions(context, block),
+            ),
+        MenuItem(
+          icon: Icons.add_circle_outline_rounded,
+          label: 'extblocks_block_add'.tr(),
+          onTap: () => _addBlock(context),
+        ),
+      ],
+    );
+  }
+
+  /// Adds a note to the type/trigger line when the runtime cannot run this
+  /// type yet, so an imported rewrite block does not look simply broken.
+  String _subtitle(BlockConfig block) {
+    final base = blockSubtitle(block);
+    if (block.type.isRunnable) return base;
+    return '$base • ${'extblocks_not_executed'.tr()}';
+  }
+
+  Future<void> _replace(BlockConfig block) => save([
+    for (final b in blocks)
+      if (b.id == block.id) block else b,
+  ]);
+
+  void _showActions(BuildContext context, BlockConfig block) {
+    GlazeBottomSheet.show<void>(
+      context,
+      title: block.name.isEmpty ? 'extblocks_block_unnamed'.tr() : block.name,
+      items: [
+        BottomSheetItem(
+          label: 'extblocks_block_export'.tr(),
+          icon: Icons.file_upload_outlined,
+          onTap: () {
+            Navigator.pop(context);
+            _export(context, block);
+          },
+        ),
+        BottomSheetItem(
+          label: 'extblocks_block_duplicate'.tr(),
+          icon: Icons.copy_outlined,
+          onTap: () {
+            Navigator.pop(context);
+            _duplicate(block);
+          },
+        ),
+        BottomSheetItem(
+          label: 'extblocks_block_delete'.tr(),
+          icon: Icons.delete_outline,
+          isDestructive: true,
+          onTap: () {
+            Navigator.pop(context);
+            save(blocks.where((b) => b.id != block.id).toList());
+          },
+        ),
+      ],
+    );
+  }
+
+  Future<void> _export(BuildContext context, BlockConfig block) async {
+    try {
+      final path = await _transfer.exportBlock(block);
+      if (!context.mounted || path.isEmpty) return;
+      GlazeToast.show(context, 'extblocks_export_done'.tr(args: [path]));
+    } catch (e) {
+      if (!context.mounted) return;
+      GlazeToast.show(context, 'extblocks_export_failed'.tr(args: ['$e']));
+    }
+  }
+
+  void _duplicate(BlockConfig block) {
+    final copy = block.copyWith(
+      id: generateId(),
+      name: '${block.name} (2)',
+      order: blocks.length,
+    );
+    save([...blocks, copy]);
+  }
 
   /// The add row: importing a file and starting a blank block are two ways to
-  /// put a block into the preset, so they sit behind one entry point. The
+  /// put a block into the group, so they sit behind one entry point. The
   /// choice comes back as the sheet's result rather than popping and opening
   /// the editor inside the tap, which would race the sheet's exit animation.
-  Future<void> _addBlock(
-    BuildContext context,
-    WidgetRef ref,
-    ExtensionPreset preset,
-  ) async {
+  Future<void> _addBlock(BuildContext context) async {
     final choice = await GlazeBottomSheet.show<_AddBlockChoice>(
       context,
       title: 'extblocks_block_add'.tr(),
@@ -289,47 +421,39 @@ class ExtBlocksSettingsSheet extends ConsumerWidget {
     if (choice == null || !context.mounted) return;
     switch (choice) {
       case _AddBlockChoice.import:
-        await _importBlocks(context, ref, preset);
+        await _importBlocks(context);
       case _AddBlockChoice.create:
-        await _createBlock(context, ref, preset);
+        await _createBlock(context);
     }
   }
 
-  /// A blank block added to the end of the preset, then opened straight in the
+  /// A blank block added to the end of the group, then opened straight in the
   /// editor so its type and settings can be filled in.
-  Future<void> _createBlock(
-    BuildContext context,
-    WidgetRef ref,
-    ExtensionPreset preset,
-  ) async {
+  Future<void> _createBlock(BuildContext context) async {
     final block = BlockConfig(
       id: generateId(),
       name: 'new_block'.tr(),
       enabled: true,
-      order: preset.blocks.length,
+      order: blocks.length,
     );
-    final updated = preset.copyWith(blocks: [...preset.blocks, block]);
-    await ref.read(extensionPresetsProvider.notifier).update(updated);
-    if (context.mounted) editBlockSheet(context, ref, updated, block);
+    final added = [...blocks, block];
+    await save(added);
+    if (!context.mounted) return;
+    showBlockEditSheet(
+      context,
+      block,
+      onSave: (updated) => save([
+        for (final b in added)
+          if (b.id == updated.id) updated else b,
+      ]),
+    );
   }
 
-  Future<void> _importBlocks(
-    BuildContext context,
-    WidgetRef ref,
-    ExtensionPreset preset,
-  ) async {
-    final result = await _transfer.importBlocks(
-      startOrder: preset.blocks.length,
-    );
+  Future<void> _importBlocks(BuildContext context) async {
+    final result = await _transfer.importBlocks(startOrder: blocks.length);
     if (!context.mounted || result.cancelled) return;
 
-    if (result.blocks.isNotEmpty) {
-      await ref
-          .read(extensionPresetsProvider.notifier)
-          .update(
-            preset.copyWith(blocks: [...preset.blocks, ...result.blocks]),
-          );
-    }
+    if (result.blocks.isNotEmpty) await save([...blocks, ...result.blocks]);
     if (!context.mounted) return;
 
     if (result.unreadable.isNotEmpty) {
@@ -345,133 +469,6 @@ class ExtBlocksSettingsSheet extends ConsumerWidget {
           ? 'extblocks_import_none'.tr()
           : 'extblocks_import_done'.tr(args: ['${result.blocks.length}']),
     );
-  }
-}
-
-/// The active preset's blocks. Tapping one opens its settings; the overflow
-/// menu holds the file and lifecycle actions.
-class _BlocksGroup extends ConsumerWidget {
-  const _BlocksGroup({required this.preset, required this.onAdd});
-
-  final ExtensionPreset preset;
-  final VoidCallback onAdd;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final blocks = preset.blocks.toList()
-      ..sort((a, b) => a.order.compareTo(b.order));
-
-    return MenuGroup(
-      header: '${'extblocks_blocks_section'.tr()} (${blocks.length})',
-      items: [
-        if (blocks.isEmpty)
-          _Hint(text: 'extblocks_blocks_empty'.tr())
-        else
-          for (final block in blocks)
-            MenuScriptItem(
-              name: block.name.isEmpty
-                  ? 'extblocks_block_unnamed'.tr()
-                  : block.name,
-              subtitle: _subtitle(block),
-              enabled: block.enabled,
-              onToggle: (value) => _toggle(ref, block, value),
-              onTap: () => editBlockSheet(context, ref, preset, block),
-              onMore: () => _showActions(context, ref, block),
-            ),
-        MenuItem(
-          icon: Icons.add_circle_outline_rounded,
-          label: 'extblocks_block_add'.tr(),
-          onTap: onAdd,
-        ),
-      ],
-    );
-  }
-
-  /// Adds a note to the type/trigger line when the runtime cannot run this
-  /// type yet, so an imported rewrite block does not look simply broken.
-  String _subtitle(BlockConfig block) {
-    final base = blockSubtitle(block);
-    if (block.type.isRunnable) return base;
-    return '$base • ${'extblocks_not_executed'.tr()}';
-  }
-
-  void _toggle(WidgetRef ref, BlockConfig block, bool enabled) {
-    ref
-        .read(extensionPresetsProvider.notifier)
-        .update(
-          preset.copyWith(
-            blocks: [
-              for (final b in preset.blocks)
-                if (b.id == block.id) b.copyWith(enabled: enabled) else b,
-            ],
-          ),
-        );
-  }
-
-  void _showActions(BuildContext context, WidgetRef ref, BlockConfig block) {
-    GlazeBottomSheet.show<void>(
-      context,
-      title: block.name.isEmpty ? 'extblocks_block_unnamed'.tr() : block.name,
-      items: [
-        BottomSheetItem(
-          label: 'extblocks_block_export'.tr(),
-          icon: Icons.file_upload_outlined,
-          onTap: () {
-            Navigator.pop(context);
-            _export(context, block);
-          },
-        ),
-        BottomSheetItem(
-          label: 'extblocks_block_duplicate'.tr(),
-          icon: Icons.copy_outlined,
-          onTap: () {
-            Navigator.pop(context);
-            _duplicate(ref, block);
-          },
-        ),
-        BottomSheetItem(
-          label: 'extblocks_block_delete'.tr(),
-          icon: Icons.delete_outline,
-          isDestructive: true,
-          onTap: () {
-            Navigator.pop(context);
-            _delete(ref, block);
-          },
-        ),
-      ],
-    );
-  }
-
-  Future<void> _export(BuildContext context, BlockConfig block) async {
-    try {
-      final path = await const BlockTransferService().exportBlock(block);
-      if (!context.mounted || path.isEmpty) return;
-      GlazeToast.show(context, 'extblocks_export_done'.tr(args: [path]));
-    } catch (e) {
-      if (!context.mounted) return;
-      GlazeToast.show(context, 'extblocks_export_failed'.tr(args: ['$e']));
-    }
-  }
-
-  void _duplicate(WidgetRef ref, BlockConfig block) {
-    final copy = block.copyWith(
-      id: generateId(),
-      name: '${block.name} (2)',
-      order: preset.blocks.length,
-    );
-    ref
-        .read(extensionPresetsProvider.notifier)
-        .update(preset.copyWith(blocks: [...preset.blocks, copy]));
-  }
-
-  void _delete(WidgetRef ref, BlockConfig block) {
-    ref
-        .read(extensionPresetsProvider.notifier)
-        .update(
-          preset.copyWith(
-            blocks: preset.blocks.where((b) => b.id != block.id).toList(),
-          ),
-        );
   }
 }
 

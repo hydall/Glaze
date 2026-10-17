@@ -20,6 +20,7 @@ import 'action_glyph.dart';
 import 'drawer_panel_scaffold.dart';
 import 'magic_drawer_models.dart';
 import 'magic_drawer_widgets.dart';
+import '../../plugins/widgets/plugin_action_cards.dart';
 
 class QuickRepliesPanel extends ConsumerStatefulWidget {
   final String charId;
@@ -142,6 +143,10 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
   Future<void> _showEditSheet({QuickReply? existing}) async {
     final reply = existing;
     final isNew = reply == null;
+    // Read before the sheet opens: on mobile the form's keyboard closes the
+    // drawer, which disposes this panel, so `ref` is dead by the time the
+    // user taps Add / Save / Delete.
+    final notifier = ref.read(quickRepliesProvider.notifier);
     // Uses the shared Glaze sheet (glass surface + handle + header) instead of
     // a bare Material sheet, which rendered as a plain light slab.
     await GlazeBottomSheet.show<void>(
@@ -156,7 +161,6 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
         // body to edit and no delete button, so the form drops both.
         builtIn: reply?.isBuiltIn ?? false,
         onSubmit: (label, text, iconId) async {
-          final notifier = ref.read(quickRepliesProvider.notifier);
           if (isNew) {
             await notifier.add(label, text, iconId: iconId);
           } else {
@@ -171,7 +175,7 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
         },
         onDelete: (isNew || reply.isBuiltIn)
             ? null
-            : () => _remove(reply.id),
+            : () => notifier.remove(reply.id),
       ),
     );
   }
@@ -383,6 +387,17 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
                         );
                       },
                     ),
+                  // Composer actions of enabled plugins.
+                  ...pluginActionCards(
+                    context,
+                    ref,
+                    charId: widget.charId,
+                    kind: PluginActionKind.composer,
+                    itemWidth: itemWidth,
+                    listRow: list,
+                    editing: widget.editing,
+                    beforeRun: widget.onClose,
+                  ),
                   // Always last, never gated on edit mode: the "+" in the grid
                   // is how a new user learns this tab is theirs to fill.
                   SizedBox(

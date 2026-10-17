@@ -32,6 +32,7 @@ import 'prompt/prompt_result.dart';
 import 'prompt/recalled_message_chunk.dart';
 import 'prompt/recalled_messages_resolver.dart';
 import 'prompt/resolved_block.dart';
+import 'prompt/runtime_prompt_block.dart';
 import '../models/ledger_prompt_injection_mode.dart';
 import '../models/ledger_prompt_injection_policy.dart';
 import 'prompt/effective_canon_prompt_materializer.dart';
@@ -205,6 +206,7 @@ PromptResult _buildPromptOnce(PromptPayload payload) {
     gameTime: payload.gameTime,
     gameDate: payload.gameDate,
     gameDay: payload.gameDay,
+    extBlocks: extBlocksMacroValues(payload.runtimePromptBlocks),
   );
 
   var currentSessionVars = Map<String, String>.from(payload.sessionVars);
@@ -380,17 +382,49 @@ PromptResult _buildPromptOnce(PromptPayload payload) {
     }
   }
 
+  final mainIndex = relativeBlocks.indexWhere((b) => b.id == 'main');
+  final beforeMain = <ResolvedRelativeBlock>[];
+  final afterMain = <ResolvedRelativeBlock>[];
   for (final block in payload.runtimePromptBlocks) {
+    if (block.placement == RuntimePromptPlacement.macro) continue;
     final content = replaceMacros(block.content, currentMacroCtx).text.trim();
     if (content.isEmpty) continue;
-    depthBlocks.add(
-      ResolvedDepthBlock(
-        id: 'runtime_prompt:${block.id}',
-        role: block.role.isNotEmpty ? block.role : 'system',
-        content: content,
-        depth: block.depth,
-      ),
-    );
+    final id = 'runtime_prompt:${block.id}';
+    final role = block.role.isNotEmpty ? block.role : 'system';
+    switch (block.placement) {
+      case RuntimePromptPlacement.depth:
+        depthBlocks.add(
+          ResolvedDepthBlock(
+            id: id,
+            role: role,
+            content: content,
+            depth: block.depth,
+          ),
+        );
+      case RuntimePromptPlacement.macro:
+        break;
+      case RuntimePromptPlacement.afterMain:
+      case RuntimePromptPlacement.beforeMain:
+        final resolvedBlock = ResolvedRelativeBlock(
+          id: id,
+          name: 'Runtime prompt: ${block.id}',
+          role: role,
+          content: content,
+          contentForAccounting: content,
+        );
+        (block.placement == RuntimePromptPlacement.afterMain
+                ? afterMain
+                : beforeMain)
+            .add(resolvedBlock);
+    }
+  }
+  // Blocks placed against the main prompt sit on either side of it. A preset
+  // without a main prompt gets them at the very top, which is where the main
+  // prompt would have been.
+  if (beforeMain.isNotEmpty || afterMain.isNotEmpty) {
+    final at = mainIndex < 0 ? 0 : mainIndex;
+    relativeBlocks.insertAll(mainIndex < 0 ? 0 : at + 1, afterMain);
+    relativeBlocks.insertAll(at, beforeMain);
   }
 
   final macroTokens = <String, int>{};
@@ -651,6 +685,7 @@ PromptResult _assembleMessages({
         charId: macroCtx.charId,
         sessionId: macroCtx.sessionId,
         macroName: macroCtx.macroName,
+        extBlocks: macroCtx.extBlocks,
       );
       final historyMsgs = HistoryAssembler(historyMacroCtx).assemble(history);
       final appendedForHistory = appendedEntries
@@ -852,7 +887,6 @@ PromptResult _assembleMessages({
               excerptChunksPerEntry: payload.memoryExcerptChunksPerEntry,
               chunkFirstTopEntries: payload.chunkFirstTopEntries,
               chunkFirstTopChunks: payload.chunkFirstTopChunks,
-              summaryExcerpt: payload.summaryContent,
               gameTime: requestClock,
             )
             .excerptSelection
@@ -999,7 +1033,11 @@ PromptResult _assembleMessages({
               buildApiMessages(
                 finalMessagesWithRegex,
                 reasoningHistoryCount: payload.apiConfig.reasoningHistoryCount,
-                noAssistant: NoAssistantOptions.of(payload.apiConfig),
+                noAssistant: NoAssistantOptions.of(
+                  payload.preset,
+                  charName: char.name,
+                  userName: persona?.name ?? 'User',
+                ),
               ),
             ),
           ),

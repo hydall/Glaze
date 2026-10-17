@@ -84,8 +84,10 @@ class _MagicCardState extends State<MagicCard> {
         child: MagicDrawerListRow(
           icon: item.def.icon,
           glyph: item.def.glyph,
+          iconFile: item.def.iconFile,
           label: item.def.label,
           status: item.status,
+          statusIcon: item.statusIcon,
           editing: editing,
           hovered: hovered,
           onTap: widget.onTap,
@@ -142,6 +144,7 @@ class _MagicCardState extends State<MagicCard> {
                       ActionGlyph(
                         icon: item.def.icon,
                         glyph: item.def.glyph,
+                        file: item.def.iconFile,
                         size: 20,
                         color: Colors.white.withValues(alpha: 0.85),
                       ),
@@ -164,10 +167,9 @@ class _MagicCardState extends State<MagicCard> {
                             ),
                             if (item.status != null) ...[
                               const SizedBox(height: 1),
-                              Text(
-                                item.status!,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                              MagicStatusLine(
+                                text: item.status!,
+                                icon: item.statusIcon,
                                 style: TextStyle(
                                   fontSize: 9,
                                   color: context.cs.onSurfaceVariant.withValues(

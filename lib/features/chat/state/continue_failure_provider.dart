@@ -10,9 +10,8 @@ class ContinueFailureNotice {
   final String charId;
   final String? sessionId;
 
-  /// Formatted transport/pipeline error. Kept for diagnostics — the toast
-  /// itself stays a fixed short label so it cannot overflow with a stack of
-  /// provider JSON.
+  /// Formatted transport/pipeline error. The toast shows it after the label,
+  /// flattened and cut short so a page of provider JSON cannot overflow it.
   final String error;
 
   /// Distinguishes two consecutive failures carrying the same text, which the

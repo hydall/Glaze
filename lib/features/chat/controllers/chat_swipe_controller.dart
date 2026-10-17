@@ -259,7 +259,9 @@ class ChatSwipeController {
 
       final character = await _ref.read(characterRepoProvider).getById(_charId);
       if (character == null) return;
-      final persona = await ChatSessionService(_ref).resolvePersona(_charId);
+      final persona = await ChatSessionService(
+        _ref,
+      ).resolvePersona(_charId, sessionId: current.session!.id);
       final greetings = InitialMessageBuilder.resolveGreetings(
         character: character,
         persona: persona,

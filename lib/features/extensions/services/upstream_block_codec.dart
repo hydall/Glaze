@@ -151,8 +151,14 @@ BlockConfig decodeUpstreamBlock(Map<String, dynamic> json, {int order = 0}) {
       _scriptTypes,
       ScriptType.stScript,
     ),
+    // The original shows a generated block's result and an accumulation
+    // block's state inside the message they belong to.
+    render: type == BlockType.generated || type == BlockType.accumulation
+        ? BlockRender.message
+        : BlockRender.card,
     hideDisplay: upstreamBool(json['hide_display']),
     inject: upstreamBool(json['inject_block']),
+    injectTarget: InjectionTarget.prompt,
     background: upstreamBool(json['background']),
     applyRegex: upstreamBool(json['apply_regex']),
     injectionRole: upstreamEnum(

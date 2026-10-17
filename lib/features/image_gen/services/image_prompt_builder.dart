@@ -151,6 +151,31 @@ String appendPromptBlock(String prompt, String block) {
   return '$prompt\n\n$text'.trim();
 }
 
+/// Replaces `{{char}}` / `{{user}}` with the participants' names.
+///
+/// The final prompt goes to an image model verbatim, and a literal
+/// `{{char}}` names nobody. A missing name falls back to a plain noun.
+String withParticipantNames(
+  String prompt, {
+  String? charName,
+  String? userName,
+}) {
+  String nameOr(String? name, String fallback) {
+    final trimmed = (name ?? '').trim();
+    return trimmed.isEmpty ? fallback : trimmed;
+  }
+
+  return prompt
+      .replaceAll(
+        RegExp(r'\{\{char\}\}', caseSensitive: false),
+        nameOr(charName, 'the character'),
+      )
+      .replaceAll(
+        RegExp(r'\{\{user\}\}', caseSensitive: false),
+        nameOr(userName, 'the user'),
+      );
+}
+
 /// Assembles style block + prompt + reference descriptions.
 /// [wrapStyle] false keeps the style as a plain prefix — see
 /// [injectPlainStyle].

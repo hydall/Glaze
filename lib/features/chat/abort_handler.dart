@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/llm/generation_phase.dart';
 import '../../core/models/chat_message.dart';
+import '../../core/plugins/plugin_hooks.dart';
 import '../../core/state/card_rewriter_providers.dart';
 import '../../core/utils/id_generator.dart';
 import '../extensions/services/extension_post_gen_service.dart';
@@ -103,7 +104,7 @@ class AbortHandler {
 
   Future<void> _abortGeneration() async {
     if (!_ref.mounted) return;
-    _activeGenId++;
+    final abortedGenId = _activeGenId++;
     final StreamingState partialStreaming = _ref.read(
       streamingStateProvider(_charId),
     );
@@ -134,6 +135,12 @@ class AbortHandler {
     final abortGenId = _activeGenId;
 
     final current = _getState().value;
+    if (current != null && current.isGenerating) {
+      _ref.read(pluginHookRegistryProvider).forChat(_charId)?.notify(
+        'generation:cancelled',
+        {'generationId': '$_charId:$abortedGenId'},
+      );
+    }
     if (current != null && (current.isGenerating || current.isPostGenRunning)) {
       final restorationSnapshot = _restorationMessage;
       try {

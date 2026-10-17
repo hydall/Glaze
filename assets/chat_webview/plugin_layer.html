@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <!-- The plugin layer: a transparent WebView the app lays over its own chat
+       controls, holding the chat panels of plugins (see plugins/plugin_host.js).
+       Same viewport as the chat page, so panels measure the same screen. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
+  <title>Glaze Plugins</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: transparent;
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      overscroll-behavior: none;
+    }
+  </style>
+</head>
+<body>
+  <script src="plugins/plugin_host.js"></script>
+</body>
+</html>

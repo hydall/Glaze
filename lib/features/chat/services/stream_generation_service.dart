@@ -58,6 +58,7 @@ import '../state/studio_cycle_state_mapper.dart';
 import '../state/studio_cycle_state_provider.dart';
 import 'memory_agent_recorder.dart';
 import 'saved_message_writer.dart';
+import '../../../core/plugins/plugin_hooks.dart';
 
 class StreamGenerationService {
   static final Map<String, List<Map<String, dynamic>>> _lastRequestsBySession =
@@ -83,6 +84,32 @@ class StreamGenerationService {
   void _phase(GenerationPhase phase) {
     if (_isAborted()) return;
     setGenerationPhase(_ref, _charId, phase);
+  }
+
+  Future<ChatSession> _applyPluginPrepare(
+    ChatSession session, {
+    required String source,
+  }) async {
+    final hooks = _ref.read(pluginHookRegistryProvider).forChat(_charId);
+    if (hooks == null) return session;
+    final index = session.messages.lastIndexWhere((m) => m.role == 'user');
+    if (index < 0) return session;
+    final original = session.messages[index];
+    final String rewritten;
+    try {
+      rewritten = await hooks.prepareGeneration(
+        original.content,
+        source: source,
+        generationId: '$_charId:$_genId',
+      );
+    } catch (e) {
+      debugPrint('[StreamGen] plugin generation:prepare failed: $e');
+      return session;
+    }
+    if (rewritten == original.content) return session;
+    final messages = [...session.messages];
+    messages[index] = original.copyWith(content: rewritten);
+    return session.copyWith(messages: messages);
   }
 
   Future<ChatState> run({
@@ -134,10 +161,28 @@ class StreamGenerationService {
       }
 
       _phase(GenerationPhase.preparing);
+      // Plugins may rewrite the latest user text for this request only
+      // (`generation:prepare`). The copy feeds the prompt; `session` itself —
+      // which the error and cancel paths save — keeps the stored text.
+      final promptSession = await _applyPluginPrepare(
+        session,
+        source: continueTargetId != null
+            ? 'continuation'
+            : regenTargetId != null
+            ? 'regeneration'
+            : 'reply',
+      );
+      if (_isAborted()) {
+        return ChatState(
+          session: saveSession ?? session,
+          isGenerating: false,
+          visibleStartIndex: vsi,
+        );
+      }
       final builder = _ref.read(promptPayloadBuilderProvider);
       final inputs = await builder.collectGenerationContext(
         charId: _charId,
-        session: session,
+        session: promptSession,
         apiConfigOverride: turnConfig.activeApiConfig,
         guidanceText: guidanceText,
         continueInstruction: continueTargetId == null
@@ -279,10 +324,15 @@ class StreamGenerationService {
       final hasInlineTags =
           reasoningTagStart.isNotEmpty && reasoningTagEnd.isNotEmpty;
 
+      final noAssistant = NoAssistantOptions.of(
+        preset,
+        charName: inputs.character.name,
+        userName: inputs.persona?.name ?? 'User',
+      );
       final apiMessages = buildApiMessages(
         promptResult.messages,
         reasoningHistoryCount: apiConfig.reasoningHistoryCount,
-        noAssistant: NoAssistantOptions.of(apiConfig),
+        noAssistant: noAssistant,
       );
       final previousApiMessages = _lastRequestsBySession[session.id];
       _rememberRequest(session.id, apiMessages);
@@ -764,6 +814,7 @@ class StreamGenerationService {
         previousMessages: previousApiMessages,
         charName: inputs.character.name,
         userName: inputs.persona?.name ?? 'User',
+        stop: noAssistant?.stop ?? const [],
         captureContext: captureContext,
       );
       _phase(GenerationPhase.waiting);

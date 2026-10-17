@@ -170,6 +170,8 @@ class ApiConfigs extends Table {
       integer().withDefault(const Constant(120000))();
   TextColumn get promptPostProcessing =>
       text().withDefault(const Constant('none'))();
+  // NoAssistant moved back onto the preset, where Vue kept it. The v139
+  // columns stay so older databases still migrate; nothing reads them.
   BoolColumn get noAssistant => boolean().withDefault(const Constant(false))();
   TextColumn get noAssistantStopString =>
       text().withDefault(const Constant(''))();

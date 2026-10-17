@@ -1,6 +1,7 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
+import '../../extensions/models/block_config.dart';
 import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/sheet_view.dart';
@@ -31,6 +32,23 @@ class ExtBlockDialogs {
         blockName: blockName,
         initialContent: initialContent,
       ),
+    );
+  }
+
+  /// Asks which of [blocks] should rewrite a message, and optionally which
+  /// fragment of it and with what extra instruction — the original's
+  /// selection popup. Returns `null` on cancel.
+  static Future<ExtBlockRewriteRequest?> promptRewrite({
+    required BuildContext context,
+    required List<BlockConfig> blocks,
+  }) {
+    return showGlazeSheet<ExtBlockRewriteRequest>(
+      context: context,
+      isScrollControlled: true,
+      useRootNavigator: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _ExtBlockRewriteSheet(blocks: blocks),
     );
   }
 
@@ -124,6 +142,92 @@ class _ExtBlockEditSheetState extends State<_ExtBlockEditSheet> {
             tone: GlazeActionTone.primary,
             expand: true,
             onTap: _save,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// What the rewrite sheet asked for. An empty [fragment] means the whole
+/// message.
+typedef ExtBlockRewriteRequest = ({
+  String blockId,
+  String fragment,
+  String additionalPrompt,
+});
+
+class _ExtBlockRewriteSheet extends StatefulWidget {
+  final List<BlockConfig> blocks;
+
+  const _ExtBlockRewriteSheet({required this.blocks});
+
+  @override
+  State<_ExtBlockRewriteSheet> createState() => _ExtBlockRewriteSheetState();
+}
+
+class _ExtBlockRewriteSheetState extends State<_ExtBlockRewriteSheet> {
+  final _fragment = TextEditingController();
+  final _additionalPrompt = TextEditingController();
+  late String _blockId = widget.blocks.first.id;
+
+  @override
+  void dispose() {
+    _fragment.dispose();
+    _additionalPrompt.dispose();
+    super.dispose();
+  }
+
+  void _run() => Navigator.of(context).pop((
+    blockId: _blockId,
+    fragment: _fragment.text,
+    additionalPrompt: _additionalPrompt.text,
+  ));
+
+  @override
+  Widget build(BuildContext context) {
+    return SheetView(
+      title: 'extblocks_rewrite_title'.tr(),
+      showHandle: true,
+      bodyPadding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+      body: ListView(
+        children: [
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final block in widget.blocks)
+                ChoiceChip(
+                  label: Text(block.name),
+                  selected: block.id == _blockId,
+                  onSelected: (_) => setState(() => _blockId = block.id),
+                ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          GlazeTextField(
+            controller: _fragment,
+            label: 'extblocks_rewrite_fragment'.tr(),
+            hint: 'extblocks_rewrite_fragment_hint'.tr(),
+            minLines: 2,
+            maxLines: 8,
+          ),
+          const SizedBox(height: 12),
+          GlazeTextField(
+            controller: _additionalPrompt,
+            label: 'extblocks_rewrite_additional_prompt'.tr(),
+            hint: 'extblocks_rewrite_additional_prompt_hint'.tr(),
+            minLines: 2,
+            maxLines: 6,
+          ),
+          const SizedBox(height: 16),
+          GlazeActionButton(
+            icon: Icons.auto_fix_high_rounded,
+            label: 'extblocks_rewrite_run'.tr(),
+            tone: GlazeActionTone.primary,
+            expand: true,
+            onTap: _run,
           ),
         ],
       ),

@@ -143,6 +143,15 @@ ORDER BY updated_at DESC
     return true;
   }
 
+  /// The character [sessionId] belongs to, without reading its messages.
+  Future<String?> characterIdOf(String sessionId) async {
+    final query = _db.selectOnly(_db.chatSessions)
+      ..addColumns([_db.chatSessions.characterId])
+      ..where(_db.chatSessions.sessionId.equals(sessionId));
+    final row = await query.getSingleOrNull();
+    return row?.read(_db.chatSessions.characterId);
+  }
+
   @override
   Future<ChatSession?> getById(String sessionId) async {
     final row = await (_db.select(
@@ -265,11 +274,9 @@ ORDER BY updated_at DESC
         if ((snapshot.draft ?? '').isEmpty) {
           return _toModel(snapshot, messages: prepared.messages);
         }
-        await (_db.update(
-          _db.chatSessions,
-        )..where((t) => t.sessionId.equals(sessionId))).write(
-          const ChatSessionsCompanion(draft: Value('')),
-        );
+        await (_db.update(_db.chatSessions)
+              ..where((t) => t.sessionId.equals(sessionId)))
+            .write(const ChatSessionsCompanion(draft: Value('')));
         return _toModel(
           snapshot.copyWith(draft: const Value('')),
           messages: prepared.messages,
@@ -663,6 +670,17 @@ ORDER BY updated_at DESC
             jsonEncode(
               current.agentSwipes.map((swipe) => swipe.toJson()).toList(),
             );
+  }
+
+  /// Ids of the sessions whose variables JSON contains [text].
+  Future<List<String>> sessionIdsWithVarsContaining(String text) async {
+    final query = _db.selectOnly(_db.chatSessions)
+      ..addColumns([_db.chatSessions.sessionId])
+      ..where(_db.chatSessions.sessionVarsJson.contains(text));
+    return [
+      for (final row in await query.get())
+        row.read(_db.chatSessions.sessionId)!,
+    ];
   }
 
   Future<Map<String, dynamic>> updateSessionVarsJson(

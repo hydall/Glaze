@@ -49,6 +49,13 @@ enum BlockRender {
   /// place a block's own JavaScript runs without going through the bridge.
   @JsonValue('panel')
   panel,
+
+  /// Appended to the message's own text when it is shown, in the block's tag
+  /// and with no frame — the original extension's `display_text`. Display
+  /// regexes and markdown then treat it as part of the reply. The stored
+  /// message is not changed.
+  @JsonValue('message')
+  message,
 }
 
 /// Where a block's content comes from.

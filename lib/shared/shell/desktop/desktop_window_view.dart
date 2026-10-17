@@ -7,6 +7,9 @@ import '../../../features/catalog/widgets/third_party_providers_screen.dart';
 import '../../../features/character_list/character_editor_screen.dart';
 import '../../../features/cloud_sync/widgets/sync_sheet.dart';
 import '../../../features/diagnostics/log_viewer_screen.dart';
+import '../../../features/plugins/screens/plugin_history_screen.dart';
+import '../../../features/plugins/screens/plugin_detail_screen.dart';
+import '../../../features/plugins/screens/plugins_screen.dart';
 import '../../../features/diagnostics/logs_screen.dart';
 import '../../../features/menu/about_screen.dart';
 import '../../../features/menu/hall_of_fame_screen.dart';
@@ -354,6 +357,8 @@ String desktopWindowTitle(String viewId) => switch (desktopViewName(viewId)) {
   'theme-settings' => 'theme_presets'.tr(),
   'theme-editor' => 'theme_edit_theme'.tr(),
   'third-party-providers' => 'third_party_providers_title'.tr(),
+  'plugins' || 'plugin-detail' => 'plugins_title'.tr(),
+  'plugin-history' => 'plugins_history_title'.tr(),
   'character-editor' => 'action_edit_character'.tr(),
   'preset-block' => 'section_prompt_blocks'.tr(),
   'persona-editor' => 'tab_personas'.tr(),
@@ -373,6 +378,8 @@ IconData _windowIcon(String viewId) => switch (desktopViewName(viewId)) {
   'theme-settings' => Icons.palette_rounded,
   'theme-editor' => Icons.format_paint_rounded,
   'third-party-providers' => Icons.extension_rounded,
+  'plugins' || 'plugin-detail' => Icons.widgets_rounded,
+  'plugin-history' => Icons.history_rounded,
   'character-editor' => Icons.person_rounded,
   'preset-block' => Icons.notes_rounded,
   'persona-editor' => Icons.badge_rounded,
@@ -398,6 +405,13 @@ Widget desktopWindowContent(String viewId) {
     'theme-settings' => const ThemePresetScreen(),
     'theme-editor' => const ThemeEditorScreen(),
     'third-party-providers' => const ThirdPartyProvidersScreen(),
+    'plugins' => const PluginsScreen(),
+    'plugin-detail' => PluginDetailScreen(
+      pluginId: view.queryParameters['id'] ?? '',
+    ),
+    'plugin-history' => PluginHistoryScreen(
+      pluginId: view.queryParameters['id'] ?? '',
+    ),
     'character-editor' => switch (view.queryParameters['new']) {
       final newId? => CharacterEditorScreen(charId: newId, isNew: true),
       null => CharacterEditorScreen(charId: view.queryParameters['id'] ?? ''),

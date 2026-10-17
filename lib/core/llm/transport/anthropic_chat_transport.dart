@@ -231,6 +231,9 @@ class AnthropicChatTransport implements ChatTransport {
     if (!request.omitTopK && request.topK > 0) {
       body['top_k'] = request.topK;
     }
+    // Anthropic rejects whitespace-only stop sequences.
+    final stop = request.stop.where((s) => s.trim().isNotEmpty).toList();
+    if (stop.isNotEmpty) body['stop_sequences'] = stop;
 
     final betaHeaders = <String>[];
     if (ttl != null) {

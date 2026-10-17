@@ -143,6 +143,60 @@ void main() {
     expect(rows.map((row) => row.attempt), isNot(contains(0)));
   });
 
+  test('embedding captures stay outside the session request budget', () async {
+    // A chat floods the session with embedding captures (one per indexed
+    // chunk) while generation requests run. The embeddings must neither be
+    // evicted by this budget nor push the generation requests out.
+    for (var i = 0; i < 60; i++) {
+      await repo.record(_event(sequence: i, stage: 'studio.final'));
+    }
+    for (var i = 0; i < 300; i++) {
+      await repo.record(
+        _event(sequence: 1000 + i, stage: 'embedding.chat_index'),
+      );
+    }
+    for (var i = 0; i < 200; i++) {
+      await repo.record(_event(sequence: 2000 + i, stage: 'studio.final'));
+    }
+
+    final requests = await repo.newestForSession(
+      'session',
+      stage: 'studio.final',
+      limit: 1000,
+    );
+    final embeddings = await repo.newestForSession(
+      'session',
+      stage: 'embedding.chat_index',
+      limit: 1000,
+    );
+
+    expect(requests, hasLength(LlmRequestCaptureRepo.maxRowsPerSession));
+    expect(embeddings, hasLength(300));
+  });
+
+  test('plugin requests have a budget of their own', () async {
+    // A plugin polling a server neither evicts the chat's model requests
+    // nor grows without bound.
+    for (var i = 0; i < 10; i++) {
+      await repo.record(_event(sequence: i, stage: 'main'));
+    }
+    for (var i = 0; i < 150; i++) {
+      await repo.record(_event(sequence: 1000 + i, stage: 'plugin.net'));
+    }
+
+    final main = await repo.newestForSession('session', stage: 'main');
+    final plugin = await repo.newestForSession(
+      'session',
+      stage: 'plugin.net',
+      limit: 1000,
+    );
+    expect(main, hasLength(10));
+    expect(
+      plugin,
+      hasLength(LlmRequestCaptureRepo.maxPluginRequestsPerSession),
+    );
+  });
+
   test('byte budget evicts before the row ceiling is reached', () async {
     // Four 190k-char messages per request — just under the per-string
     // sanitizer cap, so each row lands at roughly 0.77 MB. Twelve of them is

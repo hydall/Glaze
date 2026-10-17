@@ -471,12 +471,12 @@ Lorebook convertJanitorScript(
     id: generateId(),
     name: name,
     // `enabled` is the Global switch — the book fires in every chat, whatever
-    // else it is bound to. A book that came attached to one character has no
-    // business there, and `LorebooksNotifier.put` registers a character-scoped
-    // book in the activation map anyway, so it is already active where it
-    // belongs. Mirrors `convertCharacterBook`, which the file-card import path
-    // has done since it was fixed.
-    enabled: characterId == null,
+    // else it is bound to. An extracted book never lands there: with a
+    // character (“Character + lorebooks”) `LorebooksNotifier.put` registers the
+    // character-scoped book in the activation map, so it is active for that
+    // character only; without one (“Lorebooks” alone) it is saved switched off
+    // and the user decides where it goes. Mirrors `convertCharacterBook`.
+    enabled: false,
     activationScope: characterId != null ? 'character' : 'global',
     activationTargetId: characterId,
     entries: out,

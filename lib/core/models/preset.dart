@@ -115,6 +115,17 @@ abstract class Preset with _$Preset {
     String? guidedImpersonationPrompt,
     String? impersonationPrompt,
     String? summaryPrompt,
+
+    /// NoAssistant mode, as the Vue preset had it: the chat history goes out
+    /// as one assistant message with speaker prefixes, and the preset blocks
+    /// around it merge into [mergeRole] runs — see
+    /// `converters/no_assistant.dart`. Key names match the Vue export.
+    @Default(false) bool noAssistant,
+    @Default('system') String mergeRole,
+    @Default('') String stopString,
+    @Default('') String userPrefix,
+    @Default('') String charPrefix,
+    @Default('assistant') String squashRole,
     @Default(0) int createdAt,
   }) = _Preset;
 
@@ -225,6 +236,19 @@ String _joinTrimForNormalize(dynamic trim) {
 Map<String, dynamic> _normalizePreset(Map<String, dynamic> json) {
   final n = Map<String, dynamic>.from(json);
   n['reasoningEnabled'] = _coerceBool(n['reasoningEnabled'], false);
+  n['noAssistant'] = _coerceBool(n['noAssistant'], false);
+  for (final key in const ['stopString', 'userPrefix', 'charPrefix']) {
+    n[key] = _coerceString(n[key], '');
+  }
+  // Vue stored '' for "unset"; both fall back to its defaults.
+  final mergeRole = n['mergeRole'];
+  n['mergeRole'] = mergeRole is String && mergeRole.isNotEmpty
+      ? mergeRole
+      : 'system';
+  final squashRole = n['squashRole'];
+  n['squashRole'] = squashRole is String && squashRole.isNotEmpty
+      ? squashRole
+      : 'assistant';
   n['createdAt'] = _coerceInt(n['createdAt']) ?? 0;
   return n;
 }

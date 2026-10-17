@@ -15,6 +15,7 @@ import '../../settings/widgets/connection_status.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_error_block.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_switch.dart';
 import '../../../shared/widgets/help_tip.dart';
 import '../../../shared/widgets/menu_group.dart';
@@ -48,6 +49,12 @@ class ImageGenSheet extends ConsumerStatefulWidget {
 
 class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
   late ImageGenSettings _settings;
+
+  /// Whether [_settings] holds the stored settings. Opened from Tools on a cold
+  /// start, the sheet mounts before the provider has read them; editing the
+  /// defaults it would otherwise show saved them over the real ones and wiped
+  /// styles, references and keys.
+  bool _loaded = false;
   bool _isFetchingModels = false;
   final ImageGenConnectionService _connectionService =
       ImageGenConnectionService();
@@ -57,14 +64,8 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
   String _connectionError = '';
   String _modelFetchError = '';
 
-  @override
-  void initState() {
-    super.initState();
-    _settings =
-        ref.read(imageGenSettingsProvider).value ?? const ImageGenSettings();
-  }
-
   void _update(ImageGenSettings s) {
+    if (!_loaded) return;
     final connectionChanged = _hasConnectionChanged(_settings, s);
     _settings = s;
     ref.read(imageGenSettingsProvider.notifier).save(s);
@@ -168,6 +169,12 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
 
   @override
   Widget build(BuildContext context) {
+    if (!_loaded) {
+      final stored = ref.watch(imageGenSettingsProvider).value;
+      if (stored == null) return _buildLoading();
+      _settings = stored;
+      _loaded = true;
+    }
     final s = _settings;
 
     return SheetView(
@@ -199,6 +206,17 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
       scrollController: _scrollController,
       enableHeaderBlur: false,
       body: s.enabled ? _buildBody(context, s) : _buildDisabledPlaceholder(),
+    );
+  }
+
+  /// The sheet while the stored settings load: no switch and no fields, so
+  /// nothing can be saved before they arrive.
+  Widget _buildLoading() {
+    return SheetView(
+      title: 'section_image_gen'.tr(),
+      fitContent: false,
+      enableHeaderBlur: false,
+      body: const Center(child: GlazeSpinner()),
     );
   }
 

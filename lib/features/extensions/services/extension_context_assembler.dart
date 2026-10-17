@@ -7,6 +7,7 @@ import '../../image_gen/services/image_tag_markup.dart';
 import '../models/block_config.dart';
 import '../models/extension_context_policy.dart';
 import 'block_context_builder.dart';
+import 'macro_expander.dart';
 
 class ExtensionContextAssembly {
   final List<Map<String, dynamic>> messages;
@@ -19,6 +20,9 @@ class ExtensionContextAssembly {
 }
 
 /// Centrally assembles context for every LLM-backed extension block.
+///
+/// The card and the persona always come from the models, whichever path the
+/// rest of the context takes.
 ///
 /// Exact snapshots exist only during the generation that produced the anchor.
 /// Historical/manual runs after restart reconstruct card/persona/history from
@@ -66,23 +70,36 @@ class ExtensionContextAssembler {
     }
 
     final filterableMessages = snapshot?.filterablePromptMessages;
-    final messages = filterableMessages == null
-        ? _assembleLegacyFallback(
-            policy: policy,
-            blockConfig: blockConfig,
-            chatMessages: chatMessages,
-            anchorMessageId: anchorMessageId,
-            character: character,
-            persona: persona,
-            runtimePromptMessages: policy.includeRuntimePrompts
-                ? runtimePromptMessages
-                : const [],
-          )
-        : _filterPromptSnapshot(
-            filterableMessages,
-            policy,
-            blockConfig.contextMessageCount,
-          );
+    // The card and the persona are built from the models, never cut out of
+    // the snapshot: presets often switch the standard card blocks off and
+    // place `{{description}}` / `{{persona}}` inside their own blocks, where
+    // a filter by block id cannot find them. The snapshot's payload carries
+    // the character and persona the main request was actually built for.
+    final messages = [
+      ..._identityMessages(
+        policy: policy,
+        character: filterableMessages == null
+            ? character
+            : snapshot!.promptPayload.character,
+        persona: filterableMessages == null
+            ? persona
+            : snapshot!.promptPayload.persona ?? persona,
+      ),
+      ...filterableMessages == null
+          ? _assembleLegacyFallback(
+              blockConfig: blockConfig,
+              chatMessages: chatMessages,
+              anchorMessageId: anchorMessageId,
+              runtimePromptMessages: policy.includeRuntimePrompts
+                  ? runtimePromptMessages
+                  : const [],
+            )
+          : _filterPromptSnapshot(
+              filterableMessages,
+              policy,
+              blockConfig.contextMessageCount,
+            ),
+    ];
 
     _appendCanonicalAssistant(
       messages,
@@ -148,36 +165,39 @@ class ExtensionContextAssembler {
     }
     if (id == 'authors_note') return policy.includeAuthorsNote;
     if (id.startsWith('runtime_prompt:')) return policy.includeRuntimePrompts;
-    if (id == 'char_card' ||
-        id == 'char_personality' ||
-        id == 'scenario' ||
-        id == 'example_dialogue') {
-      return policy.includeCharacterCard;
-    }
-    if (id == 'user_persona') return policy.includePersona;
+    // Built from the models by [_identityMessages] instead.
+    if (_identityBlockIds.contains(id)) return false;
     return policy.includeMainPresetInstructions;
   }
 
-  List<Map<String, dynamic>> _assembleLegacyFallback({
+  static const _identityBlockIds = {
+    'char_card',
+    'char_personality',
+    'scenario',
+    'example_dialogue',
+    'user_persona',
+  };
+
+  List<Map<String, dynamic>> _identityMessages({
     required ExtensionContextPolicy policy,
-    required BlockConfig blockConfig,
-    required List<ChatMessage> chatMessages,
-    required String anchorMessageId,
     required Character? character,
     required Persona? persona,
-    List<PromptMessage> runtimePromptMessages = const [],
   }) {
+    final macros = MacroContext(character: character, persona: persona?.name);
+    String field(String label, String? value) {
+      final text = expand(value ?? '', macros).trim();
+      return text.isEmpty ? '' : '$label: $text';
+    }
+
     final messages = <Map<String, dynamic>>[];
     if (policy.includeCharacterCard && character != null) {
       final content = <String>[
         'Character: ${character.name}',
-        if ((character.description ?? '').trim().isNotEmpty)
-          'Description: ${character.description}',
-        if ((character.personality ?? '').trim().isNotEmpty)
-          'Personality: ${character.personality}',
-        if ((character.scenario ?? '').trim().isNotEmpty)
-          'Scenario: ${character.scenario}',
-      ].join('\n');
+        field('Description', character.description),
+        field('Personality', character.personality),
+        field('Scenario', character.scenario),
+        field('Example dialogue', character.mesExample),
+      ].where((line) => line.isNotEmpty).join('\n');
       messages.add({'role': 'system', 'content': content});
     }
     if (policy.includePersona && persona != null) {
@@ -185,10 +205,20 @@ class ExtensionContextAssembler {
         'role': 'system',
         'content': [
           'User persona: ${persona.name}',
-          if ((persona.prompt ?? '').trim().isNotEmpty) persona.prompt!,
-        ].join('\n'),
+          expand(persona.prompt ?? '', macros).trim(),
+        ].where((line) => line.isNotEmpty).join('\n'),
       });
     }
+    return messages;
+  }
+
+  List<Map<String, dynamic>> _assembleLegacyFallback({
+    required BlockConfig blockConfig,
+    required List<ChatMessage> chatMessages,
+    required String anchorMessageId,
+    List<PromptMessage> runtimePromptMessages = const [],
+  }) {
+    final messages = <Map<String, dynamic>>[];
     final scoped = buildContextMessages(
       messages: chatMessages,
       anchorMessageId: anchorMessageId,

@@ -1,12 +1,21 @@
-import 'package:collection/collection.dart';
+import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/state/character_provider.dart';
+
 import '../models/block_config.dart';
+import '../models/block_run_status.dart';
 import '../providers/extension_presets_provider.dart';
 import '../providers/extensions_settings_provider.dart';
 import '../providers/info_blocks_provider.dart';
+import 'card_blocks.dart';
+import 'blocks/block_trigger_rules.dart';
+import 'ext_blocks_inline_display.dart';
 
 typedef ExtBlocksPanelKey = ({
+  String? charId,
   String sessionId,
   String messageId,
   int swipeId,
@@ -14,6 +23,7 @@ typedef ExtBlocksPanelKey = ({
 });
 
 typedef ExtBlocksPanelVisibilityKey = ({
+  String? charId,
   String sessionId,
   String messageId,
   bool isAssistant,
@@ -44,6 +54,7 @@ class ExtBlocksPanelBuilder {
     required bool isAssistant,
     required bool isLastAssistant,
     bool isGreeting = false,
+    String? charId,
   }) {
     if (!isAssistant || !extensionsActive(ref)) return false;
     // Never show the panel on greeting/first_mes messages that have no stored
@@ -51,6 +62,7 @@ class ExtBlocksPanelBuilder {
     if (isGreeting) return false;
     final blocks = build(
       ref,
+      charId: charId,
       sessionId: sessionId,
       messageId: messageId,
       swipeId: swipeId,
@@ -63,15 +75,25 @@ class ExtBlocksPanelBuilder {
   /// Whether a block without a stored row belongs in this message's panel as a
   /// `pending` placeholder.
   ///
-  /// The panel hangs under an assistant message and runs the `afterAssistant`
-  /// set, so only those blocks can ever fill a placeholder here. An
-  /// `afterUser` block stores its result under the user message (deliberately
-  /// panel-less), a `periodic` block stores nothing at all, and `rewrite` /
-  /// `accumulation` blocks have no runtime yet — listing them would leave a row
-  /// stuck on "pending" forever, with a run button that either re-binds the
-  /// block to the wrong message or writes an error card.
+  /// The panel hangs under an assistant message and runs the reply chain,
+  /// so only those blocks can ever fill a placeholder here. A user-only block
+  /// stores its result under the user message (deliberately panel-less), a
+  /// `periodic` block stores nothing at all, a `rewrite` block changes the
+  /// message instead of leaving a result, and an `accumulation` block stores
+  /// state only under a message carrying its updater — listing them would
+  /// leave a row stuck on "pending" forever,
+  /// with a run button that either re-binds the block to the wrong message or
+  /// writes an error card.
+  ///
+  /// A block gated by a keyword or by a period longer than one turn is
+  /// expected to be missing from most replies, so its absence is not shown
+  /// as pending either.
   static bool _canPlaceholder(BlockConfig cfg) =>
-      cfg.trigger == BlockTrigger.afterAssistant && cfg.type.isRunnable;
+      cfg.runsOnChar &&
+      cfg.type.isRunnable &&
+      cfg.type.hasPanelResult &&
+      cfg.keyword.isEmpty &&
+      cfg.period <= 2;
 
   /// Merges enabled preset blocks with DB rows. A block that can run here but
   /// has no row yet becomes `pending`.
@@ -81,31 +103,43 @@ class ExtBlocksPanelBuilder {
     required String messageId,
     required int swipeId,
     int agentSwipeId = -1,
+    String? charId,
   }) {
-    final settings = ref.read(extensionsSettingsProvider);
-    final presetId = settings.activePresetId;
-    if (presetId == null || presetId.isEmpty) return [];
-
-    final preset = ref
-        .read(extensionPresetsProvider)
-        .where((p) => p.id == presetId)
-        .firstOrNull;
+    // The character's card blocks show here too, as they run.
+    final preset = effectiveExtBlocksPreset(ref.read, charId);
     if (preset == null) return [];
 
     final dbBlocks = ref
         .read(infoBlocksProvider(sessionId).notifier)
-        .getByMessageId(messageId, swipeId: swipeId, agentSwipeId: agentSwipeId);
+        .getByMessageId(
+          messageId,
+          swipeId: swipeId,
+          agentSwipeId: agentSwipeId,
+        );
     final dbByBlockId = {for (final b in dbBlocks) b.blockId: b};
 
-    final enabledConfigs = preset.blocks.where((b) => b.enabled).toList()
-      ..sort((a, b) => a.order.compareTo(b.order));
+    // A block hidden from display still runs and injects; it only stays out
+    // of the panel.
+    final enabledConfigs =
+        preset.blocks.where((b) => b.enabled && !b.hideDisplay).toList()
+          ..sort((a, b) => a.order.compareTo(b.order));
 
     if (enabledConfigs.isEmpty) return [];
 
     return [
       for (final cfg in enabledConfigs)
-        if (dbByBlockId[cfg.id] != null)
-          {...dbByBlockId[cfg.id]!.toMap(), 'manualOnly': cfg.manualOnly}
+        // A block shown inside the message leaves the panel once it is done;
+        // while it runs, fails or waits, its row here is where that shows.
+        if (showsInMessage(cfg) &&
+            dbByBlockId[cfg.id]?.status == BlockRunStatus.done)
+          ...const <Map<String, dynamic>>[]
+        else if (dbByBlockId[cfg.id] != null)
+          {
+            ...dbByBlockId[cfg.id]!.toMap(),
+            if (cfg.type == BlockType.accumulation)
+              'content': accumulationPanelHtml(dbByBlockId[cfg.id]!.content),
+            'manualOnly': cfg.manualOnly,
+          }
         else if (_canPlaceholder(cfg))
           {
             'blockId': cfg.id,
@@ -123,6 +157,15 @@ class ExtBlocksPanelBuilder {
   /// automatic `afterAssistant` chain would run is not finished. Manual-only
   /// blocks are excluded — Run All never runs them, so a panel holding nothing
   /// but a manual placeholder would offer a button that does nothing.
+  /// An accumulation block's YAML state as the panel shows it: kept as
+  /// written, line breaks and indentation included.
+  @visibleForTesting
+  static String accumulationPanelHtml(String yaml) {
+    if (yaml.trim().isEmpty) return '';
+    return '<pre class="ext-block-state">'
+        '${const HtmlEscape(HtmlEscapeMode.element).convert(yaml)}</pre>';
+  }
+
   static bool canRunAll(List<Map<String, dynamic>> blocks) {
     return blocks.any((b) {
       if (b['manualOnly'] == true) return false;
@@ -137,8 +180,10 @@ final extBlocksPanelBlocksProvider =
       ref.watch(infoBlocksProvider(key.sessionId));
       ref.watch(extensionsSettingsProvider);
       ref.watch(extensionPresetsProvider);
+      if (key.charId != null) ref.watch(characterByIdProvider(key.charId!));
       return ExtBlocksPanelBuilder.build(
         ref,
+        charId: key.charId,
         sessionId: key.sessionId,
         messageId: key.messageId,
         swipeId: key.swipeId,
@@ -151,8 +196,10 @@ final extBlocksPanelVisibleProvider =
       ref.watch(infoBlocksProvider(key.sessionId));
       ref.watch(extensionsSettingsProvider);
       ref.watch(extensionPresetsProvider);
+      if (key.charId != null) ref.watch(characterByIdProvider(key.charId!));
       return ExtBlocksPanelBuilder.shouldShowPanel(
         ref,
+        charId: key.charId,
         sessionId: key.sessionId,
         messageId: key.messageId,
         swipeId: key.swipeId,

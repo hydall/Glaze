@@ -141,10 +141,15 @@ class ImpersonationService {
     final hasInlineTags =
         reasoningTagStart.isNotEmpty && reasoningTagEnd.isNotEmpty;
 
+    final noAssistant = NoAssistantOptions.of(
+      preset,
+      charName: character?.name ?? 'Character',
+      userName: persona?.name ?? 'User',
+    );
     final apiMessages = buildApiMessages(
       promptResult.messages,
       reasoningHistoryCount: apiConfig.reasoningHistoryCount,
-      noAssistant: NoAssistantOptions.of(apiConfig),
+      noAssistant: noAssistant,
     );
 
     final accumulator = StreamAccumulator(
@@ -175,6 +180,7 @@ class ImpersonationService {
         sessionId: session.id,
         charName: character?.name ?? 'Character',
         userName: persona?.name ?? 'User',
+        stop: noAssistant?.stop ?? const [],
       ),
       cancelToken: cancelToken,
       onUpdate: (delta, reasoningDelta) {

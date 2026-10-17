@@ -332,10 +332,10 @@ a text generation creates swipes.
 
 ### INV-S1: Summary is always non-streaming
 
-`SummaryService.generateSummary()` goes through `AuxLlmClient.callOnce()`, which
-calls the protocol's `ChatTransport` with `stream: false`. No SSE. The protocol
-comes from `ApiConfig.protocol` — the summary must never hardcode one provider's
-wire format.
+`SummaryService.summarizeMessages()` and `mergeBlocks()` go through
+`AuxLlmClient.callOnce()`, which calls the protocol's `ChatTransport` with
+`stream: false`. No SSE. The protocol comes from `ApiConfig.protocol` — the
+summary must never hardcode one provider's wire format.
 
 The connection is resolved by `SummaryGenerationService` from the Memory slot
 (`PipelineSettings.memoryBookApi`), the same slot memory drafts run on, falling
@@ -349,24 +349,69 @@ applied only when it is set, so summarizing otherwise stays at
 Summary generation does not touch `ChatState.isGenerating` or any `charId`-keyed
 generation guard. Neither the manual run (`summary_tab.dart`) nor the automatic
 one (`AutoSummaryStage`) passes a `CancelToken`, so once started it cannot be
-aborted.
+aborted. Runs are serialized per session by `SummaryGenerationService`: a second
+run while one is going fails with `SummaryChainException('busy')`.
 
-### INV-S4: Auto-summary only fires on a bot turn
+### INV-S4: Auto-summary is driven by context fill, on a bot turn only
 
 `AutoSummaryStage` runs from `PostGenCoordinator` (post-assistant-turn only) and
 additionally requires `session.messages.last` to be a non-error assistant /
 character message. A user message must never trigger it.
 
-### INV-S5: A summary run is given the summary it replaces ✅ ENFORCED
+Whether it compacts is decided by tokens, never by a message count: once the
+prompt passes `SummaryCompactionSettings.triggerPercent` of what it may use,
+the oldest summarizable messages outside the fresh tail (the rest of the
+window, and at least `SummaryChain.minTailMessages`) are retold as a level-1
+block. A run that would not make the block meaningfully shorter than its source
+is skipped. An answer more than `summaryShortenSlackPercent` of its target is
+sent back once to be shortened and the shorter text kept; a block that still
+comes back no shorter than its source is rejected. Once the live
+blocks take more than `mergePercent` of the window, adjacent blocks of one
+level are merged a level up and the merged ones are archived.
 
-`SummaryService.generateSummary` reads the stored summary before it writes the
-new one and passes it to `buildSummaryPrompt`, which places it at
-`{{previous_summary}}` or, when the template does not, under
-`summaryPreviousHeader` between the instructions and the transcript. A run must
-never re-derive the chat from the transcript alone — that silently drops
-whatever the previous summary had distilled out of messages the model now
-weighs differently. The first run of a session adds nothing. Covered by
+### INV-S5: The summary is a chain of blocks bound to their messages ✅ ENFORCED
+
+The summary is stored as `SummaryBlock`s (`chat_summaries.blocks_json`). A
+level-1 block records its source message ids and a fingerprint of their text;
+a merge records the union and its archived parts. Each run retells only its
+own messages; the live blocks before it are handed over as context
+(`{{previous_summary}}` or `summaryPreviousHeader`) and are not retold.
+
+The instructions go in the system message and the material — earlier summary
+and transcript, with speakers by name — in the user message; a template that
+places `{{history}}` is sent as one user message as written.
+
+Both prompts are chosen by key from a preset library, as in Memory Books
+(`SummaryPromptSelection`; `SummaryPromptPresets` and
+`SummaryMergePromptPresets` plus the reader's saved ones). Built-ins are
+read-only; a key that names nothing resolves to the built-in default. A chat
+that still holds a prompt text of its own retells with it until a preset is
+picked, which clears it. The transcript is
+the message text alone: summarizing reads nothing from Ledger or Studio and
+runs after every bot turn, Studio on or off.
+
+A block whose sources were edited, swiped or deleted is stale: it is not sent,
+its messages return to the prompt, and the next compaction drops it together
+with its archive. Deleting a merge restores its parts; deleting a level-1 block
+returns its messages. A row from before blocks reads as one level-0 note that
+covers no messages. Covered by `test/summary_chain_test.dart` and
 `test/summary_service_test.dart`.
+
+### INV-S6: Summarized messages are not sent ✅ ENFORCED
+
+`PromptPayloadBuilder.collectGenerationContext` and
+`PromptInputsCollector.collectInputs` drop from the history every message a
+live block covers (`SummaryChain.withoutCovered`, matched by id after ExtBlocks
+injection). The summary takes their place through the preset `summary` block or
+`{{summary}}`. A switched-off summary drops nothing. Historical requests carry
+neither the summary nor any exclusion. Covered by
+`test/summary_prompt_coverage_test.dart`.
+
+### INV-S7: Memory Book never carries the summary
+
+The Memory Book block (hard block or `{{memory}}`) contains only memory
+entries. The summary is injected once, by its own block, and is not charged
+against the Memory Book budget.
 
 ### INV-S3: Summary does not mutate chat messages
 

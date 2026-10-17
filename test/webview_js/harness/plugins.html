@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Plugin host harness</title>
+  <style>
+    html, body { margin: 0; height: 100%; }
+    #chat-container { height: 100vh; box-sizing: border-box; padding-top: 60px; padding-bottom: 80px; }
+    #under { position: fixed; inset: 0; width: 100%; height: 100%; }
+  </style>
+</head>
+<body>
+  <!-- Stands in for the chat: anything a plugin frame does not draw over must
+       keep receiving the user's taps. -->
+  <div id="chat-container" style="padding-top: 60px; padding-bottom: 80px">
+    <button id="under" onclick="window.__underClicks = (window.__underClicks || 0) + 1">chat</button>
+  </div>
+  <script>
+    // Stub of the Flutter side: records every relayed call and answers a few.
+    window.__calls = [];
+    window.flutter_inappwebview = {
+      callHandler: async (name, request) => {
+        window.__calls.push({ name, request });
+        if (request.method === 'variables.get') {
+          return { ok: true, result: 'value-for-' + request.pluginId };
+        }
+        if (request.method === 'messages.list') {
+          return { ok: true, result: [
+            { id: 'm1', role: 'user', content: 'hi', hidden: false },
+            { id: 'm2', role: 'assistant', content: 'hello', hidden: false, characterId: 'c1' },
+          ] };
+        }
+        if (request.method === 'messages.get') {
+          return { ok: true, result: { id: request.params[0], role: 'assistant', content: 'one', hidden: false } };
+        }
+        if (request.method === 'messages.count') {
+          return { ok: false, error: { code: 'permission_denied', message: 'denied' } };
+        }
+        if (request.method === 'net.fetch') {
+          const [url, init] = request.params;
+          if (url.endsWith('/slow')) return new Promise(() => {});
+          const sent = init.body ? atob(init.body) : '';
+          const echo = JSON.stringify({ method: init.method, headers: init.headers, body: sent });
+          return { ok: true, result: {
+            status: 201, statusText: 'Created', url: url + '?final', redirected: true,
+            headers: [['content-type', 'application/json'], ['x-echo', 'yes']],
+            body: btoa(echo),
+          } };
+        }
+        return { ok: true, result: null };
+      },
+    };
+  </script>
+  <script src="/assets/chat_webview/plugins/plugin_host.js"></script>
+</body>
+</html>

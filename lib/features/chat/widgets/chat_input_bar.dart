@@ -11,6 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/models/chat_message.dart' show maxMessageAttachments;
 import '../../../core/platform/clipboard_images.dart';
 import '../../../core/platform/haptics.dart';
+import '../../../core/plugins/plugin_hooks.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/utils/error_format.dart';
 import '../../../core/utils/text_insert.dart';
@@ -26,6 +27,7 @@ import '../chat_provider.dart'
     show ImpersonationState, chatProvider, impersonationStateProvider;
 import '../composer_empty_action_provider.dart';
 import '../composer_pins_provider.dart';
+import '../composer_text_bridge.dart';
 import '../hidden_composer_actions_provider.dart';
 import '../quick_replies_provider.dart';
 import '../services/drawer_item_launcher.dart';
@@ -215,6 +217,19 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
   /// Held rather than looked up on demand: `dispose` has to hand the bridge
   /// back, and `ref` is off limits once the element is being unmounted.
   late final ComposerActionBridge _actionBridge;
+  late final ComposerTextBridge _textBridge;
+  // `glaze.composer.*` for plugins: read, replace and send the composer's text.
+  late final ComposerTextAccess _textAccess = ComposerTextAccess(
+    read: () => _controller.text,
+    write: (text) {
+      if (!mounted) return;
+      _controller.value = TextEditingValue(
+        text: text,
+        selection: TextSelection.collapsed(offset: text.length),
+      );
+    },
+    send: () async => mounted && await _handleSend(),
+  );
 
   /// The translate action's state: a request in flight, or a translation the
   /// next tap can undo.
@@ -237,6 +252,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     // its Actions grid. Hand it a way in.
     _actionBridge = ref.read(composerActionBridgeProvider)
       ..register(_runComposerAction);
+    _textBridge = ref.read(composerTextBridgeProvider)..register(_textAccess);
   }
 
   /// Runs a composer-owned action asked for from the drawer's Actions tab.
@@ -325,32 +341,114 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
   int get _remainingAttachmentSlots =>
       maxMessageAttachments - _attachments.length;
 
+  static const _imageExtensions = {
+    'png',
+    'jpg',
+    'jpeg',
+    'gif',
+    'webp',
+    'bmp',
+    'heic',
+    'heif',
+  };
+
+  static bool _isImageName(String name) {
+    final dot = name.lastIndexOf('.');
+    return dot >= 0 &&
+        _imageExtensions.contains(name.substring(dot + 1).toLowerCase());
+  }
+
+  static Future<Uint8List?> _readPicked(PlatformFile file) async {
+    if (file.bytes != null || file.path == null) return file.bytes;
+    try {
+      return await File(file.path!).readAsBytes();
+    } catch (error) {
+      debugPrint('[ChatInputBar] attachment read failed: $error');
+      return null;
+    }
+  }
+
+  /// Images become attachments; with plugin file handlers running in this
+  /// chat, any other file is turned into text for the composer by them.
   Future<void> _pickImages() async {
-    if (_atAttachmentLimit()) return;
+    final charId = widget.charId;
+    final plugins = charId == null
+        ? null
+        : ref.read(pluginHookRegistryProvider).forChat(charId);
+    final acceptsFiles = plugins?.fileExtensions.isNotEmpty ?? false;
+    if (!acceptsFiles && _atAttachmentLimit()) return;
     final result = await FilePicker.pickFiles(
-      type: FileType.image,
+      type: acceptsFiles ? FileType.any : FileType.image,
       allowMultiple: true,
       withData: true,
     );
     if (result == null || result.files.isEmpty || !mounted) return;
-    final slots = _remainingAttachmentSlots;
-    final picked = <ClipboardImage>[];
-    // Take only what still fits, so reading files the limit would drop is
-    // never paid for.
-    for (final file in result.files.take(slots)) {
-      var bytes = file.bytes;
-      if (bytes == null && file.path != null) {
-        try {
-          bytes = await File(file.path!).readAsBytes();
-        } catch (error) {
-          debugPrint('[ChatInputBar] attachment read failed: $error');
-        }
+    final images = acceptsFiles
+        ? result.files.where((f) => _isImageName(f.name)).toList()
+        : result.files;
+    if (images.isNotEmpty) {
+      final slots = _remainingAttachmentSlots;
+      final picked = <ClipboardImage>[];
+      // Take only what still fits, so reading files the limit would drop is
+      // never paid for.
+      for (final file in images.take(slots)) {
+        final bytes = await _readPicked(file);
+        if (bytes == null || bytes.isEmpty) continue;
+        picked.add(ClipboardImage.fromBytes(bytes, sourcePath: file.path));
       }
-      if (bytes == null || bytes.isEmpty) continue;
-      picked.add(ClipboardImage.fromBytes(bytes, sourcePath: file.path));
+      if (!mounted) return;
+      _addAttachments(picked, droppedByLimit: images.length > slots);
+    }
+    if (plugins == null || !acceptsFiles) return;
+    for (final file in result.files) {
+      if (_isImageName(file.name)) continue;
+      final bytes = await _readPicked(file);
+      if (!mounted) return;
+      if (bytes == null) continue;
+      await _insertPluginFile(plugins, file.name, bytes);
+    }
+  }
+
+  Future<void> _insertPluginFile(
+    PluginHookRunner plugins,
+    String name,
+    Uint8List bytes,
+  ) async {
+    final PluginFileExtraction extraction;
+    try {
+      extraction = await plugins.extractFile(name, bytes);
+    } catch (error) {
+      if (mounted) {
+        GlazeToast.show(
+          context,
+          'plugins_file_failed'.tr(
+            namedArgs: {'name': name, 'error': '$error'},
+          ),
+          isError: true,
+        );
+      }
+      return;
     }
     if (!mounted) return;
-    _addAttachments(picked, droppedByLimit: result.files.length > slots);
+    final content = extraction.content;
+    if (content == null) {
+      GlazeToast.show(
+        context,
+        extraction.handled
+            ? 'plugins_file_failed'.tr(
+                namedArgs: {'name': name, 'error': extraction.error ?? '?'},
+              )
+            : 'plugins_file_unsupported'.tr(namedArgs: {'name': name}),
+        isError: extraction.handled,
+      );
+      return;
+    }
+    final current = _controller.text;
+    final text = current.trim().isEmpty ? content : '$current\n\n$content';
+    _controller.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
   }
 
   /// Attaches whatever images are on the clipboard. Answers false when there
@@ -583,6 +681,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     // and can mount the replacement before this runs — cannot leave the drawer
     // holding a handler into a disposed State.
     _actionBridge.unregister(_runComposerAction);
+    _textBridge.unregister(_textAccess);
     _debounce?.cancel();
     _draftTranslator.dispose();
     _controller.dispose();
@@ -650,13 +749,13 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     });
   }
 
-  Future<void> _handleSend() async {
-    if (widget.isEditingMessage || _isDispatchingSend) return;
+  Future<bool> _handleSend() async {
+    if (widget.isEditingMessage || _isDispatchingSend) return false;
     final text = _controller.text;
-    if (text.trim().isEmpty && _attachments.isEmpty) return;
+    if (text.trim().isEmpty && _attachments.isEmpty) return false;
     // Prerequisites (e.g. a selected provider) failed: keep the composed text
     // and attachments so nothing is lost while the host shows its modal.
-    if (widget.canSend != null && !widget.canSend!()) return;
+    if (widget.canSend != null && !widget.canSend!()) return false;
     final attachments = List<ClipboardImage>.unmodifiable(_attachments);
     final guidance = _guidanceMode && _guidanceController.text.trim().isNotEmpty
         ? _guidanceController.text.trim()
@@ -694,12 +793,13 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     } finally {
       _isDispatchingSend = false;
     }
-    if (!mounted || accepted) return;
+    if (!mounted || accepted) return accepted;
     _restoreComposedPayload(
       text: text,
       guidance: guidance,
       attachments: attachments,
     );
+    return false;
   }
 
   void _clearComposedPayload() {

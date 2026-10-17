@@ -1,6 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
+
+import '../../../core/llm/display_regex_worker.dart';
 import '../../../core/models/chat_message.dart';
+import '../../regex/stopped_regex_sheet.dart';
 import 'chat_message_mapper.dart';
 import 'chat_bridge_controller.dart';
 
@@ -42,6 +47,7 @@ class MessageBridgeCommands {
     bool preserveScroll = false,
   }) async {
     _host.clearCachedTriggeredRegexes();
+    final regexed = await _regexed(messages);
     final List<Map<String, dynamic>> mapped = [];
     for (int i = 0; i < messages.length; i++) {
       final map = ChatMessageMapper.toMap(
@@ -54,6 +60,8 @@ class MessageBridgeCommands {
         persona: _host.regexPersona,
         sessionVars: _host.regexSessionVars,
         globalVars: _host.regexGlobalVars,
+        inlineExtBlocks: _host.inlineExtBlocks(messages[i]),
+        regexed: regexed?[i],
       );
       _resolveMappedFileUrls(map);
       _host.cacheMappedTriggeredRegexes(map);
@@ -92,6 +100,7 @@ class MessageBridgeCommands {
   }
 
   Future<void> appendMessage(ChatMessage message) async {
+    final regexed = await _regexed([message]);
     final map = ChatMessageMapper.toMap(
       message,
       _host.mapperContext,
@@ -100,6 +109,8 @@ class MessageBridgeCommands {
       persona: _host.regexPersona,
       sessionVars: _host.regexSessionVars,
       globalVars: _host.regexGlobalVars,
+      inlineExtBlocks: _host.inlineExtBlocks(message),
+      regexed: regexed?.single,
     );
     _resolveMappedFileUrls(map);
     _host.cacheMappedTriggeredRegexes(map);
@@ -112,6 +123,7 @@ class MessageBridgeCommands {
     List<ChatMessage> messages, {
     int startIndex = 0,
   }) async {
+    final regexed = await _regexed(messages);
     final List<Map<String, dynamic>> mapped = [];
     for (int i = 0; i < messages.length; i++) {
       final map = ChatMessageMapper.toMap(
@@ -124,6 +136,8 @@ class MessageBridgeCommands {
         persona: _host.regexPersona,
         sessionVars: _host.regexSessionVars,
         globalVars: _host.regexGlobalVars,
+        inlineExtBlocks: _host.inlineExtBlocks(messages[i]),
+        regexed: regexed?[i],
       );
       _resolveMappedFileUrls(map);
       _host.cacheMappedTriggeredRegexes(map);
@@ -143,6 +157,7 @@ class MessageBridgeCommands {
     List<ChatMessage> messages, {
     int visibleStartIndex = 0,
   }) async {
+    final regexed = await _regexed(messages);
     final List<Map<String, dynamic>> mapped = [];
     for (int i = 0; i < messages.length; i++) {
       final map = ChatMessageMapper.toMap(
@@ -154,6 +169,8 @@ class MessageBridgeCommands {
         persona: _host.regexPersona,
         sessionVars: _host.regexSessionVars,
         globalVars: _host.regexGlobalVars,
+        inlineExtBlocks: _host.inlineExtBlocks(messages[i]),
+        regexed: regexed?[i],
       );
       _resolveMappedFileUrls(map);
       _host.cacheMappedTriggeredRegexes(map);
@@ -174,6 +191,7 @@ class MessageBridgeCommands {
     bool isStreamingUpdate = false,
     bool isLast = false,
   }) async {
+    final regexed = await _regexed([message]);
     final map = ChatMessageMapper.toMap(
       message,
       _host.mapperContext,
@@ -184,6 +202,8 @@ class MessageBridgeCommands {
       persona: _host.regexPersona,
       sessionVars: _host.regexSessionVars,
       globalVars: _host.regexGlobalVars,
+      inlineExtBlocks: _host.inlineExtBlocks(message),
+      regexed: regexed?.single,
     );
     _resolveMappedFileUrls(map);
     _host.cacheMappedTriggeredRegexes(map);
@@ -231,6 +251,52 @@ class MessageBridgeCommands {
       'if (window.bridge?.retireTypingPlaceholder) '
       'window.bridge.retireTypingPlaceholder();',
     );
+  }
+
+  /// The display text of [messages] with the display regexes applied off the
+  /// main isolate, in order — or null when there are none to run, or the
+  /// worker cannot start, and the mapper should run them inline as before.
+  ///
+  /// A script stopped for running too long is named in a sheet once; it stays
+  /// off until the app restarts (see [DisplayRegexWorker]).
+  Future<List<DisplayRegexResult>?> _regexed(List<ChatMessage> messages) async {
+    final scripts = _host.displayRegexes;
+    if (scripts.isEmpty || messages.isEmpty) return null;
+    final character = _host.regexCharacter;
+    final persona = _host.regexPersona;
+    final sessionVars = _host.regexSessionVars;
+    final globalVars = _host.regexGlobalVars;
+    final jobs = [
+      for (final m in messages)
+        DisplayRegexJob(
+          text: ChatMessageMapper.displaySource(
+            m,
+            character: character,
+            persona: persona,
+            sessionVars: sessionVars,
+            globalVars: globalVars,
+            inlineExtBlocks: _host.inlineExtBlocks(m),
+          ),
+          placement: ChatMessageMapper.regexPlacement(m),
+        ),
+    ];
+    try {
+      final run = await DisplayRegexWorker.apply(
+        jobs,
+        scripts,
+        ChatMessageMapper.regexContext(
+          character: character,
+          persona: persona,
+          sessionVars: sessionVars,
+          globalVars: globalVars,
+        ),
+      );
+      if (run.stopped.isNotEmpty) unawaited(showStoppedRegexSheet(run.stopped));
+      return run.results;
+    } catch (e) {
+      debugPrint('[regex] display worker unavailable, running inline: $e');
+      return null;
+    }
   }
 
   void _resolveMappedFileUrls(Map<String, dynamic> map) {

@@ -87,6 +87,56 @@ void main() {
     });
   });
 
+  group('normalizeExtractedGreetings', () {
+    test('the chat object wins and the prompt turn is not listed again', () {
+      // The prompt always opens on the chat's own greeting; the trigger can
+      // write lore into that first message, so the prompt's copy is a near
+      // duplicate normalizeGreetings cannot fold away. It must not be added.
+      final result = normalizeExtractedGreetings(
+        chat: ['the opening line', 'an alternate'],
+        captured: 'the opening line\n\nsome lore the trigger wrote',
+      );
+      expect(result.firstMes, 'the opening line');
+      expect(result.alternates, ['an alternate']);
+    });
+
+    test('the prompt turn is the fallback for a withheld greeting', () {
+      final result = normalizeExtractedGreetings(
+        captured: 'the opening line',
+      );
+      expect(result.firstMes, 'the opening line');
+      expect(result.alternates, isEmpty);
+    });
+
+    test('the catalog metadata stands in when the chat has nothing', () {
+      final result = normalizeExtractedGreetings(
+        catalog: ['from the catalog', 'an alternate'],
+        captured: 'from the catalog',
+      );
+      expect(result.firstMes, 'from the catalog');
+      expect(result.alternates, ['an alternate']);
+    });
+
+    test('a blank chat is the same as an empty one', () {
+      final result = normalizeExtractedGreetings(
+        chat: const ['', '   '],
+        captured: 'recovered from the prompt',
+      );
+      expect(result.firstMes, 'recovered from the prompt');
+      expect(result.alternates, isEmpty);
+    });
+
+    test('the chat and the catalog are merged in order', () {
+      final result = normalizeExtractedGreetings(
+        chat: ['the opening line'],
+        catalog: ['an alternate'],
+        captured: 'ignored',
+      );
+      expect(result.firstMes, 'the opening line');
+      expect(result.alternates, ['an alternate']);
+    });
+  });
+
   group('greetingList', () {
     test('takes the strings out of a list', () {
       expect(greetingList(['a', 'b']), ['a', 'b']);

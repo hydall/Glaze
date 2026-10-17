@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/db/repositories/info_blocks_repository.dart';
@@ -7,15 +10,19 @@ import '../../../core/models/character.dart';
 import '../../../core/models/persona.dart';
 import '../../../core/llm/prompt/main_model_context_snapshot.dart';
 import '../../../core/state/db_provider.dart';
+import '../../../core/state/character_provider.dart';
+import '../../../core/state/persona_resolution.dart';
 import '../models/block_config.dart';
+import '../models/block_modes.dart';
 import '../models/extension_preset.dart';
 import '../models/info_block.dart';
-import '../providers/extension_presets_provider.dart';
-import '../providers/extensions_settings_provider.dart';
 import '../providers/info_blocks_provider.dart';
+import 'accumulation/accumulation_service.dart';
 import 'info_block_service.dart';
+import 'rewrite/rewrite_service.dart';
 import 'blocks/block_processor.dart';
 import 'blocks/block_context.dart';
+import 'blocks/block_grouping.dart';
 import 'blocks/block_handler.dart';
 import 'blocks/block_image_renderer.dart';
 import 'blocks/block_panel_updater.dart';
@@ -23,9 +30,12 @@ import 'blocks/generated_block_handler.dart';
 import 'blocks/js_block_executor.dart';
 import 'blocks/script_block_handler.dart';
 import 'blocks/block_status_tracker.dart';
+import 'blocks/block_trigger_rules.dart';
+import 'blocks/ext_blocks_script_scope.dart';
 import 'blocks/periodic_js_block_runner.dart';
 import 'blocks/single_block_runner.dart';
 import 'blocks/unsupported_block_handler.dart';
+import 'card_blocks.dart';
 
 final extensionPostGenServiceProvider = Provider<ExtensionPostGenService>(
   (ref) => ExtensionPostGenService(ref),
@@ -41,10 +51,12 @@ class ExtensionPostGenService {
   final Ref _ref;
   final BlockPanelUpdater _panelUpdater;
 
-  /// Active cancel tokens for block runs. Multiple chains can overlap
-  /// (for example, an afterAssistant image block and afterUser blocks from the
-  /// next message), so a single mutable token would orphan older runs.
-  final Set<CancelToken> _blocksCancelTokens = <CancelToken>{};
+  /// Active cancel tokens for block runs, each with the number of holders
+  /// still using it. Multiple chains can overlap (for example, an
+  /// afterAssistant image block and afterUser blocks from the next message),
+  /// so a single mutable token would orphan older runs; and a background block
+  /// outlives its chain, so it holds the token until it is done.
+  final Map<CancelToken, int> _blocksCancelTokens = <CancelToken, int>{};
 
   final BlockProcessor _blockProcessor = const BlockProcessor();
 
@@ -88,6 +100,10 @@ class ExtensionPostGenService {
 
   /// Runs all enabled preset blocks for [messageId]. Used after chat
   /// generation and from the manual "Запустить блоки" control.
+  ///
+  /// [respectTriggerConditions] applies each block's keyword or period to the
+  /// message, as an automatic run does. A manual run leaves it off: the user
+  /// asked for the blocks, so every one of them runs.
   Future<bool> runBlocksForMessage({
     required String charId,
     required String sessionId,
@@ -100,14 +116,24 @@ class ExtensionPostGenService {
     bool clearExisting = true,
     void Function()? onStarted,
     MainModelContextSnapshot? mainModelContextSnapshot,
+    bool respectTriggerConditions = false,
   }) async {
-    final preset = _resolveActivePreset();
+    final preset = _resolveActivePreset(charId, character);
     if (preset == null) return false;
-    final blocks = _blockProcessor.selectBlocks(
-      preset,
-      BlockTrigger.afterAssistant,
-    );
-    if (blocks.isEmpty) return false;
+    final where = respectTriggerConditions
+        ? _conditionsFor(messages, messageId, isUser: false)
+        : null;
+    final blocks = _blockProcessor
+        .selectBlocks(preset, BlockTrigger.afterAssistant, where: where)
+        .where((b) => b.type != BlockType.accumulation)
+        .toList();
+    if (blocks.isEmpty &&
+        ExtBlocksAccumulator.blocksFor(
+          preset,
+          BlockTrigger.afterAssistant,
+        ).isEmpty) {
+      return false;
+    }
 
     onStarted?.call();
 
@@ -144,6 +170,7 @@ class ExtensionPostGenService {
         cancelToken: cancelToken,
         trigger: BlockTrigger.afterAssistant,
         mainModelContextSnapshot: mainModelContextSnapshot,
+        where: where,
       );
     } finally {
       _finishBlockRun(cancelToken);
@@ -182,20 +209,69 @@ class ExtensionPostGenService {
     }
   }
 
-  ExtensionPreset? _resolveActivePreset() {
-    final settings = _ref.read(extensionsSettingsProvider);
-    final presetId = settings.activePresetId;
-    if (presetId == null || presetId.isEmpty) {
-      return null;
+  /// The active preset's enabled rewrite blocks, for the manual rewrite sheet.
+  List<BlockConfig> rewriteBlocks(String charId) {
+    final preset = _resolveActivePreset(charId);
+    if (preset == null) return const [];
+    return [
+      for (final block in preset.blocks)
+        if (block.enabled && block.type == BlockType.rewrite) block,
+    ];
+  }
+
+  /// Runs the rewrite block [blockId] on [messageId] by hand, as the
+  /// original's selection popup does. [textToRewrite] narrows it to a
+  /// fragment that must occur once in the message; [additionalPrompt] fills
+  /// `{{additionalPrompt}}`. Stop reaches it like any other block run.
+  Future<void> runRewriteBlock({
+    required String blockId,
+    required String charId,
+    required String sessionId,
+    required String messageId,
+    required List<ChatMessage> messages,
+    required Character character,
+    required Persona? persona,
+    String? textToRewrite,
+    String additionalPrompt = '',
+  }) async {
+    final preset = _resolveActivePreset(charId, character);
+    final block = preset?.blocks.where((b) => b.id == blockId).firstOrNull;
+    if (preset == null || block == null || block.type != BlockType.rewrite) {
+      return;
     }
-    final preset = _ref
-        .read(extensionPresetsProvider)
-        .where((pr) => pr.id == presetId)
-        .firstOrNull;
-    if (preset == null) {
-      return null;
+    final cancelToken = _startBlockRun();
+    try {
+      await _ref
+          .read(extBlocksRewriteServiceProvider)
+          .rewriteMessage(
+            blocks: [block],
+            charId: charId,
+            sessionId: sessionId,
+            messageId: messageId,
+            messages: messages,
+            character: character,
+            persona: persona,
+            preset: preset,
+            textToRewrite: textToRewrite,
+            additionalMacros: {'additionalPrompt': additionalPrompt},
+            cancelToken: cancelToken,
+          );
+    } finally {
+      _finishBlockRun(cancelToken);
     }
-    return preset;
+  }
+
+  /// The active preset with [charId]'s card blocks in it, as the original
+  /// runs them. [character] is read for the card when the caller has it.
+  ExtensionPreset? _resolveActivePreset(
+    String? charId, [
+    Character? character,
+  ]) {
+    if (character == null) return effectiveExtBlocksPreset(_ref.read, charId);
+    final preset = activeExtBlocksPresetOf(_ref.read);
+    return preset == null
+        ? null
+        : withCardBlocks(preset, cardBlocksOf(character));
   }
 
   /// Called by ExtBlocksStage after assistant message is finalised.
@@ -230,6 +306,7 @@ class ExtensionPostGenService {
       persona: persona,
       onStarted: onStarted,
       mainModelContextSnapshot: mainModelContextSnapshot,
+      respectTriggerConditions: true,
     );
   }
 
@@ -241,7 +318,7 @@ class ExtensionPostGenService {
     required Character character,
     required Persona? persona,
   }) async {
-    final preset = _resolveActivePreset();
+    final preset = _resolveActivePreset(charId, character);
     if (preset == null) return;
     if (session.id.isEmpty || session.messages.isEmpty) return;
     final lastMessage = session.messages.last;
@@ -262,6 +339,7 @@ class ExtensionPostGenService {
         persona: persona,
         cancelToken: cancelToken,
         trigger: BlockTrigger.afterUser,
+        where: _conditionsFor(session.messages, lastMessage.id, isUser: true),
       );
     } finally {
       _finishBlockRun(cancelToken);
@@ -272,6 +350,97 @@ class ExtensionPostGenService {
         lastMessage.swipeId,
         -1,
       );
+    }
+  }
+
+  /// Runs the script blocks marked to answer to a swipe, after the user
+  /// swiped [messages]' message to another variant or asked for a new one.
+  ///
+  /// Like the original, these run for their side effects only — variables,
+  /// injections, sounds — and leave nothing in the panel.
+  Future<void> runSwipeScripts({
+    required String charId,
+    required String sessionId,
+    required List<ChatMessage> messages,
+  }) => _runSideEffectScripts(
+    charId: charId,
+    sessionId: sessionId,
+    messages: messages,
+    reason: 'swipe',
+    select: (b) => b.triggerOnSwipe,
+  );
+
+  /// Runs the script blocks marked to run when a generation starts, before
+  /// the request goes out, so what they inject reaches this very reply.
+  Future<void> runGenerationStartScripts({
+    required String charId,
+    required String sessionId,
+    required List<ChatMessage> messages,
+  }) => _runSideEffectScripts(
+    charId: charId,
+    sessionId: sessionId,
+    messages: messages,
+    reason: 'generation start',
+    select: (b) => b.generationAfterCommands,
+  );
+
+  Future<void> _runSideEffectScripts({
+    required String charId,
+    required String sessionId,
+    required List<ChatMessage> messages,
+    required String reason,
+    required bool Function(BlockConfig block) select,
+  }) async {
+    final preset = _resolveActivePreset(charId);
+    if (preset == null) return;
+    final blocks =
+        preset.blocks
+            .where(
+              (b) =>
+                  b.enabled &&
+                  !b.manualOnly &&
+                  b.type == BlockType.script &&
+                  select(b),
+            )
+            .toList()
+          ..sort((a, b) => a.order.compareTo(b.order));
+    for (final block in blocks) {
+      // Only code the block carries runs here: asking the model to write a
+      // script is a chain step with a panel to show it in, and STscript has
+      // no interpreter in this app.
+      if (block.source != BlockSource.carried ||
+          block.scriptType != ScriptType.js) {
+        debugPrint(
+          '[ExtPostGen] $reason script "${block.name}" skipped: '
+          'only carried JavaScript runs outside the chain',
+        );
+        continue;
+      }
+      try {
+        await runJsBlock(
+          charId: charId,
+          sessionId: sessionId,
+          block: block,
+          contextMessages: messages,
+          // Swipe and generation-start scripts come from the original, so
+          // they get its scope, on the last message as it has them.
+          extBlocks: extBlocksScriptScope(
+            preset: preset,
+            messages: messages,
+            messageId: null,
+            rows: _ref.read(infoBlocksProvider(sessionId)),
+            character: _ref.read(characterByIdProvider(charId)),
+            persona: _ref.read(
+              effectivePersonaForChatProvider((
+                charId: charId,
+                sessionId: sessionId,
+              )),
+            ),
+          ),
+        );
+      } catch (e) {
+        debugPrint('[ExtPostGen] $reason script "${block.name}" failed: $e');
+      }
     }
   }
 
@@ -287,11 +456,41 @@ class ExtensionPostGenService {
     required Character character,
     required Persona? persona,
   }) async {
-    final preset = _resolveActivePreset();
+    final preset = _resolveActivePreset(charId, character);
     if (preset == null) return;
 
     final blockConfig = preset.blocks.where((b) => b.id == blockId).firstOrNull;
     if (blockConfig == null) return;
+
+    final side =
+        messages.where((m) => m.id == messageId).firstOrNull?.role == 'user'
+        ? BlockTrigger.afterUser
+        : BlockTrigger.afterAssistant;
+    Future<void> rebuildAccumulation() => _ref
+        .read(extBlocksAccumulatorProvider)
+        .rebuildForMessage(
+          preset: preset,
+          side: side,
+          sessionId: sessionId,
+          messageId: messageId,
+          swipeId: swipeId,
+          agentSwipeId: agentSwipeId,
+          messages: messages,
+        );
+
+    // An accumulation block has no run of its own: running it again means
+    // rebuilding the message's state from its updaters.
+    if (blockConfig.type == BlockType.accumulation) {
+      await rebuildAccumulation();
+      _refreshPanelForMessage(
+        charId,
+        sessionId,
+        messageId,
+        swipeId,
+        agentSwipeId,
+      );
+      return;
+    }
 
     final cancelToken = _startBlockRun();
 
@@ -323,6 +522,10 @@ class ExtensionPostGenService {
       if (block != null) {
         _ref.read(infoBlocksProvider(sessionId).notifier).addOrReplace(block);
       }
+      // A new generated result may carry a different updater.
+      if (blockConfig.type == BlockType.generated && !cancelToken.isCancelled) {
+        await rebuildAccumulation();
+      }
     } finally {
       _finishBlockRun(cancelToken);
     }
@@ -337,19 +540,38 @@ class ExtensionPostGenService {
 
   /// Cancels any in-flight block generation for the current session.
   void cancelBlocks() {
-    for (final token in _blocksCancelTokens.toList()) {
+    for (final token in _blocksCancelTokens.keys.toList()) {
       if (!token.isCancelled) token.cancel();
+    }
+  }
+
+  /// Runs [body] as a block run of its own, so Stop reaches it.
+  Future<T> withBlockRun<T>(Future<T> Function(CancelToken token) body) async {
+    final token = _startBlockRun();
+    try {
+      return await body(token);
+    } finally {
+      _finishBlockRun(token);
     }
   }
 
   CancelToken _startBlockRun() {
     final token = CancelToken();
-    _blocksCancelTokens.add(token);
+    _blocksCancelTokens[token] = 1;
     return token;
   }
 
+  void _holdBlockRun(CancelToken token) {
+    _blocksCancelTokens[token] = (_blocksCancelTokens[token] ?? 0) + 1;
+  }
+
   void _finishBlockRun(CancelToken token) {
-    _blocksCancelTokens.remove(token);
+    final holders = (_blocksCancelTokens[token] ?? 1) - 1;
+    if (holders <= 0) {
+      _blocksCancelTokens.remove(token);
+    } else {
+      _blocksCancelTokens[token] = holders;
+    }
   }
 
   void _publishStreamingBlockContent({
@@ -402,7 +624,7 @@ class ExtensionPostGenService {
     required Character character,
     required Persona? persona,
   }) async {
-    final preset = _resolveActivePreset();
+    final preset = _resolveActivePreset(charId, character);
     if (preset == null) return;
 
     final blockConfig = preset.blocks.where((b) => b.id == blockId).firstOrNull;
@@ -457,6 +679,13 @@ class ExtensionPostGenService {
   // Chain execution
   // ─────────────────────────────────────────────────────────────────────────
 
+  /// Runs one chain in the original extension's order: scripts marked
+  /// "before", rewrites marked "before", the generated blocks, rewrites
+  /// marked "after", scripts marked "after".
+  ///
+  /// Only carried scripts with no dependency take a phase. A script the model
+  /// writes, or one chained to the block before it, keeps its place in the
+  /// ordinary chain, where it has always run.
   Future<void> _runChain({
     required String charId,
     required String sessionId,
@@ -470,31 +699,190 @@ class ExtensionPostGenService {
     required CancelToken cancelToken,
     BlockTrigger trigger = BlockTrigger.afterAssistant,
     MainModelContextSnapshot? mainModelContextSnapshot,
+    bool Function(BlockConfig block)? where,
   }) async {
-    await _blockProcessor.run(
-      preset: preset,
-      trigger: trigger,
-      cancelToken: cancelToken,
-      runBlock: ({required blockConfig, required previousOutput}) {
-        return _runSingleBlock(
+    final eligible = _blockProcessor.selectBlocks(
+      preset,
+      trigger,
+      where: where,
+    );
+    List<BlockConfig> phase(bool Function(BlockConfig b) test) =>
+        eligible.where(test).toList();
+    final beforeScripts = phase(
+      (b) => isPhasedScript(b) && b.executionOrder == BlockRunOrder.before,
+    );
+    final afterScripts = phase(
+      (b) => isPhasedScript(b) && b.executionOrder == BlockRunOrder.after,
+    );
+    final beforeRewrites = phase(
+      (b) =>
+          b.type == BlockType.rewrite &&
+          b.generationOrder == BlockRunOrder.before,
+    );
+    final afterRewrites = phase(
+      (b) =>
+          b.type == BlockType.rewrite &&
+          b.generationOrder == BlockRunOrder.after,
+    );
+
+    var current = messages;
+    // Blocks of the ordinary chain that share one request, as the original
+    // groups them.
+    final groups = blockGroups(
+      eligible.where(
+        (b) =>
+            b.type != BlockType.rewrite &&
+            b.type != BlockType.accumulation &&
+            !isPhasedScript(b),
+      ),
+    );
+    Future<InfoBlock?> runOne(BlockConfig blockConfig, String? previous) =>
+        _runSingleBlock(
           charId: charId,
           sessionId: sessionId,
           messageId: messageId,
           swipeId: swipeId,
           agentSwipeId: agentSwipeId,
-          messages: messages,
+          messages: current,
           blockConfig: blockConfig,
           preset: preset,
           character: character,
           persona: persona,
-          previousOutput: previousOutput,
+          previousOutput: previous,
           cancelToken: cancelToken,
           mainModelContextSnapshot: mainModelContextSnapshot,
+          group: groups[blockConfig.id] ?? const [],
         );
-      },
+
+    Future<void> runScripts(List<BlockConfig> scripts) async {
+      for (final script in scripts) {
+        if (cancelToken.isCancelled) return;
+        final result = await runOne(script, null);
+        if (result != null) {
+          _ref
+              .read(infoBlocksProvider(sessionId).notifier)
+              .addOrReplace(result);
+        }
+      }
+    }
+
+    Future<void> runRewrites(List<BlockConfig> rewrites) async {
+      if (rewrites.isEmpty || cancelToken.isCancelled) return;
+      current = await _ref
+          .read(extBlocksRewriteServiceProvider)
+          .rewriteMessage(
+            blocks: rewrites,
+            charId: charId,
+            sessionId: sessionId,
+            messageId: messageId,
+            messages: current,
+            character: character,
+            persona: persona,
+            preset: preset,
+            cancelToken: cancelToken,
+          );
+    }
+
+    // The original's first accumulation pass reads the message as it came;
+    // the state is rebuilt from the one before it, so a re-run applies each
+    // update once.
+    final accumulator = _ref.read(extBlocksAccumulatorProvider);
+    final accumulators = ExtBlocksAccumulator.blocksFor(preset, trigger);
+    final accumulationTarget = (
+      sessionId: sessionId,
+      messageId: messageId,
+      swipeId: swipeId,
+      agentSwipeId: agentSwipeId,
+      messages: messages,
+    );
+    if (accumulators.isNotEmpty) {
+      await accumulator.resetForMessage(
+        blocks: accumulators,
+        sessionId: sessionId,
+        messageId: messageId,
+        swipeId: swipeId,
+        agentSwipeId: agentSwipeId,
+      );
+      await accumulator.accumulate(
+        blocks: accumulators,
+        target: accumulationTarget,
+        text:
+            messages.where((m) => m.id == messageId).firstOrNull?.content ?? '',
+      );
+    }
+
+    await runScripts(beforeScripts);
+    await runRewrites(beforeRewrites);
+    if (cancelToken.isCancelled) return;
+
+    await _blockProcessor.run(
+      preset: preset,
+      trigger: trigger,
+      cancelToken: cancelToken,
+      where: (b) =>
+          (where?.call(b) ?? true) &&
+          b.type != BlockType.rewrite &&
+          b.type != BlockType.accumulation &&
+          !isPhasedScript(b),
+      runBlock: ({required blockConfig, required previousOutput}) =>
+          runOne(blockConfig, previousOutput),
       onBlockComplete: (result) {
         _ref.read(infoBlocksProvider(sessionId).notifier).addOrReplace(result);
       },
+      onBackgroundStarted: (run) {
+        // Stop still reaches a background block after its chain returned,
+        // and the panel catches up once it lands.
+        _holdBlockRun(cancelToken);
+        unawaited(
+          run.whenComplete(() {
+            _finishBlockRun(cancelToken);
+            _refreshPanelForMessage(
+              charId,
+              sessionId,
+              messageId,
+              swipeId,
+              agentSwipeId,
+            );
+          }),
+        );
+      },
+    );
+
+    await runRewrites(afterRewrites);
+    await runScripts(afterScripts);
+
+    // The second pass reads the generated blocks now under the message.
+    if (accumulators.isNotEmpty && !cancelToken.isCancelled) {
+      await accumulator.accumulate(
+        blocks: accumulators,
+        target: accumulationTarget,
+        text: await accumulator.generatedOutput(
+          preset: preset,
+          sessionId: sessionId,
+          messageId: messageId,
+          swipeId: swipeId,
+          agentSwipeId: agentSwipeId,
+        ),
+      );
+    }
+  }
+
+  /// The keyword / period check for the message [messageId] in [messages].
+  /// A message that is not in the list fails every check, so nothing runs
+  /// against a message the chat no longer has.
+  bool Function(BlockConfig block) _conditionsFor(
+    List<ChatMessage> messages,
+    String messageId, {
+    required bool isUser,
+  }) {
+    final index = messages.indexWhere((m) => m.id == messageId);
+    if (index < 0) return (_) => false;
+    final text = messages[index].content;
+    return (block) => blockConditionsMet(
+      block,
+      messageIndex: index,
+      isUser: isUser,
+      messageText: text,
     );
   }
 
@@ -517,6 +905,7 @@ class ExtensionPostGenService {
     required CancelToken cancelToken,
     String? reuseBlockId,
     MainModelContextSnapshot? mainModelContextSnapshot,
+    List<BlockConfig> group = const [],
   }) =>
       SingleBlockRunner(
         statusTracker: _statusTracker,
@@ -537,6 +926,7 @@ class ExtensionPostGenService {
         cancelToken: cancelToken,
         reuseBlockId: reuseBlockId,
         mainModelContextSnapshot: mainModelContextSnapshot,
+        group: group,
       );
 
   BlockHandler _handlerFor(BlockType type) {
@@ -561,18 +951,18 @@ class ExtensionPostGenService {
           executeJsScript: _executeContextJsScript,
         );
       case BlockType.rewrite:
+        // Rewrites change the message in their own phase and never reach a
+        // panel row; this only answers a stray manual run.
         return UnsupportedBlockHandler(
           markBlockError: _markContextBlockError,
-          reason:
-              'Rewrite blocks can be edited and exported, but are not executed '
-              'yet.',
+          reason: 'Rewrite blocks rewrite the message and have no panel run.',
         );
       case BlockType.accumulation:
+        // Accumulation state is rebuilt from updaters around the chain, never
+        // by a panel run.
         return UnsupportedBlockHandler(
           markBlockError: _markContextBlockError,
-          reason:
-              'Accumulation blocks can be edited and exported, but are not '
-              'executed yet.',
+          reason: 'Accumulation blocks are updated by their updater block.',
         );
     }
   }
@@ -614,11 +1004,22 @@ class ExtensionPostGenService {
     required BlockConfig block,
     required List<ChatMessage> contextMessages,
     bool Function()? isAuthorized,
+    Map<String, dynamic>? extBlocks,
   }) => PeriodicJsBlockRunner(ref: _ref).run(
     charId: charId,
     sessionId: sessionId,
     block: block,
     contextMessages: contextMessages,
     isAuthorized: isAuthorized,
+    extBlocks: extBlocks,
   );
 }
+
+/// A script block that runs in its "before" or "after" phase rather than in
+/// the ordinary chain: one carrying its own code and not chained to the block
+/// before it, which is every script the original extension exports.
+@visibleForTesting
+bool isPhasedScript(BlockConfig block) =>
+    block.type == BlockType.script &&
+    block.source == BlockSource.carried &&
+    !block.dependsOnPrevious;

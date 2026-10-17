@@ -77,6 +77,58 @@ void main() {
       expect(config.model, 'embedding-model');
     });
 
+    group('borrowed model fallback', () {
+      ApiConfig llm(String endpoint, {String protocol = 'openai'}) => ApiConfig(
+        id: 'llm',
+        endpoint: endpoint,
+        model: 'chat-model',
+        protocol: protocol,
+      );
+
+      test('a hosted provider never embeds with its chat model', () {
+        for (final source in [
+          llm('https://api.openai.com/v1/chat/completions'),
+          llm('https://api.deepseek.com/v1/chat/completions'),
+          llm(
+            'https://openrouter.ai/api/v1/chat/completions',
+            protocol: 'openrouter',
+          ),
+          llm(
+            'https://generativelanguage.googleapis.com/v1beta/models/'
+            'gemini-2.5-pro:generateContent',
+            protocol: 'gemini',
+          ),
+          llm('https://proxy.example/v1/messages', protocol: 'anthropic'),
+        ]) {
+          expect(
+            embeddingModelForBorrowedLlm('', source),
+            isEmpty,
+            reason: source.endpoint,
+          );
+        }
+      });
+
+      test('a self-hosted server falls back to its chat model', () {
+        expect(
+          embeddingModelForBorrowedLlm(
+            '',
+            llm('http://127.0.0.1:11434/v1/chat/completions'),
+          ),
+          'chat-model',
+        );
+      });
+
+      test('an explicit embedding model always wins', () {
+        expect(
+          embeddingModelForBorrowedLlm(
+            ' text-embedding-3-small ',
+            llm('https://api.openai.com/v1/chat/completions'),
+          ),
+          'text-embedding-3-small',
+        );
+      });
+    });
+
     test(
       'ignores the LLM preset once the endpoint is the embedding preset\'s own',
       () {

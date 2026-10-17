@@ -114,7 +114,7 @@ lib/
 │   │   ├── sse_client.dart           # SSE + non-streaming completions via Dio
 │   │   ├── stream_accumulator.dart   # Parses inline <think…> tags from stream
 │   │   ├── response_normalizer.dart  # Extracts content from non-streaming response body
-│   │   ├── summary_service.dart      # Reads/writes summaries, triggers LLM regeneration
+│   │   ├── summary_service.dart      # Summary blocks: storage, prompt view, retell/merge calls
 │   │   ├── tokenizer.dart            # estimateTokens() with LRU cache, base64 stripping
 │   │   ├── request_tokens.dart       # countRequestTokens(): one rule for the inspector's next and captured requests
 │   │   ├── macro_engine.dart         # SillyTavern-compatible macro replacement engine
@@ -880,7 +880,7 @@ finishes.
 - `{{reasoningPrefix}}`, `{{reasoningSuffix}}` — inline reasoning tag config
 
 **Dynamic content:**
-- `{{summary}}` — current chat summary (user-authored only)
+- `{{summary}}` — live summary blocks; the messages they cover are left out of the history (INV-S6)
 - `{{memory}}` — triggered memory book entries. Memory can enter the prompt three ways: a dedicated `memory` ("Memory Book") preset block (addable from the editor, resolves like the macro), the `{{memory}}` macro, or — with `injectionTarget='hard_block'` (default) — an auto-injected "Memory Book" system message. With `injectionTarget='macro'` and no `{{memory}}` macro or `memory` block present, memory is dropped and `memoryMacroMissing` is flagged. See INV-PS5.
 - `{{lorebooks}}` — triggered lorebook content
 - `{{guidance}}` — guided swipe instruction
@@ -1121,7 +1121,24 @@ always-on capture sink (`llmRequestCaptureInstallationProvider` →
 not mix runs. Rows are folded into groups by `messageId` (one chat turn: the
 main model or the agent shards, then cleaner, ledger, ext blocks) or by
 `pipelineRunId` (a background job — card rewrite, reconciliation), and the two
-kinds share one chronological list. Retries of one call collapse into a single
+kinds share one chronological list. Plugin calls (`glaze.generate`,
+`glaze.images.generate`) carry the open chat, a stage of their own
+(`plugin.generate`, `image.plugin`) and the plugin's id as the step name, and
+record their outcome, so each shows as a call of its own with its response.
+A plugin's HTTP requests show too, under `plugin.net` with the plugin, method
+and address as the step name (`plugin_request_capture.dart`):
+`glaze.net.fetch` and downloads by URL (`fetchForPlugin`: files saved from a
+URL, image previews) record them in Dart, and the SDK's network watch reports
+every `fetch`, XHR, beacon, WebSocket and EventSource call its frame makes
+(`req` → host → `pluginHttp`), reading a clone of the response so the
+plugin's own read is untouched. A JSON body with chat messages, Gemini
+`contents` or a `prompt` shows as those messages; credentials in headers and
+query parameters are hidden; bodies are cut at 200,000 characters. These rows
+have a budget of their own (`maxPluginRequestsPerSession`), so a plugin
+polling a server does not evict the chat's model requests. Resources a page
+loads (images, scripts) are only in the plugin's network log. The watch is a
+view, not a boundary: code in the frame can reach unwrapped functions (a
+nested frame, a worker) and send unseen, still under the frame's policy. Retries of one call collapse into a single
 step carrying an attempt count. Opening a step shows that exact payload; the tab
 strip hides while it is open, and the step gets two tabs of its own: what was
 sent, and what came back (`PromptCaptureView.responseText`, read from the call
@@ -1620,6 +1637,288 @@ snapshot.
 the message header.
 
 ---
+
+## 9.1 Plugins
+
+Glaze plugins are `.glzp` zip packages with a `plugin.json` at the root. They
+run in the chat WebView and talk to the app through the `glaze.*` script API.
+Code lives in `lib/features/plugins/` and `assets/chat_webview/plugins/`.
+
+**Manifest (`plugin.json`, `format: 1`).** `id`, `name`, `version` (SemVer),
+`main`, `author`, `description`, `releaseNotes`, `locales: {default, files}`,
+`icon`, `minGlazeVersion`, `permissions`, `hosts`, and `contributes`:
+`composerActions`, `toolsActions`, `messageActions`,
+`panels[{id, src, placement: chat|message, slot, role, position}]`,
+`fileHandlers[{id, extensions, mimeTypes, scripts, icon}]` and `settings[]`
+(`toggle`, `select`, `slider`, `text`, `textarea`, `note`, `divider`,
+`group`). `composerActions` land in the chat drawer's Actions tab and
+`toolsActions` in its Tools tab, each `{id, label, icon}` with `icon` a package
+image (an SVG is tinted like the app's icons); the card's status line is always
+a puzzle piece and the plugin's name. The Tools tab also opens the plugin list
+itself as a sheet (`PluginsSheet`).
+
+**Plugin screen.** `PluginDetailScreen` is split into tabs, picked from a
+dropdown chip pinned under the header, with a fade-through between tabs:
+Info (the `icon` cover fills the screen behind it and fades out on the other
+tabs; over it the name, author, version — a tap opens the release notes — and
+the description pinned to the bottom of the screen, or the About group without a cover; then the hub link),
+Permissions (the permission groups, the network log, the request history),
+the plugin's own tabs, and last Data (export the package, export and import
+the plugin's data). Switching a plugin on or off and uninstalling it are only
+on the plugin list. `contributes.settingsTabs[{id, label, icon}]`
+declares up to `PluginSettingsTab.max` (10) tabs; each settings field puts
+itself on one with `tab`, a field without it lands on the first. Without
+`settingsTabs` every field sits on one Settings tab. A tab no field names is
+not shown. Translatable text is a string or
+`{"t": key}`. Parsed by `plugin_manifest_parser.dart`; `readPluginPackage` also checks that every
+referenced file exists and that no path escapes the package.
+
+**Permissions** (`PluginPermission`): `composer`, `messages`, `variables`
+(the plugin's own: chat, message and global scopes), `variables.shared` (the
+`shared` scope; the variables methods check the scope they are given),
+`files`, `generate`, `images`, `network`, and the library and chats split by
+what is done. Reading the library is one permission per kind,
+and so is changing it: `library.<read|create|update|delete>.<kind>` with
+kind `characters|personas|presets|lorebooks|regex|themes`; other chats are
+`chats.read|create|update|delete` (the open one is `messages`). Older
+manifests and saved settings are expanded on load
+(`PluginPermission.expand`): `library.read|create|update|delete` stands for
+that action on every kind, a format 1 manifest's `library` for all of the
+library and chats. The manifest lists what a plugin
+asks for; the user can take any of them away on the plugin's detail screen
+(`InstalledPlugin.revoked`), and `InstalledPlugin.allows` is the one check the
+bridge, the frame policy and the events use. The SDK still builds methods
+whose permission was taken away, so a call reaches the app and is refused
+there. Creating, changing and deleting (`PluginPermission.asking`) and image
+generation also ask through a consent sheet: allow once, always allow
+(`InstalledPlugin.grants`) or deny, which switches the permission off; on the
+detail screen each is Ask, Always or Off. Every permission check goes
+through `PluginBridgeService._require` and is counted in the plugin's request
+history (`pluginHistoryProvider`, `plugin_data/<id>/history.json`: per action,
+how often it was let through and how often not, and when last), shown on its
+own screen (`PluginHistoryScreen`) opened from the detail screen, filtered by
+answer and by kind of permission (`PluginPermissionCategory`; each record
+keeps the permission it was checked against). On a refusal
+(`permission_denied`) the user also gets one toast per plugin and action until
+the app restarts; a refused plugin is never asked again. A dismissed consent
+sheet counts as not allowed without a toast. Toasts
+and the select/ask sheets a plugin opens are signed with its name
+(`GlazeToast.show(source:)`, `GlazeBottomSheet.show(source:)`), so a plugin
+cannot pass a question off as the app's. Hooks
+and notifications need permissions too (`pluginEventPermissions`): `send:*`
+`composer`, `generation:*` `generate`, `chat:*` and `message:*` `messages`;
+the host page drops subscriptions without them and reports each refused kind
+once (`events.subscribe`). Generation with chat context needs `messages`;
+exporting or copying another chat needs `chats.read`. A fresh install starts
+with every permission revoked and no hosts allowed, and an update revokes the
+permissions the installed version did not ask for. An update is confirmed
+first (version, new permissions); a package from another author
+(`isSamePluginAuthor`) is installed as a new plugin: the old record, data
+folder and chat variables are dropped. The import flow then shows the
+permission sheet (`showPluginPermissionsSheet`). Grants and revocations live in
+`registry.json`. Permissions that ask are read live; revoking another one
+restarts the chat's frames. `images.generate` uses the app's own
+`ImageGenService`.
+
+**Network.** Internet access has three modes, set in the permissions' own
+Internet group: off (`network` revoked), listed hosts and any host
+(`networkHosts == null`). In the listed mode the plugin may reach
+`InstalledPlugin.allowedHosts`: the hosts `plugin.json` names (a string or
+`{ "host", "description" }` each, `example.com` / `*.example.com`), less those
+the user switched off (`blockedHosts`), plus those the user added
+(`networkHosts`). They sit in a collapsed block of the Internet group, each
+with its description; updates keep the user's setup. Local network access (`InstalledPlugin.localNetwork`) is
+a separate switch, off by default. Every plugin frame gets a
+Content-Security-Policy that allows inline code, `data:`/`blob:` URLs and the
+listed hosts (any port), or any https/wss host in the any-host mode; only with
+local network access does it allow http/ws as well (and, in the any-host mode,
+drop the policy), and without it listed hosts on the local network are
+dropped. The SDK also refuses fetch/XHR/WebSocket/EventSource calls to local
+addresses and names (`localhost`, `*.local`, private and link-local IPs).
+Home devices rarely speak TLS, so https-only keeps frames off them; on Android
+the network security config already refuses cleartext except to loopback. Each
+plugin frame sits in a wrapper frame (`wrapperDoc`) carrying the same policy:
+a frame's navigations are checked against its parent's policy, so a plugin
+that navigates itself to a URL it may not reach is stopped before the request
+goes out; the wrapper then reports `navigation` and the frame is removed. WebRTC, which no CSP covers (STUN/TURN
+and peer addresses from a session description can reach any server, and peers
+are IPs, not hosts, so it cannot follow a host list), is taken away from every
+subframe of the chat WebView by a document-start user script injected by the
+WebView itself in all frames (`chatWebViewUserScripts`), before any plugin
+code. The script keeps the constructors behind a bound `__rtcGate(key)`; the
+key (`chatWebViewRtcToken`, one per app run) goes only to plugins in the
+any-host mode, whose SDK takes WebRTC back before plugin code runs. Other
+plugins get refusing stubs, and attempts show in the log as `webrtc`. Nested
+frames in a plugin's sandbox each get their own opaque origin and no SDK, so
+they have no WebRTC and a plugin cannot borrow it from them. Verified on Android WebView; iOS and desktop not
+yet. Downloads the API makes from Dart (`files.save` and `ui.preview` with a
+URL, theme assets) go through `fetchForPlugin`, which applies the same rules
+to the first URL and every redirect, refuses hosts that are or resolve to local
+addresses without local network access (`plugin_network.dart`), and streams the
+body with a size cap and timeouts.
+`glaze.net.fetch(input, init)` (`net_api.dart`) is a request the app makes for
+the plugin, so a plugin can call a service whose CORS rules shut out its page
+without a relay server of its own.
+The SDK reads the arguments through `new Request` and hands Dart the method,
+headers and base64 body; the answer comes back as a `Response`. It needs
+`network`, runs `requirePluginHost` on every hop, takes plain http only with
+local network access, and sends no cookies; headers the app owns (`Cookie`,
+`Host`, `Origin`, `Referer`, `Sec-*`, `Proxy-*`, hop-by-hop ones) are dropped,
+`Set-Cookie` is not returned, a redirect to another origin drops
+`Authorization`, and 303 (or 301/302 after a POST) turns into a GET. Bodies
+both ways are capped at 32 MB and the response is not streamed. An
+`AbortSignal` cancels the request through `net.abort`, which the SDK takes off
+the plugin's `glaze`.
+Plugins are not told about any of this: the SDK reports each host a frame
+loads from — fetch/XHR/WebSocket/EventSource
+calls, resource timing entries and policy violations — through the
+`pluginNetwork` handler into `pluginNetworkLogProvider`
+(`plugin_data/<id>/network.json`); the detail screen lists it, and in the
+listed mode each host there can be allowed or disallowed. The log is a guide
+(plugin code could hide some of its traffic from it, and it is capped at 200
+hosts); the policy is the enforcement.
+
+**Storage.** Packages are unpacked to `<data>/plugins/<id>/`; `registry.json`
+in that folder holds install order, the enabled flag, saved settings and
+grants. Plugin-owned data (the `localStorage` shim, `glaze.files.*` with
+`chat`, `global` and `tmp` scopes) lives in `<data>/plugin_data/<id>/`;
+`files/tmp` is cleared on start, a chat's `files/chat/<session>` goes with the
+chat (session ids are reused), scopes other than those three are refused, and
+all files of one plugin together are capped at 256 MB. The `localStorage`
+shim holds 10 MB per plugin (keys and values in UTF-8, the app's count); a
+write past that throws `QuotaExceededError` in the frame, as a full browser
+storage does, instead of failing later in the app. Variables are capped at
+1 MB per chat and 16 MB for `global` and `shared`. `readPluginPackage`
+checks the sizes and file count the zip declares before inflating anything.
+Variables are per plugin: chat scope in
+`ChatSession.sessionVars['__plugin_variables:<id>']`, per-message scope in
+`'__plugin_message_variables:<id>'` (dropped with the message), global scope
+in `plugin_data/<id>/variables.json`; the `shared` scope
+(`plugin_data/_shared_variables.json`) is the one plugins use together. Only
+the owner's frames get its values pushed, and only with `variables`; the
+`shared` scope needs `variables.shared`. An
+uninstall drops its chat variables (`PluginVariableStore.forgetPlugin`). All
+are separate from block variables.
+
+**Isolation.** Every main script, panel and file-handler run gets its own
+`sandbox="allow-scripts"` iframe (null origin). `plugin_host.js` maps each
+frame window to its plugin (and message, for message panels) and stamps those
+ids on every call it forwards to the `pluginBridge` handler, so a plugin
+cannot speak for another. Frames and host talk with a message prefix drawn at
+each setup and handed over in the boot data; the boot data, the SDK and the
+runner scripts remove themselves, and the functions the SDK wraps print as
+the browser's own, so plugin code sees the API and nothing of the host. A
+panel's policy and SDK go in front of everything it ships, even markup before
+its `<head>`. The chat WebView exposes the app bridge to
+the main frame only (`javaScriptBridgeForMainFrameOnly`,
+`javaScriptHandlersForMainFrameOnly`): on Android the injected Java object is
+visible in every frame, and before this a subframe could call any handler
+with any plugin id. Message HTML and panels therefore reach the app through the
+page's `glaze:request` relays. `plugin_host.js` listens for messages in the
+capture phase before the page's other listeners and stops everything a plugin
+frame, or a frame nested in one, posts, so plugins cannot use those relays.
+Replies to hooks, actions and file runs carry random ids and are accepted only
+from the frame that was asked. `PluginBridgeService` rejects disabled
+plugins and methods whose permission is missing or switched off;
+`plugin_sdk.js` only builds the methods the manifest asks for into `glaze`.
+Chat panels are laid out for the whole screen and draw over the app's own
+chrome (header, message box, buttons). On Android, Windows and Linux they live
+in the plugin layer (`PluginLayer`, `plugin_layer.html`): a second,
+transparent WebView over the whole chat screen, above the Flutter controls.
+It runs the same `plugin_host.js`, set up with `layer: 'panels'` while the
+chat page gets `layer: 'chat'` (main, message and file frames); emits and the
+chat's insets cross between the two through Dart (`pluginEmit`,
+`pluginInsets`). The panels report the boxes they draw (`pluginHoles` →
+`PluginHoles`), and the layer takes touches only there
+(`PluginHolesHitArea`); everything else goes down to the controls and the
+chat page, which the app routes itself on those platforms. A lone panel in
+the layer is not clipped at all; with several, each is clipped (`clip-path`)
+to its boxes so it only takes its own taps. On iOS and macOS a touch goes to
+the topmost native view and cannot be passed down, so the panels stay in the
+chat page there, clipped to their boxes, and the Flutter controls are cut out
+where they draw (`PluginHolesCutter`). Frames
+inside the page may only load `about:srcdoc`/`about:blank`
+(`chatWebViewNavigationPolicy`); iOS asks about those too. Message panels sit in `.msg-content-stack`, message actions in the
+footer's `.msg-trailing-actions`. Package scripts, CSS and assets
+(`/plugins/<id>/…`) are inlined by `plugin_html_inliner.dart`, since a
+null-origin frame cannot fetch them; only the plugin's own package is read, so
+a panel cannot pull in another plugin's files. Layout insets are exposed as
+`--glaze-inset-*` CSS variables. The top bar inset is the status bar alone:
+panels draw over the app's header.
+The soft keyboard lays over the WebView and shrinks only the page's visual
+viewport, never a frame's own, so the panel frame holding the focus is fitted
+to the visual viewport while the keyboard is up; plugins laid out on `100vh`,
+`innerHeight` or their own `visualViewport` stay above it. That frame's
+insets are measured from the keyboard's top and carry its height as
+`keyboard` (`--glaze-inset-keyboard`); other panels keep the full page.
+A panel's small fixed boxes (floating buttons) are kept between the status
+bar and the message box by the SDK — after a drag, when they appear and when
+the insets settle — so one dropped on the gesture strip stays reachable;
+boxes half the screen or larger are left alone.
+
+**Hooks.** `PluginChatHost` (wraps the chat screen) starts the runtime once the
+chat bridge is published and registers a `PluginHookRunner` in
+`pluginHookRegistryProvider`; core chat code only sees that port.
+- `send:before` — `ChatNotifier._sendMessage`, before auto-translation; may
+  rewrite or cancel.
+- `generation:prepare` — `StreamGenerationService.run`, on a copy of the
+  session passed to prompt collection only; never persisted.
+- `generation:success` — `GenerationPipeline.run`, before the reply is
+  committed (for Continue, the new block before it is merged); may rewrite but
+  not empty the text. `generation:error` (pipeline error paths) and
+  `generation:cancelled` (`AbortHandler`) are notifications.
+- `send:after`, `chat:opened|closed|updated`, `message:added|updated|deleted`
+  (diffed from settled `ChatState`) — notifications. `chat:updated` follows
+  the open chat's name, persona, preset and lorebooks.
+- Composer actions appear in the drawer's Actions tab, tools actions in Tools,
+  message actions on the last message (`action:composer|tools|message:<id>`).
+- File handlers: with any running, the composer's attach button accepts every
+  file; images still attach, other files are staged in the plugin's
+  `files/tmp` and the first matching handler that does not answer
+  `unsupported_format` turns them into text for the composer.
+- `glaze.plugin.emit(name, detail)` delivers to the plugin's other frames.
+
+**Tavo compatibility** (`compat/tavo/`, `compat/tavo_compat.js`). A Tavo
+`.tpg` (`manifest.json`, spec v1/v2) is converted to `plugin.json` on import
+(`convertTavoManifest`, `compat: "tavo"`); installs from before the
+conversion are converted on load. Tavo lets every plugin read the library and
+asks before writes, so its manifests do not say which a plugin uses; the
+library, chats, images and `messages` permissions are read off the package's
+scripts (`inferTavoPermissions`) and, like the rest, start off. Tavo also runs
+send and generation hooks for plugins that do not ask for `input` or
+`generate`, so `input:*` and `generation:*` hook names in the scripts add
+`composer` and `generate`. Which were found that way is worked out again on
+load from the original manifest (`InstalledPlugin.foundInCode`), and the
+permission rows mark each as asked for by the extension or found in its code.
+`plugin.json` records the `tavoInference` version it was read with; a
+converted package read with an older one, or still holding the catch-all
+`library` (or `library.read`) from before the split, has its scripts read
+again once on load (`PluginStore._reinfer`). It ends up with the exact library
+and chat permissions it uses; any other permission newly found arrives
+switched off, as after an update. The permission rows are
+grouped: general, variables, the library, other chats
+(`pluginPermissionGroups`); each group's header switch gives or takes away
+all of it (`PluginLibraryNotifier.setPermissions`). For converted
+plugins the runtime also loads `tavo_compat.js`, which defines `tavo.*` (and
+`triggerSlash`) on top of `glaze.*` and then removes `glaze`, maps
+`input:beforeSend|afterSend` onto `send:*`, reports Tavo's version from
+`tavo.app` and sets the `--tavo-inset-*` variables instead of Glaze's. TTS is not supported: importing a package that asks
+for `tts` or calls `tavo.tts`/`glaze.tts` shows a warning sheet first
+(`plugin_compatibility.dart`).
+
+**Tavo Hub links** (`compat/tavo/tavo_hub.dart`, `screens/plugin_hub_sheet.dart`).
+A `hub.tavoai.dev` plugin page opens as a sheet instead of the browser: from
+"Install from a link" on the Plugins screen, links tapped in chats and
+descriptions (`openPluginHubLinkInApp`), and on Android the system's VIEW
+intent (an unverified filter, routed through `DeepLinkService.setWebLinkHandler`).
+The sheet reads the plugin from the hub's public API, downloads the package
+only from the hub's hosts, checks its sha256 and package id, and installs it
+through the same prompts as a file (`installPluginPackage`). Such installs keep
+the slug (`hub` in the registry, `InstalledPlugin.hubSlug`);
+`pluginHubUpdatesProvider` looks them up once per run and the list and plugin
+screen offer the update. Any plugin can be exported back to a file in its own
+format: `.tpg` for converted ones (without the generated `plugin.json`),
+`.glzp` otherwise (`PluginStore.exportPackage`).
 
 ## 10. Known Design Issues
 

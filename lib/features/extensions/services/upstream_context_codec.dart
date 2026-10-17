@@ -7,6 +7,7 @@
 /// carrying message affixes it never had.
 library;
 
+import '../../../core/utils/id_generator.dart';
 import '../models/block_context_item.dart';
 
 String upstreamContextTypeValue(ContextItemType type) => switch (type) {
@@ -65,4 +66,51 @@ Map<String, dynamic> encodeUpstreamContextItem(BlockContextItem item) {
       'block_count': item.blockCount,
     },
   };
+}
+
+/// A fresh item of [type] with the original editor's defaults
+/// (`EditorService.createContextItem`).
+BlockContextItem newContextItem(ContextItemType type, {String? id}) =>
+    BlockContextItem(
+      id: id ?? generateId(),
+      type: type,
+      messagesCount: type == ContextItemType.lastMessages ? 10 : null,
+    );
+
+/// [item] switched to [type], keeping what both types share. Only the
+/// last-messages item carries a count: the original tells the keyword and
+/// by-block items apart by that key being absent.
+BlockContextItem withContextType(BlockContextItem item, ContextItemType type) =>
+    item.copyWith(
+      type: type,
+      messagesCount: type == ContextItemType.lastMessages
+          ? (item.messagesCount ?? 10)
+          : null,
+    );
+
+/// The original's context file: `{"items": [...]}`.
+Map<String, dynamic> encodeContextItemsFile(List<BlockContextItem> items) => {
+  'items': items.map(encodeUpstreamContextItem).toList(growable: false),
+};
+
+/// Reads the original's context file, or a bare array of items. Items the
+/// original wrote before it assigned ids get one here, as its editor does on
+/// load; anything that is not an item is skipped. Null when [decoded] holds no
+/// item list at all.
+List<BlockContextItem>? decodeContextItemsFile(Object? decoded) {
+  final raw = decoded is Map ? decoded['items'] : decoded;
+  if (raw is! List) return null;
+  final items = <BlockContextItem>[];
+  for (final entry in raw) {
+    if (entry is! Map) continue;
+    final map = Map<String, dynamic>.from(entry);
+    final id = map['id'];
+    if (id is! String || id.isEmpty) map['id'] = generateId();
+    try {
+      items.add(BlockContextItem.fromJson(map));
+    } catch (_) {
+      continue;
+    }
+  }
+  return items;
 }

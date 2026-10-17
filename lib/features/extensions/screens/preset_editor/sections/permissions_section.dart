@@ -60,6 +60,7 @@ const List<_PermissionGroup> _groups = [
       (GlazeCapability.playAudio, 'perm_play_audio'),
       (GlazeCapability.executeCommand, 'perm_execute_command'),
       (GlazeCapability.showToast, 'perm_show_toast'),
+      (GlazeCapability.runBlocks, 'perm_run_blocks'),
     ],
   ),
 ];

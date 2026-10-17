@@ -7,6 +7,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/models/preset.dart';
+import '../plugins/screens/plugins_screen.dart';
 import '../../core/platform/haptics.dart';
 import '../../core/state/active_selection_provider.dart';
 import '../../core/state/db_provider.dart';
@@ -37,14 +38,18 @@ class PersonaInfo {
   const PersonaInfo({required this.name, this.avatarPath});
 }
 
+/// The persona the chat the user is in (or was last in) speaks as — a chat or
+/// character binding overrides the global one there — and the global persona
+/// before any chat was opened.
 final _activePersonaInfoProvider = Provider<PersonaInfo?>((ref) {
   final personas = ref.watch(personaListProvider).value ?? [];
   final activeId = ref.watch(activePersonaIdProvider);
   final connections = ref.watch(personaConnectionsProvider);
+  final chat = ref.watch(lastOpenChatProvider);
   final persona = getEffectivePersona(
     personas,
-    null,
-    null,
+    chat?.charId,
+    chat?.sessionId,
     activeId,
     connections,
   );
@@ -304,6 +309,8 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
         );
       case 'ext-blocks':
         _openExtBlocks();
+      case 'plugins':
+        openPluginsScreen(context);
     }
   }
 

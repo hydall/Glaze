@@ -1,4 +1,5 @@
 import Flutter
+import Photos
 import UIKit
 
 @main
@@ -7,6 +8,7 @@ import UIKit
   private let systemSettingsChannelName = "app.glaze.flutter/system_settings"
   private let powerSaveEventsChannelName = "app.glaze.flutter/power_save_events"
   private let powerSaveStreamHandler = PowerSaveStreamHandler()
+  private let mediaStoreChannelName = "app.glaze.flutter/media_store"
 
   override func application(
     _ application: UIApplication,
@@ -54,6 +56,20 @@ import UIKit
       ).setStreamHandler(powerSaveStreamHandler)
     }
 
+    if let mediaRegistrar = engineBridge.pluginRegistry.registrar(forPlugin: "GlazeMediaStore") {
+      FlutterMethodChannel(
+        name: mediaStoreChannelName,
+        binaryMessenger: mediaRegistrar.messenger()
+      ).setMethodCallHandler { [weak self] call, result in
+        switch call.method {
+        case "saveImageToGallery":
+          self?.saveImageToPhotos(call.arguments, result: result)
+        default:
+          result(FlutterMethodNotImplemented)
+        }
+      }
+    }
+
     guard let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "GlazeBackgroundAudio") else { return }
     let channel = FlutterMethodChannel(
       name: "com.hydall.glaze/background_audio",
@@ -69,6 +85,52 @@ import UIKit
         result(nil)
       default:
         result(FlutterMethodNotImplemented)
+      }
+    }
+  }
+
+  /// Adds an image to the Photos library. iOS has no public folder an app can
+  /// drop a file into, so without this a "saved" chat image ends up in the
+  /// app's own sandbox where neither Photos nor Files can see it. Asks only for
+  /// add-only access — reading the library is not needed to write to it.
+  private func saveImageToPhotos(_ arguments: Any?, result: @escaping FlutterResult) {
+    guard
+      let args = arguments as? [String: Any],
+      let bytes = args["bytes"] as? FlutterStandardTypedData
+    else {
+      result(FlutterError(code: "BAD_ARGS", message: "Missing image bytes", details: nil))
+      return
+    }
+    let filename = args["filename"] as? String
+
+    PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+      guard status == .authorized || status == .limited else {
+        DispatchQueue.main.async {
+          result(FlutterError(
+            code: "PHOTOS_DENIED",
+            message: "No permission to add photos to the library",
+            details: nil
+          ))
+        }
+        return
+      }
+      PHPhotoLibrary.shared().performChanges({
+        let options = PHAssetResourceCreationOptions()
+        options.originalFilename = filename
+        PHAssetCreationRequest.forAsset()
+          .addResource(with: .photo, data: bytes.data, options: options)
+      }) { success, error in
+        DispatchQueue.main.async {
+          if success {
+            result("Photos/\(filename ?? "")")
+          } else {
+            result(FlutterError(
+              code: "SAVE_FAILED",
+              message: error?.localizedDescription ?? "Photos refused the image",
+              details: nil
+            ))
+          }
+        }
       }
     }
   }

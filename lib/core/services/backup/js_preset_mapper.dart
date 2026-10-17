@@ -96,6 +96,12 @@ mixin JsPresetMapper on TypeConverters {
           json['impersonationPrompt'] as String? ??
           json['impersonation_prompt'] as String?,
       summaryPrompt: json['summaryPrompt'] as String?,
+      noAssistant: json['noAssistant'] == true,
+      mergeRole: _nonEmpty(json['mergeRole']) ?? 'system',
+      stopString: _nonEmpty(json['stopString']) ?? '',
+      userPrefix: _nonEmpty(json['userPrefix']) ?? '',
+      charPrefix: _nonEmpty(json['charPrefix']) ?? '',
+      squashRole: _nonEmpty(json['squashRole']) ?? 'assistant',
       createdAt: toInt(json['createdAt']) ?? 0,
     ));
   }
@@ -113,3 +119,8 @@ mixin JsPresetMapper on TypeConverters {
     return generateId() + Random().nextInt(9999).toRadixString(36);
   }
 }
+
+/// [value] when it is a non-empty string — the Vue app stored `''` for an
+/// unset preset option.
+String? _nonEmpty(Object? value) =>
+    value is String && value.isNotEmpty ? value : null;

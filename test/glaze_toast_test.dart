@@ -51,6 +51,29 @@ void main() {
     await tester.pumpAndSettle(const Duration(milliseconds: 400));
   });
 
+  testWidgets('a toast from a plugin carries its name', (tester) async {
+    await tester.pumpWidget(buildTestApp(
+      child: Builder(
+        builder: (context) {
+          return ElevatedButton(
+            onPressed: () =>
+                GlazeToast.show(context, 'Session expired', source: 'Probe'),
+            child: const Text('Show Toast'),
+          );
+        },
+      ),
+    ));
+
+    await tester.tap(find.text('Show Toast'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 400));
+
+    expect(find.text('Session expired'), findsOneWidget);
+    expect(find.text('Probe'), findsOneWidget);
+
+    GlazeToast.hide();
+    await tester.pumpAndSettle(const Duration(milliseconds: 400));
+  });
+
   testWidgets('GlazeToast.error renders error toast at top',
       (tester) async {
     await tester.pumpWidget(buildTestApp(

@@ -1,6 +1,7 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
+import 'package:dynamic_color/dynamic_color.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -35,13 +36,44 @@ class ThemeChatPreview extends ConsumerWidget {
     // the font into the engine on demand and return its family name).
     final previewFont = ref.watch(uiFontFamilyProvider).value;
     final chatFontFamily = ref.watch(chatFontFamilyProvider).value;
+    if (!preset.isMaterialYou) {
+      return _buildPreview(isDark, previewFont, chatFontFamily, null);
+    }
+    // Material You takes its palette from the system, same as app.dart does —
+    // without it the preview falls back to the seeded Glaze palette.
+    return DynamicColorBuilder(
+      builder: (lightDynamic, darkDynamic) {
+        final useDynamic = defaultTargetPlatform == TargetPlatform.android;
+        final scheme = useDynamic ? (isDark ? darkDynamic : lightDynamic) : null;
+        return _buildPreview(isDark, previewFont, chatFontFamily, scheme);
+      },
+    );
+  }
+
+  Widget _buildPreview(
+    bool isDark,
+    String? previewFont,
+    String? chatFontFamily,
+    ColorScheme? dynamicScheme,
+  ) {
     final previewTheme = isDark
-        ? AppTheme.dark(preset, fontFamily: previewFont)
-        : AppTheme.light(preset, fontFamily: previewFont);
+        ? AppTheme.dark(
+            preset,
+            fontFamily: previewFont,
+            dynamicScheme: dynamicScheme,
+          )
+        : AppTheme.light(
+            preset,
+            fontFamily: previewFont,
+            dynamicScheme: dynamicScheme,
+          );
+    final accent = preset.isMaterialYou
+        ? _toHex(previewTheme.colorScheme.primary)
+        : preset.accentColor;
     final previewCharacter = Character(
       id: 'preview_character',
       name: 'Rei',
-      color: preset.accentColor,
+      color: accent,
     );
     final chatLayout = preset.chatLayout;
     final isStandard = chatLayout == 'default';
@@ -74,6 +106,12 @@ class ThemeChatPreview extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  static String _toHex(Color c) {
+    String ch(double v) =>
+        (v * 255).round().clamp(0, 255).toRadixString(16).padLeft(2, '0');
+    return '#${ch(c.r)}${ch(c.g)}${ch(c.b)}'.toUpperCase();
   }
 
   static Color textOn(Color bg) {
@@ -164,8 +202,8 @@ class _PreviewChatScene extends StatelessWidget {
               fontFamily: chatFontFamily,
               fontSize: chatFontSize,
               letterSpacing: chatLetterSpacing,
-              text: 'Rei watches in silence, waiting for an answer.',
-              quoted: '"Lost?"',
+              text: 'Rei looks up from the book and smiles.',
+              quoted: '"You made it. The tea\'s still warm."',
               index: 1,
               time: '10:08',
             ),
@@ -173,7 +211,7 @@ class _PreviewChatScene extends StatelessWidget {
               character: Character(
                 id: 'preview_user',
                 name: 'You',
-                color: preset.accentColor,
+                color: character.color,
               ),
               isUser: true,
               showAvatar: preset.showUserAvatar,
@@ -185,8 +223,8 @@ class _PreviewChatScene extends StatelessWidget {
               fontFamily: chatFontFamily,
               fontSize: chatFontSize,
               letterSpacing: chatLetterSpacing,
-              text: 'I lean against the wall.',
-              quoted: '"Not lost. Just looking."',
+              text: 'I drop into the chair across the table.',
+              quoted: '"Sorry, the train was late."',
               index: 2,
               time: '10:09',
             ),
@@ -205,8 +243,8 @@ class _PreviewChatScene extends StatelessWidget {
                 fontFamily: chatFontFamily,
                 fontSize: chatFontSize,
                 letterSpacing: chatLetterSpacing,
-                text: 'Rei watches in silence, waiting for an answer.',
-                quoted: '"Lost?"',
+                text: 'Rei looks up from the book and smiles.',
+                quoted: '"You made it. The tea\'s still warm."',
               ),
             ),
             Padding(
@@ -223,8 +261,8 @@ class _PreviewChatScene extends StatelessWidget {
                 fontFamily: chatFontFamily,
                 fontSize: chatFontSize,
                 letterSpacing: chatLetterSpacing,
-                text: 'I lean against the wall.',
-                quoted: '"Not lost. Just looking."',
+                text: 'I drop into the chair across the table.',
+                quoted: '"Sorry, the train was late."',
               ),
             ),
           ],

@@ -10,6 +10,7 @@ import 'package:glaze_flutter/core/llm/transport/llm_protocol.dart';
 import 'package:glaze_flutter/core/llm/transport/llm_capture_context.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
+import 'package:glaze_flutter/core/models/summary_block.dart';
 
 /// Captures the aux call instead of hitting the network. Subclassing (rather
 /// than stubbing Dio) is what keeps the protocol assertion meaningful: the
@@ -18,8 +19,13 @@ import 'package:glaze_flutter/core/models/chat_message.dart';
 class _RecordingAuxLlmClient extends AuxLlmClient {
   static const response = '  generated summary  ';
 
+  /// Answers handed out in turn; [response] once they run out.
+  final List<String> responses;
+
+  _RecordingAuxLlmClient([this.responses = const []]);
+
   AuxApiConfig? config;
-  String? prompt;
+  final calls = <List<Map<String, String>>>[];
   int? maxTokens;
   double? temperature;
   int? timeoutMs;
@@ -38,14 +44,36 @@ class _RecordingAuxLlmClient extends AuxLlmClient {
     AuxRawResponseSink? onRawResponse,
   }) async {
     this.config = config;
-    this.prompt = prompt;
+    calls.add(
+      messages ??
+          [
+            {'role': 'user', 'content': prompt},
+          ],
+    );
     this.maxTokens = maxTokens;
     this.temperature = temperature;
     this.timeoutMs = timeoutMs;
     this.captureContext = captureContext;
-    return response;
+    return calls.length <= responses.length
+        ? responses[calls.length - 1]
+        : response;
   }
+
+  List<Map<String, String>>? get messages => calls.lastOrNull;
+
+  String? _content(String role) =>
+      messages?.where((m) => m['role'] == role).map((m) => m['content']).join();
+
+  String? get system => _content('system');
+  String? get user => _content('user');
 }
+
+const _api = ApiConfig(
+  id: 'api',
+  endpoint: 'https://example.com/v1',
+  apiKey: 'secret',
+  model: 'model',
+);
 
 void main() {
   late AppDatabase db;
@@ -58,136 +86,138 @@ void main() {
 
   tearDown(() => db.close());
 
-  test('reads defaults and persists trimmed manual summary state', () async {
+  const messages = [
+    ChatMessage(id: '1', role: 'user', content: 'Hello'),
+    ChatMessage(id: '2', role: 'assistant', content: 'Hi there'),
+    ChatMessage(id: '3', role: 'user', content: 'Fresh'),
+  ];
+
+  SummaryBlock block(List<String> ids, String content) => SummaryBlock(
+    id: 'b-${ids.join()}',
+    level: 1,
+    content: content,
+    messageIds: ids,
+    sourceHash: SummaryChain.fingerprint(ids, SummaryChain.index(messages)),
+    tokens: 3,
+  );
+
+  test('blocks round-trip and render into content', () async {
     final service = SummaryService(repo);
-
-    expect(await service.getSummary('session'), isNull);
-    expect(await service.getSummaryContent('session'), isNull);
+    expect(await service.getBlocks('session'), isEmpty);
     expect(await service.isSummaryEnabled('session'), isTrue);
-    expect(await service.getSummaryMessageCount('session'), 0);
 
-    await service.setSummary(
+    await service.saveBlocks(
       sessionId: 'session',
-      content: '  manual summary  ',
-      messageCount: 7,
+      blocks: [
+        block(['1', '2'], 'They met.'),
+      ],
+      messages: messages,
     );
-    expect(await service.getSummary('session'), 'manual summary');
-    expect(await service.getSummaryMessageCount('session'), 7);
+
+    expect((await service.getBlocks('session')).single.content, 'They met.');
+    expect(await service.getSummary('session'), 'They met.');
 
     await service.setSummaryEnabled(sessionId: 'session', enabled: false);
     expect(await service.getSummary('session'), isNull);
-    expect(await service.getSummaryContent('session'), 'manual summary');
-    expect(await service.isSummaryEnabled('session'), isFalse);
+    expect(await service.getPromptView('session', messages), isNull);
+    // Switching off keeps the blocks.
+    expect(await service.getBlocks('session'), hasLength(1));
 
     await service.deleteSummary('session');
-    expect(await service.getSummaryContent('session'), isNull);
+    expect(await service.getBlocks('session'), isEmpty);
   });
 
-  test(
-    'generates with filtered history and persists the trimmed response',
-    () async {
-      final llm = _RecordingAuxLlmClient();
-      final service = SummaryService(repo, llm: llm);
-      const history = [
-        ChatMessage(id: '1', role: 'user', content: 'Hello'),
-        ChatMessage(id: '2', role: 'system', content: 'Ignored'),
-        ChatMessage(id: '3', role: 'assistant', content: 'Hi there'),
-      ];
+  test('a summary from before blocks reads as one note', () async {
+    final service = SummaryService(repo);
+    await repo.put(sessionId: 'session', content: 'Old text', messageCount: 9);
 
-      final result = await service.generateSummary(
-        sessionId: 'session',
-        history: history,
-        apiConfig: const ApiConfig(
-          id: 'api',
-          endpoint: 'https://example.com/v1',
-          apiKey: 'secret',
-          model: 'model',
-        ),
-        customPrompt: 'Context:\n{{history}}',
-      );
+    final blocks = await service.getBlocks('session');
+    expect(blocks.single.isNote, isTrue);
+    expect(blocks.single.content, 'Old text');
 
-      expect(result, 'generated summary');
-      expect(llm.prompt, contains('User: Hello'));
-      expect(llm.prompt, contains('Character: Hi there'));
-      expect(llm.prompt, isNot(contains('Ignored')));
-      expect(await service.getSummaryContent('session'), 'generated summary');
-      expect(await service.getSummaryMessageCount('session'), history.length);
-      expect((await repo.get('session'))?.prompt, 'Context:\n{{history}}');
-      expect(llm.captureContext?.stage, 'summary');
-      expect(llm.captureContext?.sessionId, 'session');
-    },
-  );
+    // Sent, but standing in for no messages.
+    final view = await service.getPromptView('session', messages);
+    expect(view?.content, 'Old text');
+    expect(view?.coveredMessageIds, isEmpty);
+  });
 
-  test(
-    'routes the call through the config protocol, not always OpenAI',
-    () async {
-      final llm = _RecordingAuxLlmClient();
-      final service = SummaryService(repo, llm: llm);
+  test('the prompt view covers live blocks only', () async {
+    final service = SummaryService(repo);
+    await service.saveBlocks(
+      sessionId: 'session',
+      blocks: [
+        block(['1', '2'], 'They met.'),
+      ],
+      messages: messages,
+    );
 
-      await service.generateSummary(
-        sessionId: 'session',
-        history: const [ChatMessage(id: '1', role: 'user', content: 'Hi')],
-        apiConfig: const ApiConfig(
-          id: 'api',
-          endpoint: 'https://api.anthropic.com',
-          apiKey: 'secret',
-          model: 'claude-sonnet-4',
-          protocol: LlmProtocol.anthropic,
-          maxTokens: 4096,
-          firstChunkTimeoutMs: 12000,
-        ),
-      );
+    final view = await service.getPromptView('session', messages);
+    expect(view?.coveredMessageIds, {'1', '2'});
 
-      expect(llm.config?.protocol, LlmProtocol.anthropic);
-      expect(llm.config?.endpoint, 'https://api.anthropic.com');
-      expect(llm.config?.apiKey, 'secret');
-      expect(llm.config?.model, 'claude-sonnet-4');
-      expect(llm.maxTokens, 4096);
-      expect(llm.timeoutMs, 12000);
-    },
-  );
+    // An edited source makes the block stale: not sent, messages come back.
+    final edited = [
+      messages[0],
+      messages[1].copyWith(content: 'Hi there, edited'),
+      messages[2],
+    ];
+    expect(await service.getPromptView('session', edited), isNull);
+  });
 
-  test('carries the connection no-temperature flag', () async {
+  test('summarizes one run through the config protocol', () async {
     final llm = _RecordingAuxLlmClient();
     final service = SummaryService(repo, llm: llm);
 
-    await service.generateSummary(
+    final result = await service.summarizeMessages(
       sessionId: 'session',
-      history: const [ChatMessage(id: '1', role: 'user', content: 'Hi')],
+      source: const [
+        ChatMessage(id: '1', role: 'user', content: 'Hello'),
+        ChatMessage(id: '2', role: 'system', content: 'Ignored'),
+        ChatMessage(id: '3', role: 'assistant', content: 'Hi there'),
+      ],
       apiConfig: const ApiConfig(
         id: 'api',
-        endpoint: 'https://api.openai.com',
+        endpoint: 'https://api.anthropic.com',
         apiKey: 'secret',
-        model: 'o3',
-        // A reasoning model rejects `temperature` outright. The chat sends
-        // this config no temperature at all; the summary pins 0.3, so without
-        // the flag the same connection answered it with HTTP 400.
+        model: 'claude-sonnet-4',
+        protocol: LlmProtocol.anthropic,
+        maxTokens: 4096,
+        firstChunkTimeoutMs: 12000,
         omitTemperature: true,
       ),
+      targetTokens: 500,
+      customPrompt: 'Context:\n{{history}}',
     );
 
+    expect(result, 'generated summary');
+    // Placed by the template, so it is sent as one user message.
+    expect(llm.messages, hasLength(1));
+    expect(llm.user, contains('User: Hello'));
+    expect(llm.user, contains('Character: Hi there'));
+    expect(llm.user, isNot(contains('Ignored')));
+    expect(llm.config?.protocol, LlmProtocol.anthropic);
     expect(llm.config?.omitTemperature, isTrue);
-    expect(llm.temperature, 0.3);
+    expect(llm.maxTokens, 4096);
+    expect(llm.timeoutMs, 12000);
+    expect(llm.temperature, kSummaryDefaultTemperature);
+    expect(llm.captureContext?.stage, 'summary');
+    // Nothing is persisted: the caller commits the block.
+    expect(await service.getBlocks('session'), isEmpty);
   });
 
   test('expands macros in the prompt but never in the transcript', () async {
     final llm = _RecordingAuxLlmClient();
     final service = SummaryService(repo, llm: llm);
-    const template = 'Recap {{char}} for {{user}}.\n{{history}}\nDone.';
 
-    await service.generateSummary(
+    await service.summarizeMessages(
       sessionId: 'session',
-      history: const [
-        // The transcript itself must stay untouched, macros and all.
+      source: const [
         ChatMessage(id: '1', role: 'user', content: 'Say {{char}} out loud'),
       ],
-      apiConfig: const ApiConfig(
-        id: 'api',
-        endpoint: 'https://example.com/v1',
-        apiKey: 'secret',
-        model: 'model',
-      ),
-      customPrompt: template,
+      apiConfig: _api,
+      targetTokens: 300,
+      customPrompt:
+          'Recap {{char}} for {{user}} in {{target_tokens}}.\n'
+          '{{history}}\nDone.',
       macroContext: const MacroContext(
         charName: 'Alice',
         userName: 'Bob',
@@ -196,40 +226,21 @@ void main() {
       ),
     );
 
-    expect(llm.prompt, startsWith('Recap Alice for Bob.'));
-    expect(llm.prompt, contains('User: Say {{char}} out loud'));
-    expect(llm.prompt, endsWith('Done.'));
-    // The template is persisted unexpanded so it stays reusable.
-    expect((await repo.get('session'))?.prompt, template);
+    expect(llm.user, startsWith('Recap Alice for Bob in 300.'));
+    // Speakers go by their names; the transcript is never macro-expanded.
+    expect(llm.user, contains('Bob: Say {{char}} out loud'));
+    expect(llm.user, endsWith('Done.'));
+    // Placed by the template, so no length hint is appended.
+    expect(llm.user, isNot(contains(summaryLengthHint(300))));
   });
 
-  test('falls back to the built-in prompt for a blank template', () async {
+  test('the built-in prompt gets the length hint and the transcript', () async {
     final llm = _RecordingAuxLlmClient();
     final service = SummaryService(repo, llm: llm);
 
-    await service.generateSummary(
+    await service.summarizeMessages(
       sessionId: 'session',
-      history: const [ChatMessage(id: '1', role: 'user', content: 'Hi')],
-      apiConfig: const ApiConfig(
-        id: 'api',
-        endpoint: 'https://example.com/v1',
-        apiKey: 'secret',
-        model: 'model',
-      ),
-      customPrompt: '   ',
-    );
-
-    expect(llm.prompt, startsWith(defaultSummaryPrompt));
-    expect(llm.prompt, contains('User: Hi'));
-  });
-
-  test('ledger-stamped game time travels with the transcript', () async {
-    final llm = _RecordingAuxLlmClient();
-    final service = SummaryService(repo, llm: llm);
-
-    await service.generateSummary(
-      sessionId: 'session',
-      history: const [
+      source: const [
         ChatMessage(id: '1', role: 'user', content: 'Morning.'),
         ChatMessage(
           id: '2',
@@ -238,183 +249,231 @@ void main() {
           time: '12.05.2027 · RP_Day 0 · 09:15',
         ),
       ],
-      apiConfig: const ApiConfig(
-        id: 'api',
-        endpoint: 'https://example.com/v1',
-        apiKey: 'secret',
-        model: 'model',
-      ),
-      customPrompt: 'Context:\n{{history}}',
+      apiConfig: _api,
+      targetTokens: 400,
+      customPrompt: '   ',
     );
 
-    expect(llm.prompt, contains('User: Morning.'));
-    expect(llm.prompt, contains('[12.05.2027 · RP_Day 0 · 09:15] She nods.'));
+    // Instructions in the system message, the material in the user one.
+    expect(llm.messages?.map((m) => m['role']), ['system', 'user']);
+    expect(llm.system, startsWith(defaultSummaryPrompt.trimRight()));
+    expect(llm.system, contains(summaryLengthHint(400)));
+    expect(llm.user, startsWith(summaryTranscriptHeader));
+    // The Ledger clock stays out of the transcript.
+    expect(llm.user, contains('Character: She nods.'));
+    expect(llm.user, isNot(contains('RP_Day')));
+  });
+
+  test('earlier blocks are handed over as context, before the run', () async {
+    final llm = _RecordingAuxLlmClient();
+    final service = SummaryService(repo, llm: llm);
+
+    await service.summarizeMessages(
+      sessionId: 'session',
+      source: const [ChatMessage(id: '1', role: 'user', content: 'Hello')],
+      apiConfig: _api,
+      targetTokens: 300,
+      earlierSummary: 'They reached the pass after dark.',
+    );
+
+    expect(llm.system, isNot(contains(summaryPreviousHeader)));
+    expect(llm.user, startsWith(summaryPreviousHeader));
+    expect(
+      llm.user!.indexOf('They reached the pass after dark.'),
+      lessThan(llm.user!.indexOf('User: Hello')),
+    );
+
+    await service.summarizeMessages(
+      sessionId: 'session',
+      source: const [ChatMessage(id: '1', role: 'user', content: 'Hello')],
+      apiConfig: _api,
+      targetTokens: 300,
+      customPrompt: 'So far: $summaryPreviousPlaceholder\n{{history}}',
+      earlierSummary: 'They reached the pass.',
+    );
+    expect(llm.user, startsWith('So far: They reached the pass.'));
+    expect(llm.user, isNot(contains(summaryPreviousHeader)));
+  });
+
+  test('a merge prompt lists the parts in order', () async {
+    final llm = _RecordingAuxLlmClient();
+    final service = SummaryService(repo, llm: llm);
+
+    await service.mergeBlocks(
+      sessionId: 'session',
+      parts: [
+        block(['1'], 'First part.'),
+        block(['2'], 'Second part.'),
+      ],
+      apiConfig: _api,
+      targetTokens: 200,
+    );
+
+    expect(llm.system, startsWith(summaryMergePrompt));
+    expect(llm.system, contains(summaryLengthHint(200)));
+    expect(
+      llm.user!.indexOf('First part.'),
+      lessThan(llm.user!.indexOf('Second part.')),
+    );
+  });
+
+  test('a stored copy of the old built-in prompt counts as unset', () async {
+    final service = SummaryService(repo);
+    await service.setSummaryPrompt(
+      sessionId: 'session',
+      prompt:
+          'Summarize the following part of a roleplay conversation concisely, '
+          'in the language it is written in: key events in order, decisions, '
+          'changes in relationships, and what is still unresolved. Keep '
+          'proper names exactly as they appear.\n\n',
+    );
+    expect(await service.getSummaryPrompt('session'), isNull);
+
+    await service.setSummaryPrompt(sessionId: 'session', prompt: 'Mine.');
+    expect(await service.getSummaryPrompt('session'), 'Mine.');
+  });
+
+  test('a merge runs on the template it is given', () async {
+    final llm = _RecordingAuxLlmClient();
+    final service = SummaryService(repo, llm: llm);
+
+    await service.mergeBlocks(
+      sessionId: 'session',
+      parts: [
+        block(['1'], 'First part.'),
+        block(['2'], 'Second part.'),
+      ],
+      apiConfig: _api,
+      targetTokens: 200,
+      template: 'Fold these into {{target_tokens}} tokens.',
+    );
+
+    expect(llm.system, 'Fold these into 200 tokens.');
+    expect(llm.user, contains('First part.'));
+  });
+
+  test('a user message goes by the persona it was written as', () async {
+    final llm = _RecordingAuxLlmClient();
+    final service = SummaryService(repo, llm: llm);
+
+    await service.summarizeMessages(
+      sessionId: 'session',
+      source: const [
+        ChatMessage(id: '1', role: 'user', content: 'Hi', personaName: 'Eve'),
+        ChatMessage(id: '2', role: 'user', content: 'Again'),
+      ],
+      apiConfig: _api,
+      targetTokens: 300,
+      macroContext: const MacroContext(
+        charName: 'Alice',
+        userName: 'Bob',
+        charId: 'char',
+        sessionId: 'session',
+      ),
+    );
+
+    expect(llm.user, contains('Eve: Hi'));
+    expect(llm.user, contains('Bob: Again'));
+  });
+
+  test('an answer well past its target is shortened once', () async {
+    final long = List.filled(400, 'word').join(' ');
+    final llm = _RecordingAuxLlmClient([long, 'Short.']);
+    final service = SummaryService(repo, llm: llm);
+
+    final result = await service.summarizeMessages(
+      sessionId: 'session',
+      source: const [ChatMessage(id: '1', role: 'user', content: 'Hello')],
+      apiConfig: _api,
+      targetTokens: 150,
+    );
+
+    expect(result, 'Short.');
+    expect(llm.calls, hasLength(2));
+    expect(llm.system, startsWith(summaryShortenPrompt));
+    expect(llm.user, long);
+  });
+
+  test('a shortening that is no shorter keeps the first answer', () async {
+    final long = List.filled(400, 'word').join(' ');
+    final llm = _RecordingAuxLlmClient([long, '$long more']);
+    final service = SummaryService(repo, llm: llm);
+
+    final result = await service.mergeBlocks(
+      sessionId: 'session',
+      parts: [
+        block(['1'], 'First part.'),
+        block(['2'], 'Second part.'),
+      ],
+      apiConfig: _api,
+      targetTokens: 150,
+    );
+
+    expect(result, long);
+  });
+
+  test('an answer within its target is not sent back', () async {
+    final llm = _RecordingAuxLlmClient();
+    final service = SummaryService(repo, llm: llm);
+
+    await service.summarizeMessages(
+      sessionId: 'session',
+      source: const [ChatMessage(id: '1', role: 'user', content: 'Hello')],
+      apiConfig: _api,
+      targetTokens: 150,
+    );
+
+    expect(llm.calls, hasLength(1));
   });
 
   test('accepts an OpenRouter config with no endpoint', () async {
     final llm = _RecordingAuxLlmClient();
     final service = SummaryService(repo, llm: llm);
 
-    // OpenRouter's transport hardcodes its base URL, so configs legitimately
-    // carry an empty endpoint. The old implementation rejected them.
-    await service.generateSummary(
+    await service.summarizeMessages(
       sessionId: 'session',
-      history: const [ChatMessage(id: '1', role: 'user', content: 'Hi')],
+      source: const [ChatMessage(id: '1', role: 'user', content: 'Hi')],
       apiConfig: const ApiConfig(
         id: 'api',
         apiKey: 'secret',
         model: 'anthropic/claude-sonnet-4',
         protocol: LlmProtocol.openrouter,
       ),
+      targetTokens: 200,
     );
 
     expect(llm.config?.protocol, LlmProtocol.openrouter);
-    expect(await service.getSummaryContent('session'), 'generated summary');
   });
 
-  test(
-    'rejects incomplete API configuration before making a request',
-    () async {
-      final llm = _RecordingAuxLlmClient();
-      final service = SummaryService(repo, llm: llm);
+  test('rejects incomplete API configuration before a request', () async {
+    final llm = _RecordingAuxLlmClient();
+    final service = SummaryService(repo, llm: llm);
 
+    for (final config in const [
+      ApiConfig(id: 'api', model: 'model'),
+      ApiConfig(id: 'api', endpoint: 'https://example.com'),
+    ]) {
       await expectLater(
-        service.generateSummary(
+        service.summarizeMessages(
           sessionId: 'session',
-          history: const [],
-          apiConfig: const ApiConfig(id: 'api', model: 'model'),
+          source: const <ChatMessage>[],
+          apiConfig: config,
+          targetTokens: 200,
         ),
         throwsA(isA<Exception>()),
       );
-      await expectLater(
-        service.generateSummary(
-          sessionId: 'session',
-          history: const [],
-          apiConfig: const ApiConfig(
-            id: 'api',
-            endpoint: 'https://example.com',
-          ),
-        ),
-        throwsA(isA<Exception>()),
-      );
-      expect(llm.prompt, isNull);
-    },
-  );
-
-  group('the summary being replaced is part of the next prompt', () {
-    const apiConfig = ApiConfig(
-      id: 'api',
-      endpoint: 'https://example.com/v1',
-      apiKey: 'secret',
-      model: 'model',
-    );
-    const history = [ChatMessage(id: '1', role: 'user', content: 'Hello')];
-
-    test('a stored summary is handed over under its own heading', () async {
-      final llm = _RecordingAuxLlmClient();
-      final service = SummaryService(repo, llm: llm);
-      await service.setSummary(
-        sessionId: 'session',
-        content: 'Alla admitted she knew about the letter.',
-        messageCount: 4,
-      );
-
-      await service.generateSummary(
-        sessionId: 'session',
-        history: history,
-        apiConfig: apiConfig,
-      );
-
-      expect(llm.prompt, contains(summaryPreviousHeader));
-      expect(llm.prompt, contains('Alla admitted she knew about the letter.'));
-      // Before the transcript, so the model reads it as context rather than
-      // as the last thing said in the chat.
-      expect(
-        llm.prompt!.indexOf(summaryPreviousHeader),
-        lessThan(llm.prompt!.indexOf('User: Hello')),
-      );
-    });
-
-    test('the first run adds nothing', () async {
-      final llm = _RecordingAuxLlmClient();
-      final service = SummaryService(repo, llm: llm);
-
-      await service.generateSummary(
-        sessionId: 'session',
-        history: history,
-        apiConfig: apiConfig,
-      );
-
-      expect(llm.prompt, isNot(contains(summaryPreviousHeader)));
-      expect(llm.prompt, startsWith(defaultSummaryPrompt.trim()));
-    });
-
-    test('a template places it itself with the placeholder', () async {
-      final llm = _RecordingAuxLlmClient();
-      final service = SummaryService(repo, llm: llm);
-      await service.setSummary(
-        sessionId: 'session',
-        content: 'They reached the pass after dark.',
-        messageCount: 4,
-      );
-
-      await service.generateSummary(
-        sessionId: 'session',
-        history: history,
-        apiConfig: apiConfig,
-        customPrompt: 'So far: $summaryPreviousPlaceholder\n---\n{{history}}',
-      );
-
-      expect(
-        llm.prompt,
-        startsWith('So far: They reached the pass after dark.'),
-      );
-      // Placed, so the default heading is not added on top of it.
-      expect(llm.prompt, isNot(contains(summaryPreviousHeader)));
-    });
-
-    test('a placeholder with nothing to put in it resolves to empty', () async {
-      final llm = _RecordingAuxLlmClient();
-      final service = SummaryService(repo, llm: llm);
-
-      await service.generateSummary(
-        sessionId: 'session',
-        history: history,
-        apiConfig: apiConfig,
-        customPrompt: 'So far: $summaryPreviousPlaceholder\n{{history}}',
-      );
-
-      expect(llm.prompt, startsWith('So far: \n'));
-      expect(llm.prompt, isNot(contains(summaryPreviousPlaceholder)));
-    });
-
-    test('the run replaces what it was given', () async {
-      final llm = _RecordingAuxLlmClient();
-      final service = SummaryService(repo, llm: llm);
-      await service.setSummary(
-        sessionId: 'session',
-        content: 'old summary',
-        messageCount: 4,
-      );
-
-      await service.generateSummary(
-        sessionId: 'session',
-        history: history,
-        apiConfig: apiConfig,
-      );
-
-      expect(await service.getSummaryContent('session'), 'generated summary');
-    });
+    }
+    expect(llm.calls, isEmpty);
   });
 
-  test('the prompt can be written without touching the summary', () async {
-    // The settings sheet edits the template; stamping a message count from
-    // there would silently restart the auto-summary countdown.
+  test('the prompt can be written without touching the blocks', () async {
     final service = SummaryService(repo);
-    await service.setSummary(
+    await service.saveBlocks(
       sessionId: 'session',
-      content: 'kept',
-      messageCount: 9,
+      blocks: [
+        block(['1', '2'], 'kept'),
+      ],
+      messages: messages,
     );
 
     await service.setSummaryPrompt(
@@ -423,20 +482,11 @@ void main() {
     );
 
     expect(await service.getSummaryPrompt('session'), 'Recap {{char}}.');
-    expect(await service.getSummaryContent('session'), 'kept');
-    expect(await service.getSummaryMessageCount('session'), 9);
+    expect((await service.getBlocks('session')).single.content, 'kept');
 
     // A blank template means "use the built-in prompt", not an empty one.
     await service.setSummaryPrompt(sessionId: 'session', prompt: '   ');
     expect(await service.getSummaryPrompt('session'), isNull);
-    expect(await service.getSummaryContent('session'), 'kept');
-  });
-
-  test('regeneration threshold behavior is unchanged', () {
-    final service = SummaryService(repo);
-
-    expect(service.needsRegeneration(5, null), isTrue);
-    expect(service.needsRegeneration(10, 8), isFalse);
-    expect(service.needsRegeneration(13, 10), isTrue);
+    expect((await service.getBlocks('session')).single.content, 'kept');
   });
 }

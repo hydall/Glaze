@@ -51,6 +51,7 @@ import '../character_list/character_detail_screen.dart';
 import '../guides/guide_anchor.dart';
 import '../guides/guide_service.dart';
 import '../image_gen/image_gen_provider.dart';
+import '../personas/persona_list_provider.dart';
 import '../personas/persona_list_screen.dart';
 import '../presets/preset_editor_screen.dart';
 import '../settings/api_list_provider.dart';
@@ -87,6 +88,10 @@ import '../../core/models/chat_message.dart';
 import '../../core/state/db_provider.dart';
 import 'widgets/session_lifecycle_tracker.dart';
 import '../../shared/widgets/glaze_sheet.dart';
+import '../plugins/runtime/plugin_chat_host.dart';
+import '../plugins/providers/plugin_library_provider.dart';
+import '../plugins/widgets/plugin_holes.dart';
+import '../plugins/widgets/plugin_layer.dart';
 
 String _chatWebViewThemeSyncKey(
   ThemePreset preset,
@@ -456,7 +461,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       },
     );
 
-    return SessionLifecycleTracker(
+    // Plugins run inside this chat's WebView; the host starts them once the
+    // bridge is up and feeds them chat/message events.
+    final tracked = SessionLifecycleTracker(
       charId: charId,
       // Chat is always reached via `context.go('/chat/...')`, which replaces the
       // navigation stack — so a real pop has nothing beneath it and the OS would
@@ -481,6 +488,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         // (mirrored via the 'header' region in _measureBlurRegions).
         headerBlurViaWebView: !_blurIsFlutterSide,
         headerBackdropKey: _blurIsFlutterSide ? _chromeBackdropKey : null,
+        // What plugins draw over the page goes over the header too: in the
+        // plugin layer above it, or else through holes cut out of it.
+        headerWrapper: (header) => PluginHolesCutter(
+          holes: ref.watch(pluginHolesProvider(charId)),
+          enabled: !pluginLayerSupported(),
+          child: header,
+        ),
         // Desktop paints a tab's header edge to edge (see the shell's
         // _DesktopHeader); chat matches it instead of floating a pill.
         flushHeader: isDesktopLayout(context),
@@ -600,6 +614,24 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
               ],
         body: body,
       ),
+    );
+    // Chat panels of plugins draw over everything of the chat screen.
+    final useLayer = pluginsUseLayer(ref.watch(enabledPluginsProvider));
+    return PluginChatHost(
+      key: ValueKey('plugins-$charId'),
+      charId: charId,
+      child: useLayer
+          ? Stack(
+              fit: StackFit.expand,
+              children: [
+                tracked,
+                PluginLayer(
+                  key: ValueKey('plugin-layer-$charId'),
+                  charId: charId,
+                ),
+              ],
+            )
+          : tracked,
     );
   }
 
@@ -980,6 +1012,10 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
     if (oldWidget.drawerCtrl != widget.drawerCtrl) {
       _bindDrawerListenable();
     }
+    if (oldWidget.charId != widget.charId ||
+        oldWidget.state.session?.id != widget.state.session?.id) {
+      _publishOpenChat();
+    }
     if (oldWidget.keyboardHeight != widget.keyboardHeight) {
       _keyboardRising = widget.keyboardHeight > oldWidget.keyboardHeight;
       _keyboardSettled = false;
@@ -996,16 +1032,35 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _bindDrawerListenable();
+    // Plugins report where they draw in the WebView's own coordinates. In
+    // the plugin layer, that is the layer's (see [PluginLayer]).
+    if (!pluginLayerSupported()) {
+      ref.read(pluginHolesProvider(widget.charId)).page = () =>
+          _webViewStateKey.currentContext;
+    }
     // Re-measure when the input bar swaps tracked elements (e.g. entering
     // search/selection mode) without this widget rebuilding.
     _blurRegistry.addListener(_scheduleBlurMeasure);
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkHeight());
+    _publishOpenChat();
     final targetId = widget.targetMessageId;
     if (targetId != null && targetId.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => unawaited(_scrollToTargetMessage(targetId)),
       );
     }
+  }
+
+  /// Records this chat and its session as the one the user is in, for the
+  /// screens that show its persona from outside it. Deferred: providers may
+  /// not change while the tree builds.
+  void _publishOpenChat() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final key = (charId: widget.charId, sessionId: widget.state.session?.id);
+      if (ref.read(lastOpenChatProvider) == key) return;
+      ref.read(lastOpenChatProvider.notifier).state = key;
+    });
   }
 
   /// Waits for the keep-alive WebView to finish initializing, then scrolls to
@@ -1339,6 +1394,14 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   /// shortcut to pick one and returns false so the caller aborts the send.
   bool _ensurePersonaSelected() {
     if (ref.read(activePersonaIdProvider) != null) return true;
+    // A persona bound to this chat or its character is a selection too.
+    if (hasPersonaBinding(
+      ref.read(personaListProvider).value ?? const [],
+      ref.read(personaConnectionsProvider),
+      (charId: widget.charId, sessionId: widget.state.session?.id),
+    )) {
+      return true;
+    }
     GlazeBottomSheet.show<void>(
       context,
       title: 'persona_required_title'.tr(),
@@ -1353,7 +1416,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
             useRootNavigator: true,
             isScrollControlled: true,
             backgroundColor: Colors.transparent,
-            builder: (_) => const PersonaListScreen(),
+            builder: (_) => const PersonaListScreen(forChat: true),
           );
         },
       ),
@@ -2319,7 +2382,10 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
             Positioned.fill(
               left: column?.gutter ?? 0,
               right: column?.gutter ?? 0,
-              child: Stack(
+              child: PluginHolesCutter(
+                holes: ref.watch(pluginHolesProvider(widget.charId)),
+                enabled: !pluginLayerSupported(),
+                child: Stack(
                 children: [
                   // Fades under the header and the input area. Dropped on desktop:
                   // the flush header is opaque enough on its own, and against the
@@ -2817,6 +2883,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                     ),
                   ),
                 ],
+              ),
               ),
             ),
           ],

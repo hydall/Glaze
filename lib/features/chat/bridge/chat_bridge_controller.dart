@@ -96,6 +96,10 @@ class ChatBridgeController {
   Map<String, String> _regexSessionVars = const {};
   Map<String, String> _regexGlobalVars = const {};
 
+  /// The ExtBlocks text shown inside a message (see `inlineExtBlocksText`),
+  /// supplied by the chat widget, which can read the blocks.
+  String Function(ChatMessage message)? inlineExtBlocksFor;
+
   /// Origin marker ("Created on" / "Branched on") for the current session,
   /// prepended by [MessageBridgeCommands.setMessages] as the first synthetic
   /// separator of a full batch. Refreshed on every rebuild before messages
@@ -127,6 +131,9 @@ class ChatBridgeController {
   Map<String, String> get regexSessionVars => _regexSessionVars;
   Map<String, String> get regexGlobalVars => _regexGlobalVars;
   JsBridgeService get extensionBridgeService => _jsBridgeService;
+
+  String inlineExtBlocks(ChatMessage message) =>
+      inlineExtBlocksFor?.call(message) ?? '';
 
   List<TriggeredEntry> triggeredRegexesFor(String messageId) =>
       _triggeredRegexesByMessageId[messageId] ?? const [];
@@ -265,10 +272,8 @@ class ChatBridgeController {
   /// from the next start onwards — and stays broken across a restart, because
   /// the port is gone. Every text the WebView hands back is therefore put into
   /// its stored spelling first: the served file, relative to the data root.
-  String restoreImgResults(String text) => ImageTagMarkup.rewriteResultPaths(
-    text,
-    restoreChatWebViewLocalFilePath,
-  );
+  String restoreImgResults(String text) =>
+      ImageTagMarkup.rewriteResultPaths(text, restoreChatWebViewLocalFilePath);
 
   String? resolveLocalFileUrl(String? source) {
     return chatWebViewResolveLocalFileUrl(source);
@@ -420,6 +425,53 @@ class ChatBridgeController {
   )?
   onPanelEvent;
 
+  /// Plugin runtime entry point for `glaze.*` calls relayed by
+  /// `assets/chat_webview/plugins/plugin_host.js`. The host stamps the
+  /// calling plugin's id on each request; null while no plugin runtime is
+  /// attached to this chat.
+  Future<Map<String, dynamic>> Function(Map<String, dynamic> request)?
+  onPluginRequest;
+
+  /// A message action rendered in the WebView failed
+  /// (`{pluginId, reason, message}`).
+  void Function(Map<String, dynamic> failure)? onPluginActionFailed;
+
+  /// A plugin frame loaded from, or was stopped from loading from, a host
+  /// (`{pluginId, host, blocked}`).
+  void Function(Map<String, dynamic> report)? onPluginNetwork;
+
+  /// An HTTP request a plugin frame made, start or end, for the request log.
+  void Function(Map<String, dynamic> report)? onPluginHttpRequest;
+
+  /// Where chat panels draw, in page pixels (`[[x, y, w, h], …]`): the app
+  /// leaves these areas of its controls over the page to the plugins.
+  void Function(List<Object?> rects)? onPluginHoles;
+
+  /// What a plugin frame here emitted to the plugin's other frames
+  /// (`{pluginId, event, detail}`), for those in the plugin layer.
+  void Function(Map<String, dynamic> emit)? onPluginEmit;
+
+  /// The insets chat panels lay out against, for the plugin layer.
+  void Function(Map<String, dynamic> insets)? onPluginInsets;
+
+  /// Awaits a JS function body with [arguments] bound as parameters and
+  /// returns its resolved value. Null when the page is gone or the body threw.
+  Future<Object?> callAsyncJs(
+    String functionBody, {
+    Map<String, dynamic> arguments = const {},
+    Duration timeout = const Duration(seconds: 60),
+  }) async {
+    try {
+      final result = await _controller
+          .callAsyncJavaScript(functionBody: functionBody, arguments: arguments)
+          .timeout(timeout);
+      if (result == null || result.error != null) return null;
+      return result.value;
+    } on MissingPluginException {
+      return null;
+    }
+  }
+
   /// Register JS handlers for every callback declared on this host. The
   /// declarations live in [bridgeHandlers] (data-driven) so the actual
   /// dispatch table is short and auditable.
@@ -433,6 +485,75 @@ class ChatBridgeController {
             _dispatch(name, spec, data.args),
       );
     }
+    _controller.addJavaScriptHandler(
+      handlerName: 'pluginBridge',
+      callback: (JavaScriptHandlerFunctionData data) async {
+        final args = data.args;
+        final raw = args.isNotEmpty ? args.first : null;
+        final handler = onPluginRequest;
+        if (handler == null || raw is! Map) {
+          return const {
+            'ok': false,
+            'error': {
+              'code': 'runtime_unavailable',
+              'message': 'Plugins are not running in this chat',
+            },
+          };
+        }
+        return handler(Map<String, dynamic>.from(raw));
+      },
+    );
+    _controller.addJavaScriptHandler(
+      handlerName: 'pluginActionFailed',
+      callback: (JavaScriptHandlerFunctionData data) {
+        final raw = data.args.isNotEmpty ? data.args.first : null;
+        if (raw is Map)
+          onPluginActionFailed?.call(Map<String, dynamic>.from(raw));
+        return null;
+      },
+    );
+    _controller.addJavaScriptHandler(
+      handlerName: 'pluginHoles',
+      callback: (JavaScriptHandlerFunctionData data) {
+        final raw = data.args.isNotEmpty ? data.args.first : null;
+        onPluginHoles?.call(raw is List ? raw : const []);
+        return null;
+      },
+    );
+    _controller.addJavaScriptHandler(
+      handlerName: 'pluginEmit',
+      callback: (JavaScriptHandlerFunctionData data) {
+        final raw = data.args.isNotEmpty ? data.args.first : null;
+        if (raw is Map) onPluginEmit?.call(Map<String, dynamic>.from(raw));
+        return null;
+      },
+    );
+    _controller.addJavaScriptHandler(
+      handlerName: 'pluginInsets',
+      callback: (JavaScriptHandlerFunctionData data) {
+        final raw = data.args.isNotEmpty ? data.args.first : null;
+        if (raw is Map) onPluginInsets?.call(Map<String, dynamic>.from(raw));
+        return null;
+      },
+    );
+    _controller.addJavaScriptHandler(
+      handlerName: 'pluginNetwork',
+      callback: (JavaScriptHandlerFunctionData data) {
+        final raw = data.args.isNotEmpty ? data.args.first : null;
+        if (raw is Map) onPluginNetwork?.call(Map<String, dynamic>.from(raw));
+        return null;
+      },
+    );
+    _controller.addJavaScriptHandler(
+      handlerName: 'pluginHttp',
+      callback: (JavaScriptHandlerFunctionData data) {
+        final raw = data.args.isNotEmpty ? data.args.first : null;
+        if (raw is Map) {
+          onPluginHttpRequest?.call(Map<String, dynamic>.from(raw));
+        }
+        return null;
+      },
+    );
     _controller.addJavaScriptHandler(
       handlerName: 'glazeBridge',
       callback: (JavaScriptHandlerFunctionData data) async {
@@ -731,8 +852,7 @@ class ChatBridgeController {
   Future<void> updateMessageContent(String id, String text, bool isUser) =>
       messages.updateMessageContent(id, text, isUser);
   Future<void> removeMessage(String id) => messages.removeMessage(id);
-  Future<void> retireTypingPlaceholder() =>
-      messages.retireTypingPlaceholder();
+  Future<void> retireTypingPlaceholder() => messages.retireTypingPlaceholder();
   Future<void> setLastMessage(String? id) => messages.setLastMessage(id);
   Future<void> setContextWindowStart(String? id, {bool after = false}) =>
       messages.setContextWindowStart(id, after: after);
@@ -792,11 +912,8 @@ class ChatBridgeController {
     required String query,
     int activeIndex = -1,
     bool scroll = true,
-  }) => layout.setSearch(
-    query: query,
-    activeIndex: activeIndex,
-    scroll: scroll,
-  );
+  }) =>
+      layout.setSearch(query: query, activeIndex: activeIndex, scroll: scroll);
   Future<void> setBottomPadding(double px, {double viewportHeight = 0}) =>
       layout.setBottomPadding(px, viewportHeight: viewportHeight);
   Future<void> setTopPadding(double px) => layout.setTopPadding(px);
@@ -1025,6 +1142,7 @@ class ChatBridgeController {
     required String? previousOutput,
     int contextMessageCount = 10,
     CancelToken? cancelToken,
+    Map<String, dynamic>? extBlocks,
   }) async {
     if (cancelToken?.isCancelled == true) {
       throw Exception('Cancelled before JS execution');
@@ -1053,8 +1171,12 @@ class ChatBridgeController {
             }
           : null,
       'previousOutput': previousOutput,
+      // A script written for the original extension finds its variables and
+      // SillyTavern's chat here (see `extBlocksScriptScope`).
+      'extBlocks': ?extBlocks,
     };
-    final contextJson = jsonEncode(contextMap);
+    // Chat text may hold `</script>`; the sandbox embeds this in a script tag.
+    final contextJson = jsonEncode(contextMap).replaceAll('<', r'\u003c');
 
     final sdkSource = await rootBundle.loadString(
       'assets/chat_webview/glaze_sdk.js',
@@ -1062,6 +1184,19 @@ class ChatBridgeController {
     await _controller.evaluateJavascript(
       source: 'window.__glazeSdkSource = ${escapeJsonStr(sdkSource)};',
     );
+    if (extBlocks != null) {
+      final compatSource = await rootBundle.loadString(
+        'assets/chat_webview/extblocks_compat.js',
+      );
+      await _controller.evaluateJavascript(
+        source:
+            'window.__extBlocksCompatSource = ${escapeJsonStr(compatSource)};',
+      );
+    }
+
+    // A script of the original ExtBlocks may wait on block generation; the
+    // sandbox gives it 595 s.
+    final limit = Duration(seconds: extBlocks == null ? 60 : 600);
 
     // callAsyncJavaScript returns the JS Promise result.
     // bridge.runSandboxedScript returns a Promise<string>.
@@ -1073,11 +1208,8 @@ class ChatBridgeController {
           arguments: {'script': script, 'contextJson': contextJson},
         )
         .timeout(
-          const Duration(seconds: 60),
-          onTimeout: () => throw TimeoutException(
-            'JS runner timed out',
-            const Duration(seconds: 60),
-          ),
+          limit,
+          onTimeout: () => throw TimeoutException('JS runner timed out', limit),
         );
 
     if (result == null) return '';

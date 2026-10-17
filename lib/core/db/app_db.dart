@@ -33,6 +33,7 @@ part 'migrations/upgrade_v137.dart';
 part 'migrations/upgrade_v138.dart';
 part 'migrations/upgrade_v139.dart';
 part 'migrations/upgrade_v142.dart';
+part 'migrations/upgrade_v143.dart';
 
 @DriftDatabase(
   tables: [
@@ -102,7 +103,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 142;
+  int get schemaVersion => 143;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -141,6 +142,7 @@ class AppDatabase extends _$AppDatabase {
       await _upgradeV138(m, from);
       await _upgradeV139(m, from);
       await _upgradeV142(m, from);
+      await _upgradeV143(m, from);
       // v140 and v141 have no step of their own: they bring databases already
       // at the previous version through this pass. v140 restores the indexes
       // and triggers their earlier upgrades missed; v141 replaces the request
