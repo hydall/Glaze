@@ -3,7 +3,6 @@ import 'dart:math' as math;
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/llm/game_time.dart';
 import '../../../core/llm/macro_engine.dart';
 import '../../../core/llm/memory_book_api_config_resolver.dart';
 import '../../../core/llm/tokenizer.dart';
@@ -157,11 +156,7 @@ class SummaryGenerationService {
           targetTokens: target,
           earlierSummary: SummaryChain.render(earlier),
           customPrompt: template,
-          macroContext: _macroContext(
-            charId: charId,
-            session: session,
-            gameTime: await _readGameTime(session.id),
-          ),
+          macroContext: _macroContext(charId: charId, session: session),
           cancelToken: cancelToken,
           temperature: slot.generationTemperature,
         );
@@ -485,21 +480,9 @@ class SummaryGenerationService {
     );
   }
 
-  Future<GameTimeState> _readGameTime(String sessionId) async {
-    try {
-      final trackers = await _ref
-          .read(trackerRepoProvider)
-          .getBySessionAndScope(sessionId, 'ledger');
-      return GameTimeState.fromTrackers(trackers);
-    } catch (_) {
-      return const GameTimeState();
-    }
-  }
-
   MacroContext _macroContext({
     required String charId,
     required ChatSession session,
-    GameTimeState gameTime = const GameTimeState(),
   }) {
     final character = _ref.read(characterByIdProvider(charId));
     final persona = _ref.read(
@@ -518,9 +501,6 @@ class SummaryGenerationService {
       globalVars: _ref.read(globalVarsProvider),
       charId: charId,
       sessionId: session.id,
-      gameTime: gameTime.time,
-      gameDate: gameTime.date,
-      gameDay: gameTime.day?.toString(),
     );
   }
 }
