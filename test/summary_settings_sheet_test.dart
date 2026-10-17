@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:drift/native.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
@@ -129,6 +131,32 @@ Future<void> _openSettings(WidgetTester tester) async {
   await _settle(tester);
 }
 
+/// The prompts sit below the compaction controls, past what the list builds
+/// up front.
+Future<void> _scrollTo(WidgetTester tester, Finder finder) async {
+  await tester.scrollUntilVisible(
+    finder,
+    200,
+    scrollable: find
+        .descendant(
+          of: find.byType(SummarySettingsSheet),
+          matching: find.byType(Scrollable),
+        )
+        .first,
+  );
+  await tester.pump();
+}
+
+/// What Save wrote, read from the prefs rather than the provider: with the
+/// sheet closed nothing listens to it any more.
+Future<SummaryPromptSelection> _savedSelection() async {
+  final prefs = await SharedPreferences.getInstance();
+  final raw = prefs.getString(SummaryPromptSelectionNotifier.prefsKey);
+  return SummaryPromptSelection.fromJson(
+    jsonDecode(raw ?? '{}') as Map<String, dynamic>,
+  );
+}
+
 void main() {
   setUpAll(() async {
     SharedPreferences.setMockInitialValues({});
@@ -147,7 +175,7 @@ void main() {
     expect(find.byType(GlazeActionButton), findsNWidgets(3));
     expect(find.byType(FilledButton), findsNothing);
     // The settings are not in the tab any more…
-    expect(find.text('summary_prompt_label'.tr()), findsNothing);
+    expect(find.text('summary_prompts_section'.tr()), findsNothing);
     expect(find.text('summary_trigger_label'.tr()), findsNothing);
     // …and neither is the master switch, which was in the header.
     expect(find.byType(Switch), findsNothing);
@@ -169,10 +197,6 @@ void main() {
     expect(find.text('summary_trigger_label'.tr()), findsOneWidget);
     expect(find.text('summary_block_target_label'.tr()), findsOneWidget);
     expect(find.text('summary_merge_label'.tr()), findsOneWidget);
-    expect(find.text('summary_prompt_label'.tr()), findsOneWidget);
-    // A prompt to start from, and the prompts you have saved yourself.
-    expect(find.text('summary_prompt_preset_label'.tr()), findsOneWidget);
-    expect(find.text('memory_prompt_presets_title'.tr()), findsOneWidget);
     // Summarizing runs on the Memory slot, so the settings say where that
     // slot is bound rather than leaving the reader to find it.
     expect(
@@ -180,6 +204,17 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('summary_connection_hint'.tr()), findsOneWidget);
+    await _scrollTo(tester, find.byKey(const Key('summary_manage_prompts')));
+    // Prompts are picked from presets, as in Memory Books: one for retelling,
+    // one for merging, a view of both and the saved-prompt manager. No text
+    // field to edit in place.
+    expect(find.text('summary_prompt_retell_label'.tr()), findsOneWidget);
+    expect(find.text('summary_prompt_merge_label'.tr()), findsOneWidget);
+    expect(find.text('summary_prompt_view_current'.tr()), findsOneWidget);
+    expect(find.text('memory_prompt_manage'.tr()), findsOneWidget);
+    expect(find.byType(TextField), findsNothing);
+    expect(find.text('Recap (recommended)'), findsOneWidget);
+    expect(find.text('Keep continuity (recommended)'), findsOneWidget);
   });
 
   testWidgets('the switch in the settings is the injection master switch', (
@@ -235,6 +270,59 @@ void main() {
             .isSummaryEnabled(_sessionId),
         isTrue,
       );
+    });
+  });
+
+  testWidgets('picking a merge preset is saved as the selection', (
+    tester,
+  ) async {
+    final container = await _seed();
+    await _openSheet(tester, container);
+    await _openSettings(tester);
+
+    await _scrollTo(tester, find.byKey(const Key('summary_prompt_merge')));
+    await tester.tap(find.byKey(const Key('summary_prompt_merge')));
+    await _settle(tester);
+    await tester.tap(find.text('Tight'));
+    await _settle(tester);
+    await tester.tap(find.byIcon(Icons.check_rounded));
+    await _settle(tester);
+
+    await tester.runAsync(() async {
+      expect((await _savedSelection()).mergeKey, 'tight');
+    });
+  });
+
+  testWidgets("a chat's own prompt is shown, and a preset replaces it", (
+    tester,
+  ) async {
+    final container = await _seed();
+    await tester.runAsync(
+      () => container
+          .read(summaryServiceProvider)
+          .setSummaryPrompt(sessionId: _sessionId, prompt: 'Only this chat.'),
+    );
+    await _openSheet(tester, container);
+    await _openSettings(tester);
+
+    await _scrollTo(tester, find.byKey(const Key('summary_prompt_retell')));
+    expect(find.text('summary_prompt_chat_own'.tr()), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('summary_prompt_retell')));
+    await _settle(tester);
+    await tester.tap(find.text('State of play'));
+    await _settle(tester);
+    await tester.tap(find.byIcon(Icons.check_rounded));
+    await _settle(tester);
+
+    await tester.runAsync(() async {
+      expect(
+        await container
+            .read(summaryServiceProvider)
+            .getSummaryPrompt(_sessionId),
+        isNull,
+      );
+      expect((await _savedSelection()).retellKey, 'state_of_play');
     });
   });
 }

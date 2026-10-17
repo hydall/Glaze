@@ -9,6 +9,7 @@ import '../../features/presets/preset_list_provider.dart';
 import '../llm/summary_service.dart';
 import '../models/preset.dart';
 import '../services/memory_prompt_presets.dart' show MemoryPromptPreset;
+import '../services/summary_prompt_presets.dart';
 import 'db_provider.dart';
 import 'shared_prefs_provider.dart';
 
@@ -153,29 +154,131 @@ class SummaryCompactionSettingsNotifier
   }
 }
 
-/// Summarization prompts the reader has written and saved, shared across every
+/// Which saved or built-in prompt summarizing runs on. Global, like the
+/// compaction settings. Keys are resolved by [SummaryPromptPresets] and
+/// [SummaryMergePromptPresets]; a key that names nothing falls back to the
+/// built-in default.
+///
+/// A chat that still holds a prompt text of its own (from before presets were
+/// chosen by key) retells with that text until a preset is picked for it.
+class SummaryPromptSelection {
+  final String retellKey;
+  final String mergeKey;
+
+  const SummaryPromptSelection({
+    this.retellKey = SummaryPromptPresets.fallbackKey,
+    this.mergeKey = SummaryMergePromptPresets.fallbackKey,
+  });
+
+  SummaryPromptSelection copyWith({String? retellKey, String? mergeKey}) =>
+      SummaryPromptSelection(
+        retellKey: retellKey ?? this.retellKey,
+        mergeKey: mergeKey ?? this.mergeKey,
+      );
+
+  Map<String, dynamic> toJson() => {'retell': retellKey, 'merge': mergeKey};
+
+  factory SummaryPromptSelection.fromJson(Map<String, dynamic> json) {
+    const d = SummaryPromptSelection();
+    String read(String key, String fallback) {
+      final value = json[key];
+      return value is String && value.isNotEmpty ? value : fallback;
+    }
+
+    return SummaryPromptSelection(
+      retellKey: read('retell', d.retellKey),
+      mergeKey: read('merge', d.mergeKey),
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is SummaryPromptSelection &&
+      other.retellKey == retellKey &&
+      other.mergeKey == mergeKey;
+
+  @override
+  int get hashCode => Object.hash(retellKey, mergeKey);
+}
+
+final summaryPromptSelectionProvider =
+    AsyncNotifierProvider<
+      SummaryPromptSelectionNotifier,
+      SummaryPromptSelection
+    >(SummaryPromptSelectionNotifier.new);
+
+class SummaryPromptSelectionNotifier
+    extends AsyncNotifier<SummaryPromptSelection> {
+  static const prefsKey = 'summaryPromptSelection';
+
+  @override
+  Future<SummaryPromptSelection> build() async {
+    final prefs = await ref.read(sharedPreferencesProvider.future);
+    final raw = prefs.getString(prefsKey);
+    if (raw == null || raw.trim().isEmpty) {
+      return const SummaryPromptSelection();
+    }
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, dynamic>) {
+        return SummaryPromptSelection.fromJson(decoded);
+      }
+    } catch (e) {
+      debugPrint('[summaryPromptSelection] unreadable, using defaults: $e');
+    }
+    return const SummaryPromptSelection();
+  }
+
+  Future<void> save(SummaryPromptSelection selection) async {
+    final prefs = await ref.read(sharedPreferencesProvider.future);
+    await prefs.setString(prefsKey, jsonEncode(selection.toJson()));
+    state = AsyncData(selection);
+  }
+}
+
+/// Retelling prompts the reader has written and saved, shared across every
 /// chat — the same thing Memory Books keeps its custom drafting prompts for.
-/// Global rather than per session: a prompt worth writing is worth reusing.
 final summaryCustomPromptsProvider =
     AsyncNotifierProvider<
       SummaryCustomPromptsNotifier,
       List<MemoryPromptPreset>
     >(SummaryCustomPromptsNotifier.new);
 
-class SummaryCustomPromptsNotifier
-    extends AsyncNotifier<List<MemoryPromptPreset>> {
+class SummaryCustomPromptsNotifier extends _PromptLibraryNotifier {
   static const prefsKey = 'summaryCustomPrompts';
+
+  @override
+  String get _prefsKey => prefsKey;
+}
+
+/// Merge prompts the reader has written and saved.
+final summaryCustomMergePromptsProvider =
+    AsyncNotifierProvider<
+      SummaryCustomMergePromptsNotifier,
+      List<MemoryPromptPreset>
+    >(SummaryCustomMergePromptsNotifier.new);
+
+class SummaryCustomMergePromptsNotifier extends _PromptLibraryNotifier {
+  static const prefsKey = 'summaryCustomMergePrompts';
+
+  @override
+  String get _prefsKey => prefsKey;
+}
+
+abstract class _PromptLibraryNotifier
+    extends AsyncNotifier<List<MemoryPromptPreset>> {
+  String get _prefsKey;
 
   @override
   Future<List<MemoryPromptPreset>> build() async {
     final prefs = await ref.read(sharedPreferencesProvider.future);
-    return _decode(prefs.getString(prefsKey));
+    return _decode(prefs.getString(_prefsKey));
   }
 
   Future<void> save(List<MemoryPromptPreset> prompts) async {
     final prefs = await ref.read(sharedPreferencesProvider.future);
     await prefs.setString(
-      prefsKey,
+      _prefsKey,
       jsonEncode(MemoryPromptPreset.toJsonList(prompts)),
     );
     state = AsyncData(List.unmodifiable(prompts));
@@ -184,7 +287,7 @@ class SummaryCustomPromptsNotifier
   /// A stored list that cannot be read is not worth crashing the settings
   /// sheet over — the reader can write new prompts, and the unreadable string
   /// is left alone rather than overwritten.
-  static List<MemoryPromptPreset> _decode(String? raw) {
+  List<MemoryPromptPreset> _decode(String? raw) {
     if (raw == null || raw.trim().isEmpty) return const [];
     try {
       final decoded = jsonDecode(raw);
@@ -194,7 +297,7 @@ class SummaryCustomPromptsNotifier
           if (entry is Map<String, dynamic>) MemoryPromptPreset.fromJson(entry),
       ];
     } catch (e) {
-      debugPrint('[summaryCustomPrompts] unreadable, ignoring: $e');
+      debugPrint('[$_prefsKey] unreadable, ignoring: $e');
       return const [];
     }
   }
