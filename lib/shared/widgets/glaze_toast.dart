@@ -99,6 +99,7 @@ class GlazeToast {
     ToastPosition position = ToastPosition.bottom,
     bool isError = false,
     bool isWarning = false,
+    bool showCopyButton = false,
   }) {
     final overlay = _resolveOverlay(null);
     if (overlay != null) {
@@ -109,6 +110,7 @@ class GlazeToast {
         position: position,
         isError: isError,
         isWarning: isWarning,
+        showCopyButton: showCopyButton,
       );
     }
   }
