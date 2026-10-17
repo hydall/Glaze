@@ -127,7 +127,7 @@ class DrawerItemLauncher {
           useRootNavigator: true,
           isScrollControlled: true,
           backgroundColor: Colors.transparent,
-          builder: (_) => const PersonaListScreen(),
+          builder: (_) => const PersonaListScreen(forChat: true),
         );
       case 'image-gen':
         await showGlazeSheet<void>(
@@ -181,7 +181,8 @@ class DrawerItemLauncher {
       'regex' => (_) => const RegexSheet(startExpanded: true),
       'api' => (_) => const ApiSettingsScreen(startExpanded: true),
       'presets' => (_) => PresetListScreen(startExpanded: true, charId: charId),
-      'personas' => (_) => const PersonaListScreen(startExpanded: true),
+      'personas' => (_) =>
+          const PersonaListScreen(startExpanded: true, forChat: true),
       'image-gen' => (_) => ImageGenSheet(charId: charId),
       'authors-note' => (_) => AuthorsNoteSheet(charId: charId),
       'glossary' => (_) => const GlossarySheet(startExpanded: true),

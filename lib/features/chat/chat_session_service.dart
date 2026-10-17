@@ -486,7 +486,7 @@ class ChatSessionService {
     final persona = getEffectivePersona(
       personas,
       charId,
-      null,
+      session.id,
       activePersonaId,
       connections,
     );
@@ -515,7 +515,7 @@ class ChatSessionService {
     return repo.getByCharacterId(charId);
   }
 
-  Future<Persona?> resolvePersona(String charId) async {
+  Future<Persona?> resolvePersona(String charId, {String? sessionId}) async {
     final personaRepo = _ref.read(personaRepoProvider);
     final activePersonaId = _ref.read(activePersonaIdProvider);
     final connections = _ref.read(personaConnectionsProvider);
@@ -523,7 +523,7 @@ class ChatSessionService {
     return getEffectivePersona(
       personas,
       charId,
-      null,
+      sessionId,
       activePersonaId,
       connections,
     );

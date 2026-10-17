@@ -446,6 +446,9 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
     ref.listen(activePersonaIdProvider, (prev, next) {
       if (prev != next) _scheduleRefresh();
     });
+    ref.listen(personaConnectionsProvider, (prev, next) {
+      if (prev != next) _scheduleRefresh();
+    });
     ref.listen(lorebookActivationsProvider, (prev, next) {
       if (prev != next) _scheduleRefresh();
     });

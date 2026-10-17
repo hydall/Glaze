@@ -36,7 +36,18 @@ import '../guides/guide_service.dart';
 
 class PersonaListScreen extends ConsumerStatefulWidget {
   final bool startExpanded;
-  const PersonaListScreen({super.key, this.startExpanded = false});
+
+  /// Opened from a chat: the active row is the persona that chat speaks as,
+  /// and picking one rebinds the chat when a binding of its own or its
+  /// character's overrides the global persona. Follows [lastOpenChatProvider],
+  /// so a sidebar panel kept open across a session switch stays on the chat.
+  final bool forChat;
+
+  const PersonaListScreen({
+    super.key,
+    this.startExpanded = false,
+    this.forChat = false,
+  });
 
   @override
   ConsumerState<PersonaListScreen> createState() => _PersonaListScreenState();
@@ -191,12 +202,18 @@ class _PersonaListScreenState extends ConsumerState<PersonaListScreen> {
                     ),
                   ),
               ];
+              final chatKey = widget.forChat
+                  ? ref.watch(lastOpenChatProvider)
+                  : null;
+              final activeId = _activePersonaId(all, chatKey);
               final rows = <Widget>[
                 for (final (i, persona) in list.indexed)
                   GuideAnchor(
                     id: i == 0 ? GuideIds.personasRow : null,
                     child: _PersonaTile(
                       persona: persona,
+                      isActive: persona.id == activeId,
+                      onSelect: (id) => selectPersonaFor(ref, chatKey, id),
                       openEditor: (persona) => _showEditor(context, persona),
                     ),
                   ),
@@ -222,6 +239,25 @@ class _PersonaListScreenState extends ConsumerState<PersonaListScreen> {
         },
       ),
     );
+  }
+
+  /// The persona marked active: the one the chat speaks as when a binding
+  /// decides it, otherwise the global selection.
+  String? _activePersonaId(
+    List<Persona> personas,
+    EffectivePersonaChatKey? key,
+  ) {
+    final globalId = ref.watch(activePersonaIdProvider);
+    if (key == null) return globalId;
+    final connections = ref.watch(personaConnectionsProvider);
+    if (!hasPersonaBinding(personas, connections, key)) return globalId;
+    return getEffectivePersona(
+      personas,
+      key.charId,
+      key.sessionId,
+      globalId,
+      connections,
+    )?.id;
   }
 
   void _showEditor(BuildContext context, [Persona? existing]) {
@@ -277,14 +313,19 @@ class PersonaEditorWindow extends ConsumerWidget {
 
 class _PersonaTile extends ConsumerWidget {
   final Persona persona;
+  final bool isActive;
+  final void Function(String? personaId) onSelect;
   final void Function(Persona persona) openEditor;
 
-  const _PersonaTile({required this.persona, required this.openEditor});
+  const _PersonaTile({
+    required this.persona,
+    required this.isActive,
+    required this.onSelect,
+    required this.openEditor,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final activeId = ref.watch(activePersonaIdProvider);
-    final isActive = activeId == persona.id;
     final displayName = (persona.displayName?.trim().isNotEmpty ?? false)
         ? persona.displayName!.trim()
         : persona.name;
@@ -302,7 +343,7 @@ class _PersonaTile extends ConsumerWidget {
       shape: flat
           ? null
           : RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      onTap: () => setActivePersona(ref, isActive ? null : persona.id),
+      onTap: () => onSelect(isActive ? null : persona.id),
       leading: CircleAvatar(
         radius: 24,
         backgroundColor: context.cs.primary.withValues(alpha: 0.18),

@@ -51,6 +51,7 @@ import '../character_list/character_detail_screen.dart';
 import '../guides/guide_anchor.dart';
 import '../guides/guide_service.dart';
 import '../image_gen/image_gen_provider.dart';
+import '../personas/persona_list_provider.dart';
 import '../personas/persona_list_screen.dart';
 import '../presets/preset_editor_screen.dart';
 import '../settings/api_list_provider.dart';
@@ -1011,6 +1012,10 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
     if (oldWidget.drawerCtrl != widget.drawerCtrl) {
       _bindDrawerListenable();
     }
+    if (oldWidget.charId != widget.charId ||
+        oldWidget.state.session?.id != widget.state.session?.id) {
+      _publishOpenChat();
+    }
     if (oldWidget.keyboardHeight != widget.keyboardHeight) {
       _keyboardRising = widget.keyboardHeight > oldWidget.keyboardHeight;
       _keyboardSettled = false;
@@ -1037,12 +1042,25 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
     // search/selection mode) without this widget rebuilding.
     _blurRegistry.addListener(_scheduleBlurMeasure);
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkHeight());
+    _publishOpenChat();
     final targetId = widget.targetMessageId;
     if (targetId != null && targetId.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => unawaited(_scrollToTargetMessage(targetId)),
       );
     }
+  }
+
+  /// Records this chat and its session as the one the user is in, for the
+  /// screens that show its persona from outside it. Deferred: providers may
+  /// not change while the tree builds.
+  void _publishOpenChat() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final key = (charId: widget.charId, sessionId: widget.state.session?.id);
+      if (ref.read(lastOpenChatProvider) == key) return;
+      ref.read(lastOpenChatProvider.notifier).state = key;
+    });
   }
 
   /// Waits for the keep-alive WebView to finish initializing, then scrolls to
@@ -1376,6 +1394,14 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   /// shortcut to pick one and returns false so the caller aborts the send.
   bool _ensurePersonaSelected() {
     if (ref.read(activePersonaIdProvider) != null) return true;
+    // A persona bound to this chat or its character is a selection too.
+    if (hasPersonaBinding(
+      ref.read(personaListProvider).value ?? const [],
+      ref.read(personaConnectionsProvider),
+      (charId: widget.charId, sessionId: widget.state.session?.id),
+    )) {
+      return true;
+    }
     GlazeBottomSheet.show<void>(
       context,
       title: 'persona_required_title'.tr(),
@@ -1390,7 +1416,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
             useRootNavigator: true,
             isScrollControlled: true,
             backgroundColor: Colors.transparent,
-            builder: (_) => const PersonaListScreen(),
+            builder: (_) => const PersonaListScreen(forChat: true),
           );
         },
       ),

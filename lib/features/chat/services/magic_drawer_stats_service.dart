@@ -135,9 +135,15 @@ class MagicDrawerStatsService {
     _ensureActive();
     final activePresetDisplayName = studioName ?? activePreset?.name;
 
-    final activePersona = activePersonaId != null
-        ? personas.where((p) => p.id == activePersonaId).firstOrNull
-        : personas.firstOrNull;
+    // The persona this chat speaks as: its own or its character's binding
+    // wins over the global selection, as when the prompt is built.
+    final activePersona = getEffectivePersona(
+      personas,
+      charId,
+      sessionId,
+      activePersonaId,
+      _ref.read(personaConnectionsProvider),
+    );
 
     final summaryContent = summaryFuture == null ? null : await summaryFuture;
     _ensureActive();
