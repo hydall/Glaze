@@ -676,7 +676,7 @@ class _CharacterCardState extends ConsumerState<CharacterCard>
         BottomSheetItem(
           label: 'btn_cancel'.tr(),
           centered: true,
-          onTap: () => Navigator.pop(context),
+          onTap: () => Navigator.of(context, rootNavigator: true).pop(),
         ),
       ],
     );
