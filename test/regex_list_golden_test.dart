@@ -17,14 +17,14 @@ import 'package:glaze_flutter/core/state/db_provider.dart';
 import 'package:glaze_flutter/core/state/folder_provider.dart';
 import 'package:glaze_flutter/shared/shell/desktop/sidebar_sheet_provider.dart';
 import 'package:glaze_flutter/shared/shell/desktop/sidebar_tool_panels.dart';
-import 'package:glaze_flutter/shared/widgets/folder_card.dart';
 import 'package:glaze_flutter/shared/widgets/list_controls.dart';
 
 import 'helpers/pump_glaze_app.dart';
 
-/// Renders the regex list — its control row, multi-select, the drag arm, the
-/// filter sheet and a folder — on a phone and in the desktop sidebar, to PNG
-/// for design review.
+/// Renders the regex list — the preset's scripts as a folder with folders of
+/// its own, global folders, multi-select, moving scripts into a folder and the
+/// filter sheet — on a phone and in the desktop sidebar, to PNG for design
+/// review.
 ///
 /// Run with:
 ///   GLAZE_GOLDENS=1 flutter test --update-goldens \
@@ -100,10 +100,15 @@ Future<ProviderContainer> _container(
         Preset(
           id: 'pr-1',
           name: 'Shino',
+          regexFolders: const [PresetRegexFolder(id: 'pf1', name: 'Styling')],
           regexes: [
             _rx('p1', 'Narration colour', r'/\*(.+?)\*/g'),
             _rx('p2', 'Dialogue quotes', r'/"(.+?)"/g'),
             _rx('p3', 'Scene break', r'/^---$/gm', off: true),
+            _rx('p4', 'Bold names', r'/\b([A-Z]\w+):/g').copyWith(
+              folderId: 'pf1',
+            ),
+            _rx('p5', 'Em dashes', r'/--/g').copyWith(folderId: 'pf1'),
           ],
         ),
       );
@@ -155,9 +160,13 @@ void main() {
     container.read(routerProvider).go('/tools/regex');
     await pumpNavigation(tester);
     await _settle(tester);
-    await _shoot(tester, 'phone_list');
+    await _shoot(tester, 'phone_root');
 
-    await tester.longPress(find.text('Strip asterisks'));
+    await tester.tap(find.text('Shino'));
+    await _settle(tester);
+    await _shoot(tester, 'phone_preset');
+
+    await tester.longPress(find.text('Narration colour'));
     await _settle(tester);
     await tester.tap(find.text('Dialogue quotes'));
     await _settle(tester);
@@ -166,26 +175,13 @@ void main() {
     await tester.tap(find.byIcon(Icons.more_horiz_rounded).last);
     await _settle(tester);
     await _shoot(tester, 'phone_selection_actions');
+    await tester.tap(find.text('Move to folder'));
+    await _settle(tester);
+    await _shoot(tester, 'phone_move_to_folder');
     await tester.tapAt(const Offset(200, 40));
     await _settle(tester);
     await tester.tap(find.byIcon(Icons.close_rounded).last);
     await _settle(tester);
-
-    await tester.tap(find.byType(GlazeReorderToggleButton));
-    await tester.pump(const Duration(seconds: 4));
-    await _settle(tester);
-    await _shoot(tester, 'phone_reorder');
-    await tester.tap(find.byType(GlazeReorderToggleButton));
-    // Let the drag hint's toast run out before the next shot.
-    await tester.pump(const Duration(seconds: 5));
-    await _settle(tester);
-
-    await tester.tap(find.byType(GlazeDropdownChip));
-    await _settle(tester);
-    await _shoot(tester, 'phone_scope_picker');
-    await tester.tap(find.text('Global Scripts').last);
-    await _settle(tester);
-    await _shoot(tester, 'phone_scope_global');
 
     await tester.tap(find.byType(GlazeFilterIconButton));
     await _settle(tester);
@@ -193,9 +189,17 @@ void main() {
     await tester.binding.handlePopRoute();
     await _settle(tester);
 
-    await tester.tap(find.byType(FolderCard));
+    await tester.tap(find.text('Styling'));
     await _settle(tester);
-    await _shoot(tester, 'phone_folder');
+    await _shoot(tester, 'phone_preset_folder');
+
+    await tester.binding.handlePopRoute();
+    await _settle(tester);
+    await tester.binding.handlePopRoute();
+    await _settle(tester);
+    await tester.tap(find.text('Formatting'));
+    await _settle(tester);
+    await _shoot(tester, 'phone_global_folder');
     await _finish(tester);
   }, skip: !_runGoldens);
 
@@ -230,11 +234,13 @@ void main() {
     await pumpNavigation(tester);
     FlutterError.onError = onError;
     await _settle(tester);
-    await _shoot(tester, 'desktop_list');
+    await _shoot(tester, 'desktop_root');
 
+    await tester.tap(find.text('Shino'));
+    await _settle(tester);
     await tester.longPress(find.text('Narration colour'));
     await _settle(tester);
-    await tester.tap(find.text('Hide thinking'));
+    await tester.tap(find.text('Scene break'));
     await _settle(tester);
     await _shoot(tester, 'desktop_selecting');
     await _finish(tester);

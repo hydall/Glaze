@@ -34,7 +34,10 @@ import '../../shared/widgets/glaze_fab.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/glaze_text_field.dart';
+import '../../shared/widgets/folder_name_dialog.dart';
+import '../../shared/widgets/glaze_list_item.dart';
 import '../../shared/widgets/glaze_sheet.dart';
+import '../../shared/widgets/glaze_switch.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/list_controls.dart';
@@ -70,20 +73,25 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
   Set<String> _activeStudioStages = const {};
   Timer? _saveTimer;
 
-  /// Folder of global scripts currently browsed, or null at the top level.
-  String? _globalFolderId;
+  /// The level on screen: null at the top, or the scripts of one scope — the
+  /// preset's (a folder of its own), the agents', or a global folder.
+  _RegexScope? _area;
 
-  /// Scope picked in the control row's dropdown; null = every scope.
-  _RegexScope? _scopeFilter;
+  /// Folder inside [_area]: one of the preset's own folders, or the open
+  /// global folder. Null at the top of the preset's scripts.
+  String? _folderId;
   RegexListFilters _filters = const RegexListFilters();
-
-  /// Dragging is armed from the chip next to the sort picker, not by the
-  /// manual mode alone: while it is off a long press opens multi-select.
-  bool _reorderArmed = false;
 
   /// Selected rows while multi-selecting, as [_selectionKey]s. Empty = not
   /// selecting.
   final Set<String> _selected = {};
+
+  @override
+  void initState() {
+    super.initState();
+    // Opened from a preset's editor for that preset's scripts: start in them.
+    if (widget.presetId != null) _area = _RegexScope.preset;
+  }
 
   @override
   void deactivate() {
@@ -175,15 +183,20 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
       _clearSelection();
       return;
     }
-    if (_globalFolderId != null) {
-      setState(() => _globalFolderId = null);
+    if (_area != null) {
+      _leaveLevel();
       return;
     }
     _goBackFromList();
   }
 
+  /// The preset whose scripts this sheet shows: the one it was opened for,
+  /// else the active one, else — with none picked yet — the first preset, the
+  /// same fallback the list itself uses.
   String? get _effectivePresetId =>
-      widget.presetId ?? ref.read(activePresetIdProvider);
+      widget.presetId ??
+      ref.read(activePresetIdProvider) ??
+      ref.read(presetListProvider).value?.firstOrNull?.id;
 
   // ── Script changes ───────────────────────────────────────────────────────────
 
@@ -282,6 +295,7 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
       id: generateId(),
       name: 'New Script',
       regex: '',
+      folderId: _openPresetFolder,
     );
     await ref
         .read(presetListProvider.notifier)
@@ -342,6 +356,15 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
             );
           },
         ),
+        if (isPreset)
+          BottomSheetItem(
+            icon: Icons.drive_file_move_outlined,
+            label: 'regex_move_to_folder'.tr(),
+            onTap: () {
+              Navigator.of(context, rootNavigator: true).pop();
+              _showMovePresetScripts(context, {script.id});
+            },
+          ),
         if (!isPreset && !isStudio)
           BottomSheetItem(
             icon: Icons.create_new_folder_outlined,
@@ -386,6 +409,12 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
       widget.presetId == null && ref.read(studioFeatureEnabledProvider);
 
   void _showAddMenu(BuildContext context) {
+    // Inside a level, what is added lands there.
+    final area = _area;
+    if (area != null) {
+      _showDestinationMenu(context, scope: area);
+      return;
+    }
     // With Studio on there is no active chat preset, so the first destination
     // is the agent list instead of the preset's own scripts.
     final studioEnabled = _agentMode;
@@ -394,9 +423,7 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
       title: 'menu_regex'.tr(),
       items: [
         BottomSheetItem(
-          icon: studioEnabled
-              ? Icons.smart_toy_outlined
-              : Icons.label_outline,
+          icon: studioEnabled ? Icons.smart_toy_outlined : Icons.label_outline,
           label: studioEnabled
               ? 'regex_add_to_agents'.tr()
               : 'regex_add_to_preset'.tr(),
@@ -428,6 +455,16 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     );
   }
 
+  /// The global folder on screen, which new and imported global scripts are
+  /// filed in.
+  String? get _openGlobalFolder =>
+      _area == _RegexScope.global ? _folderId : null;
+
+  /// The preset folder on screen, which new and imported preset scripts are
+  /// filed in.
+  String? get _openPresetFolder =>
+      _area == _RegexScope.preset ? _folderId : null;
+
   String _destinationTitle(_RegexScope scope) => switch (scope) {
     _RegexScope.agent => 'regex_studio_scripts'.tr(),
     _RegexScope.global => 'regex_global_scripts'.tr(),
@@ -454,7 +491,14 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
         );
         break;
       case _RegexScope.global:
-        _selectScript(_addGlobalRegex(), isPreset: false);
+        final created = _addGlobalRegex();
+        final folderId = _openGlobalFolder;
+        if (folderId != null) {
+          unawaited(
+            ref.read(folderRepoProvider).addMember(folderId, created.id),
+          );
+        }
+        _selectScript(created, isPreset: false);
         break;
       case _RegexScope.preset:
         _addPresetRegex().then((created) {
@@ -490,6 +534,18 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
             _importRegex(context, scope: scope);
           },
         ),
+        // The preset's scripts keep folders of their own, saved with it.
+        if (scope == _RegexScope.preset &&
+            _area == _RegexScope.preset &&
+            _folderId == null)
+          BottomSheetItem(
+            icon: Icons.create_new_folder_rounded,
+            label: 'folder_new'.tr(),
+            onTap: () {
+              Navigator.of(context, rootNavigator: true).pop();
+              _createPresetFolder(context);
+            },
+          ),
       ],
     );
   }
@@ -567,9 +623,22 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
       }
 
       if (scope == _RegexScope.global) {
+        final before = {
+          for (final r
+              in ref.read(globalRegexProvider).value ?? const <PresetRegex>[])
+            r.id,
+        };
         await ref
             .read(globalRegexProvider.notifier)
             .importFromJsBackup(combinedRaw);
+        final folderId = _openGlobalFolder;
+        if (folderId != null) {
+          final repo = ref.read(folderRepoProvider);
+          for (final r
+              in ref.read(globalRegexProvider).value ?? const <PresetRegex>[]) {
+            if (!before.contains(r.id)) await repo.addMember(folderId, r.id);
+          }
+        }
         if (context.mounted) GlazeToast.show(context, 'import_success'.tr());
       } else if (scope == _RegexScope.agent) {
         // An imported file carries no Studio stages — an ST script has no such
@@ -596,7 +665,12 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
           if (context.mounted) GlazeToast.show(context, 'no_results'.tr());
           return;
         }
-        final newRegexes = _normalizeRawRegexList(combinedRaw);
+        // A file's own folder ids mean nothing to this preset: the scripts
+        // land in the folder on screen, or at the top.
+        final newRegexes = [
+          for (final r in _normalizeRawRegexList(combinedRaw))
+            r.copyWith(folderId: _openPresetFolder),
+        ];
         await ref
             .read(presetListProvider.notifier)
             .updatePreset(
@@ -667,9 +741,9 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     final studioAsync = ref.watch(studioRegexProvider);
     final activePresetId = ref.watch(activePresetIdProvider);
     // The Studio master switch decides which kind of preset is in effect, and
-    // the two are mutually exclusive — so the agent scripts do not sit in a tab
-    // beside the chat preset's, they take its place. Watched here (rather than
-    // read through [_agentMode]) so flipping the switch rebuilds the list.
+    // the two are mutually exclusive — so the agent scripts do not sit beside
+    // the chat preset's, they take their place. Watched here (rather than read
+    // through [_agentMode]) so flipping the switch rebuilds the list.
     final studioEnabled =
         widget.presetId == null && ref.watch(studioFeatureEnabledProvider);
 
@@ -678,31 +752,21 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     final activePreset = effectivePresetId != null
         ? presets.where((p) => p.id == effectivePresetId).firstOrNull
         : presets.firstOrNull;
-    final presetRegexes = activePreset?.regexes ?? <PresetRegex>[];
     final globalRegexes = globalAsync.value ?? <PresetRegex>[];
     final studioRegexes = studioAsync.value ?? <StudioRegex>[];
 
     final isEdit = _view == 'edit';
     // On desktop the add action belongs in the sheet's header — drawn in the
     // sidebar panel's app bar, or the sheet window's title bar — instead of as
-    // a floating chip over the list.
+    // a floating button over the list.
     final desktop = isDesktopLayout(context);
-    final regexFolders = ref.watch(foldersProvider(FolderDomain.regex)).value;
-    final globalFolderName = regexFolders
-        ?.where((f) => f.id == _globalFolderId)
-        .firstOrNull
-        ?.name;
     final selecting = _selected.isNotEmpty;
 
     return SheetView(
       startExpanded: widget.startExpanded,
       showRouteBackground: false,
-      title: isEdit
-          ? 'regex_editor'.tr()
-          : _globalFolderId != null
-          ? (globalFolderName ?? 'menu_regex'.tr())
-          : 'menu_regex'.tr(),
-      showBack: isEdit || widget.startExpanded || _globalFolderId != null,
+      title: isEdit ? 'regex_editor'.tr() : _levelTitle(activePreset),
+      showBack: isEdit || widget.startExpanded || _area != null,
       actions: !isEdit && desktop
           ? [
               SheetViewAction(
@@ -712,9 +776,9 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
               ),
             ]
           : const [],
-      // The scope dropdown, the filter button and the sort chip belong to the
-      // header, as on the Presets list: pinned there they stay reachable at
-      // any scroll offset. On desktop the selection takes their place.
+      // The order hint and the filter button are pinned to the header, so
+      // they stay in reach at any scroll offset. On desktop the selection
+      // takes their place, as on the Presets list.
       headerBottom: isEdit
           ? null
           : selecting && desktop
@@ -724,11 +788,11 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
               onCancel: _clearSelection,
               onMore: () => _showSelectionActions(context),
             )
-          : _buildControlsRow(context, studioEnabled: studioEnabled),
+          : _buildControlsRow(),
       // A back gesture unwinds the same chain the header's back button walks —
       // leave the editor, drop the selection, step out of the folder — and only
       // closes the sheet once none of those is left.
-      canPop: !isEdit && _globalFolderId == null && !selecting,
+      canPop: !isEdit && _area == null && !selecting,
       onBack: _handleBack,
       floating: isEdit || !selecting || desktop
           ? null
@@ -760,7 +824,6 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
                 context,
                 studioEnabled: studioEnabled,
                 activePreset: activePreset,
-                presetRegexes: presetRegexes,
                 globalRegexes: globalRegexes,
                 studioRegexes: studioRegexes,
               ),
@@ -775,6 +838,27 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     );
   }
 
+  String _levelTitle(Preset? activePreset) {
+    final folderId = _folderId;
+    switch (_area) {
+      case null:
+        return 'menu_regex'.tr();
+      case _RegexScope.agent:
+        return 'regex_studio_scripts'.tr();
+      case _RegexScope.preset:
+        final folder = activePreset?.regexFolders
+            .where((f) => f.id == folderId)
+            .firstOrNull;
+        return folder?.name ??
+            activePreset?.name ??
+            'regex_preset_scripts'.tr();
+      case _RegexScope.global:
+        final folders = ref.watch(foldersProvider(FolderDomain.regex)).value;
+        return folders?.where((f) => f.id == folderId).firstOrNull?.name ??
+            'regex_global_scripts'.tr();
+    }
+  }
+
   /// The selection bar floats above whichever chrome sits at the bottom: the
   /// shell nav bar when the screen is a route, the safe-area inset in a sheet.
   double _floatingBottom() {
@@ -783,83 +867,33 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     return (navHeight > inset ? navHeight : inset) + 16;
   }
 
-  // ── Controls row ─────────────────────────────────────────────────────────────
+  // ── Header row ───────────────────────────────────────────────────────────────
 
-  /// The scope the dropdown is set to, with an agent/preset pick carried over
-  /// to the one actually on screen when the Studio switch has flipped since.
-  _RegexScope? _effectiveScope(bool studioEnabled) => switch (_scopeFilter) {
-    _RegexScope.agent when !studioEnabled => _RegexScope.preset,
-    _RegexScope.preset when studioEnabled => _RegexScope.agent,
-    final scope => scope,
-  };
-
-  String _scopeLabel(_RegexScope? scope) => switch (scope) {
-    null => 'preset_type_all'.tr(),
-    _RegexScope.preset => 'regex_preset_scripts'.tr(),
-    _RegexScope.agent => 'regex_studio_scripts'.tr(),
-    _RegexScope.global => 'regex_global_scripts'.tr(),
-  };
-
-  IconData _scopeIcon(_RegexScope? scope) => switch (scope) {
-    null => Icons.apps_rounded,
-    _RegexScope.preset => Icons.description_outlined,
-    _RegexScope.agent => Icons.smart_toy_outlined,
-    _RegexScope.global => Icons.public,
-  };
-
-  /// Control row pinned to the header, laid out like the Presets list's: the
-  /// scope dropdown on the left, the filter button and the sort chip on the
-  /// right.
-  Widget _buildControlsRow(BuildContext context, {required bool studioEnabled}) {
-    final mode = ref.watch(regexSortProvider).value?.mode ?? PresetSortMode.manual;
-    final scope = _effectiveScope(studioEnabled);
+  /// Says what the order of the list means — scripts run top to bottom — and
+  /// how to change it, beside the filter button.
+  Widget _buildControlsRow() {
     return Row(
       children: [
-        GlazeDropdownChip(
-          label: _scopeLabel(scope),
-          onTap: () => _showScopePicker(context, studioEnabled: studioEnabled),
+        Icon(
+          Icons.drag_indicator_rounded,
+          size: 16,
+          color: context.cs.onSurfaceVariant,
         ),
-        const Spacer(),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            'regex_order_hint'.tr(),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant),
+          ),
+        ),
+        const SizedBox(width: 8),
         GlazeFilterIconButton(
           count: _filters.activeCount,
           onTap: () => _showFilterSheet(context),
         ),
-        const SizedBox(width: 8),
-        PresetSortControls(
-          mode: mode,
-          armed: _reorderArmed,
-          onToggleReorder: _toggleReorderArmed,
-          onDisarm: () {
-            if (_reorderArmed && mounted) setState(() => _reorderArmed = false);
-          },
-          onSelect: (mode) =>
-              unawaited(ref.read(regexSortProvider.notifier).setMode(mode)),
-        ),
       ],
-    );
-  }
-
-  void _showScopePicker(BuildContext context, {required bool studioEnabled}) {
-    final current = _effectiveScope(studioEnabled);
-    showGlazePickerSheet(
-      context,
-      title: 'regex_filter_scope'.tr(),
-      items: [
-        for (final scope in <_RegexScope?>[
-          null,
-          studioEnabled ? _RegexScope.agent : _RegexScope.preset,
-          _RegexScope.global,
-        ])
-          GlazePickerItem(
-            label: _scopeLabel(scope),
-            icon: _scopeIcon(scope),
-            isActive: scope == current,
-            value: scope,
-          ),
-      ],
-      onSelect: (v) {
-        if (mounted) setState(() => _scopeFilter = v as _RegexScope?);
-      },
     );
   }
 
@@ -879,15 +913,28 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     );
   }
 
-  /// Arms or disarms dragging. Arming clears any multi-select — the two modes
-  /// claim the same long press, so only one of them can be on.
-  void _toggleReorderArmed() {
-    final armed = !_reorderArmed;
+  // ── Levels ───────────────────────────────────────────────────────────────────
+
+  void _openLevel(_RegexScope area, [String? folderId]) {
     setState(() {
-      _reorderArmed = armed;
-      if (armed) _selected.clear();
+      _selected.clear();
+      _area = area;
+      _folderId = folderId;
     });
-    if (armed) GlazeToast.show(context, 'preset_drag_hint'.tr());
+  }
+
+  /// One level up: a preset's folder back to the preset's scripts, anything
+  /// else back to the top.
+  void _leaveLevel() {
+    setState(() {
+      _selected.clear();
+      if (_area == _RegexScope.preset && _folderId != null) {
+        _folderId = null;
+      } else {
+        _area = null;
+        _folderId = null;
+      }
+    });
   }
 
   // ── List ─────────────────────────────────────────────────────────────────────
@@ -896,121 +943,180 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     BuildContext context, {
     required bool studioEnabled,
     required Preset? activePreset,
-    required List<PresetRegex> presetRegexes,
     required List<PresetRegex> globalRegexes,
     required List<StudioRegex> studioRegexes,
   }) {
     final memberships =
         ref.watch(folderMembershipsProvider(FolderDomain.regex)).value ??
         FolderMemberships.empty;
-    final folders =
+    final globalFolders =
         ref.watch(foldersProvider(FolderDomain.regex)).value ?? const [];
-    final sort =
-        ref.watch(regexSortProvider).value ?? const PresetSortState();
-    final reordering = sort.mode == PresetSortMode.manual && _reorderArmed;
-    final globalFolderId = _globalFolderId;
-    final scope = _effectiveScope(studioEnabled);
-    bool shows(_RegexScope s) => scope == null || scope == s;
+    final area = _area;
+    final folderId = _folderId;
 
-    final List<PresetRegex> globalPool;
-    if (globalFolderId != null) {
-      final ids = memberships.membersIn(globalFolderId);
-      globalPool = globalRegexes.where((r) => ids.contains(r.id)).toList();
-    } else {
-      globalPool = globalRegexes
-          .where((r) => memberships.foldersOf(r.id).isEmpty)
-          .toList();
-    }
+    // Folder rows above the scripts, then the scripts of this level.
+    final folders = <Widget>[];
+    Widget? lead;
+    String? description;
+    _RegexScope scope;
+    List<PresetRegex> scripts;
+    List<String> runOrder;
+    var stagesById = const <String, Set<String>>{};
 
-    List<PresetRegex> visible(List<PresetRegex> scripts) =>
-        sortRegexScripts(scripts.where(_filters.matches).toList(), sort);
-
-    final stagesById = {
-      for (final e in studioRegexes) e.script.id: e.stages,
-    };
-
-    final groups = <Widget>[];
-    if (globalFolderId == null) {
-      if (studioEnabled) {
-        if (shows(_RegexScope.agent)) {
-          groups.add(
-            _buildGroup(
-              context,
-              scope: _RegexScope.agent,
-              header: 'regex_studio_scripts'.tr(),
-              description: 'regex_studio_description'.tr(),
-              rows: visible([for (final e in studioRegexes) e.script]),
-              fullIds: [for (final e in studioRegexes) e.script.id],
-              stagesById: stagesById,
-              reordering: reordering,
+    switch (area) {
+      case null:
+        if (studioEnabled) {
+          folders.add(
+            _folderRow(
+              key: 'area:agent',
+              icon: Icons.smart_toy_outlined,
+              name: 'regex_studio_scripts'.tr(),
+              count: studioRegexes.length,
+              onTap: () => _openLevel(_RegexScope.agent),
+            ),
+          );
+        } else if (activePreset != null) {
+          folders.add(
+            _folderRow(
+              key: 'area:preset',
+              icon: Icons.description_outlined,
+              name: activePreset.name,
+              subtitle:
+                  '${'regex_preset_scripts'.tr()} · ${activePreset.regexes.length}',
+              count: activePreset.regexes.length,
+              onTap: () => _openLevel(_RegexScope.preset),
             ),
           );
         }
-      } else if (shows(_RegexScope.preset) &&
-          (presetRegexes.isNotEmpty || scope == _RegexScope.preset)) {
-        groups.add(
-          _buildGroup(
-            context,
-            scope: _RegexScope.preset,
-            header: 'regex_preset_scripts'.tr(),
-            leading: activePreset == null
-                ? null
-                : Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-                    child: _PresetChip(
-                      presetName: activePreset.name,
-                      onTap: widget.presetId == null
-                          ? () => context.go('/tools/presets')
-                          : null,
-                    ),
-                  ),
-            rows: visible(presetRegexes),
-            fullIds: [for (final r in presetRegexes) r.id],
-            reordering: reordering,
-          ),
-        );
-      }
+        for (final folder in globalFolders) {
+          folders.add(
+            _folderRow(
+              key: 'global:${folder.id}',
+              icon: Icons.folder_rounded,
+              name: folder.name,
+              count: memberships.countFor(folder.id),
+              onTap: () => _openLevel(_RegexScope.global, folder.id),
+              onMenu: () => showFolderActions(context, ref, folder),
+            ),
+          );
+        }
+        scope = _RegexScope.global;
+        scripts = [
+          for (final r in globalRegexes)
+            if (memberships.foldersOf(r.id).isEmpty) r,
+        ];
+        runOrder = [for (final r in globalRegexes) r.id];
+      case _RegexScope.global:
+        final ids = memberships.membersIn(folderId ?? '');
+        scope = _RegexScope.global;
+        scripts = [
+          for (final r in globalRegexes)
+            if (ids.contains(r.id)) r,
+        ];
+        runOrder = [for (final r in globalRegexes) r.id];
+      case _RegexScope.agent:
+        scope = _RegexScope.agent;
+        description = 'regex_studio_description'.tr();
+        scripts = [for (final e in studioRegexes) e.script];
+        runOrder = [for (final e in studioRegexes) e.script.id];
+        stagesById = {for (final e in studioRegexes) e.script.id: e.stages};
+      case _RegexScope.preset:
+        scope = _RegexScope.preset;
+        final preset = activePreset;
+        if (preset == null) {
+          scripts = const [];
+          runOrder = const [];
+          break;
+        }
+        if (folderId == null) {
+          lead = Align(
+            alignment: Alignment.centerLeft,
+            child: _PresetChip(
+              presetName: preset.name,
+              onTap: widget.presetId == null
+                  ? () => context.go('/tools/presets')
+                  : null,
+            ),
+          );
+          for (final folder in preset.regexFolders) {
+            folders.add(
+              _folderRow(
+                key: 'preset:${folder.id}',
+                icon: Icons.folder_rounded,
+                name: folder.name,
+                count: presetScriptsIn(preset, folder.id).length,
+                onTap: () => _openLevel(_RegexScope.preset, folder.id),
+                onMenu: () => _showPresetFolderActions(context, folder),
+              ),
+            );
+          }
+        }
+        scripts = presetScriptsIn(preset, folderId);
+        runOrder = [for (final r in preset.regexes) r.id];
     }
-    if (globalFolderId != null || shows(_RegexScope.global)) {
-      groups.add(
-        _buildGroup(
-          context,
-          scope: _RegexScope.global,
-          header: 'regex_global_scripts'.tr(),
-          rows: visible(globalPool),
-          fullIds: [for (final r in globalRegexes) r.id],
-          reordering: reordering,
-        ),
-      );
-    }
+
+    final visible = scripts.where(_filters.matches).toList();
+    final visibleIds = [for (final r in visible) r.id];
+    final selecting = _selected.isNotEmpty;
+    // A handle only means something with something to drag past, and not
+    // while the rows are being picked.
+    final draggable = !selecting && visible.length > 1;
 
     return Builder(
       key: const ValueKey('regex-list'),
       builder: (innerContext) {
         final flat = inSidebarPanel(innerContext);
-        final list = ListView(
-          key: PageStorageKey('regex_list_${globalFolderId ?? 'root'}'),
-          // A sidebar panel starts its groups right under the header.
-          padding: EdgeInsets.fromLTRB(0, flat ? 0 : 12, 0, 16).add(
-            EdgeInsets.only(
-              top: MediaQuery.paddingOf(innerContext).top,
-              bottom: MediaQuery.paddingOf(innerContext).bottom,
+        final top = MediaQuery.paddingOf(innerContext).top + (flat ? 12 : 8);
+        final bottom = MediaQuery.paddingOf(innerContext).bottom + 96;
+        final list = CustomScrollView(
+          key: PageStorageKey('regex_list_${area?.name}_$folderId'),
+          slivers: [
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(16, top, 16, 0),
+              sliver: SliverList.list(
+                children: [
+                  if (lead != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: lead,
+                    ),
+                  ...folders,
+                  if (folders.isNotEmpty) const SizedBox(height: 8),
+                  // Folders hold one kind of script each, so the rows need no
+                  // label of their own; only the agent list explains itself.
+                  if (description != null) _ListHint(text: description),
+                  if (visible.isEmpty)
+                    _EmptyState(
+                      label: scripts.isEmpty && folderId != null
+                          ? 'folder_empty_items'.tr()
+                          : 'no_results'.tr(),
+                    ),
+                ],
+              ),
             ),
-          ),
-          children: [
-            // Folders sit above every group, as on the Presets list; a script
-            // filed into one lives there instead of in the Global group.
-            if (globalFolderId == null && folders.isNotEmpty)
-              Padding(
-                padding: EdgeInsets.fromLTRB(16, flat ? 12 : 0, 16, 4),
-                child: FolderSection(
-                  domain: FolderDomain.regex,
-                  icon: Icons.code_rounded,
-                  onOpenFolder: _openFolder,
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(16, 0, 16, bottom),
+              sliver: SliverReorderableList(
+                itemCount: visible.length,
+                onReorderItem: (oldIndex, newIndex) => unawaited(
+                  _reorder(
+                    scope,
+                    reanchorOrder(runOrder, visibleIds, oldIndex, newIndex),
+                  ),
+                ),
+                itemBuilder: (_, i) => KeyedSubtree(
+                  key: ValueKey(_selectionKey(scope, visible[i].id)),
+                  child: _buildRow(
+                    innerContext,
+                    visible[i],
+                    scope,
+                    index: i,
+                    draggable: draggable,
+                    stages: stagesById[visible[i].id] ?? const {},
+                  ),
                 ),
               ),
-            ...groups,
-            const SizedBox(height: 80),
+            ),
           ],
         );
         // Stepping into a folder and back swaps the whole list, so it
@@ -1027,7 +1133,7 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
             ],
           ),
           child: KeyedSubtree(
-            key: ValueKey(globalFolderId ?? '#root'),
+            key: ValueKey('${area?.name}/$folderId'),
             child: list,
           ),
         );
@@ -1035,61 +1141,34 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     );
   }
 
-  /// One group of scripts. While dragging is armed its rows sit in a
-  /// reorderable list; a drop rewrites the order the scripts run in.
-  Widget _buildGroup(
-    BuildContext context, {
-    required _RegexScope scope,
-    required String header,
-    String? description,
-    Widget? leading,
-    required List<PresetRegex> rows,
-    required List<String> fullIds,
-    Map<String, Set<String>> stagesById = const {},
-    required bool reordering,
+  /// A folder as a row of the list — the same card a script is, with a
+  /// chevron — so folders and scripts read as one list.
+  Widget _folderRow({
+    required String key,
+    required IconData icon,
+    required String name,
+    required int count,
+    String? subtitle,
+    required VoidCallback onTap,
+    VoidCallback? onMenu,
   }) {
-    Widget row(PresetRegex script) => _buildRow(
-      context,
-      script,
-      scope,
-      stages: stagesById[script.id] ?? const {},
-      reordering: reordering,
-    );
-
-    return MenuGroup(
-      header: header,
-      description: description,
-      items: [
-        ?leading,
-        if (rows.isEmpty)
-          const _EmptyState()
-        else if (reordering && rows.length > 1)
-          ReorderableListView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            padding: EdgeInsets.zero,
-            buildDefaultDragHandles: false,
-            itemCount: rows.length,
-            onReorderItem: (oldIndex, newIndex) => unawaited(
-              _reorder(
-                scope,
-                reanchorOrder(
-                  fullIds,
-                  [for (final r in rows) r.id],
-                  oldIndex,
-                  newIndex,
-                ),
-              ),
-            ),
-            itemBuilder: (_, i) => ReorderableDelayedDragStartListener(
-              key: ValueKey('${scope.name}:${rows[i].id}'),
-              index: i,
-              child: row(rows[i]),
-            ),
-          )
-        else
-          ...rows.map(row),
-      ],
+    return GlazeListItem(
+      key: ValueKey(key),
+      leading: GlazeListIcon(icon: icon),
+      title: name,
+      subtitle: subtitle ?? '$count',
+      onTap: _selected.isNotEmpty ? null : onTap,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (onMenu != null) GlazeListMenuButton(onTap: onMenu),
+          Icon(
+            Icons.chevron_right_rounded,
+            size: 20,
+            color: context.cs.onSurfaceVariant,
+          ),
+        ],
+      ),
     );
   }
 
@@ -1097,26 +1176,25 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     BuildContext context,
     PresetRegex script,
     _RegexScope scope, {
+    required int index,
+    required bool draggable,
     required Set<String> stages,
-    required bool reordering,
   }) {
     final key = _selectionKey(scope, script.id);
     final isPreset = scope == _RegexScope.preset;
     final isStudio = scope == _RegexScope.agent;
     final selecting = _selected.isNotEmpty;
-    return MenuScriptItem(
-      key: ValueKey(key),
-      name: script.name,
-      subtitle: script.regex.isNotEmpty ? script.regex : null,
-      enabled: !script.disabled,
-      selected: selecting ? _selected.contains(key) : null,
-      onToggle: (v) => _toggleScript(
-        script,
-        v,
-        isPreset: isPreset,
-        isStudio: isStudio,
-        studioStages: stages,
+    final picked = _selected.contains(key);
+    final muted = context.cs.onSurfaceVariant.withValues(alpha: 0.5);
+
+    return GlazeListItem(
+      leading: GlazeListIcon(
+        icon: Icons.code_rounded,
+        color: script.disabled ? muted : null,
       ),
+      title: script.name,
+      subtitle: script.regex.isNotEmpty ? script.regex : null,
+      selected: picked,
       onTap: selecting
           ? () => _toggleSelected(key)
           : () => _selectScript(
@@ -1125,11 +1203,56 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
               isStudio: isStudio,
               studioStages: stages,
             ),
-      // While dragging is armed a long press lifts the row, so it can't also
-      // open multi-select — that moves to the row menu.
-      onLongPress: reordering ? null : () => _startSelection(key),
-      onMore: () =>
-          _showScriptMenu(context, script, isPreset, isStudio: isStudio),
+      onLongPress: selecting ? null : () => _startSelection(key),
+      trailing: selecting
+          ? Padding(
+              padding: const EdgeInsets.all(5),
+              child: Icon(
+                picked
+                    ? Icons.check_circle_rounded
+                    : Icons.radio_button_unchecked_rounded,
+                size: 22,
+                color: picked ? context.cs.primary : muted,
+              ),
+            )
+          : Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                GlazeSwitch(
+                  value: !script.disabled,
+                  onChanged: (v) => _toggleScript(
+                    script,
+                    v,
+                    isPreset: isPreset,
+                    isStudio: isStudio,
+                    studioStages: stages,
+                  ),
+                ),
+                GlazeListMenuButton(
+                  onTap: () => _showScriptMenu(
+                    context,
+                    script,
+                    isPreset,
+                    isStudio: isStudio,
+                  ),
+                ),
+                if (draggable)
+                  ReorderableDragStartListener(
+                    index: index,
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.grab,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(2, 6, 0, 6),
+                        child: Icon(
+                          Icons.drag_indicator_rounded,
+                          size: 20,
+                          color: muted,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
     );
   }
 
@@ -1152,13 +1275,9 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
             .read(studioRegexProvider.notifier)
             .replaceAll(arrange(current, (e) => e.script.id));
       case _RegexScope.preset:
-        final preset = _effectivePreset();
-        if (preset == null) return;
-        await ref
-            .read(presetListProvider.notifier)
-            .updatePreset(
-              preset.copyWith(regexes: arrange(preset.regexes, (r) => r.id)),
-            );
+        await _updatePreset(
+          (p) => p.copyWith(regexes: arrange(p.regexes, (r) => r.id)),
+        );
     }
   }
 
@@ -1169,11 +1288,124 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     return presets.where((p) => p.id == pid).firstOrNull;
   }
 
-  void _openFolder(String id) {
-    setState(() {
-      _selected.clear();
-      _globalFolderId = id;
-    });
+  Future<void> _updatePreset(Preset Function(Preset) change) async {
+    final preset = _effectivePreset();
+    if (preset == null) return;
+    await ref.read(presetListProvider.notifier).updatePreset(change(preset));
+  }
+
+  // ── Preset folders ───────────────────────────────────────────────────────────
+
+  void _createPresetFolder(
+    BuildContext context, {
+    Set<String> fileIds = const {},
+  }) {
+    GlazeBottomSheet.show<void>(
+      context,
+      title: 'folder_create_title'.tr(),
+      child: FolderNameDialog(
+        confirmLabel: 'btn_create'.tr(),
+        onSubmit: (name) {
+          final folder = PresetRegexFolder(id: generateId(), name: name);
+          unawaited(
+            _updatePreset(
+              (p) => movePresetScripts(
+                p.copyWith(regexFolders: [...p.regexFolders, folder]),
+                fileIds,
+                folder.id,
+              ),
+            ),
+          );
+          if (fileIds.isNotEmpty && mounted) _clearSelection();
+        },
+      ),
+    );
+  }
+
+  void _showPresetFolderActions(
+    BuildContext context,
+    PresetRegexFolder folder,
+  ) {
+    GlazeBottomSheet.show<void>(
+      context,
+      title: folder.name,
+      items: [
+        BottomSheetItem(
+          icon: Icons.edit_outlined,
+          label: 'action_rename'.tr(),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            GlazeBottomSheet.show<void>(
+              context,
+              title: 'action_rename'.tr(),
+              child: FolderNameDialog(
+                initialName: folder.name,
+                confirmLabel: 'btn_save'.tr(),
+                onSubmit: (name) => unawaited(
+                  _updatePreset(
+                    (p) => p.copyWith(
+                      regexFolders: [
+                        for (final f in p.regexFolders)
+                          f.id == folder.id ? f.copyWith(name: name) : f,
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+        BottomSheetItem(
+          icon: Icons.delete_outline,
+          label: 'action_delete'.tr(),
+          isDestructive: true,
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            unawaited(
+              _updatePreset((p) => deletePresetRegexFolder(p, folder.id)),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  /// Files the preset scripts [ids] in one of the preset's folders, or takes
+  /// them out of any.
+  void _showMovePresetScripts(BuildContext context, Set<String> ids) {
+    final preset = _effectivePreset();
+    if (preset == null) return;
+    void move(String? folderId) {
+      Navigator.of(context, rootNavigator: true).pop();
+      unawaited(_updatePreset((p) => movePresetScripts(p, ids, folderId)));
+      if (mounted) _clearSelection();
+    }
+
+    GlazeBottomSheet.show<void>(
+      context,
+      title: 'regex_move_to_folder'.tr(),
+      items: [
+        BottomSheetItem(
+          icon: Icons.create_new_folder_outlined,
+          label: 'folder_new'.tr(),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            _createPresetFolder(context, fileIds: ids);
+          },
+        ),
+        BottomSheetItem(
+          icon: Icons.folder_off_outlined,
+          label: 'regex_no_folder'.tr(),
+          onTap: () => move(null),
+        ),
+        for (final folder in preset.regexFolders)
+          BottomSheetItem(
+            icon: Icons.folder_rounded,
+            label: folder.name,
+            onTap: () => move(folder.id),
+          ),
+      ],
+    );
   }
 
   // ── Multi-select ─────────────────────────────────────────────────────────────
@@ -1183,11 +1415,8 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
   static String _selectionKey(_RegexScope scope, String id) =>
       '${scope.name}:$id';
 
-  /// Enters multi-select, disarming a drag left over from the manual mode so a
-  /// long press cannot mean both things at once.
   void _startSelection(String key) {
     setState(() {
-      _reorderArmed = false;
       _selected
         ..clear()
         ..add(key);
@@ -1207,7 +1436,8 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
   ({List<PresetRegex> global, List<PresetRegex> preset, List<String> studio})
   _selectedScripts() {
     final global = [
-      for (final r in ref.read(globalRegexProvider).value ?? const <PresetRegex>[])
+      for (final r
+          in ref.read(globalRegexProvider).value ?? const <PresetRegex>[])
         if (_selected.contains(_selectionKey(_RegexScope.global, r.id))) r,
     ];
     final preset = [
@@ -1215,7 +1445,8 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
         if (_selected.contains(_selectionKey(_RegexScope.preset, r.id))) r,
     ];
     final studio = [
-      for (final e in ref.read(studioRegexProvider).value ?? const <StudioRegex>[])
+      for (final e
+          in ref.read(studioRegexProvider).value ?? const <StudioRegex>[])
         if (_selected.contains(_selectionKey(_RegexScope.agent, e.script.id)))
           e.script.id,
     ];
@@ -1224,7 +1455,7 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
 
   void _showSelectionActions(BuildContext context) {
     final picked = _selectedScripts();
-    final folderId = _globalFolderId;
+    final globalFolderId = _area == _RegexScope.global ? _folderId : null;
     GlazeBottomSheet.show<void>(
       context,
       title: '${_selected.length} ${'selected_count'.tr()}',
@@ -1253,7 +1484,17 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
             unawaited(_exportSelected(context));
           },
         ),
-        // Folders hold global scripts only; a preset's scripts travel with it.
+        if (picked.preset.isNotEmpty)
+          BottomSheetItem(
+            icon: Icons.drive_file_move_outlined,
+            label: 'regex_move_to_folder'.tr(),
+            onTap: () {
+              Navigator.of(context, rootNavigator: true).pop();
+              _showMovePresetScripts(context, {
+                for (final r in picked.preset) r.id,
+              });
+            },
+          ),
         if (picked.global.isNotEmpty)
           BottomSheetItem(
             icon: Icons.create_new_folder_outlined,
@@ -1270,7 +1511,7 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
               );
             },
           ),
-        if (folderId != null)
+        if (globalFolderId != null && picked.global.isNotEmpty)
           BottomSheetItem(
             icon: Icons.folder_off_outlined,
             label: 'action_remove_from_folder'.tr(),
@@ -1278,7 +1519,7 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
               Navigator.of(context, rootNavigator: true).pop();
               final repo = ref.read(folderRepoProvider);
               for (final r in picked.global) {
-                await repo.removeMember(folderId, r.id);
+                await repo.removeMember(globalFolderId, r.id);
               }
               if (mounted) _clearSelection();
             },
@@ -1320,16 +1561,14 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     final preset = _effectivePreset();
     if (preset != null &&
         preset.regexes.any((r) => picked(_RegexScope.preset, r.id))) {
-      await ref
-          .read(presetListProvider.notifier)
-          .updatePreset(
-            preset.copyWith(
-              regexes: [
-                for (final r in preset.regexes)
-                  picked(_RegexScope.preset, r.id) ? apply(r) : r,
-              ],
-            ),
-          );
+      await _updatePreset(
+        (p) => p.copyWith(
+          regexes: [
+            for (final r in p.regexes)
+              picked(_RegexScope.preset, r.id) ? apply(r) : r,
+          ],
+        ),
+      );
     }
     if (mounted) _clearSelection();
   }
@@ -1402,7 +1641,8 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     _clearSelection();
     if (picked.global.isNotEmpty) {
       final gone = {for (final r in picked.global) r.id};
-      final global = ref.read(globalRegexProvider).value ?? const <PresetRegex>[];
+      final global =
+          ref.read(globalRegexProvider).value ?? const <PresetRegex>[];
       await ref.read(globalRegexProvider.notifier).replaceAll([
         for (final r in global)
           if (!gone.contains(r.id)) r,
@@ -1413,25 +1653,23 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
       }
     }
     if (picked.studio.isNotEmpty) {
-      final studio = ref.read(studioRegexProvider).value ?? const <StudioRegex>[];
+      final studio =
+          ref.read(studioRegexProvider).value ?? const <StudioRegex>[];
       await ref.read(studioRegexProvider.notifier).replaceAll([
         for (final e in studio)
           if (!picked.studio.contains(e.script.id)) e,
       ]);
     }
-    final preset = _effectivePreset();
-    if (preset != null && picked.preset.isNotEmpty) {
+    if (picked.preset.isNotEmpty) {
       final gone = {for (final r in picked.preset) r.id};
-      await ref
-          .read(presetListProvider.notifier)
-          .updatePreset(
-            preset.copyWith(
-              regexes: [
-                for (final r in preset.regexes)
-                  if (!gone.contains(r.id)) r,
-              ],
-            ),
-          );
+      await _updatePreset(
+        (p) => p.copyWith(
+          regexes: [
+            for (final r in p.regexes)
+              if (!gone.contains(r.id)) r,
+          ],
+        ),
+      );
     }
   }
 }
@@ -1447,65 +1685,88 @@ class _PresetChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(10, 6, 12, 6),
-          decoration: BoxDecoration(
-            color: context.cs.primary.withValues(alpha: 0.12),
-            border: Border.all(
-              color: context.cs.primary.withValues(alpha: 0.25),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(10, 6, 12, 6),
+            decoration: BoxDecoration(
+              color: context.cs.primary.withValues(alpha: 0.12),
+              border: Border.all(
+                color: context.cs.primary.withValues(alpha: 0.25),
+              ),
+              borderRadius: BorderRadius.circular(20),
             ),
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.description_outlined,
-                size: 14,
-                color: context.cs.primary,
-              ),
-              const SizedBox(width: 6),
-              Flexible(
-                child: Text(
-                  presetName,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: context.cs.primary,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              if (onTap != null) ...[
-                const SizedBox(width: 4),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
                 Icon(
-                  Icons.chevron_right,
-                  size: 16,
-                  color: context.cs.primary.withValues(alpha: 0.7),
+                  Icons.description_outlined,
+                  size: 14,
+                  color: context.cs.primary,
                 ),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    presetName,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: context.cs.primary,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (onTap != null) ...[
+                  const SizedBox(width: 4),
+                  Icon(
+                    Icons.chevron_right,
+                    size: 16,
+                    color: context.cs.primary.withValues(alpha: 0.7),
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
         ),
-      )),
+      ),
     );
   }
 }
 
 class _EmptyState extends StatelessWidget {
-  const _EmptyState();
+  final String label;
+  const _EmptyState({required this.label});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 32),
+      padding: const EdgeInsets.symmetric(vertical: 24),
       child: Center(
         child: Text(
-          'no_results'.tr(),
-          style: TextStyle(color: context.cs.onSurfaceVariant),
+          label,
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 13, color: context.cs.onSurfaceVariant),
         ),
+      ),
+    );
+  }
+}
+
+/// A muted line above the rows, for a list that needs a word of explanation.
+class _ListHint extends StatelessWidget {
+  final String text;
+
+  const _ListHint({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 4, bottom: 8),
+      child: Text(
+        text,
+        style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant),
       ),
     );
   }

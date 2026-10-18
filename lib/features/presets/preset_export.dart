@@ -76,6 +76,8 @@ Map<String, dynamic> presetExportJson(Preset preset) {
             'substituteRegex': r.substituteRegex,
             if (r.minDepth != null) 'minDepth': r.minDepth,
             if (r.maxDepth != null) 'maxDepth': r.maxDepth,
+            // A reference into `regex_folders`, like a prompt's `folder`.
+            if (r.folderId != null) 'folder': r.folderId,
           },
         )
         .toList(),
@@ -91,6 +93,10 @@ Map<String, dynamic> presetExportJson(Preset preset) {
               'exclusive': f.exclusive,
             },
           )
+          .toList(),
+    if (preset.regexFolders.isNotEmpty)
+      'regex_folders': preset.regexFolders
+          .map((f) => <String, dynamic>{'id': f.id, 'name': f.name})
           .toList(),
     'reasoning': preset.reasoningEnabled,
   };

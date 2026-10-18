@@ -89,10 +89,27 @@ abstract class PresetRegex with _$PresetRegex {
     @Default(false) bool runOnEdit,
     @Default(false) bool memoryBookRetrieval,
     @Default(0) int substituteRegex,
+
+    /// Folder of the owning preset's [Preset.regexFolders] this script is filed
+    /// in. Only a preset's scripts use it — global scripts are filed through
+    /// the shared folder layer. Null, or an id the preset no longer declares,
+    /// means the script sits at the top of the preset's scripts.
+    String? folderId,
   }) = _PresetRegex;
 
   factory PresetRegex.fromJson(Map<String, dynamic> json) =>
       _$PresetRegexFromJson(_normalizeRegex(json));
+}
+
+/// A folder inside a preset's regex scripts, stored with the preset. It only
+/// groups scripts for the list: they still run in [Preset.regexes] order.
+@freezed
+abstract class PresetRegexFolder with _$PresetRegexFolder {
+  const factory PresetRegexFolder({required String id, required String name}) =
+      _PresetRegexFolder;
+
+  factory PresetRegexFolder.fromJson(Map<String, dynamic> json) =>
+      _$PresetRegexFolderFromJson(json);
 }
 
 @freezed
@@ -113,6 +130,10 @@ abstract class Preset with _$Preset {
     /// every preset that does not declare any.
     @Default([]) List<PresetBlockFolder> blockFolders,
     @Default([]) List<PresetRegex> regexes,
+
+    /// Folders the scripts in [regexes] may reference by
+    /// [PresetRegex.folderId].
+    @Default([]) List<PresetRegexFolder> regexFolders,
     @Default(false) bool reasoningEnabled,
     String? reasoningStart,
     String? reasoningEnd,

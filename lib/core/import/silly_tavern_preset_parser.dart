@@ -346,6 +346,8 @@ Preset parseSillyTavernPreset(Map<String, dynamic> json, String fileName) {
       (json['extensions'] as Map<String, dynamic>?)?['regex_scripts']
           as List<dynamic>?;
   final regexSource = extRegexes ?? stRegexes;
+  final regexFolders = _parseRegexFolders(json);
+  final regexFolderIds = {for (final folder in regexFolders) folder.id};
   if (regexSource != null) {
     for (int i = 0; i < regexSource.length; i++) {
       final r = regexSource[i] as Map<String, dynamic>;
@@ -354,6 +356,10 @@ Preset parseSillyTavernPreset(Map<String, dynamic> json, String fileName) {
       if (r['isEnabled'] is bool) {
         normalized['disabled'] = !(r['isEnabled'] as bool);
       }
+      // Only a folder the file declares: a dangling reference is dropped.
+      final folder = r['folder'] ?? r['folderId'];
+      normalized['folderId'] =
+          folder is String && regexFolderIds.contains(folder) ? folder : null;
       regexes.add(PresetRegex.fromJson(normalized));
     }
   }
@@ -365,6 +371,7 @@ Preset parseSillyTavernPreset(Map<String, dynamic> json, String fileName) {
       blocks: blocks,
       blockFolders: blockFolders,
       regexes: regexes,
+      regexFolders: regexFolders,
       reasoningEnabled:
           json['reasoning'] as bool? ??
           json['reasoning_enabled'] as bool? ??
@@ -406,4 +413,26 @@ List<PresetBlockFolder> _parseBlockFolders(Map<String, dynamic> json) {
 String? _declaredFolderRef(Map<String, dynamic> prompt, Set<String> declared) {
   final id = prompt['folder'];
   return id is String && declared.contains(id) ? id : null;
+}
+
+/// Reads the preset's declared regex folders (`regex_folders`), Glaze's own
+/// key: anything without a usable id is skipped, duplicates collapse.
+List<PresetRegexFolder> _parseRegexFolders(Map<String, dynamic> json) {
+  final raw = json['regex_folders'];
+  if (raw is! List) return const [];
+  final seen = <String>{};
+  final folders = <PresetRegexFolder>[];
+  for (final entry in raw) {
+    if (entry is! Map) continue;
+    final id = entry['id'];
+    if (id is! String || id.isEmpty || !seen.add(id)) continue;
+    final name = entry['name'];
+    folders.add(
+      PresetRegexFolder(
+        id: id,
+        name: name is String && name.isNotEmpty ? name : id,
+      ),
+    );
+  }
+  return folders;
 }

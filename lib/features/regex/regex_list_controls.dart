@@ -1,25 +1,8 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/models/preset.dart';
-import '../../shared/state/preset_sort.dart';
 import '../../shared/widgets/filter_sheet.dart';
-
-export '../../shared/state/preset_sort.dart';
-
-/// The regex list's sort, stored apart from every other list's.
-///
-/// Only the mode is kept: the manual order of regex scripts is not a view
-/// preference but the order they run in, so it lives in the script lists
-/// themselves and a drag rewrites them (see [reanchorOrder]).
-final regexSortProvider =
-    AsyncNotifierProvider<PresetSortNotifier, PresetSortState>(
-      () => PresetSortNotifier(
-        modeKey: 'regexListSortMode',
-        orderKey: 'regexListManualOrder',
-      ),
-    );
 
 /// The script placements a filter can narrow the list to, in the order the
 /// editor's "Affects" group lists them.
@@ -66,24 +49,6 @@ class RegexListFilters {
   }
 }
 
-/// Orders one group's [scripts] for display. Scripts carry no timestamp, so
-/// "date added" reads a script's position in its list as its age — new and
-/// imported scripts are always appended. Manual is that list order as is.
-List<PresetRegex> sortRegexScripts(
-  List<PresetRegex> scripts,
-  PresetSortState state,
-) {
-  final positions = {for (var i = 0; i < scripts.length; i++) scripts[i].id: i};
-  return sortPresetItems(
-    scripts,
-    // The manual order is the list itself; no separate order is stored.
-    state.copyWith(manualOrder: const []),
-    idOf: (s) => s.id,
-    nameOf: (s) => s.name,
-    createdAtOf: (s) => positions[s.id] ?? 0,
-  );
-}
-
 /// The full id order after the row at [oldIndex] of [visible] was dragged to
 /// [newIndex] (its final index, as `onReorderItem` reports it).
 ///
@@ -112,6 +77,43 @@ List<String> reanchorOrder(
   result.insert(result.indexOf(anchor) + 1, moved);
   return result;
 }
+
+/// The scripts of [preset] filed in folder [folderId], in run order. A null
+/// [folderId] gives the scripts at the top of the preset's list: those in no
+/// folder, or in one the preset no longer declares.
+List<PresetRegex> presetScriptsIn(Preset preset, String? folderId) {
+  final declared = {for (final f in preset.regexFolders) f.id};
+  return [
+    for (final r in preset.regexes)
+      if (folderId == null
+          ? (r.folderId == null || !declared.contains(r.folderId))
+          : r.folderId == folderId)
+        r,
+  ];
+}
+
+/// [preset] with the scripts [ids] filed in [folderId] (null = out of any
+/// folder). Their place in the run order does not change.
+Preset movePresetScripts(Preset preset, Set<String> ids, String? folderId) =>
+    preset.copyWith(
+      regexes: [
+        for (final r in preset.regexes)
+          ids.contains(r.id) ? r.copyWith(folderId: folderId) : r,
+      ],
+    );
+
+/// [preset] without folder [folderId]; its scripts move to the top level.
+Preset deletePresetRegexFolder(Preset preset, String folderId) =>
+    preset.copyWith(
+      regexFolders: [
+        for (final f in preset.regexFolders)
+          if (f.id != folderId) f,
+      ],
+      regexes: [
+        for (final r in preset.regexes)
+          r.folderId == folderId ? r.copyWith(folderId: null) : r,
+      ],
+    );
 
 /// Filters for the regex list on the shared [FilterSheet], applied when the
 /// sheet closes (the same pattern as the Presets list's filter sheet).

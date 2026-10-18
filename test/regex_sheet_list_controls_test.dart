@@ -50,10 +50,12 @@ void main() {
       Preset(
         id: 'p1',
         name: 'Preset',
+        regexFolders: const [PresetRegexFolder(id: 'f1', name: 'Formatting')],
         regexes: const [
           PresetRegex(id: 'r1', name: 'First', regex: 'a'),
           PresetRegex(id: 'r2', name: 'Second', regex: 'b'),
           PresetRegex(id: 'r3', name: 'Third', regex: 'c'),
+          PresetRegex(id: 'r4', name: 'Filed', regex: 'd', folderId: 'f1'),
         ],
       ),
     ]);
@@ -93,13 +95,31 @@ void main() {
     }
   }
 
-  testWidgets('the header carries the scope, filter and sort controls', (
-    tester,
-  ) async {
+  testWidgets('the header says scripts run in list order and carries the '
+      'filter; every script has a drag handle', (tester) async {
     await open(tester);
-    expect(find.byType(GlazeDropdownChip), findsOneWidget);
+    expect(find.text('regex_order_hint'), findsOneWidget);
     expect(find.byType(GlazeFilterIconButton), findsOneWidget);
-    expect(find.byType(PresetSortControls), findsOneWidget);
+    // Sorting is gone: the list order is the run order.
+    expect(find.byType(PresetSortControls), findsNothing);
+    expect(find.byType(GlazeDropdownChip), findsNothing);
+    // The three loose scripts can be dragged; the filed one is in its folder.
+    expect(find.byType(ReorderableDragStartListener), findsNWidgets(3));
+    expect(find.text('Filed'), findsNothing);
+    await teardown(tester);
+  });
+
+  testWidgets('a preset folder opens on its own scripts', (tester) async {
+    await open(tester);
+    await tester.tap(find.text('Formatting'));
+    await tester.pumpAndSettle();
+    expect(find.text('Filed'), findsOneWidget);
+    expect(find.text('First'), findsNothing);
+
+    // Back steps out to the preset's scripts, not out of the sheet.
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('First'), findsOneWidget);
     await teardown(tester);
   });
 
@@ -114,7 +134,7 @@ void main() {
     expect(find.byType(GlazeFab), findsNothing);
     expect(find.byIcon(Icons.check_circle_rounded), findsOneWidget);
 
-    await tester.tap(find.text('Third'));
+    await tester.tap(find.text('Second'));
     await tester.pumpAndSettle();
     expect(find.byIcon(Icons.check_circle_rounded), findsNWidgets(2));
 
@@ -126,8 +146,9 @@ void main() {
     final written = presets.saved.last.regexes;
     expect({for (final r in written) r.id: r.disabled}, {
       'r1': true,
-      'r2': false,
-      'r3': true,
+      'r2': true,
+      'r3': false,
+      'r4': false,
     });
     // Done: the selection is gone and the list is back to normal.
     expect(find.byType(GlazeSelectionBar), findsNothing);
@@ -135,7 +156,7 @@ void main() {
     await teardown(tester);
   });
 
-  testWidgets('back drops the selection before it closes the sheet', (
+  testWidgets('back drops the selection, then the level, then the sheet', (
     tester,
   ) async {
     await open(tester);
@@ -148,9 +169,16 @@ void main() {
     expect(find.byType(GlazeSelectionBar), findsNothing);
     expect(find.text('Second'), findsOneWidget);
 
+    // Then out of the preset's scripts to the top, where the preset is a
+    // folder of its own, and only then out of the sheet.
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
     expect(find.text('Second'), findsNothing);
+    expect(find.text('Preset'), findsWidgets);
+
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('Preset'), findsNothing);
     await teardown(tester);
   });
 }

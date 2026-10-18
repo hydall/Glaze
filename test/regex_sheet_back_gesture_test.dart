@@ -93,6 +93,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(GlazeFab), findsOneWidget);
 
+    // Opened for one preset, the sheet starts in that preset's scripts: back
+    // steps out to the top level before it closes the sheet.
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.byType(GlazeFab), findsOneWidget);
+
     // Nothing left inside — now back closes the sheet itself.
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();

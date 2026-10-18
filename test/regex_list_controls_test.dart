@@ -56,35 +56,35 @@ void main() {
     });
   });
 
-  group('sortRegexScripts', () {
-    final scripts = [
-      _script('1', name: 'beta'),
-      _script('2', name: 'Alpha'),
-      _script('3', name: 'gamma'),
-    ];
+  group('preset folders', () {
+    final preset = Preset(
+      id: 'p',
+      name: 'P',
+      regexFolders: const [PresetRegexFolder(id: 'f1', name: 'Format')],
+      regexes: [
+        _script('a'),
+        _script('b').copyWith(folderId: 'f1'),
+        _script('c').copyWith(folderId: 'gone'),
+        _script('d').copyWith(folderId: 'f1'),
+      ],
+    );
 
-    test('manual is the run order, even with a stored manual order', () {
-      final sorted = sortRegexScripts(
-        scripts,
-        const PresetSortState(manualOrder: ['3', '1', '2']),
-      );
-      expect(sorted.map((s) => s.id), ['1', '2', '3']);
+    test('the top level holds unfiled scripts and dangling references', () {
+      expect(presetScriptsIn(preset, null).map((r) => r.id), ['a', 'c']);
+      expect(presetScriptsIn(preset, 'f1').map((r) => r.id), ['b', 'd']);
     });
 
-    test('alphabetical ignores case', () {
-      final sorted = sortRegexScripts(
-        scripts,
-        const PresetSortState(mode: PresetSortMode.alphabetical),
-      );
-      expect(sorted.map((s) => s.name), ['Alpha', 'beta', 'gamma']);
+    test('moving scripts keeps their run order', () {
+      final moved = movePresetScripts(preset, {'a', 'd'}, null);
+      expect(moved.regexes.map((r) => r.id), ['a', 'b', 'c', 'd']);
+      expect(presetScriptsIn(moved, 'f1').map((r) => r.id), ['b']);
     });
 
-    test('date added puts the last appended first', () {
-      final sorted = sortRegexScripts(
-        scripts,
-        const PresetSortState(mode: PresetSortMode.dateAdded),
-      );
-      expect(sorted.map((s) => s.id), ['3', '2', '1']);
+    test('deleting a folder sends its scripts to the top level', () {
+      final left = deletePresetRegexFolder(preset, 'f1');
+      expect(left.regexFolders, isEmpty);
+      expect(left.regexes.where((r) => r.folderId == 'f1'), isEmpty);
+      expect(left.regexes.map((r) => r.id), ['a', 'b', 'c', 'd']);
     });
   });
 
