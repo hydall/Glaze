@@ -9,20 +9,20 @@ window.GLAZE = {
 
   // Shown until the GitHub API answers (or when it is rate-limited).
   fallbackRelease: {
-    tag: 'v0.8.2',
-    date: '2026-10-12',
+    tag: 'v0.9.0',
+    date: '2026-10-18',
     assets: [
-      { name: 'v0.8.2.apk', size: 101287499 },
-      { name: 'v0.8.2-arm64-v8a.apk', size: 54877770 },
-      { name: 'v0.8.2-armeabi-v7a.apk', size: 53938868 },
-      { name: 'v0.8.2.ipa', size: 25207852 },
-      { name: 'v0.8.2-windows.zip', size: 28044503 },
-      { name: 'v0.8.2-linux.pkg.tar.zst', size: 25147219 },
-      { name: 'v0.8.2-linux.tar.zst', size: 24028176 },
+      { name: 'v0.9.0.apk', size: 105005264 },
+      { name: 'v0.9.0-arm64-v8a.apk', size: 56809671 },
+      { name: 'v0.9.0-armeabi-v7a.apk', size: 55952701 },
+      { name: 'v0.9.0.ipa', size: 26201637 },
+      { name: 'v0.9.0-windows.zip', size: 29040350 },
+      { name: 'v0.9.0-linux.pkg.tar.zst', size: 26072564 },
+      { name: 'v0.9.0-linux.tar.zst', size: 24942104 },
     ],
   },
 
-  devVersion: '0.8.2',
+  devVersion: '0.9.0',
 
   // Where the Download page's Nightly channel looks for builds.
   nightly: { workflow: 'build-branch.yml', branch: 'nightly' },
@@ -135,7 +135,7 @@ window.GLAZE = {
       },
       dl_all: 'Все релизы',
       dl_loading: 'Загружаем данные релиза…',
-      dl_api_failed: 'Не удалось связаться с GitHub. Показаны ссылки на v0.8.2.',
+      dl_api_failed: 'Не удалось связаться с GitHub. Показаны ссылки на v0.9.0.',
       dl_missing: 'В этом релизе нет',
       dl_how: {
         android: 'Скачайте APK и откройте его. Разрешите установку из этого источника, если система спросит. Есть универсальная сборка, а также отдельные под arm64 и arm32.',
@@ -287,7 +287,7 @@ window.GLAZE = {
       },
       dl_all: 'All releases',
       dl_loading: 'Loading release data…',
-      dl_api_failed: 'Could not reach GitHub. Showing links for v0.8.2.',
+      dl_api_failed: 'Could not reach GitHub. Showing links for v0.9.0.',
       dl_missing: 'Not in this release',
       dl_how: {
         android: 'Download the APK and open it. Allow installs from this source if the system asks. There is a universal build, plus separate arm64 and arm32 ones.',
@@ -559,6 +559,19 @@ window.GLAZE = {
   // languages it is written in; any other shows the first one with a notice.
   articles: [
     {
+      slug: '0.9.0',
+      kind: 'changelog',
+      date: '2026-10-18',
+      author: 'hydall',
+      langs: ['ru', 'en'],
+      download: 'v0.9.0',
+      title: { ru: 'Glaze beta 0.9.0', en: 'Glaze beta 0.9.0' },
+      lead: {
+        ru: 'Плагины в стабильной версии, ExtBlocks как в оригинальном расширении, NoAssistant снова в пресете и бэкапы без API-ключей.',
+        en: 'Plugins on stable, ExtBlocks on par with the original extension, NoAssistant back on the preset and backups without API keys.',
+      },
+    },
+    {
       slug: 'plugins',
       kind: 'news',
       date: '2026-10-14',
@@ -678,9 +691,64 @@ window.GLAZE = {
       ],
     },
     {
+      version: '0.9.0',
+      date: '2026-10-18',
+      status: 'latest',
+      channel: 'beta',
+      tag: 'v0.9.0',
+      article: '0.9.0',
+      title: { ru: 'Плагины и ExtBlocks', en: 'Plugins and ExtBlocks' },
+      groups: [
+        {
+          title: { ru: 'Новое', en: 'New' },
+          items: {
+            ru: [
+              'Плагины: Tavo Hub, матрица разрешений, история запросов, панели поверх чата, свой API-пресет на функцию',
+              'ExtBlocks как в оригинале: триггеры, rewrite и accumulation, блок в тексте сообщения, профили генерации, макросы, Context Builder, скрипты',
+              'NoAssistant снова в пресете, макросы в стоп-строке',
+              'Экспорт бэкапа без API-ключей',
+              'Фильтр по типу запросов в инспекторе',
+              'Обновлён Renri, правленая копия сохраняется как Old Renri',
+            ],
+            en: [
+              'Plugins: Tavo Hub, a permission matrix, a request history, panels over the chat, an API preset per feature',
+              'ExtBlocks like the original: triggers, rewrite and accumulation, blocks in the message text, generation profiles, macros, the Context Builder, scripts',
+              'NoAssistant back on the preset, macros in its stop string',
+              'Backup export without API keys',
+              'A request type filter in the inspector',
+              'Renri updated, an edited copy is kept as Old Renri',
+            ],
+          },
+        },
+        {
+          title: { ru: 'Исправления', en: 'Fixes' },
+          items: {
+            ru: [
+              'Чат не зависает на зациклившемся display-regex',
+              'Персона из чата учитывает привязки к чату и персонажу',
+              'Причина неудачного «Продолжить» в уведомлении',
+              'Счётчик токенов после регенерации, текст в звёздочках в уведомлениях',
+              'Старые запросы не пропадают из инспектора',
+              'Сохранение картинок в «Фото» на iOS',
+              'Множество правок интерфейса на телефоне и ПК',
+            ],
+            en: [
+              'The chat no longer freezes on a runaway display regex',
+              'The persona picked from a chat follows chat and character bindings',
+              'A failed Continue says why',
+              'The token count after a regen, asterisk text in notifications',
+              'Old requests stay in the inspector',
+              'Chat images save to Photos on iOS',
+              'A great many interface fixes on phone and desktop',
+            ],
+          },
+        },
+      ],
+    },
+    {
       version: '0.8.2',
       date: '2026-10-12',
-      status: 'latest',
+      status: 'released',
       channel: 'beta',
       tag: 'v0.8.2',
       article: '0.8.2',
