@@ -659,10 +659,13 @@ jobs:
 
       - name: Prepare release notes
         id: notes
+        # Through env, not ${{ }} in the script: a commit subject with quotes
+        # (a `Revert "..."`, say) would otherwise break the shell parse.
+        env:
+          RELEASE_NOTES: ${{ github.event.inputs.release_notes }}
+          COMMITS:       ${{ needs.metadata.outputs.commits }}
         run: |
-          RELEASE_NOTES="${{ github.event.inputs.release_notes }}"
           if [ -z "$RELEASE_NOTES" ]; then
-            COMMITS="${{ needs.metadata.outputs.commits }}"
             if [ -n "$COMMITS" ]; then
               RELEASE_NOTES=$(printf '## Changes\n\n%s' "$COMMITS")
             else
