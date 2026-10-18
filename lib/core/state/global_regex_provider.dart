@@ -110,6 +110,14 @@ class GlobalRegexNotifier extends AsyncNotifier<List<PresetRegex>> {
     await _persist(updated);
   }
 
+  /// Replaces the whole list in one write — a drag that reorders the scripts
+  /// (their order is the order they run in) or a bulk edit of several.
+  Future<void> replaceAll(List<PresetRegex> scripts) async {
+    final updated = List<PresetRegex>.of(scripts);
+    state = AsyncData(updated);
+    await _persist(updated);
+  }
+
   Future<void> removeRegex(String id) async {
     final current = state.value ?? [];
     final updated = current.where((r) => r.id != id).toList();

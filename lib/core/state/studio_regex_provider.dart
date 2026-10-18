@@ -59,6 +59,13 @@ class StudioRegexNotifier extends AsyncNotifier<List<StudioRegex>> {
     await _persist(updated);
   }
 
+  /// Replaces the whole list in one write — a reorder or a bulk edit.
+  Future<void> replaceAll(List<StudioRegex> entries) async {
+    final updated = List<StudioRegex>.of(entries);
+    state = AsyncData(updated);
+    await _persist(updated);
+  }
+
   Future<void> removeRegex(String id) async {
     final updated = (state.value ?? const <StudioRegex>[])
         .where((entry) => entry.script.id != id)

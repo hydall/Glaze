@@ -1129,6 +1129,14 @@ class MenuScriptItem extends StatefulWidget {
   final VoidCallback onTap;
   final VoidCallback onMore;
 
+  /// Non-null while the list is multi-selecting: the switch and the menu give
+  /// way to a check mark showing whether this row is picked.
+  final bool? selected;
+
+  /// Starts multi-select from this row. Null while the list is drag-ordered,
+  /// where the long press lifts the row instead.
+  final VoidCallback? onLongPress;
+
   const MenuScriptItem({
     super.key,
     required this.name,
@@ -1137,6 +1145,8 @@ class MenuScriptItem extends StatefulWidget {
     required this.onToggle,
     required this.onTap,
     required this.onMore,
+    this.selected,
+    this.onLongPress,
   });
 
   @override
@@ -1156,9 +1166,16 @@ class _MenuScriptItemState extends State<MenuScriptItem> {
         widget.onTap();
       },
       onTapCancel: () => setState(() => _pressed = false),
+      onLongPress: widget.onLongPress == null
+          ? null
+          : () {
+              setState(() => _pressed = false);
+              Haptics.selectionClick();
+              widget.onLongPress!();
+            },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 120),
-        color: _pressed
+        color: _pressed || (widget.selected ?? false)
             ? context.cs.primary.withValues(alpha: 0.08)
             : Colors.transparent,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
@@ -1199,36 +1216,51 @@ class _MenuScriptItemState extends State<MenuScriptItem> {
               ),
             ),
             const SizedBox(width: 8),
-            Switch(
-              value: widget.enabled,
-              onChanged: (v) {
-                Haptics.selectionClick();
-                widget.onToggle(v);
-              },
-              activeThumbColor: context.cs.primary,
-              activeTrackColor: context.cs.primary.withValues(alpha: 0.5),
-              trackOutlineColor: WidgetStateProperty.resolveWith(
-                (states) => states.contains(WidgetState.selected)
-                    ? Colors.transparent
-                    : context.cs.outlineVariant,
-              ),
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () {
-                Haptics.selectionClick();
-                widget.onMore();
-              },
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(4, 8, 0, 8),
+            if (widget.selected != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 7),
                 child: Icon(
-                  Icons.more_vert,
-                  size: 20,
-                  color: context.cs.onSurfaceVariant.withValues(alpha: 0.45),
+                  widget.selected!
+                      ? Icons.check_circle_rounded
+                      : Icons.radio_button_unchecked_rounded,
+                  size: 22,
+                  color: widget.selected!
+                      ? context.cs.primary
+                      : context.cs.onSurfaceVariant.withValues(alpha: 0.5),
                 ),
+              )
+            else ...[
+              Switch(
+                value: widget.enabled,
+                onChanged: (v) {
+                  Haptics.selectionClick();
+                  widget.onToggle(v);
+                },
+                activeThumbColor: context.cs.primary,
+                activeTrackColor: context.cs.primary.withValues(alpha: 0.5),
+                trackOutlineColor: WidgetStateProperty.resolveWith(
+                  (states) => states.contains(WidgetState.selected)
+                      ? Colors.transparent
+                      : context.cs.outlineVariant,
+                ),
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
-            )),
+              MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {
+                  Haptics.selectionClick();
+                  widget.onMore();
+                },
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(4, 8, 0, 8),
+                  child: Icon(
+                    Icons.more_vert,
+                    size: 20,
+                    color: context.cs.onSurfaceVariant.withValues(alpha: 0.45),
+                  ),
+                ),
+              )),
+            ],
           ],
         ),
       ),

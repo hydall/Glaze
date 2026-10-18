@@ -54,6 +54,7 @@ import 'widgets/preset_folders_section.dart';
 import 'widgets/preset_options_sheet.dart';
 import 'widgets/preset_small_badge.dart';
 import '../../shared/widgets/glaze_sheet.dart';
+import '../../shared/widgets/selection_bar.dart';
 import '../guides/guide_anchor.dart';
 import '../guides/guide_service.dart';
 
@@ -322,7 +323,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
       headerBottom: _inAnyEditor
           ? null
           : selection.active && desktop
-          ? _SelectionBar(
+          ? GlazeSelectionBar(
               compact: true,
               count: selection.count,
               onCancel: () =>
@@ -336,7 +337,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
               alignment: Alignment.bottomCenter,
               child: Padding(
                 padding: EdgeInsets.fromLTRB(16, 0, 16, _floatingBottom()),
-                child: _SelectionBar(
+                child: GlazeSelectionBar(
                   count: selection.count,
                   onCancel: () =>
                       ref.read(presetSelectionProvider.notifier).clear(),
@@ -1904,132 +1905,6 @@ class _ConnBadge extends StatelessWidget {
           borderRadius: BorderRadius.circular(8),
         ),
         child: Icon(Icons.link, size: 16, color: color),
-      ),
-    ));
-  }
-}
-
-/// Selection bar shown while multi-selecting presets. Mirrors the chat's
-/// message-selection bar: a glass pill with a cancel button, the selected
-/// count, and a "more" button that opens the bulk-actions sheet.
-///
-/// [compact] is the desktop form that stands in for the header's controls row:
-/// the same buttons at the row's 32 px height, without the pill around them,
-/// so swapping the two leaves the list where it was.
-class _SelectionBar extends StatelessWidget {
-  final int count;
-  final VoidCallback onCancel;
-  final VoidCallback onMore;
-  final bool compact;
-
-  const _SelectionBar({
-    required this.count,
-    required this.onCancel,
-    required this.onMore,
-    this.compact = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    if (compact) {
-      return GlassBackdropGroup(
-        child: Row(
-          children: [
-            _CircleIconBtn(
-              icon: Icons.close_rounded,
-              onTap: onCancel,
-              size: 32,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                '$count ${'selected_count'.tr()}',
-                style: TextStyle(
-                  color: context.cs.onSurface,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            _CircleIconBtn(
-              icon: Icons.more_horiz_rounded,
-              onTap: count > 0 ? onMore : null,
-              size: 32,
-            ),
-          ],
-        ),
-      );
-    }
-    return Material(
-      color: Colors.transparent,
-      elevation: 0,
-      borderRadius: BorderRadius.circular(28),
-      child: GlassSurface(
-        borderRadius: BorderRadius.circular(28),
-        tint: context.cs.surface,
-        border: Border.all(color: context.cs.primary.withValues(alpha: 0.18)),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 56),
-          child: Row(
-            children: [
-              const SizedBox(width: 8),
-              _CircleIconBtn(icon: Icons.close_rounded, onTap: onCancel),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  '$count ${'selected_count'.tr()}',
-                  style: TextStyle(
-                    color: context.cs.onSurface,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              _CircleIconBtn(
-                icon: Icons.more_horiz_rounded,
-                onTap: count > 0 ? onMore : null,
-              ),
-              const SizedBox(width: 8),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _CircleIconBtn extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback? onTap;
-  final double size;
-
-  const _CircleIconBtn({required this.icon, this.onTap, this.size = 40});
-
-  @override
-  Widget build(BuildContext context) {
-    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
-      onTap: onTap,
-      child: SizedBox(
-        width: size,
-        height: size,
-        child: GlassSurface(
-          borderRadius: BorderRadius.circular(size / 2),
-          tint: context.cs.surface,
-          border: Border.all(color: context.cs.primary.withValues(alpha: 0.18)),
-          child: Center(
-            child: Icon(
-              icon,
-              size: 20,
-              color: onTap != null
-                  ? context.cs.primary
-                  : context.cs.onSurfaceVariant.withValues(alpha: 0.5),
-            ),
-          ),
-        ),
       ),
     ));
   }
