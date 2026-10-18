@@ -189,13 +189,6 @@ class PostGenCoordinator {
       'chat embedding',
       notifService,
     );
-    // The summary reads the committed reply as it is and waits on nothing
-    // Studio does.
-    _runInBackground(
-      () => autoSummaryStage.run(result.session),
-      'auto-summary',
-      notifService,
-    );
     if (!studioEnabled) {
       _runInBackground(
         () => draftStage.run(
@@ -205,6 +198,11 @@ class PostGenCoordinator {
         'memory auto-draft',
         notifService,
         onTaskNotStarted: ordinaryMemoryLease?.release,
+      );
+      _runInBackground(
+        () => autoSummaryStage.run(result.session),
+        'auto-summary',
+        notifService,
       );
     }
 
@@ -248,9 +246,9 @@ class PostGenCoordinator {
     );
     postGenFutures.add(cleanerTask);
 
-    // Memory drafts need the clock stamped by Ledger, which runs inside
-    // CleanerStage. Re-read the durable session after that workflow so they
-    // never infer a missing time from the pre-Ledger copy.
+    // Studio auxiliary consumers need the clock stamped by Ledger, which runs
+    // inside CleanerStage. Re-read the durable session after that workflow so
+    // Memory and Summary never infer a missing time from the pre-Ledger copy.
     postGenFutures.add(
       cleanerTask.then((_) async {
         if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) return;
@@ -268,6 +266,11 @@ class PostGenCoordinator {
           'memory auto-draft',
           notifService,
           onTaskNotStarted: memoryLease?.release,
+        );
+        _runInBackground(
+          () => autoSummaryStage.run(refreshed),
+          'auto-summary',
+          notifService,
         );
       }),
     );

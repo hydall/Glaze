@@ -363,9 +363,7 @@ prompt passes `SummaryCompactionSettings.triggerPercent` of what it may use,
 the oldest summarizable messages outside the fresh tail (the rest of the
 window, and at least `SummaryChain.minTailMessages`) are retold as a level-1
 block. A run that would not make the block meaningfully shorter than its source
-is skipped. An answer more than `summaryShortenSlackPercent` of its target is
-sent back once to be shortened and the shorter text kept; a block that still
-comes back no shorter than its source is rejected. Once the live
+is skipped; a block that comes back no shorter is rejected. Once the live
 blocks take more than `mergePercent` of the window, adjacent blocks of one
 level are merged a level up and the merged ones are archived.
 
@@ -376,12 +374,6 @@ level-1 block records its source message ids and a fingerprint of their text;
 a merge records the union and its archived parts. Each run retells only its
 own messages; the live blocks before it are handed over as context
 (`{{previous_summary}}` or `summaryPreviousHeader`) and are not retold.
-
-The instructions go in the system message and the material — earlier summary
-and transcript, with speakers by name — in the user message; a template that
-places `{{history}}` is sent as one user message as written. The transcript is
-the message text alone: summarizing reads nothing from Ledger or Studio and
-runs after every bot turn, Studio on or off.
 
 A block whose sources were edited, swiped or deleted is stale: it is not sent,
 its messages return to the prompt, and the next compaction drops it together

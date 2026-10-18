@@ -19,13 +19,8 @@ import 'package:glaze_flutter/core/models/summary_block.dart';
 class _RecordingAuxLlmClient extends AuxLlmClient {
   static const response = '  generated summary  ';
 
-  /// Answers handed out in turn; [response] once they run out.
-  final List<String> responses;
-
-  _RecordingAuxLlmClient([this.responses = const []]);
-
   AuxApiConfig? config;
-  final calls = <List<Map<String, String>>>[];
+  String? prompt;
   int? maxTokens;
   double? temperature;
   int? timeoutMs;
@@ -44,28 +39,13 @@ class _RecordingAuxLlmClient extends AuxLlmClient {
     AuxRawResponseSink? onRawResponse,
   }) async {
     this.config = config;
-    calls.add(
-      messages ??
-          [
-            {'role': 'user', 'content': prompt},
-          ],
-    );
+    this.prompt = prompt;
     this.maxTokens = maxTokens;
     this.temperature = temperature;
     this.timeoutMs = timeoutMs;
     this.captureContext = captureContext;
-    return calls.length <= responses.length
-        ? responses[calls.length - 1]
-        : response;
+    return response;
   }
-
-  List<Map<String, String>>? get messages => calls.lastOrNull;
-
-  String? _content(String role) =>
-      messages?.where((m) => m['role'] == role).map((m) => m['content']).join();
-
-  String? get system => _content('system');
-  String? get user => _content('user');
 }
 
 const _api = ApiConfig(
@@ -189,11 +169,9 @@ void main() {
     );
 
     expect(result, 'generated summary');
-    // Placed by the template, so it is sent as one user message.
-    expect(llm.messages, hasLength(1));
-    expect(llm.user, contains('User: Hello'));
-    expect(llm.user, contains('Character: Hi there'));
-    expect(llm.user, isNot(contains('Ignored')));
+    expect(llm.prompt, contains('User: Hello'));
+    expect(llm.prompt, contains('Character: Hi there'));
+    expect(llm.prompt, isNot(contains('Ignored')));
     expect(llm.config?.protocol, LlmProtocol.anthropic);
     expect(llm.config?.omitTemperature, isTrue);
     expect(llm.maxTokens, 4096);
@@ -226,12 +204,11 @@ void main() {
       ),
     );
 
-    expect(llm.user, startsWith('Recap Alice for Bob in 300.'));
-    // Speakers go by their names; the transcript is never macro-expanded.
-    expect(llm.user, contains('Bob: Say {{char}} out loud'));
-    expect(llm.user, endsWith('Done.'));
+    expect(llm.prompt, startsWith('Recap Alice for Bob in 300.'));
+    expect(llm.prompt, contains('User: Say {{char}} out loud'));
+    expect(llm.prompt, endsWith('Done.'));
     // Placed by the template, so no length hint is appended.
-    expect(llm.user, isNot(contains(summaryLengthHint(300))));
+    expect(llm.prompt, isNot(contains(summaryLengthHint(300))));
   });
 
   test('the built-in prompt gets the length hint and the transcript', () async {
@@ -254,14 +231,9 @@ void main() {
       customPrompt: '   ',
     );
 
-    // Instructions in the system message, the material in the user one.
-    expect(llm.messages?.map((m) => m['role']), ['system', 'user']);
-    expect(llm.system, startsWith(defaultSummaryPrompt.trimRight()));
-    expect(llm.system, contains(summaryLengthHint(400)));
-    expect(llm.user, startsWith(summaryTranscriptHeader));
-    // The Ledger clock stays out of the transcript.
-    expect(llm.user, contains('Character: She nods.'));
-    expect(llm.user, isNot(contains('RP_Day')));
+    expect(llm.prompt, startsWith(defaultSummaryPrompt.trimRight()));
+    expect(llm.prompt, contains(summaryLengthHint(400)));
+    expect(llm.prompt, contains('[12.05.2027 · RP_Day 0 · 09:15] She nods.'));
   });
 
   test('earlier blocks are handed over as context, before the run', () async {
@@ -276,11 +248,10 @@ void main() {
       earlierSummary: 'They reached the pass after dark.',
     );
 
-    expect(llm.system, isNot(contains(summaryPreviousHeader)));
-    expect(llm.user, startsWith(summaryPreviousHeader));
+    expect(llm.prompt, contains(summaryPreviousHeader));
     expect(
-      llm.user!.indexOf('They reached the pass after dark.'),
-      lessThan(llm.user!.indexOf('User: Hello')),
+      llm.prompt!.indexOf(summaryPreviousHeader),
+      lessThan(llm.prompt!.indexOf('User: Hello')),
     );
 
     await service.summarizeMessages(
@@ -291,8 +262,8 @@ void main() {
       customPrompt: 'So far: $summaryPreviousPlaceholder\n{{history}}',
       earlierSummary: 'They reached the pass.',
     );
-    expect(llm.user, startsWith('So far: They reached the pass.'));
-    expect(llm.user, isNot(contains(summaryPreviousHeader)));
+    expect(llm.prompt, startsWith('So far: They reached the pass.'));
+    expect(llm.prompt, isNot(contains(summaryPreviousHeader)));
   });
 
   test('a merge prompt lists the parts in order', () async {
@@ -309,102 +280,11 @@ void main() {
       targetTokens: 200,
     );
 
-    expect(llm.system, startsWith(summaryMergePrompt));
-    expect(llm.system, contains(summaryLengthHint(200)));
+    expect(llm.prompt, startsWith(summaryMergePrompt));
     expect(
-      llm.user!.indexOf('First part.'),
-      lessThan(llm.user!.indexOf('Second part.')),
+      llm.prompt!.indexOf('First part.'),
+      lessThan(llm.prompt!.indexOf('Second part.')),
     );
-  });
-
-  test('a stored copy of the old built-in prompt counts as unset', () async {
-    final service = SummaryService(repo);
-    await service.setSummaryPrompt(
-      sessionId: 'session',
-      prompt:
-          'Summarize the following part of a roleplay conversation concisely, '
-          'in the language it is written in: key events in order, decisions, '
-          'changes in relationships, and what is still unresolved. Keep '
-          'proper names exactly as they appear.\n\n',
-    );
-    expect(await service.getSummaryPrompt('session'), isNull);
-
-    await service.setSummaryPrompt(sessionId: 'session', prompt: 'Mine.');
-    expect(await service.getSummaryPrompt('session'), 'Mine.');
-  });
-
-  test('a user message goes by the persona it was written as', () async {
-    final llm = _RecordingAuxLlmClient();
-    final service = SummaryService(repo, llm: llm);
-
-    await service.summarizeMessages(
-      sessionId: 'session',
-      source: const [
-        ChatMessage(id: '1', role: 'user', content: 'Hi', personaName: 'Eve'),
-        ChatMessage(id: '2', role: 'user', content: 'Again'),
-      ],
-      apiConfig: _api,
-      targetTokens: 300,
-      macroContext: const MacroContext(
-        charName: 'Alice',
-        userName: 'Bob',
-        charId: 'char',
-        sessionId: 'session',
-      ),
-    );
-
-    expect(llm.user, contains('Eve: Hi'));
-    expect(llm.user, contains('Bob: Again'));
-  });
-
-  test('an answer well past its target is shortened once', () async {
-    final long = List.filled(400, 'word').join(' ');
-    final llm = _RecordingAuxLlmClient([long, 'Short.']);
-    final service = SummaryService(repo, llm: llm);
-
-    final result = await service.summarizeMessages(
-      sessionId: 'session',
-      source: const [ChatMessage(id: '1', role: 'user', content: 'Hello')],
-      apiConfig: _api,
-      targetTokens: 150,
-    );
-
-    expect(result, 'Short.');
-    expect(llm.calls, hasLength(2));
-    expect(llm.system, startsWith(summaryShortenPrompt));
-    expect(llm.user, long);
-  });
-
-  test('a shortening that is no shorter keeps the first answer', () async {
-    final long = List.filled(400, 'word').join(' ');
-    final llm = _RecordingAuxLlmClient([long, '$long more']);
-    final service = SummaryService(repo, llm: llm);
-
-    final result = await service.mergeBlocks(
-      sessionId: 'session',
-      parts: [
-        block(['1'], 'First part.'),
-        block(['2'], 'Second part.'),
-      ],
-      apiConfig: _api,
-      targetTokens: 150,
-    );
-
-    expect(result, long);
-  });
-
-  test('an answer within its target is not sent back', () async {
-    final llm = _RecordingAuxLlmClient();
-    final service = SummaryService(repo, llm: llm);
-
-    await service.summarizeMessages(
-      sessionId: 'session',
-      source: const [ChatMessage(id: '1', role: 'user', content: 'Hello')],
-      apiConfig: _api,
-      targetTokens: 150,
-    );
-
-    expect(llm.calls, hasLength(1));
   });
 
   test('accepts an OpenRouter config with no endpoint', () async {
@@ -444,7 +324,7 @@ void main() {
         throwsA(isA<Exception>()),
       );
     }
-    expect(llm.calls, isEmpty);
+    expect(llm.prompt, isNull);
   });
 
   test('the prompt can be written without touching the blocks', () async {

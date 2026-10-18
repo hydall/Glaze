@@ -4,6 +4,7 @@ import '../db/repositories/summary_repo.dart';
 import '../models/api_config.dart';
 import '../models/chat_message.dart';
 import '../models/summary_block.dart';
+import 'auxiliary_timed_history.dart';
 import 'aux_llm_client.dart';
 import 'macro_engine.dart';
 import 'tokenizer.dart';
@@ -13,38 +14,13 @@ import 'transport/llm_capture_context.dart';
 /// Prompt used when a session has no custom summarization prompt. Exposed so
 /// the editor can show it as the placeholder for an empty field.
 const defaultSummaryPrompt =
-    'You are given one part of a long roleplay. Summarize it so the story '
-    'can continue from your summary in place of these messages. Write in the '
-    'language the roleplay is written in.\n'
-    'Keep:\n'
-    '- events in the order they happened, and what caused them;\n'
-    '- changes in relationships and in what characters know, want or feel;\n'
-    '- important items: who has them, where they are, what state they are '
-    'in;\n'
-    '- where characters are and what condition they are in;\n'
-    '- promises, plans and dangers that are still open;\n'
-    '- facts about the world the story established.\n'
-    'Keep proper names and established terms exactly as written. When '
-    'something changed, keep the outcome and what caused it, not every step. '
-    'Add nothing the messages do not say; when something is unclear, say so '
-    'instead of guessing. No preamble.';
-
-/// Built-in prompts this one replaced. Picking the built-in preset stores its
-/// text, so a session holding one of these is on the built-in prompt and
-/// moves to the current one.
-const _replacedDefaultSummaryPrompts = {
-  'Summarize the following part of a roleplay conversation concisely, in '
-      'the language it is written in: key events in order, decisions, changes '
-      'in relationships, and what is still unresolved. Keep proper names '
-      'exactly as they appear.',
-};
+    'Summarize the following part of a roleplay conversation concisely, in '
+    'the language it is written in: key events in order, decisions, changes '
+    'in relationships, and what is still unresolved. Keep proper names '
+    'exactly as they appear.\n\n';
 
 /// Placeholder replaced with the formatted transcript. Substituted *after*
 /// macro expansion so nothing inside the transcript is treated as a macro.
-///
-/// A template that places it lays out the whole request itself, so it is sent
-/// as one user message. Without it the template is the system message and the
-/// material goes in the user message.
 const summaryHistoryPlaceholder = '{{history}}';
 
 /// Placeholder replaced with the summary of what came before this part. A
@@ -64,15 +40,8 @@ const summaryPreviousHeader =
     'Story so far, for context only. Do not retell it; summarize only the '
     'transcript below.';
 
-/// Heading the transcript goes under in the user message.
-const summaryTranscriptHeader = 'Transcript to summarize:';
-
 String summaryLengthHint(int targetTokens) =>
     'Keep it under about $targetTokens tokens.';
-
-/// How far past its target a block may come out before it is sent back to be
-/// shortened, in percent of the target.
-const summaryShortenSlackPercent = 125;
 
 /// Fallback idle timeout when the API config carries no `firstChunkTimeoutMs`.
 const _fallbackTimeoutMs = 120000;
@@ -85,29 +54,17 @@ const kSummaryDefaultTemperature = 0.3;
 /// is about keeping continuity through a merge, which a reader's template for
 /// retelling messages does not cover.
 const summaryMergePrompt =
-    'You are given consecutive parts of the summary of one roleplay, oldest '
+    'Below are consecutive parts of the summary of one roleplay, oldest '
     'first. Merge them into a single summary, in the language they are '
     'written in.\n'
     '- Keep the order in which things happened.\n'
     '- State a fact once, even when several parts repeat it.\n'
-    '- Keep earlier facts that are still true, not only the latest part.\n'
     '- When a later part changes what an earlier one established, keep the '
-    'outcome and, briefly, what caused it. When the parts contradict each '
-    'other without a change in the story, say the matter is unclear.\n'
-    '- Retell finished events by their outcome and what they left behind.\n'
+    'outcome and, briefly, what caused it.\n'
     '- Keep goals, promises and dangers that are still open. Never present a '
     'thread that was resolved as open again.\n'
     '- Keep proper names and established terms exactly as written.\n'
     '- Add nothing that the parts do not say. No preamble.';
-
-/// Instruction for a block that came out well past its target. Sent once; the
-/// shorter of the two texts is kept.
-const summaryShortenPrompt =
-    'The summary you are given came out longer than it should. Shorten it '
-    'without changing facts, their order, names or established terms, and '
-    'keep the language it is written in. Cut repetition and wording first; '
-    'cut continuity last. Keep what is still open and the causes of changes. '
-    'No preamble.';
 
 class SummaryService {
   final SummaryRepo _repo;
@@ -149,14 +106,10 @@ class SummaryService {
   }
 
   /// Session's custom summarization prompt, or null when it uses the built-in
-  /// [defaultSummaryPrompt]. A blank stored value counts as unset, and so does
-  /// an earlier built-in one.
+  /// [defaultSummaryPrompt]. A blank stored value counts as unset.
   Future<String?> getSummaryPrompt(String sessionId) async {
     final prompt = (await _repo.get(sessionId))?.prompt;
-    final text = prompt?.trim() ?? '';
-    if (text.isEmpty || _replacedDefaultSummaryPrompts.contains(text)) {
-      return null;
-    }
+    if (prompt == null || prompt.trim().isEmpty) return null;
     return prompt;
   }
 
@@ -233,13 +186,13 @@ class SummaryService {
     CancelToken? cancelToken,
     double? temperature,
   }) {
-    return _summarize(
+    return _call(
       sessionId: sessionId,
       apiConfig: apiConfig,
       targetTokens: targetTokens,
       temperature: temperature,
       cancelToken: cancelToken,
-      messages: buildSummaryMessages(
+      prompt: buildSummaryPrompt(
         history: source,
         template: customPrompt,
         macroContext: macroContext,
@@ -259,57 +212,20 @@ class SummaryService {
     CancelToken? cancelToken,
     double? temperature,
   }) {
-    return _summarize(
+    return _call(
       sessionId: sessionId,
       apiConfig: apiConfig,
       targetTokens: targetTokens,
       temperature: temperature,
       cancelToken: cancelToken,
-      messages: buildMergeMessages(parts: parts, targetTokens: targetTokens),
+      prompt: buildMergePrompt(parts: parts, targetTokens: targetTokens),
     );
-  }
-
-  /// One summarizer call, and one more to shorten its answer when it came out
-  /// well past [targetTokens]. The shorter text is kept; a failed shortening
-  /// keeps the first answer, which is complete.
-  Future<String> _summarize({
-    required String sessionId,
-    required ApiConfig apiConfig,
-    required List<Map<String, String>> messages,
-    required int targetTokens,
-    double? temperature,
-    CancelToken? cancelToken,
-  }) async {
-    final text = await _call(
-      sessionId: sessionId,
-      apiConfig: apiConfig,
-      messages: messages,
-      targetTokens: targetTokens,
-      temperature: temperature,
-      cancelToken: cancelToken,
-    );
-    final tokens = estimateTokens(text);
-    if (tokens * 100 <= targetTokens * summaryShortenSlackPercent) return text;
-    try {
-      final shorter = await _call(
-        sessionId: sessionId,
-        apiConfig: apiConfig,
-        messages: buildShortenMessages(text: text, targetTokens: targetTokens),
-        targetTokens: targetTokens,
-        temperature: temperature,
-        cancelToken: cancelToken,
-      );
-      return estimateTokens(shorter) < tokens ? shorter : text;
-    } catch (_) {
-      if (cancelToken?.isCancelled == true) rethrow;
-      return text;
-    }
   }
 
   Future<String> _call({
     required String sessionId,
     required ApiConfig apiConfig,
-    required List<Map<String, String>> messages,
+    required String prompt,
     required int targetTokens,
     double? temperature,
     CancelToken? cancelToken,
@@ -337,7 +253,7 @@ class SummaryService {
         omitTemperature: apiConfig.omitTemperature,
         extraRequestParameters: apiConfig.extraRequestParameters,
       ),
-      messages: messages,
+      prompt: prompt,
       // Room for the target with slack; a reasoning model spends part of it
       // before it writes anything.
       maxTokens: apiConfig.maxTokens > 0
@@ -360,20 +276,22 @@ class SummaryService {
     return trimmed;
   }
 
-  /// Builds the request for retelling one run of messages.
+  /// Builds the prompt for retelling one run of messages.
   ///
   /// Order matters: macros in [template] are expanded first (so `{{char}}`,
   /// `{{user}}`, `{{getvar::…}}` and friends work in a user-written prompt),
-  /// and only then is the transcript put in. Doing it the other way round
-  /// would run the macro engine over the chat log itself and rewrite whatever
-  /// `{{…}}` the roleplay happens to contain.
+  /// and only then is `{{history}}` swapped for the transcript. Doing it the
+  /// other way round would run the macro engine over the chat log itself and
+  /// rewrite whatever `{{…}}` the roleplay happens to contain.
   ///
-  /// The template is the system message; the earlier summary, under
-  /// [summaryPreviousHeader], and the transcript go in the user message. A
-  /// template that places `{{history}}` lays out the request itself and is
-  /// sent as one user message. `{{previous_summary}}` puts the earlier summary
-  /// where the template wants it instead.
-  List<Map<String, String>> buildSummaryMessages({
+  /// A template without `{{history}}` gets the transcript appended, which is
+  /// how the built-in prompt works.
+  ///
+  /// [previousSummary] is the summary of what came before this run. A
+  /// template places it itself with `{{previous_summary}}`; otherwise it is
+  /// handed over under [summaryPreviousHeader] between the instructions and
+  /// the transcript. An empty or absent one changes nothing about the prompt.
+  String buildSummaryPrompt({
     required List<ChatMessage> history,
     String? template,
     MacroContext? macroContext,
@@ -401,85 +319,46 @@ class SummaryService {
     final placed = resolved.contains(summaryPreviousPlaceholder);
     if (placed) {
       resolved = resolved.replaceAll(summaryPreviousPlaceholder, previous);
+    } else if (previous.isNotEmpty) {
+      resolved = '$resolved\n\n$summaryPreviousHeader\n$previous';
     }
-    final transcript = _formatHistory(history, macroContext);
+    final historyText = _formatHistory(history);
     if (resolved.contains(summaryHistoryPlaceholder)) {
-      return [
-        {
-          'role': 'user',
-          'content': resolved.replaceAll(summaryHistoryPlaceholder, transcript),
-        },
-      ];
+      return resolved.replaceAll(summaryHistoryPlaceholder, historyText);
     }
-    final material = StringBuffer();
-    if (!placed && previous.isNotEmpty) {
-      material
-        ..writeln(summaryPreviousHeader)
-        ..writeln(previous)
-        ..writeln();
-    }
-    material
-      ..writeln(summaryTranscriptHeader)
-      ..write(transcript);
-    return [
-      {'role': 'system', 'content': resolved.trim()},
-      {'role': 'user', 'content': material.toString().trimRight()},
-    ];
+    return '$resolved\n\n$historyText';
   }
 
-  List<Map<String, String>> buildMergeMessages({
+  String buildMergePrompt({
     required List<SummaryBlock> parts,
     required int targetTokens,
   }) {
-    final buffer = StringBuffer();
+    final buffer = StringBuffer()
+      ..writeln(summaryMergePrompt)
+      ..writeln(summaryLengthHint(targetTokens));
     for (var i = 0; i < parts.length; i++) {
-      if (i > 0) buffer.writeln();
       buffer
+        ..writeln()
         ..writeln('Part ${i + 1}:')
         ..writeln(parts[i].content.trim());
     }
-    return [
-      {
-        'role': 'system',
-        'content': '$summaryMergePrompt\n${summaryLengthHint(targetTokens)}',
-      },
-      {'role': 'user', 'content': buffer.toString().trimRight()},
-    ];
+    return buffer.toString().trimRight();
   }
-
-  List<Map<String, String>> buildShortenMessages({
-    required String text,
-    required int targetTokens,
-  }) => [
-    {
-      'role': 'system',
-      'content': '$summaryShortenPrompt\n${summaryLengthHint(targetTokens)}',
-    },
-    {'role': 'user', 'content': text.trim()},
-  ];
 
   Future<void> deleteSummary(String sessionId) async {
     await _repo.deleteBySessionId(sessionId);
   }
 
-  /// One line per message, under the speaker's name: the persona a user
-  /// message was written as, else the chat's persona, and the character.
-  String _formatHistory(List<ChatMessage> messages, MacroContext? context) {
-    final user = _name(context?.userName, 'User');
-    final char = _name(context?.charName, 'Character');
+  String _formatHistory(List<ChatMessage> messages) {
     final buf = StringBuffer();
     for (final msg in messages) {
-      if (msg.role == 'user') {
-        buf.writeln('${_name(msg.personaName, user)}: ${msg.content}');
-      } else if (msg.role == 'assistant') {
-        buf.writeln('$char: ${msg.content}');
+      if (msg.role == 'user' || msg.role == 'assistant') {
+        final speaker = msg.role == 'user' ? 'User' : 'Character';
+        // The ledger-stamped game clock travels with the transcript so the
+        // summary stays time-anchored instead of teleporting across hours.
+        buf.writeln('$speaker: ${auxiliaryTimedContent(msg)}');
       }
     }
     return buf.toString();
-  }
-
-  static String _name(String? name, String fallback) {
-    final trimmed = name?.trim() ?? '';
-    return trimmed.isEmpty ? fallback : trimmed;
   }
 }
