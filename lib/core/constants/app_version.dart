@@ -1,6 +1,6 @@
 const appVersion = String.fromEnvironment(
   'APP_VERSION',
-  defaultValue: '0.9.0',
+  defaultValue: '1.0.0',
 );
 const buildDate = String.fromEnvironment('BUILD_DATE');
 const buildBranch = String.fromEnvironment('BUILD_BRANCH');
