@@ -53,6 +53,7 @@ class ImageGenSettingsCodec {
     'a1111': _a1111ToJson(s.a1111),
     'novelai': _novelAiToJson(s.novelai),
     'comfyui': _comfyUiToJson(s.comfyui),
+    'tensorart': _tensorArtToJson(s.tensorart),
     'sendCharAvatar': s.sendCharAvatar,
     'charAppearanceSource': s.charAppearanceSource.name,
     'sendUserAvatar': s.sendUserAvatar,
@@ -128,6 +129,7 @@ class ImageGenSettingsCodec {
     a1111: _a1111FromJson(m['a1111']),
     novelai: _novelAiFromJson(m['novelai']),
     comfyui: _comfyUiFromJson(m['comfyui']),
+    tensorart: _tensorArtFromJson(m['tensorart']),
     sendCharAvatar: _legacyAvatarFlag(m, 'sendCharAvatar', const [
       'naisteraSendCharAvatar',
       'routmySendCharAvatar',
@@ -604,6 +606,95 @@ class ImageGenSettingsCodec {
     return [
       ComfyUiWorkflow(id: 'workflow-1', name: 'Workflow 1', json: legacy),
     ];
+  }
+
+  // ─── TensorArt ───────────────────────────────────────────────────────────
+
+  static Map<String, dynamic> _tensorArtToJson(TensorArtImageSettings s) => {
+    'accessKey': s.accessKey,
+    'endpoint': s.endpoint,
+    'toolName': s.toolName,
+    'aspectRatio': s.aspectRatio,
+    'imageSize': s.imageSize,
+    'width': s.width,
+    'height': s.height,
+    'count': s.count,
+    'tools': s.tools.map(_tensorArtToolToJson).toList(),
+  };
+
+  static TensorArtImageSettings _tensorArtFromJson(dynamic value) {
+    if (value is! Map) return const TensorArtImageSettings();
+    final m = Map<String, dynamic>.from(value);
+    return TensorArtImageSettings(
+      accessKey: m['accessKey'] as String? ?? '',
+      endpoint: m['endpoint'] as String? ?? '',
+      toolName: m['toolName'] as String? ?? TensorArtConstants.defaultTool,
+      aspectRatio: m['aspectRatio'] as String? ?? '1:1',
+      imageSize: m['imageSize'] as String? ?? '1K',
+      width: castInt(m['width'], 1024),
+      height: castInt(m['height'], 1024),
+      count: castInt(m['count'], 1),
+      tools: _tensorArtToolsFromJson(m['tools']),
+    );
+  }
+
+  static Map<String, dynamic> _tensorArtToolToJson(TensorArtTool t) => {
+    'name': t.name,
+    'description': t.description,
+    'taskType': t.taskType,
+    'estimatedCost': t.estimatedCost,
+    'imageOutput': t.imageOutput,
+    'inputs': t.inputs.map(_tensorArtInputToJson).toList(),
+  };
+
+  static Map<String, dynamic> _tensorArtInputToJson(TensorArtToolInput input) =>
+      {
+        'type': input.type,
+        'description': input.description,
+        'format': input.format,
+        'requiresAssetFields': input.requiresAssetFields,
+      };
+
+  static List<TensorArtTool> _tensorArtToolsFromJson(dynamic value) {
+    if (value is! List) return const [];
+    final tools = <TensorArtTool>[];
+    for (final raw in value) {
+      if (raw is! Map) continue;
+      final m = Map<String, dynamic>.from(raw);
+      final name = (m['name'] as String? ?? '').trim();
+      if (name.isEmpty) continue;
+      tools.add(
+        TensorArtTool(
+          name: name,
+          description: m['description'] as String? ?? '',
+          taskType: m['taskType'] as String? ?? '',
+          estimatedCost: m['estimatedCost'] as String? ?? '',
+          imageOutput: castBool(m['imageOutput'], true),
+          inputs: _tensorArtInputsFromJson(m['inputs']),
+        ),
+      );
+    }
+    return tools;
+  }
+
+  static List<TensorArtToolInput> _tensorArtInputsFromJson(dynamic value) {
+    if (value is! List) return const [];
+    final inputs = <TensorArtToolInput>[];
+    for (final raw in value) {
+      if (raw is! Map) continue;
+      final m = Map<String, dynamic>.from(raw);
+      final type = (m['type'] as String? ?? '').trim();
+      if (type.isEmpty) continue;
+      inputs.add(
+        TensorArtToolInput(
+          type: type,
+          description: m['description'] as String? ?? '',
+          format: m['format'] as String? ?? '',
+          requiresAssetFields: castBool(m['requiresAssetFields'], false),
+        ),
+      );
+    }
+    return inputs;
   }
 
   // ─── Primitive coercion ──────────────────────────────────────────────────

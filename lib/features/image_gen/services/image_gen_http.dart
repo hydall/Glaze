@@ -133,6 +133,24 @@ class ImageGenHttp {
     return response.data ?? {};
   }
 
+  /// Uploads raw bytes to a presigned URL with a PUT request.
+  Future<void> putBytes({
+    required String url,
+    required Uint8List bytes,
+    String contentType = 'application/octet-stream',
+    CancelToken? cancelToken,
+  }) async {
+    await _dio.put<void>(
+      url,
+      data: bytes,
+      options: Options(
+        headers: {'Content-Type': contentType},
+        contentType: contentType,
+      ),
+      cancelToken: cancelToken,
+    );
+  }
+
   /// Downloads raw bytes from a URL (for endpoints that return `url` instead
   /// of `b64_json`).
   static Future<Uint8List> downloadImage(

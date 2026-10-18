@@ -274,5 +274,9 @@ int providerMaxReferences(ImageGenSettings settings) {
       // The workflow decides whether any image-loading node exists, so the
       // reference library is not offered.
       return 0;
+    case ImageGenApiType.tensorart:
+      return settings.tensorart.supportsReferences
+          ? TensorArtConstants.maxReferences
+          : 0;
   }
 }

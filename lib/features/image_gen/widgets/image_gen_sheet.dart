@@ -25,6 +25,7 @@ import '../image_gen_models.dart';
 import '../image_gen_provider.dart';
 import '../services/image_gen_connection_service.dart';
 import '../services/naistera_image_provider.dart';
+import '../services/tensor_art_image_provider.dart';
 import 'a1111_fields.dart';
 import 'comfyui_fields.dart';
 import 'comfyui_workflow_sheet.dart';
@@ -35,6 +36,7 @@ import 'openrouter_fields.dart';
 import 'reference_library_section.dart';
 import 'rows.dart' as rows;
 import 'style_library_sheet.dart';
+import 'tensorart_fields.dart';
 import 'xai_fields.dart';
 import '../../../shared/widgets/glaze_sheet.dart';
 
@@ -105,7 +107,9 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
       before.novelai.endpoint != after.novelai.endpoint ||
       before.novelai.apiKey != after.novelai.apiKey ||
       before.comfyui.endpoint != after.comfyui.endpoint ||
-      before.comfyui.apiKey != after.comfyui.apiKey;
+      before.comfyui.apiKey != after.comfyui.apiKey ||
+      before.tensorart.accessKey != after.tensorart.accessKey ||
+      before.tensorart.endpoint != after.tensorart.endpoint;
 
   /// Probes the provider. Only ever runs from a tap on the status badge — the
   /// sheet never reaches out on its own.
@@ -444,6 +448,8 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
         return buildNovelAiConnectionFields(s, _update);
       case ImageGenApiType.comfyui:
         return buildComfyUiConnectionFields(s, _update);
+      case ImageGenApiType.tensorart:
+        return buildTensorArtConnectionFields(s, context, _update);
       case ImageGenApiType.openai:
       case ImageGenApiType.gemini:
         return buildOpenaiConnectionFields(s, _update);
@@ -551,6 +557,14 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
           onUpdate: _update,
           showOptions: showOptions,
         );
+      case ImageGenApiType.tensorart:
+        return buildTensorArtModelFields(
+          s,
+          isFetching: _isFetchingModels,
+          onFetchModels: _onFetchModels,
+          onUpdate: _update,
+          showOptions: showOptions,
+        );
     }
   }
 
@@ -596,6 +610,8 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
         return _fetchNaisteraModels();
       case ImageGenApiType.routmy:
         return _fetchRoutmyModels();
+      case ImageGenApiType.tensorart:
+        return _fetchTensorArtTools();
       case ImageGenApiType.openai:
       case ImageGenApiType.gemini:
         return _connectionService.fetchOpenAiModels(
@@ -617,6 +633,22 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
     return catalog.map((model) => model.id).toList();
   }
 
+  /// Loads the TensorArt tool catalog. The tool definitions decide which
+  /// parameter rows are shown and whether references are accepted.
+  Future<List<String>> _fetchTensorArtTools() async {
+    final catalog = await TensorArtImageProvider().fetchTools(
+      accessKey: _settings.tensorart.accessKey,
+      endpoint: _settings.tensorart.endpoint,
+    );
+    if (catalog.isEmpty) return const [];
+    _update(
+      _settings.copyWith(
+        tensorart: _settings.tensorart.copyWith(tools: catalog),
+      ),
+    );
+    return catalog.map((tool) => tool.name).toList();
+  }
+
   /// Loads the rout.my catalog and stores it with the `/images/edits`
   /// capability each entry advertises, so the reference gate follows the API.
   Future<List<String>> _fetchRoutmyModels() async {
@@ -625,6 +657,11 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
     _update(_settings.copyWith(routmyModels: catalog));
     return catalog.map((model) => model.id).toList();
   }
+
+  String _modelLabel(String model) =>
+      _settings.apiType == ImageGenApiType.tensorart
+      ? _settings.tensorart.toolLabel(model)
+      : model;
 
   bool _isSelectedModel(String model) => switch (_settings.apiType) {
     ImageGenApiType.openrouter => _settings.openrouter.model == model,
@@ -635,6 +672,7 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
     ImageGenApiType.a1111 => _settings.a1111.model == model,
     ImageGenApiType.novelai => _settings.novelai.model == model,
     ImageGenApiType.comfyui => _settings.comfyui.model == model,
+    ImageGenApiType.tensorart => _settings.tensorart.toolName == model,
     _ => _settings.customModel == model,
   };
 
@@ -670,6 +708,12 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
         _update(
           _settings.copyWith(novelai: _settings.novelai.copyWith(model: model)),
         );
+      case ImageGenApiType.tensorart:
+        _update(
+          _settings.copyWith(
+            tensorart: _settings.tensorart.copyWith(toolName: model),
+          ),
+        );
       default:
         _update(_settings.copyWith(customModel: model));
     }
@@ -689,7 +733,7 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
       _showOptions<String>(
         title: 'Image models',
         items: models,
-        labelBuilder: (model) => model,
+        labelBuilder: _modelLabel,
         isSelected: _isSelectedModel,
         onSelected: _applyModel,
       );

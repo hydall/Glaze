@@ -102,6 +102,36 @@ void main() {
     );
   });
 
+  test('checks TensorArt with an empty task query', () async {
+    final server = await startServer((request) async {
+      expect(request.uri.path, '/openworks/v1/task/query');
+      expect(request.headers.value('Echo-Access-Key'), 'ak_tensor_test');
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(
+        jsonEncode({
+          'code': '0',
+          'data': {'tasks': <Object>[]},
+        }),
+      );
+      await request.response.close();
+    });
+    final service = ImageGenConnectionService();
+    addTearDown(service.dispose);
+
+    await service.checkConnection(
+      settings: ImageGenSettings(
+        apiType: ImageGenApiType.tensorart,
+        tensorart: TensorArtImageSettings(
+          accessKey: 'ak_tensor_test',
+          endpoint:
+              'http://${server.address.address}:${server.port}/openworks/v1',
+        ),
+      ),
+      llmEndpoint: '',
+      llmApiKey: '',
+    );
+  });
+
   test('lists ComfyUI loader entries from /object_info', () async {
     final server = await startServer((request) async {
       expect(request.uri.path, '/object_info');

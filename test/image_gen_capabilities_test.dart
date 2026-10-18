@@ -169,6 +169,47 @@ void main() {
       );
     });
 
+    test('TensorArt gates references by the selected tool', () {
+      expect(
+        providerMaxReferences(
+          const ImageGenSettings(
+            apiType: ImageGenApiType.tensorart,
+            tensorart: TensorArtImageSettings(
+              tools: [
+                TensorArtTool(
+                  name: 'text2image',
+                  inputs: [
+                    TensorArtToolInput(type: 'STRING', description: 'prompt'),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        0,
+      );
+      expect(
+        providerMaxReferences(
+          const ImageGenSettings(
+            apiType: ImageGenApiType.tensorart,
+            tensorart: TensorArtImageSettings(
+              toolName: 'image_edit',
+              tools: [
+                TensorArtTool(
+                  name: 'image_edit',
+                  inputs: [
+                    TensorArtToolInput(type: 'STRING', description: 'prompt'),
+                    TensorArtToolInput(type: 'FILE', description: 'source'),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        TensorArtConstants.maxReferences,
+      );
+    });
+
     test('rout.my follows the fetched catalog over the fallback', () {
       const settings = ImageGenSettings(
         apiType: ImageGenApiType.routmy,

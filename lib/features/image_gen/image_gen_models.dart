@@ -17,6 +17,7 @@ enum ImageGenApiType {
   a1111,
   novelai,
   comfyui,
+  tensorart,
 }
 
 extension ImageGenApiTypeLabel on ImageGenApiType {
@@ -32,6 +33,7 @@ extension ImageGenApiTypeLabel on ImageGenApiType {
     ImageGenApiType.a1111 => 'AUTOMATIC1111 / Forge',
     ImageGenApiType.novelai => 'NovelAI',
     ImageGenApiType.comfyui => 'ComfyUI',
+    ImageGenApiType.tensorart => 'Tensor Art',
   };
 }
 
@@ -279,6 +281,124 @@ abstract class ComfyUiImageSettings with _$ComfyUiImageSettings {
   String get activeWorkflowJson => activeWorkflow?.json.trim() ?? '';
 }
 
+/// One input of a TensorArt generation tool as reported by `tool/list`.
+@freezed
+abstract class TensorArtToolInput with _$TensorArtToolInput {
+  const factory TensorArtToolInput({
+    required String type,
+    @Default('') String description,
+    @Default('') String format,
+
+    /// The ARRAY schema requires `assetId` / `assetUri` / `type` alongside the
+    /// uploaded URL. Those tools can only take references when the upload
+    /// response actually carries those fields.
+    @Default(false) bool requiresAssetFields,
+  }) = _TensorArtToolInput;
+
+  const TensorArtToolInput._();
+
+  String get _description => description.toLowerCase();
+
+  bool get isString => type == 'STRING';
+  bool get isInteger => type == 'INTEGER';
+  bool get isFile => type == 'FILE';
+  bool get isArray => type == 'ARRAY';
+
+  bool get isPrompt =>
+      isString &&
+      (_description.contains('prompt') || description.contains('提示词'));
+
+  bool get isAspectRatio =>
+      isString &&
+      (_description.contains('aspect') ||
+          _description.contains('ratio') ||
+          description.contains('比例'));
+
+  bool get isImageSize =>
+      isString &&
+      (_description.contains('size') ||
+          _description.contains('resolution') ||
+          description.contains('尺寸'));
+
+  bool get isWidth => isInteger && _description.contains('width');
+
+  bool get isHeight => isInteger && _description.contains('height');
+
+  bool get isCount =>
+      isInteger &&
+      (_description.contains('count') || _description.contains('number'));
+}
+
+/// One generation tool of the TensorArt catalog.
+@freezed
+abstract class TensorArtTool with _$TensorArtTool {
+  const factory TensorArtTool({
+    required String name,
+    @Default('') String description,
+    @Default('') String taskType,
+    @Default('') String estimatedCost,
+    @Default([]) List<TensorArtToolInput> inputs,
+    @Default(true) bool imageOutput,
+  }) = _TensorArtTool;
+
+  const TensorArtTool._();
+
+  bool get supportsReferenceImages =>
+      inputs.any((input) => input.isFile || input.isArray);
+
+  bool get usesIntegerDimensions =>
+      inputs.any((input) => input.isWidth) &&
+      inputs.any((input) => input.isHeight);
+
+  bool get usesStringDimensions => inputs.any((input) => input.isImageSize);
+
+  bool get usesAspectRatio => inputs.any((input) => input.isAspectRatio);
+
+  bool get usesCount => inputs.any((input) => input.isCount);
+}
+
+/// TensorArt / Tusi connection, tool selection and request parameters.
+@freezed
+abstract class TensorArtImageSettings with _$TensorArtImageSettings {
+  const factory TensorArtImageSettings({
+    @Default('') String accessKey,
+
+    /// Empty means "derive from the key prefix" — TensorArt or Tusi.
+    @Default('') String endpoint,
+    @Default(TensorArtConstants.defaultTool) String toolName,
+    @Default('1:1') String aspectRatio,
+    @Default('1K') String imageSize,
+    @Default(1024) int width,
+    @Default(1024) int height,
+    @Default(1) int count,
+
+    /// Catalog last loaded from `tool/list`. Empty until the user refreshes.
+    @Default([]) List<TensorArtTool> tools,
+  }) = _TensorArtImageSettings;
+
+  const TensorArtImageSettings._();
+
+  TensorArtTool? get selectedTool {
+    for (final tool in tools) {
+      if (tool.name == toolName) return tool;
+    }
+    return null;
+  }
+
+  bool get supportsReferences => selectedTool?.supportsReferenceImages ?? false;
+
+  /// Catalog label for a tool name — the description wins when it is present,
+  /// otherwise the raw id. Tools not in the fetched catalog still render.
+  String toolLabel(String name) {
+    for (final tool in tools) {
+      if (tool.name != name) continue;
+      final description = tool.description.trim();
+      return description.isEmpty ? tool.name : description;
+    }
+    return name;
+  }
+}
+
 @freezed
 abstract class ImageGenSettings with _$ImageGenSettings {
   const factory ImageGenSettings({
@@ -334,6 +454,7 @@ abstract class ImageGenSettings with _$ImageGenSettings {
     @Default(A1111ImageSettings()) A1111ImageSettings a1111,
     @Default(NovelAIImageSettings()) NovelAIImageSettings novelai,
     @Default(ComfyUiImageSettings()) ComfyUiImageSettings comfyui,
+    @Default(TensorArtImageSettings()) TensorArtImageSettings tensorart,
     // Reference handling — shared by every provider that accepts references.
     @Default(false) bool sendCharAvatar,
     @Default(CharacterAppearanceSource.image)
