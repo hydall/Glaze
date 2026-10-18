@@ -110,6 +110,38 @@ class _AppearanceGroup extends SettingsGroup {
             onTap: () => showLayoutPicker(context, ref),
           ),
         ),
+        highlightIf(
+          'ui_corner_scale',
+          highlightId,
+          MenuRangeItem(
+            label: 'settings_ui_corner_scale'.tr(),
+            description: 'settings_ui_corner_scale_desc'.tr(),
+            value: settings.uiCornerScale * 100,
+            min: 0,
+            max: 200,
+            divisions: 40,
+            decimalPlaces: 0,
+            unit: '%',
+            onChanged: (v) =>
+                notifierOf(ref).save(settings.copyWith(uiCornerScale: v / 100)),
+          ),
+        ),
+        highlightIf(
+          'avatar_roundness',
+          highlightId,
+          MenuRangeItem(
+            label: 'settings_avatar_roundness'.tr(),
+            description: 'settings_avatar_roundness_desc'.tr(),
+            value: settings.avatarRoundness * 100,
+            min: 0,
+            max: 100,
+            divisions: 20,
+            decimalPlaces: 0,
+            unit: '%',
+            onChanged: (v) =>
+                notifierOf(ref).save(settings.copyWith(avatarRoundness: v / 100)),
+          ),
+        ),
         toggle(
           id: 'show_help_tips',
           label: 'menu_show_help_tips'.tr(),

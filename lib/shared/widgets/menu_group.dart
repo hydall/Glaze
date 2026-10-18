@@ -9,6 +9,7 @@ import '../shell/shell_header_provider.dart';
 import 'glass_surface.dart';
 import 'glow_ripple.dart';
 import 'help_tip.dart';
+import 'glaze_slider.dart';
 import 'glaze_switch.dart';
 
 enum MenuGroupHeaderVariant { standard, accentCaps }
@@ -1097,16 +1098,9 @@ class _MenuRangeItemState extends State<MenuRangeItem> {
 
   /// The parameter slider itself.
   Widget _buildSlider(BuildContext context) {
-    return SliderTheme(
-      data: SliderTheme.of(context).copyWith(
-        activeTrackColor: context.cs.primary,
-        thumbColor: context.cs.primary,
-        inactiveTrackColor: context.cs.primary.withValues(alpha: 0.18),
-        overlayColor: context.cs.primary.withValues(alpha: 0.1),
-        trackHeight: 3,
-        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
-      ),
-      child: Slider(
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: GlazeSlider(
         value: widget.value.clamp(widget.min, widget.max),
         min: widget.min,
         max: widget.max,

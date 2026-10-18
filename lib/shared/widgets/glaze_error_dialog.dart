@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/utils/error_format.dart';
 import '../theme/theme_font_provider.dart';
+import '../theme/ui_scale.dart';
 import 'glass_surface.dart';
 
 class GlazeErrorDialog {
@@ -141,9 +142,9 @@ class _ErrorDialogContentState extends ConsumerState<_ErrorDialogContent> {
                 child: InkWell(
                   mouseCursor: SystemMouseCursors.click,
                   onTap: _copy,
-                  customBorder: const RoundedRectangleBorder(
+                  customBorder: RoundedRectangleBorder(
                     borderRadius: BorderRadius.vertical(
-                      bottom: Radius.circular(16),
+                      bottom: Radius.circular(context.glazeRadius(16)),
                     ),
                   ),
                   child: Padding(

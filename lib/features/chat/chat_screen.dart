@@ -97,6 +97,7 @@ String _chatWebViewThemeSyncKey(
   ThemePreset preset,
   String chatLayout,
   Brightness brightness,
+  double avatarRoundness,
 ) {
   return [
     // A "same as device" theme repaints with different colors when only the
@@ -127,6 +128,7 @@ String _chatWebViewThemeSyncKey(
     preset.showUserName,
     preset.showCharName,
     chatLayout,
+    avatarRoundness,
   ].join('|');
 }
 
@@ -1997,6 +1999,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                           preset,
                           preset.chatLayout,
                           Theme.of(context).brightness,
+                          appSettings?.avatarRoundness ?? 1.0,
                         ),
                         elementOpacity: preset.elementOpacity,
                         elementBlur: preset.elementBlur,
@@ -2012,6 +2015,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                         showCharAvatar: preset.showCharAvatar,
                         showUserName: preset.showUserName,
                         showCharName: preset.showCharName,
+                        avatarRoundness: appSettings?.avatarRoundness ?? 1.0,
                         charAvatarPath: character?.avatarPath,
                         personaAvatarPath: effectivePersona?.avatarPath,
                         bgImagePath: bgPath,

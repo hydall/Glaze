@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../shared/widgets/hover_glow.dart';
 import '../../shared/theme/app_colors.dart';
+import '../../shared/theme/ui_scale.dart';
 import '../../shared/utils/time_formatter.dart';
 import '../../shared/utils/avatar_image.dart';
 import '../../shared/widgets/glass_surface.dart';
@@ -863,7 +864,10 @@ class _SessionTileState extends ConsumerState<_SessionTile>
     ref.watch(avatarVersionProvider);
     final image = glazeAvatarImage(info.avatarPath);
     if (image != null) {
-      return ClipOval(
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(
+          context.glazeUiScale.avatarRadius(size),
+        ),
         child: SizedBox.square(
           dimension: size,
           child: Image(
@@ -878,9 +882,16 @@ class _SessionTileState extends ConsumerState<_SessionTile>
     return _defaultAvatar(context, size);
   }
 
-  Widget _defaultAvatar(BuildContext context, double size) => CircleAvatar(
-    radius: size / 2,
-    backgroundColor: context.cs.primary,
+  Widget _defaultAvatar(BuildContext context, double size) => Container(
+    width: size,
+    height: size,
+    alignment: Alignment.center,
+    decoration: BoxDecoration(
+      color: context.cs.primary,
+      borderRadius: BorderRadius.circular(
+        context.glazeUiScale.avatarRadius(size),
+      ),
+    ),
     child: Text(
       info.characterName.isNotEmpty ? info.characterName[0].toUpperCase() : '?',
       style: const TextStyle(color: Colors.black, fontSize: 18),
@@ -1071,7 +1082,10 @@ class _GroupHeader extends ConsumerWidget {
     // The group's face is the original's, not the last-used variation's.
     final image = glazeAvatarImage(info.groupAvatarPath ?? info.avatarPath);
     if (image != null) {
-      return ClipOval(
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(
+          context.glazeUiScale.avatarRadius(48),
+        ),
         child: SizedBox.square(
           dimension: 48,
           child: Image(
@@ -1087,9 +1101,16 @@ class _GroupHeader extends ConsumerWidget {
   }
 
   Widget _defaultGroupAvatar(BuildContext context, ChatSessionInfo info) =>
-      CircleAvatar(
-        radius: 24,
-        backgroundColor: context.cs.primary,
+      Container(
+        width: 48,
+        height: 48,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: context.cs.primary,
+          borderRadius: BorderRadius.circular(
+            context.glazeUiScale.avatarRadius(48),
+          ),
+        ),
         child: Text(
           info.characterName.isNotEmpty
               ? info.characterName[0].toUpperCase()

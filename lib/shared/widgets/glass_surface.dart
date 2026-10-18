@@ -8,6 +8,7 @@ import '../../features/settings/app_settings_provider.dart';
 import '../theme/app_colors.dart';
 import '../theme/theme_preset.dart';
 import '../theme/theme_provider.dart';
+import '../theme/ui_scale.dart';
 import 'glow_ripple.dart';
 import 'noise_overlay.dart';
 import 'card_backdrop.dart';
@@ -117,6 +118,9 @@ class GlassSurface extends ConsumerWidget {
     bool batterySaver,
     BackdropKey? groupKey,
   ) {
+    // The corner-rounding setting scales every glass surface: buttons, cards,
+    // sheets and windows alike.
+    final borderRadius = context.scaleBorderRadius(this.borderRadius);
     final alpha = batterySaver ? 1.0 : preset.elementOpacity.clamp(0.0, 1.0);
     final defaultBase = Theme.of(context).colorScheme.surfaceContainerHighest;
     final effectiveTint = tint;

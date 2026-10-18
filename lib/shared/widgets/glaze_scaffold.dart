@@ -8,6 +8,7 @@ import '../shell/desktop/desktop_floating_provider.dart';
 import '../shell/shell_header_provider.dart';
 import '../shell/title_bar_header.dart';
 import '../theme/app_colors.dart';
+import '../theme/ui_scale.dart';
 import 'glass_surface.dart';
 import 'glaze_background.dart';
 
@@ -481,7 +482,7 @@ class GlazePillButton extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14),
         decoration: BoxDecoration(
           color: context.cs.primary.withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: context.glazeBorderRadius(20),
           border: Border.all(color: context.cs.primary.withValues(alpha: 0.2)),
         ),
         child: Row(

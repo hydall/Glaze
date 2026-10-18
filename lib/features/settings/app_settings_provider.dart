@@ -199,6 +199,13 @@ abstract class AppSettings with _$AppSettings {
     /// memory + lorebook panel). Stored as "hide" like the other chat-surface
     /// switches, so an absent preference keeps the card on.
     @Default(false) bool hideContextCard,
+
+    /// Multiplier for the corner radii of buttons, cards, sheets and dialogs.
+    /// 1.0 is the shipped look; 0.0 squares them off.
+    @Default(1.0) double uiCornerScale,
+
+    /// How round avatars are: 1.0 is a full circle, 0.0 a square.
+    @Default(1.0) double avatarRoundness,
   }) = _AppSettings;
 }
 
@@ -232,6 +239,8 @@ abstract final class AppSettingsPreferences {
     'lorebookBuildPromptJs',
     'useStandardRandomizer',
     'hideContextCard',
+    'uiCornerScale',
+    'avatarRoundness',
   };
 
   static AppSettings read(SharedPreferences prefs) {
@@ -302,6 +311,11 @@ abstract final class AppSettingsPreferences {
           defaults.useStandardRandomizer,
       hideContextCard:
           _coerceBool(prefs.get('hideContextCard')) ?? defaults.hideContextCard,
+      uiCornerScale:
+          _coerceDouble(prefs.get('uiCornerScale')) ?? defaults.uiCornerScale,
+      avatarRoundness:
+          _coerceDouble(prefs.get('avatarRoundness')) ??
+          defaults.avatarRoundness,
     );
   }
 
@@ -333,6 +347,8 @@ abstract final class AppSettingsPreferences {
       'lorebookBuildPromptJs': normalized.lorebookBuildPromptJs,
       'useStandardRandomizer': normalized.useStandardRandomizer,
       'hideContextCard': normalized.hideContextCard,
+      'uiCornerScale': normalized.uiCornerScale,
+      'avatarRoundness': normalized.avatarRoundness,
     };
   }
 
@@ -443,6 +459,8 @@ abstract final class AppSettingsPreferences {
     lorebookBuildPromptJs: values['lorebookBuildPromptJs'] as String,
     useStandardRandomizer: values['useStandardRandomizer'] as bool,
     hideContextCard: values['hideContextCard'] as bool,
+    uiCornerScale: values['uiCornerScale'] as double,
+    avatarRoundness: values['avatarRoundness'] as double,
   );
 }
 

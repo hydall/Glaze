@@ -115,6 +115,7 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
   final bool showCharAvatar;
   final bool showUserName;
   final bool showCharName;
+  final double avatarRoundness;
   final int greetingTotal;
   final String? chatFontName;
   final String? chatFontDataUrl;
@@ -201,6 +202,7 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
     this.showCharAvatar = true,
     this.showUserName = true,
     this.showCharName = true,
+    this.avatarRoundness = 1.0,
     this.greetingTotal = 0,
     this.chatFontName,
     this.chatFontDataUrl,
@@ -1157,6 +1159,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       showCharAvatar: w.showCharAvatar,
       showUserName: w.showUserName,
       showCharName: w.showCharName,
+      avatarRoundness: w.avatarRoundness,
       chatFontName: w.chatFontName,
       chatFontDataUrl: w.chatFontDataUrl,
       chatFontSize: w.chatFontSize,
@@ -1470,6 +1473,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
         showCharAvatar: widget.showCharAvatar,
         showUserName: widget.showUserName,
         showCharName: widget.showCharName,
+        avatarRoundness: widget.avatarRoundness,
       ),
     );
     return {

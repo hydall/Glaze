@@ -1130,6 +1130,7 @@ ChatWebViewWidgetFields _fields({
   showCharAvatar: true,
   showUserName: true,
   showCharName: true,
+  avatarRoundness: 1.0,
   chatFontName: null,
   chatFontDataUrl: null,
   chatFontSize: 16,

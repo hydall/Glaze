@@ -28,6 +28,7 @@ import 'app_settings_provider.dart';
 import 'theme_preview.dart';
 import 'widgets/chat_layout_picker.dart';
 import '../../shared/widgets/glaze_sheet.dart';
+import '../../shared/widgets/glaze_slider.dart';
 
 // ─── Palette (mirrors Glaze JS PRESET_COLORS / PRESET_UI_COLORS) ──────────────
 
@@ -1074,7 +1075,7 @@ class _SliderRow extends StatelessWidget {
             child: Text(label, style: TextStyle(fontSize: 15, color: context.cs.onSurfaceVariant, fontWeight: FontWeight.w400)),
           ),
           Expanded(
-            child: Slider(
+            child: GlazeSlider(
               value: value.clamp(min, max),
               min: min,
               max: max,
@@ -1285,7 +1286,7 @@ class _FontSizeRow extends StatelessWidget {
               children: [
                 const SizedBox(width: 130),
                 Expanded(
-                  child: Slider(
+                  child: GlazeSlider(
                     value: _numVal.clamp(min, max),
                     min: min,
                     max: max,

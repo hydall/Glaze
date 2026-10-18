@@ -2,6 +2,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 import '../../theme/app_colors.dart';
+import '../../theme/ui_scale.dart';
 import '../../widgets/glass_surface.dart';
 import 'desktop_window_geometry.dart';
 
@@ -45,7 +46,7 @@ class DesktopWindowFrame extends StatelessWidget {
         ),
       ],
       child: ClipRRect(
-        borderRadius: radius,
+        borderRadius: context.scaleBorderRadius(radius),
         child: Column(
           children: [
             titleBar,

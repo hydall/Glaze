@@ -9,6 +9,7 @@ import '../../../core/utils/platform_paths.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/theme/theme_preset.dart';
 import '../../../shared/theme/theme_provider.dart';
+import '../../../shared/theme/ui_scale.dart';
 
 class ChatHeader extends ConsumerWidget {
   final Character character;
@@ -66,16 +67,25 @@ class ChatHeader extends ConsumerWidget {
         : '?';
 
     final double avatarSize = compact ? 24 : 34;
+    final avatarCorners = BorderRadius.circular(
+      context.glazeUiScale.avatarRadius(avatarSize),
+    );
     Widget avatar;
     if (character.avatarPath != null && character.avatarPath!.isNotEmpty) {
-      avatar = CircleAvatar(
-        radius: avatarSize / 2,
-        backgroundImage: FileImage(
-          File(resolveGlazeFilePath(character.avatarPath!)!),
+      avatar = Container(
+        width: avatarSize,
+        height: avatarSize,
+        decoration: BoxDecoration(
+          color: avatarColor.withValues(alpha: 0.2),
+          borderRadius: avatarCorners,
+          image: DecorationImage(
+            image: FileImage(
+              File(resolveGlazeFilePath(character.avatarPath!)!),
+            ),
+            fit: BoxFit.cover,
+            onError: (_, _) {},
+          ),
         ),
-        onBackgroundImageError: (_, _) {},
-        backgroundColor: avatarColor.withValues(alpha: 0.2),
-        child: const SizedBox.shrink(),
       );
     } else {
       avatar = Container(
@@ -83,7 +93,7 @@ class ChatHeader extends ConsumerWidget {
         height: avatarSize,
         decoration: BoxDecoration(
           color: avatarColor.withValues(alpha: 0.2),
-          shape: BoxShape.circle,
+          borderRadius: avatarCorners,
         ),
         child: Center(
           child: Text(

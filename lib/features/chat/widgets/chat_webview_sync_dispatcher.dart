@@ -361,7 +361,8 @@ class ChatWebViewSyncDispatcher {
         current.elementOpacity != old.elementOpacity ||
         current.elementBlur != old.elementBlur ||
         current.chatFontSize != old.chatFontSize ||
-        current.chatColumnWidth != old.chatColumnWidth) {
+        current.chatColumnWidth != old.chatColumnWidth ||
+        current.avatarRoundness != old.avatarRoundness) {
       bridge.applyTheme(current.buildThemeMap());
     }
   }
@@ -719,6 +720,7 @@ class ChatWebViewWidgetFields {
     required this.showCharAvatar,
     required this.showUserName,
     required this.showCharName,
+    required this.avatarRoundness,
     required this.chatFontName,
     required this.chatFontDataUrl,
     required this.chatFontSize,
@@ -787,6 +789,7 @@ class ChatWebViewWidgetFields {
   final bool showCharAvatar;
   final bool showUserName;
   final bool showCharName;
+  final double avatarRoundness;
   final String? chatFontName;
   final String? chatFontDataUrl;
   final double chatFontSize;

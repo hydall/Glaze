@@ -6,6 +6,7 @@ import '../shell/desktop/desktop_layout_provider.dart';
 import '../shell/desktop/desktop_window_chrome.dart';
 import '../shell/desktop/desktop_window_geometry.dart';
 import '../shell/shell_header_provider.dart';
+import '../theme/ui_scale.dart';
 
 /// Width cap of a desktop sheet window. Matches the modal-sheet cap the theme
 /// applies on mobile (`kSheetMaxWidthConstraints`), kept here as a literal to
@@ -407,9 +408,10 @@ class _SheetPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final radius = context.glazeBorderRadius(16);
     return DecoratedBox(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: radius,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.5),
@@ -419,7 +421,7 @@ class _SheetPanel extends StatelessWidget {
         ],
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: radius,
         child: MediaQuery.removePadding(
           context: context,
           removeTop: true,
