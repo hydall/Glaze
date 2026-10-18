@@ -333,25 +333,6 @@ void main() {
     expect(await service.getSummaryPrompt('session'), 'Mine.');
   });
 
-  test('a merge runs on the template it is given', () async {
-    final llm = _RecordingAuxLlmClient();
-    final service = SummaryService(repo, llm: llm);
-
-    await service.mergeBlocks(
-      sessionId: 'session',
-      parts: [
-        block(['1'], 'First part.'),
-        block(['2'], 'Second part.'),
-      ],
-      apiConfig: _api,
-      targetTokens: 200,
-      template: 'Fold these into {{target_tokens}} tokens.',
-    );
-
-    expect(llm.system, 'Fold these into 200 tokens.');
-    expect(llm.user, contains('First part.'));
-  });
-
   test('a user message goes by the persona it was written as', () async {
     final llm = _RecordingAuxLlmClient();
     final service = SummaryService(repo, llm: llm);

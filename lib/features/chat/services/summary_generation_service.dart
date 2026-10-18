@@ -11,7 +11,6 @@ import '../../../core/models/api_config.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../core/models/memory_book_api_settings.dart';
 import '../../../core/models/summary_block.dart';
-import '../../../core/services/summary_prompt_presets.dart';
 import '../../../core/state/active_selection_provider.dart';
 import '../../../core/state/character_provider.dart';
 import '../../../core/state/db_provider.dart';
@@ -81,8 +80,7 @@ class SummaryGenerationService {
       final slot = _ref.read(pipelineSettingsProvider).memoryBookApi;
       final apiConfig = await _requireConfig(slot);
       final service = _ref.read(summaryServiceProvider);
-      final template = await _retellTemplate(session.id);
-      final mergeTemplate = await _mergeTemplate();
+      final template = await service.getSummaryPrompt(session.id);
       final inputCap = _summarizerInputCap(apiConfig);
 
       var messages = await _messages(session.id, session.messages);
@@ -115,7 +113,6 @@ class SummaryGenerationService {
               messages: messages,
               apiConfig: apiConfig,
               settings: settings,
-              template: mergeTemplate,
               temperature: slot.generationTemperature,
               cancelToken: cancelToken,
             );
@@ -222,7 +219,6 @@ class SummaryGenerationService {
         messages: messages,
         apiConfig: apiConfig,
         settings: settings,
-        template: await _mergeTemplate(),
         temperature: slot.generationTemperature,
         cancelToken: cancelToken,
       );
@@ -290,7 +286,6 @@ class SummaryGenerationService {
     required List<ChatMessage> messages,
     required ApiConfig apiConfig,
     required SummaryCompactionSettings settings,
-    String? template,
     double? temperature,
     CancelToken? cancelToken,
   }) async {
@@ -303,7 +298,6 @@ class SummaryGenerationService {
           parts: parts,
           apiConfig: apiConfig,
           targetTokens: target,
-          template: template,
           cancelToken: cancelToken,
           temperature: temperature,
         );
@@ -330,24 +324,6 @@ class SummaryGenerationService {
       return SummaryChain.commitMerge(blocks, merged);
     });
     if (!committed) throw const SummaryChainException('changed');
-  }
-
-  /// The chat's own prompt text when it still has one, else the chosen
-  /// retelling preset.
-  Future<String> _retellTemplate(String sessionId) async {
-    final own = await _ref
-        .read(summaryServiceProvider)
-        .getSummaryPrompt(sessionId);
-    if (own != null) return own;
-    final selection = await _ref.read(summaryPromptSelectionProvider.future);
-    final custom = await _ref.read(summaryCustomPromptsProvider.future);
-    return SummaryPromptPresets.resolve(selection.retellKey, custom).prompt;
-  }
-
-  Future<String> _mergeTemplate() async {
-    final selection = await _ref.read(summaryPromptSelectionProvider.future);
-    final custom = await _ref.read(summaryCustomMergePromptsProvider.future);
-    return SummaryMergePromptPresets.resolve(selection.mergeKey, custom).prompt;
   }
 
   /// Reads the blocks and messages fresh, applies [change] and saves. A null

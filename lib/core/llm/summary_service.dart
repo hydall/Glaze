@@ -250,14 +250,12 @@ class SummaryService {
   }
 
   /// Merges [parts] — adjacent blocks of one level, in story order — into the
-  /// text of one block a level up. Persists nothing. [template] is the chosen
-  /// merge prompt; [summaryMergePrompt] when absent.
+  /// text of one block a level up. Persists nothing.
   Future<String> mergeBlocks({
     required String sessionId,
     required List<SummaryBlock> parts,
     required ApiConfig apiConfig,
     required int targetTokens,
-    String? template,
     CancelToken? cancelToken,
     double? temperature,
   }) {
@@ -267,11 +265,7 @@ class SummaryService {
       targetTokens: targetTokens,
       temperature: temperature,
       cancelToken: cancelToken,
-      messages: buildMergeMessages(
-        parts: parts,
-        targetTokens: targetTokens,
-        template: template,
-      ),
+      messages: buildMergeMessages(parts: parts, targetTokens: targetTokens),
     );
   }
 
@@ -433,20 +427,10 @@ class SummaryService {
     ];
   }
 
-  /// The merge request: [template] (or [summaryMergePrompt]) as the system
-  /// message, with `{{target_tokens}}` filled or the length hint appended, and
-  /// the parts in order as the user message.
   List<Map<String, String>> buildMergeMessages({
     required List<SummaryBlock> parts,
     required int targetTokens,
-    String? template,
   }) {
-    var instructions = (template == null || template.trim().isEmpty)
-        ? summaryMergePrompt
-        : template.trim();
-    instructions = instructions.contains(summaryTargetPlaceholder)
-        ? instructions.replaceAll(summaryTargetPlaceholder, '$targetTokens')
-        : '$instructions\n${summaryLengthHint(targetTokens)}';
     final buffer = StringBuffer();
     for (var i = 0; i < parts.length; i++) {
       if (i > 0) buffer.writeln();
@@ -455,7 +439,10 @@ class SummaryService {
         ..writeln(parts[i].content.trim());
     }
     return [
-      {'role': 'system', 'content': instructions},
+      {
+        'role': 'system',
+        'content': '$summaryMergePrompt\n${summaryLengthHint(targetTokens)}',
+      },
       {'role': 'user', 'content': buffer.toString().trimRight()},
     ];
   }

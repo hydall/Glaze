@@ -379,14 +379,7 @@ own messages; the live blocks before it are handed over as context
 
 The instructions go in the system message and the material — earlier summary
 and transcript, with speakers by name — in the user message; a template that
-places `{{history}}` is sent as one user message as written.
-
-Both prompts are chosen by key from a preset library, as in Memory Books
-(`SummaryPromptSelection`; `SummaryPromptPresets` and
-`SummaryMergePromptPresets` plus the reader's saved ones). Built-ins are
-read-only; a key that names nothing resolves to the built-in default. A chat
-that still holds a prompt text of its own retells with it until a preset is
-picked, which clears it. The transcript is
+places `{{history}}` is sent as one user message as written. The transcript is
 the message text alone: summarizing reads nothing from Ledger or Studio and
 runs after every bot turn, Studio on or off.
 
