@@ -60,20 +60,11 @@ const _memoryConfig = ApiConfig(
   maxTokens: 4096,
 );
 
-// Long enough that the oldest messages fall outside the fresh tail (a quarter
-// of the chat connection's window), so a forced compaction has a run to send.
-final _session = ChatSession(
+const _session = ChatSession(
   id: 'session',
   characterId: 'char',
   sessionIndex: 0,
-  messages: [
-    for (var i = 0; i < 6; i++)
-      ChatMessage(
-        id: 'm$i',
-        role: i.isEven ? 'user' : 'assistant',
-        content: 'They walked on through the snow. ' * 500,
-      ),
-  ],
+  messages: [ChatMessage(id: 'm1', role: 'user', content: 'Hello')],
 );
 
 typedef _Harness = ({ProviderContainer container, _RecordingAuxLlmClient llm});
@@ -115,7 +106,7 @@ Future<_Harness> _harness({MemoryBookApiSettings? slot}) async {
 
 Future<void> _summarize(ProviderContainer container) => container
     .read(summaryGenerationServiceProvider)
-    .compact(charId: 'char', session: _session, force: true);
+    .generate(charId: 'char', session: _session);
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

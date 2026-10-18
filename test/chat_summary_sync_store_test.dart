@@ -5,7 +5,7 @@ import 'package:glaze_flutter/core/db/repositories/summary_repo.dart';
 import 'package:glaze_flutter/features/cloud_sync/adapters/ext_blocks_sync_stores.dart';
 
 void main() {
-  test('cloud summary import preserves its updatedAt and blocks', () async {
+  test('cloud summary import preserves its updatedAt', () async {
     final db = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(db.close);
     final repo = SummaryRepo(db);
@@ -17,7 +17,6 @@ void main() {
       'messageCount': 12,
       'prompt': 'Keep this prompt',
       'updatedAt': 1234,
-      'blocksJson': '[{"id":"b1","level":1,"content":"Cloud summary"}]',
     };
 
     await store.putRaw(cloud);

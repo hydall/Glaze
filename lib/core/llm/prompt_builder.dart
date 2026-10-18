@@ -887,6 +887,7 @@ PromptResult _assembleMessages({
               excerptChunksPerEntry: payload.memoryExcerptChunksPerEntry,
               chunkFirstTopEntries: payload.chunkFirstTopEntries,
               chunkFirstTopChunks: payload.chunkFirstTopChunks,
+              summaryExcerpt: payload.summaryContent,
               gameTime: requestClock,
             )
             .excerptSelection

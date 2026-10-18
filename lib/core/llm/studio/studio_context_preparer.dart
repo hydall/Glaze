@@ -178,6 +178,7 @@ final class StudioContextPreparer {
             excerptChunksPerEntry: inputs.memoryExcerptChunksPerEntry,
             chunkFirstTopEntries: inputs.chunkFirstTopEntries,
             chunkFirstTopChunks: inputs.chunkFirstTopChunks,
+            summaryExcerpt: inputs.summaryContent,
             gameTime: gameTimeState,
           );
     final memoryHardContent = memory?.content?.hardBlockContent;

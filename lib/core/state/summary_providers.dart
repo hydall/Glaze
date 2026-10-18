@@ -16,140 +16,30 @@ final summaryServiceProvider = Provider<SummaryService>((ref) {
   return SummaryService(ref.watch(summaryRepoProvider));
 });
 
-/// When and how big the summary compacts. Global, not per chat.
-class SummaryCompactionSettings {
-  /// Compact on its own after a bot reply once the prompt is full enough.
-  final bool autoEnabled;
-
-  /// How full the context may get, in percent of what the prompt may use,
-  /// before old messages are summarized. The rest is the fresh tail that is
-  /// always sent as is.
-  final int triggerPercent;
-
-  /// Ceiling for one block. A small run of messages gets a smaller target.
-  final int blockTargetTokens;
-
-  /// Once the live blocks take more than this share of the context, adjacent
-  /// blocks are merged a level up.
-  final int mergePercent;
-
-  const SummaryCompactionSettings({
-    this.autoEnabled = false,
-    this.triggerPercent = 75,
-    this.blockTargetTokens = 1000,
-    this.mergePercent = 20,
-  });
-
-  static const minTriggerPercent = 50;
-  static const maxTriggerPercent = 95;
-  static const minBlockTargetTokens = 200;
-  static const maxBlockTargetTokens = 4000;
-  static const minMergePercent = 5;
-  static const maxMergePercent = 50;
-
-  SummaryCompactionSettings copyWith({
-    bool? autoEnabled,
-    int? triggerPercent,
-    int? blockTargetTokens,
-    int? mergePercent,
-  }) => SummaryCompactionSettings(
-    autoEnabled: autoEnabled ?? this.autoEnabled,
-    triggerPercent: triggerPercent ?? this.triggerPercent,
-    blockTargetTokens: blockTargetTokens ?? this.blockTargetTokens,
-    mergePercent: mergePercent ?? this.mergePercent,
-  );
-
-  Map<String, dynamic> toJson() => {
-    'autoEnabled': autoEnabled,
-    'triggerPercent': triggerPercent,
-    'blockTargetTokens': blockTargetTokens,
-    'mergePercent': mergePercent,
-  };
-
-  factory SummaryCompactionSettings.fromJson(Map<String, dynamic> json) {
-    const d = SummaryCompactionSettings();
-    int read(String key, int fallback, int min, int max) {
-      final value = json[key];
-      return value is num ? value.toInt().clamp(min, max) : fallback;
-    }
-
-    return SummaryCompactionSettings(
-      autoEnabled: json['autoEnabled'] == true,
-      triggerPercent: read(
-        'triggerPercent',
-        d.triggerPercent,
-        minTriggerPercent,
-        maxTriggerPercent,
-      ),
-      blockTargetTokens: read(
-        'blockTargetTokens',
-        d.blockTargetTokens,
-        minBlockTargetTokens,
-        maxBlockTargetTokens,
-      ),
-      mergePercent: read(
-        'mergePercent',
-        d.mergePercent,
-        minMergePercent,
-        maxMergePercent,
-      ),
+/// How many new messages must accumulate before the summary is regenerated on
+/// its own. `0` disables auto-generation. Global, not per chat.
+final summaryAutoIntervalProvider =
+    AsyncNotifierProvider<SummaryAutoIntervalNotifier, int>(
+      SummaryAutoIntervalNotifier.new,
     );
+
+class SummaryAutoIntervalNotifier extends AsyncNotifier<int> {
+  static const prefsKey = 'summaryAutoInterval';
+
+  @override
+  Future<int> build() async {
+    final prefs = await ref.read(sharedPreferencesProvider.future);
+    final value = prefs.get(prefsKey);
+    if (value is int) return value < 0 ? 0 : value;
+    if (value is String) return int.tryParse(value)?.clamp(0, 9999) ?? 0;
+    return 0;
   }
 
-  @override
-  bool operator ==(Object other) =>
-      other is SummaryCompactionSettings &&
-      other.autoEnabled == autoEnabled &&
-      other.triggerPercent == triggerPercent &&
-      other.blockTargetTokens == blockTargetTokens &&
-      other.mergePercent == mergePercent;
-
-  @override
-  int get hashCode =>
-      Object.hash(autoEnabled, triggerPercent, blockTargetTokens, mergePercent);
-}
-
-final summaryCompactionSettingsProvider =
-    AsyncNotifierProvider<
-      SummaryCompactionSettingsNotifier,
-      SummaryCompactionSettings
-    >(SummaryCompactionSettingsNotifier.new);
-
-class SummaryCompactionSettingsNotifier
-    extends AsyncNotifier<SummaryCompactionSettings> {
-  static const prefsKey = 'summaryCompaction';
-
-  /// The "every N messages" setting it replaces. Read once so a reader who
-  /// had auto-summary on keeps it on.
-  static const legacyIntervalKey = 'summaryAutoInterval';
-
-  @override
-  Future<SummaryCompactionSettings> build() async {
+  Future<void> set(int interval) async {
+    final normalized = interval < 0 ? 0 : interval;
     final prefs = await ref.read(sharedPreferencesProvider.future);
-    final raw = prefs.getString(prefsKey);
-    if (raw != null && raw.trim().isNotEmpty) {
-      try {
-        final decoded = jsonDecode(raw);
-        if (decoded is Map<String, dynamic>) {
-          return SummaryCompactionSettings.fromJson(decoded);
-        }
-      } catch (e) {
-        debugPrint('[summaryCompaction] unreadable, using defaults: $e');
-      }
-      return const SummaryCompactionSettings();
-    }
-    final legacy = prefs.get(legacyIntervalKey);
-    final legacyOn =
-        (legacy is int && legacy > 0) ||
-        (legacy is String && (int.tryParse(legacy) ?? 0) > 0);
-    return SummaryCompactionSettings(autoEnabled: legacyOn);
-  }
-
-  Future<void> save(SummaryCompactionSettings settings) async {
-    final prefs = await ref.read(sharedPreferencesProvider.future);
-    await prefs.setString(prefsKey, jsonEncode(settings.toJson()));
-    await prefs.remove(legacyIntervalKey);
-    state = AsyncData(settings);
+    await prefs.setInt(prefsKey, normalized);
+    state = AsyncData(normalized);
   }
 }
 

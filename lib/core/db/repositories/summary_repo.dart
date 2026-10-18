@@ -40,29 +40,6 @@ class SummaryRepo extends DatabaseAccessor<AppDatabase>
         messageCount: Value(messageCount),
         prompt: Value(prompt ?? existing?.prompt),
         updatedAt: Value(currentTimestampSeconds()),
-        blocksJson: Value(existing?.blocksJson),
-      ),
-    );
-  }
-
-  /// Writes the block chain and the text rendered from it, leaving the
-  /// switch and the template alone.
-  Future<void> putBlocks({
-    required String sessionId,
-    required String blocksJson,
-    required String content,
-    required int messageCount,
-  }) async {
-    final existing = await get(sessionId);
-    await into(chatSummaries).insertOnConflictUpdate(
-      ChatSummariesCompanion.insert(
-        sessionId: sessionId,
-        content: content,
-        enabled: Value(existing?.enabled ?? true),
-        messageCount: Value(messageCount),
-        prompt: Value(existing?.prompt),
-        updatedAt: Value(currentTimestampSeconds()),
-        blocksJson: Value(blocksJson),
       ),
     );
   }
@@ -74,7 +51,6 @@ class SummaryRepo extends DatabaseAccessor<AppDatabase>
     required bool enabled,
     required String? prompt,
     required int updatedAt,
-    String? blocksJson,
   }) async {
     await into(chatSummaries).insertOnConflictUpdate(
       ChatSummariesCompanion.insert(
@@ -84,7 +60,6 @@ class SummaryRepo extends DatabaseAccessor<AppDatabase>
         messageCount: Value(messageCount),
         prompt: Value(prompt),
         updatedAt: Value(updatedAt),
-        blocksJson: Value(blocksJson),
       ),
     );
   }
@@ -106,7 +81,6 @@ class SummaryRepo extends DatabaseAccessor<AppDatabase>
         messageCount: Value(existing?.messageCount ?? 0),
         prompt: Value(prompt),
         updatedAt: Value(currentTimestampSeconds()),
-        blocksJson: Value(existing?.blocksJson),
       ),
     );
   }
@@ -124,7 +98,6 @@ class SummaryRepo extends DatabaseAccessor<AppDatabase>
         messageCount: Value(existing?.messageCount ?? 0),
         prompt: Value(existing?.prompt),
         updatedAt: Value(currentTimestampSeconds()),
-        blocksJson: Value(existing?.blocksJson),
       ),
     );
   }
@@ -135,24 +108,20 @@ class SummaryRepo extends DatabaseAccessor<AppDatabase>
     )..where((t) => t.sessionId.equals(sessionId))).go().then((_) {});
   }
 
-  /// Carries user settings but not the blocks: a branch's messages are its
-  /// own, and blocks are bound to the source messages they were written from.
+  /// Carries user settings, but resets generated content because this model
+  /// has only a message count and cannot prove that a summary predates a cut.
   Future<void> copySettingsForSessionBranch({
     required String fromSessionId,
     required String toSessionId,
   }) async {
     final source = await get(fromSessionId);
     if (source == null) return;
-    await into(chatSummaries).insertOnConflictUpdate(
-      ChatSummariesCompanion.insert(
-        sessionId: toSessionId,
-        content: '',
-        enabled: Value(source.enabled),
-        messageCount: const Value(0),
-        prompt: Value(source.prompt),
-        updatedAt: Value(currentTimestampSeconds()),
-        blocksJson: const Value(null),
-      ),
+    await put(
+      sessionId: toSessionId,
+      content: '',
+      messageCount: 0,
+      enabled: source.enabled,
+      prompt: source.prompt,
     );
   }
 }

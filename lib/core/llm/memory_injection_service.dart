@@ -337,6 +337,7 @@ class MemoryInjectionService {
     required String sessionId,
     required String historyText,
     required int messageCount,
+    String? summaryExcerpt,
     List<ChatMessageForSearch>? history,
     String? currentText,
     EmbeddingConfig? embeddingConfig,
@@ -381,6 +382,7 @@ class MemoryInjectionService {
       excerptChunksPerEntry: settings.memoryExcerptChunksPerEntry,
       chunkFirstTopEntries: settings.chunkFirstTopEntries,
       chunkFirstTopChunks: settings.chunkFirstTopChunks,
+      summaryExcerpt: summaryExcerpt,
     );
     final excerptSelection = resolved.excerptSelection;
     final maxInjectionTokens = selection.budgetTokens;

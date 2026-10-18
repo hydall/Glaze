@@ -28,6 +28,7 @@ final class MemoryPromptPacker {
     required int chunkFirstTopEntries,
     required int chunkFirstTopChunks,
     GameTimeState gameTime = const GameTimeState(),
+    String? summaryExcerpt,
   }) {
     MemoryExcerptSelection select(MemorySelection input) =>
         !excerptingEnabled && packingMode != 'chunk_first'
@@ -42,7 +43,13 @@ final class MemoryPromptPacker {
           );
     int cost(List<MemoryInjectionItem> items) => items.isEmpty
         ? 0
-        : estimateTokens(format(items, gameTime: gameTime).hardBlockContent);
+        : estimateTokens(
+            format(
+              items,
+              gameTime: gameTime,
+              summaryExcerpt: summaryExcerpt,
+            ).hardBlockContent,
+          );
 
     var packed = select(selection);
     final budget = selection.budgetTokens;
@@ -101,6 +108,7 @@ final class MemoryPromptPacker {
   ResolvedMemoryContent format(
     List<MemoryInjectionItem> items, {
     GameTimeState gameTime = const GameTimeState(),
+    String? summaryExcerpt,
   }) {
     String memory(bool header) => gameTime.expandMacros(
       formatMemoryItems(
@@ -110,7 +118,11 @@ final class MemoryPromptPacker {
       ),
     );
     return ResolvedMemoryContent(
-      hardBlockContent: memory(true),
+      hardBlockContent: [
+        if (summaryExcerpt?.trim().isNotEmpty == true)
+          gameTime.expandMacros('Summary excerpt:\n$summaryExcerpt'),
+        memory(true),
+      ].join('\n\n'),
       macroContent: memory(false),
     );
   }

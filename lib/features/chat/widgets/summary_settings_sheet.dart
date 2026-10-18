@@ -23,7 +23,7 @@ import '../../../shared/widgets/glaze_sheet.dart';
 ///
 /// The Summary tab used to be one long form: the text, the master switch (in
 /// the sheet header, as a bare `Switch`), the prompt template, the auto
-/// compaction and the injection point, all in one scroll. Only the first of
+/// interval and the injection point, all in one scroll. Only the first of
 /// those is read or edited day to day. They live behind the header's settings
 /// button now, the way the Memory Books tab's do, so the tab itself is the
 /// summary and the one button that rewrites it.
@@ -66,7 +66,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
 
   bool _loading = true;
   bool _enabled = true;
-  SummaryCompactionSettings _compaction = const SummaryCompactionSettings();
+  int _autoInterval = 0;
 
   /// Saved prompts, buffered like the rest of the form so the manager sheet
   /// and the picker agree before anything is written.
@@ -84,9 +84,8 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
   List<MemoryPromptPreset> _loadedPrompts = const [];
 
   /// What was loaded, so Save writes only what actually changed. Writing the
-  /// prompt unconditionally would be harmless; writing the compaction
-  /// settings or the preset back is not — both are global state other chats
-  /// read.
+  /// prompt unconditionally would be harmless; writing the interval or the
+  /// preset back is not — both are global state other chats read.
   late _SummarySettings _loaded;
 
   @override
@@ -106,7 +105,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
     final service = ref.read(summaryServiceProvider);
     final enabled = await service.isSummaryEnabled(widget.sessionId);
     final prompt = await service.getSummaryPrompt(widget.sessionId);
-    final compaction = await ref.read(summaryCompactionSettingsProvider.future);
+    final interval = await ref.read(summaryAutoIntervalProvider.future);
     final customPrompts = await ref.read(summaryCustomPromptsProvider.future);
     // The preset list loads lazily; effectivePresetForChatProvider reads null
     // until it resolves, which would leave the injection section hidden.
@@ -123,7 +122,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
     _promptCtrl.text = prompt ?? '';
     setState(() {
       _enabled = enabled;
-      _compaction = compaction;
+      _autoInterval = interval;
       _customPrompts = customPrompts;
       _presetId = block == null ? null : preset?.id;
       _role = block?.role ?? _role;
@@ -137,7 +136,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
 
   _SummarySettings _current() => _SummarySettings(
     enabled: _enabled,
-    compaction: _compaction,
+    autoInterval: _autoInterval,
     prompt: _promptCtrl.text,
     role: _role,
     insertionMode: _insertionMode,
@@ -169,10 +168,10 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
           );
       ref.read(summaryRevisionProvider.notifier).state++;
     }
-    if (current.compaction != loaded.compaction) {
+    if (current.autoInterval != loaded.autoInterval) {
       await ref
-          .read(summaryCompactionSettingsProvider.notifier)
-          .save(current.compaction);
+          .read(summaryAutoIntervalProvider.notifier)
+          .set(current.autoInterval);
     }
     if (!identical(_customPrompts, _loadedPrompts)) {
       await ref
@@ -257,72 +256,17 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                   MenuGroup(
                     header: 'summary_generation_section'.tr(),
                     items: [
-                      MenuSwitchItem(
-                        label: 'summary_auto_label'.tr(),
-                        description: 'summary_auto_hint'.tr(),
-                        value: _compaction.autoEnabled,
-                        onChanged: (v) => setState(
-                          () => _compaction = _compaction.copyWith(
-                            autoEnabled: v,
-                          ),
-                        ),
-                      ),
                       MenuRangeItem(
-                        label: 'summary_trigger_label'.tr(),
-                        unit: '%',
-                        description: 'summary_trigger_hint'.tr(),
-                        value: _compaction.triggerPercent.toDouble(),
-                        min: SummaryCompactionSettings.minTriggerPercent
-                            .toDouble(),
-                        max: SummaryCompactionSettings.maxTriggerPercent
-                            .toDouble(),
-                        divisions:
-                            SummaryCompactionSettings.maxTriggerPercent -
-                            SummaryCompactionSettings.minTriggerPercent,
+                        label: 'summary_auto_interval_label'.tr(),
+                        description: 'summary_auto_interval_hint'.tr(),
+                        value: _autoInterval.toDouble(),
+                        min: 0,
+                        max: 100,
+                        divisions: 100,
                         decimalPlaces: 0,
                         editableValue: true,
-                        onChanged: (v) => setState(
-                          () => _compaction = _compaction.copyWith(
-                            triggerPercent: v.round(),
-                          ),
-                        ),
-                      ),
-                      MenuRangeItem(
-                        label: 'summary_block_target_label'.tr(),
-                        description: 'summary_block_target_hint'.tr(),
-                        value: _compaction.blockTargetTokens.toDouble(),
-                        min: SummaryCompactionSettings.minBlockTargetTokens
-                            .toDouble(),
-                        max: SummaryCompactionSettings.maxBlockTargetTokens
-                            .toDouble(),
-                        divisions: 38,
-                        decimalPlaces: 0,
-                        editableValue: true,
-                        onChanged: (v) => setState(
-                          () => _compaction = _compaction.copyWith(
-                            blockTargetTokens: v.round(),
-                          ),
-                        ),
-                      ),
-                      MenuRangeItem(
-                        label: 'summary_merge_label'.tr(),
-                        unit: '%',
-                        description: 'summary_merge_hint'.tr(),
-                        value: _compaction.mergePercent.toDouble(),
-                        min: SummaryCompactionSettings.minMergePercent
-                            .toDouble(),
-                        max: SummaryCompactionSettings.maxMergePercent
-                            .toDouble(),
-                        divisions:
-                            SummaryCompactionSettings.maxMergePercent -
-                            SummaryCompactionSettings.minMergePercent,
-                        decimalPlaces: 0,
-                        editableValue: true,
-                        onChanged: (v) => setState(
-                          () => _compaction = _compaction.copyWith(
-                            mergePercent: v.round(),
-                          ),
-                        ),
+                        onChanged: (v) =>
+                            setState(() => _autoInterval = v.round()),
                       ),
                       MenuItem(
                         icon: Icons.cable_rounded,
@@ -476,7 +420,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
 /// One snapshot of the form, for telling a real edit from a reopen.
 class _SummarySettings {
   final bool enabled;
-  final SummaryCompactionSettings compaction;
+  final int autoInterval;
   final String prompt;
   final String role;
   final String insertionMode;
@@ -484,7 +428,7 @@ class _SummarySettings {
 
   const _SummarySettings({
     required this.enabled,
-    required this.compaction,
+    required this.autoInterval,
     required this.prompt,
     required this.role,
     required this.insertionMode,

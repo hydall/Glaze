@@ -8,7 +8,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
-import 'package:glaze_flutter/core/models/summary_block.dart';
 import 'package:glaze_flutter/core/state/db_provider.dart';
 import 'package:glaze_flutter/core/state/summary_providers.dart';
 import 'package:glaze_flutter/features/chat/chat_provider.dart';
@@ -21,7 +20,7 @@ import 'package:glaze_flutter/shared/widgets/glaze_action_button.dart';
 
 /// The Summary tab used to be the text plus every setting the summary has, with
 /// the master switch promoted into the sheet header as a bare `Switch`. It is
-/// the block chain and its actions now; the settings live behind the header's
+/// the text and the Summarize button now; the settings live behind the header's
 /// button, as the Memory Books tab's do.
 const _charId = 'char-summary';
 const _sessionId = 'session-summary';
@@ -56,16 +55,10 @@ Future<ProviderContainer> _seed() async {
       );
   await container
       .read(summaryServiceProvider)
-      .saveBlocks(
+      .setSummary(
         sessionId: _sessionId,
-        blocks: const [
-          SummaryBlock(
-            id: 'note',
-            level: 0,
-            content: 'They reached the pass after dark.',
-          ),
-        ],
-        messages: const [],
+        content: 'They reached the pass after dark.',
+        messageCount: 1,
       );
   await container.read(chatProvider(_charId).future);
   return container;
@@ -135,20 +128,18 @@ void main() {
     await EasyLocalization.ensureInitialized();
   });
 
-  testWidgets('the tab is the block chain and its actions', (tester) async {
+  testWidgets('the tab is the summary and one Glaze button', (tester) async {
     final container = await _seed();
     await _openSheet(tester, container);
 
     expect(find.text('They reached the pass after dark.'), findsOneWidget);
-    expect(find.text('summary_note'.tr()), findsWidgets);
-    // The kit's buttons, not Material ones in a hand-picked blue.
-    expect(find.text('summary_compact_now'.tr()), findsOneWidget);
-    expect(find.text('summary_clear'.tr()), findsOneWidget);
-    expect(find.byType(GlazeActionButton), findsNWidgets(3));
+    // The kit's button, not a Material one in a hand-picked blue.
+    expect(find.byType(GlazeActionButton), findsOneWidget);
+    expect(find.text('btn_auto_summary'.tr()), findsOneWidget);
     expect(find.byType(FilledButton), findsNothing);
     // The settings are not in the tab any more…
     expect(find.text('summary_prompt_label'.tr()), findsNothing);
-    expect(find.text('summary_trigger_label'.tr()), findsNothing);
+    expect(find.text('summary_auto_interval_label'.tr()), findsNothing);
     // …and neither is the master switch, which was in the header.
     expect(find.byType(Switch), findsNothing);
   });
@@ -163,12 +154,8 @@ void main() {
 
     expect(find.byType(SummarySettingsSheet), findsOneWidget);
     expect(find.text('label_enabled'.tr()), findsOneWidget);
-    // The master switch and the auto-compaction switch.
-    expect(find.byType(Switch), findsNWidgets(2));
-    expect(find.text('summary_auto_label'.tr()), findsOneWidget);
-    expect(find.text('summary_trigger_label'.tr()), findsOneWidget);
-    expect(find.text('summary_block_target_label'.tr()), findsOneWidget);
-    expect(find.text('summary_merge_label'.tr()), findsOneWidget);
+    expect(find.byType(Switch), findsOneWidget);
+    expect(find.text('summary_auto_interval_label'.tr()), findsOneWidget);
     expect(find.text('summary_prompt_label'.tr()), findsOneWidget);
     // A prompt to start from, and the prompts you have saved yourself.
     expect(find.text('summary_prompt_preset_label'.tr()), findsOneWidget);
@@ -193,7 +180,7 @@ void main() {
     );
 
     await _openSettings(tester);
-    await tester.tap(find.byType(Switch).first);
+    await tester.tap(find.byType(Switch));
     await tester.pump();
     await tester.tap(find.byIcon(Icons.check_rounded));
     await _settle(tester);
@@ -222,7 +209,7 @@ void main() {
     await _openSheet(tester, container);
 
     await _openSettings(tester);
-    await tester.tap(find.byType(Switch).first);
+    await tester.tap(find.byType(Switch));
     await tester.pump();
     // Back, not Save.
     await tester.tap(find.byIcon(Icons.arrow_back));

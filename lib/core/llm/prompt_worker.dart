@@ -500,6 +500,7 @@ PromptResult _buildFromInputs(PromptInputs inputs) {
       excerptChunksPerEntry: inputs.memoryExcerptChunksPerEntry,
       chunkFirstTopEntries: inputs.chunkFirstTopEntries,
       chunkFirstTopChunks: inputs.chunkFirstTopChunks,
+      summaryExcerpt: inputs.summaryContent,
     );
     final excerptSelection = resolved.excerptSelection;
 

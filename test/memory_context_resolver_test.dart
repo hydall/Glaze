@@ -38,16 +38,17 @@ void main() {
       excerptChunksPerEntry: 2,
       chunkFirstTopEntries: 3,
       chunkFirstTopChunks: 1,
+      summaryExcerpt: 'Current summary.',
     );
 
     expect(result.selection.entries.map((entry) => entry.id), ['retained']);
     expect(result.excerptSelection.entries.map((entry) => entry.id), [
       'retained',
     ]);
-    // The chat summary has its own preset block; Memory Book never carries it.
-    expect(result.content?.hardBlockContent, isNot(contains('Summary')));
+    expect(result.content?.hardBlockContent, contains('Current summary.'));
     expect(result.content?.hardBlockContent, contains('Older memory'));
     expect(result.content?.hardBlockContent, isNot(contains('Visible memory')));
+    expect(result.content?.macroContent, isNot(contains('Current summary.')));
     expect(result.triggeredEntries.single.id, 'retained');
   });
 
