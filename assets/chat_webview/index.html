@@ -11,6 +11,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
   <title>Glaze Chat</title>
   <style>
+    /* Safe-area insets, pushed by the chrome on every layout change; theme
+       layouts can use them without reaching into Flutter. */
+    :root { --sat: 0px; --sab: 0px; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     /* The page itself never scrolls: #chat-container is the only scroller.
        `position: fixed` gives the document no scroll range at all, so the

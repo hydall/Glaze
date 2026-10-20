@@ -423,6 +423,9 @@ function applyLayout(l) {
   // still clearing the status bar, without a gap above the window.
   css(rootEl, '--gc-safe-top', px(layout.safeTop || 0));
   css(rootEl, '--gc-safe-bottom', px(layout.safeBottom || 0));
+  // The same insets on the document, in the names theme layouts use.
+  css(document.documentElement, '--sat', px(layout.safeTop || 0));
+  css(document.documentElement, '--sab', px(layout.safeBottom || 0));
   const shallow = prev.safeTop === layout.safeTop && prev.safeBottom === layout.safeBottom &&
     prev.gutter === layout.gutter && prev.desktop === layout.desktop;
   if (!shallow) {

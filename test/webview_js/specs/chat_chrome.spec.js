@@ -55,6 +55,18 @@ test('the keys are handed out once, and only they drive the chrome', async ({ pa
   expect(replaced).toBe(false);
 });
 
+test('the safe-area insets reach theme CSS as sat and sab', async ({ page }) => {
+  await open(page);
+  const insets = await page.evaluate(() => {
+    const style = getComputedStyle(document.documentElement);
+    return {
+      sat: style.getPropertyValue('--sat').trim(),
+      sab: style.getPropertyValue('--sab').trim(),
+    };
+  });
+  expect(insets).toEqual({ sat: '24px', sab: '16px' });
+});
+
 test('page queries and page CSS cannot reach the chrome', async ({ page }) => {
   await open(page);
   const found = await page.evaluate(() => ({
