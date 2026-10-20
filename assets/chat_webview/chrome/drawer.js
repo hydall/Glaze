@@ -331,6 +331,15 @@ export function createDrawer(ctx, composer) {
     const d = layout.drawer || {};
     const visible = st.show && d.show;
     setClass(root, classes(visible ? 'gc-drw' : 'gc-drw gc-hidden', { 'g-skinned': !!(skin.card || skin.tab) }));
+    // Build the tabs and cards while the drawer is still shut. Doing it here,
+    // on the frame the drawer opens, made the first open draw the slide first
+    // and the cards a beat later — or, when the page's main thread was busy,
+    // made the whole open look like a flat background with no animation.
+    ctx.drag.whenIdle(() => {
+      renderTabs();
+      renderTools();
+      renderActions();
+    });
     if (!visible) return;
     // The height comes from the last keyboard, which can be taller than the
     // page (some Android keyboards report the full window). Let the drawer
@@ -348,11 +357,6 @@ export function createDrawer(ctx, composer) {
     css(root, 'height', px(height));
     css(root, 'bottom', px(-height * (1 - d.progress) - ctx.shrink()));
     setClass(edge, st.effects && !ctx.theme.batterySaver ? 'gc-drw-edge' : 'gc-drw-edge gc-flat');
-    ctx.drag.whenIdle(() => {
-      renderTabs();
-      renderTools();
-      renderActions();
-    });
   }
 
   return {

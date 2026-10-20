@@ -2705,7 +2705,12 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                 },
               ),
             ),
-            if (renderDrawer)
+            // Mounted even while the drawer is shut: the page builds its
+            // tabs and cards from this state, and doing that on the opening
+            // frame made the first open draw a flat sheet while the page's
+            // main thread was still building the cards. The page keeps the
+            // drawer hidden from the layout's `show`.
+            if (!isDesktopLayout(context))
               ChatDrawerHost(
                 channel: widget.chrome,
                 charId: widget.charId,

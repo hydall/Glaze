@@ -345,6 +345,31 @@ test('a drawer taller than the viewport stays below the status bar', async ({ pa
   expect(box.tab.top).toBeGreaterThanOrEqual(24);
 });
 
+test('drawer cards are built before the drawer opens', async ({ page }) => {
+  const c = await openChrome(page);
+  await c.apply({
+    drawer: {
+      show: false, tab: 0, editing: false,
+      tabs: [{ label: 'Tools', icon: { cp: 59576 } }],
+      tools: { loading: false, cards: [{ kind: 'tool', key: 'tool:a', id: 'a', label: 'Alpha', icon: { cp: 57521 } }], add: null },
+      actions: { loading: false, cards: [], add: null },
+    },
+  });
+  await page.waitForTimeout(50);
+  const closed = await page.evaluate(() => {
+    const root = window.__chromeRoot.querySelector('.gc-drw');
+    return {
+      hidden: root.classList.contains('gc-hidden'),
+      cards: window.__chromeRoot.querySelectorAll('.gc-card').length,
+    };
+  });
+  expect(closed).toEqual({ hidden: true, cards: 1 });
+  // Opening only moves what is already there; no card build can stall the
+  // first animation frame.
+  await c.apply({ layout: { ...CHROME.layout, drawer: { show: true, height: 300, progress: 0.5 } } });
+  expect(await page.evaluate(() => window.__chromeRoot.querySelectorAll('.gc-card').length)).toBe(1);
+});
+
 test('a theme layout hands a patched prototype no chrome node', async ({ page }) => {
   const c = await openChrome(page, {
     patch: () => {
