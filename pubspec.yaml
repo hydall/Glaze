@@ -71,6 +71,7 @@ flutter:
     - assets/danvitv.png
     - assets/chat_webview/
     - assets/chat_webview/bridge/
+    - assets/chat_webview/chrome/
     - assets/chat_webview/formatter/
     - assets/chat_webview/plugins/
     - assets/chat_webview/plugins/compat/

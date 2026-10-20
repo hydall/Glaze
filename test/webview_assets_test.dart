@@ -3170,6 +3170,32 @@ void main() {
       expect(stylessCss, contains('animation: typingPhaseOut 0.13s'));
     });
   });
+
+  // ─── bundled assets ──────────────────────────────────────────────────────
+  group('the asset bundle', () {
+    test('lists every WebView asset directory', () {
+      final pubspec = File('pubspec.yaml').readAsStringSync();
+      final dirs =
+          Directory('assets/chat_webview')
+              .listSync(recursive: true)
+              .whereType<Directory>()
+              .where((d) => d.listSync().any((e) => e is File))
+              .map((d) => '${d.path}/')
+              .toList()
+            ..sort();
+      for (final dir in dirs) {
+        expect(
+          pubspec,
+          contains('- $dir'),
+          reason:
+              'Flutter bundles a declared directory, not the directories '
+              'below it. A new folder without its own line leaves the page '
+              'requesting modules the APK does not carry — every chat then '
+              'waits for a JS bridge that never starts.',
+        );
+      }
+    });
+  });
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
