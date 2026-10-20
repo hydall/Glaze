@@ -28,6 +28,7 @@ import { createDrag } from './drag.js';
 import { createHeader } from './header.js';
 import { createComposer } from './composer.js';
 import { createDrawer } from './drawer.js';
+import { compile, sanitizeCss } from './template.js';
 
 const KEY_IN = S.randomToken(32);
 const KEY_OUT = S.randomToken(32);
@@ -78,6 +79,9 @@ const shadow = S.attachShadow(host, { mode: 'closed' });
 const styleEl = S.createElement('style');
 S.setTextContent(styleEl, CHROME_CSS);
 S.appendChild(shadow, styleEl);
+// A theme's own stylesheet for the chrome, after the chrome's own (applySkin).
+const skinStyleEl = S.createElement('style');
+S.appendChild(shadow, skinStyleEl);
 const rootEl = h('div', 'gc');
 S.appendChild(shadow, rootEl);
 
@@ -199,7 +203,7 @@ const ctx = {
   theme: DEFAULT_THEME,
   themeKey: '',
   layout: DEFAULT_LAYOUT,
-  pinEls: {},
+  pinEls: S.dict(),
   send(type, data) {
     S.callFlutter('onChromeIntent', KEY_OUT, S.jsonStringify({ t: type, d: data || {} }));
   },
@@ -356,6 +360,34 @@ function applyTheme(t) {
   header.render();
 }
 
+/* ---------- Theme layout ---------- */
+
+// The base every theme layout gets: a placeholder takes no box of its own,
+// and what a template leaves out is kept out of sight.
+const SKIN_BASE = 'g-part{display:contents}.g-unplaced{display:none!important}';
+let skinKey = '';
+
+/**
+ * A theme's own layout: templates for the header, the compose area and the
+ * drawer's cards and tabs, and a stylesheet (template.js, skin.js). The
+ * stylesheet is sanitised here too: it loads data: URLs only.
+ */
+function applySkin(skin) {
+  const s = skin && typeof skin === 'object' ? skin : {};
+  const str = (k) => (S.hasOwn(s, k) && typeof s[k] === 'string' ? s[k] : '');
+  const key = S.jsonStringify([str('css'), str('header'), str('composer'), str('drawerCard'), str('drawerTab')]);
+
+  if (key === skinKey) return;
+  skinKey = key;
+  const css = sanitizeCss(str('css'));
+  S.setTextContent(skinStyleEl, str('header') || str('composer') || str('drawerCard') || str('drawerTab') || css
+    ? SKIN_BASE + css : '');
+  const tpl = (k) => (str(k) ? compile(str(k)) : null);
+  header.setSkin(tpl('header'));
+  composer.setSkin(tpl('composer'));
+  drawer.setSkin(tpl('drawerCard'), tpl('drawerTab'));
+}
+
 /* ---------- Layout ---------- */
 
 function placeBottom() {
@@ -387,6 +419,10 @@ function applyLayout(l) {
   for (const k in l) layout[k] = l[k];
   const prev = ctx.layout;
   ctx.layout = layout;
+  // For theme layouts: the page and the chrome can keep their own frame while
+  // still clearing the status bar, without a gap above the window.
+  css(rootEl, '--gc-safe-top', px(layout.safeTop || 0));
+  css(rootEl, '--gc-safe-bottom', px(layout.safeBottom || 0));
   const shallow = prev.safeTop === layout.safeTop && prev.safeBottom === layout.safeBottom &&
     prev.gutter === layout.gutter && prev.desktop === layout.desktop;
   if (!shallow) {
@@ -400,6 +436,7 @@ function applyLayout(l) {
 
 function handle(msg) {
   if (msg.theme) applyTheme(msg.theme);
+  if ('skin' in msg) applySkin(msg.skin);
   if ('font' in msg) applyFont(msg.font);
   if (msg.layout) applyLayout(msg.layout);
   if (msg.header) header.apply(msg.header);

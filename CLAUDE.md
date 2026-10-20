@@ -207,6 +207,7 @@ When editing files matching a pattern below, READ the corresponding rule file FI
 | Architecture details, full flow | `docs/ARCHITECTURE.md` |
 | Formal invariants with code references | `docs/INVARIANTS.md` |
 | Message rendering — `assets/chat_webview/formatter/`, `renderer/`, `useVirtualScroll.js` | `docs/rules/message-rendering.md` + `docs/INVARIANTS.md` (INV-MR1–8) |
+| A theme's own layout (templates for messages and chrome, theme CSS) | `docs/THEME_LAYOUTS.md` |
 | Custom `==...==` markdown markers | `docs/markdown-markers.md` |
 | Windows/build failures, dependency overrides | `docs/BUILD_NOTES.md` |
 | Class/file organization, decomposition | `docs/CODE_STYLE.md` |

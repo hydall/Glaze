@@ -101,10 +101,61 @@ abstract class ThemePreset with _$ThemePreset {
     // layout-default so text stays readable over vivid background images.
     // 0.0 = fully transparent (default, preserves current look on mobile).
     @Default(0.0) double textBgOpacity,
+    // The theme's own layout: HTML templates and a stylesheet that rearrange
+    // the chat and its chrome (see docs/THEME_LAYOUTS.md and
+    // assets/chat_webview/chrome/template.js). Empty means the built-in look.
+    // Imported from a theme file's `layout` object, inline or from files in
+    // the theme archive; exported back with the rest of the preset.
+    @Default('') String layoutMessage,
+    @Default('') String layoutCss,
+    @Default('') String layoutContentCss,
+    @Default('') String layoutHeader,
+    @Default('') String layoutComposer,
+    @Default('') String layoutDrawerCard,
+    @Default('') String layoutDrawerTab,
+    @Default('') String layoutChromeCss,
   }) = _ThemePreset;
 
   factory ThemePreset.fromJson(Map<String, dynamic> json) =>
       _$ThemePresetFromJson(json);
+}
+
+/// The names of the layout parts, as a theme file's `layout` object spells
+/// them and as the preset stores them.
+const kThemeLayoutParts = <String, String>{
+  'message': 'layoutMessage',
+  'css': 'layoutCss',
+  'contentCss': 'layoutContentCss',
+  'header': 'layoutHeader',
+  'composer': 'layoutComposer',
+  'drawerCard': 'layoutDrawerCard',
+  'drawerTab': 'layoutDrawerTab',
+  'chromeCss': 'layoutChromeCss',
+};
+
+/// The preset's own layout, part by part, as the page takes it.
+extension ThemePresetLayout on ThemePreset {
+  /// The message template and stylesheet, or null when the theme has neither.
+  Map<String, String>? get messageLayout {
+    final out = <String, String>{};
+    if (layoutMessage.isNotEmpty) out['message'] = layoutMessage;
+    if (layoutCss.isNotEmpty) out['css'] = layoutCss;
+    if (layoutContentCss.isNotEmpty) out['contentCss'] = layoutContentCss;
+    return out.isEmpty ? null : out;
+  }
+
+  /// The chrome templates and its stylesheet, or null when it has none.
+  Map<String, String>? get chromeLayout {
+    final out = <String, String>{};
+    if (layoutHeader.isNotEmpty) out['header'] = layoutHeader;
+    if (layoutComposer.isNotEmpty) out['composer'] = layoutComposer;
+    if (layoutDrawerCard.isNotEmpty) out['drawerCard'] = layoutDrawerCard;
+    if (layoutDrawerTab.isNotEmpty) out['drawerTab'] = layoutDrawerTab;
+    if (layoutChromeCss.isNotEmpty) out['css'] = layoutChromeCss;
+    return out.isEmpty ? null : out;
+  }
+
+  bool get hasCustomLayout => messageLayout != null || chromeLayout != null;
 }
 
 /// Decode a preset stored/exported by an older build, migrating dropped
@@ -140,9 +191,21 @@ class BubbleGradient {
   String encode() => '${angle.round()}|${_hexOf(color1)}|${_hexOf(color2)}';
 
   static String _hexOf(Color c) {
-    final r = (c.r * 255).round().clamp(0, 255).toRadixString(16).padLeft(2, '0');
-    final g = (c.g * 255).round().clamp(0, 255).toRadixString(16).padLeft(2, '0');
-    final b = (c.b * 255).round().clamp(0, 255).toRadixString(16).padLeft(2, '0');
+    final r = (c.r * 255)
+        .round()
+        .clamp(0, 255)
+        .toRadixString(16)
+        .padLeft(2, '0');
+    final g = (c.g * 255)
+        .round()
+        .clamp(0, 255)
+        .toRadixString(16)
+        .padLeft(2, '0');
+    final b = (c.b * 255)
+        .round()
+        .clamp(0, 255)
+        .toRadixString(16)
+        .padLeft(2, '0');
     return '#$r$g$b'.toUpperCase();
   }
 }

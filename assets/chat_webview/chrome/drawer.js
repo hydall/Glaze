@@ -10,6 +10,7 @@ import { ICON } from './icons.js';
 import {
   h, css, px, text, setClass, classes, icon, drawIcon, onTap, attachTooltip, clear,
 } from './ui.js';
+import { mount } from './template.js';
 
 const HANDLE_DISTANCE = 48;
 const HANDLE_VELOCITY = 300; // px/s
@@ -27,6 +28,9 @@ export function createDrawer(ctx, composer) {
     effects: true,
   };
   const keys = ['', ''];
+  // A theme's own card and tab (template.js): drawn inside the drawer's own
+  // card and tab, which keep the taps, the drag and the edit badges.
+  const skin = { card: null, tab: null };
 
   const root = h('div', 'gc-drw gc-hidden', ctx.root);
   const body = h('div', 'gc-drw-body', root);
@@ -119,12 +123,16 @@ export function createDrawer(ctx, composer) {
       tabEls.length = 0;
       for (let i = 0; i < st.tabs.length; i++) {
         const t = st.tabs[i];
-        const tab = h('div', classes('gc-tab', { 'gc-active': i === st.tab }), tabsEl);
-        tabEls[tabEls.length] = tab;
-        const inner = h('div', 'gc-tab-inner', tab);
-        icon(t.icon, 17, inner);
-        const label = h('span', 'gc-tab-label', inner);
-        text(label, t.label);
+        const tab = h('div', classes('gc-tab', { 'gc-active': i === st.tab, 'g-skinned': !!skin.tab }), tabsEl);
+        S.put(tabEls, tab);
+        if (skin.tab) {
+          mount(skin.tab, { label: t.label || '', icon: t.icon || null, active: i === st.tab, index: i }, tab, null, {});
+        } else {
+          const inner = h('div', 'gc-tab-inner', tab);
+          icon(t.icon, 17, inner);
+          const label = h('span', 'gc-tab-label', inner);
+          text(label, t.label);
+        }
         onTap(tab, () => selectTab(i));
       }
     }
@@ -163,17 +171,32 @@ export function createDrawer(ctx, composer) {
       'gc-hovered': cardState.hovered,
       'gc-ghosted': cardState.ghosted,
       'gc-add': !!opts.add,
+      'g-skinned': !!skin.card,
     }));
     paint();
-    const row = h('div', 'gc-card-row', el);
-    icon(item.icon, 20, row);
-    const texts = h('div', 'gc-card-texts', row);
-    const label = h('div', 'gc-card-label', texts);
-    text(label, item.label);
-    if (item.status != null && item.status !== '') {
-      const status = h('div', 'gc-card-status', texts);
-      if (item.statusIcon) icon(item.statusIcon, 10, status);
-      text(h('span', 'gc-st', status), item.status);
+    if (skin.card) {
+      mount(skin.card, {
+        label: item.label || '',
+        status: item.status == null ? '' : item.status,
+        icon: item.icon || null,
+        statusIcon: item.statusIcon || null,
+        kind: opts.add ? 'add' : item.kind || '',
+        key: item.key || '',
+        add: !!opts.add,
+        editing: st.editing,
+        tab: st.tab === 0 ? 'tools' : 'actions',
+      }, el, null, {});
+    } else {
+      const row = h('div', 'gc-card-row', el);
+      icon(item.icon, 20, row);
+      const texts = h('div', 'gc-card-texts', row);
+      const label = h('div', 'gc-card-label', texts);
+      text(label, item.label);
+      if (item.status != null && item.status !== '') {
+        const status = h('div', 'gc-card-status', texts);
+        if (item.statusIcon) icon(item.statusIcon, 10, status);
+        text(h('span', 'gc-st', status), item.status);
+      }
     }
     if (st.editing && item.badge) {
       badge(el, item.badge, () => opts.onBadge && opts.onBadge());
@@ -307,7 +330,7 @@ export function createDrawer(ctx, composer) {
     const layout = ctx.layout;
     const d = layout.drawer || {};
     const visible = st.show && d.show;
-    setClass(root, visible ? 'gc-drw' : 'gc-drw gc-hidden');
+    setClass(root, classes(visible ? 'gc-drw' : 'gc-drw gc-hidden', { 'g-skinned': !!(skin.card || skin.tab) }));
     if (!visible) return;
     css(root, 'left', px(layout.gutter));
     css(root, 'right', px(layout.gutter));
@@ -328,6 +351,15 @@ export function createDrawer(ctx, composer) {
     },
     render,
     themeChanged() {
+      keys[0] = '';
+      keys[1] = '';
+      tabsKey = '';
+      render();
+    },
+    setSkin(card, tab) {
+      skin.card = card && !card.empty ? card : null;
+      skin.tab = tab && !tab.empty ? tab : null;
+      setClass(root, classes(st.show && (ctx.layout.drawer || {}).show ? 'gc-drw' : 'gc-drw gc-hidden', { 'g-skinned': !!(skin.card || skin.tab) }));
       keys[0] = '';
       keys[1] = '';
       tabsKey = '';

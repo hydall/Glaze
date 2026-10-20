@@ -16,6 +16,13 @@ import {
   roleKey,
 } from './message_template.js';
 import { SHADOW_STYLE } from './shadow_style.js';
+import {
+  applyContentStyle,
+  applyMessageLayout,
+  hasMessageLayout,
+  messageData as layoutData,
+  refreshMessageLayout,
+} from './theme_layout.js';
 import { DEFAULT_TYPING_TEXT } from './typing_phase.js';
 
 /* ============================================================
@@ -145,6 +152,7 @@ export class Renderer {
     if (messageData.greetingIndex != null) section.dataset.greetingId = String(messageData.greetingIndex);
 
     const classes = ['message-section', this._roleKey(role), `layout-${layout}`];
+    if (hasMessageLayout()) classes.push('layout-themed');
     if (isError) classes.push('error');
     if (isHidden) classes.push('msg-hidden');
 if (messageData.isEditing) classes.push('editing');
@@ -227,6 +235,10 @@ if (messageData.isEditing) classes.push('editing');
     if (contextRule && this.contextStartAfter) {
       section.appendChild(this.createContextLimitMarker(true));
     }
+
+    // A theme's own layout moves the pieces built above (theme_layout.js).
+    const name = messageData.displayName || messageData.personaName || this._getDefaultName(role);
+    applyMessageLayout(section, layoutData(messageData, window.bridge || null, name));
 
     // Avatars and attachments are the message's light-DOM pictures, so the
     // body's own pass (writeShadowContent) never sees them.
@@ -797,6 +809,7 @@ if (messageData.isEditing) classes.push('editing');
       root.className = 'glaze-message';
       shadow.appendChild(root);
     }
+    applyContentStyle(host);
     return host;
   }
 
@@ -875,6 +888,7 @@ if (messageData.isEditing) classes.push('editing');
           } else {
             sectionEl.querySelector('.msg-reasoning')?.remove();
           }
+          refreshMessageLayout(sectionEl, { text, reasoning, isTyping });
           return;
         }
       }
@@ -922,6 +936,8 @@ if (messageData.isEditing) classes.push('editing');
       reasoningEl.remove();
     }
 
+    refreshMessageLayout(sectionEl, { text, reasoning, isTyping });
+
     if (animate) {
       sectionEl.classList.add('swipe-animating');
       const dir = sectionEl.dataset.swipeDirection || 'left';
@@ -948,6 +964,7 @@ if (messageData.isEditing) classes.push('editing');
   }
 
   updateMessageMeta(sectionEl, msg) {
+    refreshMessageLayout(sectionEl, msg);
     // In-game clock: the ledger stamps the message after the turn, so the
     // element usually appears (or updates) via this live path rather than at
     // initial render.

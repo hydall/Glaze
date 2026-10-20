@@ -8,6 +8,7 @@
 import * as S from './safe.js';
 import { ICON as I } from './icons.js';
 import { h, css, px, text, rgba, setClass, classes, icon, glass, attachGlow, applyNoise, onTap, attachTooltip } from './ui.js';
+import { createSkin } from './skin.js';
 
 const ICON = {
   back: I.arrow_back_ios_new_rounded,
@@ -105,6 +106,49 @@ export function createHeader(ctx) {
   icon(ICON.search, 24, searchBtn);
   onTap(searchBtn, () => openMobile());
 
+  // A theme's own layout of the bar (skin.js).
+  const skin = createSkin(bar.content, {
+    back: lead,
+    title: titleBox,
+    // The block as the bar lays it out: on a phone it takes the free width,
+    // on desktop it hugs, and it holds the inline search field.
+    character: desk,
+    avatar,
+    name,
+    session,
+    search: actions,
+  }, [
+    [bar.content, [lead, titleBox, actions]],
+    [desk, [charBlock, deskField]],
+    [charBlock, [avatar, texts, deskToggle]],
+    [texts, [name, session]],
+  ], {
+    back: () => ctx.send('back'),
+    character: () => ctx.send('openCharCard'),
+    avatar: () => {
+      if (state.avatar && state.avatar.url) ctx.send('openAvatar');
+    },
+    search: () => {
+      if (!state.search) return;
+      if (state.search.kind === 'desktop') openDesktop();
+      else openMobile();
+    },
+    closeSearch: () => closeSearch(),
+  });
+
+  function skinData() {
+    const a = state.avatar || {};
+    const s = state.search;
+    return {
+      title: state.title || '',
+      session: state.session || '',
+      avatar: { url: a.url || '', initial: a.initial || '?' },
+      search: { available: !!s, open: searchOpen(), desktop: !!(s && s.kind === 'desktop') },
+      flush: !!state.flush,
+      hidden: !!state.hidden,
+    };
+  }
+
   function openMobile() {
     localOpen = 'mobile';
     S.setInputValue(input, '');
@@ -139,7 +183,7 @@ export function createHeader(ctx) {
   function render() {
     const theme = ctx.theme;
     const layout = ctx.layout;
-    setClass(slot, classes('gc-hdr-slot', { 'gc-hidden': !state.show }));
+    setClass(slot, classes('gc-hdr-slot', { 'gc-hidden': !state.show, 'g-skinned': skin.active }));
     if (!state.show) return;
     const top = state.flush ? layout.safeTop : layout.safeTop + 10;
     css(slot, 'padding', state.flush
@@ -202,6 +246,7 @@ export function createHeader(ctx) {
     // while the field is open — GlazeAppBar keeps its 4px tail either way.
     setClass(searchBtn, classes('gc-iconbtn', { 'gc-hidden': desktop || !s || mobileOpen }));
 
+    skin.update(skinData());
     const r = S.getBoundingClientRect(bar.el);
     applyNoise(bar, theme, r.width, r.height);
     ctx.scheduleReport();
@@ -224,6 +269,11 @@ export function createHeader(ctx) {
       render();
     },
     render,
+    setSkin(tpl) {
+      skin.set(tpl);
+      setClass(slot, classes('gc-hdr-slot', { 'gc-hidden': !state.show, 'g-skinned': skin.active }));
+      render();
+    },
     report(out) {
       if (!state.show) return;
       out.header = ctx.rect(bar.el);

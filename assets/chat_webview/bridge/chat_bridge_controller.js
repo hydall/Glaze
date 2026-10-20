@@ -29,6 +29,7 @@ const USER_SCROLL_INPUT_WINDOW_MS = 1000;
 import { ICON } from '../renderer/icon_library.js';
 import { applyTypingPhase } from '../renderer/typing_phase.js';
 import { retryFailedLocalImages } from '../renderer/local_image_retry.js';
+import { refreshMessageLayout, setMessageLayout } from '../renderer/theme_layout.js';
 
 /* Id of the virtual typing placeholder. It is not a persisted message: Flutter
  * owns one constant id for it and the page keeps it pinned to the tail, so a
@@ -178,6 +179,7 @@ export class Bridge {
 
       const label = section.querySelector('.msg-name-label');
       if (label) label.textContent = newName;
+      refreshMessageLayout(section, { name: newName, avatarUrl: newAvatarUrl || '' });
 
       const avatar = section.querySelector('.msg-avatar');
       if (!avatar) return;
@@ -1289,6 +1291,7 @@ export class Bridge {
     const prevLast = document.querySelector('.message-section[data-is-last="true"]');
     if (prevLast) {
       delete prevLast.dataset.isLast;
+      refreshMessageLayout(prevLast, { isLast: false });
       const center = prevLast.querySelector('.msg-center-controls');
       if (center) {
         center.querySelector('.msg-regenerate')?.remove();
@@ -1299,6 +1302,7 @@ export class Bridge {
     const newLast = document.querySelector(`[data-message-id="${newLastId}"]`);
     if (!newLast) return;
     newLast.dataset.isLast = 'true';
+    refreshMessageLayout(newLast, { isLast: true });
 
     // For user messages: inject regen button directly into DOM
     if (newLast.classList.contains('user')) {
@@ -1463,6 +1467,22 @@ export class Bridge {
       if (fontFamily) root.style.setProperty('--font-family', fontFamily);
       else root.style.removeProperty('--font-family');
     }
+  }
+
+  /* A theme's own layout: its message template and its stylesheet for the
+   * page (renderer/theme_layout.js). Every section is laid out again in place,
+   * the ones the list has not mounted included. Returns the template's
+   * problems, for Flutter to log. */
+  setThemeLayout(layoutJson) {
+    let layout = null;
+    try { layout = layoutJson ? JSON.parse(layoutJson) : null; } catch (_) { layout = null; }
+    const sections = this.virtualList
+      ? this.virtualList.items.map((it) => it.el)
+      : Array.from(document.querySelectorAll('.message-section'));
+    const anchor = this.virtualList ? this.virtualList.captureAnchor() : null;
+    const errors = setMessageLayout(layout, sections);
+    if (anchor) this.virtualList.restoreAnchor(anchor);
+    return errors;
   }
 
   _normalizeLayout(layout) {

@@ -356,6 +356,9 @@ class ChatWebViewSyncDispatcher {
     required ChatWebViewWidgetFields old,
     required ChatWebViewWidgetFields current,
   }) {
+    if (current.themeLayout != old.themeLayout) {
+      unawaited(bridge.setThemeLayout(current.themeLayout));
+    }
     if (current.themeSyncKey != old.themeSyncKey ||
         current.chatLayout != old.chatLayout ||
         current.elementOpacity != old.elementOpacity ||
@@ -708,6 +711,7 @@ class ChatWebViewWidgetFields {
     required this.searchCurrentIndex,
     this.searchRevision = 0,
     required this.chatLayout,
+    required this.themeLayout,
     required this.themeSyncKey,
     required this.elementOpacity,
     required this.elementBlur,
@@ -777,6 +781,9 @@ class ChatWebViewWidgetFields {
   /// list. See [ChatWebViewSyncResult.rehighlightSearch].
   final int searchRevision;
   final String? chatLayout;
+
+  /// The theme's own message layout as JSON; null for the built-in one.
+  final String? themeLayout;
   final String? themeSyncKey;
   final double elementOpacity;
   final double elementBlur;

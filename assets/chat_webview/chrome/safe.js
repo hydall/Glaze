@@ -32,7 +32,26 @@ const doc = document;
 const win = window;
 
 export const freeze = Object.freeze;
-export const defineProperty = Object.defineProperty;
+export const hasOwn = uncurry(Object.prototype.hasOwnProperty);
+const objectCreate = Object.create;
+const definePropertyRaw = Object.defineProperty;
+/** An object with no prototype: no setter or getter of anyone else's in it. */
+export const dict = () => objectCreate(null);
+export const charCodeAt = uncurry(String.prototype.charCodeAt);
+/**
+ * Appends [value] to [list] as its own property. `list[list.length] = value`
+ * would not do: a setter a message script put on Array.prototype for that
+ * index would be handed the value.
+ */
+export function put(list, value) {
+  definePropertyRaw(list, list.length, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
+}
+export const defineProperty = definePropertyRaw;
 export const jsonParse = JSON.parse;
 export const jsonStringify = JSON.stringify;
 export const mathMax = Math.max;

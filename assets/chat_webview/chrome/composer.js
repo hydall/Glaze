@@ -16,6 +16,7 @@ import {
   h, css, px, text, rgba, setClass, classes, icon, drawIcon, iconKey, glass, attachGlow,
   applyNoise, onTap, attachPress, attachTooltip, clear, detach,
 } from './ui.js';
+import { createSkin } from './skin.js';
 
 const DISMISS_DRAG_PX = 28;
 
@@ -92,7 +93,7 @@ export function createComposer(ctx) {
   let sendBadge = null;
   attachPress(sendBtn, ctx, () => !!(st.send && st.send.tap));
   attachTooltip(sendWrap, ctx, () => (st.send && st.send.slot && st.send.hint) || '');
-  onTap(sendBtn, () => {
+  function tapSend() {
     if (!st.send || !st.send.tap) return;
     // The empty composer's button may be assigned an insert action: typed
     // here, inside the tap, so the keyboard comes up with it.
@@ -101,7 +102,8 @@ export function createComposer(ctx) {
       return;
     }
     ctx.send('sendTap', { v: S.getValue(input), g: S.getValue(guideInput) });
-  });
+  }
+  onTap(sendBtn, tapSend);
   ctx.drag.target(sendWrap, {
     group: 'send',
     depth: 3,
@@ -111,6 +113,50 @@ export function createComposer(ctx) {
     leave: () => setClass(sendWrap, 'gc-send-wrap'),
     drop: (payload) => ctx.send('assignEmpty', { key: payload }),
   });
+
+  // A theme's own layout of the compose area (skin.js).
+  const skin = createSkin(compose, {
+    attachments: atts,
+    pill: pill.el,
+    guidance: guide,
+    input,
+    row,
+    pins,
+    send: sendWrap,
+  }, [
+    [compose, [atts, pill.el, row]],
+    [pill.content, [guide, input]],
+    [row, [pins, sendWrap]],
+  ], {
+    send: () => tapSend(),
+    focus: () => {
+      if (!st.locked) S.focusRaw(input);
+    },
+  });
+  let skinHasText = null;
+
+  function skinData() {
+    const list = st.pins || [];
+    const pinData = [];
+    for (let i = 0; i < list.length; i++) pinData[pinData.length] = { key: list[i].key, icon: list[i].icon || null };
+    return {
+      placeholder: st.placeholder || '',
+      hasText: S.getValue(input) !== '',
+      locked: !!st.locked,
+      readOnly: !!st.readOnly,
+      editing: !!st.editing,
+      guidance: !!st.guidance,
+      attachments: (st.attachments || []).length,
+      pins: pinData,
+      send: { icon: (st.send && st.send.icon) || null, enabled: !!(st.send && st.send.tap) },
+    };
+  }
+
+  function updateSkin() {
+    if (!skin.active) return;
+    skinHasText = S.getValue(input) !== '';
+    skin.update(skinData());
+  }
 
   /* ---- Search / selection bar ---- */
   const barPill = glass('gc-pill', root);
@@ -148,6 +194,7 @@ export function createComposer(ctx) {
 
   S.on(input, 'input', (e) => {
     growAll();
+    if (skin.active && (S.getValue(input) !== '') !== skinHasText) updateSkin();
     if (!e.isTrusted) return;
     ctx.send('text', { v: S.getValue(input) });
   });
@@ -310,7 +357,7 @@ export function createComposer(ctx) {
     st.pinsKey = key;
     clear(pinsInner);
     ctx.drag.removeGroup('pins');
-    ctx.pinEls = {};
+    ctx.pinEls = S.dict();
     const list = st.pins || [];
     // An empty row still takes its share of the width, so the send button
     // keeps its place at the end (the Expanded around a SizedBox.shrink).
@@ -325,6 +372,8 @@ export function createComposer(ctx) {
     for (let i = 0; i < list.length; i++) {
       const pin = list[i];
       const cell = h('div', 'gc-pin', pinsInner);
+      // For theme layouts: which action a pin is, without exposing its label.
+      S.setAttribute(cell, 'data-pin', pin.key);
       ctx.pinEls[pin.key] = cell;
       const surface = circle(cell, pin.icon, pinColor(pin), () => !st.editing && !!pin.tap, () => {
         if (pin.insert) insertSurround(pin.insert);
@@ -463,7 +512,7 @@ export function createComposer(ctx) {
     // The search and selection bars sit in a SafeArea of their own on top of
     // the inset the whole composer rides on, as ChatInputBar's did.
     css(root, 'padding-bottom', px(16 + (barMode ? st.extraBottom : 0)));
-    setClass(compose, barMode ? 'gc-hidden' : '');
+    setClass(compose, classes(barMode ? 'gc-hidden' : '', { 'g-skinned': skin.active }));
     setClass(barPill.el, barMode ? 'gc-glass gc-pill' : 'gc-glass gc-pill gc-hidden');
 
     const radius = px(28 * theme.cornerScale);
@@ -523,6 +572,7 @@ export function createComposer(ctx) {
 
     renderPins();
     renderSend();
+    updateSkin();
     growAll();
     const r = S.getBoundingClientRect(pill.el);
     applyNoise(pill, theme, r.width, r.height);
@@ -548,7 +598,14 @@ export function createComposer(ctx) {
         const end = value.length;
         if (hadSelection) S.setSelectionRange(input, end, end);
       }
+      updateSkin();
       growAll();
+    },
+    setSkin(tpl) {
+      skin.set(tpl);
+      setClass(compose, skin.active ? 'g-skinned' : '');
+      updateSkin();
+      render();
     },
     setGuidanceText(value) {
       if (S.getValue(guideInput) !== value) S.setValue(guideInput, value);

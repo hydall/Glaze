@@ -29,8 +29,7 @@ import '../../core/state/studio_turn_config_resolver.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/shell/desktop/desktop_layout_provider.dart'
     show isDesktopLayout;
-import '../../shared/shell/shell_header_provider.dart'
-    show DetachedShellHost;
+import '../../shared/shell/shell_header_provider.dart' show DetachedShellHost;
 import '../../shared/shell/title_bar_header.dart';
 import 'widgets/chat_column_width.dart';
 import 'widgets/chat_header_search.dart';
@@ -209,9 +208,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       'back': (_) => _handleBack(),
       'openCharCard': (_) => unawaited(_showCharacterCard(widget.charId)),
       'openAvatar': (_) {
-        final path = ref
-            .read(characterByIdProvider(widget.charId))
-            ?.avatarPath;
+        final path = ref.read(characterByIdProvider(widget.charId))?.avatarPath;
         if (path != null && path.isNotEmpty) _showAvatarViewer(path);
       },
       'searchOpen': (_) {
@@ -676,6 +673,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       themeProvider.select((t) => t.activePreset),
     );
     final desktop = isDesktopLayout(context);
+    _chrome.set('skin', preset.chromeLayout);
     _chrome.set(
       'theme',
       chromeTheme(
@@ -824,28 +822,31 @@ class _ChatScrollButton extends StatelessWidget {
           duration: const Duration(milliseconds: 180),
           curve: Curves.easeOutCubic,
           offset: visible ? Offset.zero : const Offset(0, 0.2),
-          child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
-            onTap: onTap,
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: context.cs.surface.withValues(alpha: 0.9),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.08),
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.22),
-                    blurRadius: 18,
-                    offset: const Offset(0, 8),
+          child: MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              onTap: onTap,
+              child: Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: context.cs.surface.withValues(alpha: 0.9),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.08),
                   ),
-                ],
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.22),
+                      blurRadius: 18,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: Icon(icon, color: context.cs.primary, size: 26),
               ),
-              child: Icon(icon, color: context.cs.primary, size: 26),
             ),
-          )),
+          ),
         ),
       ),
     );
@@ -1051,8 +1052,6 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
       ),
     );
   }
-
-
 
   /// Keyboard-inset settle tracking for the WebView-bound bottom inset.
   /// While the keyboard animates, the WebView receives the predicted end
@@ -2010,6 +2009,9 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                         personaName: effectivePersona?.name,
                         greetingTotal: greetingTotal,
                         chatLayout: preset.chatLayout,
+                        themeLayout: preset.messageLayout == null
+                            ? null
+                            : jsonEncode(preset.messageLayout),
                         themeSyncKey: _chatWebViewThemeSyncKey(
                           preset,
                           preset.chatLayout,
@@ -2405,135 +2407,136 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                 holes: ref.watch(pluginHolesProvider(widget.charId)),
                 enabled: !pluginLayerSupported(),
                 child: Stack(
-                children: [
-                  // The scroll-to-bottom button. Mirror Vue ChatInput
-                  // (`v-if="!isSearchMode"`): it is suppressed while searching.
-                  Positioned(
-                    right: 16,
-                    bottom: messageListBottom + 16,
-                    child: _ChatScrollButton(
-                      visible: showScrollBtn,
-                      icon: Icons.keyboard_arrow_down_rounded,
-                      onTap: _scrollToBottom,
-                    ),
-                  ),
-                  // Context coverage panel: memory + lorebook for the next prompt.
-                  // It sits under the header, separated by [kContextCardHeaderGap],
-                  // and rides the header's own hide-on-scroll animation (same curve,
-                  // same pixel travel — see
-                  // [kGlazeHeaderHideDuration]), so the two slide away and come back
-                  // as one unit. It cannot live inside GlazeScaffold's header itself:
-                  // its measured height is what insets the top of the message list
-                  // (see [_contextCardHeight]), and that measurement belongs to this
-                  // body. The animation wrappers stay OUTSIDE the size notifier so
-                  // the reserved space is the panel's natural height — the reserve
-                  // does not collapse while the header is hidden, exactly like the
-                  // header's own reserved strip.
-                  if (showContextCard)
+                  children: [
+                    // The scroll-to-bottom button. Mirror Vue ChatInput
+                    // (`v-if="!isSearchMode"`): it is suppressed while searching.
                     Positioned(
-                      top: messageListTop + kContextCardHeaderGap,
-                      left: 12,
-                      right: 12,
-                      child: IgnorePointer(
-                        ignoring: widget.isHeaderHidden,
-                        child: AnimatedSlide(
-                          offset: widget.isHeaderHidden
-                              ? Offset(
-                                  0,
-                                  -glazeHeaderHideSlideFor(
-                                    // The panel is anchored below the header, one
-                                    // gap down: `messageListTop` (safe-area top +
-                                    // 10px padding + the 56px app bar) plus that gap
-                                    // is how far it has to travel to clear it.
-                                    headerHeight:
-                                        messageListTop + kContextCardHeaderGap,
-                                    overlayHeight: _contextCardHeight,
-                                  ),
-                                )
-                              : Offset.zero,
-                          duration: kGlazeHeaderHideDuration,
-                          curve: kGlazeHeaderHideCurve,
-                          child: AnimatedOpacity(
-                            opacity: widget.isHeaderHidden ? 0.0 : 1.0,
+                      right: 16,
+                      bottom: messageListBottom + 16,
+                      child: _ChatScrollButton(
+                        visible: showScrollBtn,
+                        icon: Icons.keyboard_arrow_down_rounded,
+                        onTap: _scrollToBottom,
+                      ),
+                    ),
+                    // Context coverage panel: memory + lorebook for the next prompt.
+                    // It sits under the header, separated by [kContextCardHeaderGap],
+                    // and rides the header's own hide-on-scroll animation (same curve,
+                    // same pixel travel — see
+                    // [kGlazeHeaderHideDuration]), so the two slide away and come back
+                    // as one unit. It cannot live inside GlazeScaffold's header itself:
+                    // its measured height is what insets the top of the message list
+                    // (see [_contextCardHeight]), and that measurement belongs to this
+                    // body. The animation wrappers stay OUTSIDE the size notifier so
+                    // the reserved space is the panel's natural height — the reserve
+                    // does not collapse while the header is hidden, exactly like the
+                    // header's own reserved strip.
+                    if (showContextCard)
+                      Positioned(
+                        top: messageListTop + kContextCardHeaderGap,
+                        left: 12,
+                        right: 12,
+                        child: IgnorePointer(
+                          ignoring: widget.isHeaderHidden,
+                          child: AnimatedSlide(
+                            offset: widget.isHeaderHidden
+                                ? Offset(
+                                    0,
+                                    -glazeHeaderHideSlideFor(
+                                      // The panel is anchored below the header, one
+                                      // gap down: `messageListTop` (safe-area top +
+                                      // 10px padding + the 56px app bar) plus that gap
+                                      // is how far it has to travel to clear it.
+                                      headerHeight:
+                                          messageListTop +
+                                          kContextCardHeaderGap,
+                                      overlayHeight: _contextCardHeight,
+                                    ),
+                                  )
+                                : Offset.zero,
                             duration: kGlazeHeaderHideDuration,
                             curve: kGlazeHeaderHideCurve,
-                            child:
-                                NotificationListener<
-                                  SizeChangedLayoutNotification
-                                >(
-                                  onNotification: (n) {
-                                    WidgetsBinding.instance
-                                        .addPostFrameCallback(
-                                          (_) => _checkHeight(),
-                                        );
-                                    return true;
-                                  },
-                                  child: SizeChangedLayoutNotifier(
-                                    child: Container(
-                                      key: _contextCardKey,
-                                      child: ContextCoverageCard(
-                                        charId: widget.charId,
-                                        memory: hasMemoryActivity
-                                            ? memoryActivity
-                                            : null,
-                                        expanded: _contextCardExpanded,
-                                        sessionId: widget.state.session?.id,
-                                        onToggle: () {
-                                          setState(() {
-                                            _contextCardExpanded =
-                                                !_contextCardExpanded;
-                                          });
-                                        },
+                            child: AnimatedOpacity(
+                              opacity: widget.isHeaderHidden ? 0.0 : 1.0,
+                              duration: kGlazeHeaderHideDuration,
+                              curve: kGlazeHeaderHideCurve,
+                              child:
+                                  NotificationListener<
+                                    SizeChangedLayoutNotification
+                                  >(
+                                    onNotification: (n) {
+                                      WidgetsBinding.instance
+                                          .addPostFrameCallback(
+                                            (_) => _checkHeight(),
+                                          );
+                                      return true;
+                                    },
+                                    child: SizeChangedLayoutNotifier(
+                                      child: Container(
+                                        key: _contextCardKey,
+                                        child: ContextCoverageCard(
+                                          charId: widget.charId,
+                                          memory: hasMemoryActivity
+                                              ? memoryActivity
+                                              : null,
+                                          expanded: _contextCardExpanded,
+                                          sessionId: widget.state.session?.id,
+                                          onToggle: () {
+                                            setState(() {
+                                              _contextCardExpanded =
+                                                  !_contextCardExpanded;
+                                            });
+                                          },
+                                        ),
                                       ),
                                     ),
                                   ),
-                                ),
+                            ),
                           ),
                         ),
                       ),
+                    // POST-cleaner live status card. Rendered AFTER the memory activity
+                    // card so it sits ABOVE it in z-order — the Stop button must stay
+                    // clickable even when the memory card is visible underneath.
+                    Positioned(
+                      left: 12,
+                      right: 12,
+                      top: contextCardBottom,
+                      child: const PostCleanerStatusCard(),
                     ),
-                  // POST-cleaner live status card. Rendered AFTER the memory activity
-                  // card so it sits ABOVE it in z-order — the Stop button must stay
-                  // clickable even when the memory card is visible underneath.
-                  Positioned(
-                    left: 12,
-                    right: 12,
-                    top: contextCardBottom,
-                    child: const PostCleanerStatusCard(),
-                  ),
-                  // Studio tracker-cycle live status card. Shown during generation
-                  // while Studio trackers / final generator are running.
-                  Positioned(
-                    left: 12,
-                    right: 12,
-                    top: contextCardBottom + 56,
-                    child: const StudioStatusCard(),
-                  ),
-                  // Post-generation tasks (Ledger and extension blocks) live status.
-                  Positioned(
-                    left: 12,
-                    right: 12,
-                    top: contextCardBottom + 112,
-                    child: PostGenStatusCard(
-                      sessionId: widget.state.session?.id,
+                    // Studio tracker-cycle live status card. Shown during generation
+                    // while Studio trackers / final generator are running.
+                    Positioned(
+                      left: 12,
+                      right: 12,
+                      top: contextCardBottom + 56,
+                      child: const StudioStatusCard(),
                     ),
-                  ),
-                  // Scroll-to-top: stacked directly above the scroll-to-bottom
-                  // button in the bottom-right corner. It is gated on the header's
-                  // own hide-on-scroll (`!widget.isHeaderHidden`), so a downward
-                  // scroll takes it away with the header and an upward one brings it
-                  // back. Suppressed while searching, like the bottom button.
-                  Positioned(
-                    right: 16,
-                    bottom: messageListBottom + 16 + 44 + 8,
-                    child: _ChatScrollButton(
-                      visible: showScrollTopBtn,
-                      icon: Icons.keyboard_arrow_up_rounded,
-                      onTap: _scrollToTop,
+                    // Post-generation tasks (Ledger and extension blocks) live status.
+                    Positioned(
+                      left: 12,
+                      right: 12,
+                      top: contextCardBottom + 112,
+                      child: PostGenStatusCard(
+                        sessionId: widget.state.session?.id,
+                      ),
                     ),
-                  ),
-                ],
-              ),
+                    // Scroll-to-top: stacked directly above the scroll-to-bottom
+                    // button in the bottom-right corner. It is gated on the header's
+                    // own hide-on-scroll (`!widget.isHeaderHidden`), so a downward
+                    // scroll takes it away with the header and an upward one brings it
+                    // back. Suppressed while searching, like the bottom button.
+                    Positioned(
+                      right: 16,
+                      bottom: messageListBottom + 16 + 44 + 8,
+                      child: _ChatScrollButton(
+                        visible: showScrollTopBtn,
+                        icon: Icons.keyboard_arrow_up_rounded,
+                        onTap: _scrollToTop,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
             // The composer and the drawer are drawn by the page; these keep
@@ -2724,4 +2727,3 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
     );
   }
 }
-

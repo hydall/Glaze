@@ -212,10 +212,18 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
     }
 
     if (isTavo) {
-      return _fromTavoThemeJson(json, archive: archive);
+      return _withLayout(
+        _fromTavoThemeJson(json, archive: archive),
+        json,
+        archive,
+      );
     }
-    if (isMoonlit) return _fromMoonlitThemeJson(json);
-    if (isSillyTavern) return _fromSillyTavernThemeJson(json);
+    if (isMoonlit) {
+      return _withLayout(_fromMoonlitThemeJson(json), json, archive);
+    }
+    if (isSillyTavern) {
+      return _withLayout(_fromSillyTavernThemeJson(json), json, archive);
+    }
 
     final id = 'imported_${DateTime.now().millisecondsSinceEpoch}';
     final name = json['name'] as String? ?? 'Imported Theme';
@@ -228,7 +236,96 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
     stripped['id'] = id;
     stripped['name'] = name;
 
-    return themePresetFromStoredJson(stripped);
+    return _withLayout(themePresetFromStoredJson(stripped), json, archive);
+  }
+
+  /// A layout part larger than this is dropped rather than imported: the page
+  /// refuses templates over 128 KiB, and a theme file has no business carrying
+  /// more than a few screens of markup.
+  static const _maxLayoutPart = 256 * 1024;
+
+  /// Attaches the theme's own layout (docs/THEME_LAYOUTS.md). Each part is
+  /// either written inline or is the path of a file in the theme archive.
+  ThemePreset _withLayout(
+    ThemePreset preset,
+    Map<String, dynamic> json,
+    Archive? archive,
+  ) {
+    final raw = json['layout'];
+    if (raw is! Map) return preset;
+    final chrome = _asMap(raw['chrome']);
+
+    String part(Object? value) {
+      if (value is! String) return '';
+      final text = _resolveLayoutText(value, archive);
+      if (text == null || text.length > _maxLayoutPart) return '';
+      return text;
+    }
+
+    // Flat layout fields (what export writes) win for any part the nested
+    // object does not spell out.
+    String pick(List<Object?> values, String current) {
+      for (final value in values) {
+        if (value != null) return part(value);
+      }
+      return current;
+    }
+
+    return preset.copyWith(
+      layoutMessage: pick([raw['message']], preset.layoutMessage),
+      layoutCss: pick([raw['css']], preset.layoutCss),
+      layoutContentCss: pick([
+        raw['contentCss'],
+        chrome['contentCss'],
+      ], preset.layoutContentCss),
+      layoutHeader: pick([
+        raw['header'],
+        chrome['header'],
+      ], preset.layoutHeader),
+      layoutComposer: pick([
+        raw['composer'],
+        chrome['composer'],
+      ], preset.layoutComposer),
+      layoutDrawerCard: pick([
+        raw['drawerCard'],
+        chrome['card'],
+      ], preset.layoutDrawerCard),
+      layoutDrawerTab: pick([
+        raw['drawerTab'],
+        chrome['tab'],
+      ], preset.layoutDrawerTab),
+      layoutChromeCss: pick([
+        raw['chromeCss'],
+        chrome['css'],
+      ], preset.layoutChromeCss),
+    );
+  }
+
+  /// A layout part: the file's text when [value] names a file in [archive],
+  /// otherwise the value itself. Null for a path that is not in the archive.
+  String? _resolveLayoutText(String value, Archive? archive) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return null;
+    if (archive != null) {
+      final entry =
+          archive.findFile(trimmed.replaceAll('\\', '/')) ??
+          archive.findFile(trimmed.split('/').last);
+      if (entry != null && entry.isFile) {
+        return utf8.decode(entry.content as List<int>);
+      }
+    }
+    // Inline text: markup, CSS or a template expression has these.
+    if (trimmed.contains('<') ||
+        trimmed.contains('{') ||
+        trimmed.contains('\n')) {
+      return value;
+    }
+    // A path (the archive could not resolve it, or there is no archive).
+    if (trimmed.length < 260 &&
+        RegExp(r'^[\w.\- /]+\.[a-z0-9]+$').hasMatch(trimmed)) {
+      return null;
+    }
+    return value;
   }
 
   bool _isSillyTavernTheme(Map<String, dynamic> json) {

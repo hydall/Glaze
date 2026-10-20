@@ -26,6 +26,7 @@ export function createDrag(ctx) {
 
   // Plain index loops throughout: an array method patched by a message
   // script would be handed these arrays, and with them the chrome's nodes.
+  // Appending goes through S.put for the same reason.
   function removeGroup(group) {
     let w = 0;
     for (let i = 0; i < targets.length; i++) {
@@ -35,7 +36,7 @@ export function createDrag(ctx) {
   }
 
   function target(el, opts) {
-    targets[targets.length] = {
+    S.put(targets, {
       el,
       group: opts.group,
       depth: opts.depth || 0,
@@ -43,7 +44,7 @@ export function createDrag(ctx) {
       enter: opts.enter || (() => {}),
       leave: opts.leave || (() => {}),
       drop: opts.drop,
-    };
+    });
   }
 
   function hit(x, y, payload) {
@@ -114,7 +115,7 @@ export function createDrag(ctx) {
     if (d.opts.ghosted) d.opts.ghosted(false);
     if (d.opts.end) d.opts.end();
     const run = [];
-    for (let i = 0; i < deferred.length; i++) run[i] = deferred[i];
+    for (let i = 0; i < deferred.length; i++) S.put(run, deferred[i]);
     deferred.length = 0;
     for (let i = 0; i < run.length; i++) run[i]();
   }
@@ -203,7 +204,7 @@ export function createDrag(ctx) {
     },
     /** Runs [fn] now, or once the drag in flight has ended. */
     whenIdle(fn) {
-      if (drag) deferred[deferred.length] = fn;
+      if (drag) S.put(deferred, fn);
       else fn();
     },
     cancel() {

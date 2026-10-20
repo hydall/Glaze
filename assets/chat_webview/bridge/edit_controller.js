@@ -1,4 +1,6 @@
 ﻿/* Extracted from ../bridge.legacy.js. Keep public behavior stable. */
+import { refreshMessageLayout } from '../renderer/theme_layout.js';
+
 
 import { WHEEL_PIXEL_SCALE } from './scroll_relay.js';
 
@@ -31,6 +33,7 @@ export class EditController {
 
     const scrollPos = scrollTopFn();
     section.classList.add('editing');
+    _refreshLayout(section, true);
 
     // Edit the stored text, not the rendering. `rawText` holds the display
     // form — macros expanded and display regexes applied — so saving from it
@@ -224,6 +227,7 @@ export class EditController {
     const section = document.querySelector(`[data-message-id="${messageId}"]`);
     if (!section) return;
     section.classList.remove('editing');
+    _refreshLayout(section, false);
 
     // Do NOT restore from originalHtml — innerHTML does not serialise shadow
     // roots, so the snapshot captured in startEdit() is always empty for
@@ -280,4 +284,11 @@ export class EditController {
     if (e.deltaMode === 1) return e.deltaY * 16;
     return e.deltaY * textarea.clientHeight;
   }
+}
+
+/// A theme's layout can show its own Save/Cancel row instead of the footer.
+function _refreshLayout(section, editing) {
+  try {
+    refreshMessageLayout(section, { isEditing: editing });
+  } catch (_) { /* no layout, nothing to refresh */ }
 }

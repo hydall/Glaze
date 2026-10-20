@@ -39,9 +39,7 @@ class ThemeBridgeCommands {
     // may contain characters that the lightweight escape helper doesn't
     // handle.
     final encoded = jsonEncode(url);
-    return _host.evalJs(
-      'window.bridge?.setBackgroundImage($encoded, $blur)',
-    );
+    return _host.evalJs('window.bridge?.setBackgroundImage($encoded, $blur)');
   }
 
   Future<void> setChatFont({
@@ -66,6 +64,13 @@ class ThemeBridgeCommands {
     }
     final json = jsonEncode(normalizedTheme);
     return _host.callJs('applyTheme', json);
+  }
+
+  /// The theme's own message layout: its template and page stylesheet, as
+  /// JSON (`renderer/theme_layout.js`). An empty string takes it away and puts
+  /// every message back to the built-in layout.
+  Future<void> setThemeLayout(String? layoutJson) {
+    return _host.callJs('setThemeLayout', layoutJson ?? '');
   }
 
   Future<void> setPerformanceMode(bool enabled) {

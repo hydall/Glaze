@@ -965,6 +965,10 @@ class ChatBridgeController {
     letterSpacing: letterSpacing,
   );
   Future<void> applyTheme(Map<String, String> t) => theme.applyTheme(t);
+
+  /// The theme's own message layout — see [ThemeBridgeCommands.setThemeLayout].
+  Future<void> setThemeLayout(String? layoutJson) =>
+      theme.setThemeLayout(layoutJson);
   Future<void> setPerformanceMode(bool enabled) =>
       theme.setPerformanceMode(enabled);
 

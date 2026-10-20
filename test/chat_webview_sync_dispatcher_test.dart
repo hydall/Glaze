@@ -12,6 +12,46 @@ import 'package:glaze_flutter/features/chat/widgets/chat_streaming_bridge_sync.d
 import 'package:glaze_flutter/features/chat/widgets/chat_webview_sync_dispatcher.dart';
 
 void main() {
+  test('an unchanged theme layout is not sent again', () {
+    final dispatcher = ChatWebViewSyncDispatcher(state: ChatWebViewSyncState());
+    final bridge = _FakeBridge();
+    final message = _assistant('a1');
+    dispatcher.dispatch(
+      bridge: bridge,
+      old: _fields(isGenerating: false, messages: [message]),
+      current: _fields(isGenerating: false, messages: [message]),
+      oldMessages: [message],
+      newMessages: [message],
+      streamingId: '__streaming__',
+      onSyncExtBlockPanels: () async {},
+      appendMessage: (_) async {},
+      buildStreamingPlaceholder: () => message,
+    );
+    expect(bridge.themeLayouts, isEmpty);
+  });
+
+  test('a preset with a layout sends it to the page', () {
+    final dispatcher = ChatWebViewSyncDispatcher(state: ChatWebViewSyncState());
+    final bridge = _FakeBridge();
+    final message = _assistant('a1');
+    dispatcher.dispatch(
+      bridge: bridge,
+      old: _fields(isGenerating: false, messages: [message]),
+      current: _fields(
+        isGenerating: false,
+        messages: [message],
+        themeLayout: '{"message":"<div>{{text}}</div>"}',
+      ),
+      oldMessages: [message],
+      newMessages: [message],
+      streamingId: '__streaming__',
+      onSyncExtBlockPanels: () async {},
+      appendMessage: (_) async {},
+      buildStreamingPlaceholder: () => message,
+    );
+    expect(bridge.themeLayouts, ['{"message":"<div>{{text}}</div>"}']);
+  });
+
   group('ChatMessageSync', () {
     test(
       'appends persisted user message while virtual placeholder exists',
@@ -1097,6 +1137,7 @@ ChatWebViewWidgetFields _fields({
   String? searchQuery,
   int searchCurrentIndex = -1,
   int searchRevision = 0,
+  String? themeLayout,
 }) => ChatWebViewWidgetFields(
   continuationTargetId: continuationTargetId,
   isSendPending: isSendPending,
@@ -1118,6 +1159,7 @@ ChatWebViewWidgetFields _fields({
   searchCurrentIndex: searchCurrentIndex,
   searchRevision: searchRevision,
   chatLayout: 'default',
+  themeLayout: themeLayout,
   themeSyncKey: 'theme',
   elementOpacity: 1,
   elementBlur: 0,
@@ -1274,6 +1316,14 @@ class _FakeBridge implements ChatBridgeController {
     String? personaAvatarPath,
     int? greetingTotal,
   }) async {}
+
+  /// Theme layouts sent to the page, in order.
+  final List<String?> themeLayouts = [];
+
+  @override
+  Future<void> setThemeLayout(String? layoutJson) async {
+    themeLayouts.add(layoutJson);
+  }
 
   @override
   dynamic noSuchMethod(Invocation invocation) => null;

@@ -105,6 +105,10 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
   final int searchRevision;
   final String? chatLayout;
 
+  /// The theme's own message layout — its template and stylesheet as JSON;
+  /// null for the built-in layout. See [ThemePreset.messageLayout].
+  final String? themeLayout;
+
   /// Changes when preset colors/layout tokens affecting the WebView change.
   final String? themeSyncKey;
   final double elementOpacity;
@@ -194,6 +198,7 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
     this.searchCurrentIndex = 0,
     this.searchRevision = 0,
     this.chatLayout,
+    this.themeLayout,
     this.themeSyncKey,
     this.elementOpacity = 0.8,
     this.elementBlur = 12,
@@ -1184,6 +1189,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       searchCurrentIndex: w.searchCurrentIndex,
       searchRevision: w.searchRevision,
       chatLayout: w.chatLayout,
+      themeLayout: w.themeLayout,
       themeSyncKey: w.themeSyncKey,
       elementOpacity: w.elementOpacity,
       elementBlur: w.elementBlur,
@@ -1530,6 +1536,8 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
 
   Future<void> _applyThemeToBridge() async {
     await _bridge?.applyTheme(_buildThemeMap());
+    // After the colors, so a theme's stylesheet has their variables to read.
+    await _bridge?.setThemeLayout(widget.themeLayout);
   }
 
   /// True once the WebView's JS bridge has fully initialized and the chat is
