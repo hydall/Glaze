@@ -33,8 +33,6 @@ void main() {
       'lorebookBuildPromptJs': String,
       'useStandardRandomizer': bool,
       'hideContextCard': bool,
-      'uiCornerScale': double,
-      'avatarRoundness': double,
     };
 
     test('AppSettings defaults match SharedPrefs fallbacks', () {
@@ -86,10 +84,6 @@ void main() {
           case double:
             if (entry.key == 'gz_chat_max_width') {
               expect(defaults.chatMaxWidth, 900);
-            } else if (entry.key == 'uiCornerScale') {
-              expect(defaults.uiCornerScale, 1.0);
-            } else if (entry.key == 'avatarRoundness') {
-              expect(defaults.avatarRoundness, 1.0);
             }
         }
       }

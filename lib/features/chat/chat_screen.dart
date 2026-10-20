@@ -39,6 +39,7 @@ import 'widgets/game_time_seed_dialog.dart';
 import '../../shared/theme/theme_font_provider.dart';
 import '../../shared/theme/theme_preset.dart';
 import '../../shared/theme/theme_provider.dart';
+import '../../shared/theme/ui_scale.dart';
 
 import '../../shared/widgets/glaze_scaffold.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
@@ -973,6 +974,10 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   /// widget would register a dependency outside the build phase.
   bool _blurFlushHeader = false;
 
+  /// Corner radius of the floating header, captured in build for the same
+  /// reason: GlazeAppBar rounds it by the theme's corner scale.
+  double _blurHeaderRadius = 20;
+
   /// Whether the page should be holding strips at all, captured in build for
   /// the same reason: the post-frame pass must not read providers. Mirrors the
   /// gate the WebView's `blurRegions` property applies.
@@ -1584,7 +1589,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
               box.size.width - 32,
               56,
             ),
-            radius: 20,
+            radius: _blurHeaderRadius,
           ),
       ..._blurRegistry.measure(box),
     ];
@@ -1760,6 +1765,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
     final messageListTop = MediaQuery.paddingOf(context).top + 10 + 56;
     _blurSafeTop = MediaQuery.paddingOf(context).top;
     _blurFlushHeader = isDesktopLayout(context);
+    _blurHeaderRadius = context.glazeRadius(20);
     _blurMirrorEnabled =
         !widget.blurIsFlutterSide && !batterySaver && preset.elementBlur > 0;
 
@@ -1999,7 +2005,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                           preset,
                           preset.chatLayout,
                           Theme.of(context).brightness,
-                          appSettings?.avatarRoundness ?? 1.0,
+                          preset.avatarRoundness,
                         ),
                         elementOpacity: preset.elementOpacity,
                         elementBlur: preset.elementBlur,
@@ -2015,7 +2021,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                         showCharAvatar: preset.showCharAvatar,
                         showUserName: preset.showUserName,
                         showCharName: preset.showCharName,
-                        avatarRoundness: appSettings?.avatarRoundness ?? 1.0,
+                        avatarRoundness: preset.avatarRoundness,
                         charAvatarPath: character?.avatarPath,
                         personaAvatarPath: effectivePersona?.avatarPath,
                         bgImagePath: bgPath,

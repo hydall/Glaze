@@ -386,7 +386,6 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
     final router = ref.watch(routerProvider);
     final themeSettings = ref.watch(themeProvider);
     final uiFont = ref.watch(uiFontFamilyProvider).value;
-    final appSettings = ref.watch(appSettingsProvider).value;
     final preset = themeSettings.activePreset;
     // The active theme's own type (dark / light / same as device) decides.
     final mode = themeSettings.isDark ? ThemeMode.dark : ThemeMode.light;
@@ -409,8 +408,6 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
           mode: mode,
           lightScheme: lightScheme,
           darkScheme: darkScheme,
-          cornerScale: appSettings?.uiCornerScale ?? 1.0,
-          avatarRoundness: appSettings?.avatarRoundness ?? 1.0,
         );
       },
     );
@@ -424,8 +421,6 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
     required ThemeMode mode,
     required ColorScheme? lightScheme,
     required ColorScheme? darkScheme,
-    required double cornerScale,
-    required double avatarRoundness,
   }) {
     return MaterialApp.router(
       title: 'Glaze',
@@ -436,15 +431,11 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
         preset,
         fontFamily: uiFont,
         dynamicScheme: lightScheme,
-        cornerScale: cornerScale,
-        avatarRoundness: avatarRoundness,
       ),
       darkTheme: AppTheme.dark(
         preset,
         fontFamily: uiFont,
         dynamicScheme: darkScheme,
-        cornerScale: cornerScale,
-        avatarRoundness: avatarRoundness,
       ),
       themeMode: mode,
       routerConfig: router,

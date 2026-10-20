@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 
+import '../../../shared/theme/ui_scale.dart';
 import '../bridge/chat_overlay_blur_region.dart';
 
 /// Collects the on-screen rects of glass widgets that overlay the chat
@@ -117,7 +118,11 @@ class _BlurRegionTrackerState extends State<BlurRegionTracker> {
       _registry?.unregister(widget.id, context);
       _registry = registry;
     }
-    _registry?.register(widget.id, context, widget.radius);
+    _registry?.register(
+      widget.id,
+      context,
+      context.glazeRadius(widget.radius),
+    );
   }
 
   @override
@@ -126,7 +131,11 @@ class _BlurRegionTrackerState extends State<BlurRegionTracker> {
     if (oldWidget.id != widget.id) {
       _registry?.unregister(oldWidget.id, context);
     }
-    _registry?.register(widget.id, context, widget.radius);
+    _registry?.register(
+      widget.id,
+      context,
+      context.glazeRadius(widget.radius),
+    );
   }
 
   @override

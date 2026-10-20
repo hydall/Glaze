@@ -87,22 +87,6 @@ List<MenuSearchEntry> buildSettingsSearchIndex() {
       groupKey: 'settings_group_appearance',
     ),
     row(
-      'ui_corner_scale',
-      'settings_ui_corner_scale',
-      'settings_ui_corner_scale_desc',
-      Icons.rounded_corner_rounded,
-      const ['corners', 'radius', 'square', 'углы', 'закругление', 'квадратные'],
-      groupKey: 'settings_group_appearance',
-    ),
-    row(
-      'avatar_roundness',
-      'settings_avatar_roundness',
-      'settings_avatar_roundness_desc',
-      Icons.account_circle_outlined,
-      const ['avatars', 'corners', 'аватарки', 'углы', 'закругление'],
-      groupKey: 'settings_group_appearance',
-    ),
-    row(
       'show_help_tips',
       'menu_show_help_tips',
       'desc_show_help_tips',

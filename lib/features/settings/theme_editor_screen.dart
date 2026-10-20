@@ -439,6 +439,28 @@ class _GeneralTab extends StatelessWidget {
               onChanged: (v) =>
                   onUpdate((p) => p.copyWith(noiseIntensity: v)),
             ),
+            MenuSubHeader('theme_corners'.tr()),
+            _SliderRow(
+              label: 'theme_corner_scale'.tr(),
+              value: preset.cornerScale,
+              min: 0,
+              max: 2,
+              divisions: 20,
+              unit: '%',
+              displayMultiplier: 100,
+              onChanged: (v) => onUpdate((p) => p.copyWith(cornerScale: v)),
+            ),
+            _SliderRow(
+              label: 'theme_avatar_roundness'.tr(),
+              value: preset.avatarRoundness,
+              min: 0,
+              max: 1,
+              divisions: 20,
+              unit: '%',
+              displayMultiplier: 100,
+              onChanged: (v) =>
+                  onUpdate((p) => p.copyWith(avatarRoundness: v)),
+            ),
             MenuSubHeader('theme_border'.tr()),
             _ColorRow(
               label: 'theme_border_color'.tr(),

@@ -255,12 +255,10 @@ class AppTheme {
     ThemePreset preset, {
     String? fontFamily,
     ColorScheme? dynamicScheme,
-    double cornerScale = 1.0,
-    double avatarRoundness = 1.0,
   }) {
     final isMaterialYou = preset.isMaterialYou;
-    final corner = cornerScale.clamp(0.0, 4.0);
-    final avatar = avatarRoundness.clamp(0.0, 1.0);
+    final corner = preset.cornerScale.clamp(0.0, 4.0);
+    final avatar = preset.avatarRoundness.clamp(0.0, 1.0);
     final colorScheme = isMaterialYou
         ? _materialYouScheme(dynamicScheme, isDark: true)
         : _buildColorScheme(preset, isDark: true);
@@ -462,12 +460,10 @@ class AppTheme {
     ThemePreset preset, {
     String? fontFamily,
     ColorScheme? dynamicScheme,
-    double cornerScale = 1.0,
-    double avatarRoundness = 1.0,
   }) {
     final isMaterialYou = preset.isMaterialYou;
-    final corner = cornerScale.clamp(0.0, 4.0);
-    final avatar = avatarRoundness.clamp(0.0, 1.0);
+    final corner = preset.cornerScale.clamp(0.0, 4.0);
+    final avatar = preset.avatarRoundness.clamp(0.0, 1.0);
     final colorScheme = isMaterialYou
         ? _materialYouScheme(dynamicScheme, isDark: false)
         : _buildColorScheme(preset, isDark: false);

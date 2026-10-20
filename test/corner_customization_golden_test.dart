@@ -143,10 +143,8 @@ void main() {
 Widget _scalePreview(BuildContext context, double scale) {
   return Theme(
     data: AppTheme.dark(
-      _preset,
+      _preset.copyWith(cornerScale: scale, avatarRoundness: scale),
       fontFamily: kInterFontFamily,
-      cornerScale: scale,
-      avatarRoundness: scale,
     ),
     child: Builder(
       builder: (context) => Material(

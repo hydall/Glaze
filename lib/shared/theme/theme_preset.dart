@@ -66,6 +66,11 @@ abstract class ThemePreset with _$ThemePreset {
     @Default(0.1) double borderOpacity,
     @Default(18) double userBubbleRadius,
     @Default(18) double charBubbleRadius,
+    // Multiplier for the corner radii of buttons, cards, sheets and dialogs:
+    // 1.0 is the shipped look, 0.0 squares them off.
+    @Default(1.0) double cornerScale,
+    // How round avatars are: 1.0 is a full circle, 0.0 a square.
+    @Default(1.0) double avatarRoundness,
     @Default(true) bool showUserAvatar,
     @Default(true) bool showCharAvatar,
     @Default(true) bool showUserName,

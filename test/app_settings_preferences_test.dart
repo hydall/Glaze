@@ -31,8 +31,6 @@ void main() {
       lorebookBuildPromptJs: 'script prompt',
       useStandardRandomizer: true,
       hideContextCard: true,
-      uiCornerScale: 0.0,
-      avatarRoundness: 0.25,
     );
     final prefs = await SharedPreferences.getInstance();
 
