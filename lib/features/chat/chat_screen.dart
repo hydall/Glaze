@@ -1828,9 +1828,19 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
         final progress = widget.drawerCtrl.drawerAnim.value;
         final bool drawerActive =
             widget.drawerCtrl.drawerOpen || widget.drawerCtrl.switchingToDrawer;
-        final targetDrawerInset = drawerActive
-            ? widget.drawerCtrl.activeDrawerHeight * progress
-            : 0.0;
+        // The drawer height comes from the last keyboard, and some Android
+        // keyboards report the whole window. Unclamped, the drawer covers the
+        // page and leaves its own header above the screen; clamp it to the
+        // usable height, below the status bar, both here and in the page.
+        final drawerMaxHeight = math.max(
+          0.0,
+          MediaQuery.sizeOf(context).height - MediaQuery.paddingOf(context).top,
+        );
+        final drawerHeight = math.min(
+          widget.drawerCtrl.activeDrawerHeight,
+          drawerMaxHeight,
+        );
+        final targetDrawerInset = drawerActive ? drawerHeight * progress : 0.0;
         final panelHeight = math.max(targetDrawerInset, widget.keyboardHeight);
         final factor = math.min(1.0, panelHeight / math.max(1.0, safeBottom));
         final effectiveBottomInset = panelHeight + (safeBottom * (1 - factor));
@@ -1875,9 +1885,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
         // didUpdateWidget). While the keyboard rises, the end value is
         // predicted from the persisted last keyboard height; while it
         // lowers, the end value is 0 (or the drawer height when switching).
-        final drawerTargetInset = drawerActive
-            ? widget.drawerCtrl.activeDrawerHeight
-            : 0.0;
+        final drawerTargetInset = drawerActive ? drawerHeight : 0.0;
         final keyboardTargetInset = _keyboardSettled
             ? widget.keyboardHeight
             : (_keyboardRising
@@ -1942,7 +1950,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
           'fades': !isDesktopLayout(context),
           'drawer': {
             'show': renderDrawer,
-            'height': widget.drawerCtrl.activeDrawerHeight,
+            'height': drawerHeight,
             'progress': progress,
           },
         });

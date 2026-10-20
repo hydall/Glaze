@@ -332,10 +332,21 @@ export function createDrawer(ctx, composer) {
     const visible = st.show && d.show;
     setClass(root, classes(visible ? 'gc-drw' : 'gc-drw gc-hidden', { 'g-skinned': !!(skin.card || skin.tab) }));
     if (!visible) return;
+    // The height comes from the last keyboard, which can be taller than the
+    // page (some Android keyboards report the full window). Let the drawer
+    // outgrow the viewport and its own header, tabs and cards end up above the
+    // screen, leaving nothing but its background. Keep it below the status
+    // bar; a taller request is clamped, not trusted.
+    const viewport = S.mathMax(0, layout.viewportH || S.viewportHeight() || 0);
+    const safeTop = S.mathMax(0, layout.safeTop || 0);
+    const available = viewport > 0
+      ? S.mathMax(0, viewport - safeTop)
+      : Number.POSITIVE_INFINITY;
+    const height = S.mathMin(S.mathMax(0, d.height || 0), available);
     css(root, 'left', px(layout.gutter));
     css(root, 'right', px(layout.gutter));
-    css(root, 'height', px(d.height));
-    css(root, 'bottom', px(-d.height * (1 - d.progress) - ctx.shrink()));
+    css(root, 'height', px(height));
+    css(root, 'bottom', px(-height * (1 - d.progress) - ctx.shrink()));
     setClass(edge, st.effects && !ctx.theme.batterySaver ? 'gc-drw-edge' : 'gc-drw-edge gc-flat');
     ctx.drag.whenIdle(() => {
       renderTabs();

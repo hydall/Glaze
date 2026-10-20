@@ -321,6 +321,30 @@ test('drawer cards and tabs follow a theme layout and keep their taps', async ({
   expect((await c.intents()).filter((i) => i.t === 'toolTap').map((i) => i.d.id)).toEqual(['a']);
 });
 
+test('a drawer taller than the viewport stays below the status bar', async ({ page }) => {
+  await page.setViewportSize({ width: 400, height: 600 });
+  const c = await openChrome(page);
+  await c.apply({
+    layout: { ...CHROME.layout, safeTop: 24, viewportH: 600, drawer: { show: true, height: 1200, progress: 1 } },
+    drawer: {
+      show: true, tab: 0, editing: false,
+      tabs: [{ label: 'Tools', icon: { cp: 59576 } }, { label: 'Actions', icon: { cp: 57521 } }],
+      tools: { loading: false, cards: [{ kind: 'tool', key: 'tool:a', id: 'a', label: 'Alpha', icon: { cp: 57521 } }], add: null },
+      actions: { loading: false, cards: [], add: null },
+    },
+  });
+  await page.waitForTimeout(50);
+  const box = await page.evaluate(() => {
+    const el = window.__chromeRoot.querySelector('.gc-drw');
+    const tab = window.__chromeRoot.querySelector('.gc-tab');
+    return { drawer: el.getBoundingClientRect().toJSON(), tab: tab.getBoundingClientRect().toJSON() };
+  });
+  expect(box.drawer.height).toBeLessThanOrEqual(600 - 24);
+  expect(box.drawer.top).toBeGreaterThanOrEqual(24);
+  expect(box.tab.height).toBeGreaterThan(0);
+  expect(box.tab.top).toBeGreaterThanOrEqual(24);
+});
+
 test('a theme layout hands a patched prototype no chrome node', async ({ page }) => {
   const c = await openChrome(page, {
     patch: () => {
