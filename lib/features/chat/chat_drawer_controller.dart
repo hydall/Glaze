@@ -8,8 +8,41 @@ import '../../core/platform/haptics.dart';
 const String kKeyboardHeightPref = 'chat_last_keyboard_height';
 const double _kDefaultKeyboardHeight = 320;
 
+/// Whether the composer's text field has the focus.
+///
+/// The field is in the chat WebView, so this is not a [FocusNode]: the page
+/// reports focus and blur through [setFocused], and [unfocus] / [requestFocus]
+/// ask the page to move it. It exposes the part of the [FocusNode] surface the
+/// keyboard ↔ drawer mediation uses.
+class ComposerFocus extends ChangeNotifier {
+  bool _hasFocus = false;
+
+  /// Moves the focus in the page. Set by the composer host while it is
+  /// mounted.
+  void Function()? onUnfocusRequested;
+  void Function()? onFocusRequested;
+
+  bool get hasFocus => _hasFocus;
+
+  /// What the page reported.
+  void setFocused(bool focused) {
+    if (_hasFocus == focused) return;
+    _hasFocus = focused;
+    notifyListeners();
+  }
+
+  void unfocus() {
+    onUnfocusRequested?.call();
+    // The page answers with a blur; until then the field is as good as
+    // unfocused for every decision taken on it.
+    setFocused(false);
+  }
+
+  void requestFocus() => onFocusRequested?.call();
+}
+
 class ChatDrawerController extends ChangeNotifier {
-  final FocusNode _inputFocus = FocusNode();
+  final ComposerFocus _inputFocus = ComposerFocus();
   final AnimationController _drawerAnimController;
   late final Animation<double> drawerAnim;
 
@@ -41,7 +74,7 @@ class ChatDrawerController extends ChangeNotifier {
     _inputFocus.addListener(_onFocusChanged);
   }
 
-  FocusNode get inputFocus => _inputFocus;
+  ComposerFocus get inputFocus => _inputFocus;
   bool get drawerOpen => _drawerOpen;
   bool get switchingToDrawer => _switchingToDrawer;
   double get lastKeyboardHeight => _lastKeyboardHeight;

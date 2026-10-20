@@ -5,7 +5,7 @@ import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
 import 'package:easy_localization/easy_localization.dart';
-import 'package:flutter/foundation.dart' show listEquals;
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -29,6 +29,8 @@ import '../../core/state/studio_turn_config_resolver.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/shell/desktop/desktop_layout_provider.dart'
     show isDesktopLayout;
+import '../../shared/shell/shell_header_provider.dart'
+    show DetachedShellHost;
 import '../../shared/shell/title_bar_header.dart';
 import 'widgets/chat_column_width.dart';
 import 'widgets/chat_header_search.dart';
@@ -39,7 +41,6 @@ import 'widgets/game_time_seed_dialog.dart';
 import '../../shared/theme/theme_font_provider.dart';
 import '../../shared/theme/theme_preset.dart';
 import '../../shared/theme/theme_provider.dart';
-import '../../shared/theme/ui_scale.dart';
 
 import '../../shared/widgets/glaze_scaffold.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
@@ -70,12 +71,13 @@ import 'state/chat_drawer_editing_provider.dart';
 import 'state/lorebook_coverage_provider.dart';
 import 'state/memory_activity_provider.dart';
 import 'state/studio_history_rotation_provider.dart';
-import 'bridge/chat_overlay_blur_region.dart';
-import 'bridge/chat_webview_blur_mode.dart';
-import 'widgets/chat_blur_region_tracker.dart';
+import 'bridge/chat_webview_environment.dart'
+    show chatWebViewResolveLocalFileUrl;
+import 'chrome/chat_chrome_channel.dart';
+import 'chrome/chat_composer_host.dart';
+import 'chrome/chat_drawer_host.dart';
+import 'chrome/chrome_json.dart';
 import 'widgets/chat_header.dart';
-import 'widgets/chat_input_bar.dart';
-import 'widgets/chat_drawer_panel.dart';
 import 'widgets/context_coverage_card.dart';
 import 'widgets/memory_sheet.dart';
 import 'widgets/studio_history_rotation_sheet.dart';
@@ -167,18 +169,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   late final ChatDrawerController _drawerCtrl;
   late final ChatSearchDelegate _search;
 
-  /// True where a Flutter `BackdropFilter` can sample the chat WebView, so the
-  /// chrome blurs it itself instead of having the blur mirrored into the page
-  /// as CSS strips. See [chatWebViewBlurIsFlutterSide].
-  final bool _blurIsFlutterSide = chatWebViewBlurIsFlutterSide();
+  /// The header, composer and drawer, drawn in the chat WebView (see
+  /// `assets/chat_webview/chrome/`). This screen sends the header's state and
+  /// the theme; the body sends the rest.
+  final ChatChromeChannel _chrome = ChatChromeChannel();
+  late final VoidCallback _removeHeaderIntents;
 
-  /// One backdrop capture for every glass surface that floats over the chat
-  /// body — the header pill at the top, the composer pill and its circle
-  /// buttons at the bottom. They never overlap and nothing is painted over one
-  /// of them in between, so the engine can blur once for all of them instead of
-  /// once per surface (see [GlassSurface.backdropKey]). Created once: a fresh
-  /// key per build would be a fresh capture per frame.
-  final BackdropKey _chromeBackdropKey = BackdropKey();
+  /// The UI font file last sent to the chrome. Compared by identity: it is a
+  /// whole font as a data URL.
+  String? _sentFontData;
+  bool _fontSent = false;
 
   /// Guards against queueing one post-frame recount per rebuild while a
   /// search is open.
@@ -205,6 +205,36 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     // reached the WebView, so the prev/next buttons looked dead and closing
     // search left the highlight behind until some unrelated rebuild.
     _search.addListener(_onSearchChanged);
+    _removeHeaderIntents = _chrome.onAll({
+      'back': (_) => _handleBack(),
+      'openCharCard': (_) => unawaited(_showCharacterCard(widget.charId)),
+      'openAvatar': (_) {
+        final path = ref
+            .read(characterByIdProvider(widget.charId))
+            ?.avatarPath;
+        if (path != null && path.isNotEmpty) _showAvatarViewer(path);
+      },
+      'searchOpen': (_) {
+        if (!_search.showSearch) _search.openSearch();
+      },
+      'searchInlineOpen': (_) => _search.openInline(),
+      'searchClose': (_) => _search.closeSearch(),
+      'searchQuery': (d) {
+        final q = d['q'];
+        if (q is! String) return;
+        final messages =
+            ref.read(chatProvider(widget.charId)).value?.messages ?? const [];
+        _search.searchController.value = TextEditingValue(
+          text: q,
+          selection: TextSelection.collapsed(offset: q.length),
+        );
+        if (d['inline'] == true) {
+          _search.syncInlineQuery(q, messages);
+        } else {
+          _search.search(q, messages);
+        }
+      },
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) maybeShowGuide(context, AppGuide.chat);
     });
@@ -243,6 +273,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
   @override
   void dispose() {
+    _removeHeaderIntents();
+    _chrome.dispose();
     _drawerCtrl.dispose();
     _search.removeListener(_onSearchChanged);
     _search.dispose();
@@ -446,8 +478,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                 enterToSend: enterToSend,
                 targetMessageId: widget.targetMessageId,
                 isHeaderHidden: _isHeaderHidden,
-                blurIsFlutterSide: _blurIsFlutterSide,
-                chromeBackdropKey: _chromeBackdropKey,
+                chrome: _chrome,
               ),
               if (awaitingTargetSession)
                 const Positioned.fill(
@@ -462,6 +493,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           ),
         );
       },
+    );
+
+    _publishChrome(
+      character: character,
+      sessionName: sessionName,
+      inTitleBar: inTitleBar,
+      batterySaver: batterySaver,
     );
 
     // Plugins run inside this chat's WebView; the host starts them once the
@@ -484,20 +522,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
             !(bodyPaintsBgImage && _everBuiltBody && !chatStateAsync.hasError),
         extendBodyBehindHeader: true,
         resizeToAvoidBottomInset: false,
-        // The body is a full-screen chat WebView. Where Flutter can sample it
-        // the header blurs it like any other content, sharing one capture with
-        // the composer chrome at the other edge; where it cannot, the header
-        // drops its blur pass and an in-WebView CSS strip reproduces it
-        // (mirrored via the 'header' region in _measureBlurRegions).
-        headerBlurViaWebView: !_blurIsFlutterSide,
-        headerBackdropKey: _blurIsFlutterSide ? _chromeBackdropKey : null,
-        // What plugins draw over the page goes over the header too: in the
-        // plugin layer above it, or else through holes cut out of it.
-        headerWrapper: (header) => PluginHolesCutter(
-          holes: ref.watch(pluginHolesProvider(charId)),
-          enabled: !pluginLayerSupported(),
-          child: header,
-        ),
+        // The floating header is drawn by the chat page (see _publishChrome);
+        // only under the app's title bar or in a window is it Flutter's.
+        drawHeader: false,
         // Desktop paints a tab's header edge to edge (see the shell's
         // _DesktopHeader); chat matches it instead of floating a pill.
         flushHeader: isDesktopLayout(context),
@@ -564,41 +591,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                       sessionIndex: sessionIndex,
                     )
                   : null),
-        onBack: () {
-          // Dismiss any open overlay first; only navigate up when nothing is
-          // open. Order mirrors the precedence the back gesture should follow.
-          //
-          // Close the drawer BEFORE looking at the input focus. The chat body
-          // is an InAppWebView platform view: tapping into it can steal native
-          // focus without Flutter clearing `inputFocus`, so `hasFocus` gets
-          // stuck `true` with no keyboard on screen. Checking focus first then
-          // swallowed the back on a no-op `unfocus()` — the magic drawer /
-          // quick replies never closed, and leaving the chat took a second
-          // press. Draining the visible overlays first keeps a stale focus flag
-          // from eating the gesture.
-          if (_drawerCtrl.drawerOpen || _drawerCtrl.switchingToDrawer) {
-            _drawerCtrl.closeDrawer();
-            return;
-          }
-          if (_search.showSearch || _search.inlineOpen) {
-            _search.closeSearch();
-            return;
-          }
-          // Only consume the back to dismiss the keyboard when it is genuinely
-          // up. Guarding on the live inset (not just `hasFocus`, which can be
-          // stale) means a lingering FocusNode no longer costs an extra press.
-          final keyboardUp = MediaQuery.viewInsetsOf(context).bottom > 0;
-          if (_drawerCtrl.inputFocus.hasFocus && keyboardUp) {
-            _drawerCtrl.inputFocus.unfocus();
-            return;
-          }
-          // Nothing left to dismiss — leave the chat. Clear any stale focus so
-          // we don't navigate away with the keyboard node still "focused".
-          if (_drawerCtrl.inputFocus.hasFocus) {
-            _drawerCtrl.inputFocus.unfocus();
-          }
-          context.go('/');
-        },
+        onBack: _handleBack,
         // Desktop keeps the search toggle in the header itself, right after
         // the session name (see [DesktopChatHeaderSearch]).
         actions: _search.showSearch || isDesktopLayout(context)
@@ -636,6 +629,112 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
             )
           : tracked,
     );
+  }
+
+  /// Dismisses whatever is open, innermost first, and leaves the chat when
+  /// nothing is.
+  ///
+  /// Close the drawer BEFORE looking at the input focus. The composer's focus
+  /// is the page's: tapping elsewhere in the WebView can leave it reported
+  /// focused with no keyboard on screen. Checking focus first then swallowed
+  /// the back on a no-op unfocus — the drawer never closed, and leaving the
+  /// chat took a second press. Draining the visible overlays first keeps a
+  /// stale focus flag from eating the gesture.
+  void _handleBack() {
+    if (!mounted) return;
+    if (_drawerCtrl.drawerOpen || _drawerCtrl.switchingToDrawer) {
+      _drawerCtrl.closeDrawer();
+      return;
+    }
+    if (_search.showSearch || _search.inlineOpen) {
+      _search.closeSearch();
+      return;
+    }
+    // Only consume the back to dismiss the keyboard when it is genuinely up.
+    final keyboardUp = MediaQuery.viewInsetsOf(context).bottom > 0;
+    if (_drawerCtrl.inputFocus.hasFocus && keyboardUp) {
+      _drawerCtrl.inputFocus.unfocus();
+      return;
+    }
+    // Nothing left to dismiss — leave the chat, without the keyboard.
+    if (_drawerCtrl.inputFocus.hasFocus) {
+      _drawerCtrl.inputFocus.unfocus();
+    }
+    context.go('/');
+  }
+
+  /// Sends the chrome its theme and the header's state.
+  void _publishChrome({
+    required Character? character,
+    required String sessionName,
+    required bool inTitleBar,
+    required bool batterySaver,
+  }) {
+    final preset = batteryAware(
+      ref,
+      batterySaver,
+      themeProvider.select((t) => t.activePreset),
+    );
+    final desktop = isDesktopLayout(context);
+    _chrome.set(
+      'theme',
+      chromeTheme(
+        context,
+        preset,
+        batterySaver: batterySaver,
+        desktop: desktop,
+        fontFamily: ref.watch(uiFontFamilyProvider).value,
+      ),
+    );
+    final fontData = ref.watch(uiFontDataProvider).value;
+    if (!_fontSent || !identical(fontData, _sentFontData)) {
+      _fontSent = true;
+      _sentFontData = fontData;
+      _chrome.set(
+        'font',
+        chromeFont(fontData, variable: preset.uiFontMode == 'glaze'),
+      );
+    }
+
+    // Under the app's title bar, and in a window of its own, the window's bar
+    // is the header (Flutter's, through GlazeScaffold).
+    final inPage = !inTitleBar && !DetachedShellHost.drawsChrome(context);
+    final avatarVersion = ref.watch(avatarVersionProvider);
+    Color avatarColor = context.cs.primary;
+    final hex = character?.color;
+    if (hex != null && hex.isNotEmpty) {
+      try {
+        avatarColor = Color(
+          int.parse('FF${hex.replaceFirst('#', '')}', radix: 16),
+        );
+      } catch (_) {}
+    }
+    final avatarPath = character?.avatarPath;
+    final avatarUrl = avatarPath == null || avatarPath.isEmpty
+        ? null
+        : chatWebViewResolveLocalFileUrl(avatarPath);
+    final name = character?.name ?? '';
+    _chrome.set('header', {
+      'show': inPage,
+      'hidden': _isHeaderHidden,
+      'flush': desktop,
+      'radius': 20,
+      'title': name.isEmpty ? 'Chat' : name,
+      'session': sessionName,
+      'avatar': {
+        'url': avatarUrl == null || avatarUrl.isEmpty
+            ? null
+            : '$avatarUrl&v=$avatarVersion',
+        'color': chromeColor(avatarColor),
+        'initial': name.isNotEmpty ? name[0].toUpperCase() : '?',
+      },
+      'search': {
+        'kind': desktop ? 'desktop' : 'mobile',
+        'open': desktop ? _search.inlineOpen : _search.showSearch,
+        'hint': 'search_messages'.tr(),
+        'closeHint': 'btn_close'.tr(),
+      },
+    });
   }
 
   /// The character block of the in-app (not title bar) header. Desktop adds
@@ -768,14 +867,8 @@ class _ChatBody extends ConsumerStatefulWidget {
   /// WebView blur region is dropped while the header is slid away.
   final bool isHeaderHidden;
 
-  /// True where the chrome blurs the WebView with its own `BackdropFilter`;
-  /// false where that blur has to be mirrored into the page as CSS strips.
-  final bool blurIsFlutterSide;
-
-  /// The backdrop capture the floating chrome shares — see
-  /// [_ChatScreenState._chromeBackdropKey]. Unused while the blur is mirrored,
-  /// since nothing here draws one then.
-  final BackdropKey chromeBackdropKey;
+  /// The chat chrome — header, composer and drawer — drawn in the WebView.
+  final ChatChromeChannel chrome;
 
   const _ChatBody({
     required this.charId,
@@ -788,8 +881,7 @@ class _ChatBody extends ConsumerStatefulWidget {
     this.enterToSend = false,
     this.targetMessageId,
     this.isHeaderHidden = false,
-    required this.blurIsFlutterSide,
-    required this.chromeBackdropKey,
+    required this.chrome,
   });
 
   @override
@@ -798,8 +890,10 @@ class _ChatBody extends ConsumerStatefulWidget {
 
 class _ChatBodyState extends ConsumerState<_ChatBody>
     with WidgetsBindingObserver {
+  /// Height of the composer, as the page reports it (see
+  /// [ChromeLayoutReport.composerHeight]): what the message list keeps clear
+  /// above the keyboard or drawer, and where the scroll buttons sit.
   double _inputBarHeight = 130.0;
-  final GlobalKey _inputBarKey = GlobalKey();
 
   /// Last bottom inset (input bar + keyboard/drawer) pushed to the WebView.
   /// Cached so it can be re-asserted on app resume — see
@@ -958,30 +1052,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
     );
   }
 
-  /// Rects of the glass overlays (header + input bar elements) measured in
-  /// WebView-local coordinates and mirrored into the WebView so the messages
-  /// scrolling underneath get blurred (Flutter's BackdropFilter cannot
-  /// sample the platform view — see [ChatOverlayBlurRegion]).
-  final ChatBlurRegionRegistry _blurRegistry = ChatBlurRegionRegistry();
-  List<ChatOverlayBlurRegion> _blurRegions = const [];
-  bool _blurMeasureScheduled = false;
 
-  /// `MediaQuery.padding.top` captured in build for the analytic header rect.
-  double _blurSafeTop = 0;
-
-  /// Desktop layout flag, captured in build alongside [_blurSafeTop]. The
-  /// header rect below is measured post-frame, where reading an inherited
-  /// widget would register a dependency outside the build phase.
-  bool _blurFlushHeader = false;
-
-  /// Corner radius of the floating header, captured in build for the same
-  /// reason: GlazeAppBar rounds it by the theme's corner scale.
-  double _blurHeaderRadius = 20;
-
-  /// Whether the page should be holding strips at all, captured in build for
-  /// the same reason: the post-frame pass must not read providers. Mirrors the
-  /// gate the WebView's `blurRegions` property applies.
-  bool _blurMirrorEnabled = false;
 
   /// Keyboard-inset settle tracking for the WebView-bound bottom inset.
   /// While the keyboard animates, the WebView receives the predicted end
@@ -1045,9 +1116,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
       ref.read(pluginHolesProvider(widget.charId)).page = () =>
           _webViewStateKey.currentContext;
     }
-    // Re-measure when the input bar swaps tracked elements (e.g. entering
-    // search/selection mode) without this widget rebuilding.
-    _blurRegistry.addListener(_scheduleBlurMeasure);
+    widget.chrome.layout.addListener(_onChromeLayout);
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkHeight());
     _publishOpenChat();
     final targetId = widget.targetMessageId;
@@ -1055,6 +1124,14 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => unawaited(_scrollToTargetMessage(targetId)),
       );
+    }
+  }
+
+  void _onChromeLayout() {
+    if (!mounted) return;
+    final height = widget.chrome.layout.value.composerHeight;
+    if (height > 0 && (height - _inputBarHeight).abs() >= 0.5) {
+      setState(() => _inputBarHeight = height);
     }
   }
 
@@ -1111,19 +1188,9 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   void _checkHeight() {
     if (!mounted) return;
     var changed = false;
-    var nextInputBarHeight = _inputBarHeight;
     var nextContextCardHeight = _contextCardHeight;
     var nextContextCardCollapsedHeight = _contextCardCollapsedHeight;
     var nextWebViewBoxHeight = _webViewBoxHeight;
-
-    final inputCtx = _inputBarKey.currentContext;
-    if (inputCtx != null) {
-      final size = inputCtx.size;
-      if (size != null && size.height != _inputBarHeight && size.height > 0) {
-        nextInputBarHeight = size.height;
-        changed = true;
-      }
-    }
 
     // The context card is only mounted while visible. When it is absent its
     // reserved top height collapses back to 0 so the list reclaims the space.
@@ -1155,7 +1222,6 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
 
     if (changed) {
       setState(() {
-        _inputBarHeight = nextInputBarHeight;
         _contextCardHeight = nextContextCardHeight;
         _contextCardCollapsedHeight = nextContextCardCollapsedHeight;
         _webViewBoxHeight = nextWebViewBoxHeight;
@@ -1540,79 +1606,8 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
     WidgetsBinding.instance.removeObserver(this);
     _keyboardSettleTimer?.cancel();
     _translations.cancelAll();
-    _blurRegistry.dispose();
+    widget.chrome.layout.removeListener(_onChromeLayout);
     super.dispose();
-  }
-
-  /// Coalesces measurement requests into one post-frame pass. Scheduled on
-  /// every build (keyboard/drawer animations move the input bar each frame)
-  /// and on registry changes.
-  void _scheduleBlurMeasure() {
-    // Nothing to mirror where the chrome blurs the WebView itself.
-    if (widget.blurIsFlutterSide) return;
-    if (_blurMeasureScheduled) return;
-    _blurMeasureScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _blurMeasureScheduled = false;
-      _measureBlurRegions();
-    });
-  }
-
-  void _measureBlurRegions() {
-    if (!mounted || widget.blurIsFlutterSide) return;
-    final box = _webViewStateKey.currentContext?.findRenderObject();
-    if (box is! RenderBox || !box.attached || !box.hasSize) return;
-    final origin = box.localToGlobal(Offset.zero);
-    final regions = <ChatOverlayBlurRegion>[
-      // The header is not a descendant (it lives in GlazeScaffold's stack),
-      // but its geometry is fixed: SafeArea + fromLTRB(16, 10, 16, 0) + 56px
-      // GlazeAppBar with radius 20 (glaze_scaffold.dart) — or, with
-      // `flushHeader` on desktop, edge to edge with square corners.
-      if (!widget.isHeaderHidden)
-        if (_blurFlushHeader)
-          ChatOverlayBlurRegion(
-            id: 'header',
-            rect: Rect.fromLTWH(
-              -origin.dx,
-              _blurSafeTop - origin.dy,
-              box.size.width,
-              56,
-            ),
-            radius: 0,
-          )
-        else
-          ChatOverlayBlurRegion(
-            id: 'header',
-            rect: Rect.fromLTWH(
-              16 - origin.dx,
-              _blurSafeTop + 10 - origin.dy,
-              box.size.width - 32,
-              56,
-            ),
-            radius: _blurHeaderRadius,
-          ),
-      ..._blurRegistry.measure(box),
-    ];
-    regions.sort((a, b) => a.id.compareTo(b.id));
-    if (listEquals(regions, _blurRegions)) return;
-    _blurRegions = regions;
-    // Deliberately not setState: the overlays move every frame of a keyboard,
-    // drawer or composer-growth animation, and rebuilding this subtree to
-    // carry the rects down as a widget property was what made a per-frame
-    // update too expensive to do — which is why the pass used to hold still
-    // until the layout settled, leaving the strips parked where the chrome had
-    // been for the whole animation. Pushed straight at the page instead, the
-    // frame costs one small bridge call and no rebuild, so the strips can
-    // follow. The property below still carries the same list for the paths
-    // that re-assert state (first paint after the page is ready, session
-    // switch); the page no-ops on geometry it already has.
-    unawaited(_pushBlurRegions());
-  }
-
-  /// Hands the measured rects to the page without going through a rebuild.
-  Future<void> _pushBlurRegions() async {
-    if (!_blurMirrorEnabled) return;
-    await _webViewStateKey.currentState?.applyBlurRegions(_blurRegions);
   }
 
   @override
@@ -1763,11 +1758,6 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
         : 0;
     final safeBottom = MediaQuery.paddingOf(context).bottom;
     final messageListTop = MediaQuery.paddingOf(context).top + 10 + 56;
-    _blurSafeTop = MediaQuery.paddingOf(context).top;
-    _blurFlushHeader = isDesktopLayout(context);
-    _blurHeaderRadius = context.glazeRadius(20);
-    _blurMirrorEnabled =
-        !widget.blurIsFlutterSide && !batterySaver && preset.elementBlur > 0;
 
     final bgBlur = preset.bgBlur > 0 ? preset.bgBlur : 0.0;
     final fontStyle = batteryAware(
@@ -1933,9 +1923,30 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
             !isDesktopLayout(context) &&
             (widget.drawerCtrl.drawerOpen || progress > 0.001);
 
-        // The overlays move with every rebuild here (keyboard, drawer
-        // animation, input growth), so re-measure their rects post-frame.
-        _scheduleBlurMeasure();
+        // Where the composer and the drawer are, every frame of a keyboard
+        // or drawer animation: the page moves them with the inset, which is
+        // one small call and no relayout of the message list.
+        widget.chrome.set('layout', {
+          'safeTop': MediaQuery.paddingOf(context).top,
+          'safeBottom': safeBottom,
+          'inset': animatedBottomPanelInset,
+          'viewportH': _webViewBoxHeight,
+          'keyboard': widget.keyboardHeight,
+          'softKeyboard':
+              widget.keyboardHeight > 0 &&
+              (defaultTargetPlatform == TargetPlatform.android ||
+                  defaultTargetPlatform == TargetPlatform.iOS),
+          'gutter': ChatColumnScope.maybeOf(context)?.gutter ?? 0,
+          // The fades under the header and the composer. Dropped on desktop:
+          // the flush header is opaque enough on its own, and against the
+          // even chat background the two bands only read as darkened edges.
+          'fades': !isDesktopLayout(context),
+          'drawer': {
+            'show': renderDrawer,
+            'height': widget.drawerCtrl.activeDrawerHeight,
+            'progress': progress,
+          },
+        });
 
         // The box height feeds the WebView's inset split (see
         // [_webViewBoxHeight]). It is normally captured by the post-frame
@@ -1993,9 +2004,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                         bottomInset: webViewBottomInset,
                         viewportHeight: _webViewBoxHeight,
                         topInset: effectiveTopInset,
-                        blurRegions: _blurMirrorEnabled
-                            ? _blurRegions
-                            : const <ChatOverlayBlurRegion>[],
+                        chromeChannel: widget.chrome,
                         charName: character?.name,
                         charColor: character?.color,
                         personaName: effectivePersona?.name,
@@ -2397,47 +2406,6 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                 enabled: !pluginLayerSupported(),
                 child: Stack(
                 children: [
-                  // Fades under the header and the input area. Dropped on desktop:
-                  // the flush header is opaque enough on its own, and against the
-                  // now-even chat background the two bands only read as a darkened
-                  // top and bottom edge.
-                  if (!isDesktopLayout(context)) ...[
-                    Positioned(
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      height: MediaQuery.paddingOf(context).top + 20,
-                      child: IgnorePointer(
-                        child: Container(
-                          decoration: const BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [Colors.black54, Colors.transparent],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    Positioned(
-                      bottom: 0,
-                      left: 0,
-                      right: 0,
-                      height: messageListBottom + 40,
-                      child: IgnorePointer(
-                        child: Container(
-                          decoration: const BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.bottomCenter,
-                              end: Alignment.topCenter,
-                              colors: [Colors.black54, Colors.transparent],
-                              stops: [0.0, 1.0],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
                   // The scroll-to-bottom button. Mirror Vue ChatInput
                   // (`v-if="!isSearchMode"`): it is suppressed while searching.
                   Positioned(
@@ -2564,336 +2532,190 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                       onTap: _scrollToTop,
                     ),
                   ),
-                  // Bottom panel: drawer + input bar
-                  Positioned.fill(
-                    child: Stack(
-                      children: [
-                        if (renderDrawer)
-                          Positioned(
-                            left: 0,
-                            right: 0,
-                            bottom:
-                                -widget.drawerCtrl.activeDrawerHeight *
-                                (1 - progress),
-                            height: widget.drawerCtrl.activeDrawerHeight,
-                            child: ChatDrawerPanel(
-                              charId: widget.charId,
-                              beforeGeneration: _beforeQuickReply,
-                              onClose: () => widget.drawerCtrl.closeDrawer(),
-                              disableEffects:
-                                  batterySaver &&
-                                  widget.drawerCtrl.isDrawerAnimating,
-                              onScrollToMessage: (id) =>
-                                  _scrollToTargetMessage(id),
-                            ),
-                          ),
-                        Positioned(
-                          left: 0,
-                          right: 0,
-                          bottom: animatedBottomPanelInset,
-                          child: ChatBlurRegionScope(
-                            registry: _blurRegistry,
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                NotificationListener<
-                                  SizeChangedLayoutNotification
-                                >(
-                                  onNotification: (n) {
-                                    WidgetsBinding.instance
-                                        .addPostFrameCallback(
-                                          (_) => _checkHeight(),
-                                        );
-                                    return true;
-                                  },
-                                  child: SizeChangedLayoutNotifier(
-                                    child: Container(
-                                      key: _inputBarKey,
-                                      child: Builder(
-                                        builder: (context) {
-                                          final allSelectedHidden =
-                                              _selectionCtrl.allSelectedHidden(
-                                                widget.state.messages,
-                                              );
-                                          final canDeleteSelected =
-                                              _selectionCtrl.canDeleteSelection(
-                                                widget.state.messages,
-                                              );
-                                          return ChatInputBar(
-                                            key: ValueKey(
-                                              widget.state.session?.id,
-                                            ),
-                                            blurViaWebView:
-                                                !widget.blurIsFlutterSide,
-                                            backdropKey:
-                                                widget.chromeBackdropKey,
-                                            focusNode:
-                                                widget.drawerCtrl.inputFocus,
-                                            initialDraft:
-                                                widget.state.session?.draft ??
-                                                '',
-                                            batterySaver:
-                                                appSettings?.batterySaver ??
-                                                false,
-                                            onDraftChanged: (text) {
-                                              ref
-                                                  .read(
-                                                    chatProvider(
-                                                      widget.charId,
-                                                    ).notifier,
-                                                  )
-                                                  .saveDraft(text);
-                                            },
-                                            showSearchControls:
-                                                widget.search.showSearch,
-                                            searchQuery:
-                                                widget.search.searchQuery,
-                                            searchMatchCount:
-                                                widget.search.matchCount,
-                                            searchCurrentIndex: widget
-                                                .search
-                                                .searchCurrentIndex,
-                                            onSearchNext:
-                                                widget.search.onSearchNext,
-                                            onSearchPrev:
-                                                widget.search.onSearchPrev,
-                                            isEditingMessage: isEditingMessage,
-                                            isSelectionMode:
-                                                _selectionCtrl.isSelectionMode,
-                                            selectedCount: _selectionCtrl
-                                                .selectedMessageIds
-                                                .length,
-                                            allSelectedHidden:
-                                                allSelectedHidden,
-                                            canDeleteSelected:
-                                                canDeleteSelected,
-                                            onCancelSelection: () {
-                                              setState(() {
-                                                _selectionCtrl.clearSelection();
-                                              });
-                                            },
-                                            // The WebView owns the selection set, so
-                                            // the range buttons ask it to extend
-                                            // (or clear) the run; the resulting
-                                            // onSelectionChange updates the toolbar.
-                                            onSelectAbove: () {
-                                              _webViewStateKey.currentState
-                                                  ?.selectMessagesAbove();
-                                            },
-                                            onSelectBelow: () {
-                                              _webViewStateKey.currentState
-                                                  ?.selectMessagesBelow();
-                                            },
-                                            onHideSelected: () async {
-                                              await _selectionCtrl.hideSelected(
-                                                ref,
-                                                widget.charId,
-                                                widget.state.messages,
-                                              );
-                                              if (mounted) setState(() {});
-                                            },
-                                            onDeleteSelected: () async {
-                                              if (!await confirmMessageDeletion(
-                                                context,
-                                                ref,
-                                                sessionId:
-                                                    widget.state.session?.id,
-                                              )) {
-                                                return;
-                                              }
-                                              if (!mounted || !context.mounted) {
-                                                return;
-                                              }
-                                              // deleteSelected drops the selection
-                                              // synchronously; rebuild before
-                                              // awaiting so the toolbar closes with
-                                              // the messages instead of after the
-                                              // DB cleanup finishes.
-                                              final pending = _selectionCtrl
-                                                  .deleteSelected(
-                                                    ref,
-                                                    widget.charId,
-                                                    widget.state.messages,
-                                                  );
-                                              if (mounted) setState(() {});
-                                              await pending;
-                                              if (mounted) setState(() {});
-                                            },
-                                            isDrawerOpen:
-                                                widget.drawerCtrl.drawerOpen ||
-                                                widget
-                                                    .drawerCtrl
-                                                    .switchingToDrawer,
-                                            virtualKeyboardSend:
-                                                widget.virtualKeyboardSend,
-                                            enterToSend: widget.enterToSend,
-                                            canSend: () =>
-                                                _ensurePersonaSelected() &&
-                                                _ensureApiSelected() &&
-                                                _ensureContextFits(),
-                                            onSend: (text) async {
-                                              if (text.trim().isEmpty) {
-                                                return false;
-                                              }
-                                              if (!await _maybeSeedGameTime()) {
-                                                return false;
-                                              }
-                                              final accepted = await ref
-                                                  .read(
-                                                    chatProvider(
-                                                      widget.charId,
-                                                    ).notifier,
-                                                  )
-                                                  .trySendMessage(text);
-                                              // The follow is armed by the sync
-                                              // dispatcher on the rising edge of the
-                                              // send window, which is the dispatch
-                                              // that appends the bubble. Arming it
-                                              // here instead waited out the durable
-                                              // write and missed that append.
-                                              return accepted;
-                                            },
-                                            onSendWithGuidance: (text, guidance) async {
-                                              if (text.trim().isEmpty) {
-                                                return false;
-                                              }
-                                              if (!await _maybeSeedGameTime()) {
-                                                return false;
-                                              }
-                                              final accepted = await ref
-                                                  .read(
-                                                    chatProvider(
-                                                      widget.charId,
-                                                    ).notifier,
-                                                  )
-                                                  .trySendMessage(
-                                                    text,
-                                                    guidanceText: guidance,
-                                                  );
-                                              // The follow is armed by the sync
-                                              // dispatcher on the rising edge of the
-                                              // send window, which is the dispatch
-                                              // that appends the bubble. Arming it
-                                              // here instead waited out the durable
-                                              // write and missed that append.
-                                              return accepted;
-                                            },
-                                            onSendWithImages:
-                                                (
-                                                  text,
-                                                  guidanceText,
-                                                  imageDataUrls,
-                                                ) async {
-                                                  if (!await _maybeSeedGameTime()) {
-                                                    return false;
-                                                  }
-                                                  final accepted = await ref
-                                                      .read(
-                                                        chatProvider(
-                                                          widget.charId,
-                                                        ).notifier,
-                                                      )
-                                                      .trySendMessage(
-                                                        text,
-                                                        guidanceText:
-                                                            guidanceText,
-                                                        imageDataUrls:
-                                                            imageDataUrls,
-                                                      );
-                                                  // Armed by the sync dispatcher —
-                                                  // see onSend above.
-                                                  return accepted;
-                                                },
-                                            isGenerating:
-                                                widget.state.isGenerating,
-                                            isGeneratingImage:
-                                                widget.state.isGeneratingImage,
-                                            isPostGenRunning:
-                                                widget.state.isPostGenRunning,
-                                            onStop:
-                                                (widget.state.isGenerating ||
-                                                    widget
-                                                        .state
-                                                        .isGeneratingImage ||
-                                                    widget
-                                                        .state
-                                                        .isPostGenRunning)
-                                                ? () {
-                                                    final notifier = ref.read(
-                                                      chatProvider(
-                                                        widget.charId,
-                                                      ).notifier,
-                                                    );
-                                                    if (widget
-                                                            .state
-                                                            .isGeneratingImage &&
-                                                        !widget
-                                                            .state
-                                                            .isGenerating) {
-                                                      notifier
-                                                          .cancelImageGeneration();
-                                                    } else {
-                                                      notifier
-                                                          .abortGeneration();
-                                                    }
-                                                  }
-                                                : null,
-                                            // On desktop the Magic Drawer lives in
-                                            // the right sidebar and the bottom
-                                            // drawer is never rendered — the button
-                                            // would only animate an empty gap open,
-                                            // so hide it (Vue: `.desktop-mode
-                                            // #btn-magic { display: none }`).
-                                            onMagicDrawer:
-                                                isDesktopLayout(context)
-                                                ? null
-                                                : () {
-                                                    // Edit mode never survives a
-                                                    // close: it drives the drawer's
-                                                    // badges *and* the composer row's,
-                                                    // and a flag left standing would
-                                                    // greet the next open with arrows
-                                                    // nobody asked for.
-                                                    if (!widget
-                                                        .drawerCtrl
-                                                        .drawerOpen) {
-                                                      ref
-                                                              .read(
-                                                                chatDrawerEditingProvider
-                                                                    .notifier,
-                                                              )
-                                                              .state =
-                                                          false;
-                                                    }
-                                                    widget.drawerCtrl
-                                                        .toggleDrawer(context);
-                                                  },
-                                            beforeGeneration: _beforeQuickReply,
-                                            onImpersonate: (guidance) => ref
-                                                .read(
-                                                  chatProvider(
-                                                    widget.charId,
-                                                  ).notifier,
-                                                )
-                                                .impersonate(
-                                                  guidanceText: guidance,
-                                                ),
-                                            charId: widget.charId,
-                                          );
-                                        },
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
                 ],
               ),
+              ),
+            ),
+            // The composer and the drawer are drawn by the page; these keep
+            // their logic, and what Flutter lays over them (guide anchors, the
+            // desktop drop targets). In page coordinates: the WebView's box.
+            Positioned.fill(
+              child: Builder(
+                builder: (context) {
+                  final allSelectedHidden = _selectionCtrl.allSelectedHidden(
+                    widget.state.messages,
+                  );
+                  final canDeleteSelected = _selectionCtrl.canDeleteSelection(
+                    widget.state.messages,
+                  );
+                  return ChatComposerHost(
+                    key: ValueKey(widget.state.session?.id),
+                    channel: widget.chrome,
+                    composerFocus: widget.drawerCtrl.inputFocus,
+                    charId: widget.charId,
+                    initialDraft: widget.state.session?.draft ?? '',
+                    onDraftChanged: (text) {
+                      ref
+                          .read(chatProvider(widget.charId).notifier)
+                          .saveDraft(text);
+                    },
+                    showSearchControls: widget.search.showSearch,
+                    searchMatchCount: widget.search.matchCount,
+                    searchCurrentIndex: widget.search.searchCurrentIndex,
+                    onSearchNext: widget.search.onSearchNext,
+                    onSearchPrev: widget.search.onSearchPrev,
+                    isEditingMessage: isEditingMessage,
+                    isSelectionMode: _selectionCtrl.isSelectionMode,
+                    selectedCount: _selectionCtrl.selectedMessageIds.length,
+                    allSelectedHidden: allSelectedHidden,
+                    canDeleteSelected: canDeleteSelected,
+                    onCancelSelection: () {
+                      setState(() {
+                        _selectionCtrl.clearSelection();
+                      });
+                    },
+                    // The WebView owns the selection set, so the range
+                    // buttons ask it to extend (or clear) the run; the
+                    // resulting onSelectionChange updates the toolbar.
+                    onSelectAbove: () {
+                      _webViewStateKey.currentState?.selectMessagesAbove();
+                    },
+                    onSelectBelow: () {
+                      _webViewStateKey.currentState?.selectMessagesBelow();
+                    },
+                    onHideSelected: () async {
+                      await _selectionCtrl.hideSelected(
+                        ref,
+                        widget.charId,
+                        widget.state.messages,
+                      );
+                      if (mounted) setState(() {});
+                    },
+                    onDeleteSelected: () async {
+                      if (!await confirmMessageDeletion(
+                        context,
+                        ref,
+                        sessionId: widget.state.session?.id,
+                      )) {
+                        return;
+                      }
+                      if (!mounted || !context.mounted) return;
+                      // deleteSelected drops the selection synchronously;
+                      // rebuild before awaiting so the toolbar closes with
+                      // the messages instead of after the DB cleanup.
+                      final pending = _selectionCtrl.deleteSelected(
+                        ref,
+                        widget.charId,
+                        widget.state.messages,
+                      );
+                      if (mounted) setState(() {});
+                      await pending;
+                      if (mounted) setState(() {});
+                    },
+                    isDrawerOpen:
+                        widget.drawerCtrl.drawerOpen ||
+                        widget.drawerCtrl.switchingToDrawer,
+                    virtualKeyboardSend: widget.virtualKeyboardSend,
+                    enterToSend: widget.enterToSend,
+                    canSend: () =>
+                        _ensurePersonaSelected() &&
+                        _ensureApiSelected() &&
+                        _ensureContextFits(),
+                    onSend: (text) async {
+                      if (text.trim().isEmpty) return false;
+                      if (!await _maybeSeedGameTime()) return false;
+                      // The follow is armed by the sync dispatcher on the
+                      // rising edge of the send window, which is the
+                      // dispatch that appends the bubble.
+                      return ref
+                          .read(chatProvider(widget.charId).notifier)
+                          .trySendMessage(text);
+                    },
+                    onSendWithGuidance: (text, guidance) async {
+                      if (text.trim().isEmpty) return false;
+                      if (!await _maybeSeedGameTime()) return false;
+                      return ref
+                          .read(chatProvider(widget.charId).notifier)
+                          .trySendMessage(text, guidanceText: guidance);
+                    },
+                    onSendWithImages:
+                        (text, guidanceText, imageDataUrls) async {
+                          if (!await _maybeSeedGameTime()) return false;
+                          return ref
+                              .read(chatProvider(widget.charId).notifier)
+                              .trySendMessage(
+                                text,
+                                guidanceText: guidanceText,
+                                imageDataUrls: imageDataUrls,
+                              );
+                        },
+                    isGenerating: widget.state.isGenerating,
+                    isGeneratingImage: widget.state.isGeneratingImage,
+                    isPostGenRunning: widget.state.isPostGenRunning,
+                    onStop:
+                        (widget.state.isGenerating ||
+                            widget.state.isGeneratingImage ||
+                            widget.state.isPostGenRunning)
+                        ? () {
+                            final notifier = ref.read(
+                              chatProvider(widget.charId).notifier,
+                            );
+                            if (widget.state.isGeneratingImage &&
+                                !widget.state.isGenerating) {
+                              notifier.cancelImageGeneration();
+                            } else {
+                              notifier.abortGeneration();
+                            }
+                          }
+                        : null,
+                    // On desktop the drawer lives in the right sidebar and the
+                    // bottom drawer is never rendered — the button would only
+                    // animate an empty gap open, so it is left out.
+                    onMagicDrawer: isDesktopLayout(context)
+                        ? null
+                        : () {
+                            // Edit mode never survives a close: it drives the
+                            // drawer's badges *and* the composer row's, and a
+                            // flag left standing would greet the next open
+                            // with arrows nobody asked for.
+                            if (!widget.drawerCtrl.drawerOpen) {
+                              ref
+                                      .read(chatDrawerEditingProvider.notifier)
+                                      .state =
+                                  false;
+                            }
+                            widget.drawerCtrl.toggleDrawer(context);
+                          },
+                    beforeGeneration: _beforeQuickReply,
+                    onImpersonate: (guidance) => ref
+                        .read(chatProvider(widget.charId).notifier)
+                        .impersonate(guidanceText: guidance),
+                  );
+                },
+              ),
+            ),
+            if (renderDrawer)
+              ChatDrawerHost(
+                channel: widget.chrome,
+                charId: widget.charId,
+                beforeGeneration: _beforeQuickReply,
+                onClose: () => widget.drawerCtrl.closeDrawer(),
+                disableEffects:
+                    batterySaver && widget.drawerCtrl.isDrawerAnimating,
+                onScrollToMessage: (id) => _scrollToTargetMessage(id),
+              ),
+            // Guide tours point at the header through these.
+            Positioned.fill(
+              child: IgnorePointer(
+                child: ValueListenableBuilder<ChromeLayoutReport>(
+                  valueListenable: widget.chrome.layout,
+                  builder: (context, layout, _) => Stack(
+                    children: [
+                      chromeAnchor(GuideIds.chatHeader, layout.headerBlock),
+                      chromeAnchor(GuideIds.chatSearch, layout.searchButton),
+                    ],
+                  ),
+                ),
               ),
             ),
           ],
@@ -2902,3 +2724,4 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
     );
   }
 }
+

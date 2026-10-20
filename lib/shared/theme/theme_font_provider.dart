@@ -189,6 +189,20 @@ final uiFontFamilyProvider = FutureProvider<String?>((ref) async {
   return null;
 });
 
+/// The UI font's file as a data URL, for surfaces drawn outside Flutter (the
+/// chat chrome in the chat WebView). Null where there is no file: the system
+/// font, and Google fonts, which are asked for by name.
+final uiFontDataProvider = FutureProvider<String?>((ref) async {
+  final settings = ref.watch(themeProvider);
+  if (settings.ignoreCustomFont) return null;
+  final preset = settings.activePreset;
+  return switch (preset.uiFontMode) {
+    'glaze' => _loadInterDataUrl(),
+    'custom' => preset.hasCustomFont ? preset.customFont : null,
+    _ => null,
+  };
+});
+
 final _loadedGoogleFonts = <String>{};
 
 Future<String?> _loadGoogleFont(String fontName) async {

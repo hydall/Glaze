@@ -69,6 +69,9 @@
   <div id="loading-screen"><glaze-spinner></glaze-spinner></div>
   <div id="chat-container" class="layout-default"></div>
 
+  <!-- First module on purpose: the chrome captures the DOM primitives it uses
+       before anything else in the page has run. See chrome/safe.js. -->
+  <script type="module" src="chrome/index.js"></script>
   <script type="module" src="formatter/index.js"></script>
   <script src="RollingNumber.js"></script>
   <script type="module" src="renderer/index.js"></script>

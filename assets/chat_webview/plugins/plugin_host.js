@@ -42,6 +42,48 @@
   // plugin layer. 'panels': this is the plugin layer, chat panels only.
   var layer = 'all';
 
+  /* ---------- Over the chat chrome ---------- */
+  // The header and the message box are drawn in this page too, in the top
+  // layer (assets/chat_webview/chrome). Chat panels go over them, as they go
+  // over the app's controls where they are in the plugin layer: shown in the
+  // top layer after the chrome, in their own order. The chrome raises
+  // itself back over anything else that enters the top layer, but not over
+  // these, and puts them back on top whenever it does.
+  var showPopoverFn = typeof HTMLElement.prototype.showPopover === 'function'
+    ? HTMLElement.prototype.showPopover : null;
+  var hidePopoverFn = showPopoverFn ? HTMLElement.prototype.hidePopover : null;
+  var matchesFn = Element.prototype.matches;
+  var panelFrames = new WeakSet();
+
+  function panelsInTopLayer() {
+    return layer === 'all' && !!showPopoverFn;
+  }
+
+  function raisePanels() {
+    if (!panelsInTopLayer()) return;
+    var list = [];
+    wrappers.forEach(function (f) { if (f.kind === 'panel') list.push(f); });
+    list.sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
+    list.forEach(function (f) {
+      var el = f.iframe;
+      if (!el.isConnected) return;
+      try {
+        if (matchesFn.call(el, ':popover-open')) hidePopoverFn.call(el);
+        showPopoverFn.call(el);
+      } catch (e) { /* not a popover (any more) */ }
+    });
+  }
+
+  Object.defineProperty(window, '__glazePluginPanels', {
+    value: Object.freeze({
+      has: function (el) { return panelFrames.has(el); },
+      raise: raisePanels,
+    }),
+    writable: false,
+    configurable: false,
+    enumerable: false,
+  });
+
   function callHandler(name, arg) {
     if (window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
       window.flutter_inappwebview.callHandler(name, arg);
@@ -227,6 +269,18 @@
       style.zIndex = String(FRAME_Z + (opts.order || 0));
       style.pointerEvents = 'none';
       style.clipPath = layer === 'panels' ? 'none' : 'polygon(0 0, 0 0, 0 0)';
+      if (panelsInTopLayer()) {
+        // A popover's UA box (margin: auto, padding, border, a Canvas
+        // background) would take the frame off the edges.
+        iframe.setAttribute('popover', 'manual');
+        style.margin = '0';
+        style.padding = '0';
+        style.inset = '0';
+        style.maxWidth = 'none';
+        style.maxHeight = 'none';
+        style.overflow = 'visible';
+        panelFrames.add(iframe);
+      }
     } else {
       style.display = 'block';
       style.width = '100%';
@@ -237,6 +291,7 @@
       plugin: plugin,
       kind: kind,
       panelId: opts.panelId || null,
+      order: opts.order || 0,
       messageId: opts.messageId || null,
       iframe: iframe,
       ready: false,
@@ -839,6 +894,7 @@
         });
       });
     });
+    raisePanels();
     scheduleReconcile();
     return plugins.size;
   }

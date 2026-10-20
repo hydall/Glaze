@@ -15,6 +15,7 @@ import '../../../../shared/theme/theme_font_provider.dart';
 import '../../../../shared/theme/theme_preset.dart';
 import '../bridge/chat_bridge_controller.dart';
 import '../bridge/chat_overlay_blur_region.dart';
+import '../chrome/chat_chrome_channel.dart';
 import '../bridge/chat_webview_bridge_host.dart';
 import '../bridge/chat_webview_theme_builder.dart';
 import '../../../core/models/chat_message.dart';
@@ -90,6 +91,10 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
   /// the WebView (blurs the Flutter-side global background) — the widgets'
   /// own BackdropFilter cannot sample the platform view or anything under it.
   final List<ChatOverlayBlurRegion> blurRegions;
+
+  /// The header, composer and drawer drawn in this page. Attached to every
+  /// page the widget initializes, before the first messages are painted.
+  final ChatChromeChannel? chromeChannel;
   final String? searchQuery;
   final int searchCurrentIndex;
 
@@ -184,6 +189,7 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
     this.viewportHeight = 0,
     this.topInset = 0,
     this.blurRegions = const [],
+    this.chromeChannel,
     this.searchQuery,
     this.searchCurrentIndex = 0,
     this.searchRevision = 0,
@@ -500,6 +506,9 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       // before the initial render, or the load's jump to the bottom reads as a
       // downward scroll and this chat opens with its header already gone.
       await _showChatHeader(bridge);
+      // The chrome claims its keys before any message is rendered: a message
+      // that runs scripts must never get to ask for them first.
+      await _attachChrome(bridge);
       final initializer = ChatWebViewInitializer(
         ref: ref,
         bridge: bridge,
@@ -704,6 +713,16 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       return;
     }
     _notifyWebViewFailure(e);
+  }
+
+  Future<void> _attachChrome(ChatBridgeController bridge) async {
+    final channel = widget.chromeChannel;
+    if (channel == null) return;
+    try {
+      await channel.attach(bridge).timeout(_kBridgeOpTimeout);
+    } catch (e) {
+      debugPrint('[ChatWebView] chrome attach failed: $e');
+    }
   }
 
   /// Re-shows the chat header and re-baselines the JS hide-on-scroll tracker.
@@ -1212,6 +1231,12 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     if (widget.charId != oldWidget.charId) {
       _clearBridgeRegistry?.call();
       _bindBridgeRegistry(widget.charId);
+    }
+    final bridgeNow = _bridge;
+    if (widget.chromeChannel != oldWidget.chromeChannel &&
+        _ready &&
+        bridgeNow != null) {
+      unawaited(_attachChrome(bridgeNow));
     }
     if (!_ready &&
         (widget.charId != oldWidget.charId ||

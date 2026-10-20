@@ -472,6 +472,82 @@ class ChatBridgeController {
     }
   }
 
+  /// An intent from the chat chrome (header, composer, drawer) — see
+  /// `assets/chat_webview/chrome/index.js`. Only those signed with the key the
+  /// page handed out at [chromeHandshake] get here.
+  void Function(String type, Map<String, dynamic> data)? onChromeIntent;
+
+  /// Keys of the chrome in each page load, by the page's id. The page hands
+  /// them out once per load; the WebView outlives this controller (it is kept
+  /// alive across chats), so they are kept where the next one finds them.
+  static final Map<String, ({String keyIn, String keyOut})> _chromeKeys = {};
+  ({String keyIn, String keyOut})? _chromeKey;
+
+  /// Gets this page's chrome keys: from the page itself on its first call in a
+  /// page load, from the cache after that. False when the page has no chrome
+  /// or handed its keys to someone else.
+  Future<bool> chromeHandshake() async {
+    final pageId = await evalJsWithResult(
+      'window.__glazeChrome ? window.__glazeChrome.pageId : null',
+    );
+    if (pageId is! String || pageId.isEmpty) {
+      _chromeKey = null;
+      return false;
+    }
+    final known = _chromeKeys[pageId];
+    if (known != null) {
+      _chromeKey = known;
+      return true;
+    }
+    final keys = await evalJsWithResult('window.__glazeChrome.handshake()');
+    if (keys is! String) {
+      _chromeKey = null;
+      debugPrint('[ChatChrome] the page handed its keys out already');
+      return false;
+    }
+    final split = keys.indexOf(':');
+    if (split <= 0) return false;
+    // One page at a time is ever alive; older loads' keys are dead weight.
+    _chromeKeys.clear();
+    final key = (
+      keyIn: keys.substring(0, split),
+      keyOut: keys.substring(split + 1),
+    );
+    _chromeKeys[pageId] = key;
+    _chromeKey = key;
+    return true;
+  }
+
+  bool get hasChrome => _chromeKey != null;
+
+  /// Sends [json] (a JSON object) to the page's chrome.
+  Future<void> applyChrome(String json) async {
+    final key = _chromeKey;
+    if (key == null) return;
+    await evalJs(
+      'window.__glazeChrome&&window.__glazeChrome.apply('
+      '${escapeJsonStr(key.keyIn)},${escapeJsonStr(json)})',
+    );
+  }
+
+  void _dispatchChromeIntent(List<dynamic> args) {
+    final key = _chromeKey;
+    if (key == null || args.length < 2 || args[0] != key.keyOut) return;
+    final raw = args[1];
+    if (raw is! String) return;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return;
+      final type = decoded['t'];
+      final data = decoded['d'];
+      if (type is! String) return;
+      onChromeIntent?.call(
+        type,
+        data is Map ? Map<String, dynamic>.from(data) : const {},
+      );
+    } catch (_) {}
+  }
+
   /// Register JS handlers for every callback declared on this host. The
   /// declarations live in [bridgeHandlers] (data-driven) so the actual
   /// dispatch table is short and auditable.
@@ -553,6 +629,11 @@ class ChatBridgeController {
         }
         return null;
       },
+    );
+    _controller.addJavaScriptHandler(
+      handlerName: 'onChromeIntent',
+      callback: (JavaScriptHandlerFunctionData data) =>
+          _dispatchChromeIntent(data.args),
     );
     _controller.addJavaScriptHandler(
       handlerName: 'glazeBridge',

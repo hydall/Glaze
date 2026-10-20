@@ -75,6 +75,12 @@ class GlazeScaffold extends StatefulWidget {
   /// it; the pill treatment stays everywhere else.
   final bool flushHeader;
 
+  /// False when the screen draws its floating header itself — the chat, whose
+  /// header is part of its WebView page. Nothing is drawn in the header's
+  /// place then; the title-bar and window cases still publish [title],
+  /// [titleWidget] and [actions] as usual.
+  final bool drawHeader;
+
   /// When true, this scaffold does not draw its own floating header. Instead it
   /// publishes its title/actions/back into the shell's persistent header (see
   /// [shellHeaderProvider]) and reserves the same vertical space. Only set this
@@ -108,6 +114,7 @@ class GlazeScaffold extends StatefulWidget {
     this.headerBackdropKey,
     this.flushHeader = false,
     this.headerWrapper,
+    this.drawHeader = true,
   });
 
   @override
@@ -215,6 +222,8 @@ class _GlazeScaffoldState extends State<GlazeScaffold> {
               child: SizedBox(height: 56),
             ),
           )
+        : (!widget.drawHeader && !inTitleBar)
+        ? const SizedBox.shrink()
         : animatedHeader;
 
     final scaffold = PopScope(
