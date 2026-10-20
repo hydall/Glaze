@@ -26,6 +26,14 @@ on:
         required: false
         default: true
         type: boolean
+      # Off by default until the maintainer opts in: the setup .exe (and its
+      # .sha256) becomes a release asset — and, like every artifact, a file in
+      # the Telegram post. Stable builds of Glaze offer it as an in-app update.
+      build_windows_installer:
+        description: 'Windows installer (EXE, enables in-app updates; needs Windows)'
+        required: false
+        default: false
+        type: boolean
       build_ios:
         description: 'iOS (IPA)'
         required: false
@@ -393,6 +401,36 @@ jobs:
           name: Glaze-release-Windows
           path: "${{ needs.metadata.outputs.tag_name }}-windows.zip"
 
+      # Same Release folder, packed by windows/installer/glaze.iss. The asset
+      # name ends in -windows-setup.exe, which is what the in-app updater looks
+      # for (lib/core/services/installer_update/installer_asset.dart).
+      - name: Build Windows installer
+        if: ${{ github.event.inputs.build_windows_installer == 'true' }}
+        shell: pwsh
+        env:
+          BUILD_CHANNEL: ${{ needs.metadata.outputs.build_channel }}
+          APP_VERSION:   ${{ needs.metadata.outputs.version }}
+          TAG_NAME:      ${{ needs.metadata.outputs.tag_name }}
+        run: |
+          # The runner image ships Inno Setup 6; install it only if it is gone.
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup -y --no-progress
+          }
+          ./windows/installer/build_installer.ps1 `
+            -Channel $env:BUILD_CHANNEL `
+            -Version $env:APP_VERSION `
+            -OutputDir installer-out `
+            -BaseName "$env:TAG_NAME-windows-setup"
+
+      - name: Upload Windows installer artifact
+        if: ${{ github.event.inputs.build_windows_installer == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: Glaze-release-Windows-installer
+          path: |
+            installer-out/${{ needs.metadata.outputs.tag_name }}-windows-setup.exe
+            installer-out/${{ needs.metadata.outputs.tag_name }}-windows-setup.exe.sha256
+
   # ── ios ────────────────────────────────────────────────────────────────────
   build-ios:
     needs: metadata
@@ -678,6 +716,10 @@ jobs:
           if [ "${{ github.event.inputs.build_android }}" = "true" ]; then
             TAG="${{ needs.metadata.outputs.tag_name }}"
             RELEASE_NOTES="$RELEASE_NOTES"$'\n\n'"## Android"$'\n\n'"- \`$TAG.apk\` — universal, runs on any phone (32- and 64-bit)"$'\n'"- \`$TAG-arm64-v8a.apk\` / \`$TAG-armeabi-v7a.apk\` — smaller, pick your device's ABI"
+          fi
+          if [ "${{ github.event.inputs.build_windows_installer }}" = "true" ]; then
+            TAG="${{ needs.metadata.outputs.tag_name }}"
+            RELEASE_NOTES="$RELEASE_NOTES"$'\n\n'"## Windows"$'\n\n'"- \`$TAG-windows-setup.exe\` — installer, updates itself from inside the app"$'\n'"- \`$TAG-windows.zip\` — portable copy, nothing to install"
           fi
           echo "notes<<DELIM" >> $GITHUB_OUTPUT
           echo "$RELEASE_NOTES"  >> $GITHUB_OUTPUT

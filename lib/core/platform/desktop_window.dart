@@ -66,6 +66,14 @@ Future<void> initDesktopWindow() async {
   );
 }
 
+/// Closes the main window the same way the close button does, so the run is
+/// recorded as ended on purpose. Used when the app hands over to its
+/// installer.
+Future<void> closeDesktopApp() async {
+  if (!isDesktopAppWindow) return;
+  await windowManager.close();
+}
+
 /// Lets the close go through the way it did before it was intercepted: the
 /// intercept is lifted and the close requested again, so the system destroys
 /// the window at once and the process winds down behind it.

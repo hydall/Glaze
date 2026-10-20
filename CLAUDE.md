@@ -216,6 +216,7 @@ When editing files matching a pattern below, READ the corresponding rule file FI
 | Plugins (`.glzp`, `plugin.json`), `glaze.*` bridge, consent, plugin frames and hooks, Tavo `.tpg` compatibility — `lib/features/plugins/`, `assets/chat_webview/plugins/` | `docs/ARCHITECTURE.md` § 9.1 |
 | Variable storage (`chat` / `character` / `global` / `message` scopes) | `docs/rules/database.md` (atomic repo methods) |
 | Build channels, dev-mode / watermark defaults, `--dart-define` wiring | `docs/RELEASE_CHANNELS.md` |
+| Windows installer (`windows/installer/`), in-app updates (`lib/core/services/installer_update/`) | `docs/WINDOWS_INSTALLER.md` |
 
 ## Workflow
 
