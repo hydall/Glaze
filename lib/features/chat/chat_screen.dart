@@ -2705,15 +2705,21 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                 },
               ),
             ),
+            // Positioned so the zero-sized host never decides the Stack's
+            // size: a lone non-positioned child makes the whole chat body
+            // collapse to 0x0 (and take the WebView with it) the moment the
+            // drawer opens.
             if (renderDrawer)
-              ChatDrawerHost(
-                channel: widget.chrome,
-                charId: widget.charId,
-                beforeGeneration: _beforeQuickReply,
-                onClose: () => widget.drawerCtrl.closeDrawer(),
-                disableEffects:
-                    batterySaver && widget.drawerCtrl.isDrawerAnimating,
-                onScrollToMessage: (id) => _scrollToTargetMessage(id),
+              Positioned.fill(
+                child: ChatDrawerHost(
+                  channel: widget.chrome,
+                  charId: widget.charId,
+                  beforeGeneration: _beforeQuickReply,
+                  onClose: () => widget.drawerCtrl.closeDrawer(),
+                  disableEffects:
+                      batterySaver && widget.drawerCtrl.isDrawerAnimating,
+                  onScrollToMessage: (id) => _scrollToTargetMessage(id),
+                ),
               ),
             // Guide tours point at the header through these.
             Positioned.fill(
