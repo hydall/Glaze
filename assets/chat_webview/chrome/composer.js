@@ -49,13 +49,14 @@ export function createComposer(ctx) {
   let lineHeight = 0;
   let guideLineHeight = 0;
 
-  const root = h('div', 'gc-cmp gc-hidden', ctx.root);
+  const root = h('div', 'gc-cmp gc-hidden tavo-composer', ctx.root);
 
   /* ---- Compose ---- */
   const compose = h('div', '', root);
   const atts = h('div', 'gc-atts gc-hidden', compose);
 
   const pill = glass('gc-pill', compose);
+  pill.el.classList.add('tavo-composer-shell');
   attachGlow(pill.el, ctx);
 
   const guide = h('div', 'gc-guide gc-hidden', pill.content);
@@ -72,7 +73,7 @@ export function createComposer(ctx) {
   S.setAttribute(guideInput, 'rows', '1');
   S.setAttribute(guideInput, 'autocapitalize', 'sentences');
 
-  const input = h('textarea', 'gc-input', pill.content);
+  const input = h('textarea', 'gc-input tavo-composer-input', pill.content);
   S.setAttribute(input, 'rows', '1');
   S.setAttribute(input, 'autocapitalize', 'sentences');
 
@@ -92,7 +93,7 @@ export function createComposer(ctx) {
   const pins = h('div', 'gc-pins', row);
   const pinsInner = h('div', 'gc-pins-inner', pins);
   const sendWrap = h('div', 'gc-send-wrap', row);
-  const sendBtn = h('button', 'gc-send', sendWrap);
+  const sendBtn = h('button', 'gc-send tavo-composer-send-icon', sendWrap);
   let sendGlyph = null;
   let sendGlyphKey = null;
   let sendBadge = null;

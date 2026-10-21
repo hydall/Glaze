@@ -1,8 +1,12 @@
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:glaze_flutter/shared/theme/theme_preset.dart';
 import 'package:glaze_flutter/shared/theme/theme_preset_storage.dart';
 
 void main() {
@@ -70,6 +74,80 @@ void main() {
     expect(preset.elementBlur, 8);
     expect(preset.chatFontSize, 15);
     expect(preset.toJson(), isNot(contains('rawCustomCss')));
+  });
+
+  group('Tavo', () {
+    Future<ThemePreset> importPackage(Map<String, dynamic> themeJson) async {
+      final archive = Archive();
+      final jsonBytes = utf8.encode(jsonEncode(themeJson));
+      archive.addFile(ArchiveFile('theme.json', jsonBytes.length, jsonBytes));
+      final png = Uint8List.fromList([137, 80, 78, 71]);
+      archive.addFile(ArchiveFile('assets/paper.png', png.length, png));
+      final dir = await Directory.systemTemp.createTemp('glaze-tavo-');
+      final file = File('${dir.path}/theme.thm');
+      await file.writeAsBytes(ZipEncoder().encode(archive));
+      try {
+        return await storage.importFromFile(file.path);
+      } finally {
+        await dir.delete(recursive: true);
+      }
+    }
+
+    test(
+      'imports custom CSS into the page, content and chrome sheets',
+      () async {
+        final preset = await importPackage({
+          'spec': 'tavo_theme_v1',
+          'name': 'Cherry glass',
+          'bubble_display_type': 'flat',
+          'custom_css': '''
+.tavo-character-bubble .tavo-message-content p { color: red; }
+.tavo-speaker-name { font-weight: 700; }
+.tavo-composer-shell { border-radius: 15px; }
+''',
+        });
+
+        expect(preset.name, 'Cherry glass');
+        expect(preset.author, 'Tavo');
+        expect(preset.chatLayout, 'default');
+        expect(preset.layoutCss, contains('.tavo-speaker-name'));
+        expect(
+          preset.layoutContentCss,
+          contains(':host(.char) .glaze-message p'),
+        );
+        expect(preset.layoutChromeCss, contains('.tavo-composer-shell'));
+        expect(preset.hasCustomLayout, isTrue);
+      },
+    );
+
+    test('brings the background image out of the archive', () async {
+      final preset = await importPackage({
+        'spec': 'tavo_theme_v1',
+        'name': 'Paper',
+        'background': {
+          'image': 'theme/assets/paper.png',
+          'imageOpacity': 0.75,
+          'color': 0x80202838,
+        },
+        'custom_css':
+            '.tavo-message-content { background-image: url("theme/assets/paper.png"); }',
+      });
+
+      expect(preset.bgImage, startsWith('data:image/png;base64,'));
+      expect(preset.bgDim, closeTo(0.25, 0.001));
+      expect(preset.layoutCss, contains('data:image/png;base64,'));
+      expect(preset.layoutCss, isNot(contains('theme/assets/paper.png')));
+    });
+
+    test('a character-avatar background wins over the image', () async {
+      final preset = await importPackage({
+        'spec': 'tavo_theme_v1',
+        'name': 'Avatars',
+        'background': {'charAvatar': true, 'image': 'theme/assets/paper.png'},
+      });
+
+      expect(preset.chatBgMode, 'avatar');
+    });
   });
 
   test('rejects a non-object root as a format error', () async {

@@ -2227,7 +2227,10 @@ void main() {
     // lifts that single block out of the body and puts it back.
     test('the attachment block stays a single element', () {
       final embedJs = _rendererAsset('image_embed.js');
-      expect(embedJs, contains("wrap.className = 'msg-image-attachment'"));
+      expect(
+        embedJs,
+        contains("wrap.className = 'msg-image-attachment tavo-message-attachments'"),
+      );
       expect(
         rendererMessageJs,
         contains("const image = body.querySelector('.msg-image-attachment')"),
@@ -2878,7 +2881,7 @@ void main() {
     test('renderer always creates the actions button', () {
       expect(
         rendererMessageJs,
-        contains("actions.className = 'msg-actions-btn'"),
+        contains("actions.className = 'msg-actions-btn tavo-action-bar-button'"),
       );
       expect(rendererMessageJs, isNot(contains('shouldHideActions()')));
     });

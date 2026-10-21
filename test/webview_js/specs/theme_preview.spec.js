@@ -91,6 +91,29 @@ test('a theme template lays the messages out and reads the theme settings', asyn
   expect(page.__failures).toEqual([]);
 });
 
+test('a Tavo theme CSS finds the page aliases and the shadow-root content', async ({ page }) => {
+  await open(page);
+  await apply(page, {
+    messages: MESSAGES,
+    layout: {
+      css: '.tavo-message-content { border: 2px solid rgb(1, 2, 3); }',
+      contentCss: ':host(.char) .glaze-message p { color: rgb(4, 5, 6); }',
+    },
+  });
+  const first = page.locator('#chat-container .message-section').nth(0);
+  await expect(first).toHaveClass(/tavo-character-bubble/);
+  await expect(first.locator('.msg-avatar')).toHaveClass(/tavo-character-avatar/);
+  await expect(first.locator('.msg-name')).toHaveClass(/tavo-speaker-name/);
+  await expect(first.locator('.message-content')).toHaveClass(/tavo-message-content/);
+  const colors = await page.evaluate(() => {
+    const host = document.querySelector('.message-section.char .message-content');
+    const p = host.shadowRoot.querySelector('p');
+    return [getComputedStyle(host).borderLeftColor, getComputedStyle(p).color];
+  });
+  expect(colors).toEqual(['rgb(1, 2, 3)', 'rgb(4, 5, 6)']);
+  expect(page.__failures).toEqual([]);
+});
+
 test('the chrome is driven from the preview, with the header and composer on screen', async ({ page }) => {
   await open(page);
   await apply(page, {

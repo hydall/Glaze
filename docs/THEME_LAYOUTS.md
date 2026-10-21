@@ -271,6 +271,29 @@ The editor's preview (the eye button in its header) is the chat page itself
 chrome and theme layout, fed a few sample messages — what it shows is what a
 chat will show.
 
+## Tavo themes
+
+A Tavo `.thm` (a ZIP with `theme.json` and `assets/`) imports through the same
+dialog. The base colors, fonts, bubbles, avatars, background and its image are
+mapped onto the preset. The theme's `custom_css` is kept as well:
+
+- selectors that style `.tavo-message-content` itself, bubbles, avatars,
+  speaker names, reasoning, attachments and action buttons go to the page
+  stylesheet; the page carries the public `.tavo-*` names as aliases next to
+  its own classes (`lib/shared/theme/tavo_theme_css.dart`);
+- selectors that reach the text inside a message (`.tavo-message-content p`,
+  `q::after`, `blockquote > *`) go to each message's shadow root, with the
+  user/character distinction kept as `:host(.user)` / `:host(.char)`;
+- composer selectors go to `chrome.css`, where `gc-pill`, `gc-input` and the
+  send button carry the matching `.tavo-composer-*` aliases;
+- `url("theme/assets/…")` is replaced with the file from the archive as a
+  `data:` image. External URLs and fonts are not fetched.
+
+Only Tavo's documented public selectors are translated; private classes may
+match by accident but are not covered. Visual-novel display mode has no Glaze
+equivalent and is imported as a normal chat. The result is an ordinary Glaze
+preset: it can be edited, exported and shared like any other.
+
 ## Worked example
 
 `layout/message.html`:

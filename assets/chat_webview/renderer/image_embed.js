@@ -18,7 +18,7 @@ export function createImageAttachments(sources, hidden, icon) {
   if (!paths.length) return null;
 
   const wrap = document.createElement('div');
-  wrap.className = 'msg-image-attachment';
+  wrap.className = 'msg-image-attachment tavo-message-attachments';
   wrap.classList.add(`count-${paths.length}`);
   // The grid layouts start at two: one image keeps the free-size block it has
   // always had, so a portrait screenshot is not cropped into a square.
