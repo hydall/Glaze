@@ -775,19 +775,25 @@ class MenuFieldItem extends StatelessWidget {
         children: [
           Row(
             children: [
-              // Flexible: a long label wraps on a narrow screen instead of
-              // pushing the expand button off the row.
-              Flexible(
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    color: context.cs.onSurfaceVariant,
-                    fontSize: 13,
-                  ),
+              // One Expanded holds label + help tip: a long label wraps on a
+              // narrow screen, and the expand button stays at the right edge
+              // (Flexible + Spacer would split the free space and strand it).
+              Expanded(
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        label,
+                        style: TextStyle(
+                          color: context.cs.onSurfaceVariant,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                    if (helpTerm != null) HelpTip(term: helpTerm!, size: 14),
+                  ],
                 ),
               ),
-              if (helpTerm != null) HelpTip(term: helpTerm!, size: 14),
-              const Spacer(),
               if (onExpand != null)
                 MouseRegion(
                   cursor: SystemMouseCursors.click,
