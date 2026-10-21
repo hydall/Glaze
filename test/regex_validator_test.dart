@@ -24,9 +24,7 @@ void main() {
 
     test('Celia Hidden Block Details pattern is pathological', () {
       expect(
-        classifyRegexSafety(
-          r'/`([^`]+)` - (「[^」]*」(?:「[^」]*」)*)*/gi',
-        ),
+        classifyRegexSafety(r'/`([^`]+)` - (「[^」]*」(?:「[^」]*」)*)*/gi'),
         RegexSafety.pathological,
       );
     });
@@ -74,6 +72,29 @@ void main() {
 
     test('dotAll .*? without \$ is safe', () {
       expect(classifyRegexSafety(r'/.*?/s'), RegexSafety.safe);
+    });
+
+    test('the ? of a non-capturing group is not a quantifier', () {
+      expect(classifyRegexSafety(r'/(?:ab)+/'), RegexSafety.safe);
+      expect(classifyRegexSafety(r'/(?<tag>ab)+/'), RegexSafety.safe);
+    });
+
+    test('a ? after an escaped paren still counts', () {
+      expect(classifyRegexSafety(r'/(\(?a)+/'), RegexSafety.pathological);
+    });
+
+    test('quantifiers inside a lookaround do not compound', () {
+      // Sola V3's tempered token: one char per iteration, the lookahead is
+      // atomic.
+      expect(
+        classifyRegexSafety(r'/((?:(?!<\/?(?:bond)(?=[:\s>]))[\s\S])*?)/g'),
+        RegexSafety.safe,
+      );
+      expect(classifyRegexSafety(r'/(?:(?<=<b[^>]*>)x)+/g'), RegexSafety.safe);
+    });
+
+    test('a real quantifier next to a lookaround is still caught', () {
+      expect(classifyRegexSafety(r'/(?:(?!x)a+)*/'), RegexSafety.pathological);
     });
   });
 }

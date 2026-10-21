@@ -191,6 +191,7 @@ void _run(_Request request) {
       isMarkdown: true,
       triggered: triggered,
       onScript: (script) => request.port.send(request.scripts.indexOf(script)),
+      underDeadline: true,
     );
     results.add(DisplayRegexResult(text: text, triggered: triggered));
   }

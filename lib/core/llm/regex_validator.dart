@@ -133,11 +133,14 @@ bool _isOuterQuantifier(String p, int pos) {
   return false;
 }
 
-/// Whether [s] contains any quantifier (`+`, `*`, `?`, or unbounded `{n,}`).
-/// Character classes `[...]` and escapes are skipped.
+/// Whether [s] — a group's body, right after its `(` — contains any
+/// quantifier (`+`, `*`, `?`, or unbounded `{n,}`). Character classes `[...]`
+/// and escapes are skipped, and so is group syntax: the `?` of `(?:` or
+/// `(?<name>` is not a quantifier, and a lookaround is atomic, so whatever it
+/// repeats inside cannot compound with the quantifier outside.
 bool _containsQuantifier(String s) {
   var inClass = false;
-  for (var i = 0; i < s.length; i++) {
+  for (var i = _groupPrefixEnd(s, 0); i < s.length; i++) {
     final ch = s[i];
     if (ch == '\\' && i + 1 < s.length) {
       i++;
@@ -149,6 +152,14 @@ bool _containsQuantifier(String s) {
     }
     if (ch == '[') {
       inClass = true;
+      continue;
+    }
+    if (ch == '(') {
+      if (_isLookaround(s, i)) {
+        i = _groupEnd(s, i);
+      } else {
+        i = _groupPrefixEnd(s, i + 1) - 1;
+      }
       continue;
     }
     if (ch == '+' || ch == '*' || ch == '?') return true;
@@ -184,4 +195,52 @@ bool _hasLazyDotAllWithAnchor(String p, bool dotAll) {
     if (p[i] == '\$') return true;
   }
   return false;
+}
+
+bool _isLookaround(String s, int open) =>
+    s.startsWith('(?=', open) ||
+    s.startsWith('(?!', open) ||
+    s.startsWith('(?<=', open) ||
+    s.startsWith('(?<!', open);
+
+/// Index just past a group's `?:` / `?=` / `?!` / `?<=` / `?<!` / `?<name>`
+/// prefix, for a group body starting at [start]; [start] itself when the
+/// group is a plain capturing one.
+int _groupPrefixEnd(String s, int start) {
+  if (start >= s.length || s[start] != '?') return start;
+  if (s.startsWith('?<=', start) || s.startsWith('?<!', start)) {
+    return start + 3;
+  }
+  if (s.startsWith('?<', start)) {
+    final close = s.indexOf('>', start);
+    return close < 0 ? start + 2 : close + 1;
+  }
+  return start + 2;
+}
+
+/// Index of the `)` closing the group opened at [open], or the last index
+/// when the group is unbalanced.
+int _groupEnd(String s, int open) {
+  var depth = 0;
+  var inClass = false;
+  for (var i = open; i < s.length; i++) {
+    final ch = s[i];
+    if (ch == '\\') {
+      i++;
+      continue;
+    }
+    if (inClass) {
+      if (ch == ']') inClass = false;
+      continue;
+    }
+    if (ch == '[') {
+      inClass = true;
+    } else if (ch == '(') {
+      depth++;
+    } else if (ch == ')') {
+      depth--;
+      if (depth == 0) return i;
+    }
+  }
+  return s.length - 1;
 }
