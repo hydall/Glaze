@@ -38,6 +38,7 @@ const definePropertyRaw = Object.defineProperty;
 /** An object with no prototype: no setter or getter of anyone else's in it. */
 export const dict = () => objectCreate(null);
 export const charCodeAt = uncurry(String.prototype.charCodeAt);
+export const stringTrim = uncurry(String.prototype.trim);
 /**
  * Appends [value] to [list] as its own property. `list[list.length] = value`
  * would not do: a setter a message script put on Array.prototype for that

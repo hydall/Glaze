@@ -134,6 +134,14 @@ class ChatChromeChannel {
     _schedule();
   }
 
+  /// Records [value] as what the page already holds in [section] — it came
+  /// from the page — so it is sent only to the next page attached.
+  void remember(String section, Object? value) {
+    _latest[section] = value;
+    _sent[section] = jsonEncode(value);
+    _dirty.remove(section);
+  }
+
   /// Sends one event; merged with the others of the same microtask.
   void push(String key, Object? value) {
     final current = _events[key];

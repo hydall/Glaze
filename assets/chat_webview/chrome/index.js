@@ -447,8 +447,10 @@ function handle(msg) {
   if ('sendHover' in msg) composer.setSendHover(!!msg.sendHover);
   if (msg.attachments) composer.apply({ attachments: S.isArray(msg.attachments) ? msg.attachments : [] });
   if (msg.drawer) drawer.apply(msg.drawer);
-  if (msg.text) composer.setText(S.stringFn(msg.text.v == null ? '' : msg.text.v));
-  if (msg.guidanceText) composer.setGuidanceText(S.stringFn(msg.guidanceText.v == null ? '' : msg.guidanceText.v));
+  if (msg.text) composer.setText(S.stringFn(msg.text.v == null ? '' : msg.text.v), msg.text.rev);
+  if (msg.guidanceText) {
+    composer.setGuidanceText(S.stringFn(msg.guidanceText.v == null ? '' : msg.guidanceText.v), msg.guidanceText.rev);
+  }
   const cmd = msg.cmd;
   if (cmd) {
     if (cmd.focus) composer.focus();

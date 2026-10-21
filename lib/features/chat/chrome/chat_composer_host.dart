@@ -201,8 +201,9 @@ class _ChatComposerHostState extends ConsumerState<ChatComposerHost> {
     _textBridge = ref.read(composerTextBridgeProvider)..register(_textAccess);
     _bindFocus();
     _removeIntents = _channel.onAll({
-      'text': (d) => _takePageText(_controller, d['v']),
-      'guidanceText': (d) => _takePageText(_guidanceController, d['v']),
+      'text': (d) => _takePageText(_controller, d['v'], rev: d['rev']),
+      'guidanceText': (d) =>
+          _takePageText(_guidanceController, d['v'], rev: d['rev']),
       'focus': (d) => widget.composerFocus.setFocused(d['f'] == true),
       'sendTap': _onSendTap,
       'pinTap': _onPinTap,
@@ -285,8 +286,18 @@ class _ChatComposerHostState extends ConsumerState<ChatComposerHost> {
 
   /* ---------- Text ---------- */
 
-  void _takePageText(TextEditingController controller, Object? raw) {
+  void _takePageText(
+    TextEditingController controller,
+    Object? raw, {
+    Object? rev,
+  }) {
     if (!mounted || raw is! String || controller.text == raw) return;
+    final isText = identical(controller, _controller);
+    // Typed over a text this has since replaced: the replacement is on its
+    // way to the page and wins.
+    if (rev is num && rev < (isText ? _textRevision : _guidanceRevision)) {
+      return;
+    }
     _fromPage = true;
     try {
       controller.value = TextEditingValue(
@@ -296,11 +307,13 @@ class _ChatComposerHostState extends ConsumerState<ChatComposerHost> {
     } finally {
       _fromPage = false;
     }
-    // What the page now holds, so a page that is reloaded gets it back.
-    if (identical(controller, _controller)) {
-      _channel.set('text', {'v': raw, 'rev': _textRevision});
+    // What the page now holds, so a page that is reloaded gets it back. Not
+    // sent to this page: written back, it would land after the next
+    // keystroke and undo it.
+    if (isText) {
+      _channel.remember('text', {'v': raw, 'rev': _textRevision});
     } else {
-      _channel.set('guidanceText', {'v': raw, 'rev': _guidanceRevision});
+      _channel.remember('guidanceText', {'v': raw, 'rev': _guidanceRevision});
     }
   }
 
@@ -905,17 +918,15 @@ class _ChatComposerHostState extends ConsumerState<ChatComposerHost> {
     };
   }
 
-  Map<String, Object?> _sendState(bool editing) {
+  /// The send button's face for one state of the composer's content.
+  Map<String, Object?> _sendFace({
+    required bool hasContent,
+    required bool guidanceOnly,
+    required bool editing,
+    required _ResolvedPin? emptyAction,
+  }) {
     final isGenerating = _isGenerating;
-    final hasContent = _hasContent;
-    final emptyPin = _get(composerEmptyActionProvider).value;
-    final emptyAction = emptyPin == null ? null : _resolvePin(emptyPin);
     final idle = !isGenerating && !hasContent;
-    final guidanceOnly =
-        hasContent &&
-        _guidanceMode &&
-        _controller.text.trim().isEmpty &&
-        _attachments.isEmpty;
     final icon = isGenerating
         ? Icons.stop_rounded
         : guidanceOnly
@@ -925,8 +936,37 @@ class _ChatComposerHostState extends ConsumerState<ChatComposerHost> {
         : (emptyAction?.icon ?? Icons.account_circle_rounded);
     return {
       'icon': chromeIcon(icon, glyph: idle ? emptyAction?.glyph : null),
-      'tap': _sendButtonTap(editing) != null,
+      // Mirrors the null branch of [_sendButtonTap].
+      'tap': !(editing && !isGenerating && !hasContent),
       'insert': idle && !widget.isEditingMessage ? emptyAction?.insert : null,
+    };
+  }
+
+  Map<String, Object?> _sendState(bool editing) {
+    final hasContent = _hasContent;
+    final emptyPin = _get(composerEmptyActionProvider).value;
+    final emptyAction = emptyPin == null ? null : _resolvePin(emptyPin);
+    final guidanceOnly =
+        hasContent &&
+        _guidanceMode &&
+        _controller.text.trim().isEmpty &&
+        _attachments.isEmpty;
+    Map<String, Object?> face(bool hasContent, bool guidanceOnly) => _sendFace(
+      hasContent: hasContent,
+      guidanceOnly: guidanceOnly,
+      editing: editing,
+      emptyAction: emptyAction,
+    );
+    return {
+      ...face(hasContent, guidanceOnly),
+      // Every face the button can wear, so the page switches it on the
+      // keystroke that empties or fills the field, as ChatInputBar did,
+      // instead of a round trip through here later.
+      'faces': {
+        'empty': face(false, false),
+        'guide': face(true, true),
+        'content': face(true, false),
+      },
       'slot': editing,
       'badge': editing && emptyPin != null,
       'emptyPin': emptyPin?.encode(),
@@ -982,6 +1022,15 @@ class _ChatComposerHostState extends ConsumerState<ChatComposerHost> {
               'placeholder': _guidanceImpersonates
                   ? 'impersonate_guidance_placeholder'.tr()
                   : 'guidance_placeholder'.tr(),
+              // Both versions, picked by the page from its own field.
+              'empty': {
+                'caption': 'guided_impersonation'.tr(),
+                'placeholder': 'impersonate_guidance_placeholder'.tr(),
+              },
+              'filled': {
+                'caption': 'guided_generation'.tr(),
+                'placeholder': 'guidance_placeholder'.tr(),
+              },
             }
           : null,
       'pins': _pinsState(editing),

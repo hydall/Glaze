@@ -41,6 +41,11 @@ export function createComposer(ctx) {
     attsKey: '',
   };
   let hadSelection = false;
+  // The revision of the last text Flutter wrote into each field. Sent back
+  // with every change typed here, so Flutter can tell a change typed over a
+  // text it has since replaced.
+  let textRev = 0;
+  let guideRev = 0;
   let lineHeight = 0;
   let guideLineHeight = 0;
 
@@ -91,14 +96,42 @@ export function createComposer(ctx) {
   let sendGlyph = null;
   let sendGlyphKey = null;
   let sendBadge = null;
-  attachPress(sendBtn, ctx, () => !!(st.send && st.send.tap));
+  let sendFaceShown = null;
+
+  function hasText() {
+    return S.stringTrim(S.getValue(input)) !== '';
+  }
+
+  /**
+   * The send button's face (icon, tap, insert) for what the fields hold right
+   * now. Flutter sends one per state of the content; picking it here keeps
+   * the button in step with every keystroke, as it was when the composer was
+   * Flutter's, instead of a round trip behind it.
+   */
+  function sendFace() {
+    const s = st.send;
+    if (!s || !s.faces) return s;
+    const text = hasText();
+    const guide = !!st.guidance && S.stringTrim(S.getValue(guideInput)) !== '';
+    const atts = (st.attachments || []).length > 0;
+    const face = !text && !guide && !atts ? s.faces.empty
+      : guide && !text && !atts ? s.faces.guide
+      : s.faces.content;
+    return face || s;
+  }
+
+  attachPress(sendBtn, ctx, () => {
+    const face = sendFace();
+    return !!(face && face.tap);
+  });
   attachTooltip(sendWrap, ctx, () => (st.send && st.send.slot && st.send.hint) || '');
   function tapSend() {
-    if (!st.send || !st.send.tap) return;
+    const face = sendFace();
+    if (!face || !face.tap) return;
     // The empty composer's button may be assigned an insert action: typed
     // here, inside the tap, so the keyboard comes up with it.
-    if (st.send.insert) {
-      insertSurround(st.send.insert);
+    if (face.insert) {
+      insertSurround(face.insert);
       return;
     }
     ctx.send('sendTap', { v: S.getValue(input), g: S.getValue(guideInput) });
@@ -139,6 +172,7 @@ export function createComposer(ctx) {
     const list = st.pins || [];
     const pinData = [];
     for (let i = 0; i < list.length; i++) pinData[pinData.length] = { key: list[i].key, icon: list[i].icon || null };
+    const face = sendFace();
     return {
       placeholder: st.placeholder || '',
       hasText: S.getValue(input) !== '',
@@ -148,7 +182,7 @@ export function createComposer(ctx) {
       guidance: !!st.guidance,
       attachments: (st.attachments || []).length,
       pins: pinData,
-      send: { icon: (st.send && st.send.icon) || null, enabled: !!(st.send && st.send.tap) },
+      send: { icon: (face && face.icon) || null, enabled: !!(face && face.tap) },
     };
   }
 
@@ -192,16 +226,26 @@ export function createComposer(ctx) {
     guideLineHeight = S.getScrollHeight(measure);
   }
 
+  /** What a change of the text changes besides: the send button, the guidance caption. */
+  function contentChanged() {
+    renderGuideText();
+    const face = sendFace();
+    const faceChanged = face !== sendFaceShown;
+    if (faceChanged) renderSend();
+    if (skin.active && (faceChanged || (S.getValue(input) !== '') !== skinHasText)) updateSkin();
+  }
+
   S.on(input, 'input', (e) => {
     growAll();
-    if (skin.active && (S.getValue(input) !== '') !== skinHasText) updateSkin();
+    contentChanged();
     if (!e.isTrusted) return;
-    ctx.send('text', { v: S.getValue(input) });
+    ctx.send('text', { v: S.getValue(input), rev: textRev });
   });
   S.on(guideInput, 'input', (e) => {
     growAll();
+    contentChanged();
     if (!e.isTrusted) return;
-    ctx.send('guidanceText', { v: S.getValue(guideInput) });
+    ctx.send('guidanceText', { v: S.getValue(guideInput), rev: guideRev });
   });
   S.on(input, 'focus', (e) => {
     if (!e.isTrusted) return;
@@ -306,7 +350,8 @@ export function createComposer(ctx) {
     S.setSelectionRange(input, caret, caret);
     hadSelection = true;
     growAll();
-    ctx.send('text', { v: next });
+    contentChanged();
+    ctx.send('text', { v: next, rev: textRev });
   }
 
   /* ---- Rendering ---- */
@@ -416,12 +461,14 @@ export function createComposer(ctx) {
   function renderSend() {
     const s = st.send;
     if (!s) return;
-    const key = iconKey(s.icon);
+    const face = sendFace();
+    sendFaceShown = face;
+    const key = iconKey(face.icon);
     if (key !== sendGlyphKey) {
       const old = sendGlyph;
       sendGlyphKey = key;
       sendGlyph = h('span', 'gc-send-glyph', sendBtn);
-      icon(s.icon, 20, sendGlyph);
+      icon(face.icon, 20, sendGlyph);
       if (old && !ctx.theme.batterySaver) {
         setClass(sendGlyph, 'gc-send-glyph gc-entering');
         setClass(old, 'gc-send-glyph gc-leaving');
@@ -432,7 +479,7 @@ export function createComposer(ctx) {
         detach(old);
       }
     }
-    css(sendBtn, 'cursor', s.tap ? 'pointer' : 'default');
+    css(sendBtn, 'cursor', face.tap ? 'pointer' : 'default');
     const wantBadge = st.editing && s.slot && s.badge;
     if (wantBadge && !sendBadge) {
       sendBadge = h('button', 'gc-badge', sendWrap);
@@ -449,6 +496,15 @@ export function createComposer(ctx) {
       css(sendBadge, 'background', rgba(ctx.theme.accent));
       css(sendBadge, 'box-shadow', `0 4px 8px ${rgba(ctx.theme.accent, 0.3)}`);
     }
+  }
+
+  /** The guidance caption and hint: impersonating over an empty field, guiding a reply over a typed one. */
+  function renderGuideText() {
+    const g = st.guidance;
+    if (!g) return;
+    const face = (hasText() ? g.filled : g.empty) || g;
+    text(guideCaption, face.caption || '');
+    S.setAttribute(guideInput, 'placeholder', face.placeholder || '');
   }
 
   function renderBar() {
@@ -539,9 +595,8 @@ export function createComposer(ctx) {
     setClass(pill.el, classes('gc-glass gc-pill', { 'gc-guiding': !!g }));
     setClass(guide, g ? 'gc-guide' : 'gc-guide gc-hidden');
     if (g) {
-      text(guideCaption, g.caption || '');
+      renderGuideText();
       css(guideCaption, 'font-size', px(10 * theme.fontScale));
-      S.setAttribute(guideInput, 'placeholder', g.placeholder || '');
       css(guideInput, 'font-size', px(14 * theme.fontScale));
       css(guideInput, 'letter-spacing', px(theme.letterSpacing));
     } else if (S.getValue(guideInput)) {
@@ -592,12 +647,14 @@ export function createComposer(ctx) {
       barKey = '';
       render();
     },
-    setText(value) {
+    setText(value, rev) {
+      if (typeof rev === 'number') textRev = rev;
       if (S.getValue(input) !== value) {
         S.setValue(input, value);
         const end = value.length;
         if (hadSelection) S.setSelectionRange(input, end, end);
       }
+      contentChanged();
       updateSkin();
       growAll();
     },
@@ -607,8 +664,10 @@ export function createComposer(ctx) {
       updateSkin();
       render();
     },
-    setGuidanceText(value) {
+    setGuidanceText(value, rev) {
+      if (typeof rev === 'number') guideRev = rev;
       if (S.getValue(guideInput) !== value) S.setValue(guideInput, value);
+      contentChanged();
       growAll();
     },
     insertSurround,

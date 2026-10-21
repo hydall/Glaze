@@ -148,6 +148,34 @@ test('typing reports the text, and a patched prototype sees no chrome node', asy
   expect(leaked).toBe(0);
 });
 
+test('the send button follows the field on every keystroke, without Flutter', async ({ page }) => {
+  const { keyIn, keyOut } = await open(page);
+  // Dead while empty, live once something is typed — as in edit mode.
+  await page.evaluate((key) => window.__glazeChrome.apply(key, JSON.stringify({
+    composer: { send: { icon: { cp: 62754 }, tap: false, slot: false, faces: {
+      empty: { icon: { cp: 57415 }, tap: false },
+      guide: { icon: { cp: 57686 }, tap: true },
+      content: { icon: { cp: 62754 }, tap: true },
+    } } },
+    text: { v: '', rev: 3 },
+  })), keyIn);
+  const all = await intents(page, keyOut);
+  const layout = all.filter((i) => i.t === 'layout').at(-1).d;
+  const [x, y, w, h] = layout.composer;
+  const [sx, sy, sw, sh] = layout.send;
+  const sends = async () => (await intents(page, keyOut)).filter((i) => i.t === 'sendTap');
+  await page.mouse.click(sx + sw / 2, sy + sh / 2);
+  expect(await sends()).toHaveLength(0);
+  await page.mouse.click(x + w / 2, y + h / 2);
+  await page.keyboard.type('hi');
+  // No state came back from Flutter in between.
+  await page.mouse.click(sx + sw / 2, sy + sh / 2);
+  expect((await sends()).map((i) => i.d.v)).toEqual(['hi']);
+  // Each change carries the revision of the text Flutter last wrote.
+  const texts = (await intents(page, keyOut)).filter((i) => i.t === 'text');
+  expect(texts.at(-1).d).toEqual({ v: 'hi', rev: 3 });
+});
+
 test('plugin chat panels draw over the chrome', async ({ page }) => {
   await page.setViewportSize({ width: 400, height: 700 });
   const { keyOut } = await open(page);
