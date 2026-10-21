@@ -11,9 +11,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/state/shared_prefs_provider.dart';
 import '../../shared/shell/nav_height_provider.dart';
 import '../../shared/shell/shell_header_provider.dart';
+import '../../shared/theme/default_chat_settings.dart';
 import '../../shared/theme/theme_preset.dart';
 import '../../shared/theme/theme_provider.dart';
+import '../../shared/theme/theme_settings_schema.dart';
 import '../../shared/theme/app_colors.dart';
+import '../../shared/theme/ui_scale.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_scaffold.dart';
 import '../../shared/widgets/glaze_tab_bar.dart';
@@ -29,6 +32,8 @@ import 'theme_preview.dart';
 import 'widgets/chat_layout_picker.dart';
 import '../../shared/widgets/glaze_sheet.dart';
 import '../../shared/widgets/glaze_slider.dart';
+
+part 'theme_editor_chat_tab.dart';
 
 // ─── Palette (mirrors Glaze JS PRESET_COLORS / PRESET_UI_COLORS) ──────────────
 
@@ -114,6 +119,10 @@ class _ThemeEditorScreenState extends ConsumerState<ThemeEditorScreen> {
   int _activeTab = 0;
   Timer? _saveTimer;
 
+  /// The Chat tab's sub-tab, by the id its declaration gives it.
+  String? _chatTabId;
+  bool _previewOpen = false;
+
   @override
   void dispose() {
     _saveTimer?.cancel();
@@ -136,11 +145,23 @@ class _ThemeEditorScreenState extends ConsumerState<ThemeEditorScreen> {
     // fonts and background/element effects stay editable.
     final colorsLocked = preset.isMaterialYou;
     final statusBar = MediaQuery.of(context).padding.top;
+    final screenHeight = MediaQuery.sizeOf(context).height;
     final bottomPad = ref.watch(navHeightProvider) + 20;
-    // Top bar: back arrow + general/chat tabs (replaces the full-width header).
+    // Top bar: back arrow + general/chat tabs + the preview toggle (replaces
+    // the full-width header). Under it, on the Chat tab, the dropdown of the
+    // chat sections, then the preview when it is open — all pinned, so none
+    // of it scrolls away.
     const tabRowHeight = 66.0;
+    const pickerRowHeight = 44.0;
     final warningHeight = (isDefault || colorsLocked) ? 62.0 : 0.0;
-    final totalTopPadding = statusBar + tabRowHeight + warningHeight;
+    final onChat = _activeTab == 1;
+    final previewHeight = (screenHeight * 0.38).clamp(220.0, 360.0);
+    final pinnedHeight =
+        tabRowHeight +
+        warningHeight +
+        (onChat ? pickerRowHeight : 0) +
+        (_previewOpen ? previewHeight + 12 : 0);
+    final totalTopPadding = statusBar + pinnedHeight;
     // In a desktop window the back button is the title bar's.
     final inWindow = DetachedShellHost.drawsChrome(context);
 
@@ -175,6 +196,7 @@ class _ThemeEditorScreenState extends ConsumerState<ThemeEditorScreen> {
                           _ChatTab(
                             preset: preset,
                             onUpdate: _update,
+                            tabId: _chatTabId,
                             topPadding: totalTopPadding,
                             bottomPadding: bottomPad,
                           ),
@@ -194,6 +216,7 @@ class _ThemeEditorScreenState extends ConsumerState<ThemeEditorScreen> {
               bottom: false,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Padding(
                     padding: EdgeInsets.fromLTRB(inWindow ? 16 : 4, 10, 16, 8),
@@ -223,6 +246,12 @@ class _ThemeEditorScreenState extends ConsumerState<ThemeEditorScreen> {
                             onChanged: (i) => setState(() => _activeTab = i),
                           ),
                         ),
+                        const SizedBox(width: 8),
+                        _PreviewToggle(
+                          open: _previewOpen,
+                          onTap: () =>
+                              setState(() => _previewOpen = !_previewOpen),
+                        ),
                       ],
                     ),
                   ),
@@ -234,7 +263,7 @@ class _ThemeEditorScreenState extends ConsumerState<ThemeEditorScreen> {
                             horizontal: 12, vertical: 8),
                         decoration: BoxDecoration(
                           color: context.cs.surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: context.glazeBorderRadius(12),
                           border: Border.all(color: context.cs.outlineVariant),
                         ),
                         child: Row(
@@ -256,11 +285,64 @@ class _ThemeEditorScreenState extends ConsumerState<ThemeEditorScreen> {
                         ),
                       ),
                     ),
+                  if (onChat)
+                    SizedBox(
+                      height: pickerRowHeight,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                        child: AbsorbPointer(
+                          absorbing: isDefault,
+                          child: _ChatSectionPicker(
+                            preset: preset,
+                            tabId: _chatTabId,
+                            onChanged: (id) => setState(() => _chatTabId = id),
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (_previewOpen)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+                      child: ThemePreviewCard(height: previewHeight),
+                    ),
                 ],
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// The header button that shows and hides the chat preview.
+class _PreviewToggle extends StatelessWidget {
+  final bool open;
+  final VoidCallback onTap;
+
+  const _PreviewToggle({required this.open, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = context.cs;
+    return Tooltip(
+      message: open ? 'theme_preview_hide'.tr() : 'theme_preview_show'.tr(),
+      child: SizedBox(
+        width: 42,
+        height: 42,
+        child: GlassSurface(
+          borderRadius: BorderRadius.circular(21),
+          tint: open ? cs.primary : cs.surface,
+          border: Border.all(color: cs.primary.withValues(alpha: 0.18)),
+          onTap: onTap,
+          child: Center(
+            child: Icon(
+              open ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+              size: 20,
+              color: open ? cs.onPrimary : cs.primary,
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -563,500 +645,6 @@ class _GeneralTab extends StatelessWidget {
   }
 }
 
-// ─── Chat Tab ─────────────────────────────────────────────────────────────────
-
-class _ChatTab extends StatefulWidget {
-  final ThemePreset preset;
-  final void Function(ThemePreset Function(ThemePreset)) onUpdate;
-  final double topPadding;
-  final double bottomPadding;
-
-  const _ChatTab({
-    required this.preset,
-    required this.onUpdate,
-    required this.topPadding,
-    required this.bottomPadding,
-  });
-
-  @override
-  State<_ChatTab> createState() => _ChatTabState();
-}
-
-class _ChatTabState extends State<_ChatTab> {
-  int _activeSubTab = 0;
-  late final ScrollController _fontScrollController;
-  late final ScrollController _colorsScrollController;
-
-  @override
-  void initState() {
-    super.initState();
-    _fontScrollController = ScrollController();
-    _colorsScrollController = ScrollController();
-  }
-
-  @override
-  void dispose() {
-    _fontScrollController.dispose();
-    _colorsScrollController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final activeScrollController = _activeSubTab == 0
-        ? _fontScrollController
-        : _colorsScrollController;
-
-    return Column(
-      children: [
-        SizedBox(height: widget.topPadding),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-          child: Hero(
-            tag: 'theme_chat_preview',
-            child: Material(
-              type: MaterialType.transparency,
-              child: ThemeChatPreview(
-                preset: widget.preset,
-                borderColor: context.cs.outlineVariant,
-              ),
-            ),
-          ),
-        ),
-        Expanded(
-          child: SingleChildScrollView(
-            controller: activeScrollController,
-            padding: EdgeInsets.only(bottom: widget.bottomPadding),
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-                  child: _LayoutPickerRow(
-                    value: widget.preset.chatLayout,
-                    onTap: () => _showLayoutPicker(context),
-                  ),
-                ),
-                _ChatBackgroundGroup(
-                  preset: widget.preset,
-                  onUpdate: widget.onUpdate,
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-                  child: GlazeTabBar(
-                    tabs: [
-                      GlazeTabItem(label: 'tab_font'.tr(), icon: Icons.text_fields),
-                      GlazeTabItem(label: 'tab_colors'.tr(), icon: Icons.palette_outlined),
-                    ],
-                    activeIndex: _activeSubTab,
-                    onChanged: (i) => setState(() => _activeSubTab = i),
-                  ),
-                ),
-                SwipeTabSwitcher(
-                  index: _activeSubTab,
-                  length: 2,
-                  onChanged: (i) => setState(() => _activeSubTab = i),
-                  child: TabSlideSwitcher(
-                    index: _activeSubTab,
-                    child: _activeSubTab == 0
-                        ? _ChatFontTab(
-                            preset: widget.preset,
-                            onUpdate: widget.onUpdate,
-                          )
-                        : _ChatColorsTab(
-                            preset: widget.preset,
-                            onUpdate: widget.onUpdate,
-                          ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Future<void> _showLayoutPicker(BuildContext context) {
-    return showChatLayoutPicker(
-      context,
-      current: widget.preset.chatLayout,
-      onSelect: (layout) =>
-          widget.onUpdate((p) => p.copyWith(chatLayout: layout)),
-    );
-  }
-}
-
-// ─── Chat → Background (shown above the font/colors tabs) ─────────────────────
-
-class _ChatBackgroundGroup extends StatelessWidget {
-  final ThemePreset preset;
-  final void Function(ThemePreset Function(ThemePreset)) onUpdate;
-
-  const _ChatBackgroundGroup({required this.preset, required this.onUpdate});
-
-  @override
-  Widget build(BuildContext context) {
-    return MenuGroup(
-      header: 'theme_chat_background'.tr(),
-      items: [
-        _FontModeRow(
-          label: 'theme_chat_bg'.tr(),
-          mode: preset.chatBgMode,
-          modes: const ['inherit', 'color', 'avatar', 'custom'],
-          modeLabels: [
-            'theme_chat_bg_inherit'.tr(),
-            'theme_chat_bg_color'.tr(),
-            'theme_chat_bg_avatar'.tr(),
-            'theme_chat_bg_custom'.tr(),
-          ],
-          onChanged: (v) => onUpdate((p) => p.copyWith(chatBgMode: v)),
-        ),
-        if (preset.chatBgMode == 'color')
-          _ColorRow(
-            label: 'theme_chat_bg_color'.tr(),
-            value: preset.chatBgColor,
-            palette: _presetUiColors,
-            allowNull: true,
-            showPreviewOverlay: false,
-            nullLabel: 'theme_auto'.tr(),
-            onChanged: (v) => onUpdate((p) => p.copyWith(chatBgColor: v)),
-          ),
-        if (preset.chatBgMode == 'custom')
-          _BgImageRow(
-            hasImage: preset.hasChatBgImage,
-            onPicked: (dataUri) =>
-                onUpdate((p) => p.copyWith(chatBgImage: dataUri)),
-            onReset: () => onUpdate((p) => p.copyWith(chatBgImage: null)),
-          ),
-      ],
-    );
-  }
-}
-
-// ─── Chat → Font ──────────────────────────────────────────────────────────────
-
-class _ChatFontTab extends StatelessWidget {
-  final ThemePreset preset;
-  final void Function(ThemePreset Function(ThemePreset)) onUpdate;
-
-  const _ChatFontTab({required this.preset, required this.onUpdate});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        MenuGroup(
-          header: 'theme_chat_font'.tr(),
-          items: [
-            _FontModeRow(
-              label: 'tab_font'.tr(),
-              mode: preset.chatFontMode,
-              modes: const ['ui', 'glaze', 'system', 'custom', 'google'],
-              modeLabels: ['theme_font_same_as_ui'.tr(), 'theme_font_glaze'.tr(), 'theme_font_system'.tr(), 'theme_font_custom'.tr(), 'theme_font_google'.tr()],
-              onChanged: (v) async {
-                if (v == 'custom') {
-                  await _pickCustomFont(context, onUpdate, isUi: false, preset: preset);
-                } else if (v == 'google') {
-                  await _pickGoogleFont(context, onUpdate, isUi: false, preset: preset);
-                } else {
-                  onUpdate((p) => p.copyWith(chatFontMode: v));
-                }
-              },
-            ),
-            if (preset.chatFontMode == 'google' && preset.chatGoogleFontName != null)
-              _GoogleFontDisplayRow(
-                fontName: preset.chatGoogleFontName!,
-                onTap: () => _pickGoogleFont(context, onUpdate, isUi: false, preset: preset),
-                onClear: () => onUpdate((p) => p.copyWith(chatFontMode: 'ui', chatGoogleFontName: null)),
-              ),
-            _FontSizeRow(
-              label: 'theme_chat_font_size'.tr(),
-              value: preset.chatFontSize,
-              min: 12,
-              max: 24,
-              onChanged: (v) => onUpdate((p) => p.copyWith(chatFontSize: v)),
-            ),
-            _SliderRow(
-              label: 'theme_chat_letter_spacing'.tr(),
-              value: preset.chatLetterSpacing,
-              min: -1,
-              max: 3,
-              divisions: 8,
-              unit: 'px',
-              onChanged: (v) =>
-                  onUpdate((p) => p.copyWith(chatLetterSpacing: v)),
-            ),
-            _SliderRow(
-              label: 'theme_user_font_weight'.tr(),
-              value: preset.userMessageFontWeight.toDouble(),
-              min: 100,
-              max: 900,
-              divisions: 8,
-              unit: '',
-              onChanged: (v) => onUpdate(
-                (p) => p.copyWith(userMessageFontWeight: _weightFromSlider(v)),
-              ),
-            ),
-            _SliderRow(
-              label: 'theme_char_font_weight'.tr(),
-              value: preset.charMessageFontWeight.toDouble(),
-              min: 100,
-              max: 900,
-              divisions: 8,
-              unit: '',
-              onChanged: (v) => onUpdate(
-                (p) => p.copyWith(charMessageFontWeight: _weightFromSlider(v)),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-      ],
-    );
-  }
-}
-
-// ─── Chat → Colors ────────────────────────────────────────────────────────────
-
-class _ChatColorsTab extends ConsumerWidget {
-  final ThemePreset preset;
-  final void Function(ThemePreset Function(ThemePreset)) onUpdate;
-
-  const _ChatColorsTab({required this.preset, required this.onUpdate});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final isBubble = preset.chatLayout == 'bubble';
-    final appSettings = ref.watch(appSettingsProvider).value ?? const AppSettings();
-    final hideMessageId = preset.hideMessageId ?? appSettings.hideMessageId;
-    final hideGenerationTime =
-        preset.hideGenerationTime ?? appSettings.hideGenerationTime;
-    final hideTokenCount =
-        preset.hideTokenCount ?? appSettings.hideTokenCount;
-    return Column(
-      children: [
-        if (isBubble)
-          MenuGroup(
-            header: 'theme_bubble_colors'.tr(),
-            items: [
-              _ColorRow(
-                label: 'theme_user_bubble'.tr(),
-                value: preset.userBubbleColor,
-                palette: _presetColors,
-                allowNull: true,
-                nullLabel: 'theme_auto'.tr(),
-                allowGradient: true,
-                gradient: preset.userBubbleGradient,
-                onGradientChanged: (v) =>
-                    onUpdate((p) => p.copyWith(userBubbleGradient: v)),
-                onChanged: (v) =>
-                    onUpdate((p) => p.copyWith(userBubbleColor: v)),
-              ),
-              _ColorRow(
-                label: 'theme_char_bubble'.tr(),
-                value: preset.charBubbleColor,
-                palette: _presetColors,
-                allowNull: true,
-                nullLabel: 'theme_auto'.tr(),
-                allowGradient: true,
-                gradient: preset.charBubbleGradient,
-                onGradientChanged: (v) =>
-                    onUpdate((p) => p.copyWith(charBubbleGradient: v)),
-                onChanged: (v) =>
-                    onUpdate((p) => p.copyWith(charBubbleColor: v)),
-              ),
-              _SliderRow(
-                label: 'theme_user_bubble_radius'.tr(),
-                value: preset.userBubbleRadius,
-                min: 0,
-                max: 36,
-                divisions: 36,
-                unit: 'px',
-                onChanged: (v) =>
-                    onUpdate((p) => p.copyWith(userBubbleRadius: v)),
-              ),
-              _SliderRow(
-                label: 'theme_char_bubble_radius'.tr(),
-                value: preset.charBubbleRadius,
-                min: 0,
-                max: 36,
-                divisions: 36,
-                unit: 'px',
-                onChanged: (v) =>
-                    onUpdate((p) => p.copyWith(charBubbleRadius: v)),
-              ),
-            ],
-          ),
-        MenuGroup(
-          header: 'theme_identity'.tr(),
-          items: [
-            _SwitchRow(
-              label: 'theme_user_avatar'.tr(),
-              value: preset.showUserAvatar,
-              onChanged: (v) =>
-                  onUpdate((p) => p.copyWith(showUserAvatar: v)),
-            ),
-            _SwitchRow(
-              label: 'theme_char_avatar'.tr(),
-              value: preset.showCharAvatar,
-              onChanged: (v) =>
-                  onUpdate((p) => p.copyWith(showCharAvatar: v)),
-            ),
-            _SwitchRow(
-              label: 'theme_user_name'.tr(),
-              value: preset.showUserName,
-              onChanged: (v) =>
-                  onUpdate((p) => p.copyWith(showUserName: v)),
-            ),
-            _SwitchRow(
-              label: 'theme_char_name'.tr(),
-              value: preset.showCharName,
-              onChanged: (v) =>
-                  onUpdate((p) => p.copyWith(showCharName: v)),
-            ),
-          ],
-        ),
-        MenuGroup(
-          header: 'theme_message_meta'.tr(),
-          items: [
-            // Tri-state, because these three also exist as app settings and the
-            // preset wins over them (see chat_screen's `preset.x ?? app.x`).
-            // The include switch is what "this preset overrides it" looks like;
-            // turning it off clears the override and hands the row back to the
-            // app setting, which is otherwise unreachable from the UI.
-            _MetaOverrideRow(
-              label: 'menu_show_msg_id'.tr(),
-              overridden: preset.hideMessageId != null,
-              shown: !hideMessageId,
-              onOverrideChanged: (on) => onUpdate(
-                (p) => p.copyWith(
-                  hideMessageId: on ? appSettings.hideMessageId : null,
-                ),
-              ),
-              onChanged: (show) =>
-                  onUpdate((p) => p.copyWith(hideMessageId: !show)),
-            ),
-            _MetaOverrideRow(
-              label: 'menu_show_gen_time'.tr(),
-              overridden: preset.hideGenerationTime != null,
-              shown: !hideGenerationTime,
-              onOverrideChanged: (on) => onUpdate(
-                (p) => p.copyWith(
-                  hideGenerationTime: on ? appSettings.hideGenerationTime : null,
-                ),
-              ),
-              onChanged: (show) =>
-                  onUpdate((p) => p.copyWith(hideGenerationTime: !show)),
-            ),
-            _MetaOverrideRow(
-              label: 'menu_show_token_count'.tr(),
-              overridden: preset.hideTokenCount != null,
-              shown: !hideTokenCount,
-              onOverrideChanged: (on) => onUpdate(
-                (p) => p.copyWith(
-                  hideTokenCount: on ? appSettings.hideTokenCount : null,
-                ),
-              ),
-              onChanged: (show) =>
-                  onUpdate((p) => p.copyWith(hideTokenCount: !show)),
-            ),
-          ],
-        ),
-        MenuGroup(
-          header: 'theme_reply_colors'.tr(),
-          items: [
-            _ColorRow(
-              label: 'theme_user_reply'.tr(),
-              value: preset.userQuoteColor,
-              palette: _presetColors,
-              allowNull: true,
-              nullLabel: 'theme_auto'.tr(),
-              onChanged: (v) =>
-                  onUpdate((p) => p.copyWith(userQuoteColor: v)),
-            ),
-            _ColorRow(
-              label: 'theme_char_reply'.tr(),
-              value: preset.charQuoteColor,
-              palette: _presetColors,
-              allowNull: true,
-              nullLabel: 'theme_auto'.tr(),
-              onChanged: (v) =>
-                  onUpdate((p) => p.copyWith(charQuoteColor: v)),
-            ),
-          ],
-        ),
-        MenuGroup(
-          header: 'theme_text_colors'.tr(),
-          items: [
-            _ColorRow(
-              label: 'theme_user_text'.tr(),
-              value: preset.userTextColor,
-              palette: _presetColors,
-              allowNull: true,
-              nullLabel: 'theme_auto'.tr(),
-              onChanged: (v) =>
-                  onUpdate((p) => p.copyWith(userTextColor: v)),
-            ),
-            _ColorRow(
-              label: 'theme_char_text'.tr(),
-              value: preset.charTextColor,
-              palette: _presetColors,
-              allowNull: true,
-              nullLabel: 'theme_auto'.tr(),
-              onChanged: (v) =>
-                  onUpdate((p) => p.copyWith(charTextColor: v)),
-            ),
-          ],
-        ),
-        MenuGroup(
-          header: 'theme_italic_colors'.tr(),
-          items: [
-            _ColorRow(
-              label: 'theme_user_italic'.tr(),
-              value: preset.userItalicColor,
-              palette: _presetColors,
-              allowNull: true,
-              nullLabel: 'theme_auto'.tr(),
-              onChanged: (v) =>
-                  onUpdate((p) => p.copyWith(userItalicColor: v)),
-            ),
-            _ColorRow(
-              label: 'theme_char_italic'.tr(),
-              value: preset.charItalicColor,
-              palette: _presetColors,
-              allowNull: true,
-              nullLabel: 'theme_auto'.tr(),
-              onChanged: (v) =>
-                  onUpdate((p) => p.copyWith(charItalicColor: v)),
-            ),
-          ],
-        ),
-        // Desktop-only: message background opacity for layout-default.
-        // On mobile the backdrop is always transparent (no impact on perf).
-        if (!isBubble &&
-            (Platform.isWindows || Platform.isLinux || Platform.isMacOS))
-          MenuGroup(
-            header: 'theme_desktop_effects'.tr(),
-            items: [
-              _SliderRow(
-                label: 'theme_text_bg_opacity'.tr(),
-                value: preset.textBgOpacity,
-                min: 0.0,
-                max: 0.8,
-                divisions: 16,
-                unit: '%',
-                displayMultiplier: 100,
-                onChanged: (v) =>
-                    onUpdate((p) => p.copyWith(textBgOpacity: v)),
-              ),
-            ],
-          ),
-        const SizedBox(height: 8),
-      ],
-    );
-  }
-}
-
 // ─── Shared row widgets ───────────────────────────────────────────────────────
 
 // ─── Slider row ───────────────────────────────────────────────────────────────
@@ -1187,71 +775,6 @@ class _SwitchRow extends StatelessWidget {
             onChanged: onChanged,
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _LayoutPickerRow extends StatelessWidget {
-  final String value;
-  final VoidCallback onTap;
-
-  const _LayoutPickerRow({
-    required this.value,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final isBubble = value == 'bubble';
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        mouseCursor: SystemMouseCursors.click,
-        borderRadius: BorderRadius.circular(14),
-        onTap: onTap,
-        child: Ink(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          decoration: BoxDecoration(
-            color: context.cs.surfaceContainerHighest.withValues(alpha: 0.45),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: context.cs.outlineVariant),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                isBubble ? Icons.chat_bubble_outline : Icons.view_stream_outlined,
-                size: 18,
-                color: context.cs.primary,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                  Text(
-                    'menu_chat_layout'.tr(),
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: context.cs.onSurface,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      isBubble ? 'layout_bubble'.tr() : 'layout_default'.tr(),
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: context.cs.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Icon(Icons.chevron_right, color: context.cs.onSurfaceVariant),
-            ],
-          ),
-        ),
       ),
     );
   }
@@ -1462,7 +985,7 @@ class _ColorRow extends ConsumerWidget {
         mouseCursor: SystemMouseCursors.click,
         onTap: locked
             ? null
-            : () => _openPicker(context, ref.read(themeProvider).activePreset),
+            : () => _openPicker(context),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           child: Row(
@@ -1493,7 +1016,7 @@ class _ColorRow extends ConsumerWidget {
                       ? (current ?? Colors.transparent)
                       : null,
                   gradient: gradientValue,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: context.glazeBorderRadius(12),
                   border: Border.all(
                     color: context.cs.outlineVariant.withValues(
                         alpha: (current == null && gradientValue == null)
@@ -1538,7 +1061,7 @@ class _ColorRow extends ConsumerWidget {
     );
   }
 
-  Future<void> _openPicker(BuildContext context, ThemePreset previewPreset) async {
+  Future<void> _openPicker(BuildContext context) async {
     await Navigator.of(context).push(
       PageRouteBuilder<void>(
         opaque: false,
@@ -1549,7 +1072,6 @@ class _ColorRow extends ConsumerWidget {
         pageBuilder: (context, animation, secondaryAnimation) {
           return _ColorPickerOverlay(
             showPreviewOverlay: showPreviewOverlay,
-            previewPreset: previewPreset,
             current: value,
             palette: palette,
             allowNull: allowNull,
@@ -1573,7 +1095,6 @@ class _ColorRow extends ConsumerWidget {
 
 class _ColorPickerOverlay extends StatefulWidget {
   final bool showPreviewOverlay;
-  final ThemePreset previewPreset;
   final String? current;
   final List<String> palette;
   final bool allowNull;
@@ -1585,7 +1106,6 @@ class _ColorPickerOverlay extends StatefulWidget {
 
   const _ColorPickerOverlay({
     required this.showPreviewOverlay,
-    required this.previewPreset,
     required this.current,
     required this.palette,
     required this.allowNull,
@@ -1609,8 +1129,6 @@ class _ColorPickerOverlayState extends State<_ColorPickerOverlay>
   // Never let the sheet collapse below this even if the preview is very tall.
   static const double _minSheetHeight = 220.0;
 
-  final GlobalKey _previewKey = GlobalKey();
-  double _previewHeight = 0;
   double _dragOffset = 0;
   bool _closing = false;
 
@@ -1625,33 +1143,19 @@ class _ColorPickerOverlayState extends State<_ColorPickerOverlay>
     Navigator.of(context).pop();
   }
 
-  /// Measure the rendered preview after layout so the sheet below can be capped
-  /// to the remaining space (and scroll within it) instead of overlapping it.
-  void _measurePreview() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final box = _previewKey.currentContext?.findRenderObject() as RenderBox?;
-      if (box == null || !box.hasSize) return;
-      final h = box.size.height;
-      if ((h - _previewHeight).abs() > 0.5) {
-        setState(() => _previewHeight = h);
-      }
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
-    if (widget.showPreviewOverlay) _measurePreview();
     return SafeArea(
       bottom: false,
       child: LayoutBuilder(
         builder: (context, constraints) {
           final availH = constraints.maxHeight;
+          final previewHeight = (availH * 0.38).clamp(200.0, 340.0);
           double? sheetMax;
-          if (widget.showPreviewOverlay && _previewHeight > 0) {
+          if (widget.showPreviewOverlay) {
             // Sheet has a fixed 12px top padding (the Padding below) on top of
             // the space taken by the preview.
-            final reserved = _previewTop + _previewHeight + _previewGap + 12;
+            final reserved = _previewTop + previewHeight + _previewGap + 12;
             sheetMax = (availH - reserved).clamp(_minSheetHeight, availH);
           }
           return Stack(
@@ -1667,34 +1171,7 @@ class _ColorPickerOverlayState extends State<_ColorPickerOverlay>
                   top: _previewTop,
                   left: 16.0,
                   right: 16.0,
-                  child: KeyedSubtree(
-                    key: _previewKey,
-                    child: IgnorePointer(
-                      child: Hero(
-                        tag: 'theme_chat_preview',
-                        child: Material(
-                          type: MaterialType.transparency,
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(20),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.28),
-                                  blurRadius: 22,
-                                  offset: const Offset(0, 10),
-                                ),
-                              ],
-                            ),
-                            child: ThemeChatPreview(
-                              preset: widget.previewPreset,
-                              borderColor: context.cs.outlineVariant
-                                  .withValues(alpha: 0.75),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
+                  child: ThemePreviewCard(height: previewHeight),
                 ),
               Align(
                 alignment: Alignment.bottomCenter,
@@ -2206,7 +1683,7 @@ class _ColorPickerSheetState extends ConsumerState<_ColorPickerSheet> {
                                         colors: [_gColor1, _gColor2],
                                       )
                                     : null,
-                                borderRadius: BorderRadius.circular(28),
+                                borderRadius: context.glazeBorderRadius(28),
                                 border: Border.all(
                                   color: cs.onSurfaceVariant.withValues(alpha: 0.45),
                                   width: 1.5,
@@ -2787,7 +2264,7 @@ class _GradientStopToggle extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: context.glazeBorderRadius(10),
           border: Border.all(
             color: selected
                 ? cs.primary
@@ -2957,7 +2434,7 @@ class _GoogleFontPickerSheetState extends State<_GoogleFontPickerSheet> {
         .where((f) => f.toLowerCase().contains(_query.toLowerCase()))
         .toList();
     return ClipRRect(
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      borderRadius: BorderRadius.vertical(top: Radius.circular(context.glazeRadius(24))),
       child: Container(
         color: cs.surface.withValues(alpha: 0.95),
         child: SafeArea(

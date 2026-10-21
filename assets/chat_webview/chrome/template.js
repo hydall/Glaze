@@ -499,6 +499,46 @@ function evalParts(parts, scope) {
   return out;
 }
 
+/* ---------- Theme settings ---------- */
+
+// What a theme's own settings may put in a CSS variable or a class name:
+// a colour, a number with its unit, a word. Nothing that could hold a url(),
+// close the declaration or start another one.
+function plainToken(s, max, allowValueChars) {
+  if (typeof s !== 'string' || !s.length || s.length > max) return false;
+  for (let i = 0; i < s.length; i++) {
+    const c = S.charCodeAt(s, i);
+    const word = (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) ||
+      c === 45 || c === 95;
+    const value = allowValueChars && (c === 35 || c === 46 || c === 37);
+    if (!word && !value) return false;
+  }
+  return true;
+}
+
+/**
+ * The theme's own setting values, as Flutter sends them: [vars] (key →
+ * value, become `--theme-<key>`) and [flags] (become `theme-<flag>`
+ * classes). Returns only the entries that are safe to apply.
+ */
+export function themeValueEntries(vars, flags) {
+  const outVars = [];
+  const outFlags = [];
+  if (vars && typeof vars === 'object' && !S.isArray(vars)) {
+    for (const k in vars) {
+      if (!S.hasOwn(vars, k)) continue;
+      const v = vars[k];
+      if (plainToken(k, 40, false) && plainToken(v, 40, true)) S.put(outVars, [k, v]);
+    }
+  }
+  if (S.isArray(flags)) {
+    for (let i = 0; i < flags.length; i++) {
+      if (plainToken(flags[i], 81, false)) S.put(outFlags, flags[i]);
+    }
+  }
+  return { vars: outVars, flags: outFlags };
+}
+
 /* ---------- Compiling ---------- */
 
 /**

@@ -14,6 +14,7 @@ import 'glaze_sheet.dart';
 import 'glaze_text_field.dart';
 import 'menu_group.dart';
 import 'top_edge_blur.dart';
+import '../theme/ui_scale.dart';
 
 // ── Data models ───────────────────────────────────────────────────────────────
 
@@ -963,15 +964,15 @@ class _SheetSearchField extends StatelessWidget {
           filled: true,
           fillColor: Colors.white.withValues(alpha: 0.06),
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: context.glazeBorderRadius(12),
             borderSide: BorderSide.none,
           ),
           enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: context.glazeBorderRadius(12),
             borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
           ),
           focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: context.glazeBorderRadius(12),
             borderSide: BorderSide(
               color: context.cs.primary.withValues(alpha: 0.5),
             ),
@@ -1192,7 +1193,7 @@ class _ItemsList extends StatelessWidget {
                     border: Border.all(
                       color: Colors.white.withValues(alpha: 0.1),
                     ),
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: context.glazeBorderRadius(16),
                   ),
                   clipBehavior: Clip.antiAlias,
                   child: Column(
@@ -1311,8 +1312,8 @@ class _LazyItemRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return ClipRRect(
       borderRadius: BorderRadius.vertical(
-        top: isFirst ? const Radius.circular(16) : Radius.zero,
-        bottom: isLast ? const Radius.circular(16) : Radius.zero,
+        top: isFirst ? Radius.circular(context.glazeRadius(16)) : Radius.zero,
+        bottom: isLast ? Radius.circular(context.glazeRadius(16)) : Radius.zero,
       ),
       child: DecoratedBox(
         decoration: BoxDecoration(
@@ -1385,18 +1386,18 @@ class _ItemCardRowState extends State<_ItemCardRow> {
     final item = widget.item;
     return Material(
       color: Colors.white.withValues(alpha: 0.06),
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: context.glazeBorderRadius(16),
       child: InkWell(
         mouseCursor: SystemMouseCursors.click,
         onTap: () {
           Haptics.selectionClick();
           item.onTap();
         },
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: context.glazeBorderRadius(16),
         child: Container(
           decoration: BoxDecoration(
             border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: context.glazeBorderRadius(16),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           child: Row(
@@ -1571,15 +1572,15 @@ class GlazeSessionRow extends StatelessWidget {
     }
     return Material(
       color: Colors.white.withValues(alpha: 0.06),
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: context.glazeBorderRadius(16),
       child: InkWell(
         mouseCursor: SystemMouseCursors.click,
         onTap: item.onTap,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: context.glazeBorderRadius(16),
         child: DecoratedBox(
           decoration: BoxDecoration(
             border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: context.glazeBorderRadius(16),
           ),
           child: content,
         ),
@@ -1836,7 +1837,7 @@ class _CardRowState extends State<_CardRow> {
                 ? context.cs.primary.withValues(alpha: 0.4)
                 : const Color(0xFF555555),
           ),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: context.glazeBorderRadius(12),
           image: hasImage
               ? DecorationImage(
                   image: NetworkImage(item.imageUrl!),
@@ -1961,7 +1962,7 @@ class _CardItemInfo extends StatelessWidget {
                   color: hasImage
                       ? Colors.white.withValues(alpha: 0.2)
                       : Colors.black.withValues(alpha: 0.05),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: context.glazeBorderRadius(12),
                   border: hasImage
                       ? Border.all(color: Colors.white.withValues(alpha: 0.1))
                       : null,

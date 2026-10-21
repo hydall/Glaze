@@ -114,6 +114,13 @@ abstract class ThemePreset with _$ThemePreset {
     @Default('') String layoutDrawerCard,
     @Default('') String layoutDrawerTab,
     @Default('') String layoutChromeCss,
+    // The theme's own settings for the editor's Chat screen, as the JSON the
+    // theme file declares under `layout.settings` (theme_settings_schema.dart).
+    // Empty means the built-in Chat screen.
+    @Default('') String layoutSettings,
+    // What the user set those settings to, by key. Settings bound to a preset
+    // field (`field`) keep their value in that field instead.
+    @Default(<String, dynamic>{}) Map<String, dynamic> themeValues,
   }) = _ThemePreset;
 
   factory ThemePreset.fromJson(Map<String, dynamic> json) =>
@@ -131,6 +138,7 @@ const kThemeLayoutParts = <String, String>{
   'drawerCard': 'layoutDrawerCard',
   'drawerTab': 'layoutDrawerTab',
   'chromeCss': 'layoutChromeCss',
+  'settings': 'layoutSettings',
 };
 
 /// The preset's own layout, part by part, as the page takes it.

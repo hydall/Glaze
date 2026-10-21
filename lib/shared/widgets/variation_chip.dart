@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
+import '../theme/ui_scale.dart';
 
 /// Pill naming the variation something belongs to.
 ///
@@ -26,7 +27,7 @@ class VariationChip extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
       decoration: BoxDecoration(
         color: context.cs.primary.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: context.glazeBorderRadius(10),
       ),
       child: Text(
         name,

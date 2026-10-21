@@ -8,6 +8,7 @@ import '../theme/app_colors.dart';
 import 'folder_card.dart';
 import 'folder_name_dialog.dart';
 import 'glaze_bottom_sheet.dart';
+import '../theme/ui_scale.dart';
 
 /// The folders block of a list that uses the shared folder layer: one card per
 /// folder, stacked above the items and pinned there. Tapping opens the folder;
@@ -246,10 +247,10 @@ class _NewFolderTile extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 8),
       child: Material(
         color: context.cs.primary.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: context.glazeBorderRadius(12),
         child: InkWell(
           mouseCursor: SystemMouseCursors.click,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: context.glazeBorderRadius(12),
           onTap: onTap,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
@@ -295,10 +296,10 @@ class _FolderTile extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 8),
       child: Material(
         color: Colors.white.withValues(alpha: 0.04),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: context.glazeBorderRadius(12),
         child: InkWell(
           mouseCursor: SystemMouseCursors.click,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: context.glazeBorderRadius(12),
           onTap: onTap,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),

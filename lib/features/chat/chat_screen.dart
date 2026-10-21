@@ -40,6 +40,7 @@ import 'widgets/game_time_seed_dialog.dart';
 import '../../shared/theme/theme_font_provider.dart';
 import '../../shared/theme/theme_preset.dart';
 import '../../shared/theme/theme_provider.dart';
+import '../../shared/theme/theme_settings_schema.dart';
 
 import '../../shared/widgets/glaze_scaffold.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
@@ -673,7 +674,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       themeProvider.select((t) => t.activePreset),
     );
     final desktop = isDesktopLayout(context);
-    _chrome.set('skin', preset.chromeLayout);
+    _chrome.set('skin', preset.chromeLayoutPayload);
     _chrome.set(
       'theme',
       chromeTheme(
@@ -2017,9 +2018,10 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                         personaName: effectivePersona?.name,
                         greetingTotal: greetingTotal,
                         chatLayout: preset.chatLayout,
-                        themeLayout: preset.messageLayout == null
-                            ? null
-                            : jsonEncode(preset.messageLayout),
+                        themeLayout: switch (preset.messageLayoutPayload) {
+                          null => null,
+                          final layout => jsonEncode(layout),
+                        },
                         themeSyncKey: _chatWebViewThemeSyncKey(
                           preset,
                           preset.chatLayout,

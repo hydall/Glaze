@@ -1,0 +1,13 @@
+{
+  "name": "Template",
+  "author": "Glaze",
+  "accentColor": "#C42A4A",
+  "layout": {
+    "message": "layout/message.html",
+    "css": "layout/chat.css",
+    "chrome": {
+      "css": "layout/chrome.css"
+    },
+    "settings": "settings.json"
+  }
+}

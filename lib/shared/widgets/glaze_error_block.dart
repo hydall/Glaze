@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/utils/error_format.dart';
+import '../theme/ui_scale.dart';
 
 /// Inline error box mirroring the chat's `.error-window` (see
 /// `assets/chat_webview/styles.css`): red-bordered card, a header strip with an
@@ -41,7 +42,7 @@ class GlazeErrorBlock extends StatelessWidget {
       decoration: BoxDecoration(
         color: _accent.withValues(alpha: 0.1),
         border: Border.all(color: _accent),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: context.glazeBorderRadius(8),
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
@@ -66,7 +67,7 @@ class GlazeErrorBlock extends StatelessWidget {
                 ),
                 InkWell(
                   mouseCursor: SystemMouseCursors.click,
-                  borderRadius: BorderRadius.circular(4),
+                  borderRadius: context.glazeBorderRadius(4),
                   onTap: () =>
                       Clipboard.setData(ClipboardData(text: message)),
                   child: const Padding(

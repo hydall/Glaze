@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/utils/error_format.dart';
 import '../../features/settings/app_settings_provider.dart';
+import '../theme/ui_scale.dart';
 
 final toastOverlayKey = GlobalKey<OverlayState>();
 
@@ -429,7 +430,7 @@ class _ToastChipState extends ConsumerState<_ToastChip> {
                 Clipboard.setData(ClipboardData(text: widget.text));
               },
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: context.glazeBorderRadius(24),
           child: (ref.watch(appSettingsProvider).value?.batterySaver ?? false)
               ? _toastContent(opaque: true)
               : BackdropFilter(
@@ -464,7 +465,7 @@ class _ToastChipState extends ConsumerState<_ToastChip> {
       decoration: BoxDecoration(
         color: bgColor,
         border: Border.all(color: _toastBorderColor, width: 1),
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: context.glazeBorderRadius(24),
         boxShadow: const [
           BoxShadow(
             color: Color(0x401A1A1A),
@@ -491,7 +492,7 @@ class _ToastChipState extends ConsumerState<_ToastChip> {
                   color: widget.isWarning
                       ? const Color(0x332A1E00)
                       : const Color(0x33FFFFFF),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: context.glazeBorderRadius(12),
                 ),
                 child: Text(
                   _copied ? 'Copied' : 'Copy',

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
 import 'glass_surface.dart';
+import '../theme/ui_scale.dart';
 
 /// Selection bar shown while a list is multi-selecting (presets, regex scripts). Mirrors the chat's
 /// message-selection bar: a glass pill with a cancel button, the selected
@@ -61,7 +62,7 @@ class GlazeSelectionBar extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       elevation: 0,
-      borderRadius: BorderRadius.circular(28),
+      borderRadius: context.glazeBorderRadius(28),
       child: GlassSurface(
         borderRadius: BorderRadius.circular(28),
         tint: context.cs.surface,

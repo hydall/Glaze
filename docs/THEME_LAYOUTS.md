@@ -21,6 +21,7 @@ The engine is `assets/chat_webview/chrome/template.js`; the message side is
   "layout": {
     "message": "layout/message.html",
     "css": "layout/chat.css",
+    "settings": "settings.json",
     "chrome": {
       "header": "layout/header.html",
       "composer": "layout/composer.html",
@@ -46,7 +47,8 @@ ignored, not treated as inline text. The flat spelling also works when a
 ```
 
 Missing parts keep the built-in look for that surface. Each part is capped at
-256 KiB.
+256 KiB. `settings` is the theme's own Chat screen in the editor — see
+[Settings](#settings).
 
 ## Template syntax
 
@@ -179,6 +181,95 @@ file, so it must not be able to send what it is shown anywhere.
 
 An image `src` is either a `data:` URL written in the template or one bare
 `{{path}}` that the app provides (an avatar). Nothing else loads.
+
+## Settings
+
+A theme can declare its own settings for the theme editor's **Chat** screen
+in `layout.settings` — the declaration itself, or the path of a JSON file in
+the archive. A declaration replaces the built-in Chat screen as a whole: its
+tabs (picked from the dropdown under the editor's header), the groups in each
+tab and the rows in each group. A theme without one gets the built-in screen,
+which is itself such a declaration (`lib/shared/theme/default_chat_settings.dart`).
+
+```json
+{
+  "tabs": [
+    {
+      "id": "theme", "label": { "en": "Theme", "ru": "Тема" }, "icon": "brush",
+      "groups": [
+        {
+          "header": "Cards",
+          "items": [
+            { "type": "color", "key": "card-edge", "label": "Card edge", "default": "#C42A4A" },
+            { "type": "slider", "key": "card-pad", "label": "Padding", "min": 4, "max": 24, "step": 1, "unit": "px", "default": 12 },
+            { "type": "switch", "key": "compact", "label": "Compact header" },
+            { "type": "select", "key": "edge", "label": "Edge side",
+              "options": [{ "value": "left", "label": "Left" }, { "value": "top", "label": "Top" }] },
+            { "field": "userBubbleColor", "when": "chatLayout == 'bubble'" }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+A row is one of:
+
+- `{"field": …}` — one of the preset's own chat fields, drawn exactly as the
+  built-in screen draws it. The fields a theme may use: `chatLayout`,
+  `chatBgMode`, `chatBgColor`, `chatBgImage`, `chatFontMode`, `chatFontSize`,
+  `chatLetterSpacing`, `userMessageFontWeight`, `charMessageFontWeight`,
+  `userBubbleColor`, `charBubbleColor`, `userBubbleRadius`,
+  `charBubbleRadius`, `showUserAvatar`, `showCharAvatar`, `showUserName`,
+  `showCharName`, `hideMessageId`, `hideGenerationTime`, `hideTokenCount`,
+  `userQuoteColor`, `charQuoteColor`, `userTextColor`, `charTextColor`,
+  `userItalicColor`, `charItalicColor`, `textBgOpacity`. Without a `label` it
+  keeps the app's own.
+- A value of the theme's own: `type` is `color`, `slider` (`min`, `max`,
+  `step`, `unit` — one of `px % em rem deg s ms` — and `percent` to show it
+  ×100), `switch` or `select` (`options`), with a `key` (letters, digits, `-`
+  and `_`) and a `default`.
+- `{"type": "subheader"}` or `{"type": "note"}` with a `label`.
+
+Labels are a string, one string per language (`{"en": …, "ru": …}`), or
+`"@key"` for one of the app's own translations. Tab icons are one of
+`text_fields palette tune chat image brush star layers person auto_awesome`.
+`description` adds a line under a row.
+
+`when` on a group or a row shows it only while the condition holds. It reads
+the preset's fields by name (`chatLayout`, `chatBgMode`, …), the theme's own
+values by key (or `theme.key`), and `desktop` / `mobile`; it has `!`, `==`,
+`!=`, `<`, `<=`, `>`, `>=`, `&&`, `||`, parentheses, strings, numbers,
+`true`, `false` and `null`. A condition that does not parse holds.
+
+The theme's own values reach it three ways, on the chat page and in the
+chrome alike:
+
+| | |
+|---|---|
+| `--theme-<key>` | a CSS variable: the colour, the number with its unit, `1`/`0` for a switch, the option of a select |
+| `theme-<key>` | a class, while a switch is on |
+| `theme-<key>-<value>` | a class for the chosen option of a select |
+
+On the page the variables are on the document and the classes on
+`#chat-container`; in the chrome both are on its root (`.gc`), so `chrome.css`
+reads them there. A message template also gets them as `theme.<key>`
+(`g-if="theme.compact"`). Only colours, numbers and plain words get through, so
+a value can never carry a `url()` into a stylesheet.
+
+## Template
+
+`docs/theme_template/` is a theme to start from: `theme.json`, a message
+template and stylesheets in `layout/`, and `settings.json` — the built-in Chat
+screen's declaration (the Font, Colors and General tabs) with one more tab of
+the theme's own settings, used by its stylesheets. Zip the folder's contents
+(so `theme.json` is at the root of the archive) and import it.
+
+The editor's preview (the eye button in its header) is the chat page itself
+(`assets/chat_webview/theme_preview.html`): the same renderer, stylesheet,
+chrome and theme layout, fed a few sample messages — what it shows is what a
+chat will show.
 
 ## Worked example
 

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
+import '../theme/ui_scale.dart';
 
 /// The one row shape every preset/memory list uses.
 ///
@@ -110,12 +111,12 @@ class GlazeListItem extends StatelessWidget {
       padding: margin,
       child: Material(
         color: Colors.transparent,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: context.glazeBorderRadius(12),
         child: InkWell(
           mouseCursor: SystemMouseCursors.click,
           onTap: onTap,
           onLongPress: onLongPress,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: context.glazeBorderRadius(12),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
             curve: Curves.easeOut,
@@ -123,7 +124,7 @@ class GlazeListItem extends StatelessWidget {
               color: highlighted
                   ? context.cs.primary.withValues(alpha: 0.14)
                   : context.cs.onSurface.withValues(alpha: 0.04),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: context.glazeBorderRadius(12),
               border: Border.all(
                 color: highlighted
                     ? context.cs.primary.withValues(alpha: 0.4)
@@ -164,7 +165,7 @@ class GlazeListIcon extends StatelessWidget {
       height: 32,
       decoration: BoxDecoration(
         color: tint.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: context.glazeBorderRadius(8),
       ),
       child: Icon(icon, size: 18, color: tint),
     );
@@ -188,11 +189,11 @@ class GlazeListMenuButton extends StatelessWidget {
       message: tooltip,
       child: Material(
         color: Colors.transparent,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: context.glazeBorderRadius(8),
         child: InkWell(
           mouseCursor: SystemMouseCursors.click,
           onTap: onTap,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: context.glazeBorderRadius(8),
           child: SizedBox(
             width: 32,
             height: 32,

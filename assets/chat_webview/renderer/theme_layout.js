@@ -10,7 +10,7 @@
 // still finds the element it updates, and dropping the template puts each
 // piece back where it was.
 
-import { compile, arrange, sanitizeCss } from '../chrome/template.js';
+import { compile, arrange, sanitizeCss, themeValueEntries } from '../chrome/template.js';
 import { formatDate, formatDateDisplay, formatTime, roleKey } from './message_template.js';
 
 const STYLE_ID = 'glaze-theme-layout';
@@ -29,6 +29,46 @@ let template = null;
 let contentCss = '';
 
 const CONTENT_STYLE_ID = 'glaze-theme-content';
+
+// The theme's own setting values (docs/THEME_LAYOUTS.md § Settings). One
+// object, filled in place, so a section laid out before a change still reads
+// the current values the next time its template updates.
+const themeValues = {};
+let themeVarNames = [];
+let themeFlagNames = [];
+
+/**
+ * Puts the theme's setting values on the page: `--theme-<key>` variables on
+ * the document, `theme-<flag>` classes on the chat container, and the values
+ * themselves in every message template's `theme` scope.
+ */
+function applyThemeValues(layout) {
+  const root = document.documentElement;
+  const container = document.getElementById('chat-container');
+  for (const name of themeVarNames) root.style.removeProperty(`--theme-${name}`);
+  if (container) for (const flag of themeFlagNames) container.classList.remove(`theme-${flag}`);
+  themeVarNames = [];
+  themeFlagNames = [];
+  for (const k of Object.keys(themeValues)) delete themeValues[k];
+
+  const { vars, flags } = themeValueEntries(layout && layout.vars, layout && layout.flags);
+  for (const [k, v] of vars) {
+    root.style.setProperty(`--theme-${k}`, v);
+    themeVarNames.push(k);
+  }
+  if (container) {
+    for (const flag of flags) container.classList.add(`theme-${flag}`);
+  }
+  themeFlagNames = flags;
+
+  const values = layout && layout.values;
+  if (values && typeof values === 'object' && !Array.isArray(values)) {
+    for (const k of Object.keys(values)) {
+      const v = values[k];
+      if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') themeValues[k] = v;
+    }
+  }
+}
 
 /**
  * Puts [contentCss] into [host]'s shadow root (or takes it out when empty).
@@ -116,6 +156,7 @@ export function messageData(m, identity, name) {
     isHidden: !!m.isHidden,
     isTyping: !!m.isTyping,
     editing: !!m.isEditing,
+    theme: themeValues,
   };
 }
 
@@ -241,6 +282,7 @@ export function setMessageLayout(layout, sections) {
 
   template = next;
   contentCss = nextContentCss;
+  applyThemeValues(layout);
   for (const section of sections) {
     if (!section || !section.querySelectorAll) continue;
     for (const host of section.querySelectorAll('.message-content')) applyContentStyle(host);

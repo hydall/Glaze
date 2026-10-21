@@ -28,7 +28,7 @@ import { createDrag } from './drag.js';
 import { createHeader } from './header.js';
 import { createComposer } from './composer.js';
 import { createDrawer } from './drawer.js';
-import { compile, sanitizeCss } from './template.js';
+import { compile, sanitizeCss, themeValueEntries } from './template.js';
 
 const KEY_IN = S.randomToken(32);
 const KEY_OUT = S.randomToken(32);
@@ -375,10 +375,12 @@ let skinKey = '';
 function applySkin(skin) {
   const s = skin && typeof skin === 'object' ? skin : {};
   const str = (k) => (S.hasOwn(s, k) && typeof s[k] === 'string' ? s[k] : '');
-  const key = S.jsonStringify([str('css'), str('header'), str('composer'), str('drawerCard'), str('drawerTab')]);
+  const key = S.jsonStringify([str('css'), str('header'), str('composer'), str('drawerCard'), str('drawerTab'),
+    S.hasOwn(s, 'vars') ? s.vars : null, S.hasOwn(s, 'flags') ? s.flags : null]);
 
   if (key === skinKey) return;
   skinKey = key;
+  applyThemeValues(S.hasOwn(s, 'vars') ? s.vars : null, S.hasOwn(s, 'flags') ? s.flags : null);
   const css = sanitizeCss(str('css'));
   S.setTextContent(skinStyleEl, str('header') || str('composer') || str('drawerCard') || str('drawerTab') || css
     ? SKIN_BASE + css : '');
@@ -386,6 +388,27 @@ function applySkin(skin) {
   header.setSkin(tpl('header'));
   composer.setSkin(tpl('composer'));
   drawer.setSkin(tpl('drawerCard'), tpl('drawerTab'));
+}
+
+let themeVarNames = [];
+
+/**
+ * The theme's own setting values: `--theme-<key>` variables and
+ * `theme-<flag>` classes on the chrome's root, for its stylesheet. Set here
+ * and not inherited from the page, where a message could override them.
+ */
+function applyThemeValues(vars, flags) {
+  for (let i = 0; i < themeVarNames.length; i++) css(rootEl, `--theme-${themeVarNames[i]}`, '');
+  themeVarNames = [];
+  const entries = themeValueEntries(vars, flags);
+  for (let i = 0; i < entries.vars.length; i++) {
+    const k = entries.vars[i][0];
+    css(rootEl, `--theme-${k}`, entries.vars[i][1]);
+    S.put(themeVarNames, k);
+  }
+  let cls = 'gc';
+  for (let i = 0; i < entries.flags.length; i++) cls += ` theme-${entries.flags[i]}`;
+  S.setAttribute(rootEl, 'class', cls);
 }
 
 /* ---------- Layout ---------- */

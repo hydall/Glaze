@@ -1597,15 +1597,15 @@ class _SheetTabButton extends StatelessWidget {
       color: active
           ? context.cs.primary.withValues(alpha: 0.12)
           : Colors.white.withValues(alpha: 0.04),
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: context.glazeBorderRadius(12),
       child: InkWell(
         mouseCursor: SystemMouseCursors.click,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: context.glazeBorderRadius(12),
         onTap: onTap,
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: context.glazeBorderRadius(12),
             border: Border.all(
               color: active
                   ? context.cs.primary.withValues(alpha: 0.28)

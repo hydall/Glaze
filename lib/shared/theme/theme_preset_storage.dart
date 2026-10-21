@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../application/sync_theme_store.dart';
 import 'theme_preset.dart';
+import 'theme_settings_schema.dart';
 
 /// Themes picked per device brightness, used while [followSystem] is on.
 @immutable
@@ -235,6 +236,12 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
 
     stripped['id'] = id;
     stripped['name'] = name;
+    if (stripped['themeValues'] is! Map<String, dynamic>) {
+      stripped.remove('themeValues');
+    }
+    if (stripped['layoutSettings'] is! String) {
+      stripped.remove('layoutSettings');
+    }
 
     return _withLayout(themePresetFromStoredJson(stripped), json, archive);
   }
@@ -298,7 +305,25 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
         raw['chromeCss'],
         chrome['css'],
       ], preset.layoutChromeCss),
+      layoutSettings: _settingsPart(raw['settings'], archive) ??
+          preset.layoutSettings,
     );
+  }
+
+  /// The theme's own Chat-screen settings (theme_settings_schema.dart): the
+  /// declaration itself, or the path of a JSON file in the archive. Null
+  /// when the theme declares none; '' when what it declares is unusable.
+  String? _settingsPart(Object? value, Archive? archive) {
+    if (value == null) return null;
+    String? text;
+    if (value is Map || value is List) {
+      text = jsonEncode(value);
+    } else if (value is String) {
+      text = _resolveLayoutText(value, archive);
+    }
+    if (text == null || text.length > _maxLayoutPart) return '';
+    final schema = ThemeSettingsSchema.parse(text);
+    return schema == null || schema.isEmpty ? '' : text;
   }
 
   /// A layout part: the file's text when [value] names a file in [archive],
