@@ -181,6 +181,7 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
     if (!_startupReady) return;
     GenerationNotificationService.instance.updateLifecycleState(state);
     if (state == AppLifecycleState.resumed) {
+      unawaited(reviveChatWebViewServers());
       _updateChecks?.resume();
       unawaited(ref.read(sessionLorebookEmbeddingWorkerProvider).drain());
       final service = ref.read(syncServiceProvider).value;

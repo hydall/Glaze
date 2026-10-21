@@ -297,7 +297,117 @@ Future<void> initChatWebViewEnvironment() async {
 WebUri? _localFileServingBaseUrl() =>
     _chatWebViewLocalFileBaseUrl ?? _chatWebViewAssetBaseUrl;
 
-Future<void> _startChatWebViewAssetServer() async {
+/// Loopback servers whose accept loop has ended — the listening socket failed
+/// or was closed, so the server will never answer again.
+final Set<HttpServer> _stoppedChatWebViewServers = Set.identity();
+
+Future<void>? _chatWebViewServerRevival;
+
+/// Brings back loopback servers the OS took away while the app was in the
+/// background. Call on every resume.
+///
+/// iOS reclaims the listening sockets of a suspended app. The suspension can
+/// last minutes, so the chat kept working for a while and then every avatar,
+/// generated image and ext-block card turned into a broken-image glyph, and
+/// the in-page retry could not help: nothing was listening on that port
+/// anymore. A dead server is rebound on its old port, so the URLs already in
+/// the page start resolving again without a re-render.
+Future<void> reviveChatWebViewServers() {
+  if (kIsWeb) return Future.value();
+  return _chatWebViewServerRevival ??= _reviveChatWebViewServers().whenComplete(
+    () => _chatWebViewServerRevival = null,
+  );
+}
+
+Future<void> _reviveChatWebViewServers() async {
+  try {
+    final fileServer = _chatWebViewLocalFileServer;
+    final filePort = _chatWebViewLocalFileBaseUrl?.port ?? 0;
+    if (fileServer != null && !await _isServerAlive(fileServer, filePort)) {
+      debugPrint('[ChatWebViewEnvironment] Local file server lost, rebinding');
+      _chatWebViewLocalFileServer = null;
+      await _closeServerQuietly(fileServer);
+      await _startChatWebViewLocalFileServer(preferredPort: filePort);
+    }
+
+    final assetServer = _chatWebViewAssetServer;
+    final assetPort = _chatWebViewAssetBaseUrl?.port ?? 0;
+    if (assetServer != null && !await _isServerAlive(assetServer, assetPort)) {
+      debugPrint('[ChatWebViewEnvironment] Asset server lost, rebinding');
+      _chatWebViewAssetServer = null;
+      await _closeServerQuietly(assetServer);
+      if (defaultTargetPlatform == TargetPlatform.iOS) {
+        await _startChatWebViewBundleServer(preferredPort: assetPort);
+      } else {
+        await _startChatWebViewAssetServer(preferredPort: assetPort);
+      }
+    }
+  } catch (e, st) {
+    debugPrint('[ChatWebViewEnvironment] Server revival failed: $e\n$st');
+  }
+}
+
+/// Whether [server] still accepts connections on [port]. A server whose
+/// accept loop has already ended is dead without probing.
+Future<bool> _isServerAlive(HttpServer server, int port) async {
+  if (_stoppedChatWebViewServers.contains(server)) return false;
+  if (port == 0) return false;
+  try {
+    final socket = await Socket.connect(
+      InternetAddress.loopbackIPv4,
+      port,
+      timeout: const Duration(milliseconds: 500),
+    );
+    socket.destroy();
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+Future<void> _closeServerQuietly(HttpServer server) async {
+  _stoppedChatWebViewServers.remove(server);
+  try {
+    await server.close(force: true);
+  } catch (_) {
+    // The socket is already gone.
+  }
+}
+
+/// Binds a loopback server on [preferredPort] when it is free, so a revived
+/// server keeps the origin the page already uses; any free port otherwise.
+Future<HttpServer> _bindLoopbackServer(int preferredPort) async {
+  if (preferredPort != 0) {
+    try {
+      return await HttpServer.bind(InternetAddress.loopbackIPv4, preferredPort);
+    } on SocketException catch (e) {
+      debugPrint(
+        '[ChatWebViewEnvironment] Port $preferredPort unavailable ($e), '
+        'binding a new one',
+      );
+    }
+  }
+  return HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+}
+
+/// Accepts requests on [server] until its socket stops, then marks it dead so
+/// [reviveChatWebViewServers] rebinds it. An accept error used to escape as an
+/// unhandled async error and leave the server registered but silent.
+Future<void> _acceptRequests(
+  HttpServer server,
+  Future<void> Function(HttpRequest request) handler,
+) async {
+  try {
+    await for (final request in server) {
+      unawaited(_handleServerRequest(request, handler));
+    }
+  } catch (e) {
+    debugPrint('[ChatWebViewEnvironment] Loopback server stopped: $e');
+  }
+  _stoppedChatWebViewServers.add(server);
+}
+
+Future<void> _startChatWebViewAssetServer({int preferredPort = 0}) async {
   if (_chatWebViewAssetServer != null) return;
 
   final assetDir = _chatWebViewAssetDirectory();
@@ -305,38 +415,32 @@ Future<void> _startChatWebViewAssetServer() async {
     return;
   }
 
-  final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+  final server = await _bindLoopbackServer(preferredPort);
   _chatWebViewAssetServer = server;
   _chatWebViewAssetBaseUrl = WebUri('http://127.0.0.1:${server.port}/');
-  unawaited(_serveChatWebViewAssets(server, assetDir));
+  unawaited(_acceptRequests(server, (r) => _serveAssetFile(r, assetDir)));
 }
 
 /// Loopback server for approved Glaze media files. It intentionally uses a
 /// different origin from the iOS/Windows/Linux chat asset server.
-Future<void> _startChatWebViewLocalFileServer() async {
+Future<void> _startChatWebViewLocalFileServer({int preferredPort = 0}) async {
   if (_chatWebViewLocalFileServer != null) return;
 
-  final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+  final server = await _bindLoopbackServer(preferredPort);
   _chatWebViewLocalFileServer = server;
   _chatWebViewLocalFileBaseUrl = WebUri('http://127.0.0.1:${server.port}/');
-  unawaited(_serveChatWebViewLocalFiles(server));
+  unawaited(_acceptRequests(server, _serveLocalFile));
 }
 
 /// Loopback server for iOS bundled chat assets. User files are served by the
 /// separate local-file server so message content cannot read them same-origin.
-Future<void> _startChatWebViewBundleServer() async {
+Future<void> _startChatWebViewBundleServer({int preferredPort = 0}) async {
   if (_chatWebViewAssetServer != null) return;
 
-  final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+  final server = await _bindLoopbackServer(preferredPort);
   _chatWebViewAssetServer = server;
   _chatWebViewAssetBaseUrl = WebUri('http://127.0.0.1:${server.port}/');
-  unawaited(_serveChatWebViewBundleAssets(server));
-}
-
-Future<void> _serveChatWebViewBundleAssets(HttpServer server) async {
-  await for (final request in server) {
-    unawaited(_handleServerRequest(request, _serveBundleAsset));
-  }
+  unawaited(_acceptRequests(server, _serveBundleAsset));
 }
 
 Future<void> _serveBundleAsset(HttpRequest request) async {
@@ -366,12 +470,6 @@ Future<void> _serveBundleAsset(HttpRequest request) async {
   await request.response.close();
 }
 
-Future<void> _serveChatWebViewLocalFiles(HttpServer server) async {
-  await for (final request in server) {
-    unawaited(_handleServerRequest(request, _serveLocalFile));
-  }
-}
-
 Future<void> _serveLocalFile(HttpRequest request) async {
   if (request.uri.path != '/__glaze_file__') {
     request.response.statusCode = HttpStatus.notFound;
@@ -383,7 +481,7 @@ Future<void> _serveLocalFile(HttpRequest request) async {
 
 /// Runs one request handler in isolation.
 ///
-/// Two reasons this is not inlined in the `await for` loops. Awaiting the
+/// Two reasons this is not inlined in the `await for` loop. Awaiting the
 /// handler there served the page one file at a time, so a single slow or
 /// half-abandoned response (the chat re-renders a message body while its image
 /// is still downloading) held back every other avatar and generated image
@@ -425,12 +523,6 @@ Directory _chatWebViewAssetDirectory() {
       'chat_webview',
     ].join(separator),
   );
-}
-
-Future<void> _serveChatWebViewAssets(HttpServer server, Directory root) async {
-  await for (final request in server) {
-    unawaited(_handleServerRequest(request, (r) => _serveAssetFile(r, root)));
-  }
 }
 
 Future<void> _serveAssetFile(HttpRequest request, Directory root) async {
@@ -644,4 +736,25 @@ void setChatWebViewLocalFileBaseUrlForTesting(WebUri? baseUrl) {
 @visibleForTesting
 void setChatWebViewAssetBaseUrlForTesting(WebUri? baseUrl) {
   _chatWebViewAssetBaseUrl = baseUrl;
+}
+
+@visibleForTesting
+Future<int> startChatWebViewLocalFileServerForTesting() async {
+  await _startChatWebViewLocalFileServer();
+  return _chatWebViewLocalFileBaseUrl!.port;
+}
+
+/// Closes the local-file server's socket without unregistering it, the way
+/// iOS reclaims it under a suspended app.
+@visibleForTesting
+Future<void> dropChatWebViewLocalFileSocketForTesting() async {
+  await _chatWebViewLocalFileServer?.close(force: true);
+}
+
+@visibleForTesting
+Future<void> stopChatWebViewLocalFileServerForTesting() async {
+  final server = _chatWebViewLocalFileServer;
+  _chatWebViewLocalFileServer = null;
+  _chatWebViewLocalFileBaseUrl = null;
+  if (server != null) await _closeServerQuietly(server);
 }
