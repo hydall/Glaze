@@ -73,7 +73,7 @@ window.GLAZE = {
       kind_news: 'Новости',
 
       info_title: 'Информация',
-      info_lead: 'Что умеет Glaze, как он выглядит и как писать для него.',
+      info_lead: 'Что умеет Glaze, как он выглядит и как писать для него плагины и темы.',
       info_back: 'Вся информация',
       info_loading: 'Загружаем страницу…',
       info_failed: 'Не удалось загрузить страницу.',
@@ -225,7 +225,7 @@ window.GLAZE = {
       kind_news: 'News',
 
       info_title: 'Info',
-      info_lead: 'What Glaze can do, what it looks like and how to build for it.',
+      info_lead: 'What Glaze can do, what it looks like, and how to build plugins and themes for it.',
       info_back: 'All info',
       info_loading: 'Loading the page…',
       info_failed: 'Could not load the page.',
@@ -549,6 +549,45 @@ window.GLAZE = {
           icon: 'code',
           title: { ru: 'Справочник API', en: 'API reference' },
           lead: { ru: 'Все методы glaze.*: сообщения, переменные, файлы, генерация, сеть, библиотека и интерфейс.', en: 'Every glaze.* method: messages, variables, files, generation, network, the library and the interface.' },
+        },
+      ],
+    },
+    {
+      id: 'themes',
+      icon: 'palette',
+      title: { ru: 'Темы', en: 'Themes' },
+      note: {
+        ru: 'Новый редактор тем и свои макеты сейчас тестируются на Nightly. Всё может измениться.',
+        en: 'The new theme editor and custom layouts are being tested on Nightly. Everything is subject to change.',
+      },
+      lead: {
+        ru: 'Как устроены темы Glaze: цвета, свои макеты чата, CSS и импорт тем Tavo.',
+        en: 'How Glaze themes work: colours, custom chat layouts, CSS and Tavo themes.',
+      },
+      pages: [
+        {
+          slug: 'themes',
+          icon: 'brush',
+          title: { ru: 'Начало работы', en: 'Getting started' },
+          lead: { ru: 'Создать тему в редакторе, импортировать чужую и понять, что может нести файл темы.', en: 'Make a theme in the editor, import one, and know what a theme file can carry.' },
+        },
+        {
+          slug: 'themes-json',
+          icon: 'data_object',
+          title: { ru: 'Файл темы', en: 'The theme file' },
+          lead: { ru: 'Поля пресета: палитра, шрифты, пузыри, фон и эффекты.', en: 'Preset fields: palette, fonts, bubbles, background and effects.' },
+        },
+        {
+          slug: 'themes-layouts',
+          icon: 'dashboard_customize',
+          title: { ru: 'Макет чата', en: 'Chat layout' },
+          lead: { ru: 'Шаблоны сообщений, шапки и поля ввода, стили и собственные настройки темы.', en: 'Message, header and composer templates, styles, and the theme\'s own settings.' },
+        },
+        {
+          slug: 'themes-tavo',
+          icon: 'swap_horiz',
+          title: { ru: 'Темы Tavo', en: 'Tavo themes' },
+          lead: { ru: 'Что Glaze берёт из .thm, как переводится custom CSS и что остаётся за бортом.', en: 'What Glaze takes from a .thm, how custom CSS is translated, and what is left out.' },
         },
       ],
     },
