@@ -65,11 +65,13 @@ String applyRegexes(
     if (script.disabled) continue;
     if (isRegexScriptStopped(script)) continue;
 
+    // Placement holds in the prompt pass too: ST's prompt-only "saver" scripts
+    // (placement 2, AI output) strip old tracker blocks from past replies, and
+    // run on the preset's own blocks they would cut the very output template
+    // the model is asked to follow.
     final sPlacement = script.placement;
     if (sPlacement.isNotEmpty && !sPlacement.contains(placementFilter)) {
-      if (!(script.promptOnly && isPrompt)) {
-        continue;
-      }
+      continue;
     }
     // ST semantics: "Only Format Display" (markdownOnly) and "Only Format
     // Prompt" (promptOnly) are two independent opt-ins, not one exclusive
