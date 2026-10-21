@@ -860,3 +860,94 @@ test('two panels in the plugin layer are clipped to take their own taps', async 
   await page.mouse.click(340, 120);
   await expect.poll(async () => (await handlerCalls(page, 'pluginBridge')).map((r) => r.pluginId)).toEqual(['a', 'b']);
 });
+
+// A plugin whose package the app serves (harness/server.js stands in for the
+// package server).
+function packaged(extra) {
+  return plugin('pk', {
+    package: 'http://127.0.0.1:4177/plugins/pk/',
+    panels: [{ id: 'main', placement: 'chat', src: 'ui/panel.html', html: '<div id="x">x</div><script src="/plugins/pk/ui/probe.js"></script>' }],
+    ...extra,
+  });
+}
+
+for (const compat of [null, 'tavo']) {
+  test(`a served panel loads its own files, and only those (${compat || 'glaze'})`, async ({ page }) => {
+    const errors = await setup(page, [packaged({ compat })]);
+    await expect.poll(() => toasts(page)).toEqual(['rgb(1, 2, 3)|1|{"ok":1}|blocked']);
+    const frame = page.locator('iframe[data-glaze-plugin="pk"]');
+    const src = await frame.evaluate((f) => f.contentDocument === null);
+    expect(src).toBe(true);
+    // Its own files are not the network.
+    expect((await page.evaluate(() => window.__calls.filter((c) => c.name === 'pluginNetwork')))
+      .map((c) => c.request.host)).toEqual(['127.0.0.1']);
+    expect(errors).toEqual([]);
+  });
+}
+
+test('a frame document is served once, from the package path', async ({ page }) => {
+  await setup(page, [packaged()]);
+  await expect.poll(() => toasts(page)).toHaveLength(1);
+  const urls = await page.evaluate(() => window.__frameUrls);
+  expect(urls).toHaveLength(1);
+  expect(urls[0]).toMatch(/^http:\/\/127\.0\.0\.1:4177\/plugins\/pk\/ui\/panel\.html\?glaze-frame=/);
+  expect((await page.request.get(urls[0])).status()).toBe(404);
+});
+
+test('a raw package page runs nothing', async ({ page }) => {
+  await setup(page, [packaged({
+    panels: [{
+      id: 'main', placement: 'chat', src: 'ui/panel.html',
+      html: `<script>
+        addEventListener('message', (e) => { if (typeof e.data === 'string') glaze.ui.toast(e.data); });
+        const f = document.createElement('iframe');
+        f.src = '/plugins/pk/page.html';
+        f.onload = () => setTimeout(() => glaze.ui.toast('loaded'), 300);
+        document.body.append(f);
+      </script>`,
+    }],
+  })]);
+  await expect.poll(() => toasts(page)).toEqual(['loaded']);
+});
+
+// A Tavo plugin: its main script and chat panels run in one page, as in
+// Tavo's chat page, and share globals.
+function onePagePlugin(extra) {
+  return plugin('t', {
+    compat: 'tavo',
+    onePage: true,
+    methods: ['ui.toast'],
+    main: `
+      globalThis.__bus = { from: 'main' };
+      tavo.plugin.on('input:beforeSend', (e) => { e.text = e.text + ' [' + globalThis.__bus.from + ']'; });
+      tavo.plugin.onInputAction('go', () => tavo.utils.toast('went:' + globalThis.__bus.from));
+    `,
+    panels: [
+      { id: 'a', placement: 'chat', src: 'ui/a.html', html: `<script>globalThis.__bus.from += '+a';</script>` },
+      { id: 'b', placement: 'chat', src: 'ui/b.html', html: `<script>globalThis.__bus.from += '+b'; tavo.utils.toast(globalThis.__bus.from);</script>` },
+    ],
+    ...extra,
+  });
+}
+
+test('a Tavo main script and its chat panels share one page', async ({ page }) => {
+  await setup(page, [onePagePlugin()]);
+  await expect.poll(() => toasts(page)).toEqual(['main+a+b']);
+  expect(await page.locator('iframe[data-glaze-plugin="t"]').count()).toBe(1);
+  await expect.poll(() => page.evaluate(() =>
+    window.glazePlugins.intercept('send:before', { text: 'x' }).then((r) => r.text))).toBe('x [main+a+b]');
+  expect(await page.evaluate(() => window.glazePlugins.runAction('t', 'action:composer:go'))).toEqual({ ok: true });
+  await expect.poll(() => toasts(page)).toEqual(['main+a+b', 'went:main+a+b']);
+});
+
+test('the shared page is where the chat panels are', async ({ page }) => {
+  // The chat page under a plugin layer runs neither.
+  await setup(page, [onePagePlugin(), plugin('g', { main: `glaze.plugin.on('send:before', (e) => { e.text += ' [g]'; });` })], { layer: 'chat' });
+  await expect.poll(() => page.evaluate(() => window.glazePlugins.hasSubscribers('send:before'))).toBe(true);
+  expect(await page.locator('iframe[data-glaze-plugin="t"]').count()).toBe(0);
+  // Each page runs the plugins the app names for it.
+  expect(await page.evaluate(() =>
+    window.glazePlugins.intercept('send:before', { text: 'x' }, ['g']).then((r) => r.text))).toBe('x [g]');
+  expect(await page.evaluate(() =>
+    window.glazePlugins.intercept('send:before', { text: 'x' }, ['t']).then((r) => r.text))).toBe('x');
+});

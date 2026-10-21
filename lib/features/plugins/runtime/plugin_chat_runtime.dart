@@ -24,6 +24,14 @@ class PluginFileHandlerEntry {
   final Future<List<Map<String, String>>> Function() scripts;
 }
 
+/// Runs a JS function body in one of the pages.
+typedef _PageCall =
+    Future<Object?> Function(
+      String functionBody, {
+      Map<String, dynamic> arguments,
+      Duration timeout,
+    });
+
 /// Result of a native-triggered plugin action.
 class PluginActionResult {
   const PluginActionResult({required this.ok, this.reason, this.message});
@@ -104,11 +112,43 @@ class PluginChatRuntime implements PluginHookRunner {
   bool _disposed = false;
   bool _ready = false;
 
+  /// Plugin ids in setup order.
+  List<String> _order = const [];
+
+  /// Plugins whose main script runs in the plugin layer: it shares one page
+  /// with their chat panels (`onePage`), which are there.
+  Set<String> _mainsInLayer = const {};
+
+  /// The page running [pluginId]'s main script.
+  _PageCall _mainPage(String pluginId) {
+    final layer = this.layer;
+    return layer != null && _mainsInLayer.contains(pluginId)
+        ? layer.callAsyncJs
+        : bridge.callAsyncJs;
+  }
+
   bool get isReady => _ready && !_disposed;
 
   /// (Re)creates every plugin frame from [payload]. Main scripts rerun.
   Future<void> setup(Map<String, Object?> payload) async {
     if (_disposed) return;
+    final entries = [
+      for (final p
+          in payload['plugins'] is List ? payload['plugins'] as List : const [])
+        if (p is Map && p['pluginId'] is String) p,
+    ];
+    _order = [for (final p in entries) p['pluginId'] as String];
+    _mainsInLayer = this.layer == null
+        ? const {}
+        : {
+            for (final p in entries)
+              if (p['onePage'] == true &&
+                  p['panels'] is List &&
+                  (p['panels'] as List).any(
+                    (x) => x is Map && x['placement'] == 'chat',
+                  ))
+                p['pluginId'] as String,
+          };
     const body =
         'return window.glazePlugins ? window.glazePlugins.setup(payload) : -1;';
     final layer = this.layer;
@@ -241,20 +281,45 @@ class PluginChatRuntime implements PluginHookRunner {
     Map<String, Object?> payload,
   ) async {
     if (!isReady) return null;
+    final full = {
+      ...payload,
+      'chatId': chatId(),
+      'at': DateTime.now().toUtc().toIso8601String(),
+    };
     try {
-      final result = await bridge.callAsyncJs(
-        'return await window.glazePlugins.intercept(type, payload);',
-        arguments: {
-          'type': type,
-          'payload': {
-            ...payload,
-            'chatId': chatId(),
-            'at': DateTime.now().toUtc().toIso8601String(),
+      if (_mainsInLayer.isEmpty) {
+        final result = await bridge.callAsyncJs(
+          'return await window.glazePlugins.intercept(type, payload);',
+          arguments: {'type': type, 'payload': full},
+          timeout: const Duration(seconds: 130),
+        );
+        return result is Map ? Map<String, dynamic>.from(result) : null;
+      }
+      // Main scripts in both pages: each run of plugins that are in the same
+      // page in turn, so the plugin order holds.
+      var text = full['text'];
+      for (var i = 0; i < _order.length;) {
+        final page = _mainPage(_order[i]);
+        final run = <String>[];
+        while (i < _order.length && _mainPage(_order[i]) == page) {
+          run.add(_order[i++]);
+        }
+        final result = await page(
+          'return await window.glazePlugins.intercept(type, payload, only);',
+          arguments: {
+            'type': type,
+            'payload': {...full, 'text': text},
+            'only': run,
           },
-        },
-        timeout: const Duration(seconds: 130),
-      );
-      return result is Map ? Map<String, dynamic>.from(result) : null;
+          timeout: const Duration(seconds: 130),
+        );
+        if (result is! Map) continue;
+        if (result['text'] is String) text = result['text'];
+        if (result['cancelled'] == true) {
+          return Map<String, dynamic>.from(result);
+        }
+      }
+      return {'text': text, 'cancelled': false};
     } catch (e) {
       debugPrint('[PluginRuntime] $type failed: $e');
       return null;
@@ -357,7 +422,7 @@ class PluginChatRuntime implements PluginHookRunner {
       return const PluginActionResult(ok: false, reason: 'runtime-not-ready');
     }
     try {
-      final result = await bridge.callAsyncJs(
+      final result = await _mainPage(pluginId)(
         'return await window.glazePlugins.runAction(pluginId, event, args);',
         arguments: {'pluginId': pluginId, 'event': event, 'args': args},
         timeout: const Duration(minutes: 11),
@@ -391,7 +456,9 @@ class PluginChatRuntime implements PluginHookRunner {
       return const PluginFileResult(code: 'runtime-not-ready');
     }
     try {
-      final result = await bridge.callAsyncJs(
+      // A handler the main script registered is there; one with its own
+      // scripts gets a frame of its own in the same page.
+      final result = await _mainPage(pluginId)(
         'return await window.glazePlugins.runFileHandler(pluginId, handlerId, file, scripts);',
         arguments: {
           'pluginId': pluginId,

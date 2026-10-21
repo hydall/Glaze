@@ -4,7 +4,7 @@
 // The host (plugin_host.js) writes `window.__pluginBoot` first:
 //   { pluginId, kind: 'main'|'panel'|'message'|'file', panelId?, messageId?,
 //     channel, config, i18n, vars: { chat, global }, storage, methods: [...],
-//     insets, compat, network, rtcToken }
+//     insets, compat, network, rtcToken, package, main? }
 // Every call goes to the parent as a `<channel>call` postMessage; the parent
 // attributes it to this frame's plugin and forwards it to Dart.
 //
@@ -25,7 +25,8 @@
   // The host is the chat page, past the wrapper frame this one sits in.
   var parentWin = window.parent.parent;
   var kind = boot.kind || 'main';
-  var isMain = kind === 'main';
+  // A chat panel may share its page with the main script (`main`).
+  var isMain = kind === 'main' || boot.main === true;
   var seq = 0;
   var pending = new Map();
 
@@ -69,6 +70,13 @@
     var seen = new Set();
     var network = boot.network;
     var local = boot.localNetwork === true;
+    // The plugin's own package, served on the loopback ('…/plugins/<id>/'):
+    // its own files, not the network.
+    var pkg = typeof boot.package === 'string' ? boot.package : null;
+    function own(url) {
+      if (!pkg) return false;
+      try { return new URL(String(url), location.href).href.indexOf(pkg) === 0; } catch (e) { return false; }
+    }
     // Same rule as the host's frame policy, which is what actually blocks.
     function isLocalHost(host) {
       host = String(host).toLowerCase().replace(/^\[|\]$/g, '');
@@ -103,7 +111,7 @@
       seen.add(key);
       post({ type: P + 'net', host: host, blocked: !!blocked });
     }
-    function remote(url) { return /^(https?|wss?):/i.test(String(url)); }
+    function remote(url) { return /^(https?|wss?):/i.test(String(url)) && !own(url); }
     function hostOf(url) {
       try { return new URL(String(url), location.href).hostname.toLowerCase(); } catch (e) { return ''; }
     }

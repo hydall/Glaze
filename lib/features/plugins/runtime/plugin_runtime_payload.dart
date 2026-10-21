@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
 import '../../chat/bridge/chat_webview_environment.dart';
+import '../compat/tavo/tavo_manifest_converter.dart';
 import '../models/installed_plugin.dart';
 import '../models/plugin_manifest.dart';
 import '../services/plugin_localizer.dart';
@@ -10,15 +11,19 @@ import '../services/plugin_store.dart';
 import 'api/files_api.dart';
 import 'plugin_bridge_service.dart';
 import 'plugin_file_store.dart';
-import 'plugin_html_inliner.dart';
+import 'plugin_package_server.dart';
 
 /// Builds the argument of `window.glazePlugins.setup(...)`: one entry per
 /// enabled plugin with its main script, panels, effective settings, i18n
 /// snapshot, storage, message actions and the methods it may call.
 class PluginRuntimePayloadBuilder {
-  const PluginRuntimePayloadBuilder({required this.store});
+  const PluginRuntimePayloadBuilder({required this.store, this.packageBase});
 
   final PluginStore store;
+
+  /// Where a plugin's package is served ([PluginPackageServer.packageBase]
+  /// of the app's server when null).
+  final String? Function(String pluginId)? packageBase;
 
   Future<Map<String, Object?>> build({
     required List<InstalledPlugin> plugins,
@@ -72,14 +77,11 @@ class PluginRuntimePayloadBuilder {
     for (final (index, panel) in manifest.panels.indexed) {
       final bytes = await store.readPackageFile(plugin.id, panel.src);
       if (bytes == null) continue;
-      final html = await inlinePluginAssets(
-        utf8.decode(bytes, allowMalformed: true),
-        plugin.id,
-        store.readPackageFile,
-      );
       panels.add({
         ...panel.toJson(),
-        'html': html,
+        // Loaded from the package's address, so what it links to is fetched
+        // from there; nothing is inlined.
+        'html': utf8.decode(bytes, allowMalformed: true),
         'order': (panel.slot == 'start' ? 0 : 10) + index,
       });
     }
@@ -88,6 +90,13 @@ class PluginRuntimePayloadBuilder {
     return {
       'pluginId': plugin.id,
       'compat': manifest.compat,
+      // Where the frames load from; null when packages are not served, and
+      // the frames are made inline.
+      'package': (packageBase ?? pluginPackageServer.packageBase)(plugin.id),
+      'mainPath': mainPath,
+      // Tavo runs the main script and the chat panels in its chat page, and
+      // its plugins share globals between them: one frame holds them all.
+      'onePage': manifest.compat == kTavoCompat,
       'main': mainBytes == null
           ? null
           : utf8.decode(mainBytes, allowMalformed: true),

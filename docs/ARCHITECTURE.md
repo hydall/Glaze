@@ -1838,12 +1838,22 @@ to its boxes so it only takes its own taps. On iOS and macOS a touch goes to
 the topmost native view and cannot be passed down, so the panels stay in the
 chat page there, clipped to their boxes, and the Flutter controls are cut out
 where they draw (`PluginHolesCutter`). Frames
-inside the page may only load `about:srcdoc`/`about:blank`
-(`chatWebViewNavigationPolicy`); iOS asks about those too. Message panels sit in `.msg-content-stack`, message actions in the
-footer's `.msg-trailing-actions`. Package scripts, CSS and assets
-(`/plugins/<id>/…`) are inlined by `plugin_html_inliner.dart`, since a
-null-origin frame cannot fetch them; only the plugin's own package is read, so
-a panel cannot pull in another plugin's files. Layout insets are exposed as
+inside the page may only load `about:srcdoc`/`about:blank` and the frame
+documents the package server hands out (`chatWebViewNavigationPolicy`); iOS
+asks about those too. Message panels sit in `.msg-content-stack`, message actions in the
+footer's `.msg-trailing-actions`. Installed packages are served over a
+loopback HTTP server (`plugin_package_server.dart`, started with the runtime,
+revived with the chat's servers) at `/plugins/<id>/<path>`, as Tavo serves
+them. The host builds each frame's document (policy, SDK, boot data, the
+plugin's HTML) and hands it over with the internal `frames.open`; the server
+serves it once, at the panel's (or main script's) path in the package, so the
+frame has a real address and the plugin's scripts, stylesheets, fonts and
+`fetch` of its own files resolve as on the web — nothing is inlined. The
+frames keep their sandbox (opaque origin); each one's policy names its own
+package path, so a plugin reaches only its own files, which the SDK does not
+count as network. Package files go out with CORS and a policy that lets a
+file loaded as a page run nothing. Without the server, frames are made inline
+(srcdoc) as before. Layout insets are exposed as
 `--glaze-inset-*` CSS variables. The top bar inset is the status bar alone:
 panels draw over the app's header.
 The soft keyboard lays over the WebView and shrinks only the page's visual
@@ -1903,7 +1913,14 @@ all of it (`PluginLibraryNotifier.setPermissions`). For converted
 plugins the runtime also loads `tavo_compat.js`, which defines `tavo.*` (and
 `triggerSlash`) on top of `glaze.*` and then removes `glaze`, maps
 `input:beforeSend|afterSend` onto `send:*`, reports Tavo's version from
-`tavo.app` and sets the `--tavo-inset-*` variables instead of Glaze's. TTS is not supported: importing a package that asks
+`tavo.app` and sets the `--tavo-inset-*` variables instead of Glaze's.
+Tavo runs a plugin's entry script and its `/chat` fragments in its chat page,
+and plugins share globals between them, so a converted plugin's payload says
+`onePage`: its main script and every chat panel go into one frame (the main
+script first), where the chat panels are — the plugin layer when there is
+one. `PluginChatRuntime` sends that plugin's hooks, actions and file handlers
+to the page its main script is in, running a hook through the pages in turn
+so the plugin order holds. `/messages` fragments stay frames of their own. TTS is not supported: importing a package that asks
 for `tts` or calls `tavo.tts`/`glaze.tts` shows a warning sheet first
 (`plugin_compatibility.dart`).
 

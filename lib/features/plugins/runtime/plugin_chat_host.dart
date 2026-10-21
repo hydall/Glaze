@@ -27,6 +27,7 @@ import 'chat_plugin_api_host.dart';
 import 'plugin_bridge_service.dart';
 import 'plugin_chat_runtime.dart';
 import 'plugin_message_diff.dart';
+import 'plugin_package_server.dart';
 import 'plugin_runtime_payload.dart';
 import 'plugin_request_capture.dart';
 import '../widgets/plugin_holes.dart';
@@ -155,6 +156,7 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
     int epoch,
   ) async {
     final store = await ref.read(pluginStoreProvider.future);
+    await pluginPackageServer.start(store.readPackageFile);
     final sdk = await rootBundle.loadString(_sdkAsset);
     final compat = {
       for (final e in _compatAssets.entries)

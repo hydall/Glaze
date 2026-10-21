@@ -11,6 +11,7 @@ import 'package:path/path.dart' as p;
 import '../../../core/constants/build_channel.dart';
 import '../../../core/utils/image_src.dart';
 import '../../../core/utils/platform_paths.dart';
+import '../../plugins/runtime/plugin_package_server.dart';
 import 'chat_webview_settings.dart';
 
 WebViewEnvironment? _chatWebViewEnvironment;
@@ -152,7 +153,8 @@ URLRequest? chatWebViewInitialUrlRequest([String page = kChatWebViewPage]) {
 /// the main frame. A frame inside it may only take inline content
 /// (`about:srcdoc`, `about:blank`): message HTML and plugin frames are all
 /// built that way. iOS asks about those too, and turning them down left
-/// every such frame empty there.
+/// every such frame empty there. The one other is a plugin frame's document
+/// as the package server hands it out ([PluginPackageServer.openFrame]).
 NavigationActionPolicy chatWebViewNavigationPolicy(
   WebUri? url, {
   bool mainFrame = true,
@@ -161,9 +163,11 @@ NavigationActionPolicy chatWebViewNavigationPolicy(
   if (url == null) return NavigationActionPolicy.CANCEL;
 
   if (!mainFrame) {
-    return url.scheme == 'about' &&
-            (url.path == 'srcdoc' || url.path == 'blank') &&
-            !url.hasQuery
+    final inline =
+        url.scheme == 'about' &&
+        (url.path == 'srcdoc' || url.path == 'blank') &&
+        !url.hasQuery;
+    return inline || pluginPackageServer.isFrameUrl(url)
         ? NavigationActionPolicy.ALLOW
         : NavigationActionPolicy.CANCEL;
   }
@@ -342,6 +346,7 @@ Future<void> _reviveChatWebViewServers() async {
         await _startChatWebViewAssetServer(preferredPort: assetPort);
       }
     }
+    await pluginPackageServer.revive();
   } catch (e, st) {
     debugPrint('[ChatWebViewEnvironment] Server revival failed: $e\n$st');
   }

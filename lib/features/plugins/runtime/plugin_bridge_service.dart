@@ -18,6 +18,7 @@ import 'api/themes_api.dart';
 import 'api/ui_api.dart';
 import 'api/variables_api.dart';
 import 'plugin_api.dart';
+import 'plugin_package_server.dart';
 
 /// Every bridged `glaze.*` method. The SDK only exposes the ones a plugin's
 /// manifest asks for, and [PluginBridgeService.dispatch] checks each call
@@ -39,7 +40,23 @@ final Map<String, PluginMethod> pluginMethodRegistry = Map.unmodifiable({
   ...uiApi(),
   ...commandsApi(),
   'events.subscribe': const PluginMethod(_subscribe, internal: true),
+  'frames.open': const PluginMethod(_openFrame, internal: true),
 });
+
+/// The host page hands over a frame's document and gets the address to load
+/// it from, in the plugin's package (see [PluginPackageServer.openFrame]);
+/// null when packages are not served, and the frame is made inline instead.
+Future<Object?> _openFrame(PluginCall c) async {
+  final document = c.arg(1);
+  if (document is! String) {
+    throw const PluginApiError('invalid_arguments', 'No frame document');
+  }
+  return pluginPackageServer.openFrame(
+    c.plugin.id,
+    c.arg(0) is String ? c.arg(0) as String : '',
+    document,
+  );
+}
 
 /// The permission each kind of hook or notification needs.
 const Map<String, String> pluginEventPermissions = {

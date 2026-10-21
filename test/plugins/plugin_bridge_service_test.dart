@@ -25,7 +25,7 @@ import 'package:glaze_flutter/features/plugins/runtime/plugin_bridge_service.dar
 import 'package:glaze_flutter/features/plugins/runtime/plugin_file_store.dart';
 import 'package:glaze_flutter/features/plugins/runtime/plugin_network.dart';
 import 'package:glaze_flutter/features/plugins/runtime/plugin_request_capture.dart';
-import 'package:glaze_flutter/features/plugins/runtime/plugin_html_inliner.dart';
+import 'package:glaze_flutter/features/plugins/runtime/plugin_package_server.dart';
 import 'package:glaze_flutter/features/plugins/runtime/plugin_message_diff.dart';
 import 'package:glaze_flutter/features/plugins/runtime/plugin_variable_store.dart';
 import 'package:glaze_flutter/features/plugins/services/plugin_manifest_parser.dart';
@@ -1127,46 +1127,14 @@ void main() {
     ]);
   });
 
-  test('package scripts, stylesheets and assets are inlined', () async {
-    final files = {
-      'js/a.js': 'window.x = "</script>";',
-      'ui/s.css': 'body{background:url(/plugins/p.one/img/bg.png)}',
-      'img/bg.png': 'PNG',
-    };
-    final html = await inlinePluginAssets(
-      '<link rel="stylesheet" href="/plugins/p.one/ui/s.css">'
-          '<script defer src="/plugins/p.one/js/a.js"></script>'
-          '<img src="/plugins/p.one/img/bg.png">',
-      'p.one',
-      (id, path) async => id == 'p.one' && files.containsKey(path)
-          ? Uint8List.fromList(utf8.encode(files[path]!))
-          : null,
-    );
-    expect(html, contains(r'window.x = "<\/script>";'));
-    expect(html, isNot(contains('src="/plugins')));
-    expect(html, contains('<style>body{background:url(data:image/png;base64,'));
-    expect(html, contains('<img src="data:image/png;base64,UE5H">'));
-  });
-
-  test("a panel cannot inline another plugin's package files", () async {
-    final read = <String>[];
-    final html = await inlinePluginAssets(
-      '<script src="/plugins/other/main.js"></script>'
-          '<link rel="stylesheet" href="/plugins/mine/s.css">'
-          '<img src="/plugins/other/key.txt">',
-      'mine',
-      (id, path) async {
-        read.add('$id/$path');
-        return Uint8List.fromList(
-          utf8.encode(
-            path == 's.css' ? '@import url(/plugins/other/x.css);' : 'secret',
-          ),
-        );
-      },
-    );
-    expect(read, ['mine/s.css']);
-    expect(html, isNot(contains('secret')));
-    expect(html, contains('<img src="/plugins/other/key.txt">'));
-    expect(html, contains('url(/plugins/other/x.css)'));
+  test('the host page opens a frame at its package address', () async {
+    await pluginPackageServer.start((id, path) async => null);
+    addTearDown(pluginPackageServer.stop);
+    final s = service([]);
+    final out = await call(s, 'frames.open', ['ui/panel.html', '<p>doc</p>']);
+    final url = Uri.parse(out['result'] as String);
+    expect(url.path, '/plugins/test.plugin/ui/panel.html');
+    expect(pluginPackageServer.isFrameUrl(url), isTrue);
+    expect(pluginMethodsFor(_plugin([])), isNot(contains('frames.open')));
   });
 }
