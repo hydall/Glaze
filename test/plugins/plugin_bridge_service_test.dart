@@ -808,20 +808,33 @@ void main() {
     }
   });
 
-  test('downloads stay off the local network unless allowed', () async {
-    final s = service(const ['files', 'network']);
-    for (final url in [
-      'http://127.0.0.1:9/x',
-      'http://localhost/x',
-      'http://192.168.1.1/x',
-      'http://[::1]/x',
-      'http://printer.local/x',
-    ]) {
-      final out = await call(s, 'files.save', ['a.txt', url]);
-      expect((out['error'] as Map)['code'], 'permission_denied', reason: url);
-    }
-    expect(host.network.every((e) => e.endsWith(':blocked')), isTrue);
-  });
+  test(
+    'downloads reach loopback, but not the local network, unless allowed',
+    () async {
+      // Loopback is this device; nothing listens on the port, so the download
+      // fails as a connection, not as a refused host.
+      final s = service(const ['files', 'network']);
+      for (final url in [
+        'http://127.0.0.1:9/x',
+        'http://localhost/x',
+        'http://[::1]/x',
+      ]) {
+        final out = await call(s, 'files.save', ['a.txt', url]);
+        expect(
+          (out['error'] as Map)['code'],
+          isNot('permission_denied'),
+          reason: url,
+        );
+      }
+      for (final url in ['http://192.168.1.1/x', 'http://printer.local/x']) {
+        final out = await call(s, 'files.save', ['a.txt', url]);
+        expect((out['error'] as Map)['code'], 'permission_denied', reason: url);
+      }
+      expect(host.network, contains('127.0.0.1:ok'));
+      expect(host.network, contains('192.168.1.1:blocked'));
+      expect(host.network, contains('printer.local:blocked'));
+    },
+  );
 
   test('local addresses are told apart from public ones', () {
     for (final a in [
@@ -1089,13 +1102,18 @@ void main() {
     });
 
     test('follows the internet and local network settings', () async {
+      // Loopback works without the local network switch.
       var out = await fetch(service(const ['network']), '/echo');
-      expect((out['error'] as Map)['code'], 'permission_denied');
+      expect(out['ok'], isTrue);
+      expect(host.network, ['127.0.0.1:ok']);
+      // A private address is the local network, and needs the switch.
       out = await call(service(const ['network']), 'net.fetch', [
-        'https://127.0.0.1:${server.port}/echo',
+        'https://192.168.0.1/x',
       ]);
       expect((out['error'] as Map)['code'], 'permission_denied');
-      expect(host.network, ['127.0.0.1:blocked']);
+      expect(host.network, contains('192.168.0.1:blocked'));
+      // Without the network permission nothing is reached at all.
+      seen.clear();
       out = await fetch(service(const []), '/echo');
       expect((out['error'] as Map)['code'], 'permission_denied');
       expect(seen, isEmpty);
