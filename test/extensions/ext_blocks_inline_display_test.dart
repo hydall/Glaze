@@ -162,4 +162,87 @@ void main() {
     );
     expect(text, '<stats>\ngold: 3\n</stats>');
   });
+
+  group('an image inside an in-message block', () {
+    const withImage = BlockConfig(
+      id: 'view',
+      name: 'view',
+      render: BlockRender.message,
+    );
+    final imagePreset = ExtensionPreset(
+      id: 'p2',
+      name: 'p2',
+      blocks: [withImage],
+    );
+    const photo = ChatMessage(
+      id: 'm',
+      role: 'assistant',
+      content:
+          'He looks up.\n'
+          '<img data-iig-instruction=\'{"prompt":"one"}\' src="a.png">',
+    );
+    final rows = [
+      _row(
+        'view',
+        '<view>'
+            '<img data-iig-instruction=\'{"prompt":"two"}\' src="b.png">'
+            '<img data-iig-instruction=\'{"prompt":"three"}\' src="c.png">'
+            '</view>',
+      ),
+    ];
+
+    test('the message numbers first, then its blocks', () {
+      // 0 is the message's own picture.
+      expect(
+        inlineExtBlockImageAt(
+          preset: imagePreset,
+          rows: rows,
+          message: photo,
+          imageIndex: 0,
+        ),
+        isNull,
+      );
+      final first = inlineExtBlockImageAt(
+        preset: imagePreset,
+        rows: rows,
+        message: photo,
+        imageIndex: 1,
+      );
+      expect(first?.block.config.id, 'view');
+      expect(first?.index, 0);
+      final second = inlineExtBlockImageAt(
+        preset: imagePreset,
+        rows: rows,
+        message: photo,
+        imageIndex: 2,
+      );
+      expect(second?.index, 1);
+      expect(
+        inlineExtBlockImageAt(
+          preset: imagePreset,
+          rows: rows,
+          message: photo,
+          imageIndex: 3,
+        ),
+        isNull,
+      );
+    });
+
+    test('a block only the panel shows is not counted', () {
+      final panelOnly = ExtensionPreset(
+        id: 'p3',
+        name: 'p3',
+        blocks: [withImage.copyWith(render: BlockRender.card)],
+      );
+      expect(
+        inlineExtBlockImageAt(
+          preset: panelOnly,
+          rows: rows,
+          message: photo,
+          imageIndex: 1,
+        ),
+        isNull,
+      );
+    });
+  });
 }

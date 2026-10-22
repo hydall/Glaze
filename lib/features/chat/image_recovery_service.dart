@@ -11,6 +11,12 @@ import '../../core/models/chat_message.dart';
 import '../../core/state/db_provider.dart';
 import '../../core/utils/platform_paths.dart';
 import '../../core/utils/time_helpers.dart';
+import '../../core/state/character_provider.dart';
+import '../../core/state/persona_resolution.dart';
+import '../extensions/providers/info_blocks_provider.dart';
+import '../extensions/services/card_blocks.dart';
+import '../extensions/services/ext_blocks_inline_display.dart';
+import '../extensions/services/extension_post_gen_service.dart';
 import '../image_gen/services/image_tag_markup.dart';
 import 'services/image_gen_processor.dart';
 import 'chat_generation_service.dart';
@@ -269,6 +275,20 @@ class ImageRecoveryService {
 
     final message = session.messages.firstWhereOrNull((m) => m.id == messageId);
     if (message == null || message.role != 'assistant') return;
+    final inline = _inlineImage(session.id, message, blockIndex);
+    if (inline != null) {
+      final row = inline.block.row;
+      final content = ImageTagMarkup.setImageBlockVariant(
+        row.content,
+        inline.index,
+        variantIndex,
+      );
+      if (content == row.content) return;
+      await _ref
+          .read(infoBlocksProvider(session.id).notifier)
+          .updateContent(row.id, content);
+      return;
+    }
     if (ImageTagMarkup.setImageBlockVariant(
           message.content,
           blockIndex,
@@ -454,6 +474,12 @@ class ImageRecoveryService {
     final msg = current.messages[messageIndex];
     if (msg.role != 'assistant') return;
 
+    final inline = _inlineImage(current.session!.id, msg, blockIndex);
+    if (inline != null) {
+      await _redrawInlineImage(current.session!.id, msg, inline);
+      return;
+    }
+
     final resetContent = reset(msg.content);
     if (resetContent == msg.content) return;
 
@@ -557,7 +583,10 @@ class ImageRecoveryService {
     final msg = current.messages[msgIdx];
     final targetSwipeId = msg.swipeId;
     final targetAgentSwipeId = msg.agentSwipeId;
-    final Set<String> claimedPaths = {};
+    final Set<String> claimedPaths = {
+      for (final row in _ref.read(infoBlocksProvider(current.session!.id)))
+        ...ImageTagMarkup.extractImageResultPaths(row.content),
+    };
     for (final m in current.messages) {
       claimedPaths.addAll(ImageTagMarkup.extractImageResultPaths(m.content));
       for (final s in m.swipes) {
@@ -619,6 +648,21 @@ class ImageRecoveryService {
     // Stored relative to the data root, like every other image path.
     final foundPath = relativeGlazeFilePath(bestMatch.path);
 
+    final inline = _inlineImage(current.session!.id, msg, blockIndex);
+    if (inline != null) {
+      final row = inline.block.row;
+      final content = ImageTagMarkup.replaceImageBlockWithResult(
+        row.content,
+        inline.index,
+        foundPath,
+      );
+      if (content == row.content) return;
+      await _ref
+          .read(infoBlocksProvider(current.session!.id).notifier)
+          .updateContent(row.id, content);
+      return;
+    }
+
     final updatedContent = attach(msg.content, foundPath);
     if (updatedContent == msg.content) return;
 
@@ -651,5 +695,52 @@ class ImageRecoveryService {
       ownsOperation: liveState?.session?.id == sessionId,
     );
     if (merged != null) _setState(AsyncData(merged));
+  }
+
+  /// The block shown inside [message] that the [blockIndex]-th image of the
+  /// message as displayed belongs to, or null when the image is the
+  /// message's own (INV-IG15).
+  ({InlineExtBlock block, int index})? _inlineImage(
+    String sessionId,
+    ChatMessage message,
+    int? blockIndex,
+  ) {
+    if (blockIndex == null) return null;
+    return inlineExtBlockImageAt(
+      preset: effectiveExtBlocksPreset(_ref.read, _charId),
+      rows: _ref.read(infoBlocksProvider(sessionId)),
+      message: message,
+      imageIndex: blockIndex,
+    );
+  }
+
+  /// Draws one picture of a block shown inside [message] again, where the
+  /// block keeps it: in its stored result, not in the message text.
+  Future<void> _redrawInlineImage(
+    String sessionId,
+    ChatMessage message,
+    ({InlineExtBlock block, int index}) inline,
+  ) async {
+    final character = _ref.read(characterByIdProvider(_charId));
+    if (character == null) return;
+    final row = inline.block.row;
+    await _ref
+        .read(extensionPostGenServiceProvider)
+        .rerunImageOnly(
+          blockId: inline.block.config.id,
+          messageId: message.id,
+          swipeId: row.swipeId,
+          agentSwipeId: row.agentSwipeId,
+          sessionId: sessionId,
+          charId: _charId,
+          character: character,
+          persona: _ref.read(
+            effectivePersonaForChatProvider((
+              charId: _charId,
+              sessionId: sessionId,
+            )),
+          ),
+          imageIndex: inline.index,
+        );
   }
 }

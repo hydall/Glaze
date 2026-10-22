@@ -7,6 +7,7 @@ import '../../../core/state/character_provider.dart';
 
 import '../models/block_config.dart';
 import '../models/block_run_status.dart';
+import '../models/info_block.dart';
 import '../providers/extension_presets_provider.dart';
 import '../providers/extensions_settings_provider.dart';
 import '../providers/info_blocks_provider.dart';
@@ -128,9 +129,16 @@ class ExtBlocksPanelBuilder {
 
     return [
       for (final cfg in enabledConfigs)
+        // A script runs for what it does, not for what it says: the original
+        // displays nothing of it. One that finished without returning anything
+        // has no row to show (a script drawn on the ExtBlocks page always
+        // returns nothing). A failed or unfinished one keeps its row, where
+        // the status and the retry control are.
+        if (_isSilentScript(cfg, dbByBlockId[cfg.id]))
+          ...const <Map<String, dynamic>>[]
         // A block shown inside the message leaves the panel once it is done;
         // while it runs, fails or waits, its row here is where that shows.
-        if (showsInMessage(cfg) &&
+        else if (showsInMessage(cfg) &&
             dbByBlockId[cfg.id]?.status == BlockRunStatus.done)
           ...const <Map<String, dynamic>>[]
         else if (dbByBlockId[cfg.id] != null)
@@ -152,6 +160,14 @@ class ExtBlocksPanelBuilder {
           },
     ];
   }
+
+  /// A script block that finished without content: nothing to show, and no
+  /// control that would act on it.
+  static bool _isSilentScript(BlockConfig cfg, InfoBlock? row) =>
+      cfg.type == BlockType.script &&
+      row != null &&
+      row.status == BlockRunStatus.done &&
+      row.content.trim().isEmpty;
 
   /// Whether the panel's "run all" control has anything to do: a block the
   /// automatic `afterAssistant` chain would run is not finished. Manual-only
