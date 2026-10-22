@@ -75,7 +75,7 @@ List your hosts in the manifest. A host is a string, or an object with a `descri
 
 The `network` permission starts off, as every permission does. When the user turns it on, the mode is "Listed hosts" with every manifest host on. In that mode the Internet group has a **Hosts** row that opens the list: the manifest's hosts with their descriptions, each with a switch, then the hosts the user added (**Add a host**). An update keeps what the user set up. Host objects need Glaze 0.9.0 (Nightly): older versions refuse such a manifest.
 
-The rules apply to everything the plugin does: `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, images, scripts and styles from the internet, and requests through `glaze.net.fetch`. Without the local network switch only https on the internet works. The local network (localhost, `192.168.*`, `*.local` and so on) and plain http need a separate switch, off by default. WebRTC is available only in the "Any host" mode.
+The rules apply to everything the plugin does: `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, images, scripts and styles from the internet, and requests through `glaze.net.fetch`. Without the local network switch only https on the internet works. The local network (`192.168.*`, `*.local` and so on) and plain http there need a separate switch, off by default. Loopback (`localhost`, `127.0.0.1`, `::1`) is not part of that switch: it works like an internet host named in the plugin's list, plain http included. WebRTC is available only in the "Any host" mode.
 
 The **Network** group on the Permissions tab lists every host the plugin's frames loaded from or were stopped from loading, and in the "Listed hosts" mode the user can allow or block each one right there.
 
