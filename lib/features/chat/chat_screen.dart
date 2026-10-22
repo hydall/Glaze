@@ -91,6 +91,7 @@ import '../../core/models/chat_message.dart';
 import '../../core/state/db_provider.dart';
 import 'widgets/session_lifecycle_tracker.dart';
 import '../../shared/widgets/glaze_sheet.dart';
+import '../extensions/services/page/ext_blocks_page.dart';
 import '../plugins/runtime/plugin_chat_host.dart';
 import '../plugins/providers/plugin_library_provider.dart';
 import '../plugins/widgets/plugin_holes.dart';
@@ -610,7 +611,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       ),
     );
     // Chat panels of plugins draw over everything of the chat screen.
-    final useLayer = pluginsUseLayer(ref.watch(enabledPluginsProvider));
+    final useLayer =
+        pluginsUseLayer(ref.watch(enabledPluginsProvider)) ||
+        (pluginLayerSupported() && ref.watch(extBlocksPageActiveProvider));
     return PluginChatHost(
       key: ValueKey('plugins-$charId'),
       charId: charId,

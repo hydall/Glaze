@@ -34,10 +34,18 @@ typedef _PageCall =
 
 /// Result of a native-triggered plugin action.
 class PluginActionResult {
-  const PluginActionResult({required this.ok, this.reason, this.message});
+  const PluginActionResult({
+    required this.ok,
+    this.reason,
+    this.message,
+    this.value,
+  });
   final bool ok;
   final String? reason;
   final String? message;
+
+  /// What the handler returned, when it survived JSON.
+  final Object? value;
 }
 
 /// Result of a file handler run: the text for the model, or an error code
@@ -217,6 +225,18 @@ class PluginChatRuntime implements PluginHookRunner {
           'event': emit['event'],
           'detail': emit['detail'],
         },
+      ).catchError((Object _) => null),
+    );
+  }
+
+  /// Delivers [event] to [pluginId]'s frames as if one of them had emitted
+  /// it, in the page its main script is in.
+  void emitTo(String pluginId, String event, Object? detail) {
+    if (!isReady) return;
+    unawaited(
+      _mainPage(pluginId)(
+        'window.glazePlugins.relayEmit(pluginId, event, detail); return true;',
+        arguments: {'pluginId': pluginId, 'event': event, 'detail': detail},
       ).catchError((Object _) => null),
     );
   }
@@ -434,6 +454,7 @@ class PluginChatRuntime implements PluginHookRunner {
         ok: result['ok'] == true,
         reason: result['reason'] as String?,
         message: result['message'] as String?,
+        value: result['value'],
       );
     } catch (e) {
       return PluginActionResult(

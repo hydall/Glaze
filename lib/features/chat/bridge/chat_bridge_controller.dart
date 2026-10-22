@@ -100,6 +100,16 @@ class ChatBridgeController {
   /// supplied by the chat widget, which can read the blocks.
   String Function(ChatMessage message)? inlineExtBlocksFor;
 
+  /// Runs a script written for the original ExtBlocks on the ExtBlocks page
+  /// instead of the one-shot sandbox; set while the page is up, which is only
+  /// when the active preset may use it (see `ext_blocks_page.dart`).
+  Future<String> Function(
+    String script,
+    Map<String, dynamic> context,
+    CancelToken? cancelToken,
+  )?
+  extBlocksPageRun;
+
   /// Origin marker ("Created on" / "Branched on") for the current session,
   /// prepended by [MessageBridgeCommands.setMessages] as the first synthetic
   /// separator of a full batch. Refreshed on every rebuild before messages
@@ -1222,6 +1232,43 @@ class ChatBridgeController {
     );
   }
 
+  /// The `context` a script block is called with: the last
+  /// [contextMessageCount] messages (all when negative), the character, the
+  /// previous block's output, and the original extension's scope.
+  static Map<String, dynamic> jsBlockContext({
+    required List<ChatMessage> messages,
+    required Character? character,
+    required String? sessionId,
+    required String? previousOutput,
+    int contextMessageCount = 10,
+    Map<String, dynamic>? extBlocks,
+  }) {
+    final int take = contextMessageCount < 0
+        ? messages.length
+        : contextMessageCount;
+    final startIdx = (messages.length - take).clamp(0, messages.length);
+    return <String, dynamic>{
+      'messages': [
+        for (final m in messages.sublist(startIdx))
+          {'role': m.role, 'text': m.content},
+      ],
+      'sessionId': sessionId,
+      'characterId': character?.id,
+      'character': character != null
+          ? {
+              'name': character.name,
+              'description': character.description ?? '',
+              'personality': character.personality ?? '',
+              'scenario': character.scenario ?? '',
+            }
+          : null,
+      'previousOutput': previousOutput,
+      // A script written for the original extension finds its variables and
+      // SillyTavern's chat here (see `extBlocksScriptScope`).
+      'extBlocks': ?extBlocks,
+    };
+  }
+
   /// Runs [script] inside a sandboxed iframe in the Chat WebView and returns
   /// the string result. Throws on timeout (>60 s) or script error.
   ///
@@ -1243,33 +1290,20 @@ class ChatBridgeController {
       throw Exception('Cancelled before JS execution');
     }
 
-    // Build context object for the script.
-    final int take = contextMessageCount < 0
-        ? messages.length
-        : contextMessageCount;
-    final startIdx = (messages.length - take).clamp(0, messages.length);
-    final contextMessages = messages
-        .sublist(startIdx)
-        .map((m) => {'role': m.role, 'text': m.content})
-        .toList();
+    final contextMap = jsBlockContext(
+      messages: messages,
+      character: character,
+      sessionId: sessionId,
+      previousOutput: previousOutput,
+      contextMessageCount: contextMessageCount,
+      extBlocks: extBlocks,
+    );
+    // A script of the original keeps what it draws and stores on the page.
+    final page = extBlocksPageRun;
+    if (extBlocks != null && page != null) {
+      return page(script, contextMap, cancelToken);
+    }
 
-    final contextMap = <String, dynamic>{
-      'messages': contextMessages,
-      'sessionId': sessionId,
-      'characterId': character?.id,
-      'character': character != null
-          ? {
-              'name': character.name,
-              'description': character.description ?? '',
-              'personality': character.personality ?? '',
-              'scenario': character.scenario ?? '',
-            }
-          : null,
-      'previousOutput': previousOutput,
-      // A script written for the original extension finds its variables and
-      // SillyTavern's chat here (see `extBlocksScriptScope`).
-      'extBlocks': ?extBlocks,
-    };
     // Chat text may hold `</script>`; the sandbox embeds this in a script tag.
     final contextJson = jsonEncode(contextMap).replaceAll('<', r'\u003c');
 

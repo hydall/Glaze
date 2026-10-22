@@ -1868,6 +1868,23 @@ when the insets settle — so one dropped on the status bar or the gesture
 strip stays reachable. A box taller or wider than that band keeps the off
 edge on screen; only a panel covering the whole viewport is left alone.
 
+**The ExtBlocks page** (`extensions/services/page/ext_blocks_page.dart`).
+With the active ExtBlocks preset's `chat_page` permission, `PluginChatHost`
+also runs a plugin of the app's own, `_extblocks` (a manifest id cannot start
+with `_`): one chat panel with the `extblocks` compat layer
+(`compat/extblocks_page.js`), which swaps the plugin `glaze` for the script
+API of `glaze_sdk.js` carried over the plugin method `extblocks.bridge` to the
+chat's `JsBridgeService`. `ChatBridgeController.runJsBlock` sends scripts of
+the original ExtBlocks there (`extBlocksPageRun`) instead of its one-shot
+sandbox; they run as the action `action:extblocks:run`, whose handler's return
+value an action reply now carries (`PluginActionResult.value`). The page keeps
+a hidden mirror of the chat in SillyTavern's markup, sent as the
+`extblocks:mirror` emit (`PluginChatRuntime.emitTo`). Its network is the
+"Allow external media" setting; `mediaOrigins` in a payload entry adds the
+app's loopback file server to `img-src`/`media-src` only. Hit boxes and the
+floating-window rescue walk from `<html>`, so boxes a script hangs next to
+`<body>` take touches as well. See EXTBLOCKS_OVERVIEW.md.
+
 **Hooks.** `PluginChatHost` (wraps the chat screen) starts the runtime once the
 chat bridge is published and registers a `PluginHookRunner` in
 `pluginHookRegistryProvider`; core chat code only sees that port.

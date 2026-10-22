@@ -67,6 +67,13 @@ abstract class PresetPermissions with _$PresetPermissions {
     /// `RewritePlugin`, `BlockService.addBlocksToExtra`, …). Each call is an
     /// LLM request or a write to the chat, so it is default-deny.
     @Default(false) bool runBlocks,
+
+    /// The page over the chat: scripts the block carries run there instead
+    /// of the one-shot sandbox, so what they draw and keep stays — a
+    /// floating button, a window, `localStorage` — as in the original, which
+    /// runs them in SillyTavern's own page. It draws over the chat, so it is
+    /// default-deny.
+    @Default(false) bool chatPage,
   }) = _PresetPermissions;
 
   factory PresetPermissions.fromJson(Map<String, dynamic> json) =>
@@ -95,7 +102,8 @@ enum GlazeCapability {
   playAudio('play_audio', 'Play audio'),
   executeCommand('execute_command', 'Run a slash command'),
   showToast('show_toast', 'Show a toast'),
-  runBlocks('run_blocks', 'Run ExtBlocks blocks from a script');
+  runBlocks('run_blocks', 'Run ExtBlocks blocks from a script'),
+  chatPage('chat_page', 'Run scripts on a page over the chat');
 
   const GlazeCapability(this.id, this.label);
   final String id;
@@ -146,6 +154,8 @@ extension PresetPermissionsCapability on PresetPermissions {
         return showToast;
       case GlazeCapability.runBlocks:
         return runBlocks;
+      case GlazeCapability.chatPage:
+        return chatPage;
     }
   }
 
@@ -204,6 +214,8 @@ extension PresetPermissionsMutator on PresetPermissions {
         return copyWith(showToast: value);
       case GlazeCapability.runBlocks:
         return copyWith(runBlocks: value);
+      case GlazeCapability.chatPage:
+        return copyWith(chatPage: value);
     }
   }
 }

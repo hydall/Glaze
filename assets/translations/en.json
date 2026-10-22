@@ -2250,6 +2250,7 @@
   "perm_execute_command": "Run a slash command",
   "perm_show_toast": "Show a toast",
   "perm_run_blocks": "Run blocks (original ExtBlocks scripts)",
+  "perm_chat_page": "Page over the chat (scripts keep their buttons and windows)",
   "perm_default_deny_hint": "Each permission opens one glaze.* method to this preset’s JS blocks. Everything is denied until you grant it.",
   "block_sec_triggers": "Triggers",
   "block_sec_basics": "Block",

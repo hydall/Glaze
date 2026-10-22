@@ -15,6 +15,9 @@ import '../../chat/bridge/chat_bridge_controller.dart';
 import '../../chat/bridge/chat_bridge_registry.dart';
 import '../../chat/chat_provider.dart';
 import '../../chat/chat_state.dart';
+import '../../extensions/providers/info_blocks_provider.dart';
+import '../../extensions/services/page/ext_blocks_page.dart';
+import '../../settings/app_settings_provider.dart';
 import '../compat/tavo/tavo_manifest_converter.dart';
 import '../models/installed_plugin.dart';
 import '../models/plugin_manifest.dart';
@@ -66,6 +69,11 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
 
   /// What `chat:updated` compares: the open chat's settings as last sent.
   String? _chatSignature;
+
+  /// The ExtBlocks page, while the active preset runs its scripts there.
+  ExtBlocksPage? _page;
+  ProviderSubscription<Object?>? _blocksSub;
+  String? _blocksSession;
   late final PluginHookRegistry _hooks;
   late final StateController<PluginChatRuntime?> _registry;
   late final PluginHoles _holes;
@@ -102,8 +110,17 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
 
   void _detach() {
     final runtime = _runtime;
+    final page = _page;
     _runtime = null;
     _host = null;
+    _page = null;
+    _blocksSub?.close();
+    _blocksSub = null;
+    _blocksSession = null;
+    if (page != null) {
+      page.dispose();
+      page.bridge.extBlocksPageRun = null;
+    }
     if (runtime == null) return;
     _hooks.unregister(widget.charId, runtime);
     final registry = _registry;
@@ -132,15 +149,18 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
     _detach();
     final bridge = ref.read(chatBridgeRegistryProvider(widget.charId));
     final plugins = ref.read(enabledPluginsProvider);
-    if (bridge == null || plugins.isEmpty) return;
-    // The chat screen lays the layer out for these plugins; they start once
-    // its page is up.
-    final layer = pluginsUseLayer(plugins)
+    final page = ref.read(extBlocksPageActiveProvider);
+    if (bridge == null || (plugins.isEmpty && !page)) return;
+    // The chat screen lays the layer out for these plugins (and the ExtBlocks
+    // page); they start once its page is up.
+    final wantsLayer =
+        pluginsUseLayer(plugins) || (page && pluginLayerSupported());
+    final layer = wantsLayer
         ? ref.read(pluginLayerRegistryProvider(widget.charId))
         : null;
-    if (layer == null && pluginsUseLayer(plugins)) return;
+    if (layer == null && wantsLayer) return;
     try {
-      await _attach(bridge, layer, plugins, epoch);
+      await _attach(bridge, layer, plugins, epoch, page: page);
     } catch (e) {
       debugPrint('[PluginChatHost] start failed: $e');
     }
@@ -153,15 +173,20 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
     ChatBridgeController bridge,
     PluginLayerController? layer,
     List<InstalledPlugin> plugins,
-    int epoch,
-  ) async {
+    int epoch, {
+    required bool page,
+  }) async {
     final store = await ref.read(pluginStoreProvider.future);
     await pluginPackageServer.start(store.readPackageFile);
     final sdk = await rootBundle.loadString(_sdkAsset);
     final compat = {
       for (final e in _compatAssets.entries)
         e.key: await rootBundle.loadString(e.value),
+      if (page) kExtBlocksPageCompat: await extBlocksPageCompatSource(),
     };
+    bool runs(String id) =>
+        plugins.any((x) => x.id == id) ||
+        (page && id == kExtBlocksPagePluginId);
     final variables = await ref.read(pluginVariableStoreProvider.future);
     if (!mounted || epoch != _epoch) return;
     late final PluginChatRuntime runtime;
@@ -194,10 +219,12 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
         host: host,
         // Read live: "always allow" answers land in the library without
         // restarting the frames.
-        pluginById: (id) => ref
-            .read(enabledPluginsProvider)
-            .where((x) => x.id == id)
-            .firstOrNull,
+        pluginById: (id) => page && id == kExtBlocksPagePluginId
+            ? extBlocksPagePlugin
+            : ref
+                  .read(enabledPluginsProvider)
+                  .where((x) => x.id == id)
+                  .firstOrNull,
         pluginName: _name,
         text: (key) => key.tr(),
         onAlwaysAllow: library.allowAlways,
@@ -235,7 +262,7 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
       final id = report['pluginId'];
       final host = report['host'];
       if (id is! String || host is! String || host.isEmpty) return;
-      if (!plugins.any((x) => x.id == id)) return;
+      if (!runs(id)) return;
       unawaited(
         ref
             .read(pluginNetworkLogProvider(id).notifier)
@@ -245,7 +272,7 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
 
     void onHttpRequest(Map<String, dynamic> report) {
       final id = report['pluginId'];
-      if (id is! String || !plugins.any((x) => x.id == id)) return;
+      if (id is! String || !runs(id)) return;
       recordFramePluginRequest(id, _sessionId, report);
     }
 
@@ -278,6 +305,15 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
           ? <String, dynamic>{}
           : variables.read(plugin.id, scope, sessionId),
     );
+    if (page) {
+      (payload['plugins'] as List).add(
+        await extBlocksPageEntry(
+          files: host.files(kExtBlocksPagePluginId),
+          allowExternalMedia:
+              ref.read(appSettingsProvider).value?.allowExternalMedia ?? true,
+        ),
+      );
+    }
     if (!mounted || epoch != _epoch) {
       runtime.dispose();
       return;
@@ -295,6 +331,32 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
     _messagesKey = null;
     _pushMessages(state);
     if (session != null) unawaited(_announce(runtime, session.id));
+    if (page) {
+      final xb = ExtBlocksPage(
+        runtime: runtime,
+        bridge: bridge,
+        charId: widget.charId,
+        read: ref.read,
+      );
+      _page = xb;
+      bridge.extBlocksPageRun = xb.run;
+      _watchBlocks(session?.id);
+      xb.flush();
+      unawaited(xb.restore());
+    }
+  }
+
+  /// Finished blocks change what a message displays without changing the
+  /// chat, so the page's mirror follows them too.
+  void _watchBlocks(String? sessionId) {
+    _blocksSub?.close();
+    _blocksSub = null;
+    _blocksSession = sessionId;
+    if (sessionId == null) return;
+    _blocksSub = ref.listenManual(
+      infoBlocksProvider(sessionId),
+      (_, _) => _page?.schedule(),
+    );
   }
 
   Future<void> _pushLocalization() async {
@@ -342,6 +404,12 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
     final host = _host;
     if (runtime == null || host == null || state == null) return;
     _pushMessages(state);
+    final page = _page;
+    if (page != null) {
+      if (state.session?.id != _blocksSession) _watchBlocks(state.session?.id);
+      // Not on every streamed chunk: the reply is mirrored once it settles.
+      if (!state.isGenerating) page.schedule();
+    }
     final session = state.session;
     if (session?.id != _sessionId) {
       final previous = _sessionId;
@@ -462,6 +530,15 @@ class _PluginChatHostState extends ConsumerState<PluginChatHost> {
     });
     ref.listen(enabledPluginsProvider, (prev, next) {
       if (_runtimeKey(prev) != _runtimeKey(next)) unawaited(_restart());
+    });
+    ref.listen(extBlocksPageActiveProvider, (prev, next) {
+      if (prev != next) unawaited(_restart());
+    });
+    // The page reaches the internet as the chat's media does.
+    ref.listen(appSettingsProvider, (prev, next) {
+      final before = prev?.value?.allowExternalMedia ?? true;
+      final after = next.value?.allowExternalMedia ?? true;
+      if (before != after && _page != null) unawaited(_restart());
     });
     ref.listen(
       chatProvider(widget.charId),

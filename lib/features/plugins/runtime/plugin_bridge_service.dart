@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../../extensions/services/page/ext_blocks_page.dart';
 import '../models/installed_plugin.dart';
 import '../models/plugin_manifest.dart';
 import 'api/characters_api.dart';
@@ -39,6 +40,7 @@ final Map<String, PluginMethod> pluginMethodRegistry = Map.unmodifiable({
   ...netApi(),
   ...uiApi(),
   ...commandsApi(),
+  ...extBlocksPageApi(),
   'events.subscribe': const PluginMethod(_subscribe, internal: true),
   'frames.open': const PluginMethod(_openFrame, internal: true),
 });

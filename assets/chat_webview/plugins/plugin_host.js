@@ -178,18 +178,29 @@
     return pkg.slice(pkg.indexOf('/plugins/') + 9, -1) === plugin.pluginId ? pkg : null;
   }
 
-  function networkPolicy(network, local, pkg) {
+  // [media] are app origins a frame may show pictures and sound from (the
+  // ExtBlocks page shows the chat's generated images); nothing else of the
+  // page may load from them.
+  function networkPolicy(network, local, pkg, media) {
     var hosts = reachable(network, local, pkg);
     if (hosts === null) return null;
     var outside = " data: blob:" + hosts;
+    var shown = outside + (media || []).map(function (o) { return ' ' + o; }).join('');
     return "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'" + outside +
-      "; style-src 'unsafe-inline'" + outside + "; img-src" + outside + "; media-src" + outside +
+      "; style-src 'unsafe-inline'" + outside + "; img-src" + shown + "; media-src" + shown +
       "; font-src" + outside + "; worker-src" + outside + "; frame-src" + outside +
       "; connect-src " + (hosts ? hosts.slice(1) : "'none'");
   }
 
+  // Loopback origins of the app's own file server, as the payload names them.
+  function mediaOf(plugin) {
+    return (Array.isArray(plugin.mediaOrigins) ? plugin.mediaOrigins : []).filter(function (o) {
+      return typeof o === 'string' && /^https?:\/\/(127\.0\.0\.1|localhost):\d+$/.test(o);
+    });
+  }
+
   function headScripts(plugin, boot) {
-    var policy = networkPolicy(plugin.network, boot.localNetwork, packageOf(plugin));
+    var policy = networkPolicy(plugin.network, boot.localNetwork, packageOf(plugin), mediaOf(plugin));
     var html = (policy ? '<meta http-equiv="Content-Security-Policy" content="' + policy + '">' : '') +
       '<meta charset="utf-8">' +
       '<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">' +
@@ -249,7 +260,7 @@
   // too, so it must be the same one.
   // [doc] is the plugin's document inline, or `{ url }` to load it from.
   function wrapperDoc(plugin, doc, local) {
-    var policy = networkPolicy(plugin.network, local, packageOf(plugin));
+    var policy = networkPolicy(plugin.network, local, packageOf(plugin), mediaOf(plugin));
     var inner = typeof doc === 'string' ? 'srcdoc="' + attr(doc) + '"' : 'src="' + attr(doc.url) + '"';
     return '<!doctype html><html><head>' +
       (policy ? '<meta http-equiv="Content-Security-Policy" content="' + policy + '">' : '') +

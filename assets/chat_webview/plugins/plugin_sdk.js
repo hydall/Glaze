@@ -839,7 +839,12 @@
         var fn = (handlers.get(d.event) || [])[0];
         if (!fn) { post({ type: P + 'reply', id: d.id, result: { ok: false, reason: 'missing-handler' } }); return; }
         Promise.resolve().then(function () { return fn(d.args ? Object.freeze(d.args) : undefined); }).then(
-          function () { post({ type: P + 'reply', id: d.id, result: { ok: true } }); },
+          // What the handler returns rides along when it survives JSON.
+          function (value) {
+            var result = { ok: true };
+            try { if (value != null) result.value = JSON.parse(JSON.stringify(value)); } catch (e) { /* dropped */ }
+            post({ type: P + 'reply', id: d.id, result: result });
+          },
           function (err) {
             console.error('[plugin] action', err);
             post({ type: P + 'reply', id: d.id, result: { ok: false, reason: 'handler-error', message: String(err && err.message || err) } });
@@ -952,7 +957,10 @@
           if (depth < 2) walk(c, depth + 1);
         }
       };
-      if (document.body) walk(document.body, 0);
+      // From <html>, as the hit boxes are: a box may hang next to <body>.
+      walk(document.documentElement, -1);
+      seen.delete(document.head);
+      seen.delete(document.body);
       seen.forEach(rescue);
     };
     var scheduleScan = function (ms) {
@@ -999,7 +1007,7 @@
   if (kind === 'panel') {
     // A chat panel covers the whole page, but only the boxes the plugin
     // draws may take touches; the host clips the frame to these rectangles.
-    var SKIP = { SCRIPT: 1, STYLE: 1, LINK: 1, META: 1, TEMPLATE: 1, NOSCRIPT: 1 };
+    var SKIP = { HEAD: 1, SCRIPT: 1, STYLE: 1, LINK: 1, META: 1, TEMPLATE: 1, NOSCRIPT: 1 };
     var MAX_RECTS = 48;
     var lastKey = '';
     var scheduled = false;
@@ -1029,7 +1037,8 @@
           }
         }
       };
-      if (document.body) walk(document.body, null);
+      // From <html>: a script may hang its boxes there, next to <body>.
+      walk(document.documentElement, null);
       if (rects.length > MAX_RECTS) {
         var u = rects.reduce(function (a, b) {
           return { left: Math.min(a.left, b.left), top: Math.min(a.top, b.top),

@@ -301,6 +301,15 @@ Future<void> initChatWebViewEnvironment() async {
 WebUri? _localFileServingBaseUrl() =>
     _chatWebViewLocalFileBaseUrl ?? _chatWebViewAssetBaseUrl;
 
+/// Origin (`http://127.0.0.1:<port>`) of the loopback server that hands the
+/// chat its local files, or null where there is none. A plugin frame may show
+/// pictures from it only when its payload names it (the ExtBlocks page).
+String? chatWebViewLocalFileOrigin() {
+  final base = _chatWebViewLocalFileBaseUrl;
+  if (base == null) return null;
+  return '${base.scheme}://${base.host}:${base.port}';
+}
+
 /// Loopback servers whose accept loop has ended — the listening socket failed
 /// or was closed, so the server will never answer again.
 final Set<HttpServer> _stoppedChatWebViewServers = Set.identity();

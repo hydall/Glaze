@@ -61,6 +61,7 @@ const List<_PermissionGroup> _groups = [
       (GlazeCapability.executeCommand, 'perm_execute_command'),
       (GlazeCapability.showToast, 'perm_show_toast'),
       (GlazeCapability.runBlocks, 'perm_run_blocks'),
+      (GlazeCapability.chatPage, 'perm_chat_page'),
     ],
   ),
 ];
