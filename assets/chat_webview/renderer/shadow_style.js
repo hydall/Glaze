@@ -366,6 +366,15 @@ export const SHADOW_STYLE = `
     margin: 0;
     cursor: pointer;
   }
+  /* A picture whose card styled it (INV-IG14): the wrapper leaves the layout,
+     so the author's width/position resolve against the author's own box, and
+     the image is the plain <img> the card was written for. The overlay
+     buttons anchor to the nearest positioned box of the card. */
+  .glaze-message .imggen-result-wrapper.imggen-authored { display: contents; }
+  .glaze-message .imggen-authored > .imggen-result {
+    display: inline;
+    border-radius: 0;
+  }
   .glaze-message table tbody tr:nth-child(even) { background-color: rgba(255,255,255,0.02); }
   .glaze-message table td { padding: 8px 12px; border-bottom: 1px solid rgba(255,255,255,0.08); }
   .glaze-message .chat-table {

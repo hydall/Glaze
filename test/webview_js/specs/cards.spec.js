@@ -421,6 +421,30 @@ test('a finished image block renders its variant switcher', async ({ page }) => 
   expect(shape.brokenImg).toBe(1);
 });
 
+test('a finished image keeps the place its card gave it', async ({ page }) => {
+  await render(page, card('imggen-authored-layout').text);
+  const shape = await page.evaluate(() => {
+    const root = window.harness.currentRoot();
+    const frame = root.querySelector('.pol-frame');
+    const img = root.querySelector('img.imggen-result');
+    const f = frame.getBoundingClientRect();
+    const i = img.getBoundingClientRect();
+    return {
+      classes: img.className,
+      filter: getComputedStyle(img).filter,
+      // The picture covers the aspect box instead of falling below it.
+      offset: [i.top - f.top, i.left - f.left, i.width - f.width, i.height - f.height],
+      ratio: f.height / f.width,
+      hasOptions: !!root.querySelector('.imggen-options-btn'),
+    };
+  });
+  expect(shape.classes).toBe('imggen-result pol-photo');
+  expect(shape.filter).toContain('sepia');
+  for (const delta of shape.offset) expect(Math.abs(delta)).toBeLessThan(1);
+  expect(shape.ratio).toBeCloseTo(0.663, 2);
+  expect(shape.hasOptions).toBe(true);
+});
+
 test('inline tags in prose keep their paragraphs and their markdown', async ({ page }) => {
   await render(page, card('inline-tags-in-prose').text);
   const shape = await page.evaluate(() => {

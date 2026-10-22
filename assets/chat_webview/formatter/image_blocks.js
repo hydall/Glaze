@@ -40,6 +40,13 @@ export const IIG_ELEMENT_REGEX = /<img\s[^>]*?data-iig-instruction\s*=\s*(?:"[^"
  */
 export const IMG_SRC_GEN_ELEMENT_REGEX = /<img\b[^>]*?\bsrc\s*=\s*["']\[IMG:GEN[^\]]*\]["'][^>]*>/gi;
 
+/**
+ * Attributes of an author's `<img>` that only decide how the picture looks —
+ * the JS half of ImageTagMarkup.presentationAttributes. A card that lays its
+ * picture out with them keeps that layout once the picture arrives (INV-IG14).
+ */
+const PRESENTATION_ATTRIBUTES = ['style', 'class', 'alt', 'title', 'width', 'height'];
+
 const ATTRIBUTE_PAIR_REGEX = /([A-Za-z_:][-A-Za-z0-9_:.]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]*))/g;
 
 /**
@@ -112,6 +119,15 @@ function unescapeAttribute(value) {
     .replace(/&amp;/g, '&');
 }
 
+function presentationOf(attributes) {
+  const presentation = {};
+  for (const name of PRESENTATION_ATTRIBUTES) {
+    const value = unescapeAttribute(attributes[name] || '');
+    if (value.trim()) presentation[name] = value;
+  }
+  return presentation;
+}
+
 /**
  * Reads the stored `<img data-iig-…>` form of a finished image block — the JS
  * half of ImageTagMarkup.encodeResultElement in image_tag_markup.dart. The
@@ -136,7 +152,7 @@ export function parseImageResultElement(tag) {
   let activeIndex = Number.isNaN(declared) ? fallback : declared;
   if (!(activeIndex >= 0)) activeIndex = 0;
   if (activeIndex > paths.length - 1) activeIndex = paths.length - 1;
-  return { paths, activeIndex, instruction };
+  return { paths, activeIndex, instruction, presentation: presentationOf(attributes) };
 }
 
 /**
@@ -212,8 +228,29 @@ export function renderImageBlock(block, at) {
   return '';
 }
 
+// The author's attributes on the rendered <img>. Their classes go after ours,
+// and the wrapper steps out of the layout (`imggen-authored`, display:
+// contents) so `width:100%` or `position:absolute` resolve against the box the
+// author put the picture in, the way they do in SillyTavern.
+function authoredImgAttributes(presentation) {
+  const entries = Object.entries(presentation || {})
+    .filter(([name]) => PRESENTATION_ATTRIBUTES.includes(name));
+  if (!entries.length) return null;
+  let classes = 'imggen-result';
+  let markup = '';
+  for (const [name, value] of entries) {
+    if (name === 'class') classes += ` ${value}`;
+    else markup += ` ${name}="${escapeHtml(value)}"`;
+  }
+  return { classes: escapeHtml(classes), markup };
+}
+
 function renderResult(block, at) {
   const src = imageSrc(block.path);
+  const authored = authoredImgAttributes(block.presentation);
+  const wrapperClass = authored ? 'imggen-result-wrapper imggen-authored' : 'imggen-result-wrapper';
+  const imgClass = authored ? authored.classes : 'imggen-result';
+  const imgExtra = authored ? authored.markup : '';
   const encInstr = encodeURIComponent(block.instruction || '');
   const variants = (block.paths || []).map((p) => imageSrc(p));
   const activeIndex = variants.length > 1 ? (block.activeIndex || 0) : 0;
@@ -234,7 +271,7 @@ function renderResult(block, at) {
   // the picture the user just waited for shows as a broken tag. These
   // are local files, so eager loading costs nothing — same reasoning as
   // _renderExtBlockImageHtml in the bridge controller.
-  return `<span class="imggen-result-wrapper"${variantAttrs}><img src="${src}" class="imggen-result" loading="eager" decoding="async" data-action="image-click" data-src="${src}"><button class="imggen-options-btn" type="button" data-action="img-options" data-src="${src}" data-instruction="${encInstr}" data-img-index="${at}" title="Options">${OPTIONS_SVG}</button>${switcher}</span>`;
+  return `<span class="${wrapperClass}"${variantAttrs}><img src="${src}" class="${imgClass}"${imgExtra} loading="eager" decoding="async" data-action="image-click" data-src="${src}"><button class="imggen-options-btn" type="button" data-action="img-options" data-src="${src}" data-instruction="${encInstr}" data-img-index="${at}" title="Options">${OPTIONS_SVG}</button>${switcher}</span>`;
 }
 
 function renderPending(block, at) {
@@ -308,6 +345,7 @@ export function extractImageBlocks(text, { hold, inert, inReasoning, isUser = fa
       paths: parsed.paths,
       activeIndex: parsed.activeIndex,
       instruction: parsed.instruction,
+      presentation: parsed.presentation,
     });
   });
 

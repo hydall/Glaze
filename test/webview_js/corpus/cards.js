@@ -186,6 +186,20 @@ loomledger { display: block; font-family: 'Card', cursive; }
     text: `<img src="a.png" data-iig-instruction="девушка" data-iig-variants="a.png;;b.png" data-iig-index="0">`,
   },
   {
+    id: 'imggen-authored-layout',
+    title: 'Finished image block the card positioned itself',
+    origin: 'INV-IG14 — "Polaroid Diaries" ExtBlocks preset',
+    text: `<div style="display:flex;justify-content:center;margin:14px 0;padding:0 4px;box-sizing:border-box">
+<div style="background:transparent;width:100%;max-width:380px;border-radius:3px;position:relative;box-sizing:border-box">
+<div class="pol-frame" style="position:relative;overflow:hidden;line-height:0;width:100%;padding-top:66.3%">
+<img data-iig-instruction='{"prompt":"a cat on a windowsill","aspect_ratio":"3:2"}' src="a.png" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;display:block;filter:saturate(0.8) contrast(1.1) brightness(1.03) sepia(0.1)" class="pol-photo">
+<div style="position:absolute;top:0;left:0;right:0;bottom:0;background:linear-gradient(135deg,rgba(255,255,255,0.4) 0%,transparent 40%);pointer-events:none;mix-blend-mode:soft-light"></div>
+</div>
+<div style="padding:9px 14px 11px 14px;background:#f5f0e8;font-family:Georgia,serif;font-style:italic;color:#3a2e22;font-size:11.5px;text-align:center">Он даже не заметил, что я смотрю.</div>
+</div>
+</div>`,
+  },
+  {
     id: 'glaze-markers',
     title: 'Glaze colour markers',
     origin: 'formatter step 7',

@@ -317,6 +317,30 @@ was waiting on. `Formatter.format` already receives `isUser`, so
 is kept as literal text — the same treatment a tag inside reasoning gets
 (INV-IG11).
 
+### INV-IG14: A block keeps the layout its card gave the picture
+
+A card often positions its picture itself — an aspect-ratio box
+(`padding-top:66.3%`) with `<img style="position:absolute;width:100%;
+height:100%">` inside, as the "Polaroid Diaries" ExtBlocks preset does. The
+block used to be rewritten as a bare `<img data-iig-…>` and rendered inside our
+own wrapper, so the picture fell below the box and left an empty frame.
+
+`ImageTagMarkup.presentationAttributes` (`style`, `class`, `alt`, `title`,
+`width`, `height`) are read off the author's `<img>` and carried through every
+state of the block: the stored element writes them after `src`; a reset with
+them stays an `<img … src="[IMG:GEN]">` element with its images in
+`data-iig-variants` (`ImageTagMarkup.pendingTag`) instead of a bracket tag that
+has nowhere to keep them; an error card holds them under `presentation`. No
+other attribute is carried — event handlers and the rest are not ours to keep.
+
+The formatter (`renderResult` in `formatter/image_blocks.js`) puts them on the
+rendered `<img>`, after our class, and marks the wrapper `imggen-authored`,
+which is `display: contents`: the author's `width:100%` and `position:absolute`
+resolve against the author's box, as in SillyTavern. The overlay buttons then
+anchor to the card's nearest positioned box. The loading placeholder and the
+error card stay app chrome (INV-IG10) and do not take the author's style; the
+model still sees only `[IMG:GEN:<instruction>]` (INV-IG12).
+
 ### INV-IG7: Regenerating an image never adds a message swipe
 
 `ImageRecoveryService` resets the retried blocks through

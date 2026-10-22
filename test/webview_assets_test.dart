@@ -1275,7 +1275,7 @@ void main() {
       // A lazy image at the bottom edge of the WebView can be evaluated while
       // the row is still off-screen and never fetched, leaving the picture the
       // user waited for as a broken tag.
-      final imgIdx = formatterImageBlocksJs.indexOf('class="imggen-result"');
+      final imgIdx = formatterImageBlocksJs.indexOf(r'class="${imgClass}"');
       expect(imgIdx, isNot(-1));
       final chunk = formatterImageBlocksJs.substring(
         formatterImageBlocksJs.lastIndexOf('<img', imgIdx),

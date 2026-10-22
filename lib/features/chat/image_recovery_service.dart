@@ -154,20 +154,17 @@ class ImageRecoveryService {
       return text;
     }
     var result = text;
-    result = result.replaceAll(
-      ImgGenPatterns.imgSrcGenRegex,
-      '[IMG:ERROR:${jsonEncode({'error': 'Generation interrupted'})}]',
-    );
     // Only elements still waiting for a picture; the same element with an
     // image in its `src` is a finished block, which an interrupted generation
     // must never turn into an error card.
     String interrupted(Match m) {
       if (!ImgGenPatterns.isPendingIigElement(m.group(0)!)) return m.group(0)!;
-      final errorJson = jsonEncode({
+      final presentation = ImageTagMarkup.presentationOf(m.group(0)!);
+      return ImageTagMarkup.errorTag({
         'error': 'Generation interrupted',
         'instruction': m.group(1) ?? '',
+        if (presentation.isNotEmpty) 'presentation': presentation,
       });
-      return '[IMG:ERROR:$errorJson]';
     }
 
     result = result.replaceAllMapped(
@@ -178,6 +175,15 @@ class ImageRecoveryService {
       ImgGenPatterns.htmlIigTagDoubleRegex,
       interrupted,
     );
+    // After the instruction elements: their `src` is `[IMG:GEN]` too, and
+    // taken here first they lost their prompt and their presentation.
+    result = result.replaceAllMapped(ImgGenPatterns.imgSrcGenRegex, (m) {
+      final presentation = ImageTagMarkup.presentationOf(m.group(0)!);
+      return ImageTagMarkup.errorTag({
+        'error': 'Generation interrupted',
+        if (presentation.isNotEmpty) 'presentation': presentation,
+      });
+    });
     result = result.replaceAllMapped(ImgGenPatterns.imgGenRegex, (m) {
       final instruction = m.group(1) ?? '';
       final errorJson = instruction.isNotEmpty
