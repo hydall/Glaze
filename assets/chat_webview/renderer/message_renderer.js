@@ -56,6 +56,8 @@ export class Renderer {
     this._lastTimestamps = { date: null, idx: -1 };
     this.selectionManager = null;
     this.allowMessageScripts = false;
+    // The "Allow external media" setting; on until Flutter says otherwise.
+    this.allowExternalMedia = true;
     // Id of the oldest message the next prompt still carries. Every render of
     // that message draws the CONTEXT LIMIT rule above it; null draws none.
     // Held here rather than on the message map so a re-render (a preset switch,
@@ -856,6 +858,7 @@ if (messageData.isEditing) classes.push('editing');
       searchQuery: this.searchQuery,
       applySearchHighlight: (html) => this._applySearchHighlight(html),
       allowMessageScripts: this.allowMessageScripts,
+      allowExternalMedia: this.allowExternalMedia,
     });
   }
 
@@ -1244,9 +1247,9 @@ if (messageData.isEditing) classes.push('editing');
 
   /**
    * Re-writes every message body (and reasoning block) from the raw text kept
-   * on the section's dataset. Used when `allowMessageScripts` flips, so the
-   * messages already on screen pick up the new policy instead of waiting for
-   * the next content update.
+   * on the section's dataset. Used when `allowMessageScripts` or
+   * `allowExternalMedia` flips, so the messages already on screen pick up the
+   * new policy instead of waiting for the next content update.
    */
   rerenderMessageBodies() {
     // `virtualList.items` also covers messages the list has not mounted, so a
@@ -1352,6 +1355,7 @@ if (messageData.isEditing) classes.push('editing');
             // the scripts it keeps are dropped right after, unexecuted.
             root.innerHTML = sanitizeMessageHtml(highlighted, {
               allowScripts: this.allowMessageScripts,
+              allowExternalMedia: this.allowExternalMedia,
             });
             root.querySelectorAll('script').forEach(script => script.remove());
             // The rewrite dropped the re-keyed `:target` rules with the rest

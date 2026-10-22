@@ -14,6 +14,8 @@
 // the contract rather than shimming one more thing where it happens to help.
 
 import { rewriteTargetSelectors } from './target_toggle.js';
+import { withParsedSheet } from '../bridge/css_sanitizer.js';
+import { hasExternalCssUrl, isExternalUrl } from '../bridge/external_media.js';
 
 /** Events during which a message's own code may run and query the document. */
 const SCOPED_EVENTS = [
@@ -71,9 +73,10 @@ const IMPORT_RULE =
  *
  * [styleSources] are the `<style>` bodies as the message wrote them: the CSS
  * policy strips the rule before insertion, so by the time the message is in
- * the DOM there is nothing left to read.
+ * the DOM there is nothing left to read. With [allowExternalMedia] off an
+ * external sheet is skipped without a report: the reader chose that.
  */
-export function hoistStyleImports(styleSources) {
+export function hoistStyleImports(styleSources, { allowExternalMedia = true } = {}) {
   const refused = [];
   for (const css of styleSources) {
     IMPORT_RULE.lastIndex = 0;
@@ -81,6 +84,7 @@ export function hoistStyleImports(styleSources) {
     while ((match = IMPORT_RULE.exec(css)) !== null) {
       const url = (match[1] ?? match[2] ?? match[3] ?? match[4] ?? match[5] ?? '').trim();
       if (!url) continue;
+      if (!allowExternalMedia && isExternalUrl(url)) continue;
       // https only: `http:` is a downgrade, and `data:`/`javascript:` in a
       // stylesheet href is a rule-injection vector rather than a font.
       if (!/^https:\/\//i.test(url)) {
@@ -101,6 +105,97 @@ export function hoistStyleImports(styleSources) {
     }
   }
   return refused;
+}
+
+/**
+ * A `@font-face` a message declared, registered with the document.
+ *
+ * Chromium does not register `@font-face` rules from a shadow-root stylesheet,
+ * so a card that brings its own font rendered in the fallback face. A rule
+ * whose every source is a `data:` URL, an `https:` URL or `local()` is copied
+ * into a `<style data-glaze-font-face>` in the document head; `http:` and
+ * anything else is refused and reported. As with a hoisted `@import`, an
+ * `https:` font is fetched from a third party, and the family name becomes
+ * document-wide — accepted knowingly, the same trade SillyTavern makes when it
+ * allows external media. See INV-MR5.
+ */
+const MAX_FONT_FACES = 32;
+const MAX_FONT_FACE_CHARS = 16 * 1024 * 1024;
+const hoistedFontFaces = new Set();
+let hoistedFontFaceChars = 0;
+
+const FONT_FACE_AT_RULE = /@font-face\b/i;
+const ALLOWED_FONT_URL = /url\(\s*(["']?)(?:data:|https:\/\/)[^"'()\s]*\1\s*\)/gi;
+const INERT_FONT_FUNCTION = /\b(?:local|format|tech)\([^()]*\)/gi;
+
+/** True when [src] names only data:, https: or locally installed fonts. */
+function isAllowedFontSource(src) {
+  const rest = String(src || '')
+    .replace(ALLOWED_FONT_URL, '')
+    .replace(INERT_FONT_FUNCTION, '');
+  return Boolean(src) && !rest.includes('(') && !rest.includes('\\');
+}
+
+function fontFaceRules(css) {
+  return withParsedSheet(css, (sheet) => Array.from(sheet.cssRules).filter(
+    (rule) => typeof CSSFontFaceRule === 'function' && rule instanceof CSSFontFaceRule,
+  )) || [];
+}
+
+/**
+ * Registers every allowed `@font-face` in [styleSources] with the
+ * document and returns report lines for the ones it refused. With
+ * [allowExternalMedia] off a face that would fetch is skipped without a report.
+ */
+export function hoistStyleFontFaces(styleSources, { allowExternalMedia = true } = {}) {
+  const refused = [];
+  for (const css of styleSources) {
+    if (!FONT_FACE_AT_RULE.test(css)) continue;
+    for (const rule of fontFaceRules(css)) {
+      const family = rule.style.getPropertyValue('font-family').trim() || '?';
+      const src = rule.style.getPropertyValue('src');
+      if (!allowExternalMedia && hasExternalCssUrl(src)) continue;
+      if (!isAllowedFontSource(src)) {
+        refused.push(`@font-face ${family} ignored: only data: and https fonts are loaded`);
+        continue;
+      }
+      const text = rule.cssText;
+      if (hoistedFontFaces.has(text)) continue;
+      if (hoistedFontFaces.size >= MAX_FONT_FACES ||
+          hoistedFontFaceChars + text.length > MAX_FONT_FACE_CHARS) {
+        refused.push(`@font-face ${family} ignored: too many fonts loaded`);
+        continue;
+      }
+      hoistedFontFaces.add(text);
+      hoistedFontFaceChars += text.length;
+      const style = document.createElement('style');
+      style.dataset.glazeFontFace = '';
+      style.textContent = text;
+      REAL_HEAD.appendChild(style);
+    }
+  }
+  return refused;
+}
+
+/**
+ * Takes back every hoisted sheet and font that loads from a third party, for
+ * when "Allow external media" is switched off. The messages re-render right
+ * after and hoist again only what the setting still allows.
+ */
+export function dropExternalHoists() {
+  for (const link of REAL_HEAD.querySelectorAll('link[data-glaze-import]')) {
+    const url = link.getAttribute('href');
+    if (!isExternalUrl(url)) continue;
+    hoisted.delete(url);
+    link.remove();
+  }
+  for (const style of REAL_HEAD.querySelectorAll('style[data-glaze-font-face]')) {
+    const text = style.textContent;
+    if (!hasExternalCssUrl(text)) continue;
+    hoistedFontFaces.delete(text);
+    hoistedFontFaceChars -= text.length;
+    style.remove();
+  }
 }
 
 function escapeSelector(value) {

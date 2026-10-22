@@ -18,6 +18,7 @@ void main() {
       'hideTooltips': bool,
       'disableSwipeRegeneration': bool,
       'allowMessageScripts': bool,
+      'allowExternalMedia': bool,
       'confirmMessageDelete': bool,
       'language': String,
       'virtualKeyboardSend': bool,
@@ -57,6 +58,7 @@ void main() {
                 entry.key == 'hapticFeedback' ||
                 entry.key == 'messageVibration' ||
                 entry.key == 'confirmMessageDelete' ||
+                entry.key == 'allowExternalMedia' ||
                 entry.key == 'dialogGrouping') {
               expect(
                 _getBoolDefault(defaults, entry.key),
@@ -308,6 +310,8 @@ bool _getBoolDefault(AppSettings s, String key) {
       return s.disableSwipeRegeneration;
     case 'confirmMessageDelete':
       return s.confirmMessageDelete;
+    case 'allowExternalMedia':
+      return s.allowExternalMedia;
     case 'virtualKeyboardSend':
       return s.virtualKeyboardSend;
     case 'showOurPicks':

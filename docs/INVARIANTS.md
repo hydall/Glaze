@@ -1775,8 +1775,31 @@ The cost is deliberate and bounded:
 - what remains is accepted knowingly: the sheet is fetched from a third party,
   which learns the reader's IP, and its rules apply to the whole document —
   app chrome included. `bridge/css_sanitizer.js` still rejects every `url()`
-  *inside* message CSS, and `@font-face`, `@page` and `@namespace` are still
-  dropped and reported (`inspectBlockedAtRules`).
+  *inside* message CSS, and `@page` and `@namespace` are still dropped and
+  reported (`inspectBlockedAtRules`).
+
+A `@font-face` is hoisted the same way (`hoistStyleFontFaces`), because
+Chromium does not register one from a shadow-root stylesheet: a card that
+brings its own font rendered in the fallback face. A rule whose every source
+is a `data:` URL, an `https:` URL or `local()` is copied, as the browser
+re-serialised it, into a `<style data-glaze-font-face>` in the head. Each rule
+once, at most 32 per session and 16M characters in total; `http:` and any
+other source is refused and reported. An `https:` font is a third-party fetch
+and the family name becomes document-wide — the same trade as `@import`, and
+the one SillyTavern makes when external media is allowed (there, message
+`@font-face` works as is, and `forbid_external_media` only strips `://`
+sources).
+
+**"Allow external media"** (app setting, on by default) is the reader's
+override for all of the above. Off, `bridge/external_media.js` drops every
+load from a third-party host before the markup is inserted — media `src` /
+`poster` / `srcset`, `<link>`, SVG references, and remote `url()`s in
+`<style>` and `style="…"` — and the hoists skip remote sheets and fonts
+without a report. `data:`/`blob:` media, `file://`, relative URLs and Glaze's
+own hosts (the page origin, loopback, `appassets.androidplatform.net`) keep
+working. A `<style>` with no remote URL stays byte-identical. Switching the
+setting off takes back what was already hoisted and re-renders the chat.
+ExtBlock HTML follows the same setting.
 
 ### INV-MR6: `document.body` is the message's overlay layer
 

@@ -151,6 +151,23 @@ List<MenuSearchEntry> buildSettingsSearchIndex() {
       const ['scripts', 'javascript', 'скрипты'],
       groupKey: 'settings_group_chat',
     ),
+    row(
+      'allow_external_media',
+      'menu_allow_external_media',
+      'desc_allow_external_media',
+      Icons.public_rounded,
+      const [
+        'media',
+        'images',
+        'fonts',
+        'network',
+        'медиа',
+        'картинки',
+        'шрифты',
+        'сеть',
+      ],
+      groupKey: 'settings_group_chat',
+    ),
     // ── Characters ──────────────────────────────────────────────────────────
     row(
       'show_our_picks',

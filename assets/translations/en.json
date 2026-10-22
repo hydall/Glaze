@@ -1070,6 +1070,8 @@
   "context_applied_char": "Current Character",
   "menu_allow_message_scripts": "Enable JavaScript execution (unsafe)",
   "desc_allow_message_scripts": "Allows JavaScript to run in chat. This can be unsafe, since scripts get access to your chat. Use it if your presets and/or regexes require it. CSS in messages is applied either way.",
+  "menu_allow_external_media": "Allow external media",
+  "desc_allow_external_media": "Lets messages load images, videos, audio, fonts and stylesheets from the internet. When off, only media embedded in the message itself is shown. Each remote load lets that site see your IP address.",
   "message_scripts_warning_title": "Enable unsafe message scripts?",
   "message_scripts_warning_desc": "Scripts in messages can read the visible chat, invoke app actions, make network requests, and spend API credits. Only enable this for content you fully trust.",
   "message_scripts_enable_action": "Enable anyway",

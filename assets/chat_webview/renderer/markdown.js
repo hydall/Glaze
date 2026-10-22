@@ -3,7 +3,11 @@ import { formatMessageBody } from './macros_in_message.js';
 import { inspectBlockedAtRules, reportCssErrors } from './css_diagnostics.js';
 import { isolateImgGenPlaceholders } from './imggen_placeholder.js';
 import { sanitizeMessageHtml } from '../bridge/html_sanitizer.js';
-import { hoistStyleImports, installMessageDocument } from './message_document.js';
+import {
+  hoistStyleFontFaces,
+  hoistStyleImports,
+  installMessageDocument,
+} from './message_document.js';
 import { retryFailedLocalImages } from './local_image_retry.js';
 
 /** Cheap pre-sanitize probe for an embedded `<script>` in formatted HTML. */
@@ -44,10 +48,11 @@ function styleSources(formatted) {
 }
 
 /** What the CSS policy did to the message's at-rules, as report lines. */
-function cssPolicyNotes(sources, refusedImports) {
+function cssPolicyNotes(sources, refusedImports, refusedFontFaces) {
   const notes = refusedImports.map(
     (url) => `@import ignored: ${url} (only https is loaded)`,
   );
+  notes.push(...refusedFontFaces);
   for (const css of sources) notes.push(...inspectBlockedAtRules(css));
   return notes;
 }
@@ -61,6 +66,7 @@ export function writeShadowContent({
   searchQuery,
   applySearchHighlight,
   allowMessageScripts = false,
+  allowExternalMedia = true,
   isReasoning = false,
   messageId,
 }) {
@@ -89,6 +95,7 @@ export function writeShadowContent({
     // still rendered exactly as written, it just cannot run anything.
     root.innerHTML = sanitizeMessageHtml(formatted, {
       allowScripts: allowMessageScripts,
+      allowExternalMedia,
     });
     // Before anything else touches the tree: the placeholder's content moves
     // behind a shadow boundary, out of reach of the message's own CSS.
@@ -97,48 +104,23 @@ export function writeShadowContent({
     // A reply still arriving is half a stylesheet, and every unclosed brace in
     // it is on its way to being closed — report only what the message settled
     // on. `isGenerating` covers the whole reply, `isTyping` its first chunks.
-    // `@import` cannot work inside a shadow root, so the sheets a card pulls
-    // are lifted to the document head (INV-MR5). Everything the CSS policy
-    // still refuses is reported instead of failing silently.
+    // `@import` and `@font-face` do not work inside a shadow root, so the
+    // sheets a card pulls and the fonts it embeds are lifted to the document
+    // head (INV-MR5). Everything the CSS policy still refuses is reported
+    // instead of failing silently.
     const styles = styleSources(formatted);
-    const refusedImports = hoistStyleImports(styles);
+    const refusedImports = hoistStyleImports(styles, { allowExternalMedia });
+    const refusedFontFaces = hoistStyleFontFaces(styles, { allowExternalMedia });
     if (!isTyping && !window.bridge?.isGenerating) {
-      reportCssErrors(root, cssPolicyNotes(styles, refusedImports));
+      reportCssErrors(root, cssPolicyNotes(styles, refusedImports, refusedFontFaces));
     }
     // The message's document: `:target` re-keyed, the scoped `document.*`
     // lookups installed for later events, and the card's own scripts run.
     // See renderer/message_document.js and INV-MR1…INV-MR8.
     installMessageDocument(root, { allowMessageScripts });
-    fixDetailsSummaryArrows(root);
     retryFailedLocalImages(root);
   } catch (e) {
     root.textContent = text || '';
     console.error('Formatter error:', e);
   }
-}
-
-export function fixDetailsSummaryArrows(root) {
-  root.querySelectorAll('details').forEach(details => {
-    const summary = details.querySelector('summary');
-    if (!summary || summary.querySelector('.glaze-flex-wrap')) return;
-
-    const wrap = document.createElement('span');
-    wrap.className = 'glaze-flex-wrap';
-    wrap.style.cssText = 'display:flex;align-items:baseline;gap:6px;width:100%;';
-
-    const arrow = document.createElement('span');
-    arrow.className = 'glaze-arrow';
-    arrow.setAttribute('aria-hidden', 'true');
-    arrow.textContent = '▶';
-
-    while (summary.firstChild) {
-      wrap.appendChild(summary.firstChild);
-    }
-    wrap.insertBefore(arrow, wrap.firstChild);
-    summary.appendChild(wrap);
-
-    details.addEventListener('toggle', () => {
-      arrow.classList.toggle('glaze-arrow-open', details.open);
-    }, { once: false });
-  });
 }

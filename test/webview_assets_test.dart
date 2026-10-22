@@ -486,6 +486,35 @@ void main() {
       expect(body, contains("_sendToFlutter('onMessageScriptBlocked', [])"));
     });
 
+    test('external media policy reaches every message render', () {
+      // "Allow external media" off: third-party loads are dropped before the
+      // markup is inserted, already-hoisted ones are taken back, and the
+      // messages on screen re-render under the new policy.
+      final body = _extractBlockBody(
+        bridgeControllerJs,
+        bridgeControllerJs.indexOf('setAllowExternalMedia(enabled) {'),
+      );
+      expect(
+        body,
+        contains('this.renderer.allowExternalMedia = enabled !== false'),
+      );
+      expect(body, contains('dropExternalHoists()'));
+      expect(body, contains('this.renderer.rerenderMessageBodies()'));
+      expect(rendererMessageJs, contains('this.allowExternalMedia = true;'));
+      expect(
+        rendererMessageJs,
+        contains('allowExternalMedia: this.allowExternalMedia,'),
+      );
+      expect(
+        markdownJs,
+        contains('hoistStyleImports(styles, { allowExternalMedia })'),
+      );
+      expect(
+        htmlSanitizerJs,
+        contains('if (!allowExternalMedia) stripExternalMedia('),
+      );
+    });
+
     test('flipping the policy re-renders the messages already on screen', () {
       final body = _extractBlockBody(
         bridgeControllerJs,
@@ -503,13 +532,27 @@ void main() {
         contains("import { sanitizeExtBlockHtml } from './html_sanitizer.js'"),
       );
       expect(
-        RegExp(r'\.innerHTML\s*=(?!\s*sanitizeExtBlockHtml)').allMatches(
+        RegExp(
+          r'\.innerHTML\s*=(?!\s*(?:sanitizeExtBlockHtml|this\._extBlockHtml))',
+        ).allMatches(
           _extractBlockBody(
             bridgeControllerJs,
             bridgeControllerJs.indexOf('_fillExtBlockBody(body, block) {'),
           ),
         ),
         isEmpty,
+      );
+    });
+
+    test('ExtBlock HTML follows the external media setting', () {
+      final body = _extractBlockBody(
+        bridgeControllerJs,
+        bridgeControllerJs.indexOf('_extBlockHtml(html) {'),
+      );
+      expect(body, contains('sanitizeExtBlockHtml(html, {'));
+      expect(
+        body,
+        contains('allowExternalMedia: this.renderer.allowExternalMedia'),
       );
     });
 
@@ -563,7 +606,9 @@ void main() {
       expect(writeBlock, contains('if (!isTyping && !window.bridge?.isGenerating) {'));
       expect(
         writeBlock,
-        contains('reportCssErrors(root, cssPolicyNotes(styles, refusedImports));'),
+        contains(
+          'reportCssErrors(root, cssPolicyNotes(styles, refusedImports, refusedFontFaces));',
+        ),
       );
     });
 
@@ -656,21 +701,30 @@ void main() {
       );
       expect(
         htmlSanitizerJs,
-        contains('return sanitizeHtml(html, EXT_BLOCK_CSS_SCOPE)'),
+        contains(
+          'return sanitizeHtml(html, EXT_BLOCK_CSS_SCOPE, allowExternalMedia)',
+        ),
       );
     });
 
     test('message HTML is filtered for code only, never for markup', () {
       expect(
         htmlSanitizerJs,
-        contains('sanitizeMessageHtml(html, { allowScripts = false } = {})'),
+        contains('{ allowScripts = false, allowExternalMedia = true } = {},'),
       );
-      // Scripts on: the message HTML is inserted exactly as written.
+      // Scripts and external media on: the message HTML is inserted exactly
+      // as written.
       expect(
         htmlSanitizerJs,
-        contains("if (allowScripts) return String(html == null ? '' : html);"),
+        contains(
+          'if (allowScripts && allowExternalMedia) '
+          "return String(html == null ? '' : html);",
+        ),
       );
-      expect(htmlSanitizerJs, contains('return stripMessageCode(html);'));
+      expect(
+        htmlSanitizerJs,
+        contains('if (!allowScripts) stripMessageCode(template.content);'),
+      );
       // Scripts off: only the things that run code are removed. The strict
       // element / CSS policy is the ExtBlock path's, and must not be reached
       // from here — a card renders the same with execution on and off.
@@ -1764,73 +1818,23 @@ void main() {
     });
   });
 
-  // ─── details/summary arrow ────────────────────────────────────────────────
-  group('details/summary arrow (SHADOW_STYLE in renderer modules)', () {
-    test('::-webkit-details-marker is hidden', () {
+  // ─── details/summary ──────────────────────────────────────────────────────
+  group('details/summary (SHADOW_STYLE in renderer modules)', () {
+    test('a card summary is styled by its author alone', () {
+      // The app used to hide every marker and inject its own arrow into
+      // every <summary>, which flattened card headers into one flex row.
+      expect(rendererJs, isNot(contains('fixDetailsSummaryArrows')));
+      expect(rendererJs, isNot(contains('glaze-arrow')));
+      expect(rendererJs, isNot(contains('.glaze-message details summary')));
+      expect(rendererJs, isNot(contains('summary::marker')));
+      expect(rendererJs, isNot(contains('summary::before')));
+    });
+
+    test('only the reasoning panel gets app styling', () {
+      expect(rendererJs, contains('.glaze-message details.reasoning-block {'));
       expect(
         rendererJs,
-        contains('::-webkit-details-marker { display: none !important; }'),
-      );
-    });
-
-    test('::marker is hidden', () {
-      expect(rendererJs, contains('::marker { display: none !important;'));
-    });
-
-    test('::before is disabled (arrow injected as real DOM span instead)', () {
-      // display:flex on <summary> is ignored in some Android WebView versions.
-      // The arrow is injected as a real .glaze-arrow <span> by fixDetailsSummaryArrows()
-      // so it always participates in flex layout correctly.
-      final beforeBlock = _extractSummaryBeforeBlock(rendererJs);
-      expect(
-        beforeBlock,
-        contains('display: none !important'),
-        reason:
-            '::before must be hidden — real DOM .glaze-arrow span is used instead',
-      );
-    });
-
-    test('.glaze-arrow span is styled', () {
-      expect(
-        rendererJs,
-        contains('.glaze-arrow {'),
-        reason: 'Real DOM arrow span must have CSS styles',
-      );
-      expect(
-        rendererJs,
-        contains('transition: transform 0.2s'),
-        reason: '.glaze-arrow must have rotation transition',
-      );
-    });
-
-    test('.glaze-arrow-open rotates 90deg when details is open', () {
-      expect(
-        rendererJs,
-        contains('.glaze-arrow.glaze-arrow-open { transform: rotate(90deg); }'),
-      );
-    });
-
-    test('fixDetailsSummaryArrows injects .glaze-arrow into every summary', () {
-      expect(rendererJs, contains('fixDetailsSummaryArrows'));
-      expect(rendererJs, contains("arrow.className = 'glaze-arrow'"));
-    });
-
-    test('writeShadowContent calls fixDetailsSummaryArrows after innerHTML', () {
-      // Must be called AFTER root.innerHTML so it sees the inserted <details>.
-      final writeBlock = _extractWriteShadowContent(rendererJs);
-      final innerIdx = writeBlock.indexOf('root.innerHTML');
-      final fixIdx = writeBlock.indexOf('fixDetailsSummaryArrows');
-      expect(innerIdx, isNot(-1), reason: 'root.innerHTML must be present');
-      expect(
-        fixIdx,
-        isNot(-1),
-        reason: 'fixDetailsSummaryArrows must be called',
-      );
-      expect(
-        fixIdx > innerIdx,
-        isTrue,
-        reason:
-            'fixDetailsSummaryArrows must be called AFTER root.innerHTML = formatted',
+        contains('.glaze-message details.reasoning-block > summary {'),
       );
     });
   });
@@ -2355,8 +2359,8 @@ void main() {
       expect(
         markdownJs,
         contains(
-          "import { hoistStyleImports, installMessageDocument } from "
-          "'./message_document.js';",
+          "  installMessageDocument,\n"
+          "} from './message_document.js';",
         ),
       );
       expect(markdownJs, contains('installMessageDocument(root, { allowMessageScripts })'));
@@ -2522,26 +2526,54 @@ void main() {
       expect(messageDocumentJs, contains('export function hoistStyleImports('));
       final body = _extractBlockBody(
         messageDocumentJs,
-        messageDocumentJs.indexOf('export function hoistStyleImports('),
+        messageDocumentJs.indexOf(
+          ') {',
+          messageDocumentJs.indexOf('export function hoistStyleImports('),
+        ),
       );
       expect(body, contains(r"if (!/^https:\/\//i.test(url))"));
       expect(body, contains('hoisted.has(url)'));
       expect(body, contains('hoisted.size >= MAX_HOISTED'));
       expect(body, contains("link.dataset.glazeImport = ''"));
       expect(body, contains('REAL_HEAD.appendChild(link)'));
-      expect(markdownJs, contains('hoistStyleImports(styles)'));
+      expect(
+        markdownJs,
+        contains('hoistStyleImports(styles, { allowExternalMedia })'),
+      );
 
       // The rules with nowhere to go are still dropped, and still reported.
       expect(
         cssDiagnosticsJs,
         contains('export function inspectBlockedAtRules('),
       );
-      expect(cssDiagnosticsJs, contains('@(font-face|page|namespace)'));
+      expect(cssDiagnosticsJs, contains('@(page|namespace)'));
       expect(
         cssSanitizerJs,
         contains('// @import, @font-face, @page, @namespace, @charset and anything unknown.'),
         reason: 'the sanitizer still strips the rule from message CSS itself; '
             'the hoist reads the source before it runs',
+      );
+    });
+
+    test('a @font-face is hoisted, and only from data: or https', () {
+      // INV-MR5: Chromium ignores @font-face inside a shadow root. A rule
+      // whose sources are all data:, https: or local() is copied into the
+      // document head; anything else is refused and reported.
+      expect(messageDocumentJs, contains('export function hoistStyleFontFaces('));
+      final body = _extractBlockBody(
+        messageDocumentJs,
+        messageDocumentJs.indexOf(
+          ') {',
+          messageDocumentJs.indexOf('export function hoistStyleFontFaces('),
+        ),
+      );
+      expect(body, contains('isAllowedFontSource('));
+      expect(body, contains('hoistedFontFaces.has(text)'));
+      expect(body, contains('hoistedFontFaces.size >= MAX_FONT_FACES'));
+      expect(body, contains("style.dataset.glazeFontFace = ''"));
+      expect(
+        markdownJs,
+        contains('hoistStyleFontFaces(styles, { allowExternalMedia })'),
       );
     });
   });
@@ -3202,16 +3234,6 @@ void main() {
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
-
-/// Extracts the summary::before CSS block from SHADOW_STYLE in renderer modules.
-String _extractSummaryBeforeBlock(String src) {
-  final marker = 'summary::before {';
-  final idx = src.indexOf(marker);
-  if (idx == -1) return '';
-  final end = src.indexOf('}', idx);
-  if (end == -1) return src.substring(idx);
-  return src.substring(idx, end + 1);
-}
 
 /// Extracts the writeShadowContent method body from renderer modules.
 /// Looks for the definition (not a call), i.e. the line that starts with the name.

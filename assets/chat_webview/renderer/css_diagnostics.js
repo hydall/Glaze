@@ -148,13 +148,14 @@ function droppedRules(css, blocks) {
 /**
  * At-rules the CSS policy drops before the message is rendered.
  *
- * Not `@import`: that one is lifted into the document head instead
- * (renderer/message_document.js, INV-MR5). These three have nowhere to go —
- * the card author saw only a rule that did nothing, so the drop is reported
- * rather than hidden. Read from the *pre-sanitize* source: by the time the
- * style element exists, the rule is already gone.
+ * Not `@import` or `@font-face`: those are lifted into the document head
+ * instead, and report what they refuse themselves (renderer/message_document.js,
+ * INV-MR5). These two have nowhere to go — the card author saw only a rule
+ * that did nothing, so the drop is reported rather than hidden. Read from the
+ * *pre-sanitize* source: by the time the style element exists, the rule is
+ * already gone.
  */
-const BLOCKED_AT_RULE = /@(font-face|page|namespace)\b/gi;
+const BLOCKED_AT_RULE = /@(page|namespace)\b/gi;
 
 export function inspectBlockedAtRules(css) {
   const source = String(css == null ? '' : css);
@@ -164,8 +165,7 @@ export function inspectBlockedAtRules(css) {
   while ((match = BLOCKED_AT_RULE.exec(source)) !== null) {
     const line = countNewlines(source, 0, match.index) + 1;
     found.push(
-      `line ${line}: @${match[1].toLowerCase()} is not applied ` +
-      '(message CSS cannot load anything over the network)',
+      `line ${line}: @${match[1].toLowerCase()} is not supported in message CSS`,
     );
     if (found.length >= MAX_REPORTED) break;
   }

@@ -403,7 +403,9 @@ export const SHADOW_STYLE = `
     background-color: rgba(244, 67, 54, 0.8);
     color: #fff;
   }
-  .glaze-message details {
+  /* Only the app's own reasoning panel. A card's <details>/<summary> is
+     styled by its author alone — no frame, no marker swap, no arrow. */
+  .glaze-message details.reasoning-block {
     margin: 8px 0;
     border: 1px solid rgba(255,255,255,0.08);
     border-radius: 8px;
@@ -411,30 +413,13 @@ export const SHADOW_STYLE = `
     font-size: 0.95em;
     opacity: 0.9;
   }
-  .glaze-message details summary {
+  .glaze-message details.reasoning-block > summary {
     padding: 8px 12px;
     cursor: pointer;
     background: rgba(0,0,0,0.18);
     font-weight: 500;
-    list-style: none !important;
-    list-style-type: none !important;
     line-height: 1.4;
   }
-  .glaze-message details summary::-webkit-details-marker { display: none !important; }
-  .glaze-message details summary::marker { display: none !important; content: '' !important; }
-  .glaze-message details summary::before { display: none !important; content: '' !important; }
-  .glaze-message .glaze-arrow {
-    display: inline;
-    flex-shrink: 0;
-    font-size: 1em;
-    transition: transform 0.2s;
-    opacity: 0.7;
-    font-style: normal;
-    font-weight: normal;
-    user-select: none;
-    -webkit-user-select: none;
-  }
-  .glaze-message .glaze-arrow.glaze-arrow-open { transform: rotate(90deg); }
   .search-highlight-text {
     background-color: rgba(255,215,0,0.4);
     border-radius: 4px;

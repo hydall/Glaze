@@ -142,6 +142,12 @@ abstract class AppSettings with _$AppSettings {
     @Default(false) bool disableSwipeRegeneration,
     @Default(false) bool allowMessageScripts,
 
+    /// Whether message HTML and CSS may load anything from the network:
+    /// `<img>`/`<video>`/`<audio>` with a remote source, `url(https://…)` in
+    /// CSS, `@import` and remote `@font-face`. On by default; off works like
+    /// SillyTavern's "Forbid external media" — embedded `data:` media stays.
+    @Default(true) bool allowExternalMedia,
+
     /// Whether deleting one or more chat messages asks for confirmation first.
     /// On by default: a delete also rolls back Studio trackers, MemoryBook
     /// entries and other data derived from the deleted point onward, so the
@@ -217,6 +223,7 @@ abstract final class AppSettingsPreferences {
     'hideTooltips',
     'disableSwipeRegeneration',
     'allowMessageScripts',
+    'allowExternalMedia',
     'confirmMessageDelete',
     'language',
     'virtualKeyboardSend',
@@ -260,6 +267,9 @@ abstract final class AppSettingsPreferences {
       allowMessageScripts:
           _coerceBool(prefs.get('allowMessageScripts')) ??
           defaults.allowMessageScripts,
+      allowExternalMedia:
+          _coerceBool(prefs.get('allowExternalMedia')) ??
+          defaults.allowExternalMedia,
       confirmMessageDelete:
           _coerceBool(prefs.get('confirmMessageDelete')) ??
           defaults.confirmMessageDelete,
@@ -318,6 +328,7 @@ abstract final class AppSettingsPreferences {
       'hideTooltips': normalized.hideTooltips,
       'disableSwipeRegeneration': normalized.disableSwipeRegeneration,
       'allowMessageScripts': normalized.allowMessageScripts,
+      'allowExternalMedia': normalized.allowExternalMedia,
       'confirmMessageDelete': normalized.confirmMessageDelete,
       'language': normalized.language,
       'virtualKeyboardSend': normalized.virtualKeyboardSend,
@@ -426,6 +437,7 @@ abstract final class AppSettingsPreferences {
     hideTooltips: values['hideTooltips'] as bool,
     disableSwipeRegeneration: values['disableSwipeRegeneration'] as bool,
     allowMessageScripts: values['allowMessageScripts'] as bool,
+    allowExternalMedia: values['allowExternalMedia'] as bool,
     confirmMessageDelete: values['confirmMessageDelete'] as bool,
     language: values['language'] as String,
     virtualKeyboardSend: values['virtualKeyboardSend'] as bool,

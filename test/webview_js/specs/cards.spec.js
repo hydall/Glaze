@@ -102,12 +102,44 @@ test('<details> keeps its summary and toggles', async ({ page }) => {
   const shape = await page.evaluate(() => {
     const details = window.harness.currentRoot().querySelector('details');
     const before = details.open;
-    details.querySelector('summary').click();
-    return { hasSummary: !!details.querySelector('summary'), before, after: details.open };
+    const summary = details.querySelector('summary');
+    summary.click();
+    return {
+      hasSummary: !!summary,
+      before,
+      after: details.open,
+      // No app arrow: a plain summary keeps the browser's own marker.
+      display: getComputedStyle(summary).display,
+    };
   });
+  expect(shape.display).toBe('list-item');
   expect(shape.hasSummary).toBe(true);
   expect(shape.before).toBe(false);
   expect(shape.after).toBe(true);
+});
+
+test('a <summary> is laid out by the card alone', async ({ page }) => {
+  await render(page, card('fandom-guide-card').text);
+  const shape = await page.evaluate(() => {
+    const root = window.harness.currentRoot();
+    const box = (selector) => root.querySelector(selector).getBoundingClientRect();
+    const intro = box('.sg-intro');
+    const now = box('.sg-now');
+    const label = box('.sg-chapter .sg-label');
+    const thumb = box('.sg-chapter .sg-thumb');
+    return {
+      arrows: root.querySelectorAll('.glaze-arrow, .glaze-flex-wrap').length,
+      nowBelowIntro: now.top >= intro.bottom - 1,
+      fandomWidth: box('.sg-fandom').width,
+      labelBesideThumb: label.left >= thumb.right,
+      labelWidth: label.width,
+    };
+  });
+  expect(shape.arrows, 'the app adds nothing to a summary').toBe(0);
+  expect(shape.nowBelowIntro, 'the "now" paragraph sits under the cover').toBe(true);
+  expect(shape.fandomWidth, 'the subtitle is not one letter wide').toBeGreaterThan(80);
+  expect(shape.labelBesideThumb).toBe(true);
+  expect(shape.labelWidth).toBeGreaterThan(80);
 });
 
 test('a <br> inside a card stays inside that card', async ({ page }) => {

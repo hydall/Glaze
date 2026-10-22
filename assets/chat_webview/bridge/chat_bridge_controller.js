@@ -11,6 +11,8 @@ import { ScrollRelay } from './scroll_relay.js';
 import { InteractionDispatch } from './interaction_dispatch.js';
 import { PanelHost } from './panel_host.js';
 import { sanitizeExtBlockHtml } from './html_sanitizer.js';
+import { stripExternalMedia } from './external_media.js';
+import { dropExternalHoists } from '../renderer/message_document.js';
 import { parseImageResultElement, parseImagePendingPayload } from '../formatter/formatter.js';
 
 /* Breathing room the caret keeps from the chrome it is being revealed past.
@@ -1797,6 +1799,26 @@ export class Bridge {
     }
   }
 
+  setAllowExternalMedia(enabled) {
+    const previous = this.renderer.allowExternalMedia;
+    this.renderer.allowExternalMedia = enabled !== false;
+    if (this.renderer.allowExternalMedia === previous) return;
+    if (!this.renderer.allowExternalMedia) {
+      dropExternalHoists();
+      // ExtBlock panels are not re-sent on a settings change: strip what is
+      // on screen in place. Switching back on restores them on their next
+      // update.
+      document.querySelectorAll('.ext-blocks-panel').forEach(stripExternalMedia);
+    }
+    this.renderer.rerenderMessageBodies();
+  }
+
+  _extBlockHtml(html) {
+    return sanitizeExtBlockHtml(html, {
+      allowExternalMedia: this.renderer.allowExternalMedia,
+    });
+  }
+
   /**
    * Called by the renderer when a message carried a `<script>` while message
    * script execution is off. Reported to Flutter once per WebView load — the
@@ -2286,7 +2308,7 @@ export class Bridge {
     if (hasImgResult && !hasImgGen && !hasImgError && !hasHtmlMarkup) {
       const imgMatch = content.match(imgResultRegex);
       const wrapper = document.createElement('span');
-      wrapper.innerHTML = sanitizeExtBlockHtml(this._renderExtBlockImageHtml(imgMatch[1]));
+      wrapper.innerHTML = this._extBlockHtml(this._renderExtBlockImageHtml(imgMatch[1]));
       body.appendChild(wrapper.firstElementChild);
       retryFailedLocalImages(body);
       return;
@@ -2307,7 +2329,7 @@ export class Bridge {
 
     const htmlEl = document.createElement('div');
     htmlEl.className = 'ext-block-content';
-    htmlEl.innerHTML = sanitizeExtBlockHtml(html);
+    htmlEl.innerHTML = this._extBlockHtml(html);
     body.appendChild(htmlEl);
     retryFailedLocalImages(body);
   }
@@ -2397,7 +2419,7 @@ export class Bridge {
     win.appendChild(hdr);
     const content = document.createElement('div');
     content.className = 'error-content';
-    content.innerHTML = sanitizeExtBlockHtml(block.content || '');
+    content.innerHTML = this._extBlockHtml(block.content || '');
     win.appendChild(content);
     inner.appendChild(win);
   }

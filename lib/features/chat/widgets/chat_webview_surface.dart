@@ -182,6 +182,15 @@ class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
     return widget.isActive(epoch) && widget.isCurrentSession(widget.sessionId);
   }
 
+  /// The message content policy from settings, as one bridge call per flag.
+  String _contentPolicyJs() {
+    final settings = ref.read(appSettingsProvider).value;
+    final scripts = settings?.allowMessageScripts ?? false;
+    final media = settings?.allowExternalMedia ?? true;
+    return 'window.bridge?.setAllowMessageScripts($scripts);'
+        'window.bridge?.setAllowExternalMedia($media);';
+  }
+
   Future<void> _onWebViewCreated(InAppWebViewController controller) async {
     final epoch = widget.lifecycleEpoch;
     if (!_callbackIsActive(epoch)) return;
@@ -190,11 +199,7 @@ class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
     final jsBridgeService = await widget.bridgeHost.buildJsBridgeService();
     if (!_callbackIsActive(epoch) || jsBridgeService == null) return;
     final bridge = ChatBridgeController(controller, jsBridgeService);
-    final allowMessageScripts =
-        ref.read(appSettingsProvider).value?.allowMessageScripts ?? false;
-    await bridge.evalJs(
-      'window.bridge?.setAllowMessageScripts($allowMessageScripts)',
-    );
+    await bridge.evalJs(_contentPolicyJs());
     if (!_callbackIsActive(epoch)) return;
     widget.onBridgeReady(bridge);
     PerfDebug.chatWebViewBridgeReady();
@@ -277,10 +282,7 @@ class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
     PerfDebug.chatWebViewLoadStopped();
     await ref
         .read(chatBridgeRegistryProvider(widget.charId))
-        ?.evalJs(
-          'window.bridge?.setAllowMessageScripts('
-          '${ref.read(appSettingsProvider).value?.allowMessageScripts ?? false})',
-        );
+        ?.evalJs(_contentPolicyJs());
     if (_callbackIsActive(epoch)) {
       await widget.onInitWebView();
     }
@@ -295,6 +297,13 @@ class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
         ref
             .read(chatBridgeRegistryProvider(widget.charId))
             ?.evalJs('window.bridge?.setAllowMessageScripts($newValue)');
+      }
+      final oldMedia = previous?.value?.allowExternalMedia ?? true;
+      final newMedia = next.value?.allowExternalMedia ?? true;
+      if (oldMedia != newMedia) {
+        ref
+            .read(chatBridgeRegistryProvider(widget.charId))
+            ?.evalJs('window.bridge?.setAllowExternalMedia($newMedia)');
       }
     });
     final covered = widget.sessionSwitching || !widget.ready;
