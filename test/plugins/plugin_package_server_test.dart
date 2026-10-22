@@ -43,6 +43,7 @@ void main() {
     expect(font.statusCode, 200);
     expect(font.headers.value('content-type'), 'font/woff2');
     expect(font.headers.value('access-control-allow-origin'), '*');
+    expect(font.headers.value('x-frame-options'), isNull);
     expect(await body(font), 'WOFF');
 
     final css = await get('$origin/plugins/p.one/style.css');
@@ -66,6 +67,8 @@ void main() {
     final first = await get(url);
     expect(first.statusCode, 200);
     expect(first.headers.value('content-security-policy'), isNull);
+    // Embedded by another origin: nothing may forbid framing it.
+    expect(first.headers.value('x-frame-options'), isNull);
     expect(await body(first), '<p>frame</p>');
     expect((await get(url)).statusCode, 404);
   });

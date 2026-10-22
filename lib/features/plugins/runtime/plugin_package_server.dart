@@ -81,6 +81,11 @@ class PluginPackageServer {
       debugPrint('[PluginPackageServer] no loopback port: $e');
       return null;
     }
+    // dart:io adds `X-Frame-Options: SAMEORIGIN` to every response, and a
+    // frame document is always embedded by another origin: the WebView
+    // refused to show it (ERR_BLOCKED_BY_RESPONSE). Each response sets the
+    // headers it needs itself.
+    server.defaultResponseHeaders.clear();
     _server = server;
     _stopped = false;
     _origin = Uri.parse('http://127.0.0.1:${server.port}');
