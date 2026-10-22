@@ -875,14 +875,14 @@
   });
 
   /* ---------- Floating windows stay reachable ---------- */
-  // A panel's draggable window could be dropped onto the message box, the
-  // status bar or the system gesture strip, where a finger can no longer pick
-  // it up (the strip belongs to the OS, and dragging out of it is the home
-  // gesture) — and a plugin that saves its position put it back there on
-  // every open. Fixed boxes are moved back between the safe top and the
-  // message box after a drag, when they appear and when the insets settle.
-  // A box covering the whole viewport is a panel meant to cover it, and stays
-  // put.
+  // A panel's draggable window could be dropped onto the status bar or the
+  // system gesture strip, where a finger can no longer pick it up (the strip
+  // belongs to the OS, and dragging out of it is the home gesture) — and a
+  // plugin that saves its position put it back there on every open. Fixed
+  // boxes are moved back between the safe top and the safe bottom after a
+  // drag, when they appear and when the insets settle. The app's header and
+  // composer may be overlapped: they are not the system's. A box covering the
+  // whole viewport is a panel meant to cover it, and stays put.
   function keepFloatersReachable() {
     var MARGIN = 8;
     // The keyboard, or a bottom inset this tall (a drawer): temporary, and
@@ -895,7 +895,7 @@
     var band = function () {
       return {
         top: (insets.topSafe || 0) + MARGIN,
-        bottom: window.innerHeight - (insets.bottomInput || 0) - MARGIN,
+        bottom: window.innerHeight - (insets.bottomSafe || 0) - MARGIN,
         left: MARGIN,
         right: window.innerWidth - MARGIN,
       };

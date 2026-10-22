@@ -655,7 +655,7 @@ const fabRect = (page) => page.frameLocator('iframe[data-glaze-plugin="p"]')
   .frameLocator('iframe').locator('#fab')
   .evaluate((el) => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left }; });
 
-test('a panel button dragged onto the message box comes back above it', async ({ page }) => {
+test('a panel button dragged into the safe bottom comes back', async ({ page }) => {
   await page.setViewportSize({ width: 400, height: 700 });
   await setup(page, [fabPanel(200)]);
   const frame = page.locator('iframe[data-glaze-plugin="p"]');
@@ -666,15 +666,16 @@ test('a panel button dragged onto the message box comes back above it', async ({
   await page.mouse.move(128, 690, { steps: 6 });
   await page.mouse.up();
 
-  // Bottom inset 80, 8 px margin: the button may end no lower than 612.
-  await expect.poll(async () => (await fabRect(page)).bottom).toBe(612);
+  // Safe bottom 0, 8 px margin: the button may end no lower than 692, over
+  // the message box.
+  await expect.poll(async () => (await fabRect(page)).bottom).toBe(692);
   expect((await fabRect(page)).left).toBe(100);
 });
 
-test('a panel button restored into the message box is moved out on open', async ({ page }) => {
+test('a panel button restored into the safe bottom is moved out on open', async ({ page }) => {
   await page.setViewportSize({ width: 400, height: 700 });
   await setup(page, [fabPanel(660)]);
-  await expect.poll(async () => (await fabRect(page)).bottom).toBe(612);
+  await expect.poll(async () => (await fabRect(page)).bottom).toBe(692);
 });
 
 test('a panel button anchored by bottom keeps that anchor', async ({ page }) => {
@@ -682,7 +683,7 @@ test('a panel button anchored by bottom keeps that anchor', async ({ page }) => 
   await setup(page, [fabPanel(0, 'top:auto;bottom:4px;')]);
   const style = () => page.frameLocator('iframe[data-glaze-plugin="p"]').frameLocator('iframe')
     .locator('#fab').evaluate((el) => [el.style.top, el.style.bottom]);
-  await expect.poll(style).toEqual(['auto', '88px']);
+  await expect.poll(style).toEqual(['auto', '8px']);
 });
 
 test('a full-screen panel is left where the plugin put it', async ({ page }) => {
@@ -717,10 +718,16 @@ const windowRect = (page) => page.frameLocator('iframe[data-glaze-plugin="p"]')
     return { top: r.top, bottom: r.bottom };
   });
 
-test('a large floating window restored into the message box is moved out', async ({ page }) => {
+test('a large floating window restored into the safe bottom is moved out', async ({ page }) => {
   await page.setViewportSize({ width: 400, height: 700 });
   await setup(page, [windowPanel('left:60px;top:400px;width:280px;height:400px')]);
-  await expect.poll(async () => (await windowRect(page)).bottom).toBe(612);
+  await expect.poll(async () => (await windowRect(page)).bottom).toBe(692);
+});
+
+test('a floating window may overlap the app header and the message box', async ({ page }) => {
+  await page.setViewportSize({ width: 400, height: 700 });
+  await setup(page, [windowPanel('left:60px;top:20px;width:280px;height:660px')]);
+  await expect.poll(async () => (await windowRect(page))).toEqual({ top: 20, bottom: 680 });
 });
 
 test('a tall floating window past the safe top is brought back', async ({ page }) => {

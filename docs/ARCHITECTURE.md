@@ -1863,10 +1863,11 @@ to the visual viewport while the keyboard is up; plugins laid out on `100vh`,
 insets are measured from the keyboard's top and carry its height as
 `keyboard` (`--glaze-inset-keyboard`); other panels keep the full page.
 A panel's fixed boxes (floating buttons and windows) are kept between the
-safe top and the message box by the SDK — after a drag, when they appear and
+safe top and the safe bottom by the SDK — after a drag, when they appear and
 when the insets settle — so one dropped on the status bar or the gesture
-strip stays reachable. A box taller or wider than that band keeps the off
-edge on screen; only a panel covering the whole viewport is left alone.
+strip stays reachable. The app's header and composer may be overlapped. A box
+taller or wider than that band keeps the off edge on screen; only a panel
+covering the whole viewport is left alone.
 
 **The ExtBlocks page** (`extensions/services/page/ext_blocks_page.dart`).
 With the active ExtBlocks preset's `chat_page` permission, `PluginChatHost`
