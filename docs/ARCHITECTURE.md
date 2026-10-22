@@ -1862,10 +1862,11 @@ to the visual viewport while the keyboard is up; plugins laid out on `100vh`,
 `innerHeight` or their own `visualViewport` stay above it. That frame's
 insets are measured from the keyboard's top and carry its height as
 `keyboard` (`--glaze-inset-keyboard`); other panels keep the full page.
-A panel's small fixed boxes (floating buttons) are kept between the status
-bar and the message box by the SDK — after a drag, when they appear and when
-the insets settle — so one dropped on the gesture strip stays reachable;
-boxes half the screen or larger are left alone.
+A panel's fixed boxes (floating buttons and windows) are kept between the
+safe top and the message box by the SDK — after a drag, when they appear and
+when the insets settle — so one dropped on the status bar or the gesture
+strip stays reachable. A box taller or wider than that band keeps the off
+edge on screen; only a panel covering the whole viewport is left alone.
 
 **Hooks.** `PluginChatHost` (wraps the chat screen) starts the runtime once the
 chat bridge is published and registers a `PluginHookRunner` in

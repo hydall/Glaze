@@ -698,6 +698,45 @@ test('a full-screen panel is left where the plugin put it', async ({ page }) => 
   expect(style).toBe('position: fixed; inset: 0px; background: rgb(0, 0, 0);');
 });
 
+// A floating window the way a launcher plugin writes one: bigger than a
+// button, so the old half-screen rule let it leave the safe area.
+function windowPanel(style) {
+  return plugin('p', {
+    panels: [{
+      id: 'window',
+      placement: 'chat',
+      html: `<div id="window" style="position:fixed;background:#000;${style}"></div>`,
+    }],
+  });
+}
+
+const windowRect = (page) => page.frameLocator('iframe[data-glaze-plugin="p"]')
+  .frameLocator('iframe').locator('#window')
+  .evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return { top: r.top, bottom: r.bottom };
+  });
+
+test('a large floating window restored into the message box is moved out', async ({ page }) => {
+  await page.setViewportSize({ width: 400, height: 700 });
+  await setup(page, [windowPanel('left:60px;top:400px;width:280px;height:400px')]);
+  await expect.poll(async () => (await windowRect(page)).bottom).toBe(612);
+});
+
+test('a tall floating window past the safe top is brought back', async ({ page }) => {
+  await page.setViewportSize({ width: 400, height: 700 });
+  await setup(page, [windowPanel('left:60px;top:-120px;width:280px;height:720px')]);
+  // Safe top 0, 8 px margin: the handle may not sit above 8, even though the
+  // window is taller than the band and its bottom must hang below it.
+  await expect.poll(async () => (await windowRect(page)).top).toBe(8);
+});
+
+test('a tall floating window dropped past the bottom comes back', async ({ page }) => {
+  await page.setViewportSize({ width: 400, height: 700 });
+  await setup(page, [windowPanel('left:60px;top:760px;width:280px;height:720px')]);
+  await expect.poll(async () => (await windowRect(page)).top).toBe(8);
+});
+
 // Stands in for the WebView's visual viewport, which the soft keyboard
 // shrinks while the page keeps its full size. Plugin frames keep their own.
 async function fakeKeyboard(page) {

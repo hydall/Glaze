@@ -869,17 +869,17 @@
     }
   });
 
-  /* ---------- Floating buttons stay reachable ---------- */
-  // A panel's draggable button could be dropped onto the message box or the
-  // system gesture strip, where a finger can no longer pick it up (the strip
-  // belongs to the OS, and dragging out of it is the home gesture) — and a
-  // plugin that saves its position put it back there on every open. Small
-  // fixed boxes are moved back between the status bar and the message box
-  // after a drag, when they appear and when the insets settle. Anything as
-  // large as half the screen is a panel meant to cover it, and stays put.
+  /* ---------- Floating windows stay reachable ---------- */
+  // A panel's draggable window could be dropped onto the message box, the
+  // status bar or the system gesture strip, where a finger can no longer pick
+  // it up (the strip belongs to the OS, and dragging out of it is the home
+  // gesture) — and a plugin that saves its position put it back there on
+  // every open. Fixed boxes are moved back between the safe top and the
+  // message box after a drag, when they appear and when the insets settle.
+  // A box covering the whole viewport is a panel meant to cover it, and stays
+  // put.
   function keepFloatersReachable() {
     var MARGIN = 8;
-    var MAX_SHARE = 0.5;
     // The keyboard, or a bottom inset this tall (a drawer): temporary, and
     // moving buttons out from under it would strand them mid-screen.
     var MAX_RESTING_INSET = 0.35;
@@ -919,10 +919,24 @@
           cs.pointerEvents === 'none') return;
       var r = el.getBoundingClientRect();
       if (r.width < 1 || r.height < 1) return;
+      // A panel covering the viewport exactly is a page of its own, not a
+      // window: it is drawn behind the status bar on purpose.
+      var vw = window.innerWidth, vh = window.innerHeight;
+      if (r.left >= -0.5 && r.left <= 0.5 && r.top >= -0.5 && r.top <= 0.5 &&
+          r.right >= vw - 0.5 && r.right <= vw + 0.5 &&
+          r.bottom >= vh - 0.5 && r.bottom <= vh + 0.5) return;
       var b = band();
-      if (r.height > (b.bottom - b.top) * MAX_SHARE || r.width > (b.right - b.left) * MAX_SHARE) return;
-      var dy = r.bottom > b.bottom ? b.bottom - r.bottom : r.top < b.top ? b.top - r.top : 0;
-      var dx = r.right > b.right ? b.right - r.right : r.left < b.left ? b.left - r.left : 0;
+      // A box taller (or wider) than the band cannot fit whole: bring the off
+      // edge back, so its handle stays on screen instead of vanishing past
+      // the safe area.
+      var tall = r.height > b.bottom - b.top;
+      var wide = r.width > b.right - b.left;
+      var dy = tall
+        ? (r.top < b.top ? b.top - r.top : r.top > b.bottom ? b.top - r.top : 0)
+        : (r.bottom > b.bottom ? b.bottom - r.bottom : r.top < b.top ? b.top - r.top : 0);
+      var dx = wide
+        ? (r.left < b.left ? b.left - r.left : r.left > b.right ? b.left - r.left : 0)
+        : (r.right > b.right ? b.right - r.right : r.left < b.left ? b.left - r.left : 0);
       if (Math.abs(dy) >= 1) shift(el, cs, dy, 'top', 'bottom');
       if (Math.abs(dx) >= 1) shift(el, cs, dx, 'left', 'right');
     };
