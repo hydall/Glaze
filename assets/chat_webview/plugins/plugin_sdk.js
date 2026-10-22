@@ -78,6 +78,15 @@
       try { return new URL(String(url), location.href).href.indexOf(pkg) === 0; } catch (e) { return false; }
     }
     // Same rule as the host's frame policy, which is what actually blocks.
+    // Loopback is this device, not the local network: the switch for that does
+    // not gate it.
+    function isLoopbackHost(host) {
+      host = String(host).toLowerCase().replace(/^\[|\]$/g, '');
+      if (host === 'localhost' || /\.localhost$/.test(host)) return true;
+      var v4 = /^127\.(\d+)\.(\d+)\.(\d+)$/.exec(host);
+      if (v4) return +v4[1] <= 255 && +v4[2] <= 255 && +v4[3] <= 255;
+      return host === '::1' || host === '0:0:0:0:0:0:0:1';
+    }
     function isLocalHost(host) {
       host = String(host).toLowerCase().replace(/^\[|\]$/g, '');
       if (host === 'localhost' || /\.(localhost|local|lan|home\.arpa|internal)$/.test(host)) return true;
@@ -93,7 +102,7 @@
       return false;
     }
     function allowed(host) {
-      if (!local && isLocalHost(host)) return false;
+      if (!local && !isLoopbackHost(host) && isLocalHost(host)) return false;
       if (network === true) return true;
       if (!Array.isArray(network)) return false;
       return network.some(function (rule) {
@@ -118,7 +127,9 @@
     // A call to the local network without access to it fails like a
     // network error, before anything is sent.
     function refused(url) {
-      return !local && network !== false && remote(url) && isLocalHost(hostOf(url));
+      var host = hostOf(url);
+      return !local && network !== false && remote(url) &&
+        !isLoopbackHost(host) && isLocalHost(host);
     }
 
     /* Request log: a 'req' message when a call goes out, one when it ends. */

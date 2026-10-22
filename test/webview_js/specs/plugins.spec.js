@@ -394,8 +394,7 @@ test('with the network permission hosts are logged', async ({ page }) => {
   await setup(page, [
     plugin('on', {
       network: true,
-      // The test server is on loopback.
-      localNetwork: true,
+      // The test server is on loopback, which needs no local network access.
       main: `fetch('http://127.0.0.1:4176/test/webview_js/harness/plugins.html').catch(() => {}).then(() => glaze.ui.toast('done'));`,
     }),
   ]);
@@ -435,24 +434,29 @@ test('with a host list only those hosts are reachable', async ({ page }) => {
 const LOCAL_PROBE = `
   (async () => {
     const page = 'http://127.0.0.1:4176/test/webview_js/harness/plugins.html';
-    const plain = await fetch(page, { mode: 'no-cors' }).then(() => 'ok', () => 'fail');
+    const loop = await fetch(page, { mode: 'no-cors' }).then(() => 'ok', () => 'fail');
     // Refused like a network failure, so the plugin cannot tell.
-    const secure = await fetch('https://192.168.0.1/', { mode: 'no-cors' }).then(() => 'ok', (e) => e.message === 'Failed to fetch' ? 'refused' : 'other');
-    glaze.ui.toast(plain + '|' + secure);
+    const privateHost = await fetch('https://192.168.0.1/', { mode: 'no-cors' }).then(() => 'ok', (e) => e.message === 'Failed to fetch' ? 'refused' : 'other');
+    glaze.ui.toast(loop + '|' + privateHost);
   })();
 `;
 
-test('the local network is out of reach unless allowed', async ({ page }) => {
+// Loopback is this device, not the user's network: the local network switch
+// does not gate it. A private address still needs that switch.
+test('loopback needs no local network access; a private host does', async ({ page }) => {
   await setup(page, [
     plugin('any', { network: true, main: LOCAL_PROBE }),
     plugin('list', { network: ['127.0.0.1', '192.168.0.1'], main: LOCAL_PROBE }),
+    // Reaching a private address may just hang, so the allowed plugin asks
+    // the loopback page again.
     plugin('local', { network: true, localNetwork: true, main: LOCAL_PROBE.replace("'https://192.168.0.1/'", 'page') }),
   ]);
-  await expect.poll(async () => (await toasts(page)).sort()).toEqual(['fail|refused', 'fail|refused', 'ok|ok']);
+  await expect.poll(async () => (await toasts(page)).sort()).toEqual(['ok|ok', 'ok|refused', 'ok|refused']);
   const reports = await netReports(page);
-  expect(reports).toContainEqual({ pluginId: 'any', host: '127.0.0.1', blocked: true });
   expect(reports).toContainEqual({ pluginId: 'list', host: '192.168.0.1', blocked: true });
-  expect(reports.filter((r) => r.pluginId === 'local').every((r) => !r.blocked)).toBe(true);
+  for (const r of reports.filter((r) => r.host === '127.0.0.1')) {
+    expect(r.blocked).toBe(false);
+  }
 });
 
 test('what plugin frames post never reaches the page past the plugin host', async ({ page }) => {

@@ -31,6 +31,9 @@
   var FILE_CAP_MS = 600000;
 
   var EVENT_KINDS = ['send', 'generation', 'chat', 'message'];
+  // CSP sources for loopback, which no local-network switch gates.
+  var LOOPBACK_SOURCES = ' http://localhost:* http://127.0.0.1:* http://[::1]:*' +
+    ' ws://localhost:* ws://127.0.0.1:* ws://[::1]:*';
   var sdkSource = '';
   var compatSources = {};
   var rtcToken = null;
@@ -129,8 +132,20 @@
     }, extra || {});
   }
 
-  // Hosts on the user's own network: loopback, private and link-local
-  // addresses and the names that only resolve inside a network.
+  // Loopback: this same device, not a network. Reaching it needs the
+  // plugin's general internet access and, in the listed-hosts mode, a host it
+  // names; the "local network" switch is about other devices on the user's
+  // network, so it does not apply here.
+  function isLoopbackHost(host) {
+    host = String(host).toLowerCase().replace(/^\[|\]$/g, '');
+    if (host === 'localhost' || /\.localhost$/.test(host)) return true;
+    var v4 = /^127\.(\d+)\.(\d+)\.(\d+)$/.exec(host);
+    if (v4) return +v4[1] <= 255 && +v4[2] <= 255 && +v4[3] <= 255;
+    return host === '::1' || host === '0:0:0:0:0:0:0:1';
+  }
+
+  // Hosts on the user's own network: private and link-local addresses and the
+  // names that only resolve inside a network.
   function isLocalHost(host) {
     host = String(host).toLowerCase().replace(/^\[|\]$/g, '');
     if (host === 'localhost' || /\.(localhost|local|lan|home\.arpa|internal)$/.test(host)) return true;
@@ -157,14 +172,19 @@
   // nothing is restricted.
   function reachable(network, local, pkg) {
     if (network === true && local) return null;
-    var schemes = local ? ['https', 'http', 'wss', 'ws'] : ['https', 'wss'];
     var hosts = pkg ? ' ' + pkg : '';
     if (network === true) {
-      hosts = ' https: wss:';
+      // Loopback stays reachable without the local network switch, plain http
+      // included.
+      hosts = ' https: wss:' + LOOPBACK_SOURCES;
     } else if (Array.isArray(network)) {
       network.forEach(function (h) {
         if (!/^(\*\.)?[a-z0-9.-]+$/.test(h)) return;
-        if (!local && isLocalHost(h.replace(/^\*\./, ''))) return;
+        var loopback = isLoopbackHost(h.replace(/^\*\./, ''));
+        if (!local && !loopback && isLocalHost(h.replace(/^\*\./, ''))) return;
+        var schemes = local || loopback
+          ? ['https', 'http', 'wss', 'ws']
+          : ['https', 'wss'];
         schemes.forEach(function (scheme) { hosts += ' ' + scheme + '://' + h + ':*'; });
       });
     }

@@ -1735,7 +1735,11 @@ listed hosts (any port), or any https/wss host in the any-host mode; only with
 local network access does it allow http/ws as well (and, in the any-host mode,
 drop the policy), and without it listed hosts on the local network are
 dropped. The SDK also refuses fetch/XHR/WebSocket/EventSource calls to local
-addresses and names (`localhost`, `*.local`, private and link-local IPs).
+addresses and names (`*.local`, private and link-local IPs). Loopback
+(`localhost`, `*.localhost`, `127.0.0.0/8`, `::1`) is this device, not a
+network, so the local network switch does not gate it: it follows the plugin's
+general internet access and, in the listed-hosts mode, its host list, and plain
+http is allowed there without the switch.
 Home devices rarely speak TLS, so https-only keeps frames off them; on Android
 the network security config already refuses cleartext except to loopback. Each
 plugin frame sits in a wrapper frame (`wrapperDoc`) carrying the same policy:
