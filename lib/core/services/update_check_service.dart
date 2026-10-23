@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import '../constants/app_version.dart';
 import '../constants/build_channel.dart';
+import 'installer_update/installer_asset.dart';
 
 /// Where an available update was found.
 ///
@@ -42,6 +43,10 @@ class UpdateInfo {
   /// Total notes available; may exceed [notes].length when the list was capped.
   final int totalNotes;
 
+  /// The release's Windows installer, when it carries one. Lets the dialog
+  /// install the update itself instead of only opening the release page.
+  final InstallerAsset? installer;
+
   const UpdateInfo({
     required this.source,
     required this.dismissId,
@@ -50,6 +55,7 @@ class UpdateInfo {
     required this.url,
     required this.notes,
     required this.totalNotes,
+    this.installer,
   });
 
   /// How many notes were dropped from [notes] because of the cap.
@@ -121,8 +127,8 @@ class UpdateCheckResult {
 /// The repo is public, so the REST API is reachable unauthenticated (60 req/h
 /// per IP — ample for an occasional check). No token is sent.
 class UpdateCheckService {
-  static const _owner = 'hydall';
-  static const _repo = 'Glaze';
+  static const owner = 'hydall';
+  static const repo = 'Glaze';
   static const _workflowFile = 'build-branch.yml';
 
   /// Cap on notes shown in the dialog — matches the release bot's `head -10`.
@@ -180,19 +186,28 @@ class UpdateCheckService {
 
   Future<UpdateCheckResult> _checkRelease() async {
     final res = await _dio.get<Map<String, dynamic>>(
-      '/repos/$_owner/$_repo/releases/latest',
+      '/repos/$owner/$repo/releases/latest',
     );
     // 404 simply means nothing has been released yet.
     if (res.statusCode != 200 || res.data == null) {
       return const UpdateCheckResult(UpdateStatus.unknown);
     }
-    final data = res.data!;
+    return releaseResult(res.data!, installedVersion: appVersion);
+  }
 
+  /// Reads a `/releases/latest` response against the installed version.
+  /// Split out so the stable path can be tested at all — `isStableChannel` is
+  /// a const and false under `flutter test`.
+  @visibleForTesting
+  static UpdateCheckResult releaseResult(
+    Map<String, dynamic> data, {
+    required String installedVersion,
+  }) {
     final tag = (data['tag_name'] as String?)?.trim() ?? '';
     if (tag.isEmpty) return const UpdateCheckResult(UpdateStatus.unknown);
 
     final latest = parseVersion(tag);
-    final installed = parseVersion(appVersion);
+    final installed = parseVersion(installedVersion);
     if (latest == null || installed == null) {
       return const UpdateCheckResult(UpdateStatus.unknown);
     }
@@ -212,9 +227,10 @@ class UpdateCheckService {
             DateTime.now().toUtc(),
         url:
             data['html_url'] as String? ??
-            'https://github.com/$_owner/$_repo/releases',
+            'https://github.com/$owner/$repo/releases',
         notes: notes.take(_noteCap).toList(),
         totalNotes: notes.length,
+        installer: InstallerAsset.fromRelease(data, owner: owner, repo: repo),
       ),
     );
   }
@@ -262,7 +278,7 @@ class UpdateCheckService {
             DateTime.now().toUtc(),
         url:
             run['html_url'] as String? ??
-            'https://github.com/$_owner/$_repo/actions',
+            'https://github.com/$owner/$repo/actions',
         notes: commits.take(_noteCap).toList(),
         totalNotes: commits.length,
       ),
@@ -272,7 +288,7 @@ class UpdateCheckService {
   /// Latest successful run of the release workflow on [_branch], or null.
   Future<Map<String, dynamic>?> _latestSuccessfulRun() async {
     final res = await _dio.get<Map<String, dynamic>>(
-      '/repos/$_owner/$_repo/actions/workflows/$_workflowFile/runs',
+      '/repos/$owner/$repo/actions/workflows/$_workflowFile/runs',
       queryParameters: <String, dynamic>{
         'branch': _branch,
         'status': 'success',
@@ -290,7 +306,7 @@ class UpdateCheckService {
   /// them — one request, because GitHub answers both in one response.
   Future<CommitComparison> _compareCommits(String base, String head) async {
     final res = await _dio.get<Map<String, dynamic>>(
-      '/repos/$_owner/$_repo/compare/$base...$head',
+      '/repos/$owner/$repo/compare/$base...$head',
     );
     if (res.statusCode != 200 || res.data == null) {
       return const CommitComparison.unresolved();
