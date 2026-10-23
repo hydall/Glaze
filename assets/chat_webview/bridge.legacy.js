@@ -143,7 +143,7 @@ class SelectionManager {
 
     const id = section.dataset.messageId;
     const isSelected = this._selectedIds.has(id);
-    const onBody = !!e.target.closest('.msg-body');
+    const onBody = !!e.target.closest('.msg-body, .msg-reasoning-inner');
 
     if (this._selectionMode && isSelected && onBody) {
       return false;
