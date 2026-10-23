@@ -32,6 +32,8 @@ void main() {
       'janitorSource': String,
       'lorebookBuildPrompt': String,
       'lorebookBuildPromptJs': String,
+      'lorebookBuildApiConfigId': String,
+      'lorebookBuildModel': String,
       'useStandardRandomizer': bool,
       'hideContextCard': bool,
     };

@@ -19,6 +19,7 @@ import '../../../core/state/translation_prompt_providers.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/menu_group.dart';
+import '../../catalog/widgets/lorebook_build_settings.dart';
 import '../../chat/widgets/custom_prompt_manager_sheet.dart';
 import '../../settings/api_list_provider.dart';
 import '../../settings/widgets/api_slot_group.dart';
@@ -129,6 +130,10 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
           settings: pipeline.translation,
           onChanged: _saveTranslation,
         ),
+        // The catalog's lorebook builds (closed JanitorAI lorebooks, scripted
+        // ones) are an auxiliary call too. The capture sheet's settings and the
+        // content providers screen show this same group.
+        const LorebookBuildLlmGroup(key: ValueKey('studio-slot-lorebook')),
       ],
     );
   }

@@ -367,65 +367,42 @@ class _CatalogDetailLauncherState
       _importing = true;
       _importPhase = null;
     });
+    // The extractor's live step, for the FAB under the sheet and for the
+    // capture sheet's own "importing the character" view. Not disposed: the
+    // sheet may still be tearing down its listener after this method returns,
+    // and a notifier holds nothing that needs releasing.
+    final phase = ValueNotifier<String?>(null);
+    void onPhase(String p) {
+      phase.value = p;
+      if (mounted) setState(() => _importPhase = p);
+    }
+
     try {
-      final String importedCharId;
-      // Kept so the capture sheet can start from this pass instead of running a
-      // second one (see JanitorLorebookCapture.initialExtraction).
-      ExtractionResult? extraction;
-      // A closed JanitorAI card with the opt-in on: the card itself only exists
-      // inside the assembled prompt, so it is captured locally via the proxy.
-      // The lorebook is NOT rebuilt here — that is the capture sheet's job below
-      // when the user asked for lorebooks too.
-      if (_useLocalExtraction && !skipExtraction && !_refusalAcknowledged) {
-        final extractor = ref.read(janitorExtractorProvider);
-        final result = await extractor.extract(
-          _sourceUrl() ?? widget.item.id,
-          onPhase: (p) {
-            if (mounted) setState(() => _importPhase = p);
-          },
-        );
-        extraction = result;
-        // Lorebooks are never attached here, not even the public ones: with
-        // "Character + lorebooks" every book — public, private or scripted —
-        // is handed to the capture sheet below, so it is the single place they
-        // are saved from and nothing lands in the library twice.
-        final commit = await extractor.commit(
-          result,
-          rebuildLorebook: false,
-          attachPublicLorebooks: false,
-          janitorMeta: _janitorMeta,
-          onPhase: (p) {
-            if (mounted) setState(() => _importPhase = p);
-          },
-        );
-        importedCharId = commit.glazeCharacterId;
-      } else {
-        // Public definition: a plain catalog import. Lorebooks stay out of it —
-        // the capture sheet below owns all of them (see above).
-        importedCharId = await ref
-            .read(catalogProvider.notifier)
-            .importCharacter(
-              downloaded,
-              sourceUrl: _sourceUrl(),
-              attachLorebooks: false,
-              janitorMeta: _janitorMeta,
-            );
-      }
-      if (!mounted) return;
-      // Character + lorebooks: the character is in the library, so the lorebook
-      // half of the import starts now. The capture sheet opens over the preview,
-      // scoped to the character we just imported so its books land on it, and
-      // the preview closes once the user is done with it.
+      final imported = _importCharacter(
+        downloaded,
+        skipExtraction: skipExtraction,
+        onPhase: onPhase,
+      );
+      // Character + lorebooks: the capture sheet goes up straight away, over
+      // the preview, and shows the character import running. Once it lands the
+      // sheet offers the lorebook options — including what to send to make the
+      // closed entries fire — with the books scoped to the imported character.
+      // The preview closes once the user is done with the sheet.
       if (mode.importsLorebooks && lorebookArgs != null && _hasAnyLorebooks) {
         await showJanitorLorebookCaptureSheet(
           context,
           args: lorebookArgs,
-          characterId: importedCharId,
-          initialExtraction: extraction,
+          pendingCharacter: JanitorPendingCharacter(
+            phase: phase,
+            result: imported,
+          ),
         );
-        if (!mounted) return;
       }
-      Navigator.of(context, rootNavigator: true).pop(importedCharId);
+      // Closing the sheet does not cancel the import: the FAB keeps showing it
+      // until it is done.
+      final result = await imported;
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop(result.characterId);
     } catch (e) {
       if (!mounted) return;
       setState(() => _importing = false);
@@ -457,6 +434,50 @@ class _CatalogDetailLauncherState
         prefix: 'error_import_failed_prefix'.tr(),
       );
     }
+  }
+
+  /// Puts the previewed character in the library. A closed JanitorAI card with
+  /// the opt-in on only exists inside the assembled prompt, so it is captured
+  /// locally through the proxy; anything else is a plain catalog import.
+  ///
+  /// Lorebooks are never attached here, not even the public ones: with
+  /// "Character + lorebooks" every book — public, private or scripted — goes
+  /// through the capture sheet, so it is the single place they are saved from
+  /// and nothing lands in the library twice.
+  Future<JanitorImportedCharacter> _importCharacter(
+    DownloadedCharacter downloaded, {
+    required bool skipExtraction,
+    required void Function(String) onPhase,
+  }) async {
+    if (_useLocalExtraction && !skipExtraction && !_refusalAcknowledged) {
+      final extractor = ref.read(janitorExtractorProvider);
+      final result = await extractor.extract(
+        _sourceUrl() ?? widget.item.id,
+        onPhase: onPhase,
+      );
+      final commit = await extractor.commit(
+        result,
+        rebuildLorebook: false,
+        attachPublicLorebooks: false,
+        janitorMeta: _janitorMeta,
+        onPhase: onPhase,
+      );
+      // The capture is handed on so the sheet can offer its entries instead of
+      // making a second capture mandatory.
+      return JanitorImportedCharacter(
+        characterId: commit.glazeCharacterId,
+        extraction: result,
+      );
+    }
+    final id = await ref
+        .read(catalogProvider.notifier)
+        .importCharacter(
+          downloaded,
+          sourceUrl: _sourceUrl(),
+          attachLorebooks: false,
+          janitorMeta: _janitorMeta,
+        );
+    return JanitorImportedCharacter(characterId: id);
   }
 
   /// Whether [mode] would run the local JanitorAI capture — the step a refusal

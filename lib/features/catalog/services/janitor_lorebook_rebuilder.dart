@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/llm/aux_llm_client.dart';
+import '../../../core/models/api_config.dart';
 import '../../../core/models/lorebook.dart';
 import '../../../core/utils/error_format.dart';
 import '../../../core/utils/id_generator.dart';
@@ -149,6 +150,24 @@ String lorebookSystemPrompt(AppSettings? settings, {bool fromJs = false}) {
   return fromJs ? kLorebookSystemPromptJs : kLorebookSystemPrompt;
 }
 
+/// The connection a lorebook build runs on, with the slot's model folded in:
+/// the one picked for lorebook builds in the settings, or [active] while the
+/// slot is left on "use the chat connection" — or points at a connection that
+/// has since been deleted. Embedding connections never qualify.
+ApiConfig? resolveLorebookBuildConfig(
+  AppSettings? settings, {
+  required List<ApiConfig> configs,
+  required ApiConfig? active,
+}) {
+  final id = settings?.lorebookBuildApiConfigId ?? '';
+  ApiConfig? config;
+  if (id.isNotEmpty) config = configs.where((c) => c.id == id).firstOrNull;
+  config ??= active;
+  if (config == null || config.mode == 'embedding') return null;
+  final model = settings?.lorebookBuildModel.trim() ?? '';
+  return model.isEmpty ? config : config.copyWith(model: model);
+}
+
 /// Assembles the exact chat messages sent to the build LLM: a `system` prompt
 /// plus a single `user` message bundling every selected context block followed
 /// by the raw lorebook text. Exposed so the UI can PREVIEW the prompt without
@@ -286,12 +305,16 @@ Future<Lorebook> rebuildLorebookWithActiveLlm(
   bool fromJs = false,
   String? characterId,
 }) async {
-  await ref.read(apiListProvider.future);
-  final config = ref.read(activeApiConfigProvider);
+  final configs = await ref.read(apiListProvider.future);
+  final settings = await ref.read(appSettingsProvider.future);
+  final config = resolveLorebookBuildConfig(
+    settings,
+    configs: configs,
+    active: ref.read(activeApiConfigProvider),
+  );
   if (config == null || config.endpoint.isEmpty || config.model.isEmpty) {
     throw NoActiveConnectionException();
   }
-  final settings = await ref.read(appSettingsProvider.future);
 
   final messages = buildLorebookMessages(
     lorebookText,

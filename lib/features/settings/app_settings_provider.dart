@@ -196,6 +196,15 @@ abstract class AppSettings with _$AppSettings {
     /// concatenated bodies. Empty → `kLorebookSystemPromptJs`.
     @Default('') String lorebookBuildPromptJs,
 
+    /// Connection lorebook builds run on (the closed-lorebook rebuild and the
+    /// scripted-lorebook conversion). Empty means the chat's selected
+    /// connection — see `resolveLorebookBuildConfig`.
+    @Default('') String lorebookBuildApiConfigId,
+
+    /// Model override for lorebook builds on that connection. Empty keeps the
+    /// connection's own model.
+    @Default('') String lorebookBuildModel,
+
     /// When on, the shuffle button opens a random character straight in the
     /// detail sheet (the classic behaviour) instead of the randomizing
     /// (Holocard) discovery overlay. Off by default.
@@ -237,6 +246,8 @@ abstract final class AppSettingsPreferences {
     'janitorSource',
     'lorebookBuildPrompt',
     'lorebookBuildPromptJs',
+    'lorebookBuildApiConfigId',
+    'lorebookBuildModel',
     'useStandardRandomizer',
     'hideContextCard',
   };
@@ -307,6 +318,11 @@ abstract final class AppSettingsPreferences {
       lorebookBuildPromptJs:
           prefs.getString('lorebookBuildPromptJs') ??
           defaults.lorebookBuildPromptJs,
+      lorebookBuildApiConfigId:
+          prefs.getString('lorebookBuildApiConfigId') ??
+          defaults.lorebookBuildApiConfigId,
+      lorebookBuildModel:
+          prefs.getString('lorebookBuildModel') ?? defaults.lorebookBuildModel,
       useStandardRandomizer:
           _coerceBool(prefs.get('useStandardRandomizer')) ??
           defaults.useStandardRandomizer,
@@ -342,6 +358,8 @@ abstract final class AppSettingsPreferences {
       'janitorSource': normalized.janitorSource.name,
       'lorebookBuildPrompt': normalized.lorebookBuildPrompt,
       'lorebookBuildPromptJs': normalized.lorebookBuildPromptJs,
+      'lorebookBuildApiConfigId': normalized.lorebookBuildApiConfigId,
+      'lorebookBuildModel': normalized.lorebookBuildModel,
       'useStandardRandomizer': normalized.useStandardRandomizer,
       'hideContextCard': normalized.hideContextCard,
     };
@@ -453,6 +471,8 @@ abstract final class AppSettingsPreferences {
         const AppSettings().janitorSource,
     lorebookBuildPrompt: values['lorebookBuildPrompt'] as String,
     lorebookBuildPromptJs: values['lorebookBuildPromptJs'] as String,
+    lorebookBuildApiConfigId: values['lorebookBuildApiConfigId'] as String,
+    lorebookBuildModel: values['lorebookBuildModel'] as String,
     useStandardRandomizer: values['useStandardRandomizer'] as bool,
     hideContextCard: values['hideContextCard'] as bool,
   );
