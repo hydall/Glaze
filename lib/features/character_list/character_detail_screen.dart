@@ -1377,7 +1377,18 @@ class _HeroNameState extends State<_HeroName>
           return text;
         }
 
-        final clipped = SizedBox(height: layout.viewport, child: text);
+        // The text has to lay out at its full height inside the capped box:
+        // squeezed to the viewport, [Text] clips its own paint to that height
+        // and the scroll would only move the already-cut-off first lines.
+        final clipped = SizedBox(
+          height: layout.viewport,
+          child: OverflowBox(
+            alignment: AlignmentDirectional.topStart,
+            minHeight: 0,
+            maxHeight: double.infinity,
+            child: text,
+          ),
+        );
         if (!animate) {
           _setTicking(false);
           return ClipRect(child: clipped);
