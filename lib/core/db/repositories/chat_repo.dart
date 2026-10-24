@@ -193,6 +193,18 @@ FROM chat_sessions''';
         .insertOnConflictUpdate(await _toCompanionAsync(session));
   }
 
+  /// Writes [sessions] in a single batch, so the reactive watchers emit
+  /// **one** update instead of one per session (the mass-import path).
+  Future<void> putAll(List<ChatSession> sessions) async {
+    if (sessions.isEmpty) return;
+    final companions = [
+      for (final session in sessions) await _toCompanionAsync(session),
+    ];
+    await _db.batch((b) {
+      b.insertAllOnConflictUpdate(_db.chatSessions, companions);
+    });
+  }
+
   /// Inserts a newly allocated session without replacing an existing owner of
   /// the same globally unique session id.
   Future<bool> insertIfAbsent(ChatSession session) async {

@@ -59,9 +59,12 @@ class BackupService {
   /// [onProgress] is called with a human-readable stage label.
   /// [onDetected] (optional) is called once with the detected format,
   /// useful for UI to show a stage-specific label.
+  /// [onCount] (optional) reports how far the current stage is, where the
+  /// importer can tell.
   Future<void> importBackupFromFile(
     String filePath, {
     void Function(String stage)? onProgress,
+    void Function(int done, int total)? onCount,
     void Function(BackupFormat format)? onDetected,
   }) async {
     _cancelFlag.reset();
@@ -73,8 +76,13 @@ class BackupService {
             .importFromFile(filePath, onProgress: onProgress);
         break;
       case BackupFormat.tavoZip:
-        await TavoBackupImporter(_db, _imageStorage, _cancel)
-            .importFromFile(filePath, onProgress: onProgress);
+        final data = await _takeInspectedTavo(filePath);
+        await TavoBackupImporter(_db, _imageStorage, _cancel).importFromFile(
+          filePath,
+          data: data,
+          onProgress: onProgress,
+          onCount: onCount,
+        );
         break;
       case BackupFormat.flutterZip:
         await FlutterBackupImporter(_db, _imageStorage, _cancel)
@@ -90,15 +98,39 @@ class BackupService {
   /// What [filePath] is and what of it will not come over, when it is a Tavo
   /// backup, so the UI can say so before the restore clears anything; null
   /// for any other file.
+  ///
+  /// The decoded backup is kept for the restore that follows, so it is not
+  /// read twice; [releaseInspectedTavo] drops it when there is no restore.
   Future<TavoBackupInspection?> inspectTavoBackup(String filePath) async {
+    releaseInspectedTavo();
     if (!tavoImportEnabled) return null;
     try {
       if (await _detectFormat(filePath) != BackupFormat.tavoZip) return null;
     } on FormatException {
       return null;
     }
-    final archive = ZipDecoder().decodeStream(InputFileStream(filePath));
-    return TavoBackupInspection.fromArchive(archive);
+    final stat = await File(filePath).stat();
+    final data = await TavoBackupData.load(filePath);
+    _inspectedTavo = (filePath, stat.size, stat.modified, data);
+    return TavoBackupInspection.fromData(data);
+  }
+
+  /// The backup [inspectTavoBackup] decoded last, with the size and time
+  /// stamp of the file it was decoded from.
+  (String, int, DateTime, TavoBackupData)? _inspectedTavo;
+
+  void releaseInspectedTavo() => _inspectedTavo = null;
+
+  /// The inspected backup when it is still the file at [filePath], unchanged;
+  /// null otherwise. Released either way: a restore uses it once.
+  Future<TavoBackupData?> _takeInspectedTavo(String filePath) async {
+    final cached = _inspectedTavo;
+    _inspectedTavo = null;
+    if (cached == null) return null;
+    final (path, size, modified, data) = cached;
+    if (path != filePath) return null;
+    final stat = await File(filePath).stat();
+    return stat.size == size && stat.modified == modified ? data : null;
   }
 
   Future<BackupFormat> _detectFormat(String filePath) async {

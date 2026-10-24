@@ -18,6 +18,7 @@ import 'package:glaze_flutter/core/db/repositories/summary_repo.dart';
 import 'package:glaze_flutter/core/llm/transport/llm_protocol.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/core/services/backup/tavo_backup_importer.dart';
+import 'package:glaze_flutter/core/services/backup_service.dart';
 import 'package:glaze_flutter/core/services/backup/tavo_lmdb_reader.dart';
 import 'package:glaze_flutter/core/services/image_storage_service.dart';
 
@@ -406,6 +407,44 @@ void main() {
         all.addAll(await ChatRepo(db).getByCharacterId(c.id));
       }
       expect(all, hasLength(3));
+    });
+  });
+
+  group('BackupService with a Tavo backup', () {
+    late AppDatabase db;
+    late _TestImageStorage images;
+
+    setUp(() {
+      SharedPreferences.setMockInitialValues({});
+      db = AppDatabase.forTesting(NativeDatabase.memory());
+      images = _TestImageStorage();
+    });
+
+    tearDown(() => db.close());
+
+    test('the restore reuses what the inspection decoded', () async {
+      final service = BackupService(db, images);
+      final inspection = await service.inspectTavoBackup(_fixture);
+      expect(inspection!.info.isTested, isTrue);
+
+      final stages = <String>[];
+      final counts = <(int, int)>[];
+      await service.importBackupFromFile(
+        _fixture,
+        onProgress: stages.add,
+        onCount: (done, total) => counts.add((done, total)),
+      );
+
+      expect(await CharacterRepo(db).getAll(), hasLength(2));
+      // Both characters and the persona that has one.
+      expect(images.saved, hasLength(3));
+      expect(counts, containsAll([(2, 2), (3, 3)]));
+      expect(stages, isNotEmpty);
+    });
+
+    test('a restore without an inspection reads the file itself', () async {
+      await BackupService(db, images).importBackupFromFile(_fixture);
+      expect(await CharacterRepo(db).getAll(), hasLength(2));
     });
   });
 }
