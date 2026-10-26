@@ -396,6 +396,34 @@ class ImageGenDispatcher {
     String? instructionImageSize, {
     CancelToken? cancelToken,
   }) {
+    // rout.my's Gemini image models live behind the Gemini-compatible route,
+    // not `/v1/images/edits`; it takes inlineData references there.
+    if (references.isNotEmpty && isRoutmyGeminiModel(settings.routmyModel)) {
+      final caps = geminiCapabilities(settings.routmyModel);
+      return GeminiImageProvider().generate(
+        endpoint: '${settings.routmyMirror.baseUrl}/compatible',
+        apiKey: settings.routmyApiKey,
+        model: settings.routmyModel,
+        prompt: prompt,
+        aspectRatio: _validOverride(
+          instructionAspectRatio,
+          caps.aspectRatios,
+          settings.routmyAspectRatio,
+        ),
+        imageSize: caps.imageSizes == null
+            ? null
+            : _resolveSize(
+                override: instructionImageSize,
+                allowed: caps.imageSizes!,
+                configured: settings.routmyImageSize,
+                width: settings.routmyCustomWidth,
+                height: settings.routmyCustomHeight,
+              ),
+        referenceImages: references.take(caps.maxReferences).toList(),
+        cancelToken: cancelToken,
+      );
+    }
+
     final images = _imagesOf(references);
     return RoutmyImageProvider(
       baseUrl: settings.routmyMirror.baseUrl,
@@ -418,6 +446,7 @@ class ImageGenDispatcher {
       ),
       quality: settings.routmyQuality,
       referenceImages: images,
+      supportsReferences: settings.routmySupportsReferences,
       cancelToken: cancelToken,
     );
   }

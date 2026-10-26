@@ -28,8 +28,11 @@ class ImageModelCaps {
 /// `gemini-3.1-flash-image` | `gemini-3-pro-image` | `gemini-2.5-flash-image`
 /// | `unknown` (proxy alias with a custom id — optimistic defaults).
 String classifyGeminiImageModel(String? modelId) {
-  final id = (modelId ?? '').toLowerCase().trim();
+  var id = (modelId ?? '').toLowerCase().trim();
   if (id.isEmpty) return 'unknown';
+  // Catalog ids from proxies (rout.my, OpenRouter) carry the vendor prefix.
+  final slash = id.indexOf('/');
+  if (slash >= 0) id = id.substring(slash + 1);
 
   if (id.startsWith('gemini-3.1-flash-image')) return 'gemini-3.1-flash-image';
   if (id.startsWith('gemini-3-pro-image')) return 'gemini-3-pro-image';
@@ -112,6 +115,14 @@ const _geminiCaps = <String, ImageModelCaps>{
 ImageModelCaps geminiCapabilities(String? modelId) =>
     _geminiCaps[classifyGeminiImageModel(modelId)] ?? _geminiCaps['unknown']!;
 
+/// rout.my serves Gemini image models through its Gemini-compatible
+/// `/compatible/v1beta` route, not through `/images/edits`. They still take
+/// inlineData references there.
+bool isRoutmyGeminiModel(String? modelId) {
+  final id = (modelId ?? '').toLowerCase();
+  return id.contains('gemini') || id.contains('nano-banana');
+}
+
 // ───────────────────────── OpenAI-compatible ─────────────────────────
 
 /// `gpt-image-1.5` | `gpt-image-1-mini` | `gpt-image-1` | `gpt-image`
@@ -140,12 +151,15 @@ bool isGptImageFamily(String kind) =>
     kind == 'gpt-image';
 
 /// References accepted by `/v1/images/edits` for a model family.
-/// dall-e-3 / unknown never route through /edits.
+/// Unknown model ids belong to custom OpenAI-compatible proxies; keep the
+/// reference UI available for them and let the proxy accept or reject the
+/// edit request. dall-e-3 stays generation-only.
 int openAiMaxReferences(String kind) {
   if (isGptImageFamily(kind)) return maxGenerationReferenceImages;
   if (kind == 'flux-kontext') return 1;
   if (kind == 'dall-e-2') return 1;
-  return 0;
+  if (kind == 'dall-e-3') return 0;
+  return maxGenerationReferenceImages;
 }
 
 /// Maps an aspect ratio to the `size` string a model family understands.
@@ -257,8 +271,12 @@ int providerMaxReferences(ImageGenSettings settings) {
           ? maxGenerationReferenceImages
           : 0;
     case ImageGenApiType.routmy:
-      // References are documented only on `/v1/images/edits`, and the catalog
-      // advertises that endpoint only for the models that take them.
+      // Gemini models go through rout.my's Gemini-compatible route, which takes
+      // inlineData references. Everything else only gets references when the
+      // catalog advertises `/v1/images/edits`.
+      if (isRoutmyGeminiModel(settings.routmyModel)) {
+        return geminiCapabilities(settings.routmyModel).maxReferences;
+      }
       return settings.routmySupportsReferences
           ? routmyMaxInjectedReferenceImages
           : 0;

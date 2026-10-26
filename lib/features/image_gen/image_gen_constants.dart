@@ -76,10 +76,11 @@ class RoutMyConstants {
     return id;
   }
 
-  /// Reference images are documented only on `/v1/images/edits`, and the live
-  /// catalog advertises that endpoint only for the `openai/gpt-image-*`
-  /// family. Every other rout.my image model is generation-only, so its
-  /// references are gated off (see [providerMaxReferences]).
+  /// Reference images for the images API go through `/v1/images/edits`, and
+  /// the live catalog advertises that endpoint only for the
+  /// `openai/gpt-image-*` family. Gemini models are different: the dispatcher
+  /// sends them through rout.my's Gemini-compatible route with inlineData
+  /// references instead (see [isRoutmyGeminiModel]).
   static bool supportsReferences(String? model) =>
       (model ?? '').toLowerCase().contains('gpt-image');
 

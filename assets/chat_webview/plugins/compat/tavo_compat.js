@@ -499,6 +499,39 @@
   try {
     Object.defineProperty(window, 'tavo', { value: tavo, writable: false, configurable: false });
   } catch (e) { window.tavo = tavo; }
+
+  // Tavo's ImageGen host bridge. Plugins such as PUSYA SOCIAL look for it
+  // before falling back to their legacy ImageGen proxy; route it to Glaze's
+  // own image service, keeping the character references they pass.
+  window.tavoImageGen = Object.freeze({
+    generate: function (o) {
+      o = o || {};
+      var refs = [];
+      var chars = Array.isArray(o.characters) ? o.characters : [];
+      for (var i = 0; i < chars.length && refs.length < 10; i++) {
+        var c = chars[i];
+        if (!c) continue;
+        var url = typeof c === 'string' ? c : c.url;
+        if (!url) continue;
+        refs.push({ name: c.name == null ? '' : String(c.name), url: String(url) });
+      }
+      var opts = {
+        referenceImages: refs,
+        aspectRatio: o.aspectRatio,
+        saveAs: 'iig_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '.png',
+        scope: 'global'
+      };
+      var run = fn(g.images, 'generate');
+      return run(String(o.prompt || ''), opts).catch(function (e) {
+        // A plugin may lack the files permission `saveAs` needs; a data URL
+        // still gives it the picture. Do not retry a provider error, or the
+        // picture is drawn (and billed) twice.
+        if (!opts.saveAs || !e || e.code !== 'permission_denied') throw e;
+        var fallback = { referenceImages: opts.referenceImages, aspectRatio: opts.aspectRatio };
+        return run(String(o.prompt || ''), fallback);
+      });
+    }
+  });
   window.triggerSlash = function (command) { return fn(g.commands, 'run')(command); };
 
   // Tavo panels read these inset variables.

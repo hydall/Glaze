@@ -21,14 +21,16 @@ class RoutmyImageProvider {
     required String quality,
     List<String>? referenceImages,
     CancelToken? cancelToken,
+    bool? supportsReferences,
   }) async {
     final hasRefs = referenceImages != null && referenceImages.isNotEmpty;
 
     // References are documented only on `/v1/images/edits`, which the catalog
-    // advertises only for the edit-capable models. The provider still checks
-    // so a reference set that slipped past the UI gate is dropped rather than
-    // sent to `/v1/images/generations`, which has no image input.
-    if (hasRefs && RoutMyConstants.supportsReferences(model)) {
+    // advertises only for the edit-capable models. Callers that know the
+    // catalog pass its verdict; without one the shipped fallback applies.
+    final canEdit =
+        supportsReferences ?? RoutMyConstants.supportsReferences(model);
+    if (hasRefs && canEdit) {
       return _editImages(
         apiKey: apiKey,
         model: model,
@@ -90,8 +92,9 @@ class RoutmyImageProvider {
   }
 
   /// OpenAI-style image edits via multipart/form-data.
-  /// Mirrors sillyimages exactly: single `image` field with PNG MIME for one ref,
-  /// `image[]` repeated for multiple. rout.my proxies OpenAI-style file fields.
+  /// rout.my documents one `image` field that may repeat for several files
+  /// (its OpenAPI schema declares `image` as a binary array), so every
+  /// reference uses that same field name.
   Future<Uint8List> _editImages({
     required String apiKey,
     required String model,
@@ -117,15 +120,11 @@ class RoutmyImageProvider {
     final q = _normalizeQuality(quality);
     if (q != null) fields['quality'] = q;
 
-    // Image files — sillyimages always uses 'image/png' MIME regardless of actual format.
-    // Single ref → field name 'image'; multiple → 'image[]' repeated.
+    // Image files — always declared as PNG, as the shared collector does.
     final imageFields = <(String, Uint8List, String, String)>[];
-    final multiRef = validRefs.length > 1;
     for (var i = 0; i < validRefs.length; i++) {
       final bytes = _base64ToBytes(validRefs[i]);
-      final fieldName = multiRef ? 'image[]' : 'image';
-      // Always declare as PNG — matches sillyimages iigBase64ToBlob(b64, 'image/png')
-      imageFields.add((fieldName, bytes, 'reference-$i.png', 'image/png'));
+      imageFields.add(('image', bytes, 'reference-$i.png', 'image/png'));
     }
 
     final json = await _http.postMultipart(

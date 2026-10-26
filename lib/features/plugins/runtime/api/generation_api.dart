@@ -23,6 +23,7 @@ import '../../models/plugin_manifest.dart';
 import '../../models/plugin_settings_schema.dart';
 import '../plugin_api.dart';
 import 'files_api.dart';
+import 'plugin_image_references.dart';
 
 /// `glaze.generate(prompt, options)` (one-off text with the chat's
 /// connection) and `glaze.images.generate(prompt, options)` (Glaze image
@@ -256,6 +257,12 @@ Future<Object?> _image(PluginCall c) async {
   final started = DateTime.now();
   final Uint8List bytes;
   try {
+    // Tavo's `image.generate` spells them `referenceImages`; the older
+    // ImageGen bridge used `characters`. Both carry names and URLs.
+    final pluginReferences = await resolvePluginImageReferences(
+      c,
+      options['referenceImages'] ?? options['characters'],
+    );
     final job = service.generateImage(
       settings: settings,
       prompt: prompt,
@@ -264,6 +271,7 @@ Future<Object?> _image(PluginCall c) async {
       llmModel: api?.model ?? '',
       character: character,
       persona: persona,
+      pluginReferences: pluginReferences,
       instructionAspectRatio: options['aspectRatio']?.toString(),
       instructionImageSize: options['size']?.toString(),
       cancelToken: cancelToken,

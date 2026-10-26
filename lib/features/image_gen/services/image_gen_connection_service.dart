@@ -162,9 +162,13 @@ class ImageGenConnectionService {
         RoutmyModelInfo(
           id: id,
           name: raw['name']?.toString() ?? '',
-          supportsEdits: endpointList.any(
-            (endpoint) => endpoint.contains('/images/edits'),
-          ),
+          // No endpoint list at all: keep the shipped gpt-image rule rather
+          // than closing references for every model in the catalog.
+          supportsEdits: endpointList.isEmpty
+              ? RoutMyConstants.supportsReferences(id)
+              : endpointList.any(
+                  (endpoint) => endpoint.contains('/images/edits'),
+                ),
         ),
       );
     }

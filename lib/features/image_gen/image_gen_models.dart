@@ -532,7 +532,12 @@ abstract class ImageGenSettings with _$ImageGenSettings {
   /// otherwise.
   bool get routmySupportsReferences {
     for (final model in routmyModels) {
-      if (model.id == routmyModel) return model.supportsEdits;
+      if (model.id == routmyModel) {
+        // A catalog without an `endpoints` field cannot say either way; the
+        // shipped gpt-image rule still opens references for those models.
+        return model.supportsEdits ||
+            RoutMyConstants.supportsReferences(routmyModel);
+      }
     }
     return RoutMyConstants.supportsReferences(routmyModel);
   }
