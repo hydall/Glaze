@@ -56,6 +56,12 @@ create, update. Ordinary send/regen only; Studio and Continue never offer them.
   `showCharacterProposalSheet` (root navigator, one sheet at a time). A refusal
   is a result the model reads (`user_rejected`), never an exception. Updates
   apply the patch to the latest row through `CharacterRepo.mutate`.
+- **Pictures are fetched before the sheet.** `avatar` (create/update) takes an
+  `http(s)` or base64 `data:` URL; `fetchToolImage` downloads it (15 MB cap,
+  cut off mid-transfer) and accepts PNG/JPEG/WebP/GIF by signature only, so the
+  sheet previews the real image and a bad link never reaches the user. Create
+  hands it to the importer as a data-URL `avatar`; update writes it through
+  `ImageStorageService.saveAvatar` and evicts the cached file and thumbnail.
 - **Stop wins.** `isAborted()` is checked after the round, after the tools ran
   and inside each tool after the sheet; a stopped reply runs no further call.
 - Tool messages are not persisted in the chat; the next turn's prompt sees only

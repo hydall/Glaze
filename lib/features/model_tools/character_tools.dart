@@ -1,5 +1,8 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
+
+import 'package:flutter/painting.dart';
 
 import '../../core/models/character.dart';
 import '../../core/services/character_import_persistence_coordinator.dart';
@@ -9,6 +12,7 @@ import '../character_list/character_import_persistence_provider.dart';
 import 'character_card_fields.dart';
 import 'character_tool_proposal.dart';
 import 'model_tool.dart';
+import 'model_tool_image.dart';
 
 /// The character-library tools, in the order they are offered.
 const List<ModelTool> characterTools = [
@@ -43,6 +47,16 @@ Future<Character> _requireCharacter(
   }
   return character;
 }
+
+const Map<String, dynamic> _avatarSchema = {
+  'type': 'string',
+  'description':
+      'Character picture: an https URL of a PNG, JPEG, WebP or GIF image, or '
+      'a base64 data: URL. Only pass a URL known to point at an image — one '
+      'the user gave, for instance; never invent one.',
+};
+
+bool _hasAvatar(Character c) => c.avatarPath?.isNotEmpty ?? false;
 
 String _snippet(String? text, int max) {
   final value = (text ?? '').trim().replaceAll(RegExp(r'\s+'), ' ');
@@ -110,6 +124,7 @@ class ListCharactersTool extends ModelTool {
             'id': ch.id,
             'name': ch.name,
             if (ch.id == c.charId) 'isCurrentChat': true,
+            'hasAvatar': _hasAvatar(ch),
             'tags': ch.tags,
             'description': _snippet(ch.description, 160),
           },
@@ -130,7 +145,8 @@ class GetCharacterTool extends ModelTool {
   @override
   String get description =>
       'Read a character card from the library: every editable field under '
-      'its character-card name. Omit id to read the character of the '
+      'its character-card name, and whether it has a picture (the picture '
+      'itself is not returned). Omit id to read the character of the '
       'current chat.';
 
   @override
@@ -148,6 +164,7 @@ class GetCharacterTool extends ModelTool {
     return {
       'id': character.id,
       if (character.id == c.charId) 'isCurrentChat': true,
+      'hasAvatar': _hasAvatar(character),
       ...characterCardJson(character),
     };
   }
@@ -178,6 +195,7 @@ class CreateCharacterTool extends ModelTool {
         'type': 'object',
         'properties': {
           ...characterFieldsSchema(),
+          'avatar': _avatarSchema,
           'character_book': {
             'type': 'object',
             'description': 'Optional lorebook created with the card.',
@@ -223,7 +241,7 @@ class CreateCharacterTool extends ModelTool {
     final fields = parseCharacterFields(
       args['character'],
       'character',
-      passThrough: const {'character_book'},
+      passThrough: const {'character_book', 'avatar'},
     );
     if (fields['name'] == null) {
       throw ModelToolError.invalid(
@@ -232,7 +250,14 @@ class CreateCharacterTool extends ModelTool {
         null,
       );
     }
-    final book = _parseBook((args['character'] as Map)['character_book']);
+    final raw = args['character'] as Map;
+    final book = _parseBook(raw['character_book']);
+    // Fetched before asking, so the sheet shows the picture itself and a
+    // broken link is reported without bothering the user.
+    final avatar = raw['avatar'] == null
+        ? null
+        : await fetchToolImage(c.ref, raw['avatar'], 'character.avatar');
+    if (c.isAborted()) throw _aborted;
 
     final approved = await c.confirm(
       CharacterToolProposal(
@@ -245,6 +270,7 @@ class CreateCharacterTool extends ModelTool {
         ],
         lorebookName: book?['name'] as String?,
         lorebookEntryCount: (book?['entries'] as List?)?.length ?? 0,
+        avatar: avatar?.bytes,
       ),
     );
     _checkApproval(approved, c);
@@ -254,7 +280,9 @@ class CreateCharacterTool extends ModelTool {
     final card = {
       'spec': 'chara_card_v3',
       'spec_version': '3.0',
-      'data': {...fields, 'character_book': ?book},
+      // The importer stores a data-URL `avatar` as the card's picture, the
+      // same as a JSON card that embeds one.
+      'data': {...fields, 'character_book': ?book, 'avatar': ?avatar?.dataUrl},
     };
     final importer = await c.ref.read(characterImporterProvider.future);
     final imported = await importer.importFromBytes(
@@ -275,6 +303,7 @@ class CreateCharacterTool extends ModelTool {
           'characterId': persisted.character.id,
           'name': persisted.character.name,
           'lorebookId': persisted.lorebook?.id,
+          'hasAvatar': _hasAvatar(persisted.character),
         };
     }
   }
@@ -344,8 +373,8 @@ class UpdateCharacterTool extends ModelTool {
       'Change fields of an existing character card. Only call this when the '
       'user asked for the card to be changed. Pass only the fields that '
       'change; each given field replaces its whole value (read the card with '
-      'glaze_get_character first when editing part of a text). The user '
-      'reviews the change and must approve it.';
+      'glaze_get_character first when editing part of a text). Pass avatar to '
+      'replace the picture. The user reviews the change and must approve it.';
 
   @override
   Map<String, dynamic> get parameters => {
@@ -354,7 +383,7 @@ class UpdateCharacterTool extends ModelTool {
       'id': {'type': 'string', 'description': 'Character id.'},
       'changes': {
         'type': 'object',
-        'properties': characterFieldsSchema(),
+        'properties': {...characterFieldsSchema(), 'avatar': _avatarSchema},
         'additionalProperties': false,
         'minProperties': 1,
       },
@@ -366,7 +395,16 @@ class UpdateCharacterTool extends ModelTool {
   @override
   Future<Object?> run(ModelToolContext c, Map<String, dynamic> args) async {
     final current = await _requireCharacter(c, args['id'], 'id');
-    final changes = parseCharacterFields(args['changes'], 'changes');
+    final changes = parseCharacterFields(
+      args['changes'],
+      'changes',
+      passThrough: const {'avatar'},
+    );
+    final rawAvatar = (args['changes'] as Map)['avatar'];
+    final avatar = rawAvatar == null
+        ? null
+        : await fetchToolImage(c.ref, rawAvatar, 'changes.avatar');
+    if (c.isAborted()) throw _aborted;
     final effective = {
       for (final entry in changes.entries)
         if (!_sameValue(
@@ -375,9 +413,12 @@ class UpdateCharacterTool extends ModelTool {
         ))
           entry.key: entry.value,
     };
-    if (effective.isEmpty) {
+    if (effective.isEmpty && avatar == null) {
       return {'characterId': current.id, 'updatedFields': const <String>[]};
     }
+    final storage = avatar == null
+        ? null
+        : await c.ref.read(imageStorageProvider.future);
 
     final approved = await c.confirm(
       CharacterToolProposal(
@@ -392,9 +433,22 @@ class UpdateCharacterTool extends ModelTool {
                 after: effective[field.key]!,
               ),
         ],
+        avatar: avatar?.bytes,
+        currentAvatarPath: storage?.absolutePath(current.avatarPath),
       ),
     );
     _checkApproval(approved, c);
+
+    String? avatarPath;
+    if (avatar != null) {
+      avatarPath = await storage!.saveAvatar(current.id, avatar.bytes);
+      // The file keeps its name, so the image cache would go on showing the
+      // old picture under it.
+      await FileImage(File(avatarPath)).evict();
+      final thumbnail = storage.thumbnailPath(avatarPath);
+      if (thumbnail != null) await FileImage(File(thumbnail)).evict();
+      bumpAvatarVersion(c.ref);
+    }
 
     // Applied to the row as it is now, not to the copy shown in the sheet:
     // the user may have edited the card while the sheet was open.
@@ -402,10 +456,10 @@ class UpdateCharacterTool extends ModelTool {
         .read(charactersProvider.notifier)
         .mutate(
           current.id,
-          (latest) => applyCharacterFields(
-            latest,
-            effective,
-          ).copyWith(updatedAt: DateTime.now().millisecondsSinceEpoch),
+          (latest) => applyCharacterFields(latest, effective).copyWith(
+            avatarPath: avatarPath ?? latest.avatarPath,
+            updatedAt: DateTime.now().millisecondsSinceEpoch,
+          ),
         );
     if (updated == null) {
       throw const ModelToolError(
@@ -415,7 +469,7 @@ class UpdateCharacterTool extends ModelTool {
     }
     return {
       'characterId': updated.id,
-      'updatedFields': effective.keys.toList(),
+      'updatedFields': [...effective.keys, if (avatar != null) 'avatar'],
     };
   }
 

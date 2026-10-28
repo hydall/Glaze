@@ -4073,5 +4073,6 @@
   "model_tools_field_creator_notes": "Заметки автора",
   "model_tools_field_tags": "Теги",
   "model_tools_field_creator": "Автор",
-  "model_tools_field_character_version": "Версия"
+  "model_tools_field_character_version": "Версия",
+  "model_tools_field_avatar": "Картинка"
 }

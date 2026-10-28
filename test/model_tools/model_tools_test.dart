@@ -1,5 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:dio/dio.dart';
 
 import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,8 +17,10 @@ import 'package:glaze_flutter/core/state/lorebook_provider.dart';
 import 'package:glaze_flutter/core/state/db_provider.dart';
 import 'package:glaze_flutter/features/model_tools/character_tool_proposal.dart';
 import 'package:glaze_flutter/features/model_tools/model_tool.dart';
+import 'package:glaze_flutter/features/model_tools/model_tool_image.dart';
 import 'package:glaze_flutter/features/model_tools/model_tool_runner.dart';
 import 'package:glaze_flutter/features/settings/api_config_draft.dart';
+import 'package:image/image.dart' as img;
 import 'package:shared_preferences/shared_preferences.dart';
 
 final _refProvider = Provider<Ref>((ref) => ref);
@@ -32,8 +37,35 @@ ApiConfig _config({
 );
 
 LlmToolTurn _turn(String name, Map<String, dynamic> args) => LlmToolTurn(
-  calls: [LlmToolCall(id: 'call_1', name: name, rawArguments: jsonEncode(args))],
+  calls: [
+    LlmToolCall(id: 'call_1', name: name, rawArguments: jsonEncode(args)),
+  ],
 );
+
+final Uint8List _png = img.encodePng(img.Image(width: 3, height: 4));
+
+String get _pngDataUrl => 'data:image/png;base64,${base64Encode(_png)}';
+
+/// Answers every request with [status] and [body]; records the URLs asked.
+class _ImageAdapter implements HttpClientAdapter {
+  _ImageAdapter(this.status, this.body);
+  final int status;
+  final Uint8List body;
+  final requested = <Uri>[];
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    requested.add(options.uri);
+    return ResponseBody.fromBytes(body, status);
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
 
 Map<String, dynamic> _decode(Map<String, String> results) =>
     jsonDecode(results['call_1']!) as Map<String, dynamic>;
@@ -89,6 +121,7 @@ void main() {
     late AppDatabase db;
     late ProviderContainer container;
     late Directory images;
+    late _ImageAdapter http;
     final proposals = <CharacterToolProposal>[];
     bool? answer = true;
 
@@ -106,11 +139,15 @@ void main() {
       SharedPreferences.setMockInitialValues({});
       db = AppDatabase.forTesting(NativeDatabase.memory());
       images = await Directory.systemTemp.createTemp('model_tools_test');
+      http = _ImageAdapter(200, _png);
       container = ProviderContainer(
         overrides: [
           appDbProvider.overrideWithValue(db),
           imageStorageProvider.overrideWith(
             (ref) async => ImageStorageService(images.path),
+          ),
+          modelToolDioProvider.overrideWithValue(
+            Dio()..httpClientAdapter = http,
           ),
         ],
       );
@@ -255,41 +292,141 @@ void main() {
       expect(all.map((c) => c.name), isNot(contains('Cid')));
     });
 
-    test('an approved create goes through the import path, lorebook included', () async {
+    test(
+      'an approved create goes through the import path, lorebook included',
+      () async {
+        final result = _decode(
+          await toolset.run(
+            _turn('glaze_create_character', {
+              'character': {
+                'name': 'Cid',
+                'description': 'A smith.',
+                'first_mes': 'Hello.',
+                'alternate_greetings': ['Hi again.'],
+                'character_book': {
+                  'name': 'Forge',
+                  'entries': [
+                    {
+                      'keys': ['forge'],
+                      'content': 'Hot.',
+                    },
+                  ],
+                },
+              },
+            }),
+            context(),
+          ),
+        );
+        expect(result['ok'], isTrue, reason: '$result');
+        final created = result['result'] as Map;
+        final stored = await container
+            .read(characterRepoProvider)
+            .getById(created['characterId'] as String);
+        expect(stored!.name, 'Cid');
+        expect(stored.firstMes, 'Hello.');
+        expect(stored.alternateGreetings, ['Hi again.']);
+        expect(created['lorebookId'], isNotNull);
+        final books = await container.read(lorebooksProvider.future);
+        final book = books.singleWhere((b) => b.id == created['lorebookId']);
+        expect(book.entries.single.content, 'Hot.');
+      },
+    );
+
+    test('a created card keeps the picture it was given', () async {
       final result = _decode(
         await toolset.run(
           _turn('glaze_create_character', {
             'character': {
-              'name': 'Cid',
-              'description': 'A smith.',
-              'first_mes': 'Hello.',
-              'alternate_greetings': ['Hi again.'],
-              'character_book': {
-                'name': 'Forge',
-                'entries': [
-                  {
-                    'keys': ['forge'],
-                    'content': 'Hot.',
-                  },
-                ],
-              },
+              'name': 'Dee',
+              'description': 'A bard.',
+              'first_mes': 'Hi.',
+              'avatar': 'https://example.com/dee.png',
             },
           }),
           context(),
         ),
       );
       expect(result['ok'], isTrue, reason: '$result');
-      final created = result['result'] as Map;
+      expect((result['result'] as Map)['hasAvatar'], isTrue);
+      expect(http.requested.single.toString(), 'https://example.com/dee.png');
+      expect(proposals.single.avatar, _png);
+
       final stored = await container
           .read(characterRepoProvider)
-          .getById(created['characterId'] as String);
-      expect(stored!.name, 'Cid');
-      expect(stored.firstMes, 'Hello.');
-      expect(stored.alternateGreetings, ['Hi again.']);
-      expect(created['lorebookId'], isNotNull);
-      final books = await container.read(lorebooksProvider.future);
-      final book = books.singleWhere((b) => b.id == created['lorebookId']);
-      expect(book.entries.single.content, 'Hot.');
+          .getById((result['result'] as Map)['characterId'] as String);
+      final storage = await container.read(imageStorageProvider.future);
+      final file = File(storage.absolutePath(stored!.avatarPath)!);
+      expect(file.readAsBytesSync(), _png);
+    });
+
+    test('an edit can replace the picture alone', () async {
+      final result = _decode(
+        await toolset.run(
+          _turn('glaze_update_character', {
+            'id': 'ann',
+            'changes': {'avatar': _pngDataUrl},
+          }),
+          context(),
+        ),
+      );
+      expect(result['ok'], isTrue, reason: '$result');
+      expect((result['result'] as Map)['updatedFields'], ['avatar']);
+      expect(proposals.single.changes, isEmpty);
+      expect(proposals.single.avatar, _png);
+      expect(http.requested, isEmpty);
+
+      final stored = await container.read(characterRepoProvider).getById('ann');
+      expect(stored!.avatarPath, isNotNull);
+      expect(stored.description, 'A knight.');
+      final storage = await container.read(imageStorageProvider.future);
+      expect(
+        File(storage.absolutePath(stored.avatarPath)!).existsSync(),
+        isTrue,
+      );
+
+      final read = _decode(
+        await toolset.run(_turn('glaze_get_character', {}), context()),
+      );
+      expect((read['result'] as Map)['hasAvatar'], isTrue);
+    });
+
+    test('a picture that is not an image is refused before asking', () async {
+      Future<Map<String, dynamic>> update(Object avatar) async => _decode(
+        await toolset.run(
+          _turn('glaze_update_character', {
+            'id': 'ann',
+            'changes': {'avatar': avatar},
+          }),
+          context(),
+        ),
+      );
+
+      final text = await update(
+        'data:image/png;base64,${base64Encode(utf8.encode('<html>'))}',
+      );
+      expect((text['error'] as Map)['code'], 'invalid_arguments');
+      expect(
+        ((text['error'] as Map)['details'] as Map)['path'],
+        'changes.avatar',
+      );
+
+      final scheme = await update('file:///etc/passwd');
+      expect((scheme['error'] as Map)['code'], 'invalid_arguments');
+
+      http = _ImageAdapter(404, Uint8List(0));
+      container.read(modelToolDioProvider).httpClientAdapter = http;
+      final missing = await update('https://example.com/gone.png');
+      expect((missing['error'] as Map)['code'], 'fetch_failed');
+
+      http = _ImageAdapter(200, Uint8List(kMaxToolImageBytes + 1));
+      container.read(modelToolDioProvider).httpClientAdapter = http;
+      final huge = await update('https://example.com/huge.png');
+      expect((huge['error'] as Map)['code'], 'invalid_arguments');
+      expect((huge['error'] as Map)['message'], contains('larger than'));
+
+      expect(proposals, isEmpty);
+      final stored = await container.read(characterRepoProvider).getById('ann');
+      expect(stored!.avatarPath, isNull);
     });
 
     test('invalid arguments name the offending path', () async {
@@ -321,7 +458,10 @@ void main() {
       expect((unknownField['error'] as Map)['code'], 'invalid_arguments');
 
       final missing = _decode(
-        await toolset.run(_turn('glaze_get_character', {'id': 'nope'}), context()),
+        await toolset.run(
+          _turn('glaze_get_character', {'id': 'nope'}),
+          context(),
+        ),
       );
       expect((missing['error'] as Map)['code'], 'resource_not_found');
 
@@ -331,18 +471,47 @@ void main() {
       expect((unknownTool['error'] as Map)['code'], 'unknown_tool');
     });
 
-    test('calls after a stop are answered as cancelled without running', () async {
-      final result = _decode(
-        await toolset.run(
-          _turn('glaze_update_character', {
-            'id': 'ann',
-            'changes': {'name': 'Anna'},
-          }),
-          context(aborted: true),
-        ),
-      );
-      expect((result['error'] as Map)['code'], 'cancelled');
-      expect(proposals, isEmpty);
-    });
+    test(
+      'calls after a stop are answered as cancelled without running',
+      () async {
+        final result = _decode(
+          await toolset.run(
+            _turn('glaze_update_character', {
+              'id': 'ann',
+              'changes': {'name': 'Anna'},
+            }),
+            context(aborted: true),
+          ),
+        );
+        expect((result['error'] as Map)['code'], 'cancelled');
+        expect(proposals, isEmpty);
+      },
+    );
+  });
+
+  test('sniffImageMime knows the four formats by signature', () {
+    expect(sniffImageMime(_png), 'image/png');
+    expect(
+      sniffImageMime(img.encodeJpg(img.Image(width: 2, height: 2))),
+      'image/jpeg',
+    );
+    expect(
+      sniffImageMime(img.encodeGif(img.Image(width: 2, height: 2))),
+      'image/gif',
+    );
+    expect(
+      sniffImageMime(
+        Uint8List.fromList([
+          ...ascii.encode('RIFF'),
+          0,
+          0,
+          0,
+          0,
+          ...ascii.encode('WEBPVP8 '),
+        ]),
+      ),
+      'image/webp',
+    );
+    expect(sniffImageMime(Uint8List.fromList(utf8.encode('<svg/>'))), isNull);
   });
 }

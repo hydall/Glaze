@@ -1,3 +1,6 @@
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
@@ -75,6 +78,14 @@ class _ProposalBody extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (proposal.avatar case final avatar?)
+              _AvatarChange(
+                after: avatar,
+                beforePath: isUpdate ? proposal.currentAvatarPath : null,
+                divider:
+                    proposal.changes.isNotEmpty ||
+                    proposal.lorebookEntryCount > 0,
+              ),
             for (final (i, change) in proposal.changes.indexed)
               GlazeExpansionTile(
                 showDivider:
@@ -139,6 +150,78 @@ class _ProposalBody extends StatelessWidget {
     ),
     null => '',
   };
+}
+
+/// The picture the card gets, next to the one it has when it already has
+/// one.
+class _AvatarChange extends StatelessWidget {
+  const _AvatarChange({
+    required this.after,
+    required this.beforePath,
+    required this.divider,
+  });
+
+  final Uint8List after;
+  final String? beforePath;
+  final bool divider;
+
+  static const double _size = 96;
+
+  @override
+  Widget build(BuildContext context) {
+    final before = beforePath;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: divider
+            ? Border(bottom: BorderSide(color: context.cs.outlineVariant))
+            : null,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('model_tools_field_avatar'.tr()),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                if (before != null && File(before).existsSync()) ...[
+                  _frame(context, Image.file(File(before), fit: BoxFit.cover)),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    child: Icon(
+                      Icons.arrow_forward_rounded,
+                      color: context.cs.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+                _frame(
+                  context,
+                  Image.memory(
+                    after,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, _, _) => Icon(
+                      Icons.broken_image_outlined,
+                      color: context.cs.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _frame(BuildContext context, Widget image) => ClipRRect(
+    borderRadius: BorderRadius.circular(12),
+    child: SizedBox(
+      width: _size,
+      height: _size * 4 / 3,
+      child: ColoredBox(color: context.inputFill, child: image),
+    ),
+  );
 }
 
 class _Caption extends StatelessWidget {

@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'character_card_fields.dart';
 
 enum CharacterProposalKind { create, update }
@@ -24,6 +26,8 @@ class CharacterToolProposal {
     required this.changes,
     this.lorebookName,
     this.lorebookEntryCount = 0,
+    this.avatar,
+    this.currentAvatarPath,
   });
 
   final CharacterProposalKind kind;
@@ -35,4 +39,11 @@ class CharacterToolProposal {
   /// The embedded lorebook a new card brings along, if any.
   final String? lorebookName;
   final int lorebookEntryCount;
+
+  /// The picture the card gets, already downloaded and checked; null when
+  /// the call leaves the picture alone.
+  final Uint8List? avatar;
+
+  /// Absolute path of the picture an edited card has now, for comparison.
+  final String? currentAvatarPath;
 }

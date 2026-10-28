@@ -4034,5 +4034,6 @@
   "model_tools_field_creator_notes": "Creator notes",
   "model_tools_field_tags": "Tags",
   "model_tools_field_creator": "Creator",
-  "model_tools_field_character_version": "Version"
+  "model_tools_field_character_version": "Version",
+  "model_tools_field_avatar": "Picture"
 }
