@@ -108,6 +108,8 @@ class ApiConfigRepo implements SyncApiConfigStore {
     firstChunkTimeoutMs: c.firstChunkTimeoutMs,
     useSystemInstruction: c.useSystemInstruction,
     tokenizer: c.tokenizer,
+    toolCalling: c.toolCalling,
+    disabledToolGroups: _decodeStringList(c.disabledToolGroupsJson),
     extraRequestParameters:
         (jsonDecode(c.extraRequestParametersJson) as List<dynamic>)
             .map(
@@ -171,10 +173,20 @@ class ApiConfigRepo implements SyncApiConfigStore {
     firstChunkTimeoutMs: Value(m.firstChunkTimeoutMs),
     useSystemInstruction: Value(m.useSystemInstruction),
     tokenizer: Value(m.tokenizer),
+    toolCalling: Value(m.toolCalling),
+    disabledToolGroupsJson: Value(jsonEncode(m.disabledToolGroups)),
     extraRequestParametersJson: Value(
       jsonEncode(
         m.extraRequestParameters.map((value) => value.toJson()).toList(),
       ),
     ),
   );
+
+  static List<String> _decodeStringList(String json) {
+    try {
+      final decoded = jsonDecode(json);
+      if (decoded is List) return decoded.whereType<String>().toList();
+    } catch (_) {}
+    return const [];
+  }
 }

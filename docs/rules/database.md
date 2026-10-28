@@ -279,6 +279,9 @@ Migration history:
   update except the turn binding: `message_id` set once from NULL, every other
   column unchanged. The old one also rejected
   `LlmRequestCaptureRepo.bindTurnMessageId`.
+- v145: added `api_configs.tool_calling` BOOLEAN DEFAULT 0 and
+  `api_configs.disabled_tool_groups_json` TEXT DEFAULT `'[]'` (per-connection
+  model tool calling; see `lib/features/model_tools/`).
 
 ---
 

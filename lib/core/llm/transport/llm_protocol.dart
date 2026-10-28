@@ -58,4 +58,16 @@ class LlmProtocol {
   };
 
   static bool isValid(String value) => all.contains(value);
+
+  /// Whether the chat can hand this protocol tools and run the calls it
+  /// answers with. The Responses API and Gemini are not wired yet: their
+  /// transports would send the definitions but never report a call back.
+  static bool supportsToolCalling(
+    String protocol, {
+    bool useResponsesApi = false,
+  }) => switch (protocol) {
+    openai || openrouter || anthropic => true,
+    customChatCompletion => !useResponsesApi,
+    _ => false,
+  };
 }

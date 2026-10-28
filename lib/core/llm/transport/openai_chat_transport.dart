@@ -286,6 +286,7 @@ class OpenAiChatTransport implements ChatTransport {
     // Kept apart from the last payload: providers that report usage send it
     // in a trailing chunk with no choices, after the one carrying the reason.
     String? finishReason;
+    final toolCalls = StreamedToolCalls();
 
     Future<void> finishAfterCancel([Object? error, StackTrace? stack]) async {
       await subscription?.cancel();
@@ -337,6 +338,7 @@ class OpenAiChatTransport implements ChatTransport {
                       fullReasoning: fullReasoning,
                       fallbackRawJsonPayload: lastRawJsonPayload,
                       finishReason: finishReason,
+                      toolCalls: toolCalls.toJson(),
                     ),
                   );
                   doneReceived = true;
@@ -355,6 +357,8 @@ class OpenAiChatTransport implements ChatTransport {
                 if (reason is String && reason.isNotEmpty) {
                   finishReason = reason;
                 }
+
+                toolCalls.consume(delta?['tool_calls']);
 
                 final contentDelta = delta?['content'] as String? ?? '';
                 // When omitReasoning is set, skip native reasoning_content so
@@ -409,7 +413,9 @@ class OpenAiChatTransport implements ChatTransport {
 
     // Server dropped connection without [DONE] — treat as normal completion
     // if any text was accumulated (provider returned 200 but omitted [DONE]).
-    if (fullText.isNotEmpty || fullReasoning.isNotEmpty) {
+    if (fullText.isNotEmpty ||
+        fullReasoning.isNotEmpty ||
+        toolCalls.isNotEmpty) {
       onComplete?.call(
         fullText,
         fullReasoning.isNotEmpty ? fullReasoning : null,
@@ -418,6 +424,7 @@ class OpenAiChatTransport implements ChatTransport {
           fullReasoning: fullReasoning,
           fallbackRawJsonPayload: lastRawJsonPayload,
           finishReason: finishReason,
+          toolCalls: toolCalls.toJson(),
         ),
       );
       return;
@@ -552,8 +559,9 @@ class OpenAiChatTransport implements ChatTransport {
     required String fullReasoning,
     String? fallbackRawJsonPayload,
     String? finishReason,
+    List<Map<String, dynamic>> toolCalls = const [],
   }) {
-    if (fullText.isEmpty && fullReasoning.isEmpty) {
+    if (fullText.isEmpty && fullReasoning.isEmpty && toolCalls.isEmpty) {
       return fallbackRawJsonPayload;
     }
 
@@ -561,6 +569,7 @@ class OpenAiChatTransport implements ChatTransport {
     if (fullReasoning.isNotEmpty) {
       message['reasoning'] = fullReasoning;
     }
+    if (toolCalls.isNotEmpty) message['tool_calls'] = toolCalls;
 
     if (fallbackRawJsonPayload != null) {
       try {
@@ -583,11 +592,7 @@ class OpenAiChatTransport implements ChatTransport {
           }).toList();
         } else {
           newChoices = [
-            {
-              'index': 0,
-              'message': message,
-              'finish_reason': ?finishReason,
-            },
+            {'index': 0, 'message': message, 'finish_reason': ?finishReason},
           ];
         }
 
@@ -645,4 +650,64 @@ class OpenAiChatTransport implements ChatTransport {
     }
     return [];
   }
+}
+
+/// Chat Completions `delta.tool_calls` fragments, assembled per call `index`:
+/// the first fragment of a call carries its id and name, the rest append to
+/// its `arguments` text.
+@visibleForTesting
+class StreamedToolCalls {
+  final Map<int, ({String? id, StringBuffer name, StringBuffer arguments})>
+  _calls = {};
+
+  bool get isNotEmpty => _calls.isNotEmpty;
+
+  void consume(Object? fragments) {
+    if (fragments is! List) return;
+    for (final (position, fragment) in fragments.indexed) {
+      if (fragment is! Map) continue;
+      final index = fragment['index'] is int
+          ? fragment['index'] as int
+          : position;
+      final id = fragment['id'];
+      final current = _calls[index];
+      final call =
+          current ??
+          (
+            id: id is String ? id : null,
+            name: StringBuffer(),
+            arguments: StringBuffer(),
+          );
+      if (current == null || (call.id == null && id is String)) {
+        _calls[index] = (
+          id: id is String ? id : call.id,
+          name: call.name,
+          arguments: call.arguments,
+        );
+      }
+      final function = fragment['function'];
+      if (function is Map) {
+        final name = function['name'];
+        // The name arrives whole on the first fragment; some proxies repeat
+        // it on every one, which appending would turn into a name twice over.
+        if (name is String && _calls[index]!.name.isEmpty) {
+          _calls[index]!.name.write(name);
+        }
+        final arguments = function['arguments'];
+        if (arguments is String) _calls[index]!.arguments.write(arguments);
+      }
+    }
+  }
+
+  List<Map<String, dynamic>> toJson() => [
+    for (final index in _calls.keys.toList()..sort())
+      {
+        'id': _calls[index]!.id ?? 'call_$index',
+        'type': 'function',
+        'function': {
+          'name': _calls[index]!.name.toString(),
+          'arguments': _calls[index]!.arguments.toString(),
+        },
+      },
+  ];
 }

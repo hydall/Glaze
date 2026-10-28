@@ -85,6 +85,14 @@ abstract class ApiConfig with _$ApiConfig {
     /// Which tokenizer counts this connection's prompts: `auto` (picked from
     /// [model]) or a `TokenizerKind.id`.
     @Default('auto') String tokenizer,
+
+    /// Offer the chat model the app's tools (`lib/features/model_tools/`).
+    /// Off by default: a provider that rejects `tools` fails the whole reply.
+    @Default(false) bool toolCalling,
+
+    /// Tool groups switched off on this connection (`ModelToolGroup.id`).
+    /// Stored as the disabled set so a group added later starts enabled.
+    @Default(<String>[]) List<String> disabledToolGroups,
   }) = _ApiConfig;
 
   factory ApiConfig.fromJson(Map<String, dynamic> json) =>

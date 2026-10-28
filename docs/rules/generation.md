@@ -34,6 +34,35 @@ Full formal invariants with code references: `docs/INVARIANTS.md`
 
 ---
 
+## Model tool calls
+
+A connection with `ApiConfig.toolCalling` on (Chat Completions, OpenRouter,
+Custom Chat Completion without Responses, Anthropic) offers the chat model the
+tools in `lib/features/model_tools/` — today the character library: list, get,
+create, update. Ordinary send/regen only; Studio and Continue never offer them.
+
+- **Calls travel in `rawResponseJson`.** Transports put them into the
+  aggregated raw response (`message.tool_calls` / Anthropic `tool_use` blocks,
+  with signed `thinking` blocks), and `parseToolTurn` reads them back. The
+  `ChatTransportOnComplete` signature does not change.
+- **One reply, several rounds.** `StreamGenerationService` answers a round that
+  ends in calls with their results (`toolFollowUpMessages`) and sends the
+  conversation again, up to `kMaxToolRounds`; the last round carries
+  `tool_choice: none`. A tool round writes nothing and keeps stream publishing
+  open; only the final text round goes through `writeAssistant`, with every
+  round's text in the one message. Each round is its own capture
+  (`withAttempt(round)`).
+- **Library writes ask first.** Create/update wait on
+  `showCharacterProposalSheet` (root navigator, one sheet at a time). A refusal
+  is a result the model reads (`user_rejected`), never an exception. Updates
+  apply the patch to the latest row through `CharacterRepo.mutate`.
+- **Stop wins.** `isAborted()` is checked after the round, after the tools ran
+  and inside each tool after the sheet; a stopped reply runs no further call.
+- Tool messages are not persisted in the chat; the next turn's prompt sees only
+  the reply text.
+
+---
+
 ## Chat and memory concurrency
 
 Chat generation and memory draft generation may overlap, including when they

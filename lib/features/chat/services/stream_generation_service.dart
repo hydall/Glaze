@@ -28,6 +28,7 @@ import '../../../core/llm/studio_regex_applicator.dart';
 import '../../../core/llm/beauty_state_parser.dart';
 import '../../../core/llm/idle_timeout_guard.dart';
 import '../../../core/llm/output_limit.dart';
+import '../../../core/llm/tools/llm_tool_call.dart';
 import '../../../core/llm/transport/call_attempt_outcome.dart';
 import '../../../core/llm/transport/chat_transport_request.dart';
 import '../../../core/llm/transport/llm_call_event.dart';
@@ -59,6 +60,9 @@ import '../state/studio_cycle_state_provider.dart';
 import 'memory_agent_recorder.dart';
 import 'saved_message_writer.dart';
 import '../../../core/plugins/plugin_hooks.dart';
+import '../../model_tools/character_tool_sheet.dart';
+import '../../model_tools/model_tool.dart';
+import '../../model_tools/model_tool_runner.dart';
 
 class StreamGenerationService {
   static final Map<String, List<Map<String, dynamic>>> _lastRequestsBySession =
@@ -760,18 +764,6 @@ class StreamGenerationService {
         throw const PromptBuildStaleException('Generation cancelled.');
       }
 
-      // Idle timeout: cancel the timer on the first chunk (text OR reasoning)
-      // so a long (but progressing) generation is never cut off. Mirrors
-      // AgentStreamRunner and AuxLlmClient patterns.
-      final idleTimeoutMs = apiConfig.firstChunkTimeoutMs > 0
-          ? apiConfig.firstChunkTimeoutMs
-          : 120000;
-      bool idleTimedOut = false;
-      final idleGuard = IdleTimeoutGuard(idleTimeoutMs, () {
-        idleTimedOut = true;
-        cancelToken.cancel('First-chunk timeout after ${idleTimeoutMs}ms');
-      });
-
       // What every field of this is for is documented on the factory. The
       // turn's message id is bound over it once the write lands
       // (`bindTurnMessageId`), which is why an ordinary turn passes none.
@@ -781,261 +773,357 @@ class StreamGenerationService {
         messageId: regenTargetId ?? continueTargetId,
       );
 
-      // One outcome per call. `onComplete` and `onError` are not exclusive on
-      // every transport — an aborted stream can reach both — and the table is
-      // keyed on `callId + attempt`, so a second write would collide with the
-      // first rather than adding to it.
-      var outcomeRecorded = false;
-      void recordOutcome({String? responseText, Object? error}) {
-        if (outcomeRecorded) return;
-        outcomeRecorded = true;
-        unawaited(
-          LlmCallEventCapture.record(
-            LlmCallEvent.transport(
-              context: captureContext,
-              attempt: describeCallAttempt(
-                attempt: 1,
-                startedAtMs: startGenTime.millisecondsSinceEpoch,
-                elapsedMs: DateTime.now()
-                    .difference(startGenTime)
-                    .inMilliseconds,
-                error: error,
+      // Tools (`lib/features/model_tools/`) run between rounds of one reply: a
+      // round that ends in calls is answered with their results and the
+      // conversation goes out again, until the model answers in text. A
+      // continuation extends a finished reply and never offers them.
+      final toolset = continueTargetId == null
+          ? ModelToolset.forConfig(apiConfig)
+          : const ModelToolset([]);
+      var requestMessages = apiMessages;
+      var round = 1;
+      late ChatTransportRequest request;
+      while (true) {
+        // Each round is one call of its own in the request inspector.
+        final roundContext = captureContext.withAttempt(round);
+        LlmToolTurn? toolTurn;
+        var toolRoundText = '';
+        // Whether this round streamed anything, rather than whether the reply
+        // has text: an earlier tool round may already have filled it.
+        var roundGotDeltas = false;
+
+        // Idle timeout: cancel the timer on the first chunk (text OR reasoning)
+        // so a long (but progressing) generation is never cut off. Mirrors
+        // AgentStreamRunner and AuxLlmClient patterns.
+        final idleTimeoutMs = apiConfig.firstChunkTimeoutMs > 0
+            ? apiConfig.firstChunkTimeoutMs
+            : 120000;
+        bool idleTimedOut = false;
+        final idleGuard = IdleTimeoutGuard(idleTimeoutMs, () {
+          idleTimedOut = true;
+          cancelToken.cancel('First-chunk timeout after ${idleTimeoutMs}ms');
+        });
+
+        // One outcome per call. `onComplete` and `onError` are not exclusive on
+        // every transport — an aborted stream can reach both — and the table is
+        // keyed on `callId + attempt`, so a second write would collide with the
+        // first rather than adding to it.
+        var outcomeRecorded = false;
+        void recordOutcome({String? responseText, Object? error}) {
+          if (outcomeRecorded) return;
+          outcomeRecorded = true;
+          unawaited(
+            LlmCallEventCapture.record(
+              LlmCallEvent.transport(
+                context: roundContext,
+                attempt: describeCallAttempt(
+                  attempt: round,
+                  startedAtMs: startGenTime.millisecondsSinceEpoch,
+                  elapsedMs: DateTime.now()
+                      .difference(startGenTime)
+                      .inMilliseconds,
+                  error: error,
+                ),
+                responseText: responseText,
               ),
-              responseText: responseText,
             ),
-          ),
-        );
-      }
-
-      final request = ChatTransportRequest.fromApiConfig(
-        apiConfig,
-        messages: apiMessages,
-        sessionId: session.id,
-        previousMessages: previousApiMessages,
-        charName: inputs.character.name,
-        userName: inputs.persona?.name ?? 'User',
-        stop: noAssistant?.stop ?? const [],
-        captureContext: captureContext,
-      );
-      _phase(GenerationPhase.waiting);
-      await transport.stream(
-        request: request,
-        cancelToken: cancelToken,
-        onUpdate: (delta, reasoningDelta) {
-          if (_isAborted()) return;
-          if (delta.isNotEmpty || reasoningDelta?.isNotEmpty == true) {
-            idleGuard.cancel();
-          }
-          accumulator.consumeDelta(delta, reasoningDelta: reasoningDelta);
-          // Reasoning-only output keeps the typing bubble on screen (the
-          // visible text is still empty), so name that phase for what it is.
-          reportStreamPhase();
-          if (!frameScheduled && !streamPublishClosed) {
-            frameScheduled = true;
-            SchedulerBinding.instance.scheduleFrameCallback((_) {
-              frameScheduled = false;
-              if (streamPublishClosed || _isAborted()) return;
-              publishStreamedText();
-            });
-          }
-        },
-        onComplete: (text, reasoning, {rawResponseJson}) {
-          if (_isAborted()) return;
-          closeStreamPublishing();
-          idleGuard.dispose();
-          // The raw body when the transport kept one: the Response tab
-          // pretty-prints it and reads the assistant text back out of it, so
-          // the payload is worth more there than the assembled text alone.
-          recordOutcome(responseText: rawResponseJson ?? text);
-          if (!apiConfig.stream &&
-              accumulator.text.isEmpty &&
-              accumulator.reasoning.isEmpty &&
-              (text.isNotEmpty ||
-                  (reasoning != null && reasoning.isNotEmpty))) {
-            accumulator.consumeDelta(text, reasoningDelta: reasoning);
-          }
-          var finalText = accumulator.text.trimLeft();
-          var finalReasoning = accumulator.reasoning.isNotEmpty
-              ? accumulator.reasoning
-              : reasoning;
-
-          finalText = _writer.sanitizeReasoningMarkers(
-            finalText,
-            reasoningTagStart,
-            reasoningTagEnd,
           );
-          if (finalReasoning != null && finalReasoning.isNotEmpty) {
-            finalReasoning = _writer.sanitizeReasoningMarkers(
-              finalReasoning,
+        }
+
+        request = ChatTransportRequest.fromApiConfig(
+          apiConfig,
+          messages: requestMessages,
+          sessionId: session.id,
+          previousMessages: previousApiMessages,
+          charName: inputs.character.name,
+          userName: inputs.persona?.name ?? 'User',
+          stop: noAssistant?.stop ?? const [],
+          tools: toolset.isEmpty ? null : toolset.definitions,
+          // The last allowed round still carries the definitions — Anthropic
+          // rejects `tool_use` history without them — but may not call.
+          toolChoice: toolset.isEmpty
+              ? null
+              : round < kMaxToolRounds
+              ? 'auto'
+              : 'none',
+          captureContext: roundContext,
+        );
+        reportedPhase = GenerationPhase.waiting;
+        _phase(GenerationPhase.waiting);
+        await transport.stream(
+          request: request,
+          cancelToken: cancelToken,
+          onUpdate: (delta, reasoningDelta) {
+            if (_isAborted()) return;
+            if (delta.isNotEmpty || reasoningDelta?.isNotEmpty == true) {
+              idleGuard.cancel();
+              roundGotDeltas = true;
+            }
+            accumulator.consumeDelta(delta, reasoningDelta: reasoningDelta);
+            // Reasoning-only output keeps the typing bubble on screen (the
+            // visible text is still empty), so name that phase for what it is.
+            reportStreamPhase();
+            if (!frameScheduled && !streamPublishClosed) {
+              frameScheduled = true;
+              SchedulerBinding.instance.scheduleFrameCallback((_) {
+                frameScheduled = false;
+                if (streamPublishClosed || _isAborted()) return;
+                publishStreamedText();
+              });
+            }
+          },
+          onComplete: (text, reasoning, {rawResponseJson}) {
+            if (_isAborted()) return;
+            final turn = toolset.isEmpty || round >= kMaxToolRounds
+                ? null
+                : parseToolTurn(rawResponseJson);
+            if (turn != null) {
+              // Not the end of the reply: publishing stays open for the next
+              // round, and nothing is written yet.
+              idleGuard.dispose();
+              recordOutcome(responseText: rawResponseJson ?? text);
+              if (!roundGotDeltas) {
+                accumulator.consumeDelta(text, reasoningDelta: reasoning);
+              }
+              toolTurn = turn;
+              toolRoundText = text;
+              return;
+            }
+            closeStreamPublishing();
+            idleGuard.dispose();
+            // The raw body when the transport kept one: the Response tab
+            // pretty-prints it and reads the assistant text back out of it, so
+            // the payload is worth more there than the assembled text alone.
+            recordOutcome(responseText: rawResponseJson ?? text);
+            if (!apiConfig.stream &&
+                !roundGotDeltas &&
+                (text.isNotEmpty ||
+                    (reasoning != null && reasoning.isNotEmpty))) {
+              accumulator.consumeDelta(text, reasoningDelta: reasoning);
+            }
+            var finalText = accumulator.text.trimLeft();
+            var finalReasoning = accumulator.reasoning.isNotEmpty
+                ? accumulator.reasoning
+                : reasoning;
+
+            finalText = _writer.sanitizeReasoningMarkers(
+              finalText,
               reasoningTagStart,
               reasoningTagEnd,
             );
-          }
+            if (finalReasoning != null && finalReasoning.isNotEmpty) {
+              finalReasoning = _writer.sanitizeReasoningMarkers(
+                finalReasoning,
+                reasoningTagStart,
+                reasoningTagEnd,
+              );
+            }
 
-          final beautyApplied = applyBeautyState(finalText, pendingSessionVars);
-          finalText = wrapLumiaOocColors(beautyApplied.text);
-          pendingSessionVars = beautyApplied.vars;
+            final beautyApplied = applyBeautyState(
+              finalText,
+              pendingSessionVars,
+            );
+            finalText = wrapLumiaOocColors(beautyApplied.text);
+            pendingSessionVars = beautyApplied.vars;
 
-          final isAllReasoning =
-              finalText.isEmpty &&
-              finalReasoning != null &&
-              finalReasoning.isNotEmpty;
-          final elapsed = DateTime.now()
-              .difference(startGenTime)
-              .inMilliseconds;
-          final timeStr = '${(elapsed / 1000).toStringAsFixed(1)}s';
-          final tokenCount = estimateTokens(finalText);
-          // Read off what the model produced, before the reasoning markers
-          // and beauty-state blocks were stripped: all of it counted against
-          // the cap.
-          final outputLimitHit = hitOutputTokenLimit(
-            text: accumulator.text,
-            reasoning: accumulator.reasoning.isNotEmpty
-                ? accumulator.reasoning
-                : reasoning,
-            rawResponse: rawResponseJson,
-            maxTokens: request.maxTokens,
-          );
-          finalState = _writer
-              .writeAssistant(
-                text: finalText,
-                reasoning: finalReasoning,
-                currentSession: saveSession ?? session,
-                isAborted: _isAborted,
-                pendingSessionVars: pendingSessionVars,
-                genTime: timeStr,
-                tokens: tokenCount,
-                rawResponse: rawResponseJson ?? text,
-                previousSwipes: previousSwipes,
-                previousSwipeId: previousSwipeId,
-                previousReasoning: previousReasoning,
-                previousGenTime: previousGenTime,
-                previousTokens: previousTokens,
-                previousSwipesMeta: previousSwipesMeta,
-                guidanceText: guidanceText,
-                guidanceType: guidanceType,
-                memoryCoverage: coverage,
-                isAllReasoning: isAllReasoning,
-                triggeredLorebooks: triggeredLorebooks,
-                triggeredMemories: triggeredMemories,
-                regenTargetId: regenTargetId,
-                visibleStartIndex: vsi,
-                outputLimitHit: outputLimitHit,
-              )
-              .copyWith(
-                promptPayload: payload,
-                mainModelContextSnapshot: MainModelContextSnapshot(
-                  providerMessages: apiMessages,
-                  promptResult: promptResult,
+            final isAllReasoning =
+                finalText.isEmpty &&
+                finalReasoning != null &&
+                finalReasoning.isNotEmpty;
+            final elapsed = DateTime.now()
+                .difference(startGenTime)
+                .inMilliseconds;
+            final timeStr = '${(elapsed / 1000).toStringAsFixed(1)}s';
+            final tokenCount = estimateTokens(finalText);
+            // Read off what the model produced, before the reasoning markers
+            // and beauty-state blocks were stripped: all of it counted against
+            // the cap.
+            final outputLimitHit = hitOutputTokenLimit(
+              text: accumulator.text,
+              reasoning: accumulator.reasoning.isNotEmpty
+                  ? accumulator.reasoning
+                  : reasoning,
+              rawResponse: rawResponseJson,
+              maxTokens: request.maxTokens,
+            );
+            finalState = _writer
+                .writeAssistant(
+                  text: finalText,
+                  reasoning: finalReasoning,
+                  currentSession: saveSession ?? session,
+                  isAborted: _isAborted,
+                  pendingSessionVars: pendingSessionVars,
+                  genTime: timeStr,
+                  tokens: tokenCount,
+                  rawResponse: rawResponseJson ?? text,
+                  previousSwipes: previousSwipes,
+                  previousSwipeId: previousSwipeId,
+                  previousReasoning: previousReasoning,
+                  previousGenTime: previousGenTime,
+                  previousTokens: previousTokens,
+                  previousSwipesMeta: previousSwipesMeta,
+                  guidanceText: guidanceText,
+                  guidanceType: guidanceType,
+                  memoryCoverage: coverage,
+                  isAllReasoning: isAllReasoning,
+                  triggeredLorebooks: triggeredLorebooks,
+                  triggeredMemories: triggeredMemories,
+                  regenTargetId: regenTargetId,
+                  visibleStartIndex: vsi,
+                  outputLimitHit: outputLimitHit,
+                )
+                .copyWith(
                   promptPayload: payload,
-                  isStudioFinalWriter: false,
+                  mainModelContextSnapshot: MainModelContextSnapshot(
+                    providerMessages: apiMessages,
+                    promptResult: promptResult,
+                    promptPayload: payload,
+                    isStudioFinalWriter: false,
+                  ),
+                );
+            _recordModelUsage(apiConfig.model);
+            _bindTurnCaptures(
+              session.id,
+              finalState?.session == null
+                  ? null
+                  : _lastAssistantId(finalState!.session!, regenTargetId),
+              turnStartedAtMs,
+            );
+            if (memoryDiagnostics is Map<String, dynamic> &&
+                finalState?.session != null) {
+              final messageId = _lastAssistantId(
+                finalState!.session!,
+                regenTargetId,
+              );
+              _ref
+                  .read(lastMemoryActivityProvider(_charId).notifier)
+                  .state = MemoryActivityState(
+                sessionId: finalState!.session!.id,
+                messageId: messageId,
+                diagnostics: Map<String, dynamic>.from(memoryDiagnostics),
+                updatedAtMillis: DateTime.now().millisecondsSinceEpoch,
+              );
+              _recorder.recordMemoryAgentOperation(
+                finalState!.session!.id,
+                messageId,
+                memoryDiagnostics,
+              );
+            } else {
+              _ref.read(lastMemoryActivityProvider(_charId).notifier).state =
+                  null;
+            }
+            // Post-turn memory pipeline (Phase G4): fire-and-forget.
+            // Does NOT block generation or user interaction.
+            if (finalState?.session != null) {
+              unawaited(
+                _ref
+                    .read(memoryPostTurnServiceProvider)
+                    .runPostTurn(finalState!.session!.id),
+              );
+            }
+          },
+          onError: (error) {
+            closeStreamPublishing();
+            idleGuard.dispose();
+            if (idleTimedOut) {
+              final msg = 'error_first_chunk_timeout'.tr(
+                namedArgs: {'seconds': '${idleTimeoutMs ~/ 1000}'},
+              );
+              // A first-chunk timeout reaches here as the cancel it was
+              // implemented as. Record it as the timeout the reader saw, so the
+              // inspector does not file it under "you stopped it".
+              recordOutcome(
+                error: TimeoutException(
+                  msg,
+                  Duration(milliseconds: idleTimeoutMs),
                 ),
               );
-          _recordModelUsage(apiConfig.model);
-          _bindTurnCaptures(
-            session.id,
-            finalState?.session == null
-                ? null
-                : _lastAssistantId(finalState!.session!, regenTargetId),
-            turnStartedAtMs,
-          );
-          if (memoryDiagnostics is Map<String, dynamic> &&
-              finalState?.session != null) {
-            final messageId = _lastAssistantId(
-              finalState!.session!,
-              regenTargetId,
-            );
-            _ref
-                .read(lastMemoryActivityProvider(_charId).notifier)
-                .state = MemoryActivityState(
-              sessionId: finalState!.session!.id,
-              messageId: messageId,
-              diagnostics: Map<String, dynamic>.from(memoryDiagnostics),
-              updatedAtMillis: DateTime.now().millisecondsSinceEpoch,
-            );
-            _recorder.recordMemoryAgentOperation(
-              finalState!.session!.id,
-              messageId,
-              memoryDiagnostics,
-            );
-          } else {
-            _ref.read(lastMemoryActivityProvider(_charId).notifier).state =
-                null;
-          }
-          // Post-turn memory pipeline (Phase G4): fire-and-forget.
-          // Does NOT block generation or user interaction.
-          if (finalState?.session != null) {
-            unawaited(
-              _ref
-                  .read(memoryPostTurnServiceProvider)
-                  .runPostTurn(finalState!.session!.id),
-            );
-          }
-        },
-        onError: (error) {
-          closeStreamPublishing();
-          idleGuard.dispose();
-          if (idleTimedOut) {
-            final msg = 'error_first_chunk_timeout'.tr(
-              namedArgs: {'seconds': '${idleTimeoutMs ~/ 1000}'},
-            );
-            // A first-chunk timeout reaches here as the cancel it was
-            // implemented as. Record it as the timeout the reader saw, so the
-            // inspector does not file it under "you stopped it".
-            recordOutcome(
-              error: TimeoutException(
-                msg,
-                Duration(milliseconds: idleTimeoutMs),
-              ),
-            );
-            if (continueTargetId != null) {
-              finalState = _continueFailure(msg, session, vsi);
+              if (continueTargetId != null) {
+                finalState = _continueFailure(msg, session, vsi);
+              } else if (regenTargetId != null && saveSession != null) {
+                finalState = _writer.writeRegenError(
+                  errorText: msg,
+                  saveSession: saveSession,
+                  regenTargetId: regenTargetId,
+                  visibleStartIndex: vsi,
+                );
+              } else {
+                finalState = _writer.writeError(
+                  errorText: msg,
+                  currentSession: session,
+                  visibleStartIndex: vsi,
+                );
+              }
+              return;
+            }
+            recordOutcome(error: error);
+            final isCancelled =
+                (error is DioException &&
+                    error.type == DioExceptionType.cancel) ||
+                cancelToken.isCancelled ||
+                _isAborted();
+            if (isCancelled) {
+              finalState = ChatState(
+                session: session,
+                isGenerating: false,
+                visibleStartIndex: vsi,
+              );
+            } else if (continueTargetId != null) {
+              finalState = _continueFailure(formatError(error), session, vsi);
             } else if (regenTargetId != null && saveSession != null) {
               finalState = _writer.writeRegenError(
-                errorText: msg,
+                errorText: formatError(error),
                 saveSession: saveSession,
                 regenTargetId: regenTargetId,
                 visibleStartIndex: vsi,
               );
             } else {
               finalState = _writer.writeError(
-                errorText: msg,
+                errorText: formatError(error),
                 currentSession: session,
                 visibleStartIndex: vsi,
               );
             }
-            return;
-          }
-          recordOutcome(error: error);
-          final isCancelled =
-              (error is DioException &&
-                  error.type == DioExceptionType.cancel) ||
-              cancelToken.isCancelled ||
-              _isAborted();
-          if (isCancelled) {
-            finalState = ChatState(
-              session: session,
-              isGenerating: false,
-              visibleStartIndex: vsi,
-            );
-          } else if (continueTargetId != null) {
-            finalState = _continueFailure(formatError(error), session, vsi);
-          } else if (regenTargetId != null && saveSession != null) {
-            finalState = _writer.writeRegenError(
-              errorText: formatError(error),
-              saveSession: saveSession,
-              regenTargetId: regenTargetId,
-              visibleStartIndex: vsi,
-            );
-          } else {
-            finalState = _writer.writeError(
-              errorText: formatError(error),
-              currentSession: session,
-              visibleStartIndex: vsi,
-            );
-          }
-        },
-      );
+          },
+        );
+        final turn = toolTurn;
+        if (turn == null || _isAborted()) break;
+
+        _phase(GenerationPhase.tools);
+        final results = await toolset.run(
+          turn,
+          ModelToolContext(
+            ref: _ref,
+            charId: _charId,
+            isAborted: _isAborted,
+            confirm: showCharacterProposalSheet,
+          ),
+        );
+        if (_isAborted()) break;
+        _log(
+          'tool round char=$_charId session=${session.id} round=$round '
+          'calls=${turn.calls.map((c) => c.name).join(',')}',
+        );
+        // A trailing assistant prefill is folded into the round that answered
+        // it; sending both would put two assistant turns back to back.
+        final base =
+            requestMessages.isNotEmpty &&
+                requestMessages.last['role'] == 'assistant'
+            ? requestMessages.sublist(0, requestMessages.length - 1)
+            : requestMessages;
+        requestMessages = [
+          ...base,
+          ...toolFollowUpMessages(
+            assistantText: toolRoundText,
+            turn: turn,
+            results: results,
+          ),
+        ];
+        if (accumulator.text.trim().isNotEmpty) {
+          accumulator.consumeDelta('\n\n');
+        }
+        round++;
+      }
       // Neither callback is guaranteed on every transport path; the window
       // must be shut before the pipeline clears the streaming state.
       closeStreamPublishing();

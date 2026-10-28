@@ -36,6 +36,7 @@ import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/sheet_view.dart';
 import 'api_config_draft.dart';
 import 'context_budget_check.dart';
+import '../model_tools/model_tool.dart';
 import '../studio/widgets/studio_slots_tab.dart';
 import 'api_list_provider.dart';
 import 'api_preset_selection_provider.dart';
@@ -151,6 +152,8 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   bool _requestReasoning = false;
   bool _customUseResponsesApi = false;
   bool _useSystemInstruction = true;
+  bool _toolCalling = false;
+  List<String> _disabledToolGroups = const [];
   bool _showNativeReasoning = true;
   bool _excludeReasoningFromContextBudget = false;
   String _reasoningEffort = 'medium';
@@ -476,6 +479,8 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       _requestReasoning = values.requestReasoning;
       _customUseResponsesApi = values.useResponsesApi;
       _useSystemInstruction = values.useSystemInstruction;
+      _toolCalling = values.toolCalling;
+      _disabledToolGroups = values.disabledToolGroups;
       _showNativeReasoning = values.showNativeReasoning;
       _excludeReasoningFromContextBudget =
           values.excludeReasoningFromContextBudget;
@@ -558,6 +563,8 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
         requestReasoning: _requestReasoning,
         useResponsesApi: _customUseResponsesApi,
         useSystemInstruction: _useSystemInstruction,
+        toolCalling: _toolCalling,
+        disabledToolGroups: _disabledToolGroups,
         showNativeReasoning: _showNativeReasoning,
         excludeReasoningFromContextBudget: _excludeReasoningFromContextBudget,
         reasoningEffort: _reasoningEffort,
@@ -955,6 +962,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
           _buildContextGroup(),
           _buildGenerationGroup(),
           _buildReasoningGroup(),
+          _buildToolsGroup(),
           // Everything below is for troubleshooting or provider quirks, not
           // day-to-day tuning — one tap away instead of in the way.
           MenuCollapsibleSection(
@@ -1650,6 +1658,50 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
               _scheduleSave();
             },
           ),
+      ],
+    );
+  }
+
+  bool get _supportsToolCalling => LlmProtocol.supportsToolCalling(
+    _protocol,
+    useResponsesApi: _useResponsesApi,
+  );
+
+  /// Tools the chat model may call (`lib/features/model_tools/`). Hidden for
+  /// protocols whose transport cannot report a call back.
+  Widget _buildToolsGroup() {
+    if (!_supportsToolCalling) return const SizedBox.shrink();
+    return MenuGroup(
+      compact: true,
+      header: 'section_model_tools'.tr(),
+      items: [
+        MenuSwitchItem(
+          label: 'label_tool_calling'.tr(),
+          description: 'desc_tool_calling'.tr(),
+          value: _toolCalling,
+          onChanged: (v) {
+            setState(() => _toolCalling = v);
+            _scheduleSave();
+          },
+        ),
+        if (_toolCalling)
+          for (final group in ModelToolGroup.values)
+            MenuSwitchItem(
+              label: 'label_tool_group_${group.id}'.tr(),
+              description: 'desc_tool_group_${group.id}'.tr(),
+              value: !_disabledToolGroups.contains(group.id),
+              onChanged: (v) {
+                setState(() {
+                  _disabledToolGroups = v
+                      ? [
+                          for (final id in _disabledToolGroups)
+                            if (id != group.id) id,
+                        ]
+                      : [..._disabledToolGroups, group.id];
+                });
+                _scheduleSave();
+              },
+            ),
       ],
     );
   }

@@ -346,6 +346,17 @@ class CharactersNotifier extends AsyncNotifier<List<Character>> {
     ref.invalidateSelf();
   }
 
+  /// Changes the stored card through [CharacterRepo.mutate]; null when it no
+  /// longer exists.
+  Future<Character?> mutate(
+    String id,
+    Character Function(Character latest) mutate,
+  ) async {
+    final updated = await ref.read(characterRepoProvider).mutate(id, mutate);
+    if (updated != null) ref.invalidateSelf();
+    return updated;
+  }
+
   /// Creates a new variation cloned from [source] (copy-of-current-card). The
   /// new row joins [source]'s variation group at the next free order, gets its
   /// own copied avatar file (so deleting it never orphans a sibling), and

@@ -123,6 +123,16 @@ class ApiConfigDraft {
       promptPostProcessing: protocol == LlmProtocol.customChatCompletion
           ? PromptPostProcessing.normalize(values.promptPostProcessing)
           : PromptPostProcessing.none,
+      // The editor hides the switch where the transport cannot report calls
+      // back, so a stored `true` there would send tools nobody runs.
+      toolCalling:
+          values.toolCalling &&
+          LlmProtocol.supportsToolCalling(
+            protocol,
+            useResponsesApi:
+                protocol == LlmProtocol.customChatCompletion &&
+                values.useResponsesApi,
+          ),
     );
   }
 
@@ -210,6 +220,8 @@ class ApiConfigDraft {
       promptPostProcessing: normalized.promptPostProcessing,
       protocol: normalized.protocol,
       extraRequestParameters: normalized.extraRequestParameters,
+      toolCalling: normalized.toolCalling,
+      disabledToolGroups: normalized.disabledToolGroups,
     );
   }
 

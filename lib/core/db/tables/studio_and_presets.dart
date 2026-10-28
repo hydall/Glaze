@@ -186,6 +186,9 @@ class ApiConfigs extends Table {
   TextColumn get extraRequestParametersJson =>
       text().withDefault(const Constant('[]'))();
   TextColumn get tokenizer => text().withDefault(const Constant('auto'))();
+  BoolColumn get toolCalling => boolean().withDefault(const Constant(false))();
+  TextColumn get disabledToolGroupsJson =>
+      text().withDefault(const Constant('[]'))();
 
   @override
   Set<Column> get primaryKey => {configId};

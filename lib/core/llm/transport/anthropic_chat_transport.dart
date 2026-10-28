@@ -235,6 +235,32 @@ class AnthropicChatTransport implements ChatTransport {
     final stop = request.stop.where((s) => s.trim().isNotEmpty).toList();
     if (stop.isNotEmpty) body['stop_sequences'] = stop;
 
+    final tools = request.tools;
+    if (tools != null && tools.isNotEmpty) {
+      body['tools'] = [
+        for (final tool in tools)
+          if (tool['function'] case final Map<dynamic, dynamic> function)
+            {
+              'name': function['name'],
+              if (function['description'] != null)
+                'description': function['description'],
+              'input_schema':
+                  function['parameters'] ??
+                  const <String, dynamic>{
+                    'type': 'object',
+                    'properties': <String, dynamic>{},
+                  },
+            },
+      ];
+      body['tool_choice'] = {
+        'type': switch (request.toolChoice) {
+          'none' => 'none',
+          'required' => 'any',
+          _ => 'auto',
+        },
+      };
+    }
+
     final betaHeaders = <String>[];
     if (ttl != null) {
       betaHeaders
@@ -336,6 +362,7 @@ class AnthropicChatTransport implements ChatTransport {
     String? stopReason;
     var doneReceived = false;
     String? lastRawJsonPayload;
+    final blocks = _AnthropicStreamBlocks();
 
     final completer = Completer<void>();
     StreamSubscription<List<int>>? subscription;
@@ -371,7 +398,10 @@ class AnthropicChatTransport implements ChatTransport {
             final json = jsonDecode(payload) as Map<String, dynamic>;
             final type = json['type'] as String?;
 
-            if (type == 'content_block_delta') {
+            if (type == 'content_block_start') {
+              blocks.start(json);
+            } else if (type == 'content_block_delta') {
+              blocks.delta(json);
               final delta = json['delta'] as Map<String, dynamic>?;
               final deltaType = delta?['type'] as String?;
               if (deltaType == 'text_delta') {
@@ -406,6 +436,7 @@ class AnthropicChatTransport implements ChatTransport {
                     usage: usage,
                     stopReason: stopReason,
                     fallbackPayload: lastRawJsonPayload,
+                    blocks: blocks,
                   ),
                 );
                 doneReceived = true;
@@ -445,7 +476,10 @@ class AnthropicChatTransport implements ChatTransport {
 
     if (cancelToken?.isCancelled == true) return;
 
-    if (!doneReceived && (fullText.isNotEmpty || fullReasoning.isNotEmpty)) {
+    if (!doneReceived &&
+        (fullText.isNotEmpty ||
+            fullReasoning.isNotEmpty ||
+            blocks.hasToolUse)) {
       onComplete?.call(
         fullText,
         fullReasoning.isNotEmpty ? fullReasoning : null,
@@ -455,6 +489,7 @@ class AnthropicChatTransport implements ChatTransport {
           usage: usage,
           stopReason: stopReason,
           fallbackPayload: lastRawJsonPayload,
+          blocks: blocks,
         ),
       );
     } else if (!doneReceived) {
@@ -639,11 +674,18 @@ class AnthropicChatTransport implements ChatTransport {
     required Map<String, dynamic> usage,
     String? stopReason,
     String? fallbackPayload,
+    _AnthropicStreamBlocks? blocks,
   }) {
+    // The streamed thinking blocks carry the signatures a tool-use follow-up
+    // has to replay; the merged text alone would be rejected.
+    final thinking = blocks?.thinkingBlocks ?? const [];
     final content = <Map<String, dynamic>>[
-      if (fullReasoning.isNotEmpty)
+      if (thinking.isNotEmpty)
+        ...thinking
+      else if (fullReasoning.isNotEmpty)
         {'type': 'thinking', 'thinking': fullReasoning},
       {'type': 'text', 'text': fullText},
+      ...?blocks?.toolUseBlocks,
     ];
     return jsonEncode({
       'type': 'message',
@@ -653,5 +695,83 @@ class AnthropicChatTransport implements ChatTransport {
       if (usage.isNotEmpty) 'usage': usage,
       'last_event': ?fallbackPayload,
     });
+  }
+}
+
+/// Content blocks of one streamed Anthropic message, by their stream index:
+/// thinking (with its signature) and `tool_use` (with its input assembled from
+/// `input_json_delta` fragments). Text is accumulated by the caller.
+class _AnthropicStreamBlocks {
+  final Map<int, Map<String, dynamic>> _thinking = {};
+  final Map<int, ({String id, String name, StringBuffer input})> _toolUse = {};
+
+  bool get hasToolUse => _toolUse.isNotEmpty;
+
+  void start(Map<String, dynamic> event) {
+    final index = event['index'];
+    final block = event['content_block'];
+    if (index is! int || block is! Map) return;
+    switch (block['type']) {
+      case 'thinking':
+        _thinking[index] = {
+          'type': 'thinking',
+          'thinking': block['thinking'] as String? ?? '',
+          'signature': ?block['signature'],
+        };
+      case 'redacted_thinking':
+        _thinking[index] = Map<String, dynamic>.from(block);
+      case 'tool_use':
+        _toolUse[index] = (
+          id: block['id'] as String? ?? 'toolu_$index',
+          name: block['name'] as String? ?? '',
+          input: StringBuffer(),
+        );
+    }
+  }
+
+  void delta(Map<String, dynamic> event) {
+    final index = event['index'];
+    final delta = event['delta'];
+    if (index is! int || delta is! Map) return;
+    switch (delta['type']) {
+      case 'thinking_delta':
+        final block = _thinking[index];
+        if (block != null) {
+          block['thinking'] = '${block['thinking']}${delta['thinking'] ?? ''}';
+        }
+      case 'signature_delta':
+        final block = _thinking[index];
+        if (block != null) {
+          block['signature'] =
+              '${block['signature'] ?? ''}${delta['signature'] ?? ''}';
+        }
+      case 'input_json_delta':
+        _toolUse[index]?.input.write(delta['partial_json'] ?? '');
+    }
+  }
+
+  List<Map<String, dynamic>> get thinkingBlocks => [
+    for (final index in _thinking.keys.toList()..sort()) _thinking[index]!,
+  ];
+
+  List<Map<String, dynamic>> get toolUseBlocks => [
+    for (final index in _toolUse.keys.toList()..sort())
+      {
+        'type': 'tool_use',
+        'id': _toolUse[index]!.id,
+        'name': _toolUse[index]!.name,
+        'input': _decodeInput(_toolUse[index]!.input.toString()),
+      },
+  ];
+
+  /// A model that streamed no input at all called the tool without
+  /// arguments. Unparseable input is kept as text so the tool can report it.
+  static Object _decodeInput(String text) {
+    if (text.trim().isEmpty) return const <String, dynamic>{};
+    try {
+      return jsonDecode(text) as Object;
+    } catch (_) {
+      return text;
+    }
   }
 }
