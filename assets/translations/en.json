@@ -1618,6 +1618,7 @@
   "catalog_ctx_extra_ph": "Optional custom context…",
   "catalog_ctx_empty": "Content is empty",
   "catalog_ctx_card_pending": "Recovered from the character during extraction",
+  "catalog_ctx_greetings_pending": "Not in the catalog — taken from the chat during extraction",
   "catalog_ctx_tokens": "{} tokens",
   "catalog_lorebooks_key_context_title": "Context for key inference",
   "catalog_lorebooks_key_context_hint": "Sent to the model so it can infer trigger keys — never written back as entries. Tap a source to see what it sends.",

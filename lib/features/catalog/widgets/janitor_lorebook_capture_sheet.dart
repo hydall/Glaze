@@ -1657,7 +1657,16 @@ class _JanitorLorebookCaptureState
         ),
         ContextSourceTile(
           label: 'catalog_ctx_greetings'.tr(),
-          content: _previewCtx.greetings,
+          // A closed card withholds its greetings from the catalog metadata;
+          // the capture's chat still carries them, so like the card they are
+          // shown once a capture has run and stay selectable before it.
+          content: _previewCtx.greetings.trim().isNotEmpty
+              ? _previewCtx.greetings
+              : (_extraction ?? _importCapture)?.greetingsContext ?? '',
+          emptyNote: (_extraction ?? _importCapture) == null
+              ? 'catalog_ctx_greetings_pending'.tr()
+              : null,
+          pending: (_extraction ?? _importCapture) == null,
           value: _extractSources.greetings,
           onChanged: (v) => setState(() => _extractSources.greetings = v),
         ),

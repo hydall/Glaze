@@ -738,7 +738,9 @@ class JanitorWebViewProxy {
   /// the card text (+ optional [triggerText], e.g. the catalog description) to
   /// maximise lorebook keyword matches, and return the captured payload. Pass
   /// `includeCard: false` to leave the recovered card out of that second send —
-  /// the user deselected it as a trigger source. The chat, the
+  /// the user deselected it as a trigger source. `includeChatGreetings: true`
+  /// appends the greetings the capture's chat carries — for a closed card they
+  /// exist nowhere the caller could read them beforehand. The chat, the
   /// persona and the throwaway proxy preset are all removed afterwards, and the
   /// account's API settings are restored. Throws on timeout / login / CF failure.
   ///
@@ -754,6 +756,7 @@ class JanitorWebViewProxy {
     required String characterId,
     String triggerText = '',
     bool includeCard = true,
+    bool includeChatGreetings = false,
     JanitorLoreBudget? loreBudget,
     void Function(String phase)? onPhase,
   }) =>
@@ -762,6 +765,7 @@ class JanitorWebViewProxy {
           characterId,
           triggerText,
           includeCard,
+          includeChatGreetings,
           loreBudget,
           onPhase,
         ),
@@ -777,6 +781,7 @@ class JanitorWebViewProxy {
     String characterId,
     String triggerText,
     bool includeCard,
+    bool includeChatGreetings,
     JanitorLoreBudget? loreBudget,
     void Function(String phase)? onPhase,
   ) async {
@@ -871,6 +876,8 @@ class JanitorWebViewProxy {
           final parts = <String>[
             if (includeCard && card.isNotEmpty) card,
             if (triggerText.trim().isNotEmpty) triggerText.trim(),
+            if (includeChatGreetings && greetings.isNotEmpty)
+              greetings.join('\n\n---\n\n'),
           ];
           trigger = parts.isEmpty ? '.' : parts.join('\n\n');
           phase('triggering (lorebook)');

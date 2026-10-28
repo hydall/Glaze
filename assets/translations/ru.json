@@ -1679,6 +1679,7 @@
   "catalog_ctx_extra_ph": "Опциональный контекст…",
   "catalog_ctx_empty": "Содержание пусто",
   "catalog_ctx_card_pending": "Восстанавливается из персонажа при извлечении",
+  "catalog_ctx_greetings_pending": "Нет в каталоге — берутся из чата при извлечении",
   "catalog_ctx_tokens": "{} ток.",
   "catalog_lorebooks_key_context_title": "Контекст для подбора ключей",
   "catalog_lorebooks_key_context_hint": "Отправляется модели, чтобы она подобрала ключи срабатывания, — и никогда не попадает в записи. Нажмите на источник, чтобы увидеть, что именно уйдёт.",
