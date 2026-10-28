@@ -207,9 +207,9 @@ test('a tag inside backticks is shown, not rendered', async ({ page }) => {
     const root = window.harness.currentRoot();
     return {
       codeTexts: Array.from(root.querySelectorAll('code')).map((c) => c.textContent),
-      // The code-block wrapper is ours; any other <div> would mean the tag
-      // inside the backticks was parsed as markup.
-      realDivs: root.querySelectorAll('div:not(.code-block-wrapper)').length,
+      // The code-block wrapper and its header are ours; any other <div> would
+      // mean the tag inside the backticks was parsed as markup.
+      realDivs: root.querySelectorAll('div:not(.code-block-wrapper, .code-block-header)').length,
     };
   });
   expect(shape.codeTexts).toContain('<div>');

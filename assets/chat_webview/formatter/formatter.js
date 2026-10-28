@@ -40,6 +40,11 @@ export {
   parseImagePendingElement,
 } from './image_blocks.js';
 
+// Both icons ship in the button; `data-copied` decides which one shows.
+const COPY_ICON =
+  '<svg class="code-copy-icon" viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>' +
+  '<svg class="code-copied-icon" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>';
+
 function escapeHtml(value) {
   return String(value == null ? '' : value)
     .replace(/&/g, '&amp;')
@@ -137,8 +142,12 @@ export class Formatter {
     switch (region.kind) {
       case 'code': {
         const langAttr = region.lang ? ` class="language-${region.lang}"` : '';
-        const langLabel = region.lang ? `<span class="code-lang">${region.lang}</span>` : '';
-        return `<div class="code-block-wrapper">${langLabel}` +
+        // The header is ours, not the message's: the copy button is handled by
+        // the `copy-code` action in bridge/interaction_dispatch.js.
+        return '<div class="code-block-wrapper"><div class="code-block-header">' +
+          `<span class="code-lang">${region.lang}</span>` +
+          '<button type="button" class="code-copy-btn" data-action="copy-code" ' +
+          `aria-label="Copy code">${COPY_ICON}</button></div>` +
           `<pre><code${langAttr}>${escapeHtml(region.code)}</code></pre></div>`;
       }
       case 'inline-code':

@@ -85,11 +85,29 @@ export const SHADOW_STYLE = `
      contents so the node lays out where the card expected it to, while
      staying under the message's own stylesheet. */
   .glaze-message .glaze-message-overlay { display: contents; }
-  .glaze-message .code-lang {
-    position: absolute; top: 4px; right: 8px;
-    font-size: 10px; opacity: 0.4;
-    text-transform: uppercase; font-family: monospace;
+  .glaze-message .code-block-header {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; padding: 2px 4px 2px 12px;
+    background: rgba(0,0,0,0.28);
+    border-radius: 8px 8px 0 0;
   }
+  .glaze-message .code-block-wrapper > pre { margin: 0; border-radius: 0 0 8px 8px; }
+  .glaze-message .code-lang {
+    font-size: 11px; opacity: 0.6;
+    text-transform: lowercase; font-family: 'Consolas','Monaco','Courier New',monospace;
+  }
+  .glaze-message .code-copy-btn {
+    display: flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; padding: 0;
+    background: none; border: none; border-radius: 6px;
+    color: inherit; opacity: 0.6; cursor: pointer;
+  }
+  .glaze-message .code-copy-btn:hover { opacity: 1; background: rgba(255,255,255,0.08); }
+  .glaze-message .code-copy-btn svg { width: 16px; height: 16px; fill: currentColor; }
+  .glaze-message .code-copy-btn .code-copied-icon,
+  .glaze-message .code-copy-btn[data-copied] .code-copy-icon { display: none; }
+  .glaze-message .code-copy-btn[data-copied] .code-copied-icon { display: block; }
+  .glaze-message .code-copy-btn[data-copied] { opacity: 1; }
   .glaze-message .janitor-img-wrapper {
     display: inline-block; position: relative; max-width: 100%; margin: 4px 0;
   }
