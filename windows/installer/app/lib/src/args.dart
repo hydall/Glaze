@@ -9,6 +9,9 @@
 ///   again.
 /// - `--uninstall`: the Apps entry. `--silent` with it removes the program and
 ///   keeps the data, with no window.
+/// - `--import-from <folder>`: the folder of a portable Glaze the in-app
+///   updater was started from. Its WebView2 profile (catalog logins) is
+///   copied into a fresh install, which would otherwise start logged out.
 /// - `--demo`: no changes to the system, for previews and tests.
 enum SetupMode { install, update, uninstall }
 
@@ -18,6 +21,7 @@ class SetupArgs {
   final bool demo;
   final String? package;
   final String? payload;
+  final String? importFrom;
 
   const SetupArgs({
     this.mode = SetupMode.install,
@@ -25,6 +29,7 @@ class SetupArgs {
     this.demo = false,
     this.package,
     this.payload,
+    this.importFrom,
   });
 
   factory SetupArgs.parse(List<String> args) {
@@ -33,6 +38,7 @@ class SetupArgs {
     var demo = false;
     String? package;
     String? payload;
+    String? importFrom;
     for (var i = 0; i < args.length; i++) {
       String? next() => i + 1 < args.length ? args[++i] : null;
       switch (args[i].toLowerCase()) {
@@ -48,6 +54,8 @@ class SetupArgs {
           package = next();
         case '--payload':
           payload = next();
+        case '--import-from':
+          importFrom = next();
       }
     }
     return SetupArgs(
@@ -58,6 +66,7 @@ class SetupArgs {
       demo: demo,
       package: package,
       payload: payload,
+      importFrom: importFrom,
     );
   }
 }

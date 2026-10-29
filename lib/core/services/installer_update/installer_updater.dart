@@ -170,9 +170,12 @@ class InstallerUpdater {
   /// as an update: it shows its progress but asks nothing, waits for Glaze to
   /// close, and starts it again when done; the caller quits right after.
   /// Otherwise it opens on its first page, so a zip copy's user sees where
-  /// Glaze is going.
+  /// Glaze is going, and is told this copy's folder, whose WebView2 profile
+  /// (catalog logins) it copies into the fresh install.
   Future<void> launch(File installer, {required bool silent}) async {
-    final args = silent ? const ['--update'] : const <String>[];
+    final args = silent
+        ? const ['--update']
+        : ['--import-from', p.dirname(_executablePath)];
     try {
       await _startProcess(installer.path, args);
     } on ProcessException catch (e) {

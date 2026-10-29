@@ -322,7 +322,8 @@ void main() {
       await updater({}, started: started).launch(file, silent: true);
       await updater({}, started: started).launch(file, silent: false);
       expect(started.first, [file.path, '--update']);
-      expect(started.last, [file.path]);
+      // A zip copy hands over its folder, for its WebView2 profile.
+      expect(started.last, [file.path, '--import-from', tmp.path]);
     });
 
     test(

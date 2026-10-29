@@ -29,6 +29,9 @@ abstract class SetupSystem {
 
   Future<void> createShortcut(String link, {required String target});
 
+  /// What the shortcut at [link] starts, or null when it cannot be read.
+  Future<String?> shortcutTarget(String link);
+
   /// Whether a running program holds [exe] open — Windows locks a running
   /// executable against writing.
   Future<bool> isRunning(String exe);
@@ -123,6 +126,21 @@ class WindowsSystem implements SetupSystem {
       r' $s.Save()',
       env: {'GLZ_LINK': link, 'GLZ_TARGET': target},
     );
+  }
+
+  @override
+  Future<String?> shortcutTarget(String link) async {
+    try {
+      final out = await _powershell(
+        r'(New-Object -ComObject WScript.Shell).CreateShortcut($env:GLZ_LINK)'
+        r'.TargetPath',
+        env: {'GLZ_LINK': link},
+      );
+      final target = out.trim();
+      return target.isEmpty ? null : target;
+    } on ProcessException {
+      return null;
+    }
   }
 
   @override

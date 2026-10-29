@@ -82,6 +82,7 @@ class DemoEngine extends SetupEngine {
     required File? package,
     required bool desktopShortcut,
     required SetupListener listener,
+    String? importFrom,
   }) async {
     listener.onStep(SetupStep.close);
     listener.onProgress(0.02);
@@ -163,6 +164,8 @@ class _NoSystem implements SetupSystem {
   @override
   Future<void> createShortcut(String link, {required String target}) async {}
   // The demo engine's own flag decides; this only ever runs while it is set.
+  @override
+  Future<String?> shortcutTarget(String link) async => null;
   @override
   Future<bool> isRunning(String exe) async => _running;
   @override

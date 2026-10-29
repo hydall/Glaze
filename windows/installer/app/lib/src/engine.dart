@@ -111,8 +111,10 @@ class SetupEngine {
     required File? package,
     required bool desktopShortcut,
     required SetupListener listener,
+    String? importFrom,
   }) async {
     final paths = await this.paths();
+    final existing = await existingInstall() ?? const <String, String>{};
     final zip = ZipReader(payload);
 
     listener.onStep(SetupStep.close);
@@ -154,14 +156,29 @@ class SetupEngine {
       await writeUninstaller(package, File(paths.uninstaller));
     }
 
+    if (importFrom != null) {
+      await _importProfile(importFrom, paths, listener);
+    }
+
     listener.onStep(SetupStep.shortcuts);
     listener.onDetail('');
-    await system.createShortcut(paths.startMenuLink, target: paths.exe);
-    final desktop = File(paths.desktopLink);
+    final startLink = await _freeLink(
+      _recorded(existing, 'GlazeStartMenuLink') ?? paths.startMenuLink,
+      paths.exe,
+    );
+    await system.createShortcut(startLink, target: paths.exe);
+    String? desktopLink;
     if (desktopShortcut) {
-      await system.createShortcut(paths.desktopLink, target: paths.exe);
-    } else if (await desktop.exists()) {
-      await desktop.delete();
+      desktopLink = await _freeLink(
+        _recorded(existing, 'GlazeDesktopLink') ?? paths.desktopLink,
+        paths.exe,
+      );
+      await system.createShortcut(desktopLink, target: paths.exe);
+    } else {
+      await _deleteOwnLinks([
+        existing['GlazeDesktopLink'],
+        paths.desktopLink,
+      ], paths.exe);
     }
     listener.onProgress(0.95);
 
@@ -181,6 +198,10 @@ class SetupEngine {
       'GlazeChannel': channel.id,
       'GlazeCommit': setupCommit,
       'GlazeDesktopShortcut': desktopShortcut ? 1 : 0,
+      // Where this install's shortcuts went, so the uninstaller removes those
+      // and nothing else of the same name.
+      'GlazeStartMenuLink': startLink,
+      'GlazeDesktopLink': desktopLink ?? '',
     });
 
     listener.onStep(SetupStep.finish);
@@ -192,6 +213,7 @@ class SetupEngine {
     required SetupListener listener,
   }) async {
     final paths = await this.paths();
+    final existing = await existingInstall() ?? const <String, String>{};
     deleteData = deleteData && await canDeleteData();
 
     listener.onStep(SetupStep.close);
@@ -218,10 +240,12 @@ class SetupEngine {
 
     listener.onStep(SetupStep.shortcuts);
     listener.onDetail('');
-    for (final link in [paths.startMenuLink, paths.desktopLink]) {
-      final file = File(link);
-      if (await file.exists()) await file.delete();
-    }
+    await _deleteOwnLinks([
+      existing['GlazeStartMenuLink'],
+      existing['GlazeDesktopLink'],
+      paths.startMenuLink,
+      paths.desktopLink,
+    ], paths.exe);
     await system.deleteKey(_uninstallKey);
     listener.onProgress(0.75);
 
@@ -258,6 +282,80 @@ class SetupEngine {
       thenIfEmpty: [paths.installDir, p.dirname(paths.installDir)],
     );
     listener.onProgress(1);
+  }
+
+  /// A shortcut path an earlier install recorded; empty means it made none.
+  static String? _recorded(Map<String, String> key, String name) {
+    final value = key[name];
+    return value == null || value.isEmpty ? null : value;
+  }
+
+  /// [link] when it is free or already starts [exe]; otherwise the first free
+  /// `<name> (2).lnk`, `(3)`… — the way Windows names a copy. A shortcut of
+  /// the same name that starts something else — the legacy Electron app's,
+  /// one the reader made for a portable copy — is never replaced.
+  Future<String> _freeLink(String link, String exe) async {
+    final stem = p.withoutExtension(link);
+    for (var n = 1; n <= 20; n++) {
+      final candidate = n == 1 ? link : '$stem ($n).lnk';
+      if (!await File(candidate).exists() || await _startsExe(candidate, exe)) {
+        return candidate;
+      }
+    }
+    throw FileSystemException('no free name for the shortcut', link);
+  }
+
+  /// Deletes those of [links] that exist and start [exe]; anyone else's
+  /// shortcut stays.
+  Future<void> _deleteOwnLinks(Iterable<String?> links, String exe) async {
+    for (final link in {
+      ...links.whereType<String>().where((l) => l.isNotEmpty),
+    }) {
+      final file = File(link);
+      if (await file.exists() && await _startsExe(link, exe)) {
+        await file.delete();
+      }
+    }
+  }
+
+  Future<bool> _startsExe(String link, String exe) async {
+    final target = await system.shortcutTarget(link);
+    return target != null &&
+        p.normalize(target).toLowerCase() == p.normalize(exe).toLowerCase();
+  }
+
+  /// Copies the WebView2 profile of the portable copy in [folder] into a
+  /// fresh install. Never over a profile the install already has, never from
+  /// the install itself, and the original stays where it is. A file that
+  /// cannot be read (a cache still locked) is skipped: the logins are what
+  /// matters, and a failed copy must not fail the install.
+  Future<void> _importProfile(
+    String folder,
+    InstallPaths paths,
+    SetupListener listener,
+  ) async {
+    final from = Directory(p.join(folder, 'Glaze.exe.WebView2'));
+    final to = Directory(paths.webViewProfile);
+    if (p.equals(p.normalize(from.path), p.normalize(to.path)) ||
+        !await from.exists() ||
+        await to.exists()) {
+      return;
+    }
+    final partial = Directory('${to.path}.glzimport');
+    if (await partial.exists()) await partial.delete(recursive: true);
+    await for (final entry in from.list(recursive: true, followLinks: false)) {
+      if (entry is! File) continue;
+      final relative = p.relative(entry.path, from: from.path);
+      listener.onDetail('Glaze.exe.WebView2/$relative');
+      try {
+        final target = File(p.join(partial.path, relative));
+        await target.parent.create(recursive: true);
+        await entry.copy(target.path);
+      } on FileSystemException {
+        // Skipped, see above.
+      }
+    }
+    await partial.rename(to.path);
   }
 
   /// The WebView2 profile of a Release folder the app was run from: shipping

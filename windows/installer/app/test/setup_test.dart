@@ -83,6 +83,9 @@ class FakeSystem implements SetupSystem {
   final String root;
   final keys = <String, Map<String, String>>{};
   final shortcuts = <String>[];
+
+  /// Every shortcut's target, ours and those that were there before.
+  final linkTargets = <String, String>{};
   final killed = <String>[];
   final deferred = <String>[];
   final thenIfEmpty = <String>[];
@@ -112,8 +115,12 @@ class FakeSystem implements SetupSystem {
   @override
   Future<void> createShortcut(String link, {required String target}) async {
     shortcuts.add(link);
+    linkTargets[link] = target;
     await File(link).create(recursive: true);
   }
+
+  @override
+  Future<String?> shortcutTarget(String link) async => linkTargets[link];
 
   @override
   Future<bool> isRunning(String exe) async => running;
@@ -407,6 +414,158 @@ void main() {
     );
   });
 
+  group('an older Glaze on the machine', () {
+    late FakeSystem system;
+    late SetupEngine engine;
+    late File payload;
+
+    /// Everything an older Glaze leaves behind, with something in it.
+    late Map<String, String> before;
+
+    String file(String path, String content) {
+      File(path)
+        ..createSync(recursive: true)
+        ..writeAsStringSync(content);
+      return path;
+    }
+
+    Map<String, String> snapshot(Iterable<String> roots) => {
+      for (final root in roots)
+        if (Directory(root).existsSync())
+          for (final f in Directory(root).listSync(recursive: true))
+            if (f is File) f.path: f.readAsStringSync(),
+    };
+
+    late List<String> roots;
+
+    setUp(() {
+      system = FakeSystem(tmp.path);
+      engine = SetupEngine(system, channel: const Channel('stable'));
+      payload = File(p.join(tmp.path, 'glaze.zip'))
+        ..writeAsBytesSync(makeZip({'Glaze.exe': utf8.encode('new')}));
+      final roaming = p.join(tmp.path, 'Roaming');
+      final local = p.join(tmp.path, 'Local');
+      // A portable copy, unpacked by hand, with its WebView2 profile.
+      final portable = p.join(tmp.path, 'Downloads', 'Glaze');
+      // The legacy Electron app: its folder, its data in the same place as
+      // stable's, its shortcuts with the same name as ours.
+      final electron = p.join(local, 'Programs', 'glaze');
+      file(p.join(portable, 'Glaze.exe'), 'old portable');
+      file(p.join(portable, 'data', 'app.so'), 'old aot');
+      file(
+        p.join(portable, 'Glaze.exe.WebView2', 'EBWebView', 'Cookies'),
+        'logins',
+      );
+      file(p.join(electron, 'Glaze.exe'), 'electron');
+      file(p.join(roaming, 'Glaze', 'glaze.db'), 'chats');
+      file(p.join(roaming, 'Glaze-nightly', 'glaze.db'), 'nightly chats');
+      file(
+        p.join(roaming, 'com.glaze', 'Glaze', 'shared_preferences.json'),
+        '{}',
+      );
+      for (final folder in ['Programs', 'Desktop']) {
+        final link = file(
+          p.join(tmp.path, folder, 'Glaze.lnk'),
+          'electron link',
+        );
+        system.linkTargets[link] = p.join(electron, 'Glaze.exe');
+      }
+      roots = [
+        portable,
+        electron,
+        p.join(roaming, 'Glaze'),
+        p.join(roaming, 'Glaze-nightly'),
+        p.join(roaming, 'com.glaze'),
+      ];
+      before = snapshot(roots);
+      system.legacy = true;
+    });
+
+    test('install, update and uninstall leave all of it as it was', () async {
+      Future<void> install({bool desktop = true}) => engine.install(
+        payload: payload,
+        package: null,
+        desktopShortcut: desktop,
+        listener: RecordingListener(),
+      );
+      await install();
+      await install(desktop: false);
+      await install();
+      final paths = await engine.paths();
+      expect(File(paths.exe).readAsStringSync(), 'new');
+
+      // The old shortcuts still start the old app; ours sit beside them.
+      final ours = p.join(tmp.path, 'Desktop', 'Glaze (2).lnk');
+      for (final folder in ['Programs', 'Desktop']) {
+        expect(
+          system.linkTargets[p.join(tmp.path, folder, 'Glaze.lnk')],
+          endsWith(p.join('glaze', 'Glaze.exe')),
+        );
+        expect(
+          File(p.join(tmp.path, folder, 'Glaze.lnk')).readAsStringSync(),
+          'electron link',
+        );
+      }
+      expect(system.linkTargets[ours], paths.exe);
+      // Reinstalling reuses its own shortcut rather than adding a (3).
+      expect(
+        File(p.join(tmp.path, 'Desktop', 'Glaze (3).lnk')).existsSync(),
+        isFalse,
+      );
+
+      // Uninstall with "delete my data" ticked: the legacy app is installed,
+      // so stable's data stays anyway.
+      await engine.uninstall(deleteData: true, listener: RecordingListener());
+      expect(File(ours).existsSync(), isFalse);
+      expect(
+        File(p.join(tmp.path, 'Desktop', 'Glaze.lnk')).existsSync(),
+        isTrue,
+      );
+      expect(
+        File(p.join(tmp.path, 'Programs', 'Glaze.lnk')).existsSync(),
+        isTrue,
+      );
+      expect(snapshot(roots), before);
+    });
+
+    test('a portable copy\'s logins are copied over, never moved', () async {
+      final portable = p.join(tmp.path, 'Downloads', 'Glaze');
+      await engine.install(
+        payload: payload,
+        package: null,
+        desktopShortcut: false,
+        listener: RecordingListener(),
+        importFrom: portable,
+      );
+      final paths = await engine.paths();
+      expect(
+        File(
+          p.join(paths.webViewProfile, 'EBWebView', 'Cookies'),
+        ).readAsStringSync(),
+        'logins',
+      );
+      expect(snapshot(roots), before);
+
+      // A profile the install already has is never replaced.
+      File(
+        p.join(paths.webViewProfile, 'EBWebView', 'Cookies'),
+      ).writeAsStringSync('newer');
+      await engine.install(
+        payload: payload,
+        package: null,
+        desktopShortcut: false,
+        listener: RecordingListener(),
+        importFrom: portable,
+      );
+      expect(
+        File(
+          p.join(paths.webViewProfile, 'EBWebView', 'Cookies'),
+        ).readAsStringSync(),
+        'newer',
+      );
+    });
+  });
+
   test('arguments', () {
     final update = SetupArgs.parse([
       '--update',
@@ -418,6 +577,10 @@ void main() {
     expect(update.mode, SetupMode.update);
     expect(update.package, r'C:\a b\GlazeSetup.exe');
     expect(update.payload, r'C:\t\glaze.zip');
+    expect(
+      SetupArgs.parse(['--import-from', r'D:\Glaze']).importFrom,
+      r'D:\Glaze',
+    );
     expect(SetupArgs.parse(['--uninstall', '--silent']).silent, isTrue);
     // Only an uninstall may run unseen.
     expect(SetupArgs.parse(['--silent']).silent, isFalse);

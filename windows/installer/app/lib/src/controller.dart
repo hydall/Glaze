@@ -110,6 +110,7 @@ class SetupController extends ChangeNotifier implements SetupListener {
           package: args.package == null ? null : File(args.package!),
           desktopShortcut: desktopShortcut,
           listener: this,
+          importFrom: args.importFrom,
         );
       }
     } catch (e, st) {
