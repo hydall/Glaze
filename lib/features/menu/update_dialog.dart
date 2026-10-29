@@ -253,9 +253,9 @@ class _UpdateSheetBodyState extends State<_UpdateSheetBody> {
                       )
                     : GlazeActionButton(
                         icon: Icons.open_in_new_rounded,
-                        label: info.source == UpdateSource.release
-                            ? 'update_open_release'.tr()
-                            : 'update_open_actions'.tr(),
+                        label: info.source == UpdateSource.ciBuild
+                            ? 'update_open_actions'.tr()
+                            : 'update_open_release'.tr(),
                         tone: GlazeActionTone.primary,
                         onTap: () {
                           _openActions();

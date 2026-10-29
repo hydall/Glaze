@@ -316,20 +316,13 @@ void main() {
       );
     });
 
-    test('silent launch passes the update switches', () async {
+    test('an installed copy starts the setup as an update', () async {
       final started = <List<String>>[];
       final file = File('${tmp.path}${Platform.pathSeparator}setup.exe');
       await updater({}, started: started).launch(file, silent: true);
-      expect(started.single.first, file.path);
-      expect(
-        started.single.skip(1),
-        containsAll([
-          '/VERYSILENT',
-          '/SUPPRESSMSGBOXES',
-          '/CLOSEAPPLICATIONS',
-          '/RELAUNCH=1',
-        ]),
-      );
+      await updater({}, started: started).launch(file, silent: false);
+      expect(started.first, [file.path, '--update']);
+      expect(started.last, [file.path]);
     });
 
     test(
@@ -337,11 +330,134 @@ void main() {
       () async {
         final u = updater({});
         expect(u.isInstalledBySetup, isFalse);
-        await File('${tmp.path}${Platform.pathSeparator}unins000.exe').create();
+        await File(
+          '${tmp.path}${Platform.pathSeparator}uninstall'
+          '${Platform.pathSeparator}GlazeSetup.exe',
+        ).create(recursive: true);
         expect(u.isInstalledBySetup, isTrue);
       },
     );
   });
+
+  group('nightly: the rolling pre-release', () {
+    const installed = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const head = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+
+    UpdateCheckService service(Map<String, Object> routes) {
+      final dio = Dio(
+        BaseOptions(
+          baseUrl: 'https://api.github.com',
+          validateStatus: (_) => true,
+        ),
+      );
+      dio.httpClientAdapter = _JsonAdapter(routes);
+      return UpdateCheckService(dio: dio, installedCommit: installed);
+    }
+
+    final nightly = <String, Object>{
+      'tag_name': 'nightly-build',
+      'target_commitish': head,
+      'prerelease': true,
+      'created_at': '2026-10-29T12:00:00Z',
+      'html_url': 'https://github.com/$_owner/$_repo/releases/tag/nightly-build',
+      'assets': [
+        {
+          'name': 'Glaze-nightly-windows-setup.exe',
+          'size': 41000000,
+          'digest': 'sha256:${'c' * 64}',
+          'browser_download_url':
+              'https://github.com/$_owner/$_repo/releases/download/nightly-build/'
+              'Glaze-nightly-windows-setup.exe',
+        },
+      ],
+    };
+    final ahead = {
+      'status': 'ahead',
+      'commits': [
+        {
+          'parents': [<String, Object>{}],
+          'commit': {'message': 'feat: one'},
+        },
+        {
+          'parents': [<String, Object>{}],
+          'commit': {'message': 'fix: two\n\nbody'},
+        },
+      ],
+    };
+
+    test('a newer build is offered with its setup and commits', () async {
+      final result = await service({
+        '/repos/$_owner/$_repo/releases/tags/nightly-build': nightly,
+        '/repos/$_owner/$_repo/compare/$installed...$head': ahead,
+      }).checkNightlyRelease();
+      expect(result.status, UpdateStatus.available);
+      final info = result.info!;
+      expect(info.source, UpdateSource.nightlyRelease);
+      expect(info.dismissId, head);
+      expect(info.label, 'nightly · bbbbbbb');
+      expect(info.notes, ['fix: two', 'feat: one']);
+      expect(info.installer?.name, 'Glaze-nightly-windows-setup.exe');
+    });
+
+    test('the same commit, or an older release, is up to date', () async {
+      final same = await service({
+        '/repos/$_owner/$_repo/releases/tags/nightly-build': {
+          ...nightly,
+          'target_commitish': installed,
+        },
+      }).checkNightlyRelease();
+      expect(same.status, UpdateStatus.upToDate);
+      final behind = await service({
+        '/repos/$_owner/$_repo/releases/tags/nightly-build': nightly,
+        '/repos/$_owner/$_repo/compare/$installed...$head': {
+          'status': 'behind',
+          'commits': <Object>[],
+        },
+      }).checkNightlyRelease();
+      expect(behind.status, UpdateStatus.upToDate);
+    });
+
+    test('no release yet falls back to the Actions run', () async {
+      final result = await service({
+        '/repos/$_owner/$_repo/actions/workflows/build-branch.yml/runs': {
+          'workflow_runs': [
+            {'head_sha': head, 'run_number': 42},
+          ],
+        },
+        '/repos/$_owner/$_repo/compare/$installed...$head': ahead,
+      }).checkNightlyRelease();
+      expect(result.info?.source, UpdateSource.ciBuild);
+      expect(result.info?.label, '#42');
+      expect(result.info?.installer, isNull);
+    });
+  });
+}
+
+/// Answers API paths with JSON; anything else is a 404.
+class _JsonAdapter implements HttpClientAdapter {
+  _JsonAdapter(this.routes);
+
+  final Map<String, Object> routes;
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    final body = routes[options.uri.path];
+    // GitHub answers a 404 with a JSON body too.
+    return ResponseBody.fromString(
+      jsonEncode(body ?? {'message': 'Not Found'}),
+      body == null ? 404 : 200,
+      headers: {
+        Headers.contentTypeHeader: [Headers.jsonContentType],
+      },
+    );
+  }
+
+  @override
+  void close({bool force = false}) {}
 }
 
 /// Serves [files] by URL path; anything else is a 404.

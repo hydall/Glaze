@@ -13,8 +13,11 @@ enum UpdateSource {
   /// A published GitHub Release (`stable` channel).
   release,
 
-  /// A successful GitHub Actions run (`nightly` / feature branches).
+  /// A successful GitHub Actions run (feature branches).
   ciBuild,
+
+  /// The rolling `nightly` pre-release, replaced by every nightly build.
+  nightlyRelease,
 }
 
 /// Result of a successful update check that found something newer than the
@@ -82,9 +85,7 @@ class CommitComparison {
 
   /// The range could not be resolved — a force-push, an unknown SHA, a failed
   /// request.
-  const CommitComparison.unresolved()
-    : status = '',
-      commits = const [];
+  const CommitComparison.unresolved() : status = '', commits = const [];
 
   /// `ahead`, `behind`, `identical`, `diverged`, or empty when unresolved.
   /// `ahead` means the *head* is ahead of the base.
@@ -174,7 +175,11 @@ class UpdateCheckService {
 
   Future<UpdateCheckResult> check() async {
     try {
-      return isStableChannel ? await _checkRelease() : await _checkCiBuild();
+      if (isStableChannel) return await _checkRelease();
+      // The nightly branch publishes a rolling pre-release the app can
+      // download from; other branches' builds live in Actions only.
+      if (_branch == 'nightly') return await checkNightlyRelease();
+      return await _checkCiBuild();
     } on DioException {
       return const UpdateCheckResult(UpdateStatus.unknown);
     } catch (_) {
@@ -235,7 +240,75 @@ class UpdateCheckService {
     );
   }
 
-  // ── pre-release channels: CI builds on this branch ─────────────────────────
+  // ── nightly: the rolling pre-release ───────────────────────────────────────
+
+  /// Tag of the pre-release every nightly build replaces (build-branch.yml).
+  /// Not `nightly`: git would then resolve that name to the tag before the
+  /// branch.
+  static const nightlyReleaseTag = 'nightly-build';
+
+  /// The rolling `nightly` pre-release against the installed commit. Falls
+  /// back to the Actions run while no such release exists yet.
+  @visibleForTesting
+  Future<UpdateCheckResult> checkNightlyRelease() async {
+    final res = await _dio.get<Map<String, dynamic>>(
+      '/repos/$owner/$repo/releases/tags/$nightlyReleaseTag',
+    );
+    final data = res.data;
+    // CI creates the release with its commit as the target.
+    final headSha = data?['target_commitish'] as String? ?? '';
+    if (res.statusCode != 200 ||
+        data == null ||
+        !RegExp(r'^[0-9a-f]{40}$').hasMatch(headSha)) {
+      return _checkCiBuild();
+    }
+    return _commitUpdate(
+      headSha: headSha,
+      build: (commits) => UpdateInfo(
+        source: UpdateSource.nightlyRelease,
+        dismissId: headSha,
+        label: 'nightly · ${headSha.substring(0, 7)}',
+        createdAt:
+            DateTime.tryParse(data['created_at'] as String? ?? '')?.toUtc() ??
+            DateTime.now().toUtc(),
+        url:
+            data['html_url'] as String? ??
+            'https://github.com/$owner/$repo/releases/tag/$nightlyReleaseTag',
+        notes: commits.take(_noteCap).toList(),
+        totalNotes: commits.length,
+        installer: InstallerAsset.fromRelease(data, owner: owner, repo: repo),
+      ),
+    );
+  }
+
+  /// Whether [headSha] is ahead of the installed commit, and the update it
+  /// makes if so.
+  Future<UpdateCheckResult> _commitUpdate({
+    required String headSha,
+    required UpdateInfo Function(List<String> commits) build,
+  }) async {
+    // Local/dev build with no embedded SHA — can't compare meaningfully.
+    if (_installedCommit.isEmpty) {
+      return const UpdateCheckResult(UpdateStatus.unknown);
+    }
+    if (headSha == _installedCommit) {
+      return const UpdateCheckResult(UpdateStatus.upToDate);
+    }
+
+    // Two different SHAs do not mean the branch is ahead. The installed build
+    // can be *newer* than the branch's last published build — the run after
+    // it failed, or the build came from a branch that has since moved on —
+    // and offering it then presented a build two weeks older than the one
+    // running, as an update. Ask which way round they are rather than
+    // assuming.
+    final comparison = await _compareCommits(_installedCommit, headSha);
+    if (comparison.installedIsAtLeastAsNew) {
+      return const UpdateCheckResult(UpdateStatus.upToDate);
+    }
+    return UpdateCheckResult(UpdateStatus.available, build(comparison.commits));
+  }
+
+  // ── other branches: CI builds on this branch ───────────────────────────────
 
   Future<UpdateCheckResult> _checkCiBuild() async {
     final run = await _latestSuccessfulRun();
@@ -246,30 +319,10 @@ class UpdateCheckService {
       return const UpdateCheckResult(UpdateStatus.unknown);
     }
 
-    // Local/dev build with no embedded SHA — can't compare meaningfully.
-    if (_installedCommit.isEmpty) {
-      return const UpdateCheckResult(UpdateStatus.unknown);
-    }
-    if (headSha == _installedCommit) {
-      return const UpdateCheckResult(UpdateStatus.upToDate);
-    }
-
-    // Two different SHAs do not mean the branch is ahead. The installed build
-    // can be *newer* than the branch's last successful run — the run after it
-    // failed, or the build came from a branch that has since moved on — and
-    // offering it then presented a build two weeks older than the one running,
-    // as an update. Ask which way round they are rather than assuming.
-    final comparison = await _compareCommits(_installedCommit, headSha);
-    if (comparison.installedIsAtLeastAsNew) {
-      return const UpdateCheckResult(UpdateStatus.upToDate);
-    }
-
-    final commits = comparison.commits;
     final runNumber = (run['run_number'] as num?)?.toInt() ?? 0;
-
-    return UpdateCheckResult(
-      UpdateStatus.available,
-      UpdateInfo(
+    return _commitUpdate(
+      headSha: headSha,
+      build: (commits) => UpdateInfo(
         source: UpdateSource.ciBuild,
         dismissId: headSha,
         label: runNumber > 0 ? '#$runNumber' : _branch,

@@ -1,0 +1,35 @@
+#include <windows.h>
+
+#ifndef GLAZE_VERSION_NUMBER
+#define GLAZE_VERSION_NUMBER 0,0,0,0
+#endif
+#ifndef GLAZE_VERSION_STRING
+#define GLAZE_VERSION_STRING "0.0.0"
+#endif
+
+101 ICON "../../runner/resources/app_icon.ico"
+1 RT_MANIFEST "launcher.manifest"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION GLAZE_VERSION_NUMBER
+PRODUCTVERSION GLAZE_VERSION_NUMBER
+FILEOS VOS__WINDOWS32
+FILETYPE VFT_APP
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904e4"
+    BEGIN
+      VALUE "CompanyName", "com.glaze"
+      VALUE "FileDescription", "Glaze Setup"
+      VALUE "FileVersion", GLAZE_VERSION_STRING
+      VALUE "ProductName", "Glaze"
+      VALUE "ProductVersion", GLAZE_VERSION_STRING
+      VALUE "OriginalFilename", "GlazeSetup.exe"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1252
+  END
+END

@@ -20,6 +20,21 @@ on:
         required: false
         default: true
         type: boolean
+      build_windows_setup:
+        # The single-file setup (windows/installer). Only with Windows above.
+        description: 'Windows setup (EXE, in-app updates; only with Windows)'
+        required: false
+        default: true
+        type: boolean
+      publish_nightly:
+        # Replaces the rolling `nightly-build` pre-release with this build, which
+        # nightly installs update from. Only on the nightly branch, and only
+        # when Windows is built: a release without the setup would leave them
+        # nothing to install.
+        description: 'Publish as the rolling nightly pre-release (nightly branch only)'
+        required: false
+        default: true
+        type: boolean
       build_ios:
         description: 'iOS (IPA)'
         required: false
@@ -414,6 +429,40 @@ jobs:
           name: Glaze-release-Windows
           path: "${{ needs.metadata.outputs.file_slug }}-windows.zip"
 
+      # The same Release folder as one GlazeSetup.exe (windows/installer). The
+      # name ends in -windows-setup.exe, which the in-app updater looks for.
+      - name: Build Windows setup
+        if: ${{ github.event.inputs.build_windows_setup == 'true' }}
+        shell: pwsh
+        env:
+          BUILD_CHANNEL: ${{ needs.metadata.outputs.build_channel }}
+          APP_VERSION:   ${{ needs.metadata.outputs.version }}
+          GIT_SHA:       ${{ needs.metadata.outputs.git_sha }}
+          FILE_SLUG:     ${{ needs.metadata.outputs.file_slug }}
+        run: |
+          ./windows/installer/build_setup.ps1 `
+            -Channel $env:BUILD_CHANNEL `
+            -Version $env:APP_VERSION `
+            -Commit $env:GIT_SHA `
+            -OutputDir setup-out `
+            -BaseName "$env:FILE_SLUG-windows-setup"
+
+      - name: Upload Windows setup
+        if: ${{ github.event.inputs.build_windows_setup == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: Glaze-release-Windows-setup
+          path: "setup-out/${{ needs.metadata.outputs.file_slug }}-windows-setup.exe"
+
+      # Apart from the setup, so the Telegram post (every Glaze-release-*
+      # artifact) does not carry a checksum file. The nightly release does.
+      - name: Upload Windows setup checksum
+        if: ${{ github.event.inputs.build_windows_setup == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: Glaze-setup-checksum
+          path: "setup-out/${{ needs.metadata.outputs.file_slug }}-windows-setup.exe.sha256"
+
   # ── ios ────────────────────────────────────────────────────────────────────
   build-ios:
     needs: metadata
@@ -664,6 +713,74 @@ jobs:
         with:
           name: Glaze-release-TarZst
           path: "build/linux/tarzst/${{ needs.metadata.outputs.file_slug }}-linux.tar.zst"
+
+  # ── rolling nightly pre-release ────────────────────────────────────────────
+  # Nightly installs update from a release, because Actions artifacts cannot be
+  # downloaded without a token. One pre-release, `nightly-build`, deleted and
+  # made again for every build so it is dated and tagged at this commit; it is
+  # never `Latest`, and /releases/latest (the README, the site, stable's own
+  # update check) never resolves to it. The tag is not `nightly`: git would
+  # resolve that name to the tag before the branch.
+  publish-nightly:
+    needs: [metadata, build-android, build-windows, build-ios, build-linux]
+    runs-on: ubuntu-latest
+    if: >-
+      ${{ !cancelled() &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled') &&
+      github.ref_name == 'nightly' &&
+      github.event.inputs.publish_nightly == 'true' &&
+      github.event.inputs.build_windows == 'true' &&
+      github.event.inputs.build_windows_setup == 'true' }}
+    concurrency:
+      group: publish-nightly
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.metadata.outputs.git_sha }}
+          fetch-depth: 50
+
+      - name: Download built artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: Glaze-*
+          merge-multiple: true
+          path: artifacts/
+
+      - name: Replace the nightly-build pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO:     ${{ github.repository }}
+          SHA:      ${{ needs.metadata.outputs.git_sha }}
+          VERSION:  ${{ needs.metadata.outputs.version }}
+          BUILD_DATE: ${{ needs.metadata.outputs.build_date }}
+        run: |
+          set -euo pipefail
+          rm -f artifacts/*debug-symbols* 2>/dev/null || true
+          ls -la artifacts/
+          {
+            echo "> [!WARNING]"
+            echo "> Unstable build from the \`nightly\` branch, replaced by every new one. For everyday use take the [latest release](https://github.com/$REPO/releases/latest)."
+            echo ">"
+            echo "> Нестабильная сборка из ветки \`nightly\`, заменяется каждой новой. Для обычного использования берите [последний релиз](https://github.com/$REPO/releases/latest)."
+            echo
+            echo "$VERSION · $BUILD_DATE UTC · \`${SHA:0:7}\`"
+            echo
+            git log -15 --no-merges --format='- %s (%h)' "$SHA"
+          } > notes.md
+
+          # Delete and create rather than edit: a fresh release is dated now
+          # and its tag points at this commit.
+          gh release delete nightly-build --repo "$REPO" --cleanup-tag --yes || true
+          gh api -X DELETE "repos/$REPO/git/refs/tags/nightly-build" 2>/dev/null || true
+          gh release create nightly-build artifacts/* \
+            --repo "$REPO" \
+            --target "$SHA" \
+            --prerelease \
+            --latest=false \
+            --title "Nightly · $VERSION · ${SHA:0:7}" \
+            --notes-file notes.md
 
   # ── telegram notify ────────────────────────────────────────────────────────
   notify:

@@ -77,6 +77,45 @@ jobs:
       - name: Test
         run: flutter test --exclude-tags db-migration --reporter expanded
 
+  windows-setup:
+    # The setup window (windows/installer/app) is a project of its own, out of
+    # the root analyzer's reach, and its launcher is C++. Both are checked
+    # here; the Windows build itself runs in the build workflows.
+    name: Windows setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.9'
+          channel: 'stable'
+          cache: true
+
+      - name: Analyze + test the setup window
+        working-directory: windows/installer/app
+        run: |
+          mkdir -p assets/fonts
+          cp ../../../assets/fonts/InterVariable.ttf assets/fonts/
+          flutter pub get
+          flutter analyze
+          flutter test
+
+      - name: Compile the launcher and packer
+        working-directory: windows/installer/launcher
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq mingw-w64 >/dev/null
+          x86_64-w64-mingw32-windres launcher.rc -O coff -o launcher.res
+          for target in launcher packer; do
+            flags=""; libs="-lcabinet -lshell32"
+            [ "$target" = packer ] && flags="-DGLAZE_PACKER" || flags="-mwindows launcher.res"
+            x86_64-w64-mingw32-g++ -std=c++17 -O2 -Wall -Wextra -Werror -municode -static \
+              $flags launcher.cpp -o "/tmp/$target.exe" $libs
+          done
+
   database-migrations:
     name: Database migrations
     runs-on: ubuntu-latest

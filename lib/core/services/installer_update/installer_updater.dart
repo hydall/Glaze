@@ -68,12 +68,14 @@ class InstallerUpdater {
   final String _executablePath;
   final Future<void> Function(String exe, List<String> args) _startProcess;
 
-  /// Whether this copy of Glaze was put here by the installer — its
-  /// uninstaller sits next to the exe. A copy unpacked from the zip is not,
-  /// and a silent install would land in the installer's folder instead and
-  /// leave this one as it is, so such copies run the installer visibly.
+  /// Whether this copy of Glaze was put here by the setup — its uninstaller
+  /// sits in `uninstall\` next to the exe (windows/installer/app). A copy
+  /// unpacked from the zip is not, and an update would land in the setup's
+  /// folder instead and leave this one as it is, so such copies get the
+  /// setup's own window to install from.
   bool get isInstalledBySetup =>
-      File(p.join(p.dirname(_executablePath), 'unins000.exe')).existsSync();
+      File(p.join(p.dirname(_executablePath), 'uninstall', 'GlazeSetup.exe'))
+          .existsSync();
 
   /// Fetches [asset] into a temporary folder and verifies it. Returns the
   /// checked file; anything that fails the check is deleted first.
@@ -164,20 +166,13 @@ class InstallerUpdater {
   static Future<String> sha256Of(File file) async =>
       (await sha256.bind(file.openRead()).first).toString();
 
-  /// Starts the verified installer. With [silent] — an installed copy — it
-  /// runs without a wizard, closes Glaze if it is still up, and starts it
-  /// again when done; the caller quits right after. Otherwise the wizard
-  /// shows, so a zip copy's user sees where Glaze is going.
+  /// Starts the verified setup. With [silent] — an installed copy — it runs
+  /// as an update: it shows its progress but asks nothing, waits for Glaze to
+  /// close, and starts it again when done; the caller quits right after.
+  /// Otherwise it opens on its first page, so a zip copy's user sees where
+  /// Glaze is going.
   Future<void> launch(File installer, {required bool silent}) async {
-    final args = silent
-        ? const [
-            '/VERYSILENT',
-            '/SUPPRESSMSGBOXES',
-            '/CLOSEAPPLICATIONS',
-            '/NORESTART',
-            '/RELAUNCH=1',
-          ]
-        : const <String>[];
+    final args = silent ? const ['--update'] : const <String>[];
     try {
       await _startProcess(installer.path, args);
     } on ProcessException catch (e) {
