@@ -741,11 +741,19 @@ jobs:
           ref: ${{ needs.metadata.outputs.git_sha }}
           fetch-depth: 50
 
+      # The builds and the setup's checksum; not the debug symbols, which
+      # are artifacts of their own (Glaze-debug-symbols-*).
       - name: Download built artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: Glaze-*
+          pattern: Glaze-release-*
           merge-multiple: true
+          path: artifacts/
+
+      - name: Download the setup's checksum
+        uses: actions/download-artifact@v4
+        with:
+          name: Glaze-setup-checksum
           path: artifacts/
 
       - name: Replace the nightly-build pre-release
@@ -757,7 +765,6 @@ jobs:
           BUILD_DATE: ${{ needs.metadata.outputs.build_date }}
         run: |
           set -euo pipefail
-          rm -f artifacts/*debug-symbols* 2>/dev/null || true
           ls -la artifacts/
           {
             echo "> [!WARNING]"
