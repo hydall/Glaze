@@ -29,7 +29,9 @@ window.GLAZE = {
 
   links: {
     github: 'https://github.com/hydall/Glaze',
-    releases: 'https://github.com/hydall/Glaze/releases',
+    // The nightly channel publishes a rolling `nightly` pre-release, which
+    // would head the plain list; the filter keeps it to stable releases.
+    releases: 'https://github.com/hydall/Glaze/releases?q=prerelease%3Afalse&expanded=true',
     issues: 'https://github.com/hydall/Glaze/issues',
     discord: 'https://discord.gg/jnGhd7p6Ht',
     telegram: 'https://t.me/glazeapp',
