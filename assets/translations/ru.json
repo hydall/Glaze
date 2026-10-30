@@ -1010,6 +1010,8 @@
   "lorebook_global_settings_tooltip": "Глобальные настройки",
   "lorebook_import_st_tooltip": "Импорт лорбука SillyTavern",
   "lorebook_embedding_settings_tooltip": "Настройки эмбеддингов",
+  "lorebook_search_tooltip": "Поиск лорбуков",
+  "lorebook_search_hint": "Поиск лорбуков…",
   "lorebook_import_st_dialog_title": "Импорт лорбука SillyTavern",
   "lorebook_imported": "Импортировано: {0} ({1} записей)",
   "lorebook_confirm_delete_desc": "Удалить лорбук \"{0}\"? Это действие нельзя отменить.",

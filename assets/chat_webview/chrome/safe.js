@@ -92,6 +92,8 @@ export const getBoundingClientRect = uncurry(Element.prototype.getBoundingClient
 export const getScrollHeight = getter(Element.prototype, 'scrollHeight');
 export const getScrollWidth = getter(Element.prototype, 'scrollWidth');
 export const getClientWidth = getter(Element.prototype, 'clientWidth');
+export const getClientHeight = getter(Element.prototype, 'clientHeight');
+export const getTagName = getter(Element.prototype, 'tagName');
 export const getScrollLeft = getter(Element.prototype, 'scrollLeft');
 export const setScrollLeft = setter(Element.prototype, 'scrollLeft');
 export const getScrollTop = getter(Element.prototype, 'scrollTop');
@@ -210,6 +212,9 @@ export const setTimer = win.setTimeout.bind(win);
 export const clearTimer = win.clearTimeout.bind(win);
 export const viewportHeight = getter(win, 'innerHeight').bind(null, win);
 export const matchMedia = win.matchMedia ? win.matchMedia.bind(win) : null;
+export const computedStyle = win.getComputedStyle.bind(win);
+/** The element under viewport (x, y) inside a shadow root, as that root sees it. */
+export const elementFromPointIn = uncurry(ShadowRoot.prototype.elementFromPoint);
 
 // Popover / top layer and document roots.
 const hasPopover = typeof HTMLElement.prototype.showPopover === 'function';

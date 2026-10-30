@@ -999,6 +999,8 @@
   "lorebook_global_settings_tooltip": "Global settings",
   "lorebook_import_st_tooltip": "Import SillyTavern lorebook",
   "lorebook_embedding_settings_tooltip": "Embedding settings",
+  "lorebook_search_tooltip": "Search lorebooks",
+  "lorebook_search_hint": "Search lorebooks…",
   "lorebook_import_st_dialog_title": "Import SillyTavern Lorebook",
   "lorebook_imported": "Imported {0} ({1} entries)",
   "lorebook_confirm_delete_desc": "Delete lorebook \"{0}\"? This cannot be undone.",
