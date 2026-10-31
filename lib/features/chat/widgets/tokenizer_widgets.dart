@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
@@ -834,7 +835,7 @@ class _BarChartPainter extends CustomPainter {
             shadows: const [Shadow(blurRadius: 3)],
           ),
         ),
-        textDirection: TextDirection.ltr,
+        textDirection: ui.TextDirection.ltr,
       )..layout(maxWidth: size.width);
       final top = y - label.height - 1 < 0 ? y + 2 : y - label.height - 1;
       label.paint(canvas, Offset((size.width - label.width) / 2, top));
