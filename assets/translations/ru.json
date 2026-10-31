@@ -102,6 +102,7 @@
   "regex_run_on_edit": "Срабатывать при редактировании",
   "regex_memory_book_retrieval": "Применять при генерации черновиков Memory Book",
   "regex_macros_find": "Макросы в поиске",
+  "regex_ephemerality_none_hint": "Ничего не отмечено: скрипт меняет само сообщение — изменение видно в чате и уходит модели, как в SillyTavern.",
   "regex_ephemerality": "Эфемерность",
   "regex_user_input": "Ввод пользователя",
   "regex_ai_output": "Ответ ИИ",

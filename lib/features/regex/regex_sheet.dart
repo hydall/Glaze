@@ -2199,13 +2199,19 @@ class _RegexEditViewState extends State<_RegexEditView> {
         ),
         MenuGroup(
           header: 'regex_ephemerality'.tr(),
+          // Neither box ticked is a state of its own — the script edits the
+          // message itself and runs everywhere — so it is said in words
+          // rather than shown as both boxes ticked.
+          description: s.ticksDisplay || s.ticksPrompt
+              ? null
+              : 'regex_ephemerality_none_hint'.tr(),
           // Shown and written the way the engine reads them (see
           // [RegexPasses]): an imported script's SillyTavern flags and
           // Glaze's own list are set together, so what the checkboxes say is
           // what runs — and what an export to SillyTavern carries.
           items: ephemeralities.map((opt) {
-            final display = s.altersDisplay;
-            final prompt = s.altersPrompt;
+            final display = s.ticksDisplay;
+            final prompt = s.ticksPrompt;
             return _CheckboxOption(
               label: opt.$2,
               value: opt.$1 == 1 ? display : prompt,
