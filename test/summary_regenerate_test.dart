@@ -496,7 +496,7 @@ void main() {
   });
 
   group('chain', () {
-    test('liveBefore keeps the blocks that start earlier, and notes last', () {
+    test('liveBefore keeps notes and the blocks that start earlier', () {
       final chain = [
         const SummaryBlock(id: 'note', level: 0, content: 'A note.'),
         _block('b1', ['m0', 'm1']),
@@ -504,8 +504,8 @@ void main() {
       ];
 
       expect(SummaryChain.liveBefore(chain, _messages, 'm2').map((b) => b.id), [
-        'b1',
         'note',
+        'b1',
       ]);
     });
 

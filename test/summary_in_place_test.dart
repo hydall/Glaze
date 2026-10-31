@@ -146,20 +146,25 @@ void main() {
       expect(view.segments.single.beforeMessageId, 'm5');
     });
 
-    test('a reader note closes the last run', () {
+    test('a reader note is not in any run', () {
       const note = SummaryBlock(id: 'n', level: 0, content: 'Note.');
 
       final view = SummaryChain.promptView([
         note,
         block('b1', ['m1', 'm2']),
-        block('b2', ['m4', 'm5']),
       ], messages);
 
-      expect(view.segments.map((s) => s.content), [
-        'Summary of m1, m2.',
-        'Summary of m4, m5.\n\nNote.',
-      ]);
-      expect(view.segments.map((s) => s.beforeMessageId), ['m3', 'm6']);
+      expect(view.segments.single.content, 'Summary of m1, m2.');
+      expect(view.segments.single.beforeMessageId, 'm3');
+    });
+
+    test('notes alone put nothing in the prompt', () {
+      const note = SummaryBlock(id: 'n', level: 0, content: 'Note.');
+
+      final view = SummaryChain.promptView([note], messages);
+
+      expect(view.content, isEmpty);
+      expect(view.segments, isEmpty);
     });
 
     test('segments survive the trip to the prompt isolate', () {

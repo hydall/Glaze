@@ -211,10 +211,10 @@ void main() {
     expect(tail, greaterThan(700));
   });
 
-  test('what the trim dropped is retold on the next run whatever the fill', () async {
+  test('what the trim dropped waits for a due run', () async {
     // Twelve messages, 1500 of history beside a fixed part of 500: 2000,
-    // under the 2325 trigger, so the fill alone asks for nothing. The last
-    // prompt sent only the newest six — the trim dropped m0…m5.
+    // under the 2325 trigger. The last prompt sent only the newest six —
+    // the trim dropped m0…m5 — but nothing runs until the fill asks for it.
     final session = _sessionOf(12);
     final container = await _container(
       500,
@@ -223,16 +223,7 @@ void main() {
     final result = await container
         .read(summaryGenerationServiceProvider)
         .compact(charId: 'char', session: session);
-
-    expect(result.created, 1);
-    final blocks = await container
-        .read(summaryServiceProvider)
-        .getBlocks(session.id);
-    expect(blocks.single.messageIds, [for (var i = 0; i < 6; i++) 'm$i']);
-    // The sent part stays as written.
-    expect(await _rawIds(container, session), [
-      for (var i = 6; i < 12; i++) 'm$i',
-    ]);
+    expect(result.created, 0);
   });
 
   test('a prompt that sent everything is left to the fill', () async {
