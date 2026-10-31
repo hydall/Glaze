@@ -87,14 +87,8 @@ Future<ProviderContainer> _container(
   Set<String> sent = const {},
   Map<String, Object>? settings,
 }) async {
-  // A tenth of the budget as the least raw history, which the small
-  // windows here are sized around (the default is 16k tokens).
   SharedPreferences.setMockInitialValues({
-    'summaryCompaction': jsonEncode({
-      'autoTailFloorUnit': 'percent',
-      'autoTailFloorPercent': 10,
-      ...?settings,
-    }),
+    if (settings != null) 'summaryCompaction': jsonEncode(settings),
   });  final db = AppDatabase.forTesting(NativeDatabase.memory());
   final container = ProviderContainer(
     overrides: [
@@ -178,23 +172,20 @@ void main() {
     );
   });
 
-  test('the least raw history is a setting, in tokens by default', () {
+  test('the least raw history is a setting, a tenth by default', () {
     const d = SummaryCompactionSettings();
-    expect(d.autoTailFloorUnit, SummaryManualTailUnit.tokens);
-    expect(d.autoTailFloor(100000), 16000);
-    // Never past the line a run compacts to.
-    expect(d.autoTailFloor(20000), 15000);
-    const percent = SummaryCompactionSettings(
-      autoTailFloorUnit: SummaryManualTailUnit.percent,
-      autoTailFloorPercent: 20,
-    );
-    expect(percent.autoTailFloor(100000), 20000);
-    expect(SummaryCompactionSettings.fromJson(percent.toJson()), percent);
+    expect(d.autoTailFloorUnit, SummaryManualTailUnit.percent);
+    expect(d.autoTailFloor(100000), 10000);
     // Saved before the setting existed: the default.
-    expect(
-      SummaryCompactionSettings.fromJson(const {}).autoTailFloorTokens,
-      16000,
+    expect(SummaryCompactionSettings.fromJson(const {}), d);
+    const tokens = SummaryCompactionSettings(
+      autoTailFloorUnit: SummaryManualTailUnit.tokens,
+      autoTailFloorTokens: 16000,
     );
+    expect(tokens.autoTailFloor(100000), 16000);
+    // Never past the line a run compacts to.
+    expect(tokens.autoTailFloor(20000), 15000);
+    expect(SummaryCompactionSettings.fromJson(tokens.toJson()), tokens);
   });
 
   test('the line a run compacts to never sits above the trigger', () {

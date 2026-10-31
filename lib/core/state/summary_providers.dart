@@ -80,9 +80,9 @@ class SummaryCompactionSettings {
     this.autoEnabled = false,
     this.triggerPercent = 75,
     this.compactToPercent = 75,
-    this.autoTailFloorUnit = SummaryManualTailUnit.tokens,
+    this.autoTailFloorUnit = SummaryManualTailUnit.percent,
     this.autoTailFloorPercent = 10,
-    this.autoTailFloorTokens = 16000,
+    this.autoTailFloorTokens = 8000,
     this.blockTargetTokens = 1000,
     this.mergePercent = 20,
     this.manualTailUnit = SummaryManualTailUnit.percent,
@@ -188,9 +188,9 @@ class SummaryCompactionSettings {
         minCompactToPercent,
         maxTriggerPercent,
       ),
-      autoTailFloorUnit: json['autoTailFloorUnit'] == 'percent'
-          ? SummaryManualTailUnit.percent
-          : SummaryManualTailUnit.tokens,
+      autoTailFloorUnit: json['autoTailFloorUnit'] == 'tokens'
+          ? SummaryManualTailUnit.tokens
+          : SummaryManualTailUnit.percent,
       autoTailFloorPercent: read(
         'autoTailFloorPercent',
         d.autoTailFloorPercent,
