@@ -13,6 +13,7 @@ import '../chat_session_service.dart';
 import '../chat_state.dart';
 import '../state/chat_session_write_queue.dart';
 import '../state/cached_token_breakdown.dart';
+import '../state/context_window_marker.dart';
 import '../../../core/llm/regex_service.dart';
 import '../../../core/state/active_selection_provider.dart';
 import '../../../shared/widgets/glaze_toast.dart';
@@ -325,6 +326,96 @@ class ChatMessageOpsController {
     if (!_ref.mounted) return;
     _dropTokenBreakdown();
     _publish(updated, token: token);
+  }
+
+  /// Pins the stepped history anchor on the message at [index]: the next
+  /// prompt's history starts there and holds there until that window no
+  /// longer fits under the trim trigger (see `ContextCalculator`). The rule in
+  /// the chat moves at once. A pin the window cannot hold — the message is too
+  /// far back for the room the history has — is undone with a warning, and
+  /// the anchor stays where it was.
+  Future<void> pinHistoryAnchor(int index) async {
+    if (!_ref.mounted) return;
+    final session = _getState().value?.session;
+    if (session == null || index < 0 || index >= session.messages.length) {
+      return;
+    }
+    final message = session.messages[index];
+    // A hidden message is not in the prompt, so the trim could not find it.
+    if (message.isHidden) return;
+    final previousAnchor = session.historyAnchorId;
+    final previousPinned = session.historyAnchorPinned;
+    await _writeHistoryAnchor(session.id, message.id, pinned: true);
+    if (!_ref.mounted) return;
+    final held =
+        _ref.read(cachedTokenBreakdownProvider(_charId))?.historyAnchorId ==
+        message.id;
+    if (held) return;
+    GlazeToast.warningWithoutContext('history_anchor_pin_too_far'.tr());
+    await _writeHistoryAnchor(
+      session.id,
+      previousAnchor,
+      pinned: previousPinned,
+    );
+  }
+
+  /// Lets the stepped trim place the anchor again: the pin goes, and the
+  /// anchor it marked stays until the trim moves it.
+  Future<void> unpinHistoryAnchor() async {
+    if (!_ref.mounted) return;
+    final session = _getState().value?.session;
+    if (session == null || !session.historyAnchorPinned) return;
+    await _writeHistoryAnchor(
+      session.id,
+      session.historyAnchorId,
+      pinned: false,
+    );
+  }
+
+  /// Writes the anchor and its pin to the session's vars, publishes them on
+  /// the open chat so the next prompt build reads them, and recounts the
+  /// prompt so the CONTEXT LIMIT rule moves with them.
+  Future<void> _writeHistoryAnchor(
+    String sessionId,
+    String? anchorId, {
+    required bool pinned,
+  }) async {
+    final token = _writes.beginPublication();
+    final vars = await _writes.run(
+      () =>
+          _ref.read(chatRepoProvider).updateSessionVarsJson(sessionId, (vars) {
+            if (anchorId == null) {
+              vars.remove(ChatSessionX.historyAnchorVarKey);
+            } else {
+              vars[ChatSessionX.historyAnchorVarKey] = anchorId;
+            }
+            if (pinned && anchorId != null) {
+              vars[ChatSessionX.historyAnchorPinnedVarKey] = '1';
+            } else {
+              vars.remove(ChatSessionX.historyAnchorPinnedVarKey);
+            }
+            return vars;
+          }),
+    );
+    if (!_ref.mounted) return;
+    if (!_writes.isCurrentPublication(token)) return;
+    final latest = _getState().value;
+    final session = latest?.session;
+    if (latest == null || session == null || session.id != sessionId) return;
+    _setState(
+      AsyncData(
+        latest.copyWith(
+          session: session.copyWith(
+            sessionVars: {
+              for (final entry in vars.entries)
+                entry.key: entry.value.toString(),
+            },
+          ),
+        ),
+      ),
+    );
+    _dropTokenBreakdown();
+    await recountContextWindow(_ref, _charId);
   }
 
   /// Hiding a message takes it out of the prompt exactly the way editing one
