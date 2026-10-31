@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -367,6 +369,34 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                         onChanged: (v) => setState(
                           () => _compaction = _compaction.copyWith(
                             triggerPercent: v.round(),
+                            // The line a run compacts to never sits above
+                            // the trigger.
+                            compactToPercent: math.min(
+                              _compaction.compactToPercent,
+                              v.round(),
+                            ),
+                          ),
+                        ),
+                      ),
+                      MenuRangeItem(
+                        label: 'summary_compact_to_label'.tr(),
+                        unit: '%',
+                        description: 'summary_compact_to_hint'.tr(),
+                        value: _compaction.compactToPercent.toDouble(),
+                        min: SummaryCompactionSettings.minCompactToPercent
+                            .toDouble(),
+                        max: _compaction.triggerPercent.toDouble(),
+                        divisions:
+                            _compaction.triggerPercent -
+                            SummaryCompactionSettings.minCompactToPercent,
+                        decimalPlaces: 0,
+                        editableValue: true,
+                        onChanged: (v) => setState(
+                          () => _compaction = _compaction.copyWith(
+                            compactToPercent: v.round().clamp(
+                              SummaryCompactionSettings.minCompactToPercent,
+                              _compaction.triggerPercent,
+                            ),
                           ),
                         ),
                       ),

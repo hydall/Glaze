@@ -67,10 +67,14 @@ class SummaryCompactionProgress {
 /// messages range from a line to a page, so a count says little about room.
 /// Once the prompt passes the trigger share of what it may use, the oldest
 /// messages are retold as a level-1 block, which then stands in for them,
-/// until the prompt is back under the trigger: the fresh tail sent as written
-/// is what fits under the line next to the rest of the prompt (see
-/// [autoTailBudget]). When the live blocks themselves outgrow their share,
-/// adjacent blocks of one level are merged a level up.
+/// until the prompt is under the line it compacts to (the trigger, or lower
+/// — `SummaryCompactionSettings.compactToPercent`): the fresh tail sent as
+/// written is what fits under that line next to the rest of the prompt (see
+/// [autoTailBudget]). Messages the history trim dropped from the last prompt
+/// are retold on the next run whatever the fill, so nothing the model stopped
+/// seeing as written goes unsummarized for long. When the live blocks
+/// themselves outgrow their share, adjacent blocks of one level are merged a
+/// level up.
 ///
 /// The connection is the Memory slot's (`PipelineSettings.memoryBookApi`), the
 /// same one memory drafts run on, falling back to the active chat connection.
@@ -132,6 +136,7 @@ class SummaryGenerationService {
 
       var messages = await _messages(session.id, session.messages);
       final budget = _promptBudget(charId);
+      final compactTo = settings.compactToTokens(budget.total);
       var created = 0;
       var merged = 0;
       var idle = 0;
@@ -179,24 +184,39 @@ class SummaryGenerationService {
         }
 
         final triggerTokens = budget.total * settings.triggerPercent ~/ 100;
-        if (!force && used < triggerTokens) break;
+        // What the history trim left out of the last prompt and no block
+        // stands in for yet: due now, whatever the fill.
+        final dropped = force
+            ? const _Dropped.none()
+            : _dropped(messages, view.coveredMessageIds, budget.sentIds);
+        if (!force && used < triggerTokens && dropped.tokens == 0) break;
+        var tail = autoTailBudget(
+          total: budget.total,
+          compactToTokens: compactTo,
+          fixedTokens: budget.fixedTokens,
+          summaryTokens: summaryTokens,
+        );
+        // The tail is cut from the newest messages; what was dropped is
+        // older than everything sent, so a tail no larger than the sent
+        // part leaves the dropped messages to the source.
+        if (dropped.tokens > 0) tail = math.min(tail, dropped.sentTokens);
         final plan = SummaryChain.planSource(
           blocks: blocks,
           messages: messages,
           tailBudgetTokens: force
               ? settings.manualTailBudget(_contextSize(budget))
-              : autoTailBudget(
-                  total: budget.total,
-                  triggerTokens: triggerTokens,
-                  fixedTokens: budget.fixedTokens,
-                  summaryTokens: summaryTokens,
-                ),
+              : tail,
           maxSourceTokens: inputCap,
         );
         if (plan.source.isEmpty) break;
         final overflow = used > budget.total;
         final minSource = math.max(1000, settings.blockTargetTokens * 2);
-        if (!force && !overflow && plan.sourceTokens < minSource) break;
+        if (!force &&
+            !overflow &&
+            dropped.tokens == 0 &&
+            plan.sourceTokens < minSource) {
+          break;
+        }
         final target = _targetFor(plan.sourceTokens, settings);
         // A block barely smaller than its messages frees nothing.
         if (target * 11 ~/ 10 >= plan.sourceTokens) break;
@@ -665,10 +685,11 @@ class SummaryGenerationService {
     return stored?.messages ?? fallback;
   }
 
-  /// What the main prompt may use, and how much of it is neither history nor
-  /// summary. Taken from the last prompt build when there is one: it carries
-  /// the real preset, lorebooks and memory. Without one, only the connection
-  /// is known and the fixed part counts as zero.
+  /// What the main prompt may use, how much of it is neither history nor
+  /// summary, and which history messages the last prompt sent. Taken from
+  /// the last prompt build when there is one: it carries the real preset,
+  /// lorebooks and memory. Without one, only the connection is known and the
+  /// fixed part counts as zero.
   _PromptBudget _promptBudget(String charId) {
     final breakdown = _ref.read(cachedTokenBreakdownProvider(charId));
     if (breakdown != null) {
@@ -682,7 +703,11 @@ class SummaryGenerationService {
         final summaryNow = breakdown.macroTokens['summary'] ?? 0;
         final fixed =
             breakdown.totalTokens - breakdown.historyTokens - summaryNow;
-        return _PromptBudget(total: total, fixedTokens: math.max(0, fixed));
+        return _PromptBudget(
+          total: total,
+          fixedTokens: math.max(0, fixed),
+          sentIds: breakdown.visibleMessageIds,
+        );
       }
     }
     final chat = _ref.read(activeApiConfigProvider);
@@ -691,25 +716,55 @@ class SummaryGenerationService {
   }
 
   /// The raw history an automatic run leaves as written: what fits under the
-  /// trigger next to the fixed part and the live summary, so the run brings
-  /// the prompt back under the line that started it. Counting the tail from
-  /// the window instead (the rest past the trigger) let a prompt with a large
-  /// fixed part — preset, lorebooks, memory — sit far above the trigger with
-  /// nothing to retell, until the history trim cut it first.
+  /// line the run compacts to ([compactToTokens], the trigger at most) next
+  /// to the fixed part and the live summary, so the run brings the prompt
+  /// under that line. Counting the tail from the window instead (the rest
+  /// past the trigger) let a prompt with a large fixed part — preset,
+  /// lorebooks, memory — sit far above the trigger with nothing to retell,
+  /// until the history trim cut it first.
   ///
   /// Never less than [SummaryCompactionSettings.autoTailFloorPercent] of
-  /// [total]: a fixed part past the trigger cannot be compacted away, and the
+  /// [total]: a fixed part past the line cannot be compacted away, and the
   /// newest exchanges still have to reach the model as written.
   @visibleForTesting
   static int autoTailBudget({
     required int total,
-    required int triggerTokens,
+    required int compactToTokens,
     required int fixedTokens,
     required int summaryTokens,
   }) => math.max(
-    triggerTokens - fixedTokens - summaryTokens,
+    compactToTokens - fixedTokens - summaryTokens,
     total * SummaryCompactionSettings.autoTailFloorPercent ~/ 100,
   );
+
+  /// Summarizable messages older than everything the last prompt sent that
+  /// no block covers: the history trim dropped them, and the model has not
+  /// seen them in any form since. Empty when nothing was sent (no prompt has
+  /// been built yet) or the trim held everything.
+  static _Dropped _dropped(
+    List<ChatMessage> messages,
+    Set<String> covered,
+    Set<String> sentIds,
+  ) {
+    if (sentIds.isEmpty) return const _Dropped.none();
+    final eligible = messages.where(SummaryChain.isSummarizable).toList();
+    final firstSent = eligible.indexWhere((m) => sentIds.contains(m.id));
+    if (firstSent <= 0) return const _Dropped.none();
+    var tokens = 0;
+    for (final message in eligible.take(firstSent)) {
+      if (!covered.contains(message.id)) {
+        tokens += estimateTokens(message.content);
+      }
+    }
+    if (tokens == 0) return const _Dropped.none();
+    var sent = 0;
+    for (final message in eligible.skip(firstSent)) {
+      if (!covered.contains(message.id)) {
+        sent += estimateTokens(message.content);
+      }
+    }
+    return _Dropped(tokens: tokens, sentTokens: sent);
+  }
 
   /// The chat connection's context size, which a manual tail in percent is a
   /// share of; the prompt budget when no connection is set.
@@ -807,5 +862,23 @@ class _PromptBudget {
   final int total;
   final int fixedTokens;
 
-  const _PromptBudget({required this.total, required this.fixedTokens});
+  /// History messages the last prompt sent, by id. Empty when no prompt has
+  /// been built.
+  final Set<String> sentIds;
+
+  const _PromptBudget({
+    required this.total,
+    required this.fixedTokens,
+    this.sentIds = const {},
+  });
+}
+
+/// What the history trim left out of the last prompt, in tokens, and the
+/// uncovered history it kept.
+class _Dropped {
+  final int tokens;
+  final int sentTokens;
+
+  const _Dropped({required this.tokens, required this.sentTokens});
+  const _Dropped.none() : tokens = 0, sentTokens = 0;
 }

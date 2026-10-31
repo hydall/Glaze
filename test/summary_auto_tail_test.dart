@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -48,15 +50,13 @@ const _config = ApiConfig(
   contextSize: 4000,
 );
 
-const _messageCount = 40;
-
 /// About 125 tokens each under the approximate count the tests run with.
-final _session = ChatSession(
+ChatSession _sessionOf(int count) => ChatSession(
   id: 'session',
   characterId: 'char',
   sessionIndex: 0,
   messages: [
-    for (var i = 0; i < _messageCount; i++)
+    for (var i = 0; i < count; i++)
       ChatMessage(
         id: 'm$i',
         role: i.isEven ? 'user' : 'assistant',
@@ -65,22 +65,31 @@ final _session = ChatSession(
   ],
 );
 
-/// A prompt build whose fixed part — preset, lorebooks, memory — came to
-/// [fixed] tokens, with no history sent yet.
-TokenBreakdown _breakdown(int fixed) => TokenBreakdown(
-  sourceTokens: const {},
-  staticTotal: fixed,
-  fixedTotal: fixed,
-  historyBudget: 3100 - fixed,
-  historyTokens: 0,
-  totalTokens: fixed,
-  cutoffIndex: 0,
-  trimmedHistory: const [],
-);
+final _session = _sessionOf(40);
 
-Future<ProviderContainer> _container(int fixed) async {
-  SharedPreferences.setMockInitialValues({});
-  final db = AppDatabase.forTesting(NativeDatabase.memory());
+/// A prompt build whose fixed part — preset, lorebooks, memory — came to
+/// [fixed] tokens, and whose history held [sent].
+TokenBreakdown _breakdown(int fixed, {Set<String> sent = const {}}) =>
+    TokenBreakdown(
+      sourceTokens: const {},
+      staticTotal: fixed,
+      fixedTotal: fixed,
+      historyBudget: 3100 - fixed,
+      historyTokens: 0,
+      totalTokens: fixed,
+      cutoffIndex: 0,
+      trimmedHistory: const [],
+      visibleMessageIds: sent,
+    );
+
+Future<ProviderContainer> _container(
+  int fixed, {
+  Set<String> sent = const {},
+  Map<String, Object>? settings,
+}) async {
+  SharedPreferences.setMockInitialValues({
+    if (settings != null) 'summaryCompaction': jsonEncode(settings),
+  });  final db = AppDatabase.forTesting(NativeDatabase.memory());
   final container = ProviderContainer(
     overrides: [
       appDbProvider.overrideWithValue(db),
@@ -101,22 +110,36 @@ Future<ProviderContainer> _container(int fixed) async {
   await container.read(apiListProvider.future);
   container.read(activeApiPresetIdProvider.notifier).state = _config.id;
   container.read(cachedTokenBreakdownProvider('char').notifier).state =
-      _breakdown(fixed);
+      _breakdown(fixed, sent: sent);
   return container;
+}
+
+/// Messages no block stands in for, oldest first.
+Future<List<String>> _rawIds(
+  ProviderContainer container, [
+  ChatSession? session,
+]) async {
+  final chat = session ?? _session;
+  final blocks = await container
+      .read(summaryServiceProvider)
+      .getBlocks(chat.id);
+  final covered = SummaryChain.promptView(
+    blocks,
+    chat.messages,
+  ).coveredMessageIds;
+  return [
+    for (final m in chat.messages)
+      if (!covered.contains(m.id)) m.id,
+  ];
 }
 
 /// Tokens of history the run left as written.
 Future<int> _rawTail(ProviderContainer container) async {
-  final blocks = await container
-      .read(summaryServiceProvider)
-      .getBlocks(_session.id);
-  final covered = SummaryChain.promptView(
-    blocks,
-    _session.messages,
-  ).coveredMessageIds;
   var tokens = 0;
-  for (final m in _session.messages) {
-    if (!covered.contains(m.id)) tokens += estimateTokens(m.content);
+  for (final id in await _rawIds(container)) {
+    tokens += estimateTokens(
+      _session.messages.firstWhere((m) => m.id == id).content,
+    );
   }
   return tokens;
 }
@@ -130,7 +153,7 @@ void main() {
     expect(
       SummaryGenerationService.autoTailBudget(
         total: 3100,
-        triggerTokens: 2325,
+        compactToTokens: 2325,
         fixedTokens: 500,
         summaryTokens: 100,
       ),
@@ -141,12 +164,87 @@ void main() {
     expect(
       SummaryGenerationService.autoTailBudget(
         total: 3100,
-        triggerTokens: 2325,
+        compactToTokens: 2325,
         fixedTokens: 2500,
         summaryTokens: 100,
       ),
       310,
     );
+  });
+
+  test('the line a run compacts to never sits above the trigger', () {
+    const settings = SummaryCompactionSettings(
+      triggerPercent: 60,
+      compactToPercent: 75,
+    );
+    expect(settings.compactToTokens(1000), 600);
+    // Saved before the line existed: it is the trigger.
+    expect(
+      SummaryCompactionSettings.fromJson(const {
+        'triggerPercent': 70,
+      }).compactToPercent,
+      70,
+    );
+    expect(
+      SummaryCompactionSettings.fromJson(const {
+        'triggerPercent': 70,
+        'compactToPercent': 50,
+      }).compactToPercent,
+      50,
+    );
+  });
+
+  test('a lower line frees room under the trigger for the chat to grow', () async {
+    // Trigger 75 % (2325), compact to 50 % (1550): with a fixed part of
+    // 500 the run leaves 1050 raw where compacting to the trigger left
+    // 1825.
+    final container = await _container(
+      500,
+      settings: {'autoEnabled': true, 'triggerPercent': 75, 'compactToPercent': 50},
+    );
+    await container
+        .read(summaryGenerationServiceProvider)
+        .compact(charId: 'char', session: _session);
+
+    final tail = await _rawTail(container);
+    expect(tail, lessThanOrEqualTo(1550 - 500));
+    expect(tail, greaterThan(700));
+  });
+
+  test('what the trim dropped is retold on the next run whatever the fill', () async {
+    // Twelve messages, 1500 of history beside a fixed part of 500: 2000,
+    // under the 2325 trigger, so the fill alone asks for nothing. The last
+    // prompt sent only the newest six — the trim dropped m0…m5.
+    final session = _sessionOf(12);
+    final container = await _container(
+      500,
+      sent: {for (var i = 6; i < 12; i++) 'm$i'},
+    );
+    final result = await container
+        .read(summaryGenerationServiceProvider)
+        .compact(charId: 'char', session: session);
+
+    expect(result.created, 1);
+    final blocks = await container
+        .read(summaryServiceProvider)
+        .getBlocks(session.id);
+    expect(blocks.single.messageIds, [for (var i = 0; i < 6; i++) 'm$i']);
+    // The sent part stays as written.
+    expect(await _rawIds(container, session), [
+      for (var i = 6; i < 12; i++) 'm$i',
+    ]);
+  });
+
+  test('a prompt that sent everything is left to the fill', () async {
+    final session = _sessionOf(12);
+    final container = await _container(
+      500,
+      sent: {for (var i = 0; i < 12; i++) 'm$i'},
+    );
+    final result = await container
+        .read(summaryGenerationServiceProvider)
+        .compact(charId: 'char', session: session);
+    expect(result.created, 0);
   });
 
   test('a run with a small fixed part leaves the room under the trigger', () async {
