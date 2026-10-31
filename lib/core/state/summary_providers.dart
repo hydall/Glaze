@@ -27,8 +27,9 @@ class SummaryCompactionSettings {
   final bool autoEnabled;
 
   /// How full the context may get, in percent of what the prompt may use,
-  /// before old messages are summarized. The rest is the fresh tail that is
-  /// always sent as is.
+  /// before old messages are summarized. A run retells the oldest until the
+  /// prompt is back under this line, so the fresh tail sent as is is what
+  /// fits under it next to the rest of the prompt.
   final int triggerPercent;
 
   /// Ceiling for one block. A small run of messages gets a smaller target.
@@ -64,6 +65,10 @@ class SummaryCompactionSettings {
   });
 
   static const minTriggerPercent = 50;
+
+  /// The least raw history an automatic run leaves, in percent of what the
+  /// prompt may use, when the fixed part alone crowds the trigger.
+  static const autoTailFloorPercent = 10;
   static const maxTriggerPercent = 95;
   static const minBlockTargetTokens = 200;
   static const maxBlockTargetTokens = 4000;
