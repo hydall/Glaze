@@ -80,7 +80,7 @@ void main() {
   );
 
   test(
-    'a draft over a hidden message waits for the reader, named, with no call',
+    'a draft over a hidden message skips it and is generated',
     () async {
       final harness = await _createHarness(autoGenerate: true);
       addTearDown(harness.dispose);
@@ -97,11 +97,9 @@ void main() {
       final book = await harness.container
           .read(memoryBookRepoProvider)
           .getBySessionId('s1');
-      expect(harness.calls(), 0);
-      expect(book!.pendingDrafts.single.status, 'needs_regeneration');
-      // With no translations loaded the text is the key alone; the wording
-      // that names the message by its place in the chat is the key's.
-      expect(book.pendingDrafts.single.error, contains('memory_draft_source'));
+      expect(harness.calls(), 1);
+      expect(book!.pendingDrafts.single.status, 'pending_approval');
+      expect(book.pendingDrafts.single.content, 'Generated memory');
       expect(harness.container.read(memoryActiveDraftsProvider), isEmpty);
     },
   );

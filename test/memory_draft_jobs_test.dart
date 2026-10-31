@@ -189,7 +189,7 @@ void main() {
     await EasyLocalization.ensureInitialized();
   });
 
-  test('a draft over a hidden message is refused, named, with no request', () async {
+  test('a draft whose every message is hidden is refused, with no request', () async {
     final harness = await _seed(hideMessage: true);
 
     await harness.startGeneration();

@@ -2637,7 +2637,7 @@
   "memory_books_drafts_created": "{arg0} drafts created",
   "memory_books_messages_not_found": "Messages not found for this draft",
   "memory_draft_source_problems": "This range can't be retold: {}. Fix those messages in the chat, then generate again.",
-  "memory_draft_source_hidden": "message #{} is hidden",
+  "memory_draft_source_all_hidden": "every message of the range is hidden",
   "memory_draft_source_error": "message #{} is a failed reply",
   "memory_draft_source_empty": "message #{} is empty",
   "memory_draft_source_deleted": "{} deleted",

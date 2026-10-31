@@ -29,7 +29,7 @@ void main() {
   final sources = [first, second];
   final manifest = MemorySourceManifest.capture('s', sources, ['a', 'b']);
 
-  test('problems name every source capture would refuse, by position', () {
+  test('problems name every source capture would refuse, by position, and skip hidden ones', () {
     final chat = [
       first,
       second.copyWith(isHidden: true),
@@ -39,11 +39,9 @@ void main() {
     ];
 
     expect(MemorySourceManifest.problems(['a', 'e'], chat), isEmpty);
+    // A hidden message is skipped, not refused.
+    expect(MemorySourceManifest.problems(['a', 'b', 'e'], chat), isEmpty);
     expect(MemorySourceManifest.problems(['a', 'b', 'c', 'd', 'gone'], chat), [
-      const MemorySourceProblem(
-        position: 2,
-        kind: MemorySourceProblemKind.hidden,
-      ),
       const MemorySourceProblem(
         position: 3,
         kind: MemorySourceProblemKind.empty,
@@ -57,10 +55,23 @@ void main() {
         kind: MemorySourceProblemKind.deleted,
       ),
     ]);
-    // What problems names is what capture refuses, and nothing else.
+    // A range hidden whole has nothing to retell.
+    expect(MemorySourceManifest.problems(['b'], chat), [
+      const MemorySourceProblem(
+        position: 0,
+        kind: MemorySourceProblemKind.allHidden,
+      ),
+    ]);
+    // Capture still refuses a hidden source; the generator leaves it out.
     expect(
       () => MemorySourceManifest.capture('s', [first, chat[1]], ['a', 'b']),
       throwsStateError,
+    );
+    final kept = MemorySourceManifest.withoutHidden(['a', 'b', 'e'], chat);
+    expect(kept, ['a', 'e']);
+    expect(
+      MemorySourceManifest.capture('s', [first, chat[4]], kept).messages.length,
+      2,
     );
   });
 

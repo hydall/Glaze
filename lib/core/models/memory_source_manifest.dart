@@ -7,8 +7,10 @@ import 'chat_message.dart';
 enum MemorySourceValidity { verified, unverified, invalid }
 
 /// Why one source of a draft cannot be captured: the message is gone from
-/// the chat, or [MemorySourceManifest.eligible] refuses it.
-enum MemorySourceProblemKind { deleted, hidden, error, empty }
+/// the chat, or [MemorySourceManifest.eligible] refuses it. A hidden message
+/// is no problem — the draft skips it — unless every source is hidden
+/// ([allHidden]), when there is nothing left to retell.
+enum MemorySourceProblemKind { deleted, allHidden, error, empty }
 
 /// A source [MemorySourceManifest.capture] would refuse, by its position in
 /// the chat (1-based, every message counted) so the reader can find it. A
@@ -67,6 +69,24 @@ class MemorySourceManifest {
     );
   }
 
+  /// [expectedIds] less the messages of [chat] that are hidden: what a
+  /// draft retells. A hidden message is the reader's choice to keep it out of
+  /// the story, so the draft skips it, as the transcript does, rather than
+  /// refuse the whole range.
+  static List<String> withoutHidden(
+    List<String> expectedIds,
+    List<ChatMessage> chat,
+  ) {
+    final hidden = {
+      for (final message in chat)
+        if (message.isHidden) message.id,
+    };
+    return [
+      for (final id in expectedIds)
+        if (!hidden.contains(id)) id,
+    ];
+  }
+
   static bool eligible(ChatMessage message) =>
       !message.isHidden &&
       !message.isTyping &&
@@ -77,9 +97,11 @@ class MemorySourceManifest {
   /// Every source among [expectedIds] that [capture] would refuse, in chat
   /// order: a deleted message sorts last, having no position of its own.
   /// Empty when the draft can be captured from [chat] as it stands. A draft
-  /// is planned over the messages of its day; one hidden, emptied, deleted
-  /// or turned into an error bubble since is not skipped — the memory would
-  /// then hold a gap — but named, so the reader can put it right.
+  /// is planned over the messages of its day; a hidden one is skipped (see
+  /// [withoutHidden]), but one emptied, deleted or turned into an error
+  /// bubble since is not — the memory would then hold a gap — and is named,
+  /// so the reader can put it right. A range hidden whole has nothing to
+  /// retell and is one [MemorySourceProblemKind.allHidden] problem.
   static List<MemorySourceProblem> problems(
     List<String> expectedIds,
     List<ChatMessage> chat,
@@ -87,6 +109,8 @@ class MemorySourceManifest {
     final position = {for (var i = 0; i < chat.length; i++) chat[i].id: i};
     final found = <MemorySourceProblem>[];
     var deleted = 0;
+    var shown = 0;
+    var hidden = 0;
     for (final id in expectedIds) {
       final at = position[id];
       if (at == null) {
@@ -94,10 +118,13 @@ class MemorySourceManifest {
         continue;
       }
       final message = chat[at];
-      final MemorySourceProblemKind kind;
       if (message.isHidden) {
-        kind = MemorySourceProblemKind.hidden;
-      } else if (message.isError) {
+        hidden++;
+        continue;
+      }
+      shown++;
+      final MemorySourceProblemKind kind;
+      if (message.isError) {
         kind = MemorySourceProblemKind.error;
       } else if (message.isTyping ||
           message.content.trim().isEmpty ||
@@ -107,6 +134,14 @@ class MemorySourceManifest {
         continue;
       }
       found.add(MemorySourceProblem(position: at + 1, kind: kind));
+    }
+    if (hidden > 0 && shown == 0 && deleted == 0) {
+      return const [
+        MemorySourceProblem(
+          position: 0,
+          kind: MemorySourceProblemKind.allHidden,
+        ),
+      ];
     }
     found.sort((a, b) => a.position.compareTo(b.position));
     for (var i = 0; i < deleted; i++) {
