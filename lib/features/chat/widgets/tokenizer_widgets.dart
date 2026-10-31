@@ -1,3 +1,6 @@
+import 'dart:math' as math;
+import 'dart:ui' as ui;
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
@@ -251,13 +254,39 @@ class KpiItem extends StatelessWidget {
   }
 }
 
+/// A line across the context bar at a share of the window, with its number.
+class ContextBarMark {
+  /// Share of the context window, 0–100.
+  final int percent;
+
+  /// The trigger line reads strong; the level a step refills to, faint.
+  final bool strong;
+
+  const ContextBarMark({required this.percent, this.strong = true});
+
+  @override
+  bool operator ==(Object other) =>
+      other is ContextBarMark &&
+      other.percent == percent &&
+      other.strong == strong;
+
+  @override
+  int get hashCode => Object.hash(percent, strong);
+}
+
 class TokenizerLayout extends StatelessWidget {
   final TokenBreakdown breakdown;
   final int contextSize;
+
+  /// Lines over the context bar — the stepped trim's trigger and the level a
+  /// step brings the prompt back to, from the connection's settings.
+  final List<ContextBarMark> marks;
+
   const TokenizerLayout({
     super.key,
     required this.breakdown,
     required this.contextSize,
+    this.marks = const [],
   });
 
   static const _mainKeys = [
@@ -346,6 +375,8 @@ class TokenizerLayout extends StatelessWidget {
               child: CustomPaint(
                 painter: _BarChartPainter(
                   segments: segments,
+                  marks: marks,
+                  markColor: context.cs.onSurface,
                   backgroundColor: context.cs.surfaceContainerHighest,
                   borderRadius: 12,
                 ),
@@ -675,11 +706,15 @@ class _BarSegment {
 
 class _BarChartPainter extends CustomPainter {
   final List<_BarSegment> segments;
+  final List<ContextBarMark> marks;
+  final Color markColor;
   final Color backgroundColor;
   final double borderRadius;
 
   _BarChartPainter({
     required this.segments,
+    this.marks = const [],
+    required this.markColor,
     required this.backgroundColor,
     required this.borderRadius,
   });
@@ -746,6 +781,8 @@ class _BarChartPainter extends CustomPainter {
       currentY += height;
     }
 
+    _paintMarks(canvas, size);
+
     canvas.restore();
 
     // Draw outer box shadows (inner shadow effect)
@@ -767,8 +804,54 @@ class _BarChartPainter extends CustomPainter {
     canvas.restore();
   }
 
+  /// Dashed lines at each mark's share of the bar, measured from the top as
+  /// the segments are, each with its percent above the line.
+  void _paintMarks(Canvas canvas, Size size) {
+    if (size.height < 4) return;
+    for (final mark in marks) {
+      final y = (mark.percent.clamp(0, 100) / 100 * size.height)
+          .clamp(1.0, size.height - 1)
+          .toDouble();
+      final alpha = mark.strong ? 0.9 : 0.5;
+      final shadow = Paint()
+        ..color = Colors.black.withValues(alpha: alpha * 0.5)
+        ..strokeWidth = 3;
+      final line = Paint()
+        ..color = markColor.withValues(alpha: alpha)
+        ..strokeWidth = 1.5;
+      const dash = 4.0;
+      for (var x = 0.0; x < size.width; x += dash * 2) {
+        final end = math.min(x + dash, size.width);
+        canvas.drawLine(Offset(x, y), Offset(end, y), shadow);
+        canvas.drawLine(Offset(x, y), Offset(end, y), line);
+      }
+      final label = TextPainter(
+        text: TextSpan(
+          text: '${mark.percent}%',
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            color: markColor.withValues(alpha: alpha),
+            shadows: const [Shadow(blurRadius: 3)],
+          ),
+        ),
+        textDirection: ui.TextDirection.ltr,
+      )..layout(maxWidth: size.width);
+      final top = y - label.height - 1 < 0 ? y + 2 : y - label.height - 1;
+      label.paint(canvas, Offset((size.width - label.width) / 2, top));
+      label.dispose();
+    }
+  }
+
   @override
   bool shouldRepaint(covariant _BarChartPainter oldDelegate) {
+    if (oldDelegate.markColor != markColor ||
+        oldDelegate.marks.length != marks.length) {
+      return true;
+    }
+    for (var i = 0; i < marks.length; i++) {
+      if (oldDelegate.marks[i] != marks[i]) return true;
+    }
     if (oldDelegate.segments.length != segments.length) return true;
     for (int i = 0; i < segments.length; i++) {
       if (oldDelegate.segments[i].fraction != segments[i].fraction ||

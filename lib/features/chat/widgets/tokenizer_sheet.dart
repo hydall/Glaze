@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/llm/context_calculator.dart';
+import '../../../core/llm/history_trim.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../core/llm/prompt_isolate.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
@@ -80,6 +81,23 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
     // Not from initState itself: _calculate sets state.
     _loading = true;
     WidgetsBinding.instance.addPostFrameCallback((_) => _calculate());
+  }
+
+  /// The stepped trim's lines on the context bar: where the whole prompt
+  /// may get before the anchor moves, and the level a step brings it back
+  /// to — both shares of the context window, as the settings give them.
+  /// None under the sliding trim, which has no such lines.
+  List<ContextBarMark> _trimMarks() {
+    final config = ref.watch(activeApiConfigProvider);
+    if (config == null || config.historyTrimMode != HistoryTrimMode.stepped) {
+      return const [];
+    }
+    final trigger = config.historyTrimTriggerPercent.clamp(1, 100);
+    final refill = trigger - config.historyTrimStepPercent.clamp(1, 95);
+    return [
+      ContextBarMark(percent: trigger),
+      if (refill > 0) ContextBarMark(percent: refill, strong: false),
+    ];
   }
 
   ApiConfig? _resolveApiConfig() {
@@ -271,7 +289,11 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
           const SizedBox(height: 12),
           _buildTokenizerTile(context),
           const SizedBox(height: 24),
-          TokenizerLayout(breakdown: bd, contextSize: contextSize),
+          TokenizerLayout(
+            breakdown: bd,
+            contextSize: contextSize,
+            marks: _trimMarks(),
+          ),
           if (bd.cutoffIndex > 0) ...[
             const SizedBox(height: 12),
             // The gear leads to the connection's Context section: the window
