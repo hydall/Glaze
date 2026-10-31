@@ -73,6 +73,18 @@ void main() {
       expect(both.ephemerality, [1, 2]);
       expect(both.altersDisplay, isTrue);
     });
+
+    test('neither box ticked stays unticked and runs everywhere', () {
+      final none = useFigure.withPasses(display: false, prompt: false);
+      expect(none.ephemerality, isEmpty);
+      expect(none.ticksDisplay, isFalse);
+      expect(none.ticksPrompt, isFalse);
+      expect(none.altersDisplay, isTrue);
+      expect(none.altersPrompt, isTrue);
+      // A flagged script's boxes are its flags.
+      expect(useFigure.ticksDisplay, isFalse);
+      expect(useFigure.ticksPrompt, isTrue);
+    });
   });
 
   group('applyRegexes with the figure-space pair', () {

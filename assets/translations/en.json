@@ -102,6 +102,7 @@
   "regex_run_on_edit": "Run On Edit",
   "regex_memory_book_retrieval": "Apply when generating Memory Book drafts",
   "regex_macros_find": "Macros in Find Regex",
+  "regex_ephemerality_none_hint": "Neither ticked: the script edits the message itself, so the change is both shown in the chat and sent to the model, as SillyTavern does.",
   "regex_ephemerality": "Ephemerality",
   "regex_user_input": "User Input",
   "regex_ai_output": "AI Output",

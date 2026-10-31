@@ -27,6 +27,17 @@ extension RegexPasses on PresetRegex {
       ? promptOnly
       : ephemerality.isEmpty || ephemerality.contains(2);
 
+  /// What the editor's "Alter Chat Display" box shows: the flag of an
+  /// imported script, else whether Glaze's own list names the display.
+  ///
+  /// Unlike [altersDisplay], an empty list without flags reads as unticked:
+  /// that is a script with neither box ticked — SillyTavern's "edit the
+  /// message itself" — which the engine runs in every pass.
+  bool get ticksDisplay => usesStFlags ? markdownOnly : ephemerality.contains(1);
+
+  /// What the editor's "Alter Outgoing Prompt" box shows (see [ticksDisplay]).
+  bool get ticksPrompt => usesStFlags ? promptOnly : ephemerality.contains(2);
+
   /// The script with both ways of saying it set to [display] / [prompt] — what
   /// the editor writes, so the engine, the display list and an export to
   /// SillyTavern all read the same thing.
