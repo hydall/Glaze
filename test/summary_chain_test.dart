@@ -289,15 +289,36 @@ void main() {
     ]);
   });
 
-  test('notes come first and cover nothing', () {
+  test('a summary from before blocks is still sent', () {
+    final messages = _chat(2);
+    final view = SummaryChain.promptView([
+      const SummaryBlock(
+        id: SummaryBlock.legacyNoteId,
+        level: 0,
+        content: 'Old summary',
+      ),
+    ], messages);
+    expect(view.content, 'Old summary');
+  });
+
+  test('notes stay out of the prompt and cover nothing', () {
     final messages = _chat(4);
     final blocks = [
       _block('a', messages, ['m0', 'm1']),
-      const SummaryBlock(id: 'n', level: 0, content: 'Note'),
+      const SummaryBlock(id: 'n', level: 0, content: 'Note', tokens: 40),
     ];
     final view = SummaryChain.promptView(blocks, messages);
-    expect(view.content, startsWith('Note'));
+    expect(view.content, isNot(contains('Note')));
     expect(view.coveredMessageIds, {'m0', 'm1'});
+    expect(
+      SummaryChain.liveTokens(blocks, messages),
+      SummaryChain.liveTokens([blocks.first], messages),
+    );
+    // The retelling still gets it, with the earlier summary.
+    expect(
+      SummaryChain.liveBefore(blocks, messages, 'm2').map((b) => b.id),
+      contains('n'),
+    );
   });
 
   test('commitSource refuses a run another block already covers', () {

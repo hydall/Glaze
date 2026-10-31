@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -86,6 +88,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
 
   /// The manual tail in tokens, typed; [_compaction] follows every valid edit.
   final TextEditingController _tailTokens = TextEditingController();
+  final TextEditingController _floorTokens = TextEditingController();
 
   /// The chat's own retelling text, kept from before prompts were chosen by
   /// key. It wins over [_selection] until a preset is picked, which clears it.
@@ -121,6 +124,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
     _scrollController.dispose();
     _preambleText.dispose();
     _tailTokens.dispose();
+    _floorTokens.dispose();
     super.dispose();
   }
 
@@ -154,6 +158,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
       _enabled = enabled;
       _compaction = compaction;
       _tailTokens.text = '${compaction.manualTailTokens}';
+      _floorTokens.text = '${compaction.autoTailFloorTokens}';
       _ownPrompt = prompt;
       _selection = selection;
       _preambleOn = preamble.enabled;
@@ -301,6 +306,26 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
     );
   }
 
+  void _pickFloorUnit() {
+    showGlazePickerSheet(
+      context,
+      title: 'summary_auto_floor_label'.tr(),
+      items: [
+        for (final unit in SummaryManualTailUnit.values)
+          GlazePickerItem(
+            label: _tailUnitLabel(unit),
+            isActive: unit == _compaction.autoTailFloorUnit,
+            value: unit,
+          ),
+      ],
+      onSelect: (value) => setState(
+        () => _compaction = _compaction.copyWith(
+          autoTailFloorUnit: value as SummaryManualTailUnit,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return SheetView(
@@ -367,9 +392,87 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                         onChanged: (v) => setState(
                           () => _compaction = _compaction.copyWith(
                             triggerPercent: v.round(),
+                            // The line a run compacts to never sits above
+                            // the trigger.
+                            compactToPercent: math.min(
+                              _compaction.compactToPercent,
+                              v.round(),
+                            ),
                           ),
                         ),
                       ),
+                      MenuRangeItem(
+                        label: 'summary_compact_to_label'.tr(),
+                        unit: '%',
+                        description: 'summary_compact_to_hint'.tr(),
+                        value: _compaction.compactToPercent.toDouble(),
+                        min: SummaryCompactionSettings.minCompactToPercent
+                            .toDouble(),
+                        max: _compaction.triggerPercent.toDouble(),
+                        divisions:
+                            _compaction.triggerPercent -
+                            SummaryCompactionSettings.minCompactToPercent,
+                        decimalPlaces: 0,
+                        editableValue: true,
+                        onChanged: (v) => setState(
+                          () => _compaction = _compaction.copyWith(
+                            compactToPercent: v.round().clamp(
+                              SummaryCompactionSettings.minCompactToPercent,
+                              _compaction.triggerPercent,
+                            ),
+                          ),
+                        ),
+                      ),
+                      MenuSelectorItem(
+                        label: 'summary_auto_floor_label'.tr(),
+                        description: 'summary_auto_floor_hint'.tr(),
+                        currentValue: _tailUnitLabel(
+                          _compaction.autoTailFloorUnit,
+                        ),
+                        onTap: _pickFloorUnit,
+                      ),
+                      if (_compaction.autoTailFloorUnit ==
+                          SummaryManualTailUnit.percent)
+                        MenuRangeItem(
+                          label: 'summary_manual_tail_percent_label'.tr(),
+                          unit: '%',
+                          value: _compaction.autoTailFloorPercent.toDouble(),
+                          min: SummaryCompactionSettings.minManualTailPercent
+                              .toDouble(),
+                          max: SummaryCompactionSettings.maxManualTailPercent
+                              .toDouble(),
+                          divisions:
+                              SummaryCompactionSettings.maxManualTailPercent -
+                              SummaryCompactionSettings.minManualTailPercent,
+                          decimalPlaces: 0,
+                          editableValue: true,
+                          onChanged: (v) => setState(
+                            () => _compaction = _compaction.copyWith(
+                              autoTailFloorPercent: v.round(),
+                            ),
+                          ),
+                        )
+                      else
+                        MenuFieldItem(
+                          label: 'summary_manual_tail_tokens_label'.tr(),
+                          controller: _floorTokens,
+                          placeholder:
+                              '${const SummaryCompactionSettings().autoTailFloorTokens}',
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                          ],
+                          // An empty or zero field keeps the last number.
+                          onChanged: (text) {
+                            final v = int.tryParse(text) ?? 0;
+                            if (v < 1) return;
+                            setState(
+                              () => _compaction = _compaction.copyWith(
+                                autoTailFloorTokens: v,
+                              ),
+                            );
+                          },
+                        ),
                       MenuSelectorItem(
                         label: 'summary_manual_tail_label'.tr(),
                         description: 'summary_manual_tail_hint'.tr(),

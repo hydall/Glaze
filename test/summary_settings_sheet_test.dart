@@ -357,10 +357,17 @@ void main() {
     expect(find.text('summary_auto_label'.tr()), findsOneWidget);
     expect(find.text('summary_trigger_label'.tr()), findsOneWidget);
     expect(find.text('summary_manual_tail_label'.tr()), findsOneWidget);
-    // The manual tail is a share of the context by default; the token slider
-    // shows only once tokens are picked.
-    expect(find.text('summary_manual_tail_unit_percent'.tr()), findsOneWidget);
-    expect(find.text('summary_manual_tail_percent_label'.tr()), findsOneWidget);
+    expect(find.text('summary_auto_floor_label'.tr()), findsOneWidget);
+    // The least fresh history and the manual tail are both shares of the
+    // context by default; the token fields show only once tokens are picked.
+    expect(
+      find.text('summary_manual_tail_unit_percent'.tr()),
+      findsNWidgets(2),
+    );
+    expect(
+      find.text('summary_manual_tail_percent_label'.tr()),
+      findsNWidgets(2),
+    );
     expect(find.text('summary_manual_tail_tokens_label'.tr()), findsNothing);
     expect(find.text('summary_block_target_label'.tr()), findsOneWidget);
     expect(find.text('summary_merge_label'.tr()), findsOneWidget);
@@ -452,11 +459,13 @@ void main() {
             .isSummaryEnabled(_sessionId),
         isFalse,
       );
-      // The summary text itself is untouched by the switch.
+      // The summary itself is untouched by the switch.
       expect(
-        await container
-            .read(summaryServiceProvider)
-            .getSummaryContent(_sessionId),
+        (await container
+                .read(summaryServiceProvider)
+                .getBlocks(_sessionId))
+            .single
+            .content,
         'They reached the pass after dark.',
       );
     });

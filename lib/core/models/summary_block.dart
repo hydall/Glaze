@@ -60,6 +60,15 @@ class SummaryBlock {
 
   bool get isNote => level == 0;
 
+  /// The id of the note a summary from before blocks existed reads as (see
+  /// `SummaryService`): the old summary itself, not a reader's note, so the
+  /// chat prompt keeps carrying it.
+  static const legacyNoteId = 'note-legacy';
+
+  /// A note the reader wrote for the retelling — every note but the
+  /// [legacyNoteId] one.
+  bool get isReaderNote => isNote && id != legacyNoteId;
+
   SummaryBlock copyWith({String? content, bool? archived, int? tokens}) =>
       SummaryBlock(
         id: id,
@@ -378,6 +387,20 @@ class SummaryChain {
     ).where((b) => !isStale(b, byId)).toList(growable: false);
   }
 
+  /// Live blocks the chat prompt carries, in story order: every live block
+  /// but the reader's notes. A note is an instruction for the retelling —
+  /// handed to it with the earlier summary (see [liveBefore]) — and never
+  /// reaches the chat request, where it would only repeat the author's note.
+  /// A summary from before blocks (the [SummaryBlock.legacyNoteId] note) is
+  /// still carried: it is the old retelling, not a note.
+  static List<SummaryBlock> inPrompt(
+    List<SummaryBlock> blocks,
+    List<ChatMessage> messages,
+  ) => live(
+    blocks,
+    messages,
+  ).where((b) => !b.isReaderNote).toList(growable: false);
+
   /// Live blocks that come before [firstMessageId] in story order, notes
   /// included: the earlier summary a retelling of the run starting there is
   /// handed as context.
@@ -408,7 +431,7 @@ class SummaryChain {
     List<SummaryBlock> blocks,
     List<ChatMessage> messages,
   ) {
-    final used = live(blocks, messages);
+    final used = inPrompt(blocks, messages);
     final covered = {for (final block in used) ...block.messageIds};
     return SummaryPromptView(
       content: render(used),
@@ -417,9 +440,8 @@ class SummaryChain {
     );
   }
 
-  /// Cuts [used] — live blocks in story order — where a message the prompt
-  /// carries sits between two of them. Notes cover no messages and open the
-  /// first run.
+  /// Cuts [used] — the blocks the prompt carries, in story order — where a
+  /// message the prompt carries sits between two of them.
   static List<SummarySegment> _segments(
     List<SummaryBlock> used,
     List<ChatMessage> messages,
@@ -491,10 +513,12 @@ class SummaryChain {
     return history.where((m) => !covered.contains(m.id)).toList();
   }
 
+  /// What the summary takes in the chat prompt: the blocks [inPrompt]
+  /// carries, notes left out.
   static int liveTokens(
     List<SummaryBlock> blocks,
     List<ChatMessage> messages,
-  ) => live(blocks, messages).fold(0, (sum, b) => sum + b.tokens);
+  ) => inPrompt(blocks, messages).fold(0, (sum, b) => sum + b.tokens);
 
   /// Drops stale active blocks together with the archive they were merged
   /// from: the archived parts cover the same changed messages. A block that

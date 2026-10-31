@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/llm/macro_engine.dart';
@@ -65,9 +66,14 @@ class SummaryCompactionProgress {
 /// Compaction is driven by how full the prompt is, not by a message count —
 /// messages range from a line to a page, so a count says little about room.
 /// Once the prompt passes the trigger share of what it may use, the oldest
-/// messages outside the fresh tail are retold as a level-1 block, which then
-/// stands in for them. When the live blocks themselves outgrow their share,
-/// adjacent blocks of one level are merged a level up.
+/// messages are retold as a level-1 block, which then stands in for them,
+/// until the prompt is under the line it compacts to (the trigger, or lower
+/// — `SummaryCompactionSettings.compactToPercent`): the fresh tail sent as
+/// written is what fits under that line next to the rest of the prompt (see
+/// [autoTailBudget]). The source is always the oldest messages no block
+/// stands in for yet, so what the history trim dropped from the prompt is
+/// retold first once a run is due. When the live blocks themselves outgrow
+/// their share, adjacent blocks of one level are merged a level up.
 ///
 /// The connection is the Memory slot's (`PipelineSettings.memoryBookApi`), the
 /// same one memory drafts run on, falling back to the active chat connection.
@@ -129,6 +135,7 @@ class SummaryGenerationService {
 
       var messages = await _messages(session.id, session.messages);
       final budget = _promptBudget(charId);
+      final compactTo = settings.compactToTokens(budget.total);
       var created = 0;
       var merged = 0;
       var idle = 0;
@@ -177,12 +184,18 @@ class SummaryGenerationService {
 
         final triggerTokens = budget.total * settings.triggerPercent ~/ 100;
         if (!force && used < triggerTokens) break;
+        final tail = autoTailBudget(
+          compactToTokens: compactTo,
+          floorTokens: settings.autoTailFloor(budget.total),
+          fixedTokens: budget.fixedTokens,
+          summaryTokens: summaryTokens,
+        );
         final plan = SummaryChain.planSource(
           blocks: blocks,
           messages: messages,
           tailBudgetTokens: force
               ? settings.manualTailBudget(_contextSize(budget))
-              : budget.total - triggerTokens,
+              : tail,
           maxSourceTokens: inputCap,
         );
         if (plan.source.isEmpty) break;
@@ -681,6 +694,26 @@ class SummaryGenerationService {
     final total = chat == null ? 0 : chat.contextSize - chat.maxTokens;
     return _PromptBudget(total: total > 0 ? total : 32000, fixedTokens: 0);
   }
+
+  /// The raw history an automatic run leaves as written: what fits under the
+  /// line the run compacts to ([compactToTokens], the trigger at most) next
+  /// to the fixed part and the live summary, so the run brings the prompt
+  /// under that line. Counting the tail from the window instead (the rest
+  /// past the trigger) let a prompt with a large fixed part — preset,
+  /// lorebooks, memory — sit far above the trigger with nothing to retell,
+  /// until the history trim cut it first.
+  ///
+  /// Never less than [floorTokens] (the reader's least raw history, see
+  /// [SummaryCompactionSettings.autoTailFloor]): a fixed part past the line
+  /// cannot be compacted away, and the newest exchanges still have to reach
+  /// the model as written.
+  @visibleForTesting
+  static int autoTailBudget({
+    required int compactToTokens,
+    required int floorTokens,
+    required int fixedTokens,
+    required int summaryTokens,
+  }) => math.max(compactToTokens - fixedTokens - summaryTokens, floorTokens);
 
   /// The chat connection's context size, which a manual tail in percent is a
   /// share of; the prompt budget when no connection is set.

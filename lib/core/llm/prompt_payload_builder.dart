@@ -294,13 +294,16 @@ class PromptPayloadBuilder {
       throwIfAborted();
       runtimePromptBlocks = _readRuntimePromptBlocks(session.id);
 
-      // A historical request rebuilds the prompt an older reply saw; the
-      // summary of today does not belong in it.
-      final summaryView = historicalWindow == null
-          ? await _ref
-                .read(summaryServiceProvider)
-                .getPromptView(session.id, session.messages)
-          : null;
+      // On a historical request (a regeneration or swipe) [session] holds
+      // the messages before the target, and the view is read over those: a
+      // block whose sources are all there stands in for them as on any
+      // other turn, one that reaches past the target counts as stale and
+      // its messages come back as written. Leaving the summary out of every
+      // regeneration sent the model a chat with no past at all whenever the
+      // reader swiped.
+      final summaryView = await _ref
+          .read(summaryServiceProvider)
+          .getPromptView(session.id, session.messages);
       summaryContent = summaryView?.content;
       summarySegments = summaryView?.segments ?? const [];
       // Summarized messages are not sent: their block stands in for them.

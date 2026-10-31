@@ -186,7 +186,7 @@ class SummaryService {
     if (legacy.isEmpty) return const [];
     return [
       SummaryBlock(
-        id: 'note-legacy',
+        id: SummaryBlock.legacyNoteId,
         level: 0,
         content: legacy,
         tokens: estimateTokens(legacy),
@@ -204,7 +204,7 @@ class SummaryService {
     return _repo.putBlocks(
       sessionId: sessionId,
       blocksJson: SummaryBlock.encodeList(blocks),
-      content: SummaryChain.render(SummaryChain.live(blocks, messages)),
+      content: SummaryChain.render(SummaryChain.inPrompt(blocks, messages)),
       messageCount: messages.length,
     );
   }
@@ -224,7 +224,7 @@ class SummaryService {
       if (next == null) return null;
       return (
         blocksJson: SummaryBlock.encodeList(next),
-        content: SummaryChain.render(SummaryChain.live(next, messages)),
+        content: SummaryChain.render(SummaryChain.inPrompt(next, messages)),
       );
     },
   );

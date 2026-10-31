@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -27,9 +28,31 @@ class SummaryCompactionSettings {
   final bool autoEnabled;
 
   /// How full the context may get, in percent of what the prompt may use,
-  /// before old messages are summarized. The rest is the fresh tail that is
-  /// always sent as is.
+  /// before old messages are summarized.
   final int triggerPercent;
+
+  /// Where an automatic run brings the prompt, in percent of what it may
+  /// use: it retells the oldest messages until the prompt is under this
+  /// line, so the fresh tail sent as is is what fits under it next to the
+  /// rest of the prompt. Equal to [triggerPercent] (the default) a run takes
+  /// the prompt just under the trigger; lower, it frees room for the chat to
+  /// grow before the next run, and the provider's cache holds until then.
+  /// Never above the trigger: see [compactToTokens].
+  final int compactToPercent;
+
+  /// How the least raw history an automatic run leaves is given: a share of
+  /// what the prompt may use, or a number of tokens. It holds when the fixed
+  /// part of the prompt alone crowds the line a run compacts to, so the
+  /// newest exchanges still reach the model as written.
+  final SummaryManualTailUnit autoTailFloorUnit;
+
+  /// That least raw history in percent, when [autoTailFloorUnit] is
+  /// [SummaryManualTailUnit.percent].
+  final int autoTailFloorPercent;
+
+  /// That least raw history in tokens, when [autoTailFloorUnit] is
+  /// [SummaryManualTailUnit.tokens].
+  final int autoTailFloorTokens;
 
   /// Ceiling for one block. A small run of messages gets a smaller target.
   final int blockTargetTokens;
@@ -56,6 +79,10 @@ class SummaryCompactionSettings {
   const SummaryCompactionSettings({
     this.autoEnabled = false,
     this.triggerPercent = 75,
+    this.compactToPercent = 75,
+    this.autoTailFloorUnit = SummaryManualTailUnit.percent,
+    this.autoTailFloorPercent = 10,
+    this.autoTailFloorTokens = 8000,
     this.blockTargetTokens = 1000,
     this.mergePercent = 20,
     this.manualTailUnit = SummaryManualTailUnit.percent,
@@ -64,6 +91,24 @@ class SummaryCompactionSettings {
   });
 
   static const minTriggerPercent = 50;
+  static const minCompactToPercent = 20;
+
+  /// Tokens of raw history an automatic run leaves at the least, for a
+  /// prompt that may use [total]: [autoTailFloorPercent] or
+  /// [autoTailFloorTokens], never past the line the run compacts to — a
+  /// floor above it would leave nothing to retell.
+  int autoTailFloor(int total) => math.min(
+    autoTailFloorUnit == SummaryManualTailUnit.tokens
+        ? autoTailFloorTokens
+        : total * autoTailFloorPercent ~/ 100,
+    compactToTokens(total),
+  );
+
+  /// Tokens an automatic run brings the prompt under, for a prompt that may
+  /// use [total]: [compactToPercent], capped at the trigger — a run cannot
+  /// bring the prompt to a line above the one it started at.
+  int compactToTokens(int total) =>
+      total * math.min(compactToPercent, triggerPercent) ~/ 100;
   static const maxTriggerPercent = 95;
   static const minBlockTargetTokens = 200;
   static const maxBlockTargetTokens = 4000;
@@ -82,6 +127,10 @@ class SummaryCompactionSettings {
   SummaryCompactionSettings copyWith({
     bool? autoEnabled,
     int? triggerPercent,
+    int? compactToPercent,
+    SummaryManualTailUnit? autoTailFloorUnit,
+    int? autoTailFloorPercent,
+    int? autoTailFloorTokens,
     int? blockTargetTokens,
     int? mergePercent,
     SummaryManualTailUnit? manualTailUnit,
@@ -90,6 +139,10 @@ class SummaryCompactionSettings {
   }) => SummaryCompactionSettings(
     autoEnabled: autoEnabled ?? this.autoEnabled,
     triggerPercent: triggerPercent ?? this.triggerPercent,
+    compactToPercent: compactToPercent ?? this.compactToPercent,
+    autoTailFloorUnit: autoTailFloorUnit ?? this.autoTailFloorUnit,
+    autoTailFloorPercent: autoTailFloorPercent ?? this.autoTailFloorPercent,
+    autoTailFloorTokens: autoTailFloorTokens ?? this.autoTailFloorTokens,
     blockTargetTokens: blockTargetTokens ?? this.blockTargetTokens,
     mergePercent: mergePercent ?? this.mergePercent,
     manualTailUnit: manualTailUnit ?? this.manualTailUnit,
@@ -100,6 +153,10 @@ class SummaryCompactionSettings {
   Map<String, dynamic> toJson() => {
     'autoEnabled': autoEnabled,
     'triggerPercent': triggerPercent,
+    'compactToPercent': compactToPercent,
+    'autoTailFloorUnit': autoTailFloorUnit.name,
+    'autoTailFloorPercent': autoTailFloorPercent,
+    'autoTailFloorTokens': autoTailFloorTokens,
     'blockTargetTokens': blockTargetTokens,
     'mergePercent': mergePercent,
     'manualTailUnit': manualTailUnit.name,
@@ -114,14 +171,36 @@ class SummaryCompactionSettings {
       return value is num ? value.toInt().clamp(min, max) : fallback;
     }
 
+    final triggerPercent = read(
+      'triggerPercent',
+      d.triggerPercent,
+      minTriggerPercent,
+      maxTriggerPercent,
+    );
     return SummaryCompactionSettings(
       autoEnabled: json['autoEnabled'] == true,
-      triggerPercent: read(
-        'triggerPercent',
-        d.triggerPercent,
-        minTriggerPercent,
+      triggerPercent: triggerPercent,
+      // Settings saved before the line existed compact to the trigger, as
+      // they always did.
+      compactToPercent: read(
+        'compactToPercent',
+        triggerPercent,
+        minCompactToPercent,
         maxTriggerPercent,
       ),
+      autoTailFloorUnit: json['autoTailFloorUnit'] == 'tokens'
+          ? SummaryManualTailUnit.tokens
+          : SummaryManualTailUnit.percent,
+      autoTailFloorPercent: read(
+        'autoTailFloorPercent',
+        d.autoTailFloorPercent,
+        minManualTailPercent,
+        maxManualTailPercent,
+      ),
+      autoTailFloorTokens: switch (json['autoTailFloorTokens']) {
+        final num v when v >= 1 => v.toInt(),
+        _ => d.autoTailFloorTokens,
+      },
       blockTargetTokens: read(
         'blockTargetTokens',
         d.blockTargetTokens,
@@ -156,6 +235,10 @@ class SummaryCompactionSettings {
       other is SummaryCompactionSettings &&
       other.autoEnabled == autoEnabled &&
       other.triggerPercent == triggerPercent &&
+      other.compactToPercent == compactToPercent &&
+      other.autoTailFloorUnit == autoTailFloorUnit &&
+      other.autoTailFloorPercent == autoTailFloorPercent &&
+      other.autoTailFloorTokens == autoTailFloorTokens &&
       other.blockTargetTokens == blockTargetTokens &&
       other.mergePercent == mergePercent &&
       other.manualTailUnit == manualTailUnit &&
@@ -166,6 +249,10 @@ class SummaryCompactionSettings {
   int get hashCode => Object.hash(
     autoEnabled,
     triggerPercent,
+    compactToPercent,
+    autoTailFloorUnit,
+    autoTailFloorPercent,
+    autoTailFloorTokens,
     blockTargetTokens,
     mergePercent,
     manualTailUnit,
