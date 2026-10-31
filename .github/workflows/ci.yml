@@ -153,7 +153,10 @@ jobs:
 
   webview-render:
     name: WebView render tests
-    runs-on: ubuntu-latest
+    # Not ubuntu-latest: that label moved to Ubuntu 26.04 at the end of
+    # October 2026, and `playwright install --with-deps` (1.56) has no
+    # dependency list for it, so the Chromium step failed on every PR.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
