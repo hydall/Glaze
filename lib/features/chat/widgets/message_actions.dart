@@ -194,6 +194,7 @@ void showMessageContextMenu({
           label: pinnedHere
               ? 'action_unpin_cache_anchor'.tr()
               : 'action_pin_cache_anchor'.tr(),
+          hint: 'action_pin_cache_anchor_hint'.tr(),
           onTap: () async {
             Navigator.of(context, rootNavigator: true).pop();
             final notifier = ref.read(chatProvider(charId).notifier);

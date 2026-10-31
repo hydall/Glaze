@@ -3453,6 +3453,7 @@
   "context_cache_anchor": "Якорь кэша · сообщение #{index}",
   "context_cache_anchor_pinned": "Якорь кэша · сообщение #{index} · закреплён",
   "action_pin_cache_anchor": "Закрепить якорь кэша здесь",
+  "action_pin_cache_anchor_hint": "Режим блочной обрезки",
   "action_unpin_cache_anchor": "Открепить якорь кэша",
   "history_anchor_pin_too_far": "Слишком далеко назад: с историей отсюда промпт перешагнёт порог обрезки. Якорь остался на месте.",
   "prompt_cache_anchor": "КЭШ",

@@ -3420,6 +3420,7 @@
   "context_cache_anchor": "Cache anchor · message #{index}",
   "context_cache_anchor_pinned": "Cache anchor · message #{index} · pinned",
   "action_pin_cache_anchor": "Pin cache anchor here",
+  "action_pin_cache_anchor_hint": "Stepped history trim mode",
   "action_unpin_cache_anchor": "Unpin cache anchor",
   "history_anchor_pin_too_far": "Too far back for the history to start there: the prompt would pass the trim trigger. The anchor stays where it was.",
   "prompt_cache_anchor": "CACHE",
