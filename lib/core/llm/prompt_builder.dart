@@ -331,8 +331,7 @@ PromptResult _buildPromptOnce(PromptPayload payload) {
 
     if (resolved == null) continue;
 
-    if (id == 'summary' &&
-        rawBlock.insertionMode == summaryInPlaceInsertion) {
+    if (id == 'summary' && rawBlock.insertionMode == summaryInPlaceInsertion) {
       inPlaceSummary = resolveInPlaceSummary(
         payload: payload,
         block: rawBlock,
@@ -883,6 +882,8 @@ PromptResult _assembleMessages({
         payload.apiConfig.excludeReasoningFromContextBudget,
     historyTrimMode: payload.apiConfig.historyTrimMode,
     historyAnchorId: payload.sessionVars[ChatSessionX.historyAnchorVarKey],
+    historyAnchorPinned:
+        payload.sessionVars[ChatSessionX.historyAnchorPinnedVarKey] == '1',
     historyTrimTriggerPercent: payload.apiConfig.historyTrimTriggerPercent,
     historyTrimStepPercent: payload.apiConfig.historyTrimStepPercent,
   );

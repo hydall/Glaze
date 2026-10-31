@@ -1307,6 +1307,9 @@ class StreamGenerationService {
   /// Stores the history anchor a stepped trim settled on, when it moved, and
   /// raises the amber "trimmed" toast for the block the move dropped.
   ///
+  /// The reader's pin rides along: it stays while the trim held the pinned
+  /// anchor, and goes once the trim had to step past it.
+  ///
   /// Fire-and-forget and change-guarded: it must never delay a generation, and
   /// the anchor holds still for many turns, so the common case writes nothing.
   /// Failure is survivable — the next turn simply re-anchors.
@@ -1316,13 +1319,14 @@ class StreamGenerationService {
     required List<ChatMessage> history,
     required String historyTrimMode,
   }) {
-    final current = session.sessionVars[ChatSessionX.historyAnchorVarKey];
+    final normalizedCurrent = session.historyAnchorId;
+    final currentPinned = session.historyAnchorPinned;
     final next = breakdown.historyAnchorId;
-    final normalizedCurrent = (current == null || current.isEmpty)
-        ? null
-        : current;
     final normalizedNext = (next == null || next.isEmpty) ? null : next;
-    if (normalizedCurrent == normalizedNext) return;
+    final nextPinned = normalizedNext != null && breakdown.historyAnchorPinned;
+    if (normalizedCurrent == normalizedNext && currentPinned == nextPinned) {
+      return;
+    }
     unawaited(
       _ref
           .read(chatRepoProvider)
@@ -1332,6 +1336,11 @@ class StreamGenerationService {
               updated.remove(ChatSessionX.historyAnchorVarKey);
             } else {
               updated[ChatSessionX.historyAnchorVarKey] = normalizedNext;
+            }
+            if (nextPinned) {
+              updated[ChatSessionX.historyAnchorPinnedVarKey] = '1';
+            } else {
+              updated.remove(ChatSessionX.historyAnchorPinnedVarKey);
             }
             return updated;
           })

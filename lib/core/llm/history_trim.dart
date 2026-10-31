@@ -27,16 +27,37 @@ abstract final class HistoryTrimMode {
       all.contains(value) ? value! : sliding;
 }
 
-/// How full the anchored window may get before a stepped trim moves the anchor.
+/// How full the prompt may get before a stepped trim moves the anchor, as a
+/// share of the context window — the number the prompt inspector shows, with
+/// everything the request carries counted in, history included.
 ///
-/// Below 100 % on purpose: stepping only once the window is already over budget
-/// leaves no room for the turn that pushed it there, so the anchor would move
-/// again immediately.
+/// It used to be a share of the *history budget*, the context left once the
+/// preset, the character, the lorebooks and memory had taken theirs. That
+/// leftover moves with every turn's lorebook activation, so the same setting
+/// cut three messages on one turn and thirty on the next; a share of the
+/// whole window names a line the reader can see.
+///
+/// Below 100 % on purpose: stepping only once the window is already over
+/// budget leaves no room for the turn that pushed it there, so the anchor
+/// would move again immediately.
 const int kDefaultHistoryTrimTriggerPercent = 85;
 
-/// How much of the history budget a step gives back.
+/// How much of the context window a step gives back.
 ///
 /// The freed share is the headroom the following turns grow into, and it sets
 /// how long the prefix — and with it a provider's cache — holds still. Larger
 /// means rarer steps and longer cache runs at the cost of history on screen.
+/// A step larger than the room the history has above the fixed part of the
+/// prompt frees half of that room instead: freeing all of it would leave
+/// nothing to hold, and the next turn would step again.
 const int kDefaultHistoryTrimStepPercent = 30;
+
+/// How far below the refill level a held window may sit before the anchor
+/// moves back to it, as a share of the context window.
+///
+/// A turn whose lorebooks or memory swell cuts the history deep, and the
+/// anchor it leaves would otherwise hold that cut for every turn after, long
+/// after the room came back. Moving back costs a cache miss, but the prefix
+/// that shrank back already missed; the slack keeps the ordinary ebb and flow
+/// of a few per cent from moving the anchor every turn.
+const int kHistoryAnchorRefillSlackPercent = 5;
