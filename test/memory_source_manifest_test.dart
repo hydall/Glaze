@@ -29,6 +29,41 @@ void main() {
   final sources = [first, second];
   final manifest = MemorySourceManifest.capture('s', sources, ['a', 'b']);
 
+  test('problems name every source capture would refuse, by position', () {
+    final chat = [
+      first,
+      second.copyWith(isHidden: true),
+      const ChatMessage(id: 'c', role: 'user', content: '   '),
+      const ChatMessage(id: 'd', role: 'assistant', content: 'x', isError: true),
+      const ChatMessage(id: 'e', role: 'user', content: 'Fine.'),
+    ];
+
+    expect(MemorySourceManifest.problems(['a', 'e'], chat), isEmpty);
+    expect(MemorySourceManifest.problems(['a', 'b', 'c', 'd', 'gone'], chat), [
+      const MemorySourceProblem(
+        position: 2,
+        kind: MemorySourceProblemKind.hidden,
+      ),
+      const MemorySourceProblem(
+        position: 3,
+        kind: MemorySourceProblemKind.empty,
+      ),
+      const MemorySourceProblem(
+        position: 4,
+        kind: MemorySourceProblemKind.error,
+      ),
+      const MemorySourceProblem(
+        position: 0,
+        kind: MemorySourceProblemKind.deleted,
+      ),
+    ]);
+    // What problems names is what capture refuses, and nothing else.
+    expect(
+      () => MemorySourceManifest.capture('s', [first, chat[1]], ['a', 'b']),
+      throwsStateError,
+    );
+  });
+
   test(
     'manifest survives full book JSON and distinguishes missing provenance',
     () {

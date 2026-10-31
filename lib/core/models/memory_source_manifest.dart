@@ -6,6 +6,31 @@ import 'chat_message.dart';
 
 enum MemorySourceValidity { verified, unverified, invalid }
 
+/// Why one source of a draft cannot be captured: the message is gone from
+/// the chat, or [MemorySourceManifest.eligible] refuses it.
+enum MemorySourceProblemKind { deleted, hidden, error, empty }
+
+/// A source [MemorySourceManifest.capture] would refuse, by its position in
+/// the chat (1-based, every message counted) so the reader can find it.
+class MemorySourceProblem {
+  final int position;
+  final MemorySourceProblemKind kind;
+
+  const MemorySourceProblem({required this.position, required this.kind});
+
+  @override
+  bool operator ==(Object other) =>
+      other is MemorySourceProblem &&
+      other.position == position &&
+      other.kind == kind;
+
+  @override
+  int get hashCode => Object.hash(position, kind);
+
+  @override
+  String toString() => 'MemorySourceProblem(#$position ${kind.name})';
+}
+
 /// Evidence captured when a summary is generated, never inferred on import.
 /// Session branches retain message identities, so originSessionId is descriptive.
 class MemorySourceManifest {
@@ -47,6 +72,52 @@ class MemorySourceManifest {
       !message.isError &&
       message.content.trim().isNotEmpty &&
       (message.role == 'user' || message.role == 'assistant');
+
+  /// Every source among [expectedIds] that [capture] would refuse, in chat
+  /// order: a deleted message sorts last, having no position of its own.
+  /// Empty when the draft can be captured from [chat] as it stands. A draft
+  /// is planned over the messages of its day; one hidden, emptied, deleted
+  /// or turned into an error bubble since is not skipped — the memory would
+  /// then hold a gap — but named, so the reader can put it right.
+  static List<MemorySourceProblem> problems(
+    List<String> expectedIds,
+    List<ChatMessage> chat,
+  ) {
+    final position = {for (var i = 0; i < chat.length; i++) chat[i].id: i};
+    final found = <MemorySourceProblem>[];
+    var deleted = 0;
+    for (final id in expectedIds) {
+      final at = position[id];
+      if (at == null) {
+        deleted++;
+        continue;
+      }
+      final message = chat[at];
+      final MemorySourceProblemKind kind;
+      if (message.isHidden) {
+        kind = MemorySourceProblemKind.hidden;
+      } else if (message.isError) {
+        kind = MemorySourceProblemKind.error;
+      } else if (message.isTyping ||
+          message.content.trim().isEmpty ||
+          (message.role != 'user' && message.role != 'assistant')) {
+        kind = MemorySourceProblemKind.empty;
+      } else {
+        continue;
+      }
+      found.add(MemorySourceProblem(position: at + 1, kind: kind));
+    }
+    found.sort((a, b) => a.position.compareTo(b.position));
+    for (var i = 0; i < deleted; i++) {
+      found.add(
+        const MemorySourceProblem(
+          position: 0,
+          kind: MemorySourceProblemKind.deleted,
+        ),
+      );
+    }
+    return found;
+  }
 
   MemorySourceValidity validate(
     List<String> expectedIds,

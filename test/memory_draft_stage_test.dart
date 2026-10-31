@@ -78,6 +78,33 @@ void main() {
       expect(harness.container.read(memoryActiveDraftsProvider), isEmpty);
     },
   );
+
+  test(
+    'a draft over a hidden message waits for the reader, named, with no call',
+    () async {
+      final harness = await _createHarness(autoGenerate: true);
+      addTearDown(harness.dispose);
+      final session = harness.session.copyWith(
+        messages: [
+          harness.session.messages[0],
+          harness.session.messages[1].copyWith(isHidden: true),
+        ],
+      );
+      final lease = harness.stage.reserveAutoGeneration(session);
+
+      await harness.stage.run(session, generationLease: lease);
+
+      final book = await harness.container
+          .read(memoryBookRepoProvider)
+          .getBySessionId('s1');
+      expect(harness.calls(), 0);
+      expect(book!.pendingDrafts.single.status, 'needs_regeneration');
+      // With no translations loaded the text is the key alone; the wording
+      // that names the message by its place in the chat is the key's.
+      expect(book.pendingDrafts.single.error, contains('memory_draft_source'));
+      expect(harness.container.read(memoryActiveDraftsProvider), isEmpty);
+    },
+  );
 }
 
 Future<_Harness> _createHarness({

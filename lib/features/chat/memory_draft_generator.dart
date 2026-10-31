@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:dio/dio.dart';
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart';
 
@@ -24,6 +25,29 @@ import '../../core/state/db_provider.dart';
 import '../../core/state/global_regex_provider.dart';
 import '../../core/state/studio_regex_provider.dart';
 import '../settings/api_list_provider.dart';
+
+/// Why [draft] cannot be retold from [chat] as the reader should hear it,
+/// or null when every source is in place. The manifest captured at
+/// generation refuses a hidden, empty or failed message and one that is
+/// gone, and a draft left pointing at one failed the same way on every
+/// attempt, saying only that its sources were "missing, reordered, or
+/// unavailable". The messages are named by their place in the chat so the
+/// reader can unhide, regenerate or restore them and generate again; they
+/// are not skipped, which would leave the memory with a gap.
+String? memoryDraftSourceProblems(MemoryDraft draft, List<ChatMessage> chat) {
+  final problems = MemorySourceManifest.problems(draft.messageIds, chat);
+  if (problems.isEmpty) return null;
+  final named = problems.map((problem) {
+    final key = switch (problem.kind) {
+      MemorySourceProblemKind.hidden => 'memory_draft_source_hidden',
+      MemorySourceProblemKind.error => 'memory_draft_source_error',
+      MemorySourceProblemKind.empty => 'memory_draft_source_empty',
+      MemorySourceProblemKind.deleted => 'memory_draft_source_deleted',
+    };
+    return key.tr(args: ['${problem.position}']);
+  });
+  return 'memory_draft_source_problems'.tr(args: [named.join(', ')]);
+}
 
 class MemoryDraftGenerator {
   final T Function<T>(ProviderListenable<T> provider) _read;
