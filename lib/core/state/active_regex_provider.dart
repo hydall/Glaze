@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../llm/regex_passes.dart';
 import '../models/preset.dart';
 import 'db_provider.dart';
 import 'active_selection_provider.dart';
@@ -43,13 +44,7 @@ final activeRegexesProvider = FutureProvider<List<PresetRegex>>((ref) async {
 
 final displayRegexesProvider = FutureProvider<List<PresetRegex>>((ref) async {
   final all = await ref.watch(activeRegexesProvider.future);
-  // "Only Format Prompt" keeps a script out of the display pass — unless it
-  // also ticks "Only Format Display", which opts it into both passes (ST ORs
-  // the two flags; see [applyRegexes]).
-  return all
-      .where(
-        (r) =>
-            r.ephemerality.contains(1) && (!r.promptOnly || r.markdownOnly),
-      )
-      .toList();
+  // The same answer the engine gives (see [RegexPasses]): the flags of an
+  // imported script, else Glaze's own list.
+  return all.where((r) => r.altersDisplay).toList();
 });
