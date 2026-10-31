@@ -31,6 +31,15 @@
  * While the wheel is relayed, the trusted `wheel` the plugin still forwards for
  * the same notch is swallowed at the document — see relayNativeWheel() — or
  * every notch would scroll twice.
+ *
+ * The chat chrome (chrome/index.js — the composer's field above all) draws in
+ * a closed shadow root, where `document.elementFromPoint` cannot look: it
+ * returns the chrome's host, and a step would go on to the chat underneath.
+ * So the chrome (`window.__glazeChrome`) is asked first whether the cursor is
+ * over a field or scroller of its; if so the step is its, whether or not it
+ * can take it — the field at its end swallows the step, as a text field in
+ * any editor does, rather than passing it on to the chat behind. Only a point
+ * where the chrome has nothing reaches the page.
  */
 
 /* Pixel-mode wheel scale used by the page's own wheel handlers: they scroll by
@@ -123,11 +132,21 @@ export class ScrollRelay {
     this._panFedThisFrame = false;
     this._nativeWheelRelayed = false;
     this._frame = this._frame.bind(this);
+    // The chrome module runs before the bridge, so its hook is there by now.
+    this._chrome = ScrollRelay._chromeHook();
     this._swallowNativeWheel = (e) => {
       if (!e.isTrusted) return;
       e.preventDefault();
       e.stopImmediatePropagation();
     };
+  }
+
+  /* The chrome's scroll hook, when the page has one with all three parts. */
+  static _chromeHook() {
+    const chrome = window.__glazeChrome;
+    return chrome && typeof chrome.ownsScrollAt === 'function' &&
+      typeof chrome.scrollAt === 'function' &&
+      typeof chrome.canScrollAt === 'function' ? chrome : null;
   }
 
   /* Flutter relays the mouse wheel through wheel() from now on: drop the
@@ -164,6 +183,12 @@ export class ScrollRelay {
 
     const container = this._containerFn ? this._containerFn() : null;
     const hasPoint = Number.isFinite(x) && Number.isFinite(y);
+    // The chrome first: a field of its own under the cursor takes the step,
+    // whether or not it can still move.
+    if (hasPoint && this._chrome && this._chrome.ownsScrollAt(x, y)) {
+      this._chrome.scrollAt(x, y, dx, dy);
+      return;
+    }
     const target = (hasPoint ? deepElementFromPoint(x, y) : null) || container;
     if (!target) return;
 
@@ -384,6 +409,12 @@ export class ScrollRelay {
   _canScrollAt(dx, dy) {
     const container = this._containerFn ? this._containerFn() : null;
     const hasPoint = Number.isFinite(this._cursorX) && Number.isFinite(this._cursorY);
+    // Over a field of the chrome the answer is the field's: at its end, what
+    // is owed is dropped there, as at the end of the chat.
+    if (hasPoint && this._chrome &&
+        this._chrome.ownsScrollAt(this._cursorX, this._cursorY)) {
+      return this._chrome.canScrollAt(this._cursorX, this._cursorY, dx, dy);
+    }
     let el = hasPoint ? deepElementFromPoint(this._cursorX, this._cursorY) : null;
     while (el && el !== document.body && el !== document.documentElement) {
       if (this._canScroll(el, dx, dy)) return true;
