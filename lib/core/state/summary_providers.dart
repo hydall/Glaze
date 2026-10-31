@@ -40,6 +40,20 @@ class SummaryCompactionSettings {
   /// Never above the trigger: see [compactToTokens].
   final int compactToPercent;
 
+  /// How the least raw history an automatic run leaves is given: a share of
+  /// what the prompt may use, or a number of tokens. It holds when the fixed
+  /// part of the prompt alone crowds the line a run compacts to, so the
+  /// newest exchanges still reach the model as written.
+  final SummaryManualTailUnit autoTailFloorUnit;
+
+  /// That least raw history in percent, when [autoTailFloorUnit] is
+  /// [SummaryManualTailUnit.percent].
+  final int autoTailFloorPercent;
+
+  /// That least raw history in tokens, when [autoTailFloorUnit] is
+  /// [SummaryManualTailUnit.tokens].
+  final int autoTailFloorTokens;
+
   /// Ceiling for one block. A small run of messages gets a smaller target.
   final int blockTargetTokens;
 
@@ -66,6 +80,9 @@ class SummaryCompactionSettings {
     this.autoEnabled = false,
     this.triggerPercent = 75,
     this.compactToPercent = 75,
+    this.autoTailFloorUnit = SummaryManualTailUnit.tokens,
+    this.autoTailFloorPercent = 10,
+    this.autoTailFloorTokens = 16000,
     this.blockTargetTokens = 1000,
     this.mergePercent = 20,
     this.manualTailUnit = SummaryManualTailUnit.percent,
@@ -76,10 +93,16 @@ class SummaryCompactionSettings {
   static const minTriggerPercent = 50;
   static const minCompactToPercent = 20;
 
-  /// The least raw history an automatic run leaves, in percent of what the
-  /// prompt may use, when the fixed part alone crowds the line it compacts
-  /// to.
-  static const autoTailFloorPercent = 10;
+  /// Tokens of raw history an automatic run leaves at the least, for a
+  /// prompt that may use [total]: [autoTailFloorPercent] or
+  /// [autoTailFloorTokens], never past the line the run compacts to — a
+  /// floor above it would leave nothing to retell.
+  int autoTailFloor(int total) => math.min(
+    autoTailFloorUnit == SummaryManualTailUnit.tokens
+        ? autoTailFloorTokens
+        : total * autoTailFloorPercent ~/ 100,
+    compactToTokens(total),
+  );
 
   /// Tokens an automatic run brings the prompt under, for a prompt that may
   /// use [total]: [compactToPercent], capped at the trigger — a run cannot
@@ -105,6 +128,9 @@ class SummaryCompactionSettings {
     bool? autoEnabled,
     int? triggerPercent,
     int? compactToPercent,
+    SummaryManualTailUnit? autoTailFloorUnit,
+    int? autoTailFloorPercent,
+    int? autoTailFloorTokens,
     int? blockTargetTokens,
     int? mergePercent,
     SummaryManualTailUnit? manualTailUnit,
@@ -114,6 +140,9 @@ class SummaryCompactionSettings {
     autoEnabled: autoEnabled ?? this.autoEnabled,
     triggerPercent: triggerPercent ?? this.triggerPercent,
     compactToPercent: compactToPercent ?? this.compactToPercent,
+    autoTailFloorUnit: autoTailFloorUnit ?? this.autoTailFloorUnit,
+    autoTailFloorPercent: autoTailFloorPercent ?? this.autoTailFloorPercent,
+    autoTailFloorTokens: autoTailFloorTokens ?? this.autoTailFloorTokens,
     blockTargetTokens: blockTargetTokens ?? this.blockTargetTokens,
     mergePercent: mergePercent ?? this.mergePercent,
     manualTailUnit: manualTailUnit ?? this.manualTailUnit,
@@ -125,6 +154,9 @@ class SummaryCompactionSettings {
     'autoEnabled': autoEnabled,
     'triggerPercent': triggerPercent,
     'compactToPercent': compactToPercent,
+    'autoTailFloorUnit': autoTailFloorUnit.name,
+    'autoTailFloorPercent': autoTailFloorPercent,
+    'autoTailFloorTokens': autoTailFloorTokens,
     'blockTargetTokens': blockTargetTokens,
     'mergePercent': mergePercent,
     'manualTailUnit': manualTailUnit.name,
@@ -156,6 +188,19 @@ class SummaryCompactionSettings {
         minCompactToPercent,
         maxTriggerPercent,
       ),
+      autoTailFloorUnit: json['autoTailFloorUnit'] == 'percent'
+          ? SummaryManualTailUnit.percent
+          : SummaryManualTailUnit.tokens,
+      autoTailFloorPercent: read(
+        'autoTailFloorPercent',
+        d.autoTailFloorPercent,
+        minManualTailPercent,
+        maxManualTailPercent,
+      ),
+      autoTailFloorTokens: switch (json['autoTailFloorTokens']) {
+        final num v when v >= 1 => v.toInt(),
+        _ => d.autoTailFloorTokens,
+      },
       blockTargetTokens: read(
         'blockTargetTokens',
         d.blockTargetTokens,
@@ -191,6 +236,9 @@ class SummaryCompactionSettings {
       other.autoEnabled == autoEnabled &&
       other.triggerPercent == triggerPercent &&
       other.compactToPercent == compactToPercent &&
+      other.autoTailFloorUnit == autoTailFloorUnit &&
+      other.autoTailFloorPercent == autoTailFloorPercent &&
+      other.autoTailFloorTokens == autoTailFloorTokens &&
       other.blockTargetTokens == blockTargetTokens &&
       other.mergePercent == mergePercent &&
       other.manualTailUnit == manualTailUnit &&
@@ -202,6 +250,9 @@ class SummaryCompactionSettings {
     autoEnabled,
     triggerPercent,
     compactToPercent,
+    autoTailFloorUnit,
+    autoTailFloorPercent,
+    autoTailFloorTokens,
     blockTargetTokens,
     mergePercent,
     manualTailUnit,

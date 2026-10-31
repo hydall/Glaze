@@ -87,8 +87,14 @@ Future<ProviderContainer> _container(
   Set<String> sent = const {},
   Map<String, Object>? settings,
 }) async {
+  // A tenth of the budget as the least raw history, which the small
+  // windows here are sized around (the default is 16k tokens).
   SharedPreferences.setMockInitialValues({
-    if (settings != null) 'summaryCompaction': jsonEncode(settings),
+    'summaryCompaction': jsonEncode({
+      'autoTailFloorUnit': 'percent',
+      'autoTailFloorPercent': 10,
+      ...?settings,
+    }),
   });  final db = AppDatabase.forTesting(NativeDatabase.memory());
   final container = ProviderContainer(
     overrides: [
@@ -152,8 +158,8 @@ void main() {
   test('the tail is what fits under the trigger beside the fixed part', () {
     expect(
       SummaryGenerationService.autoTailBudget(
-        total: 3100,
         compactToTokens: 2325,
+        floorTokens: 310,
         fixedTokens: 500,
         summaryTokens: 100,
       ),
@@ -163,12 +169,31 @@ void main() {
     // exchanges raw rather than retelling up to the last message.
     expect(
       SummaryGenerationService.autoTailBudget(
-        total: 3100,
         compactToTokens: 2325,
+        floorTokens: 310,
         fixedTokens: 2500,
         summaryTokens: 100,
       ),
       310,
+    );
+  });
+
+  test('the least raw history is a setting, in tokens by default', () {
+    const d = SummaryCompactionSettings();
+    expect(d.autoTailFloorUnit, SummaryManualTailUnit.tokens);
+    expect(d.autoTailFloor(100000), 16000);
+    // Never past the line a run compacts to.
+    expect(d.autoTailFloor(20000), 15000);
+    const percent = SummaryCompactionSettings(
+      autoTailFloorUnit: SummaryManualTailUnit.percent,
+      autoTailFloorPercent: 20,
+    );
+    expect(percent.autoTailFloor(100000), 20000);
+    expect(SummaryCompactionSettings.fromJson(percent.toJson()), percent);
+    // Saved before the setting existed: the default.
+    expect(
+      SummaryCompactionSettings.fromJson(const {}).autoTailFloorTokens,
+      16000,
     );
   });
 

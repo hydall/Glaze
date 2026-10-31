@@ -185,8 +185,8 @@ class SummaryGenerationService {
         final triggerTokens = budget.total * settings.triggerPercent ~/ 100;
         if (!force && used < triggerTokens) break;
         final tail = autoTailBudget(
-          total: budget.total,
           compactToTokens: compactTo,
+          floorTokens: settings.autoTailFloor(budget.total),
           fixedTokens: budget.fixedTokens,
           summaryTokens: summaryTokens,
         );
@@ -703,19 +703,17 @@ class SummaryGenerationService {
   /// lorebooks, memory — sit far above the trigger with nothing to retell,
   /// until the history trim cut it first.
   ///
-  /// Never less than [SummaryCompactionSettings.autoTailFloorPercent] of
-  /// [total]: a fixed part past the line cannot be compacted away, and the
-  /// newest exchanges still have to reach the model as written.
+  /// Never less than [floorTokens] (the reader's least raw history, see
+  /// [SummaryCompactionSettings.autoTailFloor]): a fixed part past the line
+  /// cannot be compacted away, and the newest exchanges still have to reach
+  /// the model as written.
   @visibleForTesting
   static int autoTailBudget({
-    required int total,
     required int compactToTokens,
+    required int floorTokens,
     required int fixedTokens,
     required int summaryTokens,
-  }) => math.max(
-    compactToTokens - fixedTokens - summaryTokens,
-    total * SummaryCompactionSettings.autoTailFloorPercent ~/ 100,
-  );
+  }) => math.max(compactToTokens - fixedTokens - summaryTokens, floorTokens);
 
   /// The chat connection's context size, which a manual tail in percent is a
   /// share of; the prompt budget when no connection is set.
