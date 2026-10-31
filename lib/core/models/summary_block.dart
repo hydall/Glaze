@@ -339,9 +339,12 @@ class SummaryChain {
     for (final message in messages) message.id: message,
   };
 
-  /// Active blocks in story order: notes first, then by where their first
-  /// source message sits in [messages]. A block whose sources are all gone
-  /// sorts last, where it does no harm — it is stale anyway.
+  /// Active blocks in story order: by where their first source message sits
+  /// in [messages], a block whose sources are all gone after them (it does
+  /// no harm there — it is stale anyway), and the reader's notes last of
+  /// all. A note holds what the reader wants kept in mind now, so it closes
+  /// the summary, right before the history sent as written, rather than
+  /// opening it where a long retelling would bury it.
   static List<SummaryBlock> ordered(
     List<SummaryBlock> blocks,
     List<ChatMessage> messages,
@@ -350,7 +353,7 @@ class SummaryChain {
       for (var i = 0; i < messages.length; i++) messages[i].id: i,
     };
     int start(SummaryBlock block) {
-      if (block.isNote) return -1;
+      if (block.isNote) return messages.length + 1;
       for (final id in block.messageIds) {
         final at = position[id];
         if (at != null) return at;
@@ -418,8 +421,8 @@ class SummaryChain {
   }
 
   /// Cuts [used] — live blocks in story order — where a message the prompt
-  /// carries sits between two of them. Notes cover no messages and open the
-  /// first run.
+  /// carries sits between two of them. Notes cover no messages and close the
+  /// last run, right before the history sent as written.
   static List<SummarySegment> _segments(
     List<SummaryBlock> used,
     List<ChatMessage> messages,

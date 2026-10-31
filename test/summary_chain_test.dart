@@ -289,14 +289,14 @@ void main() {
     ]);
   });
 
-  test('notes come first and cover nothing', () {
+  test('notes come last and cover nothing', () {
     final messages = _chat(4);
     final blocks = [
-      _block('a', messages, ['m0', 'm1']),
       const SummaryBlock(id: 'n', level: 0, content: 'Note'),
+      _block('a', messages, ['m0', 'm1']),
     ];
     final view = SummaryChain.promptView(blocks, messages);
-    expect(view.content, startsWith('Note'));
+    expect(view.content, endsWith('Note'));
     expect(view.coveredMessageIds, {'m0', 'm1'});
   });
 

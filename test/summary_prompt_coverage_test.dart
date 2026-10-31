@@ -141,6 +141,35 @@ void main() {
     expect(await generationHistory(edited), ['m1', 'm2', 'm3']);
   });
 
+  test('a regeneration of the newest reply still carries the summary', () async {
+    // Swiping m3: the prompt is built from the messages before it, which
+    // the block covers whole — it stands in for them as on a plain send.
+    final inputs = await builder.collectGenerationContext(
+      charId: 'c1',
+      session: session,
+      apiConfigOverride: const ApiConfig(id: 'api'),
+      allowRemoteRetrieval: false,
+      excludeSnapshotMessageId: 'm3',
+    );
+    expect(inputs.history, isEmpty);
+    expect(inputs.summaryContent, 'They met.');
+    expect(inputs.summarySegments.single.beforeMessageId, isNull);
+  });
+
+  test('a regeneration inside a block gives its messages back', () async {
+    // Swiping m2: the block reaches past the target, so it is left out and
+    // m1 is sent as written.
+    final inputs = await builder.collectGenerationContext(
+      charId: 'c1',
+      session: session,
+      apiConfigOverride: const ApiConfig(id: 'api'),
+      allowRemoteRetrieval: false,
+      excludeSnapshotMessageId: 'm2',
+    );
+    expect(inputs.history.map((m) => m.id), ['m1']);
+    expect(inputs.summaryContent, isNull);
+  });
+
   test('a switched-off summary leaves the history whole', () async {
     await container
         .read(summaryServiceProvider)

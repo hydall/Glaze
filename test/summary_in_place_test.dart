@@ -146,16 +146,20 @@ void main() {
       expect(view.segments.single.beforeMessageId, 'm5');
     });
 
-    test('a reader note opens the first run', () {
+    test('a reader note closes the last run', () {
       const note = SummaryBlock(id: 'n', level: 0, content: 'Note.');
 
       final view = SummaryChain.promptView([
         note,
         block('b1', ['m1', 'm2']),
+        block('b2', ['m4', 'm5']),
       ], messages);
 
-      expect(view.segments.single.content, 'Note.\n\nSummary of m1, m2.');
-      expect(view.segments.single.beforeMessageId, 'm3');
+      expect(view.segments.map((s) => s.content), [
+        'Summary of m1, m2.',
+        'Summary of m4, m5.\n\nNote.',
+      ]);
+      expect(view.segments.map((s) => s.beforeMessageId), ['m3', 'm6']);
     });
 
     test('segments survive the trip to the prompt isolate', () {

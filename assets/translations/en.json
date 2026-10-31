@@ -570,7 +570,7 @@
   "summary_stats": "{} blocks • {} tokens • stand in for {} messages",
   "summary_note": "Note",
   "summary_note_add": "Note",
-  "summary_note_hint": "Sent with the summary in every request. Stands in for no messages and is never merged.",
+  "summary_note_hint": "Sent with the summary in every request, after the retelling and right before the recent history. Stands in for no messages and is never merged.",
   "summary_block_level": "Level {}",
   "summary_block_stale": "Source messages changed — not sent, they are back in history",
   "summary_tokens_n": "{} tokens",
