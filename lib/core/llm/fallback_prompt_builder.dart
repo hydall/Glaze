@@ -54,6 +54,8 @@ PromptResult buildFallbackPrompt(PromptPayload payload) {
         payload.apiConfig.excludeReasoningFromContextBudget,
     historyTrimMode: payload.apiConfig.historyTrimMode,
     historyAnchorId: payload.sessionVars[ChatSessionX.historyAnchorVarKey],
+    historyAnchorPinned:
+        payload.sessionVars[ChatSessionX.historyAnchorPinnedVarKey] == '1',
     historyTrimTriggerPercent: payload.apiConfig.historyTrimTriggerPercent,
     historyTrimStepPercent: payload.apiConfig.historyTrimStepPercent,
   );

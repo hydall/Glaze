@@ -376,11 +376,23 @@ extension ChatSessionX on ChatSession {
   int get deletedMessageCount =>
       int.tryParse(sessionVars[deletedMessagesVarKey] ?? '') ?? 0;
 
+  /// Reserved [sessionVars] key, `'1'` while [historyAnchorVarKey] is the
+  /// reader's own choice — the chat's "Pin cache anchor". The stepped trim
+  /// holds a pinned anchor as long as its window fits under the trigger line
+  /// and never moves it back to the refill level; once it has to step past
+  /// it, the pin goes with it. Absent otherwise.
+  static const historyAnchorPinnedVarKey = '__historyAnchorPinned';
+
   /// Anchor the last stepped trim settled on. See [historyAnchorVarKey].
   String? get historyAnchorId {
     final value = sessionVars[historyAnchorVarKey];
     return value == null || value.isEmpty ? null : value;
   }
+
+  /// Whether [historyAnchorId] was pinned by the reader. See
+  /// [historyAnchorPinnedVarKey].
+  bool get historyAnchorPinned =>
+      historyAnchorId != null && sessionVars[historyAnchorPinnedVarKey] == '1';
 
   String get historyText => messages
       .where((m) => (m.role == 'user' || m.role == 'assistant') && !m.isHidden)

@@ -290,6 +290,7 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
             CacheAnchorTile(
               messageNumber: anchorIndex + 1,
               preview: visibleMessages[anchorIndex].content,
+              pinned: bd.historyAnchorPinned,
             ),
           ],
           if (hiddenCount > 0) ...[

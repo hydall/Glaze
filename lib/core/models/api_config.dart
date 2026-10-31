@@ -25,8 +25,9 @@ abstract class ApiConfig with _$ApiConfig {
     /// is why it sits next to the window it is cut against.
     @Default('sliding') String historyTrimMode,
 
-    /// Stepped mode only: how full the held window may get before the anchor
-    /// moves, and how much of the budget a move gives back. See
+    /// Stepped mode only: how full the prompt may get before the anchor
+    /// moves, and how much of the context window a move gives back — both
+    /// shares of the context window, as the prompt inspector shows it. See
     /// [kDefaultHistoryTrimTriggerPercent] / [kDefaultHistoryTrimStepPercent].
     @Default(85) int historyTrimTriggerPercent,
     @Default(30) int historyTrimStepPercent,

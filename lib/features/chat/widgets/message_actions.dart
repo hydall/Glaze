@@ -4,10 +4,13 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/llm/history_trim.dart';
+import '../../../core/models/chat_message.dart';
 import '../../../core/state/character_provider.dart';
 import '../../../core/state/persona_resolution.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../extensions/services/extension_post_gen_service.dart';
+import '../../settings/api_list_provider.dart';
 import '../chat_provider.dart';
 import '../editing_message_provider.dart';
 import 'ext_block_dialogs.dart';
@@ -40,6 +43,20 @@ void showMessageContextMenu({
   final rewriteBlocks = ref
       .read(extensionPostGenServiceProvider)
       .rewriteBlocks(charId);
+  // Only the stepped trim holds the start of the history still, so only
+  // there is a place to pin it. A hidden message is not in the prompt.
+  final session = ref.read(chatProvider(charId)).value?.session;
+  final canPinAnchor =
+      !isHidden &&
+      !isTyping &&
+      session != null &&
+      session.id == sessionId &&
+      ref.read(activeApiConfigProvider)?.historyTrimMode ==
+          HistoryTrimMode.stepped;
+  final pinnedHere =
+      session != null &&
+      session.historyAnchorPinned &&
+      session.historyAnchorId == messageId;
 
   final items = <BottomSheetItem>[
     if (isTypingTarget)
@@ -168,6 +185,22 @@ void showMessageContextMenu({
               context.go(
                 '/chat/${branch.characterId}?session=${branch.sessionIndex}',
               );
+            }
+          },
+        ),
+      if (canPinAnchor && !isGenerating)
+        BottomSheetItem(
+          icon: Icons.anchor,
+          label: pinnedHere
+              ? 'action_unpin_cache_anchor'.tr()
+              : 'action_pin_cache_anchor'.tr(),
+          onTap: () async {
+            Navigator.of(context, rootNavigator: true).pop();
+            final notifier = ref.read(chatProvider(charId).notifier);
+            if (pinnedHere) {
+              await notifier.unpinHistoryAnchor();
+            } else {
+              await notifier.pinHistoryAnchor(messageIndex);
             }
           },
         ),

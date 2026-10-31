@@ -371,6 +371,13 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
   Future<void> unhideAllMessages() => _messageOpsCtrl.unhideAllMessages();
 
+  /// See [ChatMessageOpsController.pinHistoryAnchor].
+  Future<void> pinHistoryAnchor(int index) =>
+      _messageOpsCtrl.pinHistoryAnchor(index);
+
+  /// See [ChatMessageOpsController.unpinHistoryAnchor].
+  Future<void> unpinHistoryAnchor() => _messageOpsCtrl.unpinHistoryAnchor();
+
   Future<void> hideTopMessages(int count) =>
       _messageOpsCtrl.hideTopMessages(count);
 

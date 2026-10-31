@@ -500,10 +500,7 @@ class TokenizerInfoTile extends StatelessWidget {
                 ),
                 if (note != null) ...[
                   const SizedBox(height: 2),
-                  Text(
-                    note,
-                    style: TextStyle(fontSize: 12, color: accent),
-                  ),
+                  Text(note, style: TextStyle(fontSize: 12, color: accent)),
                 ],
               ],
             ),
@@ -601,10 +598,15 @@ class CacheAnchorTile extends StatelessWidget {
   /// chat without opening anything.
   final String preview;
 
+  /// Whether the reader pinned the anchor there (the chat's "Pin cache
+  /// anchor"), as opposed to the trim having placed it.
+  final bool pinned;
+
   const CacheAnchorTile({
     super.key,
     required this.messageNumber,
     required this.preview,
+    this.pinned = false,
   });
 
   @override
@@ -623,16 +625,21 @@ class CacheAnchorTile extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.anchor, size: 18, color: _cacheAccent),
+          Icon(
+            pinned ? Icons.push_pin : Icons.anchor,
+            size: 18,
+            color: _cacheAccent,
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'context_cache_anchor'.tr(
-                    namedArgs: {'index': '$messageNumber'},
-                  ),
+                  (pinned
+                          ? 'context_cache_anchor_pinned'
+                          : 'context_cache_anchor')
+                      .tr(namedArgs: {'index': '$messageNumber'}),
                   style: const TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
