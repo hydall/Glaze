@@ -14,6 +14,7 @@ import '../../shared/shell/desktop/desktop_floating_provider.dart';
 import '../../shared/shell/desktop/desktop_layout_provider.dart';
 import '../../shared/shell/desktop/sidebar_sheet_provider.dart';
 import '../../shared/shell/nav_height_provider.dart';
+import '../../core/llm/regex_passes.dart';
 import '../../core/models/folder.dart';
 import '../../core/models/preset.dart';
 import '../../core/models/studio_regex.dart';
@@ -2198,15 +2199,22 @@ class _RegexEditViewState extends State<_RegexEditView> {
         ),
         MenuGroup(
           header: 'regex_ephemerality'.tr(),
+          // Shown and written the way the engine reads them (see
+          // [RegexPasses]): an imported script's SillyTavern flags and
+          // Glaze's own list are set together, so what the checkboxes say is
+          // what runs — and what an export to SillyTavern carries.
           items: ephemeralities.map((opt) {
+            final display = s.altersDisplay;
+            final prompt = s.altersPrompt;
             return _CheckboxOption(
               label: opt.$2,
-              value: s.ephemerality.contains(opt.$1),
-              onChanged: (v) {
-                final list = List<int>.from(s.ephemerality);
-                v ? list.add(opt.$1) : list.remove(opt.$1);
-                _update(s.copyWith(ephemerality: list));
-              },
+              value: opt.$1 == 1 ? display : prompt,
+              onChanged: (v) => _update(
+                s.withPasses(
+                  display: opt.$1 == 1 ? v : display,
+                  prompt: opt.$1 == 2 ? v : prompt,
+                ),
+              ),
             );
           }).toList(),
         ),
