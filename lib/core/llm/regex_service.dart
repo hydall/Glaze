@@ -5,7 +5,10 @@ import '../models/character.dart';
 import '../models/persona.dart';
 import '../models/chat_message.dart' show TriggeredEntry;
 import 'macro_engine.dart';
+import 'regex_passes.dart';
 import 'regex_validator.dart';
+
+export 'regex_passes.dart';
 
 class RegexApplyContext {
   final Character? char;
@@ -79,28 +82,32 @@ String applyRegexes(
     if (sPlacement.isNotEmpty && !sPlacement.contains(placementFilter)) {
       continue;
     }
-    // ST semantics: "Only Format Display" (markdownOnly) and "Only Format
-    // Prompt" (promptOnly) are two independent opt-ins, not one exclusive
-    // switch — `getRegexedString` ORs the two clauses. A script that ticks
-    // both therefore runs in the display pass *and* in the prompt pass.
-    // Requiring both at once made such a script dead everywhere, because no
-    // caller passes `isMarkdown` and `isPrompt` together.
+    // Where the script runs is one answer, whichever way the script says it
+    // (see [RegexPasses]): SillyTavern's "Only Format Display" /
+    // "Only Format Prompt" flags when it carries either — an imported script
+    // — else Glaze's own ephemerality list. Reading both and requiring both
+    // is what left an imported display script dead: its list said prompt
+    // only, from an older import, while its flag said display.
     //
-    // The storage pass (run-on-edit) passes neither flag, and still skips
-    // both kinds: a display- or prompt-scoped rewrite must never be baked
-    // into the stored message.
-    if (script.promptOnly || script.markdownOnly) {
-      final wantsThisPass =
-          (script.promptOnly && isPrompt) ||
-          (script.markdownOnly && isMarkdown);
-      if (!wantsThisPass) continue;
-    }
-
-    final sEphemerality = script.ephemerality;
-    if (!ignoreEphemerality &&
-        sEphemerality.isNotEmpty &&
-        !sEphemerality.contains(ephemeralityFilter)) {
-      continue;
+    // The display and prompt passes say which they are. Every other pass —
+    // the storage pass on edit, the Studio and ExtBlocks passes — says
+    // neither and keeps to the list, and the storage pass still skips every
+    // flagged script: a display- or prompt-scoped rewrite must never be
+    // baked into the stored message.
+    if (isMarkdown || isPrompt) {
+      final runsHere = ignoreEphemerality && !script.usesStFlags
+          ? true
+          : (isMarkdown && script.altersDisplay) ||
+                (isPrompt && script.altersPrompt);
+      if (!runsHere) continue;
+    } else {
+      if (script.usesStFlags) continue;
+      final sEphemerality = script.ephemerality;
+      if (!ignoreEphemerality &&
+          sEphemerality.isNotEmpty &&
+          !sEphemerality.contains(ephemeralityFilter)) {
+        continue;
+      }
     }
 
     if (ctx.depth != null) {
