@@ -2580,7 +2580,7 @@
   "memory_draft_source_hidden": "сообщение №{} скрыто",
   "memory_draft_source_error": "сообщение №{} — ответ с ошибкой",
   "memory_draft_source_empty": "сообщение №{} пустое",
-  "memory_draft_source_deleted": "одно из сообщений удалено",
+  "memory_draft_source_deleted": "удалено: {}",
   "memory_books_need_more_uncovered": "Нужно больше непокрытых сообщений перед созданием черновика",
   "memory_books_no_stable_messages": "Нет стабильных сообщений для сканирования",
   "memory_books_reindex_failed": "Переиндексация не удалась: {arg0}",

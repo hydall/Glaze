@@ -55,7 +55,10 @@ class _Harness {
       .generate(sessionId: _sessionId, charId: _charId, draftId: _draftId);
 }
 
-Future<_Harness> _seed({String draftContent = ''}) async {
+Future<_Harness> _seed({
+  String draftContent = '',
+  bool hideMessage = false,
+}) async {
   SharedPreferences.setMockInitialValues({});
   ChatSessionService.clearCache();
   final db = AppDatabase.forTesting(NativeDatabase.memory());
@@ -90,12 +93,18 @@ Future<_Harness> _seed({String draftContent = ''}) async {
   await container
       .read(chatRepoProvider)
       .put(
-        const ChatSession(
+        ChatSession(
           id: _sessionId,
           characterId: _charId,
           sessionIndex: 0,
           messages: [
-            ChatMessage(id: 'm1', role: 'user', content: 'Hello', timestamp: 1),
+            ChatMessage(
+              id: 'm1',
+              role: 'user',
+              content: 'Hello',
+              timestamp: 1,
+              isHidden: hideMessage,
+            ),
           ],
         ),
       );
@@ -178,6 +187,24 @@ void main() {
   setUpAll(() async {
     SharedPreferences.setMockInitialValues({});
     await EasyLocalization.ensureInitialized();
+  });
+
+  test('a draft over a hidden message is refused, named, with no request', () async {
+    final harness = await _seed(hideMessage: true);
+
+    await harness.startGeneration();
+
+    // No translations are loaded: the text is the key, which names the
+    // message by its place in the chat.
+    expect(harness.isRunning, isFalse);
+    expect(harness.generation.isCompleted, isFalse);
+    final draft = await harness.persistedDraft;
+    expect(draft.status, 'needs_regeneration');
+    expect(draft.error, contains('memory_draft_source'));
+    expect(
+      harness.container.read(memoryDraftJobsProvider).lastFailure?.message,
+      contains('memory_draft_source'),
+    );
   });
 
   testWidgets('a generation started from the sheet outlives closing it', (

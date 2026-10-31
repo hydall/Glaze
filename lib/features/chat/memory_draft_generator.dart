@@ -37,15 +37,25 @@ import '../settings/api_list_provider.dart';
 String? memoryDraftSourceProblems(MemoryDraft draft, List<ChatMessage> chat) {
   final problems = MemorySourceManifest.problems(draft.messageIds, chat);
   if (problems.isEmpty) return null;
-  final named = problems.map((problem) {
+  final named = <String>[];
+  var deleted = 0;
+  for (final problem in problems) {
     final key = switch (problem.kind) {
       MemorySourceProblemKind.hidden => 'memory_draft_source_hidden',
       MemorySourceProblemKind.error => 'memory_draft_source_error',
       MemorySourceProblemKind.empty => 'memory_draft_source_empty',
-      MemorySourceProblemKind.deleted => 'memory_draft_source_deleted',
+      MemorySourceProblemKind.deleted => null,
     };
-    return key.tr(args: ['${problem.position}']);
-  });
+    if (key == null) {
+      deleted++;
+    } else {
+      named.add(key.tr(args: ['${problem.position}']));
+    }
+  }
+  // Deleted sources have no position to name: one item with their count.
+  if (deleted > 0) {
+    named.add('memory_draft_source_deleted'.tr(args: ['$deleted']));
+  }
   return 'memory_draft_source_problems'.tr(args: [named.join(', ')]);
 }
 

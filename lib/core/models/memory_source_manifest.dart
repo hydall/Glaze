@@ -11,7 +11,8 @@ enum MemorySourceValidity { verified, unverified, invalid }
 enum MemorySourceProblemKind { deleted, hidden, error, empty }
 
 /// A source [MemorySourceManifest.capture] would refuse, by its position in
-/// the chat (1-based, every message counted) so the reader can find it.
+/// the chat (1-based, every message counted) so the reader can find it. A
+/// deleted source has no position and carries 0.
 class MemorySourceProblem {
   final int position;
   final MemorySourceProblemKind kind;

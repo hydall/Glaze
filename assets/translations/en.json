@@ -2640,7 +2640,7 @@
   "memory_draft_source_hidden": "message #{} is hidden",
   "memory_draft_source_error": "message #{} is a failed reply",
   "memory_draft_source_empty": "message #{} is empty",
-  "memory_draft_source_deleted": "a message was deleted",
+  "memory_draft_source_deleted": "{} deleted",
   "memory_books_setup_embedding_first": "Set up embedding API in Embedding Settings first",
   "memory_books_reindex_result": "Indexed: {indexed}, Skipped: {skipped}, Failed: {failed}",
   "memory_books_reindex_failed": "Reindex failed: {arg0}",
