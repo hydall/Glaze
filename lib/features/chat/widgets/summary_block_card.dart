@@ -18,7 +18,7 @@ const Color _kCyan = Color(0xFF26C6DA);
 ///
 /// Built from the parts a Memory Books draft row is (`MemoryDraftCard`), so
 /// the two tabs of the Memory sheet read as one surface: the plaque, the state
-/// pill, the Regenerate tile and the round action buttons. While the block is
+/// pill, the action tiles and the round action buttons. While the block is
 /// written again the card counts the seconds and offers Stop; the draft that
 /// run leaves takes the block's place on the card, waiting for Approve, and
 /// tapping the row edits it — as a memory draft waits and is edited. The

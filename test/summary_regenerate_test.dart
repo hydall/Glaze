@@ -645,7 +645,38 @@ void main() {
       expect((await _one(h.container, 'b1')).draft, isNull);
     });
 
-    test('a stale block gets a stale draft, which is not kept', () async {
+    test('a shortened merge keeps its parts when approved', () async {
+      final h = await _harness([
+        _block('b1', ['m0', 'm1'], archived: true),
+        _block('b2', ['m2', 'm3'], archived: true),
+        _block(
+          'b12',
+          ['m0', 'm1', 'm2', 'm3'],
+          level: 2,
+          childIds: ['b1', 'b2'],
+          content: 'A long merge. ' * 50,
+          tokens: 1500,
+        ),
+      ]);
+      h.llm.answer = 'Shorter merge.';
+
+      await _generator(
+        h.container,
+      ).shortenBlock(session: _session(), blockId: 'b12');
+      await _approve(h.container, 'b12');
+
+      final merged = await _one(h.container, 'b12');
+      expect(merged.content, 'Shorter merge.');
+      expect(merged.level, 2);
+      expect(merged.childIds, ['b1', 'b2']);
+      expect(merged.messageIds, ['m0', 'm1', 'm2', 'm3']);
+      expect(
+        (await _blocks(h.container)).where((b) => b.archived),
+        hasLength(2),
+      );
+    });
+
+    test('a stale block is refused before the summarizer is asked', () async {
       final h = await _harness([
         _block(
           'b1',
@@ -654,16 +685,29 @@ void main() {
           tokens: 1500,
         ),
       ]);
-      h.llm.answer = 'Shorter.';
 
       await expectLater(
         _generator(
           h.container,
         ).shortenBlock(session: _session(_edited), blockId: 'b1'),
-        _reason('changed'),
+        _reason('stale'),
       );
 
+      expect(h.llm.calls, isEmpty);
       expect((await _one(h.container, 'b1')).draft, isNull);
+    });
+
+    test('a block from before sizes were stored is still shortened', () async {
+      final h = await _harness([
+        _block('b1', ['m0', 'm1'], content: 'A long block. ' * 50, tokens: 0),
+      ]);
+      h.llm.answer = 'Shorter.';
+
+      await _generator(
+        h.container,
+      ).shortenBlock(session: _session(), blockId: 'b1');
+
+      expect((await _one(h.container, 'b1')).draft?.content, 'Shorter.');
     });
   });
 

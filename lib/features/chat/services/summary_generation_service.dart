@@ -488,9 +488,11 @@ class SummaryGenerationService {
   /// leaves the result on it as a [SummaryDraft], as [regenerateBlock] does.
   /// For a block that came out far past that size: a merge the summarizer
   /// would not fit, a block written under a bigger setting. Its messages are
-  /// not retold, so the draft is bound as the block is: a stale block's draft
-  /// is stale too and is not approved. The text must come out shorter than
-  /// the block (`not_shorter`). A stopped run ([cancelToken]) writes nothing.
+  /// not retold, so the draft is bound as the block is; a stale block is
+  /// refused (`stale`) before the summarizer is asked, since it is not sent
+  /// and there is nothing to shorten for the prompt. The text must come out
+  /// shorter than the block (`not_shorter`). A stopped run ([cancelToken])
+  /// writes nothing.
   Future<void> shortenBlock({
     required ChatSession session,
     required String blockId,
@@ -509,6 +511,9 @@ class SummaryGenerationService {
           .where((b) => b.id == blockId && !b.archived && !b.isNote)
           .firstOrNull;
       if (block == null) throw const SummaryChainException('not_live');
+      if (SummaryChain.isStale(block, SummaryChain.index(messages))) {
+        throw const SummaryChainException('stale');
+      }
 
       final text = await service.shortenText(
         sessionId: session.id,
@@ -523,7 +528,9 @@ class SummaryGenerationService {
         content: text,
         messageIds: block.messageIds,
         sourceHash: block.sourceHash,
-        tokens: _acceptedTokens(text, block.tokens),
+        // Counted now, not read off the block: a block from before sizes
+        // were stored reads 0 and would refuse any text.
+        tokens: _acceptedTokens(text, estimateTokens(block.content)),
         sourceTokens: block.sourceTokens,
         createdAt: DateTime.now().millisecondsSinceEpoch,
       );

@@ -460,7 +460,8 @@ is refused (`stale_merge`), since its parts are as out of date as it is. Notes
 are never regenerated. Shortening (`shortenBlock`; the card of a live block
 past the block size offers it) sends the block's own text through the
 shortening prompt, aimed at the block size, and leaves the result as a draft
-the same way, bound as the block is. The new text must be shorter than its source, and a
+the same way, bound as the block is; a stale block is refused (`stale`) before
+the summarizer is asked. The new text must be shorter than its source, and a
 draft whose messages changed after it was written is not approved
 (`changed`). A part merged away loses its draft. Covered by
 `test/summary_regenerate_test.dart`.

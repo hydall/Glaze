@@ -113,6 +113,7 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
       'mixed_levels' => 'summary_error_mixed_levels'.tr(),
       'select_two' => 'summary_error_select_two'.tr(),
       'stale_merge' => 'summary_error_stale_merge'.tr(),
+      'stale' => 'summary_block_stale'.tr(),
       'sources_gone' => 'summary_error_sources_gone'.tr(),
       'nothing_to_compact' => 'summary_nothing_to_compact'.tr(),
       _ => 'summary_error_changed'.tr(),
