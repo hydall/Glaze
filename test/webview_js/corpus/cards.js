@@ -307,6 +307,40 @@ document.getElementById('sc-out').textContent='ok'+o;
 </script>`,
   },
   {
+    id: 'script-template-literal',
+    title: 'Card script that builds its markup with template literals',
+    origin: '#807 — the inline-code pass read the backticks of `${x}` as code ' +
+      'and the script no longer parsed',
+    text: `<div id="tl-out">-</div>
+<script>
+var who = 'мир';
+document.getElementById('tl-out').innerHTML = \`<b>привет, \${who}</b>\` + \`!\`;
+</script>`,
+  },
+  {
+    id: 'fenced-code-with-script',
+    title: 'Fenced code that shows a <style> and a <script>',
+    origin: '#807 review — the bodies were held before the fences, and the ' +
+      'leak sweep deleted them from the code block',
+    text: 'Пример:\n\n```html\n<style>.a { color: red; }</style>\n' +
+      '<script>let x = 1;</script>\n```\n\nКонец.',
+  },
+  {
+    id: 'inline-code-style-tag',
+    title: 'Prose about a <style> tag in backticks, with no closing tag',
+    origin: '#807 review — an unclosed <style> held before inline code ate ' +
+      'the rest of the message',
+    text: 'Тег `<style>` задаёт стили. А это **жирный** текст.',
+  },
+  {
+    id: 'think-with-script',
+    title: 'Reasoning block and reply that both carry a <script>',
+    origin: '#807 review — the reasoning re-render shared placeholder numbers ' +
+      'with the reply and printed "undefined"',
+    text: '<think>план <script>window.__thinkRan = 1;</script> готов</think>\n\n' +
+      'Ответ <script>window.__replyRan = 1;</script> тут.',
+  },
+  {
     id: 'pre-with-emphasis',
     title: 'Code in a <pre> that uses * and _ as operators',
     origin: 'the pre-parse marker scan reached inside a raw-text element the ' +

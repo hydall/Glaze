@@ -100,12 +100,11 @@ export class Formatter {
 
     const regions = createStore('P');
 
-    const raw = maskCodeElements(source);
-    const staged = raw.unmask(protectRegions(raw.masked, {
+    const staged = protectRegions(source, {
       store: regions,
       inReasoning,
       isUser,
-    }));
+    });
     // `<style>` and `<script>` bodies are code, and the tag scan below would
     // read them as prose: `i<n; i++) { if (i>` in a script is a tag to it, and
     // escaping that corrupts the script. They are masked for its length and

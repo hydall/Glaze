@@ -423,14 +423,17 @@ export function runMessageScripts(root, allowMessageScripts = false) {
       // ST-style cards read `document.currentScript.previousElementSibling` to
       // find the element they decorate; the real currentScript would be our
       // injected element, sitting in the document's head.
+      // Read now: the script is removed once it has run, and a handler that
+      // asks later must still get the message's shadow root.
       const parent = script.parentElement;
+      const rootNode = script.getRootNode();
       const shim = {
         previousElementSibling: script.previousElementSibling,
         nextElementSibling: script.nextElementSibling,
         parentNode: script.parentNode,
         parentElement: parent,
         closest: (selector) => (parent && parent.closest ? parent.closest(selector) : null),
-        getRootNode: () => script.getRootNode(),
+        getRootNode: () => rootNode,
         dataset: script.dataset,
         getAttribute: (name) => script.getAttribute(name),
       };

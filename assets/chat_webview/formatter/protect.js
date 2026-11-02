@@ -114,10 +114,19 @@ export function protectRegions(
   out = out.replace(/```(\w*)\n?([\s\S]*?)(?:```|$)/g, (_match, lang, code) =>
     block(store.hold({ kind: 'code', lang, code })));
 
+  // A card's own `<script>` and `<style>` are code, and nothing below may read
+  // inside them: a template literal's backticks are not inline code. Only a
+  // closed element whose tag is not itself in backticks is held here, so
+  // `<style>` written as prose about a tag stays prose; a still-streaming one
+  // is masked by the formatter, after this pass.
+  const elements = maskCodeElements(out, { closedOnly: true });
+  out = elements.masked;
+
   // Inline code, before the tag scan can read what is inside it as HTML.
-  // `Пиши `<div>`` is prose about a tag, not a tag.
+  // `Пиши `<div>`` is prose about a tag, not a tag. A span that wraps a whole
+  // element shows it as written.
   out = out.replace(/`([^`\n]+)`/g, (_match, code) =>
-    store.hold({ kind: 'inline-code', code }));
+    store.hold({ kind: 'inline-code', code: elements.unmask(code) }));
 
   // A model writes `&lt;br&gt;` when it escapes its own output; the reader
   // meant a line break.
@@ -129,14 +138,17 @@ export function protectRegions(
     hold: (imageBlock) => block(store.hold({ kind: 'image', block: imageBlock })),
     // Tags a reasoning block only talks about stay the text the model wrote:
     // nothing here loads, spins or generates (INV-IG11).
-    inert: (raw) => store.hold({ kind: 'text', text: raw }),
+    inert: (raw) => store.hold({ kind: 'text', text: elements.unmask(raw) }),
   });
 
   out = out.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_match, alt, url) =>
     store.hold({ kind: 'html', html: markdownImageCard(alt, url) }));
 
-  return out;
+  return elements.unmask(out);
 }
+
+const CODE_ELEMENT = /<(style|script)\b[^>]*>[\s\S]*?(?:<\/\1\s*>|$)/gi;
+const CLOSED_CODE_ELEMENT = /(?<!`)<(style|script)\b[^>]*>[\s\S]*?<\/\1\s*>/gi;
 
 /**
  * Hides `<style>` and `<script>` bodies for the duration of the marker scan.
@@ -144,11 +156,14 @@ export function protectRegions(
  * Their contents are code, not prose: a `*` in a CSS selector is not an italic
  * marker and `**` in a script is not bold. They go back into the text before
  * it is parsed, so both still reach the message as real elements.
+ *
+ * [closedOnly] holds only a complete element whose tag is not in backticks —
+ * what `protectRegions` needs before it reads inline code.
  */
-export function maskCodeElements(text) {
+export function maskCodeElements(text, { closedOnly = false } = {}) {
   const bodies = [];
   const masked = text.replace(
-    /<(style|script)\b[^>]*>[\s\S]*?(?:<\/\1\s*>|$)/gi,
+    closedOnly ? CLOSED_CODE_ELEMENT : CODE_ELEMENT,
     (match) => {
       bodies.push(match);
       return `${SENTINEL}RAW_${bodies.length - 1}${SENTINEL}`;
@@ -157,7 +172,9 @@ export function maskCodeElements(text) {
   const pattern = new RegExp(`${SENTINEL}RAW_(\\d+)${SENTINEL}`, 'g');
   return {
     masked,
-    unmask: (value) => String(value).replace(pattern, (_m, i) => bodies[Number(i)]),
+    // A placeholder this mask did not make is left alone, not turned into
+    // the word "undefined".
+    unmask: (value) => String(value).replace(pattern, (m, i) => bodies[Number(i)] ?? m),
   };
 }
 

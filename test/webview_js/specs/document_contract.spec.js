@@ -215,3 +215,58 @@ test('a card script survives its own comparisons', async ({ page }) => {
   expect(shape.formatted).toContain('i<n');
   expect(shape.formatted).not.toContain('&lt;n');
 });
+
+test('a card script keeps its template literals', async ({ page }) => {
+  // The backticks of `${x}` are not inline code: a closed <script> is held
+  // before the inline-code pass reads the message.
+  await render(page, card('script-template-literal').text);
+  const out = await page.evaluate(() =>
+    window.harness.currentRoot().querySelector('#tl-out').innerHTML);
+  expect(out).toBe('<b>привет, мир</b>!');
+  expect(page.__failures).toEqual([]);
+});
+
+test('INV-MR1 currentScript describes the element the script was written in', async ({ page }) => {
+  await render(page, `<section class="cs-wrap" data-k="w"><span id="cs-prev">a</span><script data-role="probe">
+var s = document.currentScript;
+window.__cs = {
+  prev: s.previousElementSibling && s.previousElementSibling.id,
+  next: s.nextElementSibling && s.nextElementSibling.id,
+  parent: s.parentElement && s.parentElement.className,
+  closest: s.closest('[data-k]') && s.closest('[data-k]').dataset.k,
+  role: s.dataset.role,
+  attr: s.getAttribute('data-role'),
+};
+var root = s.getRootNode;
+setTimeout(function () { window.__csRoot = root() instanceof ShadowRoot; }, 0);
+</script><i id="cs-next">b</i></section>`);
+  await page.waitForFunction(() => window.__csRoot !== undefined);
+  const shape = await page.evaluate(() => ({ ...window.__cs, root: window.__csRoot }));
+  expect(shape).toEqual({
+    prev: 'cs-prev',
+    next: 'cs-next',
+    parent: 'cs-wrap',
+    closest: 'w',
+    role: 'probe',
+    attr: 'probe',
+    root: true,
+  });
+});
+
+test('INV-MR8 a timer a card schedules runs with the message document', async ({ page }) => {
+  await render(page, `<div id="tm-out">-</div><script>
+setTimeout(function () {
+  document.getElementById('tm-out').textContent = 'timeout';
+  requestAnimationFrame(function () {
+    document.getElementById('tm-out').textContent += '+frame';
+  });
+}, 0);
+</script>`);
+  await page.waitForFunction(() =>
+    window.harness.currentRoot().querySelector('#tm-out').textContent === 'timeout+frame');
+  const own = await page.evaluate(() =>
+    ['setTimeout', 'setInterval', 'requestAnimationFrame'].map((name) =>
+      window[name] === Window.prototype[name] ||
+        String(window[name]).includes('[native code]')));
+  expect(own, 'the timers are the browser\'s own once the scope is gone').toEqual([true, true, true]);
+});
