@@ -212,7 +212,8 @@ __pycache__/
 *.pyc
 
 # WebView asset browser tests (test/webview_js)
-test/webview_js/node_modules/
+# No trailing slash: a symlinked node_modules is a file, not a directory.
+test/webview_js/node_modules
 test/webview_js/test-results/
 test/webview_js/playwright-report/
 # The Node manifests above are ignored repo-wide (a leftover of the Vue app).

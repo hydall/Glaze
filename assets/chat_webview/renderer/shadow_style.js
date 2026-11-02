@@ -2,6 +2,7 @@
 export const SHADOW_STYLE = `
   :host { display: block; font-size: inherit; color: inherit; }
   .glaze-message { word-wrap: break-word; line-height: 1.6; color: inherit; }
+  :where(.glaze-message) :where(*, *::before, *::after) { box-sizing: border-box; }
   .glaze-message p { margin: 0 0 0.8em 0; }
   .glaze-message p:first-child { margin-top: 0; }
   .glaze-message p:last-child { margin-bottom: 0; }

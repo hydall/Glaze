@@ -2511,8 +2511,12 @@ void main() {
       // A card's modal is appended from its click handler, long after its
       // <script> finished running.
       expect(messageDocumentJs, contains('const SCOPED_EVENTS ='));
-      expect(messageDocumentJs, contains('queueMicrotask(restore)'));
-      expect(messageDocumentJs, contains('setTimeout(restore, 0)'));
+      // It ends as the event reaches the shadow host, so the app's own
+      // listeners after it see the app's document; the microtask and the
+      // browser's own timeout are the backstops.
+      expect(messageDocumentJs, contains('host.addEventListener(type, finish)'));
+      expect(messageDocumentJs, contains('queueMicrotask(finish)'));
+      expect(messageDocumentJs, contains('REAL_SET_TIMEOUT(finish, 0)'));
       // …and only for a message whose own code has actually run, so the app's
       // document is untouched for every message that carries no script.
       expect(messageDocumentJs, contains('scripted.has(root)'));

@@ -24,6 +24,8 @@ const SCOPED_EVENTS = [
   'transitionend', 'animationend',
 ];
 
+const SCOPED_TIMERS = ['setTimeout', 'setInterval', 'requestAnimationFrame'];
+
 /** Load events a card waits for, which the real document fired long ago. */
 const READY_EVENTS = new Set(['DOMContentLoaded', 'load', 'readystatechange']);
 
@@ -34,6 +36,9 @@ const OVERLAY_CLASS = 'glaze-message-overlay';
 // points at the message root: a <script> appended to a shadow root never runs.
 const REAL_HEAD = document.head || document.documentElement;
 const REAL_BODY = document.body || document.documentElement;
+// The scope wraps `window.setTimeout` for a card's timers; the scope's own
+// backstop must not be one of them.
+const REAL_SET_TIMEOUT = window.setTimeout.bind(window);
 
 /**
  * The app's own body, for chrome that must land outside a message.
@@ -324,11 +329,38 @@ function installDocumentScope(root, collectReady) {
     set: (listener) => { if (listener) collectReady(listener); },
   });
 
+  const timers = [];
+  for (const name of SCOPED_TIMERS) {
+    const original = window[name];
+    if (typeof original !== 'function') continue;
+    const own = Object.getOwnPropertyDescriptor(window, name);
+    timers.push({ name, own });
+    Object.defineProperty(window, name, {
+      configurable: true,
+      writable: true,
+      value: function (callback, ...rest) {
+        if (typeof callback !== 'function') return original.call(window, callback, ...rest);
+        return original.call(window, function (...args) {
+          const restore = installDocumentScope(root, () => {});
+          try {
+            return callback.apply(this, args);
+          } finally {
+            restore();
+          }
+        }, ...rest);
+      },
+    });
+  }
+
   installed = root;
   return () => {
     if (installed !== root) return;
     installed = null;
     for (const { target, name } of defined) delete target[name];
+    for (const { name, own } of timers) {
+      if (own) Object.defineProperty(window, name, own);
+      else delete window[name];
+    }
   };
 }
 
@@ -346,11 +378,24 @@ function installEventScope() {
       const root = messageRootOf(event);
       if (!root || !scripted.has(root)) return;
       const restore = installDocumentScope(root, () => {});
+      // The card's own handlers all run inside its shadow root. Once the
+      // event reaches the host it is the app's listeners' turn, and they —
+      // and any timer they start — get the app's document back.
+      const host = root.getRootNode().host;
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        if (host) host.removeEventListener(type, finish);
+        restore();
+      };
+      if (host) host.addEventListener(type, finish);
       // The dispatch is one task: a microtask runs once it has finished
-      // propagating. The timeout is only a backstop for a listener that
-      // throws past the checkpoint.
-      queueMicrotask(restore);
-      setTimeout(restore, 0);
+      // propagating, for an event a card stopped before it left the message.
+      // The timeout is only a backstop for a listener that throws past the
+      // checkpoint.
+      queueMicrotask(finish);
+      REAL_SET_TIMEOUT(finish, 0);
     }, true);
   }
 }
@@ -394,9 +439,19 @@ export function runMessageScripts(root, allowMessageScripts = false) {
       // ST-style cards read `document.currentScript.previousElementSibling` to
       // find the element they decorate; the real currentScript would be our
       // injected element, sitting in the document's head.
+      // Read now: the script is removed once it has run, and a handler that
+      // asks later must still get the message's shadow root.
+      const parent = script.parentElement;
+      const rootNode = script.getRootNode();
       const shim = {
         previousElementSibling: script.previousElementSibling,
+        nextElementSibling: script.nextElementSibling,
         parentNode: script.parentNode,
+        parentElement: parent,
+        closest: (selector) => (parent && parent.closest ? parent.closest(selector) : null),
+        getRootNode: () => rootNode,
+        dataset: script.dataset,
+        getAttribute: (name) => script.getAttribute(name),
       };
       Object.defineProperty(document, 'currentScript', {
         value: shim,

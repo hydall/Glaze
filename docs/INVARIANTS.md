@@ -1765,8 +1765,14 @@ script a function scope of its own, and the attribute pointed at nothing.
 
 `document.currentScript` is shimmed for the duration to the element the script
 was written next to, so ST-style cards that read
-`currentScript.previousElementSibling` still find what they decorate. The
-`<script>` is removed from the message afterwards, and so is the injected one.
+`currentScript.previousElementSibling` still find what they decorate. The shim
+answers `previousElementSibling`, `nextElementSibling`, `parentNode`,
+`parentElement`, `closest()`, `getRootNode()` (the message's shadow root, read
+before the script is removed), `dataset` and `getAttribute()`. The `<script>` is
+removed from the message afterwards, and so is the injected one.
+
+A closed `<script>` / `<style>` is held before the inline-code pass, so the
+backticks of a template literal are never read as inline code.
 
 ### INV-MR2: The app's own document is restored exactly
 
@@ -1858,7 +1864,16 @@ message's scripts have all run. The app's own listeners are never touched.
 A card's modal is appended from its click handler, not from its `<script>`. The
 document scope is therefore re-installed for the length of any dispatch of a
 common interaction event whose composed path passes through a message root, and
-removed on the microtask that follows it.
+removed as the event reaches the message's shadow host — the card's own
+handlers have all run by then, and the app's listeners (and the timers they
+start) get the app's document. The microtask after the dispatch is the backstop
+for an event the card stopped inside the message.
+
+A callback handed to `setTimeout`, `setInterval` or `requestAnimationFrame`
+while the scope is installed is wrapped, and re-installs the scope for the
+length of its own run: a card that reveals its modal on a timer still finds
+its elements. The wrapped timers are own properties of `window`, removed with
+the rest of the scope (INV-MR2).
 
 Only for a message whose own code has actually run: a message with no
 `<script>` never needs the scope, so for all but a handful of messages the
