@@ -323,7 +323,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   void _invalidateHistory() => ref.invalidate(chatHistoryProvider);
 
   // Delegate methods to controllers
-  Future<void> editMessage(
+  Future<MessageEditOutcome> editMessage(
     int index,
     String newContent, {
     String? tagStart,
