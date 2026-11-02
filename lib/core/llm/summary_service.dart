@@ -79,6 +79,10 @@ String summaryLengthHint(int targetTokens) =>
 /// shortened, in percent of the target.
 const summaryShortenSlackPercent = 125;
 
+/// How many times an answer is sent back to be shortened while it stays past
+/// that slack.
+const summaryShortenRounds = 2;
+
 /// Fallback idle timeout when the API config carries no `firstChunkTimeoutMs`.
 const _fallbackTimeoutMs = 120000;
 
@@ -309,10 +313,11 @@ class SummaryService {
     );
   }
 
-  /// One summarizer call, and one more to shorten its answer when it came out
-  /// well past [targetTokens]. The shorter text is kept; a failed shortening,
-  /// or one the model refused — shorter than anything — keeps the first
-  /// answer, which is complete.
+  /// One summarizer call, and up to two more to shorten its answer while it
+  /// is well past [targetTokens]: a model that overshoots the target by half
+  /// tends to overshoot again, by less. Each shorter text is kept; a failed
+  /// shortening, or one no shorter than the text it was given, ends the
+  /// shortening with the last answer, which is complete.
   Future<String> _summarize({
     required String sessionId,
     required ApiConfig apiConfig,
@@ -322,7 +327,7 @@ class SummaryService {
     double? temperature,
     CancelToken? cancelToken,
   }) async {
-    final text = await _call(
+    var text = await _call(
       sessionId: sessionId,
       apiConfig: apiConfig,
       messages: messages,
@@ -330,26 +335,36 @@ class SummaryService {
       temperature: temperature,
       cancelToken: cancelToken,
     );
-    final tokens = estimateTokens(text);
-    if (tokens * 100 <= targetTokens * summaryShortenSlackPercent) return text;
-    try {
-      final shorter = await _call(
-        sessionId: sessionId,
-        apiConfig: apiConfig,
-        messages: buildShortenMessages(
-          text: text,
+    var tokens = estimateTokens(text);
+    for (
+      var round = 0;
+      round < summaryShortenRounds &&
+          tokens * 100 > targetTokens * summaryShortenSlackPercent;
+      round++
+    ) {
+      try {
+        final shorter = await _call(
+          sessionId: sessionId,
+          apiConfig: apiConfig,
+          messages: buildShortenMessages(
+            text: text,
+            targetTokens: targetTokens,
+            template: shortenTemplate,
+          ),
           targetTokens: targetTokens,
-          template: shortenTemplate,
-        ),
-        targetTokens: targetTokens,
-        temperature: temperature,
-        cancelToken: cancelToken,
-      );
-      return estimateTokens(shorter) < tokens ? shorter : text;
-    } catch (_) {
-      if (cancelToken?.isCancelled == true) rethrow;
-      return text;
+          temperature: temperature,
+          cancelToken: cancelToken,
+        );
+        final shorterTokens = estimateTokens(shorter);
+        if (shorterTokens >= tokens) break;
+        text = shorter;
+        tokens = shorterTokens;
+      } catch (_) {
+        if (cancelToken?.isCancelled == true) rethrow;
+        break;
+      }
     }
+    return text;
   }
 
   Future<String> _call({

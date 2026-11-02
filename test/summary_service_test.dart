@@ -434,6 +434,41 @@ void main() {
     expect(llm.user, long);
   });
 
+  test('an answer still past its target is shortened once more', () async {
+    final long = List.filled(400, 'word').join(' ');
+    final medium = List.filled(300, 'word').join(' ');
+    final llm = _RecordingAuxLlmClient([long, medium, 'Short.']);
+    final service = SummaryService(repo, llm: llm);
+
+    final result = await service.summarizeMessages(
+      sessionId: 'session',
+      source: const [ChatMessage(id: '1', role: 'user', content: 'Hello')],
+      apiConfig: _api,
+      targetTokens: 150,
+    );
+
+    expect(result, 'Short.');
+    expect(llm.calls, hasLength(3));
+    expect(llm.user, medium);
+  });
+
+  test('a second shortening that is no shorter keeps the first', () async {
+    final long = List.filled(400, 'word').join(' ');
+    final medium = List.filled(300, 'word').join(' ');
+    final llm = _RecordingAuxLlmClient([long, medium, '$medium more']);
+    final service = SummaryService(repo, llm: llm);
+
+    final result = await service.summarizeMessages(
+      sessionId: 'session',
+      source: const [ChatMessage(id: '1', role: 'user', content: 'Hello')],
+      apiConfig: _api,
+      targetTokens: 150,
+    );
+
+    expect(result, medium);
+    expect(llm.calls, hasLength(3));
+  });
+
   test('a merge is shortened on the template it is given', () async {
     final long = List.filled(400, 'word').join(' ');
     final llm = _RecordingAuxLlmClient([long, 'Short.']);
