@@ -24,6 +24,8 @@ const SCOPED_EVENTS = [
   'transitionend', 'animationend',
 ];
 
+const SCOPED_TIMERS = ['setTimeout', 'setInterval', 'requestAnimationFrame'];
+
 /** Load events a card waits for, which the real document fired long ago. */
 const READY_EVENTS = new Set(['DOMContentLoaded', 'load', 'readystatechange']);
 
@@ -324,11 +326,38 @@ function installDocumentScope(root, collectReady) {
     set: (listener) => { if (listener) collectReady(listener); },
   });
 
+  const timers = [];
+  for (const name of SCOPED_TIMERS) {
+    const original = window[name];
+    if (typeof original !== 'function') continue;
+    const own = Object.getOwnPropertyDescriptor(window, name);
+    timers.push({ name, own });
+    Object.defineProperty(window, name, {
+      configurable: true,
+      writable: true,
+      value: function (callback, ...rest) {
+        if (typeof callback !== 'function') return original.call(window, callback, ...rest);
+        return original.call(window, function (...args) {
+          const restore = installDocumentScope(root, () => {});
+          try {
+            return callback.apply(this, args);
+          } finally {
+            restore();
+          }
+        }, ...rest);
+      },
+    });
+  }
+
   installed = root;
   return () => {
     if (installed !== root) return;
     installed = null;
     for (const { target, name } of defined) delete target[name];
+    for (const { name, own } of timers) {
+      if (own) Object.defineProperty(window, name, own);
+      else delete window[name];
+    }
   };
 }
 
@@ -394,9 +423,16 @@ export function runMessageScripts(root, allowMessageScripts = false) {
       // ST-style cards read `document.currentScript.previousElementSibling` to
       // find the element they decorate; the real currentScript would be our
       // injected element, sitting in the document's head.
+      const parent = script.parentElement;
       const shim = {
         previousElementSibling: script.previousElementSibling,
+        nextElementSibling: script.nextElementSibling,
         parentNode: script.parentNode,
+        parentElement: parent,
+        closest: (selector) => (parent && parent.closest ? parent.closest(selector) : null),
+        getRootNode: () => script.getRootNode(),
+        dataset: script.dataset,
+        getAttribute: (name) => script.getAttribute(name),
       };
       Object.defineProperty(document, 'currentScript', {
         value: shim,
