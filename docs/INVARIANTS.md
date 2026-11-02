@@ -1864,7 +1864,10 @@ message's scripts have all run. The app's own listeners are never touched.
 A card's modal is appended from its click handler, not from its `<script>`. The
 document scope is therefore re-installed for the length of any dispatch of a
 common interaction event whose composed path passes through a message root, and
-removed on the microtask that follows it.
+removed as the event reaches the message's shadow host — the card's own
+handlers have all run by then, and the app's listeners (and the timers they
+start) get the app's document. The microtask after the dispatch is the backstop
+for an event the card stopped inside the message.
 
 A callback handed to `setTimeout`, `setInterval` or `requestAnimationFrame`
 while the scope is installed is wrapped, and re-installs the scope for the

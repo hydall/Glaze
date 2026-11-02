@@ -270,3 +270,30 @@ setTimeout(function () {
         String(window[name]).includes('[native code]')));
   expect(own, 'the timers are the browser\'s own once the scope is gone').toEqual([true, true, true]);
 });
+
+test('INV-MR8 the app\'s own listeners and timers keep the app\'s document', async ({ page }) => {
+  await render(page, `<button id="ap-btn" onclick="setTimeout(function () {
+  document.getElementById('ap-out').textContent = 'card';
+}, 0)">go</button><div id="ap-out">-</div><script>window.__apReady = 1;</script>`);
+  await page.evaluate(() => {
+    window.__app = null;
+    document.addEventListener('click', () => {
+      const inEvent = document.body;
+      setTimeout(() => {
+        window.__app = {
+          inEvent: inEvent === document.querySelector('body'),
+          inTimer: document.body === document.querySelector('body') &&
+            String(document.getElementById).includes('[native code]'),
+        };
+      }, 0);
+    }, { once: true });
+    window.harness.currentRoot().querySelector('#ap-btn').click();
+  });
+  await page.waitForFunction(() => window.__app !== null);
+  const shape = await page.evaluate(() => ({
+    app: window.__app,
+    card: window.harness.currentRoot().querySelector('#ap-out').textContent,
+  }));
+  expect(shape.app).toEqual({ inEvent: true, inTimer: true });
+  expect(shape.card, 'the card\'s own timer still sees the message').toBe('card');
+});

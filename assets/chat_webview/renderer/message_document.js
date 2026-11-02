@@ -36,6 +36,9 @@ const OVERLAY_CLASS = 'glaze-message-overlay';
 // points at the message root: a <script> appended to a shadow root never runs.
 const REAL_HEAD = document.head || document.documentElement;
 const REAL_BODY = document.body || document.documentElement;
+// The scope wraps `window.setTimeout` for a card's timers; the scope's own
+// backstop must not be one of them.
+const REAL_SET_TIMEOUT = window.setTimeout.bind(window);
 
 /**
  * The app's own body, for chrome that must land outside a message.
@@ -375,11 +378,24 @@ function installEventScope() {
       const root = messageRootOf(event);
       if (!root || !scripted.has(root)) return;
       const restore = installDocumentScope(root, () => {});
+      // The card's own handlers all run inside its shadow root. Once the
+      // event reaches the host it is the app's listeners' turn, and they —
+      // and any timer they start — get the app's document back.
+      const host = root.getRootNode().host;
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        if (host) host.removeEventListener(type, finish);
+        restore();
+      };
+      if (host) host.addEventListener(type, finish);
       // The dispatch is one task: a microtask runs once it has finished
-      // propagating. The timeout is only a backstop for a listener that
-      // throws past the checkpoint.
-      queueMicrotask(restore);
-      setTimeout(restore, 0);
+      // propagating, for an event a card stopped before it left the message.
+      // The timeout is only a backstop for a listener that throws past the
+      // checkpoint.
+      queueMicrotask(finish);
+      REAL_SET_TIMEOUT(finish, 0);
     }, true);
   }
 }
