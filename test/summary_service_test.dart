@@ -508,6 +508,24 @@ void main() {
     expect(result, long);
   });
 
+  test('a text is shortened as it stands, on the shortening prompt', () async {
+    final llm = _RecordingAuxLlmClient(['Short.']);
+    final service = SummaryService(repo, llm: llm);
+
+    final result = await service.shortenText(
+      sessionId: 'session',
+      text: 'Long block text.',
+      apiConfig: _api,
+      targetTokens: 150,
+    );
+
+    expect(result, 'Short.');
+    expect(llm.calls, hasLength(1));
+    expect(llm.system, startsWith(summaryShortenPrompt));
+    expect(llm.system, contains(summaryLengthHint(150)));
+    expect(llm.user, 'Long block text.');
+  });
+
   test('an answer within its target is not sent back', () async {
     final llm = _RecordingAuxLlmClient();
     final service = SummaryService(repo, llm: llm);

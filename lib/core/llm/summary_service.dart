@@ -109,9 +109,10 @@ const summaryMergePrompt =
     '- Keep proper names and established terms exactly as written.\n'
     '- Add nothing that the parts do not say. No preamble.';
 
-/// Instruction for a block that came out well past its target. Sent once; the
-/// shorter of the two texts is kept. The built-in default of
-/// `SummaryShortenPromptPresets`.
+/// Instruction for a block that came out well past its target, and for a
+/// block the reader shortens. Sent while the answer stays past its slack
+/// ([summaryShortenRounds]); each shorter text is kept. The built-in default
+/// of `SummaryShortenPromptPresets`.
 const summaryShortenPrompt =
     'The summary you are given came out longer than it should. Shorten it '
     'without changing facts, their order, names or established terms, and '
@@ -307,6 +308,35 @@ class SummaryService {
       shortenTemplate: shortenTemplate,
       messages: buildMergeMessages(
         parts: parts,
+        targetTokens: targetTokens,
+        template: template,
+      ),
+    );
+  }
+
+  /// Shortens [text] — a block as it stands — to about [targetTokens] on the
+  /// shortening prompt ([template], or [summaryShortenPrompt]), and shortens
+  /// the answer again while it stays past its slack, as every summary is.
+  /// Persists nothing. For a block that came out far past the block size
+  /// without retelling its messages again.
+  Future<String> shortenText({
+    required String sessionId,
+    required String text,
+    required ApiConfig apiConfig,
+    required int targetTokens,
+    String? template,
+    CancelToken? cancelToken,
+    double? temperature,
+  }) {
+    return _summarize(
+      sessionId: sessionId,
+      apiConfig: apiConfig,
+      targetTokens: targetTokens,
+      temperature: temperature,
+      cancelToken: cancelToken,
+      shortenTemplate: template,
+      messages: buildShortenMessages(
+        text: text,
         targetTokens: targetTokens,
         template: template,
       ),

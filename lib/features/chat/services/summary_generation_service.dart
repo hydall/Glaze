@@ -73,7 +73,8 @@ class SummaryRunOutlook {
 
   /// The line to compact to lies under the fixed part with the summary: a
   /// run can only leave the floor, and frees little.
-  bool get floorOnly => compactToTokens - fixedTokens - summaryTokens < floorTokens;
+  bool get floorOnly =>
+      compactToTokens - fixedTokens - summaryTokens < floorTokens;
 
   factory SummaryRunOutlook.of({
     required int total,
@@ -449,7 +450,7 @@ class SummaryGenerationService {
           sessionId: session.id,
           parts: parts,
           apiConfig: apiConfig,
-          targetTokens: _targetFor(sourceTokens, settings),
+          targetTokens: mergeTargetFor(sourceTokens, settings),
           template: await _mergeTemplate(),
           shortenTemplate: await _shortenTemplate(),
           cancelToken: cancelToken,
@@ -470,6 +471,64 @@ class SummaryGenerationService {
       final committed = await _commit(session.id, messages, (current, now) {
         // Stopped, or edited while the summarizer was writing: the draft
         // describes messages that no longer read that way.
+        if (stopped() ||
+            SummaryChain.isDraftStale(draft, SummaryChain.index(now))) {
+          return null;
+        }
+        return SummaryChain.putDraft(current, block.id, draft);
+      });
+      if (!committed && !stopped()) {
+        throw const SummaryChainException('changed');
+      }
+    });
+  }
+
+  /// Shortens an active block as it stands — its own text through the
+  /// shortening prompt, aimed at the block size the settings name — and
+  /// leaves the result on it as a [SummaryDraft], as [regenerateBlock] does.
+  /// For a block that came out far past that size: a merge the summarizer
+  /// would not fit, a block written under a bigger setting. Its messages are
+  /// not retold, so the draft is bound as the block is: a stale block's draft
+  /// is stale too and is not approved. The text must come out shorter than
+  /// the block (`not_shorter`). A stopped run ([cancelToken]) writes nothing.
+  Future<void> shortenBlock({
+    required ChatSession session,
+    required String blockId,
+    CancelToken? cancelToken,
+  }) {
+    return _exclusive(session.id, () async {
+      final settings = await _ref.read(
+        summaryCompactionSettingsProvider.future,
+      );
+      final slot = _ref.read(pipelineSettingsProvider).memoryBookApi;
+      final apiConfig = await _requireConfig(slot);
+      final service = _ref.read(summaryServiceProvider);
+      final messages = await _messages(session.id, session.messages);
+      final blocks = await service.getBlocks(session.id);
+      final block = blocks
+          .where((b) => b.id == blockId && !b.archived && !b.isNote)
+          .firstOrNull;
+      if (block == null) throw const SummaryChainException('not_live');
+
+      final text = await service.shortenText(
+        sessionId: session.id,
+        text: block.content,
+        apiConfig: apiConfig,
+        targetTokens: settings.blockTargetTokens,
+        template: await _shortenTemplate(),
+        cancelToken: cancelToken,
+        temperature: slot.generationTemperature,
+      );
+      final draft = SummaryDraft(
+        content: text,
+        messageIds: block.messageIds,
+        sourceHash: block.sourceHash,
+        tokens: _acceptedTokens(text, block.tokens),
+        sourceTokens: block.sourceTokens,
+        createdAt: DateTime.now().millisecondsSinceEpoch,
+      );
+      bool stopped() => cancelToken?.isCancelled ?? false;
+      final committed = await _commit(session.id, messages, (current, now) {
         if (stopped() ||
             SummaryChain.isDraftStale(draft, SummaryChain.index(now))) {
           return null;
@@ -589,7 +648,7 @@ class SummaryGenerationService {
     CancelToken? cancelToken,
   }) async {
     final sourceTokens = parts.fold(0, (sum, b) => sum + b.tokens);
-    final target = _targetFor(sourceTokens, settings);
+    final target = mergeTargetFor(sourceTokens, settings);
     final text = await _ref
         .read(summaryServiceProvider)
         .mergeBlocks(
@@ -832,6 +891,17 @@ class SummaryGenerationService {
   /// A small source gets a small block; the setting is the ceiling.
   static int _targetFor(int sourceTokens, SummaryCompactionSettings settings) =>
       math.min(settings.blockTargetTokens, math.max(150, sourceTokens ~/ 3));
+
+  /// A merge aims at the block size itself, as a retelling does, and at most
+  /// half of its parts, so two small blocks make a small one. The parts are
+  /// summaries already: a third of them, as [_targetFor] asks of messages,
+  /// cut continuity rather than words, and the summarizer overshot it anyway,
+  /// so merges came out past the block size whatever it was set to.
+  @visibleForTesting
+  static int mergeTargetFor(
+    int sourceTokens,
+    SummaryCompactionSettings settings,
+  ) => math.min(settings.blockTargetTokens, math.max(150, sourceTokens ~/ 2));
 
   static int _idSeq = 0;
 

@@ -48,6 +48,10 @@ class SummaryBlockCard extends StatelessWidget {
   /// summarizer again.
   final VoidCallback? onRegenerate;
 
+  /// Shortens the block to the block size, as a draft. Null unless the block
+  /// is live, past that size and without a draft.
+  final VoidCallback? onShorten;
+
   /// When the run writing this block again started; null while none is.
   final DateTime? generatingSince;
 
@@ -69,6 +73,7 @@ class SummaryBlockCard extends StatelessWidget {
     this.onEdit,
     this.onDelete,
     this.onRegenerate,
+    this.onShorten,
     this.generatingSince,
     this.onStop,
     this.onApprove,
@@ -174,13 +179,31 @@ class SummaryBlockCard extends StatelessWidget {
           ),
           // The tile a Memory Books draft has under its body: the action is
           // worth a word, not an unlabelled glyph in the menu.
-          if (onRegenerate != null && !_generating) ...[
+          if ((onRegenerate != null || onShorten != null) && !_generating) ...[
             const SizedBox(height: 8),
-            MemoryActionTile(
-              icon: Icons.refresh_rounded,
-              label: 'memory_books_btn_regenerate'.tr(),
-              accent: _kAmber,
-              onTap: busy ? null : onRegenerate,
+            Row(
+              children: [
+                if (onRegenerate != null)
+                  Expanded(
+                    child: MemoryActionTile(
+                      icon: Icons.refresh_rounded,
+                      label: 'memory_books_btn_regenerate'.tr(),
+                      accent: _kAmber,
+                      onTap: busy ? null : onRegenerate,
+                    ),
+                  ),
+                if (onRegenerate != null && onShorten != null)
+                  const SizedBox(width: 8),
+                if (onShorten != null)
+                  Expanded(
+                    child: MemoryActionTile(
+                      icon: Icons.compress_rounded,
+                      label: 'summary_block_shorten'.tr(),
+                      accent: _kCyan,
+                      onTap: busy ? null : onShorten,
+                    ),
+                  ),
+              ],
             ),
           ],
           if (_generating || settled) ...[

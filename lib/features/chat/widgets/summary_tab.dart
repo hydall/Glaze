@@ -26,12 +26,13 @@ import 'summary_block_editor_sheet.dart';
 /// of old messages and is sent in their place. The tab lists the active
 /// chain in story order, the archive of merged-away blocks below it, and the
 /// actions that change the chain — compact now, merge a selection, add a note,
-/// write one block again. Compacting runs in `summaryCompactionProvider`,
-/// block after block until the backlog is retold, with its progress and a
-/// Stop button in the action bar, and goes on when the sheet is closed. A
-/// block written again comes back as a draft on its card and replaces the
-/// block's text only once approved, the way a Memory Books draft becomes an
-/// entry.
+/// write one block again, shorten one. Compacting runs in
+/// `summaryCompactionProvider`, block after block until the backlog is retold,
+/// with its progress and a Stop button in the action bar, and goes on when the
+/// sheet is closed. A block written again comes back as a draft on its card
+/// and replaces the block's text only once approved, the way a Memory Books
+/// draft becomes an entry; so does a block shortened to the block size, which
+/// the card of a block past that size offers.
 ///
 /// Everything else — the master switch, the template, when compaction runs,
 /// the injection point — is behind the header's settings button, in
@@ -164,6 +165,28 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
       ),
     );
   }
+
+  /// As [_regenerate]: the run belongs to [summaryRegenerationProvider].
+  void _shorten(SummaryBlock block) {
+    final session = _session;
+    if (session == null) return;
+    setState(() => _error = null);
+    unawaited(_regeneration.shorten(session: session, blockId: block.id));
+  }
+
+  /// Whether a card offers Shorten: a live block past the block size, with
+  /// no draft waiting on it. A stale block is not sent, so there is nothing
+  /// to gain; a draft is shortened by approving a shorter one later.
+  bool _canShorten(
+    SummaryBlock block,
+    Map<String, ChatMessage> byId,
+    int? blockTarget,
+  ) =>
+      blockTarget != null &&
+      !block.isNote &&
+      block.draft == null &&
+      block.tokens > blockTarget &&
+      !SummaryChain.isStale(block, byId);
 
   void _stop(SummaryBlock block) {
     final session = _session;
@@ -333,6 +356,10 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
     final messages = session?.messages ?? const <ChatMessage>[];
     final regeneration = ref.watch(summaryRegenerationProvider);
     final regenerating = session != null && regeneration.isBusy(session.id);
+    final blockTarget = ref
+        .watch(summaryCompactionSettingsProvider)
+        .value
+        ?.blockTargetTokens;
     final compacting = session == null
         ? null
         : ref.watch(summaryCompactionProvider.select((s) => s.run(session.id)));
@@ -398,6 +425,9 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
                         onRegenerate: block.isNote
                             ? null
                             : () => _regenerate(block),
+                        onShorten: _canShorten(block, byId, blockTarget)
+                            ? () => _shorten(block)
+                            : null,
                         generatingSince: session == null
                             ? null
                             : regeneration.since(session.id, block.id),

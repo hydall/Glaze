@@ -393,11 +393,13 @@ the oldest summarizable messages outside the fresh tail (the rest of the
 window, and at least `SummaryChain.minTailMessages`) are retold as a level-1
 block. A run that would not make the block meaningfully shorter than its source
 is skipped. An answer more than `summaryShortenSlackPercent` of its target is
-sent back once to be shortened, with the chosen shortening prompt, and the
-shorter text kept; a block that still
-comes back no shorter than its source is rejected. Once the live
-blocks take more than `mergePercent` of the window, adjacent blocks of one
-level are merged a level up and the merged ones are archived.
+sent back to be shortened, up to `summaryShortenRounds` times, with the chosen
+shortening prompt, and each shorter text kept; a block that still comes back
+no shorter than its source is rejected. Once the live blocks take more than
+`mergePercent` of the window, adjacent blocks of one level are merged a level
+up and the merged ones are archived. A retelling aims at the block size or a
+third of its messages, whichever is less; a merge at the block size or half of
+its parts (`mergeTargetFor`), since the parts are summaries already.
 
 An automatic run makes at most `SummaryGenerationService._maxSteps` blocks, so
 it never holds the next turn for long; the manual run ("Compact history") has
@@ -455,7 +457,10 @@ read today, with the live blocks before it as context, so approving brings a
 stale one back; until then compaction neither drops a stale block whose draft
 is fresh nor retells its messages again (`SummaryChain.awaitsReview`). A merge is merged again from its archived parts; a stale merge
 is refused (`stale_merge`), since its parts are as out of date as it is. Notes
-are never regenerated. The new text must be shorter than its source, and a
+are never regenerated. Shortening (`shortenBlock`; the card of a live block
+past the block size offers it) sends the block's own text through the
+shortening prompt, aimed at the block size, and leaves the result as a draft
+the same way, bound as the block is. The new text must be shorter than its source, and a
 draft whose messages changed after it was written is not approved
 (`changed`). A part merged away loses its draft. Covered by
 `test/summary_regenerate_test.dart`.
