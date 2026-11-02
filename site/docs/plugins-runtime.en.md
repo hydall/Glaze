@@ -100,7 +100,7 @@ Other plugins don't receive these messages. To share data between plugins, use t
 
 ## Panels
 
-A **chat panel** covers the whole chat page, but only what it draws takes taps; everything else passes through to the chat. Keep the page background transparent and place elements with `position: fixed`.
+A **chat panel** covers the whole chat page, but only what it draws takes taps; everything else passes through to the chat. Keep the page background transparent and place elements with `position: fixed`. An element counts wherever it is in the document, including one appended straight to `<html>`, next to `<body>`.
 
 The chat has the app's controls over it: the status bar, the header, the message box. Their sizes are in CSS variables and in `glaze.ui.insets()`:
 
@@ -121,6 +121,8 @@ The chat has the app's controls over it: the status bar, the header, the message
 ```
 
 What a panel draws shows over the app's controls too. Small fixed elements, such as floating buttons, are moved back between the status bar and the message box if they end up behind them (after a drag, for example).
+
+The same machinery runs ExtBlocks scripts when their preset has the **Page over the chat** permission: the app runs them as a chat panel of its own, which does not appear in the plugin list. Such a page works like any chat panel — its `localStorage` is kept, only what it draws takes taps — and reaches the internet only when **Allow external media** is on.
 
 A **message panel** sits inside the message, before or after its text (`slot`). Its height follows its content. `glaze.plugin.messageId` is the message's id, and the `message` scope of variables refers to it by default.
 
