@@ -143,25 +143,64 @@
     return out;
   }
 
-  var PLACEMENT = { user: 1, char: 2 };
+  // Same mapping as the Tavo backup importer (tavo_backup_importer.dart).
+  var PLACEMENT = { user: 1, char: 2, lorebook: 5, reasoning: 6 };
+  var PLACEMENT_OUT = { 1: 'user', 2: 'char', 5: 'lorebook', 6: 'reasoning' };
+  var SUBST_IN = { raw: 1, escaped: 2 };
+  var SUBST_OUT = { 1: 'raw', 2: 'escaped' };
+  function timingOut(r) {
+    if (r.runOnEdit && !r.markdownOnly && !r.promptOnly) return 'editAndReceive';
+    if (r.markdownOnly && !r.promptOnly) return 'display';
+    if (r.promptOnly && !r.markdownOnly) return 'send';
+    return 'sendAndDisplay';
+  }
   function regexEntry(r) {
     return {
       name: r.name, findRegex: r.regex, replaceString: r.replacement,
       trimStrings: r.trimOut ? String(r.trimOut).split('\n') : [],
-      placements: (r.placement || []).map(function (p) { return p === 1 ? 'user' : 'char'; }),
-      timing: 'sendAndDisplay', substitution: 'none',
+      placements: (r.placement || []).map(function (p) { return PLACEMENT_OUT[p] || 'char'; }),
+      timing: timingOut(r), substitution: SUBST_OUT[r.substituteRegex] || 'none',
       minDepth: r.minDepth == null ? null : r.minDepth, maxDepth: r.maxDepth == null ? null : r.maxDepth,
       enabled: !r.disabled,
     };
   }
   function regexOut(r) { return r && { id: r.id, name: r.name, entries: [regexEntry(r)] }; }
+  // An entry comes either in Tavo's own shape (`placements` names, `timing`)
+  // or in the SillyTavern-style export shape (`placement` numbers,
+  // `markdownOnly` / `promptOnly`). Dropping the scope flags made a
+  // display-only rule — e.g. one that appends a <script> to every message —
+  // run on the prompt too, so the script went to the model.
+  function regexScopeIn(e) {
+    if (typeof e.timing === 'string') {
+      return {
+        markdownOnly: e.timing === 'display' || e.timing === 'sendAndDisplay',
+        promptOnly: e.timing === 'send' || e.timing === 'sendAndDisplay',
+        runOnEdit: e.timing === 'editAndReceive',
+      };
+    }
+    if (e.markdownOnly !== undefined || e.promptOnly !== undefined || e.runOnEdit !== undefined) {
+      return { markdownOnly: !!e.markdownOnly, promptOnly: !!e.promptOnly, runOnEdit: !!e.runOnEdit };
+    }
+    return { markdownOnly: true, promptOnly: true, runOnEdit: false };
+  }
+  function regexPlacementIn(e) {
+    if (Array.isArray(e.placements)) return e.placements.map(function (p) { return PLACEMENT[p] || 2; });
+    if (Array.isArray(e.placement)) {
+      return e.placement.map(function (p) { return typeof p === 'number' ? p : (PLACEMENT[p] || +p || 2); });
+    }
+    return [2];
+  }
   function regexRuleIn(setName, e, single) {
+    var scope = regexScopeIn(e);
+    var subst = e.substitution != null ? SUBST_IN[e.substitution] : e.substituteRegex;
     return {
-      name: single ? setName : (setName + ' / ' + (e.name || 'rule')),
+      name: single ? setName : (setName + ' / ' + (e.name || e.scriptName || 'rule')),
       regex: e.findRegex || '', replacement: e.replaceString || '',
       trimOut: Array.isArray(e.trimStrings) ? e.trimStrings.join('\n') : '',
-      placement: (e.placements || ['char']).map(function (p) { return PLACEMENT[p] || 2; }),
-      disabled: e.enabled === false,
+      placement: regexPlacementIn(e),
+      disabled: e.enabled === false || e.disabled === true,
+      markdownOnly: scope.markdownOnly, promptOnly: scope.promptOnly, runOnEdit: scope.runOnEdit,
+      substituteRegex: typeof subst === 'number' ? subst : 0,
       minDepth: e.minDepth == null ? null : e.minDepth, maxDepth: e.maxDepth == null ? null : e.maxDepth,
     };
   }
@@ -331,7 +370,9 @@
       }
       return first;
     },
-    update: function (set) {
+    // Both `update(set)` and `update(id, set)` are seen in the wild.
+    update: function (set, data) {
+      if (set != null && typeof set !== 'object') set = Object.assign({}, data, { id: set });
       set = set || {};
       var e = (set.entries || [])[0] || {};
       return fn(R, 'update')(Object.assign({ id: set.id }, regexRuleIn(set.name, e, true)));
