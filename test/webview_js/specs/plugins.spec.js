@@ -298,6 +298,35 @@ test('Tavo plugins get tavo.* mapped onto glaze.*', async ({ page }) => {
   await expect.poll(() => toasts(page)).toEqual(['value-for-t|hi', 'went']);
 });
 
+test('Tavo regex rules keep their display / prompt scope', async ({ page }) => {
+  await setup(page, [
+    plugin('t', {
+      compat: 'tavo',
+      methods: ['regex.create', 'regex.update', 'ui.toast'],
+      main: `
+        (async () => {
+          // SillyTavern-style export entry: display-only, user + char.
+          await tavo.regex.create({ name: 'st', entries: [{ findRegex: 'a', replaceString: 'b',
+            placement: [1, 2], markdownOnly: true, promptOnly: false }] });
+          await tavo.regex.create({ name: 'tv', entries: [{ findRegex: 'a', placements: ['user'], timing: 'send' }] });
+          await tavo.regex.create({ name: 'df', entries: [{ findRegex: 'a' }] });
+          await tavo.regex.update('r1', { name: 'st', entries: [{ findRegex: 'a', timing: 'display' }] });
+          tavo.utils.toast('done');
+        })().catch((e) => tavo.utils.toast('failed: ' + e.message));
+      `,
+    }),
+  ]);
+  await expect.poll(() => toasts(page)).toEqual(['done']);
+  const created = (await calls(page, 'regex.create')).map((c) => c.request.params[0]);
+  expect(created.map((r) => [r.name, r.placement, r.markdownOnly, r.promptOnly])).toEqual([
+    ['st', [1, 2], true, false],
+    ['tv', [1], false, true],
+    ['df', [2], true, true],
+  ]);
+  const updated = (await calls(page, 'regex.update'))[0].request.params[0];
+  expect(updated).toMatchObject({ id: 'r1', name: 'st', markdownOnly: true, promptOnly: false });
+});
+
 test('glaze.net.fetch goes through the app and answers with a Response', async ({ page }) => {
   await setup(page, [
     plugin('n', {
