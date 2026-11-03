@@ -198,6 +198,8 @@ const summaryMergePrompt =
     '- Keep goals, promises and dangers that are still open. Never present a '
     'thread that was resolved as open again.\n'
     '- Keep proper names and established terms exactly as written.\n'
+    '- Write it as a summary, not as data, whatever form the parts take: no '
+    'JSON, no code fences.\n'
     '- Add nothing that the parts do not say. No preamble.';
 
 /// Instruction for a block that came out well past its target, and for a
