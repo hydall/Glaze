@@ -392,7 +392,10 @@ prompt passes `SummaryCompactionSettings.triggerPercent` of what it may use,
 the oldest summarizable messages outside the fresh tail (the rest of the
 window, and at least `SummaryChain.minTailMessages`) are retold as a level-1
 block. A run that would not make the block meaningfully shorter than its source
-is skipped. An answer more than `summaryShortenSlackPercent` of its target is
+is skipped. The size target goes into every summary prompt in words and
+characters as well as tokens (`SummaryTarget`, worked out from the material of
+the request): a model keeps to those, not to a token count it cannot see.
+An answer more than `summaryShortenSlackPercent` of its target is
 sent back to be shortened, up to `summaryShortenRounds` times, with the chosen
 shortening prompt, and each shorter text kept — a round that takes off less
 than `summaryShortenMinGainPercent` of its text is the last; a block that still comes back

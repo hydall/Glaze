@@ -230,9 +230,11 @@ void main() {
     expect(llm.user, startsWith('Recap Alice for Bob in 300.'));
     // Speakers go by their names; the transcript is never macro-expanded.
     expect(llm.user, contains('Bob: Say {{char}} out loud'));
-    expect(llm.user, endsWith('Done.'));
+    // The target in words goes in even when the template places it in
+    // tokens, after the template's own text.
+    expect(llm.user, contains('Done.\n'));
     // Placed by the template, so no length hint is appended.
-    expect(llm.user, isNot(contains(summaryLengthHint(300))));
+    expect(llm.user, contains(summaryLengthHint(300)));
   });
 
   test('the built-in prompt gets the length hint and the transcript', () async {
@@ -349,7 +351,8 @@ void main() {
       template: 'Fold these into {{target_tokens}} tokens.',
     );
 
-    expect(llm.system, 'Fold these into 200 tokens.');
+    expect(llm.system, startsWith('Fold these into 200 tokens.\n'));
+    expect(llm.system, contains('words'));
     expect(llm.user, contains('First part.'));
   });
 
@@ -389,7 +392,10 @@ void main() {
       template: 'Write one L{{level}} block of {{target_tokens}} tokens.',
     );
 
-    expect(request.first['content'], 'Write one L2 block of 200 tokens.');
+    expect(
+      request.first['content'],
+      startsWith('Write one L2 block of 200 tokens.\n'),
+    );
   });
 
   test('a user message goes by the persona it was written as', () async {
@@ -486,7 +492,7 @@ void main() {
     );
 
     expect(result, 'Short.');
-    expect(llm.system, 'Cut it to 150 tokens.');
+    expect(llm.system, startsWith('Cut it to 150 tokens.\n'));
     expect(llm.user, long);
   });
 
@@ -506,6 +512,54 @@ void main() {
     );
 
     expect(result, long);
+  });
+
+  test('the target goes in as words and characters of the material', () async {
+    final llm = _RecordingAuxLlmClient();
+    final service = SummaryService(repo, llm: llm);
+    final russian = List.filled(60, 'Снег шёл всю ночь над дорогой.').join(' ');
+
+    await service.summarizeMessages(
+      sessionId: 'session',
+      source: [ChatMessage(id: '1', role: 'user', content: russian)],
+      apiConfig: _api,
+      targetTokens: 150,
+    );
+
+    final hint = RegExp(
+      r'Keep it under about 150 tokens: no more than (\d+) words, '
+      r'about (\d+) characters\.',
+    ).firstMatch(llm.system!);
+    expect(hint, isNotNull);
+    final words = int.parse(hint!.group(1)!);
+    final chars = int.parse(hint.group(2)!);
+    // A word of this text is several characters, a token a few.
+    expect(words, lessThan(chars));
+    expect(words % 10, 0);
+    expect(chars % 100, 0);
+    expect(
+      SummaryTarget.of(150, russian).words,
+      lessThan(SummaryTarget.of(150, 'a b c d e f g h ' * 40).words),
+    );
+  });
+
+  test('a template that places the target in words gets no hint', () async {
+    final llm = _RecordingAuxLlmClient();
+    final service = SummaryService(repo, llm: llm);
+
+    await service.mergeBlocks(
+      sessionId: 'session',
+      parts: [
+        block(['1'], 'First part.'),
+        block(['2'], 'Second part.'),
+      ],
+      apiConfig: _api,
+      targetTokens: 200,
+      template: 'At most {{target_words}} words, {{target_chars}} characters.',
+    );
+
+    expect(llm.system, matches(r'^At most \d+ words, \d+ characters\.$'));
+    expect(llm.system, isNot(contains(summaryLengthHint(200))));
   });
 
   test('a round that barely shortens is the last', () async {
