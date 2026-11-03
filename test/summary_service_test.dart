@@ -508,6 +508,24 @@ void main() {
     expect(result, long);
   });
 
+  test('a round that barely shortens is the last', () async {
+    final long = List.filled(400, 'word').join(' ');
+    final barely = List.filled(392, 'word').join(' ');
+    final llm = _RecordingAuxLlmClient([long, barely, 'Short.']);
+    final service = SummaryService(repo, llm: llm);
+
+    final result = await service.summarizeMessages(
+      sessionId: 'session',
+      source: const [ChatMessage(id: '1', role: 'user', content: 'Hello')],
+      apiConfig: _api,
+      targetTokens: 150,
+    );
+
+    // The shorter text is kept, but the model is not asked a third time.
+    expect(result, barely);
+    expect(llm.calls, hasLength(2));
+  });
+
   test('a text is shortened as it stands, on the shortening prompt', () async {
     final llm = _RecordingAuxLlmClient(['Short.']);
     final service = SummaryService(repo, llm: llm);

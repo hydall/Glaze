@@ -394,7 +394,8 @@ window, and at least `SummaryChain.minTailMessages`) are retold as a level-1
 block. A run that would not make the block meaningfully shorter than its source
 is skipped. An answer more than `summaryShortenSlackPercent` of its target is
 sent back to be shortened, up to `summaryShortenRounds` times, with the chosen
-shortening prompt, and each shorter text kept; a block that still comes back
+shortening prompt, and each shorter text kept — a round that takes off less
+than `summaryShortenMinGainPercent` of its text is the last; a block that still comes back
 no shorter than its source is rejected. Once the live blocks take more than
 `mergePercent` of the window, adjacent blocks of one level are merged a level
 up and the merged ones are archived. A retelling aims at the block size or a

@@ -83,6 +83,12 @@ const summaryShortenSlackPercent = 125;
 /// that slack.
 const summaryShortenRounds = 2;
 
+/// The least a shortening round must take off, in percent of the text it was
+/// given, for another round to follow. A model that cut one percent of a
+/// block will not cut a third of it when asked the same again, and each round
+/// writes the whole block out once more — minutes, on a big one.
+const summaryShortenMinGainPercent = 10;
+
 /// Fallback idle timeout when the API config carries no `firstChunkTimeoutMs`.
 const _fallbackTimeoutMs = 120000;
 
@@ -346,8 +352,9 @@ class SummaryService {
   /// One summarizer call, and up to two more to shorten its answer while it
   /// is well past [targetTokens]: a model that overshoots the target by half
   /// tends to overshoot again, by less. Each shorter text is kept; a failed
-  /// shortening, or one no shorter than the text it was given, ends the
-  /// shortening with the last answer, which is complete.
+  /// shortening, one no shorter than the text it was given, or one that took
+  /// off less than [summaryShortenMinGainPercent] of it, ends the shortening
+  /// with the last answer, which is complete.
   Future<String> _summarize({
     required String sessionId,
     required ApiConfig apiConfig,
@@ -387,8 +394,12 @@ class SummaryService {
         );
         final shorterTokens = estimateTokens(shorter);
         if (shorterTokens >= tokens) break;
+        final barely =
+            (tokens - shorterTokens) * 100 <
+            tokens * summaryShortenMinGainPercent;
         text = shorter;
         tokens = shorterTokens;
+        if (barely) break;
       } catch (_) {
         if (cancelToken?.isCancelled == true) rethrow;
         break;
