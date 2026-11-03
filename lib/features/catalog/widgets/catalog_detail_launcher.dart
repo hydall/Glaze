@@ -22,6 +22,7 @@ import '../services/janitor_extractor.dart';
 import '../services/datacat/datacat_cards.dart';
 import '../services/janitor_provider.dart';
 import '../services/janitor_public_lorebook.dart';
+import '../services/janitor_waiting_room.dart';
 import '../services/janitor_webview_proxy.dart';
 import '../services/janny_provider.dart';
 import '../third_party_providers_provider.dart';
@@ -544,7 +545,23 @@ class _CatalogDetailLauncherState
     }
     final downloaded = _downloaded;
     if (downloaded == null) {
-      return _LoadingView(phase: _loadPhase);
+      if (widget.provider != CatalogProvider.janitor) {
+        return _LoadingView(phase: _loadPhase);
+      }
+      // The JanitorAI proxy may be sitting in the admission queue; name that
+      // instead of leaving a spinner with no explanation.
+      return ValueListenableBuilder<JanitorWaitingRoom?>(
+        valueListenable: JanitorWebViewProxy.instance.waitingRoom,
+        builder: (context, room, _) => _LoadingView(
+          phase: room == null
+              ? _loadPhase
+              : room.estimatedWait == null
+              ? 'catalog_janitor_queue'.tr()
+              : 'catalog_janitor_queue_wait'.tr(
+                  namedArgs: {'wait': room.estimatedWait!},
+                ),
+        ),
+      );
     }
     final char = _toCharacter(downloaded);
     final avatarUrl =

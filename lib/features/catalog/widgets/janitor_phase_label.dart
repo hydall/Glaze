@@ -14,11 +14,19 @@ String janitorPhaseLabel(String? phase) {
   if (pass != null) {
     return 'janitor_phase_trigger_pass'.tr(args: [pass[1]!, pass[2]!]);
   }
+  final queue = _queuePattern.firstMatch(raw);
+  if (queue != null) {
+    final wait = queue[1]?.trim() ?? '';
+    return wait.isEmpty
+        ? 'janitor_phase_queue'.tr()
+        : 'janitor_phase_queue_wait'.tr(args: [wait]);
+  }
   final key = _keys[raw];
   return key == null ? raw : key.tr();
 }
 
 final _passPattern = RegExp(r'^triggering \(lorebook, pass (\d+)/(\d+)\)$');
+final _queuePattern = RegExp(r'^waiting in queue(?: \(([^)]*)\))?$');
 
 const _keys = <String, String>{
   'fetching metadata': 'janitor_phase_metadata',
