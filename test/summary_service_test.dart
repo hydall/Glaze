@@ -543,6 +543,24 @@ void main() {
     );
   });
 
+  test('text without spaced words still gets a sane word target', () {
+    final target = SummaryTarget.of(1000, '她点了点头，没有说话。雨还在下。' * 300);
+
+    // Not the floor of 20 that one "word" per paragraph would give.
+    expect(target.words, greaterThan(100));
+    expect(target.words, lessThan(target.chars));
+  });
+
+  test('an inline picture is no text to measure by', () {
+    final prose = 'Snow fell on the road all night. ' * 100;
+    final picture = '<img src="data:image/png;base64,${'A' * 50000}">';
+
+    expect(
+      SummaryTarget.of(500, '$prose$picture').chars,
+      SummaryTarget.of(500, prose).chars,
+    );
+  });
+
   test('a template that places the target in words gets no hint', () async {
     final llm = _RecordingAuxLlmClient();
     final service = SummaryService(repo, llm: llm);

@@ -8,6 +8,7 @@ import '../models/api_config.dart';
 import '../models/chat_message.dart';
 import '../models/summary_block.dart';
 import 'aux_llm_client.dart';
+import 'inline_media.dart';
 import 'macro_engine.dart';
 import 'tokenizer.dart';
 import 'transport/llm_protocol.dart';
@@ -102,15 +103,32 @@ class SummaryTarget {
     required this.chars,
   });
 
-  /// [tokens] as words and characters of text like [material].
+  /// Characters a word is taken to run to when the material gives no usable
+  /// figure: text without spaces between words (Chinese, Japanese, Thai)
+  /// splits into a "word" per paragraph, and a word target of twenty would
+  /// contradict the character target beside it.
+  static const _fallbackCharsPerWord = 6.0;
+
+  /// Past this many characters a "word", the material is not spaced into
+  /// words.
+  static const _longestPlausibleWord = 15.0;
+
+  /// [tokens] as words and characters of text like [material]. Inline
+  /// pictures are left out of the measure, as [estimateTokens] leaves them
+  /// out of the count: a base64 payload is characters but no text.
   factory SummaryTarget.of(int tokens, String material) {
-    final text = material.trim();
+    final text = stripInlineMedia(material).trim();
     final materialTokens = text.isEmpty ? 0 : estimateTokens(text);
     final materialWords = text.isEmpty ? 0 : text.split(RegExp(r'\s+')).length;
     final charsPerToken = materialTokens > 0
         ? text.length / materialTokens
         : 4.0;
-    final charsPerWord = materialWords > 0 ? text.length / materialWords : 6.0;
+    final measuredCharsPerWord = materialWords > 0
+        ? text.length / materialWords
+        : _fallbackCharsPerWord;
+    final charsPerWord = measuredCharsPerWord > _longestPlausibleWord
+        ? _fallbackCharsPerWord
+        : measuredCharsPerWord;
     final chars = tokens * charsPerToken;
     return SummaryTarget(
       tokens: tokens,

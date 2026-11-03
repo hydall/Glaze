@@ -512,7 +512,10 @@ class SummaryGenerationService {
           .firstOrNull;
       if (block == null) throw const SummaryChainException('not_live');
       if (SummaryChain.isStale(block, SummaryChain.index(messages))) {
-        throw const SummaryChainException('stale');
+        // A stale merge has the more useful advice: delete it for its parts.
+        throw SummaryChainException(
+          block.childIds.isNotEmpty ? 'stale_merge' : 'stale',
+        );
       }
 
       final text = await service.shortenText(

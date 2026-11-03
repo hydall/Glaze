@@ -398,8 +398,9 @@ the request): a model keeps to those, not to a token count it cannot see.
 An answer more than `summaryShortenSlackPercent` of its target is
 sent back to be shortened, up to `summaryShortenRounds` times, with the chosen
 shortening prompt, and each shorter text kept — a round that takes off less
-than `summaryShortenMinGainPercent` of its text is the last; a block that still comes back
-no shorter than its source is rejected. Once the live blocks take more than
+than `summaryShortenMinGainPercent` of its text is the last; a block that
+still comes back no shorter than its source is rejected. Once the live blocks
+take more than
 `mergePercent` of the window, adjacent blocks of one level are merged a level
 up and the merged ones are archived. A retelling aims at the block size or a
 third of its messages, whichever is less; a merge at the block size or half of
@@ -431,8 +432,10 @@ The retelling, merging and shortening prompts are chosen by key from preset
 libraries, as in Memory Books (`SummaryPromptSelection`;
 `SummaryPromptPresets`, `SummaryMergePromptPresets` and
 `SummaryShortenPromptPresets` plus the reader's saved ones). A merge prompt gets
-`{{target_tokens}}` and `{{level}}`, the level of the block it makes; a
-shortening prompt gets `{{target_tokens}}`. Built-ins are
+`{{target_tokens}}`, `{{target_words}}`, `{{target_chars}}` and `{{level}}`,
+the level of the block it makes; a shortening prompt gets the three target
+placeholders (`SummaryTarget`; the target in words and characters is appended
+when a prompt places neither). Built-ins are
 read-only; a key that names nothing resolves to the built-in default. A chat
 that still holds a prompt text of its own retells with it until a preset is
 picked, which clears it. The reader may put one instruction in front of all
