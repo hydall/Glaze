@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
@@ -23,6 +24,7 @@ import '../../../shared/widgets/menu_group.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/sheet_view.dart';
+import '../../settings/api_list_provider.dart';
 import '../../settings/app_settings_provider.dart';
 import '../janitor_account_provider.dart';
 import '../services/catalog_error_labels.dart';
@@ -244,6 +246,15 @@ class _JanitorLorebookCaptureState
   Lorebook? _built;
   Timer? _timer;
   int _elapsed = 0;
+
+  /// Progress of a build split into several requests, as `(done, total)`;
+  /// null while the build is a single request (or none is running).
+  (int, int)? _buildProgress;
+
+  /// Parts of a split build that already came back, so retrying a build that
+  /// broke halfway resumes instead of starting over. Dropped with the capture
+  /// they were built from — see `rebuildLorebookWithActiveLlm`.
+  final _buildPartCache = <String, List<LorebookEntry>>{};
 
   /// The character's **closed** lorebooks: attached books that couldn't be
   /// downloaded whole (private, or an inaccessible advanced script). These are
@@ -704,6 +715,7 @@ class _JanitorLorebookCaptureState
       _built = null;
       _buildError = null;
       _buildDebug = null;
+      _buildPartCache.clear();
     });
     try {
       final result = await ref
@@ -774,6 +786,7 @@ class _JanitorLorebookCaptureState
       _buildDebug = null;
       _built = null;
       _elapsed = 0;
+      _buildProgress = null;
     });
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -796,6 +809,12 @@ class _JanitorLorebookCaptureState
                 : '',
             extra: _buildSources.extra ? _buildExtraController.text.trim() : '',
             characterId: _characterId,
+            onProgress: (done, total) {
+              if (mounted && total > 1) {
+                setState(() => _buildProgress = (done, total));
+              }
+            },
+            partCache: _buildPartCache,
           );
       if (mounted) setState(() => _built = book);
     } catch (e) {
@@ -812,7 +831,12 @@ class _JanitorLorebookCaptureState
       }
     } finally {
       _timer?.cancel();
-      if (mounted) setState(() => _building = false);
+      if (mounted) {
+        setState(() {
+          _building = false;
+          _buildProgress = null;
+        });
+      }
     }
   }
 
@@ -825,27 +849,42 @@ class _JanitorLorebookCaptureState
 
   /// Show the exact messages the build would send, in their own sheet — the
   /// prompt carries the whole extracted text, far too much to unfold inline.
+  ///
+  /// Text too long for one request is built in several; the preview shows the
+  /// first and says how many there are — the rest differ only in their slice
+  /// of the text.
   void _preview() {
     final ex = _extraction;
     if (ex == null) return;
+    final settings = ref.read(appSettingsProvider).value;
+    final requests = planLorebookBuild(
+      _withoutPublicScripts(ex.lorebookText),
+      // Split the way the build will: the budget depends on the build
+      // connection's context size.
+      config: resolveLorebookBuildConfig(
+        settings,
+        configs: ref.read(apiListProvider).value ?? const [],
+        active: ref.read(activeApiConfigProvider),
+      ),
+      chunkTokens:
+          settings?.lorebookBuildChunkTokens ??
+          kDefaultLorebookBuildChunkTokens,
+      // The preview must show what the build would really send, so it takes
+      // the same system prompt — the edited one when the user changed it in
+      // the extraction settings.
+      systemPrompt: lorebookSystemPrompt(settings),
+      card: _buildSources.card ? ex.cardContext : '',
+      catalog: _buildSources.catalog ? ex.catalogContext : '',
+      scenario: _buildSources.scenario ? ex.scenarioContext : '',
+      greetings: _buildSources.greetings ? ex.greetingsContext : '',
+      lorebookDescs:
+          _buildSources.lorebookDescs ? ex.lorebookDescsContext : '',
+      extra: _buildSources.extra ? _buildExtraController.text.trim() : '',
+    );
     showJanitorPromptPreviewSheet(
       context,
-      buildLorebookMessages(
-        _withoutPublicScripts(ex.lorebookText),
-        // The preview must show what the build would really send, so it takes
-        // the same system prompt — the edited one when the user changed it in
-        // the extraction settings.
-        systemPrompt: lorebookSystemPrompt(
-          ref.read(appSettingsProvider).value,
-        ),
-        card: _buildSources.card ? ex.cardContext : '',
-        catalog: _buildSources.catalog ? ex.catalogContext : '',
-        scenario: _buildSources.scenario ? ex.scenarioContext : '',
-        greetings: _buildSources.greetings ? ex.greetingsContext : '',
-        lorebookDescs:
-            _buildSources.lorebookDescs ? ex.lorebookDescsContext : '',
-        extra: _buildSources.extra ? _buildExtraController.text.trim() : '',
-      ),
+      requests.first,
+      requestCount: requests.length,
     );
   }
 
@@ -1517,9 +1556,17 @@ class _JanitorLorebookCaptureState
             children: [
               ActionTile(
                 icon: Icons.auto_awesome_rounded,
-                label: _building
+                label: !_building
+                    ? 'catalog_lorebooks_build_btn'.tr()
+                    : _buildProgress == null
                     ? 'catalog_lorebooks_building'.tr(args: ['$_elapsed'])
-                    : 'catalog_lorebooks_build_btn'.tr(),
+                    : 'catalog_lorebooks_building_parts'.tr(
+                        args: [
+                          '${math.min(_buildProgress!.$1 + 1, _buildProgress!.$2)}',
+                          '${_buildProgress!.$2}',
+                          '$_elapsed',
+                        ],
+                      ),
                 primary: true,
                 busy: _building,
                 onTap: _build,
@@ -1532,8 +1579,8 @@ class _JanitorLorebookCaptureState
             ],
           ),
         ),
-        // A build is one long non-streaming request over the whole extracted
-        // text; on a slow model it sits silent for minutes. Say so next to the
+        // A build is one long non-streaming request per part of the extracted
+        // text; on a slow model each sits silent for minutes. Say so next to the
         // button rather than let it read as a hang.
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
@@ -2159,23 +2206,32 @@ class _ClosedRow extends StatelessWidget {
 /// own. Port of JAR's `#promptPreview`, promoted out of an inline disclosure:
 /// the prompt carries the whole extracted lorebook, so reading it inside the
 /// capture sheet meant scrolling the flow away to get to it.
+///
+/// [requestCount] is how many requests the build is split into; [messages]
+/// is the first of them.
 void showJanitorPromptPreviewSheet(
   BuildContext context,
-  List<Map<String, String>> messages,
-) {
+  List<Map<String, String>> messages, {
+  int requestCount = 1,
+}) {
   showGlazeSheet<void>(
     context: context,
     useRootNavigator: true,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
     barrierColor: Colors.black54,
-    builder: (_) => _PromptPreviewSheet(messages: messages),
+    builder: (_) =>
+        _PromptPreviewSheet(messages: messages, requestCount: requestCount),
   );
 }
 
 class _PromptPreviewSheet extends StatelessWidget {
   final List<Map<String, String>> messages;
-  const _PromptPreviewSheet({required this.messages});
+  final int requestCount;
+  const _PromptPreviewSheet({
+    required this.messages,
+    required this.requestCount,
+  });
 
   String get _plainText =>
       messages.map((m) => '### ${m['role']}\n${m['content']}').join('\n\n');
@@ -2205,6 +2261,16 @@ class _PromptPreviewSheet extends StatelessWidget {
             bottom: MediaQuery.paddingOf(inner).bottom + 24,
           ),
           children: [
+            if (requestCount > 1)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: _GroupNote(
+                  'catalog_lorebooks_preview_parts'.tr(
+                    args: ['$requestCount'],
+                  ),
+                  top: 0,
+                ),
+              ),
             for (final m in messages)
               MenuGroup(
                 header: m['role'] ?? '',

@@ -1,10 +1,12 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/llm/aux_llm_client.dart';
+import '../../../core/llm/tokenizer.dart';
 import '../../../core/models/api_config.dart';
 import '../../../core/models/lorebook.dart';
 import '../../../core/utils/error_format.dart';
@@ -13,6 +15,7 @@ import '../../../core/utils/time_helpers.dart';
 import '../../settings/api_list_provider.dart';
 import '../../settings/app_settings_provider.dart';
 import 'catalog_error_source.dart';
+import 'janitor_separate.dart';
 
 /// Rebuilds raw, concatenated closed-lorebook text into structured
 /// [LorebookEntry]s using Glaze's **active LLM connection** — a Dart port of
@@ -131,8 +134,157 @@ class LorebookBuildException implements Exception {
        source = CatalogErrorSource.provider,
        cause = error;
 
+  /// The same failure, labelled with the request it came from when a build
+  /// was split into several — "which one" is the first thing to know when
+  /// part 14 of 20 breaks. [resumable] says the parts before it are kept and
+  /// the next build picks up here.
+  LorebookBuildException inPart(
+    int part,
+    int total, {
+    bool resumable = false,
+  }) => LorebookBuildException(
+    (resumable
+            ? 'catalog_lorebooks_err_part_resume'
+            : 'catalog_lorebooks_err_part')
+        .tr(args: ['$part', '$total', message]),
+    source: source,
+    rawText: rawText,
+    reasoning: reasoning,
+    rawResponseJson: rawResponseJson,
+    cause: cause,
+  );
+
   @override
   String toString() => message;
+}
+
+/// Floor under [lorebookBuildChunkBudget], so a tiny (or never configured)
+/// context size can't shred the text into one-paragraph requests. Also the
+/// smallest request size the extraction settings offer.
+const int kMinLorebookBuildChunkTokens = 2000;
+
+/// How much lorebook text one build request may carry on [config]: at most
+/// [maxTokens] (the user's setting), and given the [fixedTokens] every request
+/// repeats (system prompt plus context), at most half of what is left of the
+/// context window — prompt and reply share it, and the reply is about as long
+/// as the text.
+int lorebookBuildChunkBudget(
+  ApiConfig? config, {
+  int fixedTokens = 0,
+  int maxTokens = kDefaultLorebookBuildChunkTokens,
+}) {
+  var budget = maxTokens;
+  final window = config?.contextSize ?? 0;
+  if (window > 0) {
+    final fit = (window - fixedTokens) ~/ 2;
+    if (fit < budget) budget = fit;
+  }
+  return budget < kMinLorebookBuildChunkTokens
+      ? kMinLorebookBuildChunkTokens
+      : budget;
+}
+
+/// Splits captured lorebook text into pieces of at most [maxTokens] each,
+/// cutting only between entry blocks (blank lines) so an entry stays whole in
+/// one request. A single block larger than the budget is cut on line breaks,
+/// and a single line larger than that by length — the last resort for text
+/// that has no structure to cut along.
+List<String> chunkLorebookText(String text, int maxTokens) {
+  final chunks = <String>[];
+  final current = <String>[];
+  var currentTokens = 0;
+  for (final block in splitEntries(text)) {
+    for (final piece in _splitOversized(block, maxTokens, '\n')) {
+      final tokens = estimateTokens(piece, useCache: false);
+      if (currentTokens > 0 && currentTokens + tokens > maxTokens) {
+        chunks.add(current.join('\n\n'));
+        current.clear();
+        currentTokens = 0;
+      }
+      current.add(piece);
+      currentTokens += tokens;
+    }
+  }
+  if (current.isNotEmpty) chunks.add(current.join('\n\n'));
+  return chunks;
+}
+
+/// [text] cut into pieces of at most [maxTokens], packed greedily along
+/// [separator] (line breaks, then nothing at all for a single overlong line).
+List<String> _splitOversized(String text, int maxTokens, String separator) {
+  final tokens = estimateTokens(text, useCache: false);
+  if (tokens <= maxTokens) return [text];
+  if (separator.isEmpty) {
+    final step = math.max(1, text.length * maxTokens ~/ tokens);
+    return [
+      for (var i = 0; i < text.length; i += step)
+        text.substring(i, math.min(i + step, text.length)),
+    ];
+  }
+  final pieces = <String>[];
+  final current = StringBuffer();
+  var currentTokens = 0;
+  for (final line in text.split(separator)) {
+    for (final part in _splitOversized(line, maxTokens, '')) {
+      final partTokens = estimateTokens(part, useCache: false);
+      if (currentTokens > 0 && currentTokens + partTokens > maxTokens) {
+        pieces.add(current.toString());
+        current.clear();
+        currentTokens = 0;
+      }
+      if (current.isNotEmpty) current.write(separator);
+      current.write(part);
+      currentTokens += partTokens;
+    }
+  }
+  if (current.isNotEmpty) pieces.add(current.toString());
+  return pieces;
+}
+
+/// Every request a build sends, in order: [buildLorebookMessages] once per
+/// piece of [lorebookText] that fits [config]'s budget (see
+/// [lorebookBuildChunkBudget]), each carrying the full context. Text that fits
+/// one request — and any JavaScript source, which has to be read whole —
+/// stays a single request, as does everything when [chunkTokens] (the
+/// extraction setting) is 0.
+List<List<Map<String, String>>> planLorebookBuild(
+  String lorebookText, {
+  ApiConfig? config,
+  int chunkTokens = kDefaultLorebookBuildChunkTokens,
+  String card = '',
+  String catalog = '',
+  String scenario = '',
+  String greetings = '',
+  String lorebookDescs = '',
+  String extra = '',
+  bool fromJs = false,
+  String? systemPrompt,
+}) {
+  List<Map<String, String>> messagesFor(String text) => buildLorebookMessages(
+    text,
+    card: card,
+    catalog: catalog,
+    scenario: scenario,
+    greetings: greetings,
+    lorebookDescs: lorebookDescs,
+    extra: extra,
+    fromJs: fromJs,
+    systemPrompt: systemPrompt,
+  );
+
+  if (fromJs || chunkTokens <= 0) return [messagesFor(lorebookText)];
+  final fixed = messagesFor('').fold<int>(
+    0,
+    (sum, m) => sum + estimateTokens(m['content'] ?? ''),
+  );
+  final budget = lorebookBuildChunkBudget(
+    config,
+    fixedTokens: fixed,
+    maxTokens: chunkTokens,
+  );
+  final chunks = chunkLorebookText(lorebookText, budget);
+  if (chunks.length <= 1) return [messagesFor(lorebookText)];
+  return [for (final chunk in chunks) messagesFor(chunk)];
 }
 
 /// The system prompt a build actually sends: the user's own, when they edited
@@ -275,7 +427,9 @@ LorebookEntry _buildEntry(Map<String, dynamic> raw, int index) {
               ? (raw['insertion_order'] as num).toInt()
               : 100;
   return LorebookEntry(
-    id: 'jle_${DateTime.now().millisecondsSinceEpoch}_$index',
+    // Placeholder: [rebuildLorebookWithActiveLlm] numbers the entries once
+    // every part is in, so ids stay unique across a split build.
+    id: 'jle_$index',
     comment: comment,
     keys: keys,
     secondaryKeys: secondary,
@@ -289,6 +443,16 @@ LorebookEntry _buildEntry(Map<String, dynamic> raw, int index) {
 /// Builds a [Lorebook] from [lorebookText] using the active LLM. [card] and
 /// [catalog] are optional context for key inference. [name] is the lorebook
 /// title; [characterId], when given, scopes the book to that character.
+///
+/// Text too long for one request is built in several (see
+/// [planLorebookBuild]), one after another, and the entries of every part
+/// are merged into the one book. [onProgress] reports `(done, total)` before
+/// each request and once at the end.
+///
+/// [partCache], when given, keeps the entries of every part that came back,
+/// keyed by the exact request: a build that fails at part 14 of 20 resumes
+/// there on the next try instead of paying for the first 13 again. It is
+/// emptied once a build succeeds, so building again asks the model afresh.
 ///
 /// Throws [NoActiveConnectionException] when no connection is configured, or
 /// [Exception] when the LLM response can't be parsed into entries.
@@ -304,6 +468,8 @@ Future<Lorebook> rebuildLorebookWithActiveLlm(
   String extra = '',
   bool fromJs = false,
   String? characterId,
+  void Function(int done, int total)? onProgress,
+  Map<String, List<LorebookEntry>>? partCache,
 }) async {
   final configs = await ref.read(apiListProvider.future);
   final settings = await ref.read(appSettingsProvider.future);
@@ -316,8 +482,10 @@ Future<Lorebook> rebuildLorebookWithActiveLlm(
     throw NoActiveConnectionException();
   }
 
-  final messages = buildLorebookMessages(
+  final requests = planLorebookBuild(
     lorebookText,
+    config: config,
+    chunkTokens: settings.lorebookBuildChunkTokens,
     card: card,
     catalog: catalog,
     scenario: scenario,
@@ -327,7 +495,62 @@ Future<Lorebook> rebuildLorebookWithActiveLlm(
     fromJs: fromJs,
     systemPrompt: lorebookSystemPrompt(settings, fromJs: fromJs),
   );
+  if (requests.length > 1) {
+    debugPrint('[janitor-rebuilder] text split into ${requests.length} parts');
+  }
 
+  final entries = <LorebookEntry>[];
+  for (var i = 0; i < requests.length; i++) {
+    onProgress?.call(i, requests.length);
+    final messages = requests[i];
+    // The model is part of the key: a part a different model built is not
+    // what a retry on this one would return.
+    final key = [
+      config.id,
+      config.model,
+      for (final m in messages) m['content'] ?? '',
+    ].join('\u0000');
+    var part = partCache?[key];
+    if (part == null) {
+      try {
+        part = await _buildPart(config, messages);
+      } on LorebookBuildException catch (e) {
+        if (requests.length == 1) rethrow;
+        throw e.inPart(i + 1, requests.length, resumable: partCache != null);
+      }
+      partCache?[key] = part;
+    }
+    entries.addAll(part);
+  }
+  onProgress?.call(requests.length, requests.length);
+  partCache?.clear();
+
+  debugPrint('[janitor-extractor] rebuilt ${entries.length} lorebook entries');
+
+  final stamp = DateTime.now().millisecondsSinceEpoch;
+  return Lorebook(
+    id: generateId(),
+    name: name,
+    // Never global: scoped to [characterId] when there is one, otherwise saved
+    // switched off. See `convertJanitorScript`.
+    enabled: false,
+    activationScope: characterId != null ? 'character' : 'global',
+    activationTargetId: characterId,
+    entries: [
+      for (var i = 0; i < entries.length; i++)
+        entries[i].copyWith(id: 'jle_${stamp}_$i'),
+    ],
+    updatedAt: currentTimestampSeconds(),
+  );
+}
+
+/// One build request: sends [messages] on [config] and parses the reply into
+/// entries. Throws [LorebookBuildException] for anything short of at least
+/// one usable entry.
+Future<List<LorebookEntry>> _buildPart(
+  ApiConfig config,
+  List<Map<String, String>> messages,
+) async {
   String? reasoningOut;
   String? rawJsonOut;
   final String raw;
@@ -354,9 +577,9 @@ Future<Lorebook> rebuildLorebookWithActiveLlm(
       // model ever emits the JSON. Let the provider's full budget apply.
       maxTokens: 0,
       temperature: 0.2,
-      // 0 → no idle guard and no HTTP receive timeout. This is a single
-      // non-streaming request that reconstructs a whole lorebook from a large
-      // prompt, so on a slow model it can legitimately take far longer than the
+      // 0 → no idle guard and no HTTP receive timeout. This is a
+      // non-streaming request that reconstructs up to a whole lorebook from a
+      // large prompt, so on a slow model it can legitimately take far longer than the
       // default two minutes and must not be cut off underneath the user.
       timeoutMs: 0,
       onRawResponse: (reasoning, rawResponseJson) {
@@ -431,18 +654,5 @@ Future<Lorebook> rebuildLorebookWithActiveLlm(
       rawResponseJson: rawJsonOut,
     );
   }
-
-  debugPrint('[janitor-extractor] rebuilt ${entries.length} lorebook entries');
-
-  return Lorebook(
-    id: generateId(),
-    name: name,
-    // Never global: scoped to [characterId] when there is one, otherwise saved
-    // switched off. See `convertJanitorScript`.
-    enabled: false,
-    activationScope: characterId != null ? 'character' : 'global',
-    activationTargetId: characterId,
-    entries: entries,
-    updatedAt: currentTimestampSeconds(),
-  );
+  return entries;
 }

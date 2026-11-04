@@ -34,6 +34,7 @@ void main() {
       'lorebookBuildPromptJs': String,
       'lorebookBuildApiConfigId': String,
       'lorebookBuildModel': String,
+      'lorebookBuildChunkTokens': int,
       'useStandardRandomizer': bool,
       'hideContextCard': bool,
     };
@@ -83,6 +84,11 @@ void main() {
               expect(defaults.janitorSource, ExtractionSource.datacat);
             } else if (entry.key == 'batterySaverMode') {
               expect(defaults.batterySaverMode, BatterySaverMode.system);
+            }
+          // ignore: type_literal_in_constant_pattern
+          case int:
+            if (entry.key == 'lorebookBuildChunkTokens') {
+              expect(defaults.lorebookBuildChunkTokens, 24000);
             }
           // ignore: type_literal_in_constant_pattern
           case double:

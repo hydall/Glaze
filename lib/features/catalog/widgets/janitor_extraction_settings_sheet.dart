@@ -9,10 +9,11 @@ import '../../../shared/widgets/glaze_sheet.dart';
 /// capture sheet's header.
 ///
 /// Everything that decides *how* a lorebook is rebuilt into entries lives here:
-/// the connection and model the build runs on, and the system prompts it is
-/// given. Keeping them one tap from the flow means a failed build can be
-/// corrected where it failed. The JanitorAI account and the extraction source
-/// are content-provider settings and stay on that screen.
+/// the connection and model the build runs on, how a long extraction is split
+/// into requests, and the system prompts it is given. Keeping them one tap
+/// from the flow means a failed build can be corrected where it failed. The
+/// JanitorAI account and the extraction source are content-provider settings
+/// and stay on that screen.
 Future<void> showJanitorExtractionSettingsSheet(BuildContext context) {
   return showGlazeSheet<void>(
     context: context,
@@ -38,7 +39,11 @@ class JanitorExtractionSettingsSheet extends StatelessWidget {
             top: MediaQuery.paddingOf(inner).top + 12,
             bottom: MediaQuery.paddingOf(inner).bottom + 24,
           ),
-          children: const [LorebookBuildLlmGroup(), LorebookBuildPromptsGroup()],
+          children: const [
+            LorebookBuildLlmGroup(),
+            LorebookBuildSplitGroup(),
+            LorebookBuildPromptsGroup(),
+          ],
         ),
       ),
     );

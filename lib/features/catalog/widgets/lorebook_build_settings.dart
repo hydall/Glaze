@@ -49,6 +49,61 @@ class LorebookBuildLlmGroup extends ConsumerWidget {
   }
 }
 
+/// Whether a long extraction is built in several requests, and how much text
+/// each one carries. Stored as one value: 0 means "don't split".
+class LorebookBuildSplitGroup extends ConsumerWidget {
+  const LorebookBuildSplitGroup({super.key});
+
+  /// Largest request size offered. Past this the reply alone outgrows the
+  /// output limit of nearly every provider.
+  static const _maxTokens = 128000;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(appSettingsProvider).value;
+    if (settings == null) return const SizedBox.shrink();
+    void save(int tokens) {
+      final latest = ref.read(appSettingsProvider).value ?? settings;
+      ref
+          .read(appSettingsProvider.notifier)
+          .save(latest.copyWith(lorebookBuildChunkTokens: tokens));
+    }
+
+    final tokens = settings.lorebookBuildChunkTokens;
+    final split = tokens > 0;
+    return MenuGroup(
+      header: 'catalog_extraction_split_title'.tr(),
+      description: 'catalog_extraction_split_hint'.tr(),
+      items: [
+        MenuSwitchItem(
+          label: 'catalog_extraction_split_toggle'.tr(),
+          description: 'catalog_extraction_split_toggle_desc'.tr(),
+          value: split,
+          onChanged: (on) => save(on ? kDefaultLorebookBuildChunkTokens : 0),
+        ),
+        if (split)
+          MenuRangeItem(
+            label: 'catalog_extraction_split_tokens'.tr(),
+            description: 'catalog_extraction_split_tokens_desc'.tr(),
+            value: tokens
+                .clamp(kMinLorebookBuildChunkTokens, _maxTokens)
+                .toDouble(),
+            min: kMinLorebookBuildChunkTokens.toDouble(),
+            max: _maxTokens.toDouble(),
+            divisions:
+                (_maxTokens - kMinLorebookBuildChunkTokens) ~/ 1000,
+            editableValue: true,
+            decimalPlaces: 0,
+            onChanged: (v) => save(v.round()),
+            onReset: tokens == kDefaultLorebookBuildChunkTokens
+                ? null
+                : () => save(kDefaultLorebookBuildChunkTokens),
+          ),
+      ],
+    );
+  }
+}
+
 /// The two system prompts the lorebook build LLM is given — for a closed
 /// lorebook recovered from the captured prompt, and for a scripted one — plus
 /// a reset to the built-in wording.

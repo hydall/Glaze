@@ -12,6 +12,12 @@ part 'app_settings_provider.freezed.dart';
 
 const supportedAppLanguages = {'en', 'ru'};
 
+/// Default for [AppSettings.lorebookBuildChunkTokens]. The model copies every
+/// entry body back out inside its JSON, so a build reply runs at least as long
+/// as the text it was given: this keeps it inside the output limit common
+/// providers allow, with room left for keys and JSON.
+const kDefaultLorebookBuildChunkTokens = 24000;
+
 /// Where a JanitorAI card, its hidden definition or its lorebooks are read
 /// from.
 ///
@@ -69,6 +75,13 @@ bool? _coerceBool(Object? value) {
     if (normalized == '1' || normalized == 'true') return true;
     if (normalized == '0' || normalized == 'false') return false;
   }
+  return null;
+}
+
+int? _coerceInt(Object? value) {
+  if (value is int) return value;
+  if (value is double) return value.round();
+  if (value is String) return int.tryParse(value.trim());
   return null;
 }
 
@@ -205,6 +218,11 @@ abstract class AppSettings with _$AppSettings {
     /// connection's own model.
     @Default('') String lorebookBuildModel,
 
+    /// Most lorebook text one build request carries, in tokens; longer text is
+    /// built in several requests (see `planLorebookBuild`). 0 turns the split
+    /// off and sends everything in one request, however long.
+    @Default(kDefaultLorebookBuildChunkTokens) int lorebookBuildChunkTokens,
+
     /// When on, the shuffle button opens a random character straight in the
     /// detail sheet (the classic behaviour) instead of the randomizing
     /// (Holocard) discovery overlay. Off by default.
@@ -248,6 +266,7 @@ abstract final class AppSettingsPreferences {
     'lorebookBuildPromptJs',
     'lorebookBuildApiConfigId',
     'lorebookBuildModel',
+    'lorebookBuildChunkTokens',
     'useStandardRandomizer',
     'hideContextCard',
   };
@@ -323,6 +342,9 @@ abstract final class AppSettingsPreferences {
           defaults.lorebookBuildApiConfigId,
       lorebookBuildModel:
           prefs.getString('lorebookBuildModel') ?? defaults.lorebookBuildModel,
+      lorebookBuildChunkTokens:
+          _coerceInt(prefs.get('lorebookBuildChunkTokens')) ??
+          defaults.lorebookBuildChunkTokens,
       useStandardRandomizer:
           _coerceBool(prefs.get('useStandardRandomizer')) ??
           defaults.useStandardRandomizer,
@@ -360,6 +382,7 @@ abstract final class AppSettingsPreferences {
       'lorebookBuildPromptJs': normalized.lorebookBuildPromptJs,
       'lorebookBuildApiConfigId': normalized.lorebookBuildApiConfigId,
       'lorebookBuildModel': normalized.lorebookBuildModel,
+      'lorebookBuildChunkTokens': normalized.lorebookBuildChunkTokens,
       'useStandardRandomizer': normalized.useStandardRandomizer,
       'hideContextCard': normalized.hideContextCard,
     };
@@ -374,6 +397,8 @@ abstract final class AppSettingsPreferences {
       final value = entry.value;
       if (value is bool) {
         await prefs.setBool(entry.key, value);
+      } else if (value is int) {
+        await prefs.setInt(entry.key, value);
       } else if (value is double) {
         await prefs.setDouble(entry.key, value);
       } else if (value is String) {
@@ -396,6 +421,9 @@ abstract final class AppSettingsPreferences {
       if (current is bool) {
         final parsed = _coerceBool(incoming);
         if (parsed != null) merged[key] = parsed;
+      } else if (current is int) {
+        final parsed = _coerceInt(incoming);
+        if (parsed != null && parsed >= 0) merged[key] = parsed;
       } else if (current is double) {
         final parsed = _coerceDouble(incoming);
         if (parsed != null) merged[key] = parsed;
@@ -473,6 +501,7 @@ abstract final class AppSettingsPreferences {
     lorebookBuildPromptJs: values['lorebookBuildPromptJs'] as String,
     lorebookBuildApiConfigId: values['lorebookBuildApiConfigId'] as String,
     lorebookBuildModel: values['lorebookBuildModel'] as String,
+    lorebookBuildChunkTokens: values['lorebookBuildChunkTokens'] as int,
     useStandardRandomizer: values['useStandardRandomizer'] as bool,
     hideContextCard: values['hideContextCard'] as bool,
   );
