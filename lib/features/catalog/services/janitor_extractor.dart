@@ -480,7 +480,8 @@ class JanitorExtractor {
   /// Rebuilds [lorebookText] into a structured [Lorebook] with the active LLM,
   /// using the selected context strings for key inference. Used by the catalog
   /// Lorebooks tab's "Build" action (the extractor owns the provider [Ref] that
-  /// `rebuildLorebookWithActiveLlm` needs). [characterId] scopes the book.
+  /// `rebuildLorebookWithActiveLlm` needs). [characterId] scopes the book;
+  /// [onProgress] and [partCache] follow a build split into several requests.
   Future<Lorebook> buildLorebook({
     required String lorebookText,
     required String name,
@@ -491,6 +492,8 @@ class JanitorExtractor {
     String lorebookDescs = '',
     String extra = '',
     String? characterId,
+    void Function(int done, int total)? onProgress,
+    Map<String, List<LorebookEntry>>? partCache,
   }) => rebuildLorebookWithActiveLlm(
     _ref,
     lorebookText: lorebookText,
@@ -502,6 +505,8 @@ class JanitorExtractor {
     lorebookDescs: lorebookDescs,
     extra: extra,
     characterId: characterId,
+    onProgress: onProgress,
+    partCache: partCache,
   );
 
   /// The key-inference context that is knowable from the character's catalog

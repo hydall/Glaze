@@ -13,8 +13,8 @@ import 'app_settings_provider.dart';
 ///
 /// Two settings survive on purpose: the interface language, because resetting
 /// it would drop the user into a language they may not read, and the
-/// lorebook-build prompts and connection, which are user-written text and a
-/// choice of connection rather than a toggle.
+/// lorebook-build settings (prompts, connection, request size), which are
+/// user-written text and a tuned build rather than a toggle.
 Future<void> resetGlazeSettings(WidgetRef ref) async {
   final settings = ref.read(appSettingsProvider).value ?? const AppSettings();
   const defaults = AppSettings();
@@ -28,6 +28,7 @@ Future<void> resetGlazeSettings(WidgetRef ref) async {
           lorebookBuildPromptJs: settings.lorebookBuildPromptJs,
           lorebookBuildApiConfigId: settings.lorebookBuildApiConfigId,
           lorebookBuildModel: settings.lorebookBuildModel,
+          lorebookBuildChunkTokens: settings.lorebookBuildChunkTokens,
         ),
       );
 

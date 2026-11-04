@@ -13,6 +13,7 @@ import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/state/db_provider.dart';
 import 'package:glaze_flutter/features/catalog/catalog_models.dart';
 import 'package:glaze_flutter/features/catalog/services/janitor_extractor.dart';
+import 'package:glaze_flutter/features/catalog/services/janitor_lorebook_rebuilder.dart';
 import 'package:glaze_flutter/features/catalog/services/janitor_public_lorebook.dart';
 import 'package:glaze_flutter/features/catalog/widgets/janitor_extraction_settings_sheet.dart';
 import 'package:glaze_flutter/features/catalog/widgets/janitor_lorebook_capture_sheet.dart';
@@ -220,6 +221,37 @@ void main() {
       size: const Size(430, 1300),
     );
     await shoot(tester, 'lorebook_capture_3_settings');
+    // The split switched off folds the request size away.
+    await tester.tap(find.text('Собирать в несколько запросов'));
+    await settle(tester);
+    await shoot(tester, 'lorebook_capture_3b_settings_no_split');
+  }, skip: !_runGoldens);
+
+  testWidgets('3c — prompt preview of a build split into parts', (
+    tester,
+  ) async {
+    await pump(
+      tester,
+      Builder(
+        builder: (context) => Center(
+          child: TextButton(
+            onPressed: () => showJanitorPromptPreviewSheet(
+              context,
+              buildLorebookMessages(
+                _capture.lorebookText,
+                card: _capture.cardContext,
+              ),
+              requestCount: 25,
+            ),
+            child: const Text('preview'),
+          ),
+        ),
+      ),
+      sheet: false,
+    );
+    await tester.tap(find.text('preview'));
+    await settle(tester);
+    await shoot(tester, 'lorebook_capture_3c_preview_parts');
   }, skip: !_runGoldens);
 
   testWidgets('4 — agents tab', (tester) async {
