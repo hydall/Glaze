@@ -14,6 +14,7 @@ import 'package:glaze_flutter/core/llm/transport/llm_request_capture.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/core/state/db_provider.dart';
+import 'package:glaze_flutter/core/state/global_regex_provider.dart';
 import 'package:glaze_flutter/features/chat/composer_text_bridge.dart';
 import 'package:glaze_flutter/features/chat/services/prompt_capture_view_service.dart';
 import 'package:glaze_flutter/features/plugins/models/installed_plugin.dart';
@@ -720,6 +721,77 @@ void main() {
     host.ui.consents.clear();
     await call(granted, 'characters.remove', ['nope']);
     expect(host.ui.consents, isEmpty);
+  });
+
+  test('a plugin regex asks first and keeps its display scope', () async {
+    SharedPreferences.setMockInitialValues({});
+    final s = service(const [
+      'library.read.regex',
+      'library.create.regex',
+      'library.update.regex',
+    ]);
+    // What tavo_compat.js sends for a display-only Tavo / ST rule.
+    final rule = {
+      'name': 'engine',
+      'regex': r'^([\s\S]*)$',
+      'replacement': '\$1\n<script>run()</script>',
+      'placement': [1, 2],
+      'markdownOnly': true,
+      'promptOnly': false,
+      'runOnEdit': false,
+    };
+    host.ui.answer = PluginConsentAnswer.once;
+    final created = await call(s, 'regex.create', [rule]);
+    expect(created['ok'], isTrue);
+    expect(host.ui.consents, [
+      'Test:library.create.regex:plugins_consent_regex_create',
+    ]);
+    final id = created['result'];
+    var stored = (await container.read(globalRegexProvider.future)).single;
+    expect(stored.id, id);
+    expect(stored.placement, [1, 2]);
+    expect(stored.markdownOnly, isTrue);
+    expect(stored.promptOnly, isFalse);
+
+    // An old rule that ran on the prompt too is put right by an update.
+    await container
+        .read(globalRegexProvider.notifier)
+        .updateRegex(stored.copyWith(markdownOnly: false));
+    host.ui.answer = PluginConsentAnswer.always;
+    final updated = await call(s, 'regex.update', [
+      {'id': id, ...rule},
+    ]);
+    expect(updated['ok'], isTrue);
+    stored = (await container.read(globalRegexProvider.future)).single;
+    expect(stored.markdownOnly, isTrue);
+    expect(host.ui.consents.last, endsWith('plugins_consent_regex_update'));
+
+    // "Always" holds: the next update goes through without the sheet.
+    await call(s, 'regex.update', [
+      {'id': id, ...rule},
+    ]);
+    expect(host.ui.consents, hasLength(2));
+
+    // Two at once both land.
+    await Future.wait([
+      call(s, 'regex.create', [
+        {...rule, 'name': 'a'},
+      ]),
+      call(s, 'regex.create', [
+        {...rule, 'name': 'b'},
+      ]),
+    ]);
+    expect(
+      (await container.read(globalRegexProvider.future)).map((r) => r.name),
+      unorderedEquals(['engine', 'a', 'b']),
+    );
+
+    // Refused, nothing is added.
+    final refused = service(const ['library.create.regex']);
+    host.ui.answer = PluginConsentAnswer.deny;
+    final out = await call(refused, 'regex.create', [rule]);
+    expect((out['error'] as Map)['code'], 'permission_denied');
+    expect(await container.read(globalRegexProvider.future), hasLength(3));
   });
 
   test('a denied plugin is not asked again', () async {

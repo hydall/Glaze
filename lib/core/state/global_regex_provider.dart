@@ -96,15 +96,24 @@ class GlobalRegexNotifier extends AsyncNotifier<List<PresetRegex>> {
     await prefs.setString(_globalRegexKey, jsonEncode(json));
   }
 
+  /// The list once [build] has read it. A write before that used to start
+  /// from an empty list, and [build] finishing afterwards put the stored
+  /// list back over it — the new script was lost. Read after the wait, so
+  /// writes that waited together each see the one before.
+  Future<List<PresetRegex>> _loaded() async {
+    await future;
+    return state.value ?? const [];
+  }
+
   Future<void> addRegex(PresetRegex regex) async {
-    final current = state.value ?? [];
+    final current = await _loaded();
     final updated = [...current, regex];
     state = AsyncData(updated);
     await _persist(updated);
   }
 
   Future<void> updateRegex(PresetRegex regex) async {
-    final current = state.value ?? [];
+    final current = await _loaded();
     final updated = current.map((r) => r.id == regex.id ? regex : r).toList();
     state = AsyncData(updated);
     await _persist(updated);
@@ -113,20 +122,21 @@ class GlobalRegexNotifier extends AsyncNotifier<List<PresetRegex>> {
   /// Replaces the whole list in one write — a drag that reorders the scripts
   /// (their order is the order they run in) or a bulk edit of several.
   Future<void> replaceAll(List<PresetRegex> scripts) async {
+    await _loaded();
     final updated = List<PresetRegex>.of(scripts);
     state = AsyncData(updated);
     await _persist(updated);
   }
 
   Future<void> removeRegex(String id) async {
-    final current = state.value ?? [];
+    final current = await _loaded();
     final updated = current.where((r) => r.id != id).toList();
     state = AsyncData(updated);
     await _persist(updated);
   }
 
   Future<void> importFromJsBackup(List<dynamic> rawList) async {
-    final existing = state.value ?? [];
+    final existing = await _loaded();
     final existingIds = existing.map((e) => e.id).toSet();
     final imported = <PresetRegex>[];
     for (final raw in rawList) {
