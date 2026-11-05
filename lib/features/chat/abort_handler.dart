@@ -23,7 +23,7 @@ typedef AbortSessionMutation =
     );
 
 class AbortHandler {
-  final Ref _ref;
+  Ref _ref;
   final String _charId;
   final void Function(AsyncValue<ChatState>) _setState;
   final AsyncValue<ChatState> Function() _getState;
@@ -44,6 +44,11 @@ class AbortHandler {
     required this._mutateSession,
     required this._loadSession,
   });
+
+  /// The Ref of the provider build under way; the notifier outlives a
+  /// rebuild, the Ref it was built on does not — on the stale one a stop
+  /// found it unmounted and did nothing. Called from every build.
+  void rebind(Ref ref) => _ref = ref;
 
   int nextGenId() => ++_activeGenId;
   bool isCurrentGen(int genId) => _activeGenId == genId;

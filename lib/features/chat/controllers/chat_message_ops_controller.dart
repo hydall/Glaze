@@ -40,7 +40,7 @@ enum MessageEditOutcome {
 }
 
 class ChatMessageOpsController {
-  final Ref _ref;
+  Ref _ref;
   final String _charId;
   final void Function(AsyncValue<ChatState>) _setState;
   final AsyncValue<ChatState> Function() _getState;
@@ -67,6 +67,13 @@ class ChatMessageOpsController {
        _getState = getState,
        _invalidateHistory = invalidateHistory,
        _writes = writes;
+
+  /// Hands over the Ref of the provider build under way. The chat notifier
+  /// outlives a rebuild of its provider — an invalidation: the author's note
+  /// saved, the history screen, cloud sync — and the Ref it was built on does
+  /// not: every operation on the stale one found it unmounted and returned in
+  /// silence, until the app was restarted. Called from every build.
+  void rebind(Ref ref) => _ref = ref;
 
   ChatMessageService get _messageSvc => ChatMessageService(_ref);
 
