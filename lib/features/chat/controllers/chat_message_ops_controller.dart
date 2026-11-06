@@ -269,7 +269,9 @@ class ChatMessageOpsController {
     _invalidateHistory();
 
     try {
-      await _writes.run(() => svc.commitDeleteMessages(original, plan));
+      // The service of the build under way, not [svc]: a rebuild while this
+      // waits its turn leaves the one above on an unmounted Ref.
+      await _writes.run(() => _messageSvc.commitDeleteMessages(original, plan));
     } catch (e) {
       debugPrint('[ChatMessageOps] delete failed, restoring messages: $e');
       if (!_ref.mounted) return;
@@ -510,6 +512,9 @@ class ChatMessageOpsController {
     if (!_writes.isCurrentPublication(token)) return;
     _ref.read(messageVariablesProvider.notifier).clearSession(cleared.id);
     _invalidateHistory();
+    // The chat moved on while the clear was committing: the cleared session
+    // is not the one on screen.
+    if (_getState().value?.session?.id != current.session!.id) return;
     _setState(AsyncData(ChatState(session: cleared)));
   }
 }

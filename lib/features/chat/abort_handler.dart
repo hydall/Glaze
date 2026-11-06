@@ -50,6 +50,20 @@ class AbortHandler {
   /// found it unmounted and did nothing. Called from every build.
   void rebind(Ref ref) => _ref = ref;
 
+  /// The state as it is now, while the chat is still on the session
+  /// [snapshot] was taken of. Null once it moved on — the provider was rebuilt
+  /// onto another session, the session was deleted — and what the stop saved
+  /// belongs to a chat no longer on screen: painting it would bring that chat
+  /// back. A rebuild no longer ends a stop under way ([rebind]), so the
+  /// session is what says whose state this is.
+  ChatState? _sameSession(ChatState snapshot) {
+    final latest = _getState().value;
+    if (latest == null || latest.session?.id != snapshot.session?.id) {
+      return null;
+    }
+    return latest;
+  }
+
   int nextGenId() => ++_activeGenId;
   bool isCurrentGen(int genId) => _activeGenId == genId;
 
@@ -158,18 +172,21 @@ class AbortHandler {
         if (durableSession != null) {
           ChatSessionService.updateCache(durableSession);
         }
-        _setState(
-          AsyncData(
-            current.copyWith(
-              session: durableSession ?? current.session,
-              isGenerating: false,
-              isGeneratingImage: false,
-              isPostGenRunning: false,
-              regenTargetId: null,
-              continuationTargetId: null,
+        final latest = _sameSession(current);
+        if (latest != null) {
+          _setState(
+            AsyncData(
+              latest.copyWith(
+                session: durableSession ?? latest.session,
+                isGenerating: false,
+                isGeneratingImage: false,
+                isPostGenRunning: false,
+                regenTargetId: null,
+                continuationTargetId: null,
+              ),
             ),
-          ),
-        );
+          );
+        }
       } catch (error) {
         if (!_ref.mounted || _activeGenId != abortGenId) return;
         final sessionId = current.session?.id;
@@ -180,19 +197,22 @@ class AbortHandler {
         if (durableSession != null) {
           ChatSessionService.updateCache(durableSession);
         }
-        _setState(
-          AsyncData(
-            current.copyWith(
-              session: durableSession ?? current.session,
-              isGenerating: false,
-              isGeneratingImage: false,
-              isPostGenRunning: false,
-              regenTargetId: null,
-              continuationTargetId: null,
-              error: 'Failed to save the aborted response: $error',
+        final latest = _sameSession(current);
+        if (latest != null) {
+          _setState(
+            AsyncData(
+              latest.copyWith(
+                session: durableSession ?? latest.session,
+                isGenerating: false,
+                isGeneratingImage: false,
+                isPostGenRunning: false,
+                regenTargetId: null,
+                continuationTargetId: null,
+                error: 'Failed to save the aborted response: $error',
+              ),
             ),
-          ),
-        );
+          );
+        }
       }
     } else if (current != null && current.isGeneratingImage) {
       _setState(AsyncData(current.copyWith(isGeneratingImage: false)));
