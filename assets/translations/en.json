@@ -558,7 +558,7 @@
   "summary_trigger_label": "Compaction threshold",
   "summary_trigger_hint": "How full the context may get before old messages are summarized on their own. Compact history keeps its own tail, set below.",
   "summary_compact_to_label": "Compact down to",
-  "summary_compact_to_hint": "How full the context window is left after a run: old messages are retold until the window is filled to about this percent. Never above the threshold.",
+  "summary_compact_to_hint": "How full the context window is left after a run: old messages are retold until the whole prompt — preset, card, lorebooks, memory, summary and the fresh history that is left — fills about this percent. A level of the prompt, not a share of the history. Never above the threshold.",
   "summary_auto_floor_label": "Least fresh history",
   "summary_auto_floor_hint": "How much of the newest history an automatic run always leaves as written, even when the preset, lorebooks and memory take nearly all the room.",
   "summary_manual_tail_label": "Recent history to keep (manual)",
