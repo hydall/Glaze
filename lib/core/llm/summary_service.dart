@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:dio/dio.dart';
 
 import '../db/app_db.dart' as db;
@@ -6,6 +8,7 @@ import '../models/api_config.dart';
 import '../models/chat_message.dart';
 import '../models/summary_block.dart';
 import 'aux_llm_client.dart';
+import 'inline_media.dart';
 import 'macro_engine.dart';
 import 'tokenizer.dart';
 import 'transport/llm_protocol.dart';
@@ -54,8 +57,15 @@ const summaryHistoryPlaceholder = '{{history}}';
 const summaryPreviousPlaceholder = '{{previous_summary}}';
 
 /// Placeholder replaced with the block's size target in tokens. A template
-/// without it gets [summaryLengthHint] appended instead.
+/// that places neither this nor the target in words or characters gets
+/// [SummaryTarget.hint] appended instead.
 const summaryTargetPlaceholder = '{{target_tokens}}';
+
+/// Placeholders replaced with the target in words and in characters, worked
+/// out from the material of the request ([SummaryTarget]). A template that
+/// places either gets no hint appended.
+const summaryTargetWordsPlaceholder = '{{target_words}}';
+const summaryTargetCharsPlaceholder = '{{target_chars}}';
 
 /// Heading the earlier summary is handed over under when the template does
 /// not place it itself. Each block retells only its own messages, so the
@@ -72,12 +82,97 @@ const summaryTranscriptHeader = 'Transcript to summarize:';
 /// merge makes — one above its parts.
 const summaryLevelPlaceholder = '{{level}}';
 
+/// The token half of [SummaryTarget.hint].
 String summaryLengthHint(int targetTokens) =>
-    'Keep it under about $targetTokens tokens.';
+    'Keep it under about $targetTokens tokens';
+
+/// The size target in units a model can keep to. A model does not see tokens
+/// and overshoots a token target two- and threefold; it keeps to a word count,
+/// and to a character count, far better. Both are worked out from the material
+/// of the request itself, so they fit its language — Russian runs about three
+/// characters a token, English four — and from the same estimate the blocks
+/// are measured by.
+class SummaryTarget {
+  final int tokens;
+  final int words;
+  final int chars;
+
+  const SummaryTarget({
+    required this.tokens,
+    required this.words,
+    required this.chars,
+  });
+
+  /// Characters a word is taken to run to when the material gives no usable
+  /// figure: text without spaces between words (Chinese, Japanese, Thai)
+  /// splits into a "word" per paragraph, and a word target of twenty would
+  /// contradict the character target beside it.
+  static const _fallbackCharsPerWord = 6.0;
+
+  /// Past this many characters a "word", the material is not spaced into
+  /// words.
+  static const _longestPlausibleWord = 15.0;
+
+  /// [tokens] as words and characters of text like [material]. Inline
+  /// pictures are left out of the measure, as [estimateTokens] leaves them
+  /// out of the count: a base64 payload is characters but no text.
+  factory SummaryTarget.of(int tokens, String material) {
+    final text = stripInlineMedia(material).trim();
+    final materialTokens = text.isEmpty ? 0 : estimateTokens(text);
+    final materialWords = text.isEmpty ? 0 : text.split(RegExp(r'\s+')).length;
+    final charsPerToken = materialTokens > 0
+        ? text.length / materialTokens
+        : 4.0;
+    final measuredCharsPerWord = materialWords > 0
+        ? text.length / materialWords
+        : _fallbackCharsPerWord;
+    final charsPerWord = measuredCharsPerWord > _longestPlausibleWord
+        ? _fallbackCharsPerWord
+        : measuredCharsPerWord;
+    final chars = tokens * charsPerToken;
+    return SummaryTarget(
+      tokens: tokens,
+      words: _round(chars / charsPerWord, 10, 20),
+      chars: _round(chars, 100, 200),
+    );
+  }
+
+  static int _round(double value, int step, int least) =>
+      math.max(least, (value / step).round() * step);
+
+  /// Appended to a template that places the target in no unit a model keeps
+  /// to; the token figure stays for the reader who set it.
+  String get hint =>
+      '${summaryLengthHint(tokens)}: no more than $words words, '
+      'about $chars characters.';
+
+  /// [template] with the target placeholders filled, and [hint] appended
+  /// unless it places the target in words or characters itself.
+  String apply(String template) {
+    final placed =
+        template.contains(summaryTargetWordsPlaceholder) ||
+        template.contains(summaryTargetCharsPlaceholder);
+    final filled = template
+        .replaceAll(summaryTargetPlaceholder, '$tokens')
+        .replaceAll(summaryTargetWordsPlaceholder, '$words')
+        .replaceAll(summaryTargetCharsPlaceholder, '$chars');
+    return placed ? filled : '${filled.trimRight()}\n$hint';
+  }
+}
 
 /// How far past its target a block may come out before it is sent back to be
 /// shortened, in percent of the target.
 const summaryShortenSlackPercent = 125;
+
+/// How many times an answer is sent back to be shortened while it stays past
+/// that slack.
+const summaryShortenRounds = 2;
+
+/// The least a shortening round must take off, in percent of the text it was
+/// given, for another round to follow. A model that cut one percent of a
+/// block will not cut a third of it when asked the same again, and each round
+/// writes the whole block out once more — minutes, on a big one.
+const summaryShortenMinGainPercent = 10;
 
 /// Fallback idle timeout when the API config carries no `firstChunkTimeoutMs`.
 const _fallbackTimeoutMs = 120000;
@@ -103,11 +198,14 @@ const summaryMergePrompt =
     '- Keep goals, promises and dangers that are still open. Never present a '
     'thread that was resolved as open again.\n'
     '- Keep proper names and established terms exactly as written.\n'
+    '- Write it as a summary, not as data, whatever form the parts take: no '
+    'JSON, no code fences.\n'
     '- Add nothing that the parts do not say. No preamble.';
 
-/// Instruction for a block that came out well past its target. Sent once; the
-/// shorter of the two texts is kept. The built-in default of
-/// `SummaryShortenPromptPresets`.
+/// Instruction for a block that came out well past its target, and for a
+/// block the reader shortens. Sent while the answer stays past its slack
+/// ([summaryShortenRounds]); each shorter text is kept. The built-in default
+/// of `SummaryShortenPromptPresets`.
 const summaryShortenPrompt =
     'The summary you are given came out longer than it should. Shorten it '
     'without changing facts, their order, names or established terms, and '
@@ -309,10 +407,41 @@ class SummaryService {
     );
   }
 
-  /// One summarizer call, and one more to shorten its answer when it came out
-  /// well past [targetTokens]. The shorter text is kept; a failed shortening,
-  /// or one the model refused — shorter than anything — keeps the first
-  /// answer, which is complete.
+  /// Shortens [text] — a block as it stands — to about [targetTokens] on the
+  /// shortening prompt ([template], or [summaryShortenPrompt]), and shortens
+  /// the answer again while it stays past its slack, as every summary is.
+  /// Persists nothing. For a block that came out far past the block size
+  /// without retelling its messages again.
+  Future<String> shortenText({
+    required String sessionId,
+    required String text,
+    required ApiConfig apiConfig,
+    required int targetTokens,
+    String? template,
+    CancelToken? cancelToken,
+    double? temperature,
+  }) {
+    return _summarize(
+      sessionId: sessionId,
+      apiConfig: apiConfig,
+      targetTokens: targetTokens,
+      temperature: temperature,
+      cancelToken: cancelToken,
+      shortenTemplate: template,
+      messages: buildShortenMessages(
+        text: text,
+        targetTokens: targetTokens,
+        template: template,
+      ),
+    );
+  }
+
+  /// One summarizer call, and up to two more to shorten its answer while it
+  /// is well past [targetTokens]: a model that overshoots the target by half
+  /// tends to overshoot again, by less. Each shorter text is kept; a failed
+  /// shortening, one no shorter than the text it was given, or one that took
+  /// off less than [summaryShortenMinGainPercent] of it, ends the shortening
+  /// with the last answer, which is complete.
   Future<String> _summarize({
     required String sessionId,
     required ApiConfig apiConfig,
@@ -322,7 +451,7 @@ class SummaryService {
     double? temperature,
     CancelToken? cancelToken,
   }) async {
-    final text = await _call(
+    var text = await _call(
       sessionId: sessionId,
       apiConfig: apiConfig,
       messages: messages,
@@ -330,26 +459,40 @@ class SummaryService {
       temperature: temperature,
       cancelToken: cancelToken,
     );
-    final tokens = estimateTokens(text);
-    if (tokens * 100 <= targetTokens * summaryShortenSlackPercent) return text;
-    try {
-      final shorter = await _call(
-        sessionId: sessionId,
-        apiConfig: apiConfig,
-        messages: buildShortenMessages(
-          text: text,
+    var tokens = estimateTokens(text);
+    for (
+      var round = 0;
+      round < summaryShortenRounds &&
+          tokens * 100 > targetTokens * summaryShortenSlackPercent;
+      round++
+    ) {
+      try {
+        final shorter = await _call(
+          sessionId: sessionId,
+          apiConfig: apiConfig,
+          messages: buildShortenMessages(
+            text: text,
+            targetTokens: targetTokens,
+            template: shortenTemplate,
+          ),
           targetTokens: targetTokens,
-          template: shortenTemplate,
-        ),
-        targetTokens: targetTokens,
-        temperature: temperature,
-        cancelToken: cancelToken,
-      );
-      return estimateTokens(shorter) < tokens ? shorter : text;
-    } catch (_) {
-      if (cancelToken?.isCancelled == true) rethrow;
-      return text;
+          temperature: temperature,
+          cancelToken: cancelToken,
+        );
+        final shorterTokens = estimateTokens(shorter);
+        if (shorterTokens >= tokens) break;
+        final barely =
+            (tokens - shorterTokens) * 100 <
+            tokens * summaryShortenMinGainPercent;
+        text = shorter;
+        tokens = shorterTokens;
+        if (barely) break;
+      } catch (_) {
+        if (cancelToken?.isCancelled == true) rethrow;
+        break;
+      }
     }
+    return text;
   }
 
   Future<String> _call({
@@ -418,7 +561,8 @@ class SummaryService {
   /// [summaryPreviousHeader], and the transcript go in the user message. A
   /// template that places `{{history}}` lays out the request itself and is
   /// sent as one user message. `{{previous_summary}}` puts the earlier summary
-  /// where the template wants it instead.
+  /// where the template wants it instead. The size target goes in as
+  /// [SummaryTarget] says, worked out from the transcript.
   List<Map<String, String>> buildSummaryMessages({
     required List<ChatMessage> history,
     String? template,
@@ -432,23 +576,15 @@ class SummaryService {
     if (macroContext != null) {
       resolved = replaceMacros(resolved, macroContext).text;
     }
+    final transcript = _formatHistory(history, macroContext);
     if (targetTokens != null) {
-      if (resolved.contains(summaryTargetPlaceholder)) {
-        resolved = resolved.replaceAll(
-          summaryTargetPlaceholder,
-          '$targetTokens',
-        );
-      } else {
-        resolved =
-            '${resolved.trimRight()}\n${summaryLengthHint(targetTokens)}';
-      }
+      resolved = SummaryTarget.of(targetTokens, transcript).apply(resolved);
     }
     final previous = previousSummary?.trim() ?? '';
     final placed = resolved.contains(summaryPreviousPlaceholder);
     if (placed) {
       resolved = resolved.replaceAll(summaryPreviousPlaceholder, previous);
     }
-    final transcript = _formatHistory(history, macroContext);
     if (resolved.contains(summaryHistoryPlaceholder)) {
       return [
         {
@@ -474,8 +610,9 @@ class SummaryService {
   }
 
   /// The merge request: [template] (or [summaryMergePrompt]) as the system
-  /// message, with `{{level}}` filled, `{{target_tokens}}` filled or the length
-  /// hint appended, and the parts in order as the user message.
+  /// message, with `{{level}}` filled and the size target put in as
+  /// [SummaryTarget] says (worked out from the parts), and the parts in order
+  /// as the user message.
   List<Map<String, String>> buildMergeMessages({
     required List<SummaryBlock> parts,
     required int targetTokens,
@@ -486,9 +623,6 @@ class SummaryService {
         : template.trim();
     final level = (parts.firstOrNull?.level ?? 1) + 1;
     instructions = instructions.replaceAll(summaryLevelPlaceholder, '$level');
-    instructions = instructions.contains(summaryTargetPlaceholder)
-        ? instructions.replaceAll(summaryTargetPlaceholder, '$targetTokens')
-        : '$instructions\n${summaryLengthHint(targetTokens)}';
     final buffer = StringBuffer();
     for (var i = 0; i < parts.length; i++) {
       if (i > 0) buffer.writeln();
@@ -496,6 +630,8 @@ class SummaryService {
         ..writeln('Part ${i + 1}:')
         ..writeln(parts[i].content.trim());
     }
+    final material = buffer.toString();
+    instructions = SummaryTarget.of(targetTokens, material).apply(instructions);
     return [
       {'role': 'system', 'content': instructions},
       {'role': 'user', 'content': buffer.toString().trimRight()},
@@ -503,8 +639,8 @@ class SummaryService {
   }
 
   /// The shortening request: [template] (or [summaryShortenPrompt]) as the
-  /// system message, with `{{target_tokens}}` filled or the length hint
-  /// appended, and the oversized block as the user message.
+  /// system message, with the size target put in as [SummaryTarget] says
+  /// (worked out from the block), and the oversized block as the user message.
   List<Map<String, String>> buildShortenMessages({
     required String text,
     required int targetTokens,
@@ -516,9 +652,7 @@ class SummaryService {
     return [
       {
         'role': 'system',
-        'content': instructions.contains(summaryTargetPlaceholder)
-            ? instructions.replaceAll(summaryTargetPlaceholder, '$targetTokens')
-            : '$instructions\n${summaryLengthHint(targetTokens)}',
+        'content': SummaryTarget.of(targetTokens, text).apply(instructions),
       },
       {'role': 'user', 'content': text.trim()},
     ];

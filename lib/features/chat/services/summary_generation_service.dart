@@ -35,6 +35,74 @@ class SummaryCompactionResult {
   bool get changed => created > 0 || merged > 0;
 }
 
+/// What an automatic run would do in a chat as it stands: the prompt's
+/// numbers as [SummaryGenerationService.compact] reads them, the lines the
+/// settings draw on them, and the fresh history a run would leave. The
+/// compaction settings show it, so a reader sees why a run keeps only the
+/// floor when the line to compact to lies under the fixed part.
+class SummaryRunOutlook {
+  /// What the prompt may use.
+  final int total;
+
+  /// Neither history nor summary: preset, card, persona, lorebooks, memory.
+  final int fixedTokens;
+
+  /// The live summary, notes left out.
+  final int summaryTokens;
+
+  /// Messages no block stands in for.
+  final int historyTokens;
+
+  final int triggerTokens;
+  final int compactToTokens;
+  final int floorTokens;
+
+  /// The fresh history a run would leave as written.
+  final int tailTokens;
+
+  const SummaryRunOutlook({
+    required this.total,
+    required this.fixedTokens,
+    required this.summaryTokens,
+    required this.historyTokens,
+    required this.triggerTokens,
+    required this.compactToTokens,
+    required this.floorTokens,
+    required this.tailTokens,
+  });
+
+  /// The line to compact to lies under the fixed part with the summary: a
+  /// run can only leave the floor, and frees little.
+  bool get floorOnly =>
+      compactToTokens - fixedTokens - summaryTokens < floorTokens;
+
+  factory SummaryRunOutlook.of({
+    required int total,
+    required int fixedTokens,
+    required int summaryTokens,
+    required int historyTokens,
+    required SummaryCompactionSettings settings,
+  }) {
+    final compactTo = settings.compactToTokens(total);
+    final floor = settings.autoTailFloor(total);
+    return SummaryRunOutlook(
+      total: total,
+      fixedTokens: fixedTokens,
+      summaryTokens: summaryTokens,
+      historyTokens: historyTokens,
+      triggerTokens: total * settings.triggerPercent ~/ 100,
+      compactToTokens: compactTo,
+      floorTokens: floor,
+      tailTokens: SummaryGenerationService.autoTailBudget(
+        compactToTokens: compactTo,
+        floorTokens: floor,
+        fixedTokens: fixedTokens,
+        summaryTokens: summaryTokens,
+      ),
+    );
+  }
+}
+
 /// Where a compaction run stands, reported before each request it sends.
 class SummaryCompactionProgress {
   /// Blocks written so far in this run.
@@ -100,7 +168,8 @@ class SummaryGenerationService {
   /// changes faster than it is retold.
   static const _maxIdleSteps = 3;
 
-  /// Compacts [session] until the prompt is back under the trigger. [force]
+  /// Compacts [session] until the prompt is under the line it compacts to:
+  /// the trigger starts a run, the line ends it. [force]
   /// ignores the trigger and the minimum run size, keeps only the manual tail
   /// (`manualTailBudget`) as raw history rather than the rest of the window,
   /// and keeps going, one block at a time, until everything older is
@@ -183,7 +252,11 @@ class SummaryGenerationService {
         }
 
         final triggerTokens = budget.total * settings.triggerPercent ~/ 100;
-        if (!force && used < triggerTokens) break;
+        // The trigger starts a run; the line the run compacts to ends it,
+        // through the tail planSource leaves. A run that stopped at the
+        // trigger instead left the prompt just under it after one block,
+        // and the next reply started the next run.
+        if (!force && created == 0 && used < triggerTokens) break;
         final tail = autoTailBudget(
           compactToTokens: compactTo,
           floorTokens: settings.autoTailFloor(budget.total),
@@ -377,7 +450,7 @@ class SummaryGenerationService {
           sessionId: session.id,
           parts: parts,
           apiConfig: apiConfig,
-          targetTokens: _targetFor(sourceTokens, settings),
+          targetTokens: mergeTargetFor(sourceTokens, settings),
           template: await _mergeTemplate(),
           shortenTemplate: await _shortenTemplate(),
           cancelToken: cancelToken,
@@ -398,6 +471,74 @@ class SummaryGenerationService {
       final committed = await _commit(session.id, messages, (current, now) {
         // Stopped, or edited while the summarizer was writing: the draft
         // describes messages that no longer read that way.
+        if (stopped() ||
+            SummaryChain.isDraftStale(draft, SummaryChain.index(now))) {
+          return null;
+        }
+        return SummaryChain.putDraft(current, block.id, draft);
+      });
+      if (!committed && !stopped()) {
+        throw const SummaryChainException('changed');
+      }
+    });
+  }
+
+  /// Shortens an active block as it stands — its own text through the
+  /// shortening prompt, aimed at the block size the settings name — and
+  /// leaves the result on it as a [SummaryDraft], as [regenerateBlock] does.
+  /// For a block that came out far past that size: a merge the summarizer
+  /// would not fit, a block written under a bigger setting. Its messages are
+  /// not retold, so the draft is bound as the block is; a stale block is
+  /// refused (`stale`) before the summarizer is asked, since it is not sent
+  /// and there is nothing to shorten for the prompt. The text must come out
+  /// shorter than the block (`not_shorter`). A stopped run ([cancelToken])
+  /// writes nothing.
+  Future<void> shortenBlock({
+    required ChatSession session,
+    required String blockId,
+    CancelToken? cancelToken,
+  }) {
+    return _exclusive(session.id, () async {
+      final settings = await _ref.read(
+        summaryCompactionSettingsProvider.future,
+      );
+      final slot = _ref.read(pipelineSettingsProvider).memoryBookApi;
+      final apiConfig = await _requireConfig(slot);
+      final service = _ref.read(summaryServiceProvider);
+      final messages = await _messages(session.id, session.messages);
+      final blocks = await service.getBlocks(session.id);
+      final block = blocks
+          .where((b) => b.id == blockId && !b.archived && !b.isNote)
+          .firstOrNull;
+      if (block == null) throw const SummaryChainException('not_live');
+      if (SummaryChain.isStale(block, SummaryChain.index(messages))) {
+        // A stale merge has the more useful advice: delete it for its parts.
+        throw SummaryChainException(
+          block.childIds.isNotEmpty ? 'stale_merge' : 'stale',
+        );
+      }
+
+      final text = await service.shortenText(
+        sessionId: session.id,
+        text: block.content,
+        apiConfig: apiConfig,
+        targetTokens: settings.blockTargetTokens,
+        template: await _shortenTemplate(),
+        cancelToken: cancelToken,
+        temperature: slot.generationTemperature,
+      );
+      final draft = SummaryDraft(
+        content: text,
+        messageIds: block.messageIds,
+        sourceHash: block.sourceHash,
+        // Counted now, not read off the block: a block from before sizes
+        // were stored reads 0 and would refuse any text.
+        tokens: _acceptedTokens(text, estimateTokens(block.content)),
+        sourceTokens: block.sourceTokens,
+        createdAt: DateTime.now().millisecondsSinceEpoch,
+      );
+      bool stopped() => cancelToken?.isCancelled ?? false;
+      final committed = await _commit(session.id, messages, (current, now) {
         if (stopped() ||
             SummaryChain.isDraftStale(draft, SummaryChain.index(now))) {
           return null;
@@ -517,7 +658,7 @@ class SummaryGenerationService {
     CancelToken? cancelToken,
   }) async {
     final sourceTokens = parts.fold(0, (sum, b) => sum + b.tokens);
-    final target = _targetFor(sourceTokens, settings);
+    final target = mergeTargetFor(sourceTokens, settings);
     final text = await _ref
         .read(summaryServiceProvider)
         .mergeBlocks(
@@ -670,6 +811,34 @@ class SummaryGenerationService {
     return stored?.messages ?? fallback;
   }
 
+  /// The prompt's numbers as [compact] reads them now, with the lines
+  /// [settings] draw on them; null when no prompt has been built in this
+  /// chat yet, so nothing is known of the fixed part.
+  SummaryRunOutlook? outlook({
+    required String charId,
+    required List<SummaryBlock> blocks,
+    required List<ChatMessage> messages,
+    required SummaryCompactionSettings settings,
+  }) {
+    if (_ref.read(cachedTokenBreakdownProvider(charId)) == null) return null;
+    final budget = _promptBudget(charId);
+    final view = SummaryChain.promptView(blocks, messages);
+    var history = 0;
+    for (final message in messages) {
+      if (SummaryChain.isSummarizable(message) &&
+          !view.coveredMessageIds.contains(message.id)) {
+        history += estimateTokens(message.content);
+      }
+    }
+    return SummaryRunOutlook.of(
+      total: budget.total,
+      fixedTokens: budget.fixedTokens,
+      summaryTokens: SummaryChain.liveTokens(blocks, messages),
+      historyTokens: history,
+      settings: settings,
+    );
+  }
+
   /// What the main prompt may use, and how much of it is neither history nor
   /// summary. Taken from the last prompt build when there is one: it carries
   /// the real preset, lorebooks and memory. Without one, only the connection
@@ -732,6 +901,17 @@ class SummaryGenerationService {
   /// A small source gets a small block; the setting is the ceiling.
   static int _targetFor(int sourceTokens, SummaryCompactionSettings settings) =>
       math.min(settings.blockTargetTokens, math.max(150, sourceTokens ~/ 3));
+
+  /// A merge aims at the block size itself, as a retelling does, and at most
+  /// half of its parts, so two small blocks make a small one. The parts are
+  /// summaries already: a third of them, as [_targetFor] asks of messages,
+  /// cut continuity rather than words, and the summarizer overshot it anyway,
+  /// so merges came out past the block size whatever it was set to.
+  @visibleForTesting
+  static int mergeTargetFor(
+    int sourceTokens,
+    SummaryCompactionSettings settings,
+  ) => math.min(settings.blockTargetTokens, math.max(150, sourceTokens ~/ 2));
 
   static int _idSeq = 0;
 

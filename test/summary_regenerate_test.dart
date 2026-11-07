@@ -91,6 +91,7 @@ SummaryBlock _block(
   List<String> childIds = const [],
   bool archived = false,
   SummaryDraft? draft,
+  int tokens = 5,
 }) => SummaryBlock(
   id: id,
   level: level,
@@ -99,7 +100,7 @@ SummaryBlock _block(
   sourceHash: SummaryChain.fingerprint(ids, SummaryChain.index(_messages)),
   childIds: childIds,
   archived: archived,
-  tokens: 5,
+  tokens: tokens,
   sourceTokens: 400,
   createdAt: 7,
   draft: draft,
@@ -560,6 +561,153 @@ void main() {
       expect(draft?.sourceHash, chain.first.draft?.sourceHash);
       expect(decoded.last.draft, isNull);
       expect(chain.last.toJson().containsKey('draft'), isFalse);
+    });
+  });
+
+  test('a merge written again aims at the block size, not a third', () async {
+    final h = await _harness([
+      _block('b1', ['m0', 'm1'], archived: true, tokens: 900),
+      _block('b2', ['m2', 'm3'], archived: true, tokens: 900),
+      _block(
+        'b12',
+        ['m0', 'm1', 'm2', 'm3'],
+        level: 2,
+        childIds: ['b1', 'b2'],
+        tokens: 1400,
+      ),
+    ]);
+
+    await _regenerate(h.container, 'b12');
+
+    // Half of 1800 tokens of parts, under the default block size of 1000; a
+    // third would have asked for 600.
+    expect(h.llm.system, contains(summaryLengthHint(900)));
+    expect(
+      SummaryGenerationService.mergeTargetFor(
+        6000,
+        const SummaryCompactionSettings(blockTargetTokens: 3000),
+      ),
+      3000,
+    );
+  });
+
+  group('shortening', () {
+    test('sends the block itself through the shortening prompt', () async {
+      final h = await _harness([
+        _block(
+          'b1',
+          ['m0', 'm1'],
+          content: 'A long block. ' * 50,
+          tokens: 1500,
+        ),
+        _block('b2', ['m2', 'm3']),
+      ]);
+      h.llm.answer = 'Shorter.';
+
+      await _generator(
+        h.container,
+      ).shortenBlock(session: _session(), blockId: 'b1');
+
+      expect(h.llm.calls, hasLength(1));
+      expect(h.llm.system, startsWith(summaryShortenPrompt));
+      // The block size, not a share of the block.
+      expect(h.llm.system, contains(summaryLengthHint(1000)));
+      expect(h.llm.user, startsWith('A long block.'));
+      expect(h.llm.user, isNot(contains('Message 0.')));
+      final b1 = await _one(h.container, 'b1');
+      expect(b1.content, startsWith('A long block.'));
+      expect(b1.draft?.content, 'Shorter.');
+      expect(b1.draft?.messageIds, ['m0', 'm1']);
+      expect(b1.draft?.sourceTokens, 400);
+      expect((await _one(h.container, 'b2')).draft, isNull);
+
+      await _approve(h.container, 'b1');
+
+      final approved = await _one(h.container, 'b1');
+      expect(approved.content, 'Shorter.');
+      expect(approved.messageIds, ['m0', 'm1']);
+      expect(approved.draft, isNull);
+    });
+
+    test('a text no shorter than the block is refused', () async {
+      final h = await _harness([
+        _block('b1', ['m0', 'm1'], content: 'Short.', tokens: 2),
+      ]);
+      h.llm.answer = 'Not shorter at all, really, by any count.';
+
+      await expectLater(
+        _generator(
+          h.container,
+        ).shortenBlock(session: _session(), blockId: 'b1'),
+        _reason('not_shorter'),
+      );
+
+      expect((await _one(h.container, 'b1')).draft, isNull);
+    });
+
+    test('a shortened merge keeps its parts when approved', () async {
+      final h = await _harness([
+        _block('b1', ['m0', 'm1'], archived: true),
+        _block('b2', ['m2', 'm3'], archived: true),
+        _block(
+          'b12',
+          ['m0', 'm1', 'm2', 'm3'],
+          level: 2,
+          childIds: ['b1', 'b2'],
+          content: 'A long merge. ' * 50,
+          tokens: 1500,
+        ),
+      ]);
+      h.llm.answer = 'Shorter merge.';
+
+      await _generator(
+        h.container,
+      ).shortenBlock(session: _session(), blockId: 'b12');
+      await _approve(h.container, 'b12');
+
+      final merged = await _one(h.container, 'b12');
+      expect(merged.content, 'Shorter merge.');
+      expect(merged.level, 2);
+      expect(merged.childIds, ['b1', 'b2']);
+      expect(merged.messageIds, ['m0', 'm1', 'm2', 'm3']);
+      expect(
+        (await _blocks(h.container)).where((b) => b.archived),
+        hasLength(2),
+      );
+    });
+
+    test('a stale block is refused before the summarizer is asked', () async {
+      final h = await _harness([
+        _block(
+          'b1',
+          ['m0', 'm1'],
+          content: 'A long block. ' * 50,
+          tokens: 1500,
+        ),
+      ]);
+
+      await expectLater(
+        _generator(
+          h.container,
+        ).shortenBlock(session: _session(_edited), blockId: 'b1'),
+        _reason('stale'),
+      );
+
+      expect(h.llm.calls, isEmpty);
+      expect((await _one(h.container, 'b1')).draft, isNull);
+    });
+
+    test('a block from before sizes were stored is still shortened', () async {
+      final h = await _harness([
+        _block('b1', ['m0', 'm1'], content: 'A long block. ' * 50, tokens: 0),
+      ]);
+      h.llm.answer = 'Shorter.';
+
+      await _generator(
+        h.container,
+      ).shortenBlock(session: _session(), blockId: 'b1');
+
+      expect((await _one(h.container, 'b1')).draft?.content, 'Shorter.');
     });
   });
 
