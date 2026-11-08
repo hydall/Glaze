@@ -3460,6 +3460,7 @@
   "action_pin_cache_anchor_hint": "Stepped history trim mode",
   "action_unpin_cache_anchor": "Unpin cache anchor",
   "history_anchor_pin_too_far": "Too far back for the history to start there: the prompt would pass the trim trigger. The anchor stays where it was.",
+  "history_anchor_pin_summarized": "This message is retold in the summary and is not sent as itself, so the history cannot start there. Delete the summary block that covers it to get it back. The anchor stays where it was.",
   "prompt_cache_anchor": "CACHE",
   "prompt_cache_anchor_hint": "The oldest message still in the prompt — the start of the history. In blocks mode this start is held still across turns, so the provider's prompt cache can hit.",
   "section_context": "Context",
