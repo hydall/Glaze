@@ -153,6 +153,58 @@ void main() {
     expect(capture.parserVerdicts.single.parserCode, 'accepted');
   });
 
+  test(
+    'a call id reused by a later run keeps each response with its request',
+    () {
+      // The main request's id repeated across app runs. Both runs' outcomes share
+      // it, and each request must still get the one that answered it.
+      LlmRequestCaptureRow row(int id, int at) => LlmRequestCaptureRow(
+        id: id,
+        sequence: id,
+        createdAtMs: at,
+        sessionId: 'session',
+        stage: 'main',
+        callId: 'call:main:session:1',
+        attempt: 1,
+        truncated: false,
+        eventJson: '{}',
+      );
+      LlmCallEventRow event(String id, int at, String body) => LlmCallEventRow(
+        id: id,
+        createdAtMs: at,
+        sessionId: 'session',
+        pipelineRunId: 'turn:session:1',
+        callId: 'call:main:session:1',
+        stage: 'main',
+        attempt: 1,
+        kind: 'transport_succeeded',
+        responseText: body,
+        payloadJson: '{}',
+        truncated: false,
+      );
+      final older = row(1, 1000);
+      final newer = row(2, 5000);
+      final events = [
+        event('a', 1500, 'old reply'),
+        event('b', 5500, 'new reply'),
+      ];
+
+      String? replyFor(LlmRequestCaptureRow target) => PromptCaptureView(
+        row: target,
+        request: const {},
+        event: const {},
+        callEvents: PromptCaptureViewService.eventsForRow(
+          target,
+          sameCallRows: [older, newer],
+          callEvents: events,
+        ),
+      ).responseText;
+
+      expect(replyFor(older), 'old reply');
+      expect(replyFor(newer), 'new reply');
+    },
+  );
+
   test('returns the whole retained window, not just the newest page', () async {
     for (var i = 0; i < 80; i++) {
       await repo.record(

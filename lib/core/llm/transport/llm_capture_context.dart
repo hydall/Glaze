@@ -6,7 +6,15 @@
 /// They carry this instead, and `LlmRequestCaptureRepo.bindTurnMessageId`
 /// stamps the message id over them once the write lands — after which one
 /// turn is one `messageId` across every stage that took part in it.
-String turnRunId(String sessionId, int genId) => 'turn:$sessionId:$genId';
+///
+/// [genId] alone is not unique: it is an in-memory counter that starts over
+/// with every chat notifier (an app restart, a reopened chat). Ids built from
+/// it alone repeated across runs, so a new turn's request was joined to every
+/// older turn that had drawn the same number, and the inspector showed the
+/// oldest of their responses. [startedAtMs] — when the turn began — keeps the
+/// id unique across runs while staying a plain value both sides can share.
+String turnRunId(String sessionId, int genId, int startedAtMs) =>
+    'turn:$sessionId:$startedAtMs-$genId';
 
 /// The call id of a turn's **main** request — the one that writes the reply.
 ///
@@ -21,7 +29,10 @@ String turnRunId(String sessionId, int genId) => 'turn:$sessionId:$genId';
 /// both sides of the join and stays stable if the turn is described twice.
 /// Retries within a turn are distinguished by `attempt`, which is what the
 /// call-event table is keyed on alongside the id.
-String mainCallId(String sessionId, int genId) => 'call:main:$sessionId:$genId';
+///
+/// [startedAtMs] is part of the id for the reason given on [turnRunId].
+String mainCallId(String sessionId, int genId, int startedAtMs) =>
+    'call:main:$sessionId:$startedAtMs-$genId';
 
 /// The capture context for a turn's **main** request — the one that writes the
 /// reply.
@@ -43,13 +54,14 @@ String mainCallId(String sessionId, int genId) => 'call:main:$sessionId:$genId';
 LlmCaptureContext mainCaptureContext({
   required String sessionId,
   required int genId,
+  required int startedAtMs,
   String? messageId,
 }) => LlmCaptureContext(
   stage: 'main',
   sessionId: sessionId,
   messageId: messageId,
-  pipelineRunId: turnRunId(sessionId, genId),
-  callId: mainCallId(sessionId, genId),
+  pipelineRunId: turnRunId(sessionId, genId, startedAtMs),
+  callId: mainCallId(sessionId, genId, startedAtMs),
   // One attempt: this stream has no retry runner, and a failure is surfaced
   // to the reader rather than retried behind their back.
   attempt: 1,

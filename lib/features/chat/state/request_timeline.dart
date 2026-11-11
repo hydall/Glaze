@@ -102,49 +102,104 @@ class RequestGroup {
   }
 }
 
-/// Folds raw captures into the timeline the Requests tab renders.
+/// Folds raw captures into the timeline the Requests tab renders: one row per
+/// logical call, newest first, each in its own place in time.
 ///
-/// Grouping key, in order of preference:
-/// 1. `messageId` — one chat turn. Post-generation stages set it themselves and
-///    the generation stages are stamped with it once the reply is written
-///    (`LlmRequestCaptureRepo.bindTurnMessageId`), so a whole turn collapses
-///    into one group without guessing from timestamps.
-/// 2. `pipelineRunId` — one background job (card rewrite, reconciliation).
-/// 3. the row itself — a stray call with no identity of its own.
+/// Requests used to be folded under the message they belonged to, so a turn
+/// was one card with its stages inside. That misled more than it helped: a
+/// step re-run an hour later (an ext block, a ledger repair) was filed under
+/// the old turn, and the turn jumped to the top of the list with the late
+/// request hidden inside it. Now nothing is nested; a row still names its turn
+/// in its subtitle, so the link is not lost.
 ///
-/// Groups come back newest-last-request first; entries inside a group run
-/// oldest first.
+/// Only retries of one call collapse — three identical rows for one failing
+/// request is noise. A call is identified by its call id *within its owner*
+/// (message, then pipeline run): call ids built from a per-run counter repeat
+/// across app restarts, and must not fold unrelated turns together.
+///
+/// Every returned group holds exactly one entry; [RequestGroup] is kept as the
+/// row type so the card and the filter read it the same way.
 List<RequestGroup> buildRequestTimeline(List<PromptCaptureView> captures) {
   if (captures.isEmpty) return const [];
 
-  final byKey = <String, List<PromptCaptureView>>{};
-  for (final capture in captures) {
-    byKey.putIfAbsent(_groupKey(capture), () => []).add(capture);
+  final rows = captures.toList()
+    ..sort((a, b) {
+      final byTime = a.row.createdAtMs.compareTo(b.row.createdAtMs);
+      return byTime != 0 ? byTime : a.row.id.compareTo(b.row.id);
+    });
+
+  final order = <String>[];
+  final byCall = <String, List<PromptCaptureView>>{};
+  // The chain currently open for each call key. An attempt number that does
+  // not go up means the same id was handed out again (a counter that started
+  // over), not a retry, so it opens a chain of its own.
+  final openChain = <String, String>{};
+  for (final row in rows) {
+    final base = _callKey(row);
+    var key = openChain[base];
+    if (key != null && !_continuesChain(byCall[key]!.last, row)) key = null;
+    if (key == null) {
+      key = byCall.containsKey(base) ? '$base#${row.row.id}' : base;
+      openChain[base] = key;
+      order.add(key);
+    }
+    byCall.putIfAbsent(key, () => []).add(row);
   }
 
-  final groups = <RequestGroup>[];
-  for (final entry in byKey.entries) {
-    final rows = entry.value.toList()
-      ..sort((a, b) => a.row.createdAtMs.compareTo(b.row.createdAtMs));
-    final collapsed = _collapseAttempts(rows);
-    if (collapsed.isEmpty) continue;
-    groups.add(
-      RequestGroup(
-        key: entry.key,
-        kind: entry.key.startsWith('msg:')
-            ? RequestGroupKind.turn
-            : RequestGroupKind.task,
-        messageId: rows.first.row.messageId,
-        entries: collapsed,
+  final groups = [
+    for (final key in order)
+      _rowFor(
+        key,
+        RequestTimelineEntry(
+          capture: byCall[key]!.last,
+          attempts: byCall[key]!.length,
+        ),
       ),
-    );
-  }
-
-  groups.sort((a, b) => b.endedAtMs.compareTo(a.endedAtMs));
+  ];
+  // By the time the call was made: a retry that ran later moves its row up,
+  // because its last attempt is what the row shows.
+  groups.sort((a, b) {
+    final byTime = b.startedAtMs.compareTo(a.startedAtMs);
+    return byTime != 0
+        ? byTime
+        : b.entries.single.capture.row.id.compareTo(
+            a.entries.single.capture.row.id,
+          );
+  });
   return groups;
 }
 
-String _groupKey(PromptCaptureView capture) {
+/// Where the "app restart" separator goes in a newest-first timeline: the
+/// index of the first row sent before this run started at [startedAtMs], so
+/// the separator sits between this run's requests and the earlier ones. Null
+/// when no earlier request is listed — a separator under everything would mark
+/// nothing.
+int? restartSeparatorIndex(List<RequestGroup> groups, int startedAtMs) {
+  for (var i = 0; i < groups.length; i++) {
+    if (groups[i].startedAtMs < startedAtMs) return i;
+  }
+  return null;
+}
+
+RequestGroup _rowFor(String key, RequestTimelineEntry entry) {
+  final messageId = entry.capture.row.messageId;
+  final hasMessage = messageId != null && messageId.isNotEmpty;
+  return RequestGroup(
+    key: key,
+    kind: hasMessage ? RequestGroupKind.turn : RequestGroupKind.task,
+    messageId: hasMessage ? messageId : null,
+    entries: [entry],
+  );
+}
+
+bool _continuesChain(PromptCaptureView last, PromptCaptureView next) {
+  final previous = last.row.attempt;
+  final current = next.row.attempt;
+  if (previous == null || current == null) return true;
+  return current > previous;
+}
+
+String _ownerKey(PromptCaptureView capture) {
   final row = capture.row;
   final messageId = row.messageId;
   if (messageId != null && messageId.isNotEmpty) return 'msg:$messageId';
@@ -153,29 +208,12 @@ String _groupKey(PromptCaptureView capture) {
   return 'row:${row.id}';
 }
 
-/// One entry per logical call, carrying how many attempts it took.
-List<RequestTimelineEntry> _collapseAttempts(List<PromptCaptureView> rows) {
-  final order = <String>[];
-  final byCall = <String, List<PromptCaptureView>>{};
-  for (final row in rows) {
-    final key = _callKey(row);
-    if (!byCall.containsKey(key)) order.add(key);
-    byCall.putIfAbsent(key, () => []).add(row);
-  }
-  return [
-    for (final key in order)
-      RequestTimelineEntry(
-        capture: byCall[key]!.last,
-        attempts: byCall[key]!.length,
-      ),
-  ];
-}
-
 String _callKey(PromptCaptureView capture) {
   final row = capture.row;
+  final owner = _ownerKey(capture);
   final callId = row.callId ?? row.logicalCallId;
-  if (callId != null && callId.isNotEmpty) return 'call:$callId';
-  // No call identity (the main request has none): stage + agent is enough to
-  // fold a retry of the same step, and distinct steps keep distinct stages.
-  return 'stage:${row.stage}:${row.agentId ?? ''}';
+  if (callId != null && callId.isNotEmpty) return '$owner|call:$callId';
+  // No call identity (older main requests have none): stage + agent is enough
+  // to fold a retry of the same step, and distinct steps keep distinct stages.
+  return '$owner|stage:${row.stage}:${row.agentId ?? ''}';
 }
