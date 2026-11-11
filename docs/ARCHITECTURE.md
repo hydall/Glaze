@@ -1118,11 +1118,19 @@ sent; a request that already ran answers from its own stored manifest
 **Requests tab** (`widgets/requests/`, `state/request_timeline.dart`): the
 Prompt Inspector's timeline of what this chat actually sent, read from the
 always-on capture sink (`llmRequestCaptureInstallationProvider` →
-`llm_request_capture_rows`) and cut at `AppRuntime.startedAt` so a restart does
-not mix runs. Rows are folded into groups by `messageId` (one chat turn: the
-main model or the agent shards, then cleaner, ledger, ext blocks) or by
-`pipelineRunId` (a background job — card rewrite, reconciliation), and the two
-kinds share one chronological list. Plugin calls (`glaze.generate`,
+`llm_request_capture_rows`), across app runs — each row shows its date when it
+was not today, and an "app restart" separator at `AppRuntime.startedAt`
+(`restartSeparatorIndex`) parts this run's requests from earlier ones. The
+list is flat: one row per logical call, newest first, with only the retries of
+one call collapsed into it. A call is keyed by its call id
+within its owner (`messageId`, else `pipelineRunId`), and an attempt number that
+does not go up starts a new row, because older main-request ids repeat across
+runs. Rows are not nested under their turn — a step re-run later would land
+inside an old turn — but a row still names its turn and the reply's first words
+in its subtitle. Call events are joined to a request by call id *and* time
+(`PromptCaptureViewService.eventsForRow`): an event belongs to the newest
+request of that id and attempt sent at or before it. Plugin calls
+(`glaze.generate`,
 `glaze.images.generate`) carry the open chat, a stage of their own
 (`plugin.generate`, `image.plugin`) and the plugin's id as the step name, and
 record their outcome, so each shows as a call of its own with its response.

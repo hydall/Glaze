@@ -770,6 +770,7 @@ class StreamGenerationService {
       final captureContext = mainCaptureContext(
         sessionId: session.id,
         genId: _genId,
+        startedAtMs: startGenTime.millisecondsSinceEpoch,
         messageId: regenTargetId ?? continueTargetId,
       );
 

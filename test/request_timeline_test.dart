@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/features/chat/services/prompt_capture_view_service.dart';
 import 'package:glaze_flutter/features/chat/state/request_timeline.dart';
+import 'package:glaze_flutter/features/chat/widgets/requests/request_stage_label.dart';
 
 PromptCaptureView _capture({
   required int id,
@@ -37,7 +38,7 @@ PromptCaptureView _capture({
 )!;
 
 void main() {
-  test('a turn folds every stage that shares its message id', () {
+  test('every stage of a turn is its own row, newest first', () {
     final groups = buildRequestTimeline([
       _capture(
         id: 4,
@@ -63,18 +64,37 @@ void main() {
       ),
     ]);
 
-    expect(groups, hasLength(1));
-    final turn = groups.single;
-    expect(turn.kind, RequestGroupKind.turn);
-    expect(turn.requestCount, 4);
-    // Execution order, not the newest-first order the rows arrive in.
-    expect(
-      turn.entries.map((e) => e.stage),
-      ['studio.controller', 'main', 'cleaner.rewrite', 'ledger.turn'],
-    );
+    expect(groups, hasLength(4));
+    expect(groups.every((g) => g.entries.length == 1), isTrue);
+    expect(groups.map((g) => g.entries.single.stage), [
+      'ledger.turn',
+      'cleaner.rewrite',
+      'main',
+      'studio.controller',
+    ]);
+    // Each row still knows its turn.
+    expect(groups.every((g) => g.kind == RequestGroupKind.turn), isTrue);
+    expect(groups.every((g) => g.messageId == 'm1'), isTrue);
   });
 
-  test('retries of one call collapse into a single step', () {
+  test('a step re-run later sits at its own time, not under the old turn', () {
+    final groups = buildRequestTimeline([
+      _capture(id: 1, createdAtMs: 100, stage: 'main', messageId: 'm1'),
+      _capture(id: 2, createdAtMs: 200, stage: 'main', messageId: 'm2'),
+      _capture(
+        id: 3,
+        createdAtMs: 900,
+        stage: 'extblock.status',
+        messageId: 'm1',
+        callId: 'extblock:status:m1#0',
+      ),
+    ]);
+
+    expect(groups.map((g) => g.startedAtMs), [900, 200, 100]);
+    expect(groups.first.messageId, 'm1');
+  });
+
+  test('retries of one call collapse into a single row', () {
     final groups = buildRequestTimeline([
       _capture(
         id: 2,
@@ -97,11 +117,34 @@ void main() {
     final entry = groups.single.entries.single;
     expect(entry.attempts, 2);
     expect(entry.capture.row.attempt, 2, reason: 'the last attempt is kept');
-    expect(groups.single.requestCount, 2);
     expect(groups.single.hasRetry, isTrue);
   });
 
-  test('a background job stays its own group, in its place in time', () {
+  test('a call id reused by a later run is not taken for a retry', () {
+    // The main request's id came from a counter that started over with every
+    // app run, so two unrelated turns could carry the same one.
+    final groups = buildRequestTimeline([
+      _capture(
+        id: 1,
+        createdAtMs: 100,
+        stage: 'main',
+        pipelineRunId: 'turn:session:1',
+        callId: 'call:main:session:1',
+      ),
+      _capture(
+        id: 2,
+        createdAtMs: 900,
+        stage: 'main',
+        pipelineRunId: 'turn:session:1',
+        callId: 'call:main:session:1',
+      ),
+    ]);
+
+    expect(groups, hasLength(2));
+    expect(groups.every((g) => g.entries.single.attempts == 1), isTrue);
+  });
+
+  test('a background job is a row of its own, in its place in time', () {
     final groups = buildRequestTimeline([
       _capture(id: 3, createdAtMs: 300, stage: 'main', messageId: 'm2'),
       _capture(
@@ -123,30 +166,43 @@ void main() {
     expect(groups.map((g) => g.endedAtMs), [300, 200, 100]);
   });
 
-  test('the turn is named by its generator, not by its last stage', () {
+  test('the app restart separator sits above the first earlier request', () {
     final groups = buildRequestTimeline([
-      _capture(
-        id: 2,
-        createdAtMs: 200,
-        stage: 'cleaner.rewrite',
-        messageId: 'm1',
-        callId: 'c1',
-      ),
-      _capture(
-        id: 1,
-        createdAtMs: 100,
-        stage: 'studio.final',
-        messageId: 'm1',
-        agentId: 'final',
-      ),
+      _capture(id: 1, createdAtMs: 100, stage: 'main', messageId: 'm1'),
+      _capture(id: 2, createdAtMs: 200, stage: 'main', messageId: 'm2'),
+      _capture(id: 3, createdAtMs: 900, stage: 'main', messageId: 'm3'),
     ]);
 
-    expect(groups.single.leadFamily, RequestStageFamily.agent);
+    // Started at 500: one request of this run above, two earlier below.
+    expect(restartSeparatorIndex(groups, 500), 1);
+    // Nothing from this run yet: the separator heads the list.
+    expect(restartSeparatorIndex(groups, 1000), 0);
+    // Nothing from before the restart: no separator.
+    expect(restartSeparatorIndex(groups, 50), isNull);
+  });
+
+  test('a request from another day shows its date', () {
+    final now = DateTime(2026, 11, 11, 15);
+    expect(
+      formatRequestTime(DateTime(2026, 11, 11, 9, 5, 7), now: now),
+      '09:05:07',
+    );
+    expect(
+      formatRequestTime(DateTime(2026, 11, 10, 9, 5, 7), now: now),
+      '10.11 09:05:07',
+    );
+    expect(
+      formatRequestTime(DateTime(2025, 1, 2, 3, 4, 5), now: now),
+      '02.01.2025 03:04:05',
+    );
   });
 
   test('stage families cover every producer in the app', () {
     expect(requestStageFamily('main'), RequestStageFamily.main);
-    expect(requestStageFamily('studio.post_processing'), RequestStageFamily.agent);
+    expect(
+      requestStageFamily('studio.post_processing'),
+      RequestStageFamily.agent,
+    );
     expect(requestStageFamily('cleaner.audit'), RequestStageFamily.cleaner);
     expect(requestStageFamily('ledger.turn_repair'), RequestStageFamily.ledger);
     expect(requestStageFamily('extblock.status'), RequestStageFamily.extBlock);

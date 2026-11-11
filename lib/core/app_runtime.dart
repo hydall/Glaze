@@ -1,8 +1,8 @@
 /// When this app process started.
 ///
-/// The Requests tab scopes itself to "since the app started" — request captures
-/// live in the database and outlive a restart, so a wall-clock cut is the only
-/// thing that separates this run's traffic from the previous one's. Stamped
+/// The Requests tab keeps requests across app runs (captures live in the
+/// database and outlive a restart) and draws an "app restart" separator at this
+/// moment, so this run's traffic reads apart from the previous one's. Stamped
 /// from `main()` so it is the process start, not the first time something
 /// happened to read it.
 abstract final class AppRuntime {
