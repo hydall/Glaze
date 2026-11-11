@@ -4,6 +4,9 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/llm/summary_service.dart'
+    show summaryShortenSlackPercent;
+import '../../../core/llm/tokenizer.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../core/models/summary_block.dart';
 import '../../../core/state/summary_providers.dart';
@@ -109,6 +112,7 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
     return switch (error.reason) {
       'busy' => 'summary_error_busy'.tr(),
       'not_shorter' => 'summary_error_not_shorter'.tr(),
+      'not_shortened' => 'summary_error_not_shortened'.tr(),
       'not_adjacent' => 'summary_error_not_adjacent'.tr(),
       'mixed_levels' => 'summary_error_mixed_levels'.tr(),
       'select_two' => 'summary_error_select_two'.tr(),
@@ -175,19 +179,27 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
     unawaited(_regeneration.shorten(session: session, blockId: block.id));
   }
 
-  /// Whether a card offers Shorten: a live block past the block size, with
-  /// no draft waiting on it. A stale block is not sent, so there is nothing
-  /// to gain; a draft is shortened by approving a shorter one later.
+  /// Whether a card offers Shorten: a live block past the block size by more
+  /// than the slack the summarizer itself allows
+  /// ([summaryShortenSlackPercent]), with no draft waiting on it. A block
+  /// just past the size has nothing worth a summarizer call to cut. A stale
+  /// block is not sent, so there is nothing to gain; a draft is shortened by
+  /// approving a shorter one later. A block from before sizes were stored
+  /// reads 0 and is counted from its text.
   bool _canShorten(
     SummaryBlock block,
     Map<String, ChatMessage> byId,
     int? blockTarget,
-  ) =>
-      blockTarget != null &&
-      !block.isNote &&
-      block.draft == null &&
-      block.tokens > blockTarget &&
-      !SummaryChain.isStale(block, byId);
+  ) {
+    if (blockTarget == null || block.isNote || block.draft != null) {
+      return false;
+    }
+    final tokens = block.tokens > 0
+        ? block.tokens
+        : estimateTokens(block.content);
+    return tokens * 100 > blockTarget * summaryShortenSlackPercent &&
+        !SummaryChain.isStale(block, byId);
+  }
 
   void _stop(SummaryBlock block) {
     final session = _session;

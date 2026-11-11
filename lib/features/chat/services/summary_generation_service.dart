@@ -57,7 +57,8 @@ class SummaryRunOutlook {
   final int compactToTokens;
   final int floorTokens;
 
-  /// The fresh history a run would leave as written.
+  /// The fresh history a run would leave as written: the tail it keeps, or
+  /// all the history there is when that is less.
   final int tailTokens;
 
   const SummaryRunOutlook({
@@ -93,14 +94,31 @@ class SummaryRunOutlook {
       triggerTokens: total * settings.triggerPercent ~/ 100,
       compactToTokens: compactTo,
       floorTokens: floor,
-      tailTokens: SummaryGenerationService.autoTailBudget(
-        compactToTokens: compactTo,
-        floorTokens: floor,
-        fixedTokens: fixedTokens,
-        summaryTokens: summaryTokens,
+      tailTokens: math.min(
+        historyTokens,
+        SummaryGenerationService.autoTailBudget(
+          compactToTokens: compactTo,
+          floorTokens: floor,
+          fixedTokens: fixedTokens,
+          summaryTokens: summaryTokens,
+        ),
       ),
     );
   }
+}
+
+/// The chat's side of a [SummaryRunOutlook]: the live summary and the fresh
+/// history, counted the way [SummaryGenerationService.compact] counts them.
+/// Counting walks every message, so it is done once; the outlook itself is
+/// cheap to work out again as the settings change.
+class SummaryOutlookCounts {
+  final int summaryTokens;
+  final int historyTokens;
+
+  const SummaryOutlookCounts({
+    required this.summaryTokens,
+    required this.historyTokens,
+  });
 }
 
 /// Where a compaction run stands, reported before each request it sends.
@@ -213,13 +231,10 @@ class SummaryGenerationService {
         if (cancelToken?.isCancelled == true) break;
         messages = await _messages(session.id, session.messages);
         final blocks = await _cleanBlocks(session.id, messages);
-        final view = SummaryChain.promptView(blocks, messages);
-        final summaryTokens = SummaryChain.liveTokens(blocks, messages);
-        final historyTokens = messages
-            .where(SummaryChain.isSummarizable)
-            .where((m) => !view.coveredMessageIds.contains(m.id))
-            .fold(0, (sum, m) => sum + estimateTokens(m.content));
-        final used = budget.fixedTokens + summaryTokens + historyTokens;
+        final counts = _count(blocks, messages);
+        final summaryTokens = counts.summaryTokens;
+        final used =
+            budget.fixedTokens + summaryTokens + counts.historyTokens;
 
         if (summaryTokens > budget.total * settings.mergePercent ~/ 100) {
           final parts = SummaryChain.mergeCandidate(
@@ -491,8 +506,9 @@ class SummaryGenerationService {
   /// not retold, so the draft is bound as the block is; a stale block is
   /// refused (`stale`) before the summarizer is asked, since it is not sent
   /// and there is nothing to shorten for the prompt. The text must come out
-  /// shorter than the block (`not_shorter`). A stopped run ([cancelToken])
-  /// writes nothing.
+  /// shorter than the block (`not_shortened` — not `not_shorter`, whose
+  /// advice to lower the block size does not fit here). A stopped run
+  /// ([cancelToken]) writes nothing.
   Future<void> shortenBlock({
     required ChatSession session,
     required String blockId,
@@ -527,13 +543,19 @@ class SummaryGenerationService {
         cancelToken: cancelToken,
         temperature: slot.generationTemperature,
       );
+      // Counted now, not read off the block: a block from before sizes were
+      // stored reads 0 and would refuse any text.
+      final int tokens;
+      try {
+        tokens = _acceptedTokens(text, estimateTokens(block.content));
+      } on SummaryChainException {
+        throw const SummaryChainException('not_shortened');
+      }
       final draft = SummaryDraft(
         content: text,
         messageIds: block.messageIds,
         sourceHash: block.sourceHash,
-        // Counted now, not read off the block: a block from before sizes
-        // were stored reads 0 and would refuse any text.
-        tokens: _acceptedTokens(text, estimateTokens(block.content)),
+        tokens: tokens,
         sourceTokens: block.sourceTokens,
         createdAt: DateTime.now().millisecondsSinceEpoch,
       );
@@ -811,17 +833,11 @@ class SummaryGenerationService {
     return stored?.messages ?? fallback;
   }
 
-  /// The prompt's numbers as [compact] reads them now, with the lines
-  /// [settings] draw on them; null when no prompt has been built in this
-  /// chat yet, so nothing is known of the fixed part.
-  SummaryRunOutlook? outlook({
-    required String charId,
-    required List<SummaryBlock> blocks,
-    required List<ChatMessage> messages,
-    required SummaryCompactionSettings settings,
-  }) {
-    if (_ref.read(cachedTokenBreakdownProvider(charId)) == null) return null;
-    final budget = _promptBudget(charId);
+  /// The live summary and the fresh history of [blocks] over [messages].
+  static SummaryOutlookCounts _count(
+    List<SummaryBlock> blocks,
+    List<ChatMessage> messages,
+  ) {
     final view = SummaryChain.promptView(blocks, messages);
     var history = 0;
     for (final message in messages) {
@@ -830,11 +846,40 @@ class SummaryGenerationService {
         history += estimateTokens(message.content);
       }
     }
+    return SummaryOutlookCounts(
+      summaryTokens: SummaryChain.liveTokens(blocks, messages),
+      historyTokens: history,
+    );
+  }
+
+  /// The summary and the fresh history of [sessionId] as [compact] would
+  /// count them now: the messages as stored, stale blocks left out (without
+  /// writing anything — a run drops them itself). [fallback] stands in for
+  /// a session not stored yet.
+  Future<SummaryOutlookCounts> outlookCounts(
+    String sessionId,
+    List<ChatMessage> fallback,
+  ) async {
+    final messages = await _messages(sessionId, fallback);
+    final blocks = await _ref.read(summaryServiceProvider).getBlocks(sessionId);
+    return _count(SummaryChain.withoutStale(blocks, messages), messages);
+  }
+
+  /// The prompt's numbers as [compact] reads them, with the lines [settings]
+  /// draw on them, over [counts] from [outlookCounts]; null when no prompt
+  /// has been built in this chat yet, so nothing is known of the fixed part.
+  SummaryRunOutlook? outlook({
+    required String charId,
+    required SummaryOutlookCounts counts,
+    required SummaryCompactionSettings settings,
+  }) {
+    if (_ref.read(cachedTokenBreakdownProvider(charId)) == null) return null;
+    final budget = _promptBudget(charId);
     return SummaryRunOutlook.of(
       total: budget.total,
       fixedTokens: budget.fixedTokens,
-      summaryTokens: SummaryChain.liveTokens(blocks, messages),
-      historyTokens: history,
+      summaryTokens: counts.summaryTokens,
+      historyTokens: counts.historyTokens,
       settings: settings,
     );
   }

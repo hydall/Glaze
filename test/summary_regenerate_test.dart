@@ -639,7 +639,7 @@ void main() {
         _generator(
           h.container,
         ).shortenBlock(session: _session(), blockId: 'b1'),
-        _reason('not_shorter'),
+        _reason('not_shortened'),
       );
 
       expect((await _one(h.container, 'b1')).draft, isNull);

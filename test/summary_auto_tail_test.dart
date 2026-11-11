@@ -299,8 +299,18 @@ void main() {
     expect(roomy.triggerTokens, 2325);
     expect(roomy.compactToTokens, 1550);
     expect(roomy.floorTokens, 310);
-    expect(roomy.tailTokens, 950);
+    // The room under the line is 950, but only 900 of history is there.
+    expect(roomy.tailTokens, 900);
     expect(roomy.floorOnly, isFalse);
+
+    final bigHistory = SummaryRunOutlook.of(
+      total: 3100,
+      fixedTokens: 500,
+      summaryTokens: 100,
+      historyTokens: 4000,
+      settings: settings,
+    );
+    expect(bigHistory.tailTokens, 950);
 
     final crowded = SummaryRunOutlook.of(
       total: 3100,

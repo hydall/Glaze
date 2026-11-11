@@ -7,7 +7,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/chat_message.dart';
 import '../../../core/models/preset.dart';
-import '../../../core/models/summary_block.dart';
 import '../../../core/services/memory_prompt_presets.dart'
     show MemoryPromptPreset;
 import '../../../core/services/summary_preamble.dart';
@@ -77,10 +76,12 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
   bool _enabled = true;
   SummaryCompactionSettings _compaction = const SummaryCompactionSettings();
 
-  /// The chain and the chat as the outlook reads them, loaded once with the
-  /// settings; the outlook itself follows the sliders.
-  List<SummaryBlock> _outlookBlocks = const [];
-  List<ChatMessage> _outlookMessages = const [];
+  /// The summary and fresh history as the outlook reads them, counted once
+  /// with the settings; the outlook itself follows the sliders.
+  SummaryOutlookCounts _outlookCounts = const SummaryOutlookCounts(
+    summaryTokens: 0,
+    historyTokens: 0,
+  );
 
   /// Saved prompts, buffered like the rest of the form so the manager sheet
   /// and the picker agree before anything is written.
@@ -162,19 +163,19 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
       )),
     );
     final block = preset?.blocks.where((b) => b.id == 'summary').firstOrNull;
-    final outlookBlocks = await ref
-        .read(summaryServiceProvider)
-        .getBlocks(widget.sessionId);
+    final outlookCounts = await ref
+        .read(summaryGenerationServiceProvider)
+        .outlookCounts(
+          widget.sessionId,
+          ref.read(chatProvider(widget.charId)).value?.session?.messages ??
+              const <ChatMessage>[],
+        );
     if (!mounted) return;
-    final outlookMessages =
-        ref.read(chatProvider(widget.charId)).value?.session?.messages ??
-        const <ChatMessage>[];
 
     setState(() {
       _enabled = enabled;
       _compaction = compaction;
-      _outlookBlocks = outlookBlocks;
-      _outlookMessages = outlookMessages;
+      _outlookCounts = outlookCounts;
       _tailTokens.text = '${compaction.manualTailTokens}';
       _floorTokens.text = '${compaction.autoTailFloorTokens}';
       _ownPrompt = prompt;
@@ -305,8 +306,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
         .read(summaryGenerationServiceProvider)
         .outlook(
           charId: widget.charId,
-          blocks: _outlookBlocks,
-          messages: _outlookMessages,
+          counts: _outlookCounts,
           settings: _compaction,
         );
     if (outlook == null) return 'summary_outlook_none'.tr();

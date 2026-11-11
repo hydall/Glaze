@@ -602,6 +602,7 @@
   "summary_delete_note_hint": "The note will no longer be sent.",
   "summary_error_busy": "The summary is already being compacted.",
   "summary_error_not_shorter": "The summarizer returned text no shorter than its source. Lower the block size or use another model.",
+  "summary_error_not_shortened": "The summarizer did not make the block shorter. Try again, pick another shortening prompt, or use another model.",
   "summary_error_not_adjacent": "Select blocks that follow each other.",
   "summary_error_mixed_levels": "Select blocks of the same level.",
   "summary_error_select_two": "Select at least two blocks.",

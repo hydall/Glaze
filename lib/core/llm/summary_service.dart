@@ -630,7 +630,9 @@ class SummaryService {
         ..writeln('Part ${i + 1}:')
         ..writeln(parts[i].content.trim());
     }
-    final material = buffer.toString();
+    // Measured on the parts' own text: the "Part N:" labels are no part of
+    // what the merged block reads like.
+    final material = [for (final p in parts) p.content.trim()].join('\n\n');
     instructions = SummaryTarget.of(targetTokens, material).apply(instructions);
     return [
       {'role': 'system', 'content': instructions},
