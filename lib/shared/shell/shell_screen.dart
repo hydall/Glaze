@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/guides/guide_service.dart';
+import '../../features/settings/app_settings_provider.dart';
 import '../../features/studio/studio_availability.dart';
 import '../widgets/glass_nav_bar.dart';
 import '../widgets/glass_surface.dart';
@@ -15,6 +16,7 @@ import '../widgets/glaze_toast.dart';
 import 'animated_header_below.dart';
 import 'nav_bar_suppression_provider.dart';
 import 'nav_height_provider.dart';
+import 'phone_landscape.dart';
 import 'shell_header_provider.dart';
 import 'shell_navigation_provider.dart';
 import 'desktop/desktop_layout_provider.dart';
@@ -86,6 +88,11 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
     });
   }
 
+  void _goBranch(int index) => widget.navigationShell.goBranch(
+    index,
+    initialLocation: index == widget.navigationShell.currentIndex,
+  );
+
   @override
   Widget build(BuildContext context) {
     final currentIndex = widget.navigationShell.currentIndex;
@@ -125,10 +132,40 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
     // an editor lives inline inside a sheet rather than on its own route.
     final navSuppressed = ref.watch(navBarSuppressionProvider).isNotEmpty;
     if (navSuppressed) _clearNavHeight();
-    final showNavBar =
+    final inChat = location.startsWith('/chat/');
+    final showTabs =
         !navSuppressed &&
-        !location.startsWith('/chat/') &&
+        !inChat &&
         !hideNavBarRoutes.any((r) => location.startsWith(r));
+    // A phone held sideways moves the tabs to a rail down one side (the right
+    // unless the user picked the left): a bottom bar would take a fifth of the
+    // short side away from the lists.
+    final landscape = isPhoneLandscape(context);
+    final showNavBar = showTabs && !landscape;
+    final showRail = showTabs && landscape;
+    final railLeft = ref.watch(
+      appSettingsProvider.select((s) => s.value?.navRailLeft ?? false),
+    );
+    // Screens pad their bottoms by the bar's height; the rail takes none.
+    if (showRail) _clearNavHeight();
+    final padding = MediaQuery.paddingOf(context);
+    // Sideways, the content keeps clear of both side insets (a notch or camera
+    // cutout sits on one of them) — the rail's side by the rail, which sits
+    // inside its inset, the other by a plain gap — so no screen has to deal
+    // with them itself. The content stops short of the pill, not of the rail's
+    // outer gap: the screens carry their own side padding. The chat is the
+    // exception: its background runs edge to edge and its column keeps clear
+    // of the cutouts on its own (see `ChatColumnWidth`).
+    final insetSides = landscape && !inChat;
+    final railRoom = showRail
+        ? glassNavRailExtent(context, left: railLeft) - kGlassNavRailMargin
+        : 0.0;
+    final contentLeft = showRail && railLeft
+        ? railRoom
+        : (insetSides ? padding.left : 0.0);
+    final contentRight = showRail && !railLeft
+        ? railRoom
+        : (insetSides ? padding.right : 0.0);
     return GlazeBackground(
       child: PopScope(
         canPop: false,
@@ -148,23 +185,44 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
           backgroundColor: Colors.transparent,
           body: Stack(
             children: [
-              Positioned.fill(child: widget.navigationShell),
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: _PersistentHeader(branchIndex: currentIndex),
+              // One shape in both orientations — only the insets change — so a
+              // rotation never remounts the branches and loses their state.
+              Positioned.fill(
+                left: contentLeft,
+                right: contentRight,
+                child: MediaQuery.removePadding(
+                  context: context,
+                  removeLeft: insetSides,
+                  removeRight: insetSides,
+                  child: Stack(
+                    children: [
+                      Positioned.fill(child: widget.navigationShell),
+                      Positioned(
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        child: _PersistentHeader(branchIndex: currentIndex),
+                      ),
+                    ],
+                  ),
+                ),
               ),
+              if (showRail)
+                Positioned(
+                  top: 0,
+                  bottom: 0,
+                  left: railLeft ? 0 : null,
+                  right: railLeft ? null : 0,
+                  child: GlassNavRail(
+                    currentIndex: currentIndex,
+                    onTap: _goBranch,
+                    left: railLeft,
+                  ),
+                ),
             ],
           ),
           bottomNavigationBar: showNavBar
-              ? GlassNavBar(
-                  currentIndex: currentIndex,
-                  onTap: (index) => widget.navigationShell.goBranch(
-                    index,
-                    initialLocation: index == currentIndex,
-                  ),
-                )
+              ? GlassNavBar(currentIndex: currentIndex, onTap: _goBranch)
               : null,
         ),
       ),

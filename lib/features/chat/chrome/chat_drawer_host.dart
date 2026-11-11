@@ -573,6 +573,8 @@ class _ChatDrawerHostState extends ConsumerState<ChatDrawerHost> {
         'done': 'btn_ok'.tr(),
         'delete': 'btn_delete'.tr(),
         'hide': 'composer_action_hide'.tr(),
+        // The side panel's close button (a phone held sideways).
+        'close': 'btn_close'.tr(),
       },
       'effects': !widget.disableEffects,
     });

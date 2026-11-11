@@ -28,6 +28,7 @@ import { createDrag } from './drag.js';
 import { createHeader } from './header.js';
 import { createComposer } from './composer.js';
 import { createDrawer } from './drawer.js';
+import { createStrip } from './strip.js';
 import { compile, sanitizeCss, themeValueEntries } from './template.js';
 
 const KEY_IN = S.randomToken(32);
@@ -151,6 +152,7 @@ S.on(document, 'toggle', (e) => {
 const layers = {
   fades: h('div', '', rootEl),
   drawer: h('div', '', rootEl),
+  strip: h('div', '', rootEl),
   composer: h('div', '', rootEl),
   header: h('div', '', rootEl),
 };
@@ -190,6 +192,15 @@ const DEFAULT_LAYOUT = {
   softKeyboard: false,
   gutter: 0,
   fades: false,
+  // A phone held sideways: the composer is one capsule (field and send).
+  wide: false,
+  // A phone held sideways: where the strip holding the pinned buttons and
+  // the drawer goes ({ side, edge, width }) — see strip.js. Null: none.
+  strip: null,
+  // The left and right safe-area insets (a notch or camera cutout), which
+  // the composer keeps clear of when it fills the screen above the keyboard.
+  safeLeft: 0,
+  safeRight: 0,
   drawer: { show: false, height: 0, progress: 0 },
 };
 
@@ -240,6 +251,7 @@ function inLayer(layer, make) {
   }
 }
 const header = inLayer(layers.header, () => createHeader(ctx));
+ctx.strip = inLayer(layers.strip, () => createStrip(ctx));
 const composer = inLayer(layers.composer, () => createComposer(ctx));
 const drawer = inLayer(layers.drawer, () => createDrawer(ctx, composer));
 ctx.root = rootEl;
@@ -252,6 +264,7 @@ function report() {
   header.report(out);
   composer.report(out);
   drawer.report(out);
+  ctx.strip.report(out);
   composerHeight = out.composerHeight || 0;
   placeFades();
   const key = S.jsonStringify(out);
@@ -417,7 +430,9 @@ function placeBottom() {
   const layout = ctx.layout;
   const bottom = S.mathMax(0, (layout.inset || 0) - ctx.shrink());
   css(composer.root, 'bottom', px(bottom));
+  composer.placeTyping();
   drawer.render();
+  ctx.strip.place(composer.stripVisible());
   placeFades();
 }
 
@@ -427,11 +442,9 @@ function placeFades() {
   S.setAttribute(fadeTop, 'class', on ? 'gc-fade-top' : 'gc-fade-top gc-hidden');
   S.setAttribute(fadeBottom, 'class', on && composerHeight > 0 ? 'gc-fade-bottom' : 'gc-fade-bottom gc-hidden');
   if (!on) return;
+  // Full width, like the background they darken: only the chat column
+  // (messages, header, composer) keeps to the gutter.
   css(fadeTop, 'height', px(layout.safeTop + 20));
-  css(fadeTop, 'left', px(layout.gutter));
-  css(fadeTop, 'right', px(layout.gutter));
-  css(fadeBottom, 'left', px(layout.gutter));
-  css(fadeBottom, 'right', px(layout.gutter));
   const bottom = S.mathMax(0, (layout.inset || 0) - ctx.shrink());
   css(fadeBottom, 'height', px(composerHeight + bottom + 40));
 }
@@ -450,7 +463,10 @@ function applyLayout(l) {
   css(document.documentElement, '--sat', px(layout.safeTop || 0));
   css(document.documentElement, '--sab', px(layout.safeBottom || 0));
   const shallow = prev.safeTop === layout.safeTop && prev.safeBottom === layout.safeBottom &&
-    prev.gutter === layout.gutter && prev.desktop === layout.desktop;
+    prev.gutter === layout.gutter && prev.desktop === layout.desktop &&
+    prev.wide === layout.wide &&
+    prev.safeLeft === layout.safeLeft && prev.safeRight === layout.safeRight &&
+    S.jsonStringify(prev.strip) === S.jsonStringify(layout.strip);
   if (!shallow) {
     header.render();
     composer.render();

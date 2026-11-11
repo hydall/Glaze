@@ -32,6 +32,7 @@ import '../../shared/shell/desktop/desktop_layout_provider.dart'
 import '../../shared/shell/shell_header_provider.dart' show DetachedShellHost;
 import '../../shared/shell/title_bar_header.dart';
 import 'widgets/chat_column_width.dart';
+import 'widgets/chat_strip.dart';
 import 'widgets/chat_header_search.dart';
 import 'widgets/message_actions.dart';
 import 'widgets/message_delete_confirmation.dart';
@@ -1859,7 +1860,17 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
           widget.drawerCtrl.activeDrawerHeight,
           drawerMaxHeight,
         );
-        final targetDrawerInset = drawerActive ? drawerHeight * progress : 0.0;
+        // A phone held sideways opens the drawer in the composer's strip down
+        // the side of the screen: it takes no height from under the composer.
+        final strip = ChatStrip.of(
+          context,
+          railLeft: ref.watch(
+            appSettingsProvider.select((s) => s.value?.navRailLeft ?? false),
+          ),
+        );
+        final targetDrawerInset = drawerActive && strip == null
+            ? drawerHeight * progress
+            : 0.0;
         final panelHeight = math.max(targetDrawerInset, widget.keyboardHeight);
         final factor = math.min(1.0, panelHeight / math.max(1.0, safeBottom));
         final effectiveBottomInset = panelHeight + (safeBottom * (1 - factor));
@@ -1904,7 +1915,9 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
         // didUpdateWidget). While the keyboard rises, the end value is
         // predicted from the persisted last keyboard height; while it
         // lowers, the end value is 0 (or the drawer height when switching).
-        final drawerTargetInset = drawerActive ? drawerHeight : 0.0;
+        final drawerTargetInset = drawerActive && strip == null
+            ? drawerHeight
+            : 0.0;
         final keyboardTargetInset = _keyboardSettled
             ? widget.keyboardHeight
             : (_keyboardRising
@@ -1963,6 +1976,15 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
               (defaultTargetPlatform == TargetPlatform.android ||
                   defaultTargetPlatform == TargetPlatform.iOS),
           'gutter': ChatColumnScope.maybeOf(context)?.gutter ?? 0,
+          // A phone held sideways: the composer is one capsule (field and
+          // send) and its pinned buttons — and the drawer, when open — go to
+          // a strip down the side, to leave the short side to the messages.
+          'wide': strip != null,
+          'strip': strip?.toJson(),
+          // The notch sides: typing sideways, the composer fills the screen
+          // above the keyboard and keeps clear of them.
+          'safeLeft': MediaQuery.paddingOf(context).left,
+          'safeRight': MediaQuery.paddingOf(context).right,
           // The fades under the header and the composer. Dropped on desktop:
           // the flush header is opaque enough on its own, and against the
           // even chat background the two bands only read as darkened edges.

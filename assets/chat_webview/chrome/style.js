@@ -164,6 +164,66 @@ export const CHROME_CSS = `
 .gc-send-wrap { position: relative; margin-left: 8px; flex: none; transition: transform 120ms; pointer-events: auto; }
 .gc-send-wrap.gc-candidate { transform: scale(1.15); }
 .gc-send-wrap > .gc-badge { top: -6px; right: -6px; }
+/* A phone held sideways (layout.wide + layout.strip): height is the scarce
+   side, so the composer is one capsule, 48 tall — the field and the send
+   button (composer.js moves them into .gc-line) — and the pinned buttons go
+   to the strip down the side of the screen. The empty row under the pill
+   goes. */
+.gc-wide > .gc-row { display: none; }
+.gc-line { display: flex; align-items: flex-end; min-width: 0; }
+.gc-line > .gc-input { flex: 1 1 0; min-width: 0; min-height: 48px; padding: 12px 8px 12px 20px; }
+.gc-line > .gc-send-wrap { margin: 4px; }
+/* Typing there (composer.js typing()): the composer fills all the room above
+   the keyboard, edge to edge with square corners, over a scrim that dims the
+   chat. Only the text keeps clear of the status bar and the notch (--gc-st,
+   --gc-sl, --gc-sr). The field takes all of the pill and scrolls; the send
+   button keeps to the bottom corner, next to the keyboard.
+   .gc-full: the frame is up (growing, open or shrinking back); .gc-open: it
+   is fullscreen; .gc-anim: it moves between the two (FULL_MS). */
+.gc-scrim { position: absolute; inset: 0; pointer-events: auto; background: rgba(0,0,0,0.6);
+  -webkit-backdrop-filter: var(--gc-backdrop); backdrop-filter: var(--gc-backdrop);
+  opacity: 0; transition: opacity 260ms; }
+.gc-scrim.gc-on { opacity: 1; }
+.gc-cmp.gc-full { display: flex; flex-direction: column; padding-left: 0; padding-right: 0; }
+.gc-cmp.gc-anim { transition: top 260ms cubic-bezier(0.2, 0, 0, 1), left 260ms cubic-bezier(0.2, 0, 0, 1),
+  right 260ms cubic-bezier(0.2, 0, 0, 1), padding-bottom 260ms cubic-bezier(0.2, 0, 0, 1); }
+.gc-typing { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+.gc-typing > .gc-pill { flex: 1 1 0; min-height: 0; }
+.gc-anim .gc-typing > .gc-pill { transition: border-radius 260ms cubic-bezier(0.2, 0, 0, 1); }
+.gc-open .gc-typing > .gc-pill { --gc-bw: 0px; }
+.gc-typing > .gc-pill > .gc-glass-content { height: 100%; }
+.gc-anim .gc-typing > .gc-pill > .gc-glass-content { transition: padding 260ms cubic-bezier(0.2, 0, 0, 1); }
+.gc-open .gc-typing > .gc-pill > .gc-glass-content { padding: var(--gc-st) var(--gc-sr) 0 var(--gc-sl); }
+.gc-typing .gc-line { flex: 1 1 0; min-height: 0; align-items: stretch; }
+.gc-typing .gc-line > .gc-input { height: auto !important; overflow-y: auto; }
+.gc-anim .gc-typing .gc-line > .gc-input { transition: padding 260ms cubic-bezier(0.2, 0, 0, 1); }
+.gc-open .gc-typing .gc-line > .gc-input { padding: 16px 12px 16px 24px; }
+.gc-typing .gc-line > .gc-send-wrap { align-self: flex-end; }
+.gc-anim .gc-typing .gc-line > .gc-send-wrap { transition: margin 260ms cubic-bezier(0.2, 0, 0, 1); }
+.gc-open .gc-typing .gc-line > .gc-send-wrap { margin: 12px 16px; }
+
+/* ---------- Strip (a phone held sideways) ---------- */
+/* Full height down one side, like the app's tab rail; strip.js places it.
+   Two slots on top of each other: the composer's pins and the drawer,
+   cross-faded by the drawer's progress. */
+.gc-strip { position: absolute; pointer-events: auto; --gc-fill: var(--gc-fill-surface);
+  --gc-bw: var(--gc-ui-bw); --gc-bc: var(--gc-ui-bc); }
+.gc-strip > .gc-glass-content { position: absolute; inset: 0; }
+.gc-strip-slot { position: absolute; inset: 0; transition: none; }
+/* The pins, spread evenly down the strip like the rail's tabs; they scroll
+   when there are more than fit. Plain icons, not glass circles on glass. */
+.gc-strip .gc-pins { position: absolute; inset: 0; padding: 6px 0; overflow-x: hidden; overflow-y: auto;
+  overscroll-behavior-y: contain; }
+.gc-strip .gc-pins.gc-empty { height: auto; }
+.gc-strip .gc-pins-inner { display: flex; flex-direction: column; align-items: stretch;
+  justify-content: space-evenly; gap: 4px; width: 100%; min-height: 100%; }
+/* Bare icons, 28 px (composer.js renderPins), in a full-width target: no
+   glass, no ring, no state circle — a press shrinks the icon (attachPress). */
+.gc-strip .gc-pin { width: 100%; height: 56px; }
+.gc-strip .gc-circle, .gc-strip .gc-circle > .gc-glass-content { width: 100%; height: 56px; }
+.gc-strip .gc-circle { --gc-fill: transparent; --gc-bw: 0px; --gc-backdrop: none; border-radius: 0; overflow: visible; }
+.gc-strip .gc-circle > .gc-noise { display: none !important; }
+.gc-strip .gc-pin > .gc-badge { top: 4px; right: 10px; }
 .gc-send { position: relative; width: 40px; height: 40px; border-radius: 50%; background: var(--gc-accent);
   overflow: hidden; display: block; pointer-events: auto; }
 .gc-send::after { content: ''; position: absolute; inset: 0; border-radius: 50%; background: #000; opacity: 0; transition: opacity 200ms; }
@@ -227,6 +287,44 @@ export const CHROME_CSS = `
 .gc-card-status span.gc-st { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .gc-card.gc-add .gc-card-row > .gc-icon { color: var(--gc-on-60); }
 .gc-card > .gc-badge { top: 2px; right: 0; }
+/* The strip-only parts of the drawer, hidden on an upright phone. */
+.gc-strip-tab, .gc-drw-foot { display: none; }
+/* A phone held sideways: the drawer fills the strip in place of the pins
+   (drawer.js place). Top: one button showing the open tab, a tap switches to
+   the other; then the tools as a column of icon-and-label tiles, like the
+   rail's tabs; bottom: close. */
+.gc-drw.gc-in-strip { position: absolute; inset: 0; background: transparent; border: none;
+  display: flex; flex-direction: column; }
+.gc-drw.gc-in-strip .gc-handle, .gc-drw.gc-in-strip .gc-drw-edge, .gc-drw.gc-in-strip .gc-drw-tint,
+.gc-drw.gc-in-strip .gc-tabs, .gc-drw.gc-in-strip .gc-edit { display: none; }
+.gc-drw.gc-in-strip .gc-drw-head { position: static; order: 0; flex: none; padding: 6px 4px 0 4px; display: block; }
+.gc-drw.gc-in-strip .gc-drw-body { position: relative; inset: auto; order: 1; flex: 1 1 0; min-height: 0;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 10px, #000 calc(100% - 10px), transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 10px, #000 calc(100% - 10px), transparent 100%); }
+.gc-drw.gc-in-strip .gc-drw-tab { scrollbar-width: none; }
+.gc-drw.gc-in-strip .gc-drw-tab::-webkit-scrollbar { display: none; }
+.gc-drw.gc-in-strip .gc-grid { grid-template-columns: minmax(0, 1fr); row-gap: 2px; padding: 8px 4px !important; }
+.gc-drw.gc-in-strip .gc-card { padding: 8px 2px; border: none; background: transparent; border-radius: 14px; }
+.gc-drw.gc-in-strip .gc-card.gc-pressed { background: var(--gc-on-06); }
+.gc-drw.gc-in-strip .gc-card-row { flex-direction: column; }
+.gc-drw.gc-in-strip .gc-card-row > .gc-icon { color: var(--gc-on); }
+.gc-drw.gc-in-strip .gc-card-texts { margin: 4px 0 0 0; align-items: center; width: 100%; }
+.gc-drw.gc-in-strip .gc-card-label { font-size: 10px; font-weight: 500; line-height: 1.15; text-align: center;
+  color: var(--gc-on-55); }
+.gc-drw.gc-in-strip .gc-card-status { display: none; }
+.gc-drw.gc-in-strip .gc-strip-tab { display: flex; flex-direction: column; align-items: center; width: 100%;
+  padding: 8px 2px 6px 2px; border-radius: 14px; color: var(--gc-accent); cursor: pointer;
+  background: var(--gc-accent-08); box-shadow: inset 0 0 0 1px var(--gc-accent-22); }
+.gc-drw.gc-in-strip .gc-strip-tab:active { background: var(--gc-accent-22); }
+.gc-strip-tab-label { margin-top: 3px; font-size: 10px; font-weight: 600; line-height: 1.15; text-align: center;
+  color: var(--gc-on); overflow-wrap: anywhere; }
+.gc-strip-tab-dots { display: flex; gap: 4px; margin-top: 5px; }
+.gc-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--gc-on-25, rgba(255,255,255,0.25)); }
+.gc-dot.gc-on { background: var(--gc-accent); }
+.gc-drw.gc-in-strip .gc-drw-foot { display: flex; order: 2; flex: none; justify-content: center; padding: 2px 0 8px 0; }
+.gc-drw-x { width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  color: var(--gc-on-55); cursor: pointer; }
+.gc-drw-x:active { background: var(--gc-on-06); }
 .gc-drw-loading { position: absolute; inset: 0; background: rgba(0,0,0,0.133); display: flex; align-items: center; justify-content: center; }
 .gc-spinner { width: 28px; height: 28px; border-radius: 50%; border: 3px solid rgba(255,255,255,0.1);
   border-top-color: var(--gc-accent); animation: gc-spin 0.8s linear infinite; }

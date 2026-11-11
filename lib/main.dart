@@ -10,10 +10,10 @@ import 'core/app_runtime.dart';
 import 'core/debug/perf_debug.dart';
 import 'core/diagnostics/app_log.dart';
 import 'core/platform/desktop_window.dart';
+import 'core/platform/screen_orientation.dart';
 import 'core/services/dev_mode_flag_migration.dart';
 import 'core/services/preset_seeder.dart';
 import 'core/services/windows_preferences_migration.dart';
-import 'shared/shell/desktop/desktop_layout_provider.dart';
 
 final appRestartKey = GlobalKey();
 
@@ -78,29 +78,11 @@ Future<void> main() async {
       ),
     );
   }
-  // Phones are locked to portrait; tablets may rotate, and it is the landscape
-  // width that then turns on the desktop layout. No widget exists yet, so read
-  // the first view's physical size and divide by its density to tell the two
-  // apart. An unreadable size keeps the phone lock.
+  // Phones and tablets both rotate. A phone turned sideways keeps the phone
+  // layout in its landscape form (side navigation rail); a tablet turned
+  // sideways gets the desktop layout. See `isDesktopViewportSize`.
   try {
-    final views = WidgetsBinding.instance.platformDispatcher.views;
-    var isTablet = false;
-    if (views.isNotEmpty) {
-      final view = views.first;
-      final dpr = view.devicePixelRatio;
-      if (dpr > 0) {
-        final logical = view.physicalSize / dpr;
-        isTablet = logical.shortestSide >= kTabletShortestSideBreakpoint;
-      }
-    }
-    await SystemChrome.setPreferredOrientations(
-      isTablet
-          ? DeviceOrientation.values
-          : const [
-              DeviceOrientation.portraitUp,
-              DeviceOrientation.portraitDown,
-            ],
-    );
+    await ScreenOrientation.allowAll();
   } catch (error, stackTrace) {
     FlutterError.reportError(
       FlutterErrorDetails(

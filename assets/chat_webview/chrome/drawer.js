@@ -1,5 +1,7 @@
 // The chat drawer on a phone: two tabs (Tools, Actions) of cards in a
-// three-column grid under a tab strip, an edit pencil and a drag handle.
+// three-column grid under a tab strip, an edit pencil and a drag handle — or,
+// on a phone held sideways, a single column of them in the composer's strip
+// (strip.js), under one button that switches the tab, above a close button.
 // Mirrors ChatDrawerPanel + MagicDrawerPanel + QuickRepliesPanel. Flutter
 // owns the cards — what is in each tab, in which order, what a card's status
 // line says and what a tap does; this draws them and reports taps, edits and
@@ -32,7 +34,10 @@ export function createDrawer(ctx, composer) {
   // card and tab, which keep the taps, the drag and the edit badges.
   const skin = { card: null, tab: null };
 
-  const root = h('div', 'gc-drw gc-hidden', ctx.root);
+  // The drawer's own layer; the root moves into the strip and back (place).
+  const home = ctx.root;
+  let inStrip = false;
+  const root = h('div', 'gc-drw gc-hidden', home);
   const body = h('div', 'gc-drw-body', root);
   const panes = [h('div', 'gc-drw-tab', body), h('div', 'gc-drw-tab', body)];
   const grids = [h('div', 'gc-grid', panes[0]), h('div', 'gc-grid', panes[1])];
@@ -49,6 +54,21 @@ export function createDrawer(ctx, composer) {
   const editMark = icon(ICON.edit_outlined, 18, edit);
   attachTooltip(edit, ctx, () => (st.editing ? st.tips.done : st.tips.edit) || '');
   onTap(edit, () => ctx.send('drawerEditToggle'));
+  // In the strip (a phone held sideways; CSS shows these only there): one
+  // button at the top that shows the open tab and switches to the other, and
+  // a close button at the bottom where the pins' column ends.
+  const stripTab = h('button', 'gc-strip-tab', head);
+  const stripTabIcon = h('div', 'gc-strip-tab-icon', stripTab);
+  const stripTabLabel = h('div', 'gc-strip-tab-label', stripTab);
+  const stripTabDots = h('div', 'gc-strip-tab-dots', stripTab);
+  onTap(stripTab, () => {
+    if (st.tabs.length > 1) selectTab((st.tab + 1) % st.tabs.length);
+  });
+  const foot = h('div', 'gc-drw-foot', root);
+  const close = h('button', 'gc-drw-x', foot);
+  icon(ICON.close, 20, close);
+  attachTooltip(close, ctx, () => st.tips.close || '');
+  onTap(close, () => ctx.send('drawerClose'));
 
   // The handle is above the header so its vertical swipe wins where the two
   // overlap; it lets taps through to the tabs (pointer events only, no click
@@ -136,6 +156,16 @@ export function createDrawer(ctx, composer) {
         onTap(tab, () => selectTab(i));
       }
     }
+    const current = st.tabs[st.tab];
+    clear(stripTabIcon);
+    if (current) icon(current.icon, 22, stripTabIcon);
+    text(stripTabLabel, current ? current.label || '' : '');
+    // Two dots under the label, the open tab's lit: there is another tab
+    // behind this button.
+    clear(stripTabDots);
+    for (let i = 0; i < st.tabs.length; i++) {
+      h('span', i === st.tab ? 'gc-dot gc-on' : 'gc-dot', stripTabDots);
+    }
     for (let i = 0; i < panes.length; i++) {
       const active = i === st.tab;
       css(panes[i], 'visibility', active ? 'visible' : 'hidden');
@@ -219,7 +249,9 @@ export function createDrawer(ctx, composer) {
       ctx.drag.source(el, {
         payload: () => item.key,
         longPress: true,
-        enabled: () => true,
+        // Rearranging needs the pins row to drop onto, which the strip
+        // swaps out while the drawer is open: upright only.
+        enabled: () => !inStrip,
         start: () => {
           unpress();
           setClass(panes[st.tab], 'gc-drw-tab gc-dragging');
@@ -326,12 +358,43 @@ export function createDrawer(ctx, composer) {
     }
   }
 
+  function rootClass(visible) {
+    return classes(visible ? 'gc-drw' : 'gc-drw gc-hidden', {
+      'g-skinned': !!(skin.card || skin.tab),
+      'gc-in-strip': inStrip,
+    });
+  }
+
+  /**
+   * A phone held sideways: the drawer lives in the strip down the side of the
+   * screen (strip.js), in place of the composer's pins, which the strip
+   * cross-fades it with — a column of tools under one tab-switching button,
+   * instead of a sheet as tall as the keyboard that would leave the messages
+   * no room at all. Moves the root between the strip and its own layer.
+   */
+  function place(on) {
+    if (on === inStrip) return;
+    inStrip = on;
+    S.appendChild(on ? ctx.strip.drawer : home, root);
+    const props = ['left', 'right', 'top', 'bottom', 'height'];
+    for (let i = 0; i < props.length; i++) css(root, props[i], '');
+  }
+
   function render() {
     const layout = ctx.layout;
     const d = layout.drawer || {};
+    place(!!layout.strip && composer.stripVisible());
     const visible = st.show && d.show;
-    setClass(root, classes(visible ? 'gc-drw' : 'gc-drw gc-hidden', { 'g-skinned': !!(skin.card || skin.tab) }));
+    setClass(root, rootClass(visible));
     if (!visible) return;
+    if (inStrip) {
+      ctx.drag.whenIdle(() => {
+        renderTabs();
+        renderTools();
+        renderActions();
+      });
+      return;
+    }
     // The height comes from the last keyboard, which can be taller than the
     // page (some Android keyboards report the full window). Let the drawer
     // outgrow the viewport and its own header, tabs and cards end up above the
@@ -370,7 +433,8 @@ export function createDrawer(ctx, composer) {
     setSkin(card, tab) {
       skin.card = card && !card.empty ? card : null;
       skin.tab = tab && !tab.empty ? tab : null;
-      setClass(root, classes(st.show && (ctx.layout.drawer || {}).show ? 'gc-drw' : 'gc-drw gc-hidden', { 'g-skinned': !!(skin.card || skin.tab) }));
+      const d = ctx.layout.drawer || {};
+      setClass(root, rootClass(st.show && d.show));
       keys[0] = '';
       keys[1] = '';
       tabsKey = '';

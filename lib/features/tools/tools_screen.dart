@@ -15,6 +15,7 @@ import '../../shared/shell/desktop/sidebar_sheet_provider.dart';
 import '../../shared/shell/desktop/sidebar_tool_panels.dart';
 import '../../shared/shell/nav_height_provider.dart';
 import '../../shared/shell/nav_retap_provider.dart';
+import '../../shared/shell/phone_landscape.dart';
 import '../../shared/shell/shell_header_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glass_surface.dart';
@@ -207,6 +208,28 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
 
   ToolsTileSize _sizeFor(ToolsTileDef def) => _sizes[def.id] ?? def.defaultSize;
 
+  /// Whether the last build laid the grid out for a phone held sideways (see
+  /// [_buildRows]).
+  bool _landscape = false;
+
+  /// Columns of the grid: two on an upright phone, four sideways, where two
+  /// would make every tile as wide as half the screen and the persona square
+  /// taller than the screen itself.
+  int get _columns => _landscape ? 4 : 2;
+
+  /// Tile height sideways: one height for every tile, so the rows of a
+  /// four-column grid line up whatever sizes they mix.
+  static const double _kLandscapeTileHeight = 128;
+
+  /// The size [def] is drawn at. Sideways the square has no room, so it is
+  /// drawn as wide; the stored size is untouched and comes back upright.
+  ToolsTileSize _displaySizeFor(ToolsTileDef def) {
+    final size = _sizeFor(def);
+    return _landscape && size == ToolsTileSize.large
+        ? ToolsTileSize.wide
+        : size;
+  }
+
   List<ToolsTileDef> _visibleTiles() =>
       _itemIds.map(_defFor).whereType<ToolsTileDef>().toList();
 
@@ -378,6 +401,7 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
     }
 
     final tiles = _visibleTiles();
+    _landscape = !widget.inSidebar && isPhoneLandscape(context);
 
     final list = ListView(
       controller: _scrollController,
@@ -450,8 +474,10 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
     );
   }
 
-  /// Packs the visible tiles into rows: small tiles pair up two-per-row, wide
-  /// and large tiles each take a full row at their own height.
+  /// Packs the visible tiles into rows of [_columns] columns, in order: a small
+  /// tile spans one column, a wide or large one two. A tile that does not fit
+  /// in what is left of a row starts the next one. On an upright phone that is
+  /// small tiles pairing up and every wide or large tile on a row of its own.
   List<Widget> _buildRows(
     BuildContext context,
     List<ToolsTileDef> tiles,
@@ -461,7 +487,10 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
     ImageProvider? presetImage,
   ) {
     final rows = <Widget>[];
-    final pendingSmall = <ToolsTileDef>[];
+    final pending = <ToolsTileDef>[];
+    var pendingSpan = 0;
+    int spanOf(ToolsTileDef def) =>
+        _displaySizeFor(def) == ToolsTileSize.small ? 1 : 2;
 
     Widget tileFor(ToolsTileDef def) => GuideAnchor(
       id: GuideIds.toolsTile(def.id),
@@ -475,36 +504,49 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
       ),
     );
 
-    void flushSmallRow() {
-      if (pendingSmall.isEmpty) return;
+    void flushRow() {
+      if (pending.isEmpty) return;
       if (rows.isNotEmpty) rows.add(const SizedBox(height: 10));
-      final first = pendingSmall.removeAt(0);
-      final second = pendingSmall.isNotEmpty ? pendingSmall.removeAt(0) : null;
+      final row = [
+        for (final def in pending) (span: spanOf(def), tile: tileFor(def)),
+      ];
+      final columns = _columns;
       rows.add(
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(child: tileFor(first)),
-            const SizedBox(width: 10),
-            Expanded(
-              child: second != null ? tileFor(second) : const SizedBox(),
-            ),
-          ],
+        LayoutBuilder(
+          builder: (context, constraints) {
+            // Sized from one column width, so a two-column tile spans exactly
+            // two columns and the gutter between them, and every row's edges
+            // line up. A short row keeps its tiles at that width rather than
+            // stretching them across the gap.
+            const gap = 10.0;
+            final column =
+                (constraints.maxWidth - gap * (columns - 1)) / columns;
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              spacing: gap,
+              children: [
+                for (final item in row)
+                  SizedBox(
+                    width: column * item.span + gap * (item.span - 1),
+                    child: item.tile,
+                  ),
+              ],
+            );
+          },
         ),
       );
+      pending.clear();
+      pendingSpan = 0;
     }
 
     for (final def in tiles) {
-      if (_sizeFor(def) == ToolsTileSize.small) {
-        pendingSmall.add(def);
-        if (pendingSmall.length == 2) flushSmallRow();
-      } else {
-        flushSmallRow();
-        if (rows.isNotEmpty) rows.add(const SizedBox(height: 10));
-        rows.add(tileFor(def));
-      }
+      final span = spanOf(def);
+      if (pendingSpan + span > _columns) flushRow();
+      pending.add(def);
+      pendingSpan += span;
+      if (pendingSpan == _columns) flushRow();
     }
-    flushSmallRow();
+    flushRow();
 
     if (_editing && _canAdd()) {
       if (rows.isNotEmpty) rows.add(const SizedBox(height: 10));
@@ -522,7 +564,7 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
     String presetName,
     ImageProvider? presetImage,
   ) {
-    final size = _sizeFor(def);
+    final size = _displaySizeFor(def);
     final subtitle = _subtitleFor(def, personaInfo, presetName);
     final artwork = _artworkFor(def, resolvedAvatar, presetImage);
 
@@ -534,6 +576,7 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
     }) => _ToolTile(
       def: def,
       size: tileSize,
+      height: _landscape ? _kLandscapeTileHeight : null,
       subtitle: subtitle,
       artwork: artwork,
       editing: editing,
@@ -638,6 +681,10 @@ class _HeaderEditToggle extends StatelessWidget {
 class _ToolTile extends StatelessWidget {
   final ToolsTileDef def;
   final ToolsTileSize size;
+
+  /// Height to draw at instead of [size]'s own; the landscape grid gives
+  /// every tile one height.
+  final double? height;
   final String subtitle;
   final ImageProvider? artwork;
   final bool editing;
@@ -653,6 +700,7 @@ class _ToolTile extends StatelessWidget {
   const _ToolTile({
     required this.def,
     required this.size,
+    this.height,
     required this.subtitle,
     this.artwork,
     this.editing = false,
@@ -709,6 +757,8 @@ class _ToolTile extends StatelessWidget {
   }
 
   Widget _sized(Widget child) {
+    final override = height;
+    if (override != null) return SizedBox(height: override, child: child);
     if (size.isSquare) return AspectRatio(aspectRatio: 1, child: child);
     return SizedBox(height: size.height, child: child);
   }
