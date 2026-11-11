@@ -1189,6 +1189,8 @@
   "settings_group_advanced": "Advanced",
   "menu_show_help_tips": "Show Tooltips",
   "desc_show_help_tips": "Shows the contextual help (?) buttons across the app",
+  "menu_nav_rail_left": "Tabs on the Left in Landscape",
+  "desc_nav_rail_left": "With the phone turned sideways, shows the tab bar along the left edge instead of the right",
   "menu_show_msg_id": "Show Message ID",
   "desc_show_msg_id": "Shows the unique message identifier under each message",
   "menu_show_gen_time": "Show Generation Time",

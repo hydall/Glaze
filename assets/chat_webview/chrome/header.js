@@ -186,9 +186,13 @@ export function createHeader(ctx) {
     setClass(slot, classes('gc-hdr-slot', { 'gc-hidden': !state.show, 'g-skinned': skin.active }));
     if (!state.show) return;
     const top = state.flush ? layout.safeTop : layout.safeTop + 10;
+    // The floating bar keeps to the chat column, like the composer under it:
+    // on a phone held sideways that column is narrowed clear of the notch.
+    // The flush desktop bar spans the window.
+    const side = px(16 + (layout.gutter || 0));
     css(slot, 'padding', state.flush
       ? `${px(top)} 0 0 0`
-      : `${px(top)} 16px 0 16px`);
+      : `${px(top)} ${side} 0 ${side}`);
     // Hide-on-scroll slides the bar up by one and a half times the header's
     // whole slot (status bar included) while it fades. Animated on the bar
     // itself: an ancestor going translucent would cut the glass off from the

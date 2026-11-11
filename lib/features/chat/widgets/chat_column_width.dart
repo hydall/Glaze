@@ -2,9 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/shell/desktop/desktop_layout_provider.dart';
+import '../../../shared/shell/phone_landscape.dart';
+import 'chat_strip.dart';
 import '../../settings/app_settings_provider.dart';
 
 /// Caps the chat column's width on desktop and lets it be dragged by its edges.
+/// On a phone held sideways it caps the column too, to a fixed readable width
+/// clear of the screen's cutouts, without the grips.
 ///
 /// Vue drove this with `--chat-max-width` plus two absolutely-positioned
 /// `.sidebar-drag-handle` elements at the column's edges (ChatView.vue) — the
@@ -67,17 +71,50 @@ class _ChatColumnWidthState extends ConsumerState<ChatColumnWidth> {
     final configured =
         ref.watch(appSettingsProvider.select((s) => s.value?.chatMaxWidth)) ??
         0;
-    final width = _dragWidth ?? configured;
-    final enabled = isDesktopLayout(context) && width > 0;
+    final desktop = isDesktopLayout(context);
+    final phoneLandscape = isPhoneLandscape(context);
+    final padding = MediaQuery.paddingOf(context);
+    // A phone held sideways has a notch or camera cutout on one side and the
+    // composer's strip down one side (the tab rail's); the column stays clear
+    // of the deeper of them on both sides, so the messages stay centred.
+    final strip = ChatStrip.of(
+      context,
+      railLeft: ref.watch(
+        appSettingsProvider.select((s) => s.value?.navRailLeft ?? false),
+      ),
+    );
+    final sideInset = phoneLandscape
+        ? [
+            padding.left,
+            padding.right,
+            strip?.reserve ?? 0.0,
+          ].reduce((a, b) => a > b ? a : b)
+        : 0.0;
 
     // One shape whether or not the column is capped, so crossing the limit
-    // (a window resize, the setting) never remounts the chat and its WebView.
+    // (a window resize, the setting, a rotation) never remounts the chat and
+    // its WebView.
     return LayoutBuilder(
       builder: (context, constraints) {
+        final double width;
+        final bool enabled;
+        if (phoneLandscape) {
+          // Not draggable on a phone: the column is whatever reads well and
+          // clears the cutouts.
+          final room = constraints.maxWidth - sideInset * 2;
+          width = room < kPhoneLandscapeChatMaxWidth
+              ? room
+              : kPhoneLandscapeChatMaxWidth;
+          enabled = width > 0;
+        } else {
+          width = _dragWidth ?? configured;
+          enabled = desktop && width > 0;
+        }
         // Nothing to cap — and nothing to drag — when the column is already
         // narrower than the limit.
         final capped = enabled && constraints.maxWidth > width;
         final gutter = capped ? (constraints.maxWidth - width) / 2 : 0.0;
+        final draggable = capped && desktop;
         return Stack(
           children: [
             Positioned.fill(
@@ -87,7 +124,7 @@ class _ChatColumnWidthState extends ConsumerState<ChatColumnWidth> {
                 child: widget.child,
               ),
             ),
-            if (capped) ...[
+            if (draggable) ...[
               _Grip(
                 left: gutter - ChatColumnWidth.handleWidth / 2,
                 onStart: () => _begin(width),

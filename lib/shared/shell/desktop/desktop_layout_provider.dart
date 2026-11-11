@@ -78,18 +78,23 @@ bool get _isTouchPlatform =>
 /// Whether a viewport of [size] should use the desktop layout, ignoring the
 /// "force mobile layout" setting.
 ///
-/// True for any window wider than [kDesktopWidthBreakpoint] — except a
-/// tablet-sized touch screen held in portrait: the three-column layout is a
-/// landscape arrangement, so those stay on the phone layout when upright and
-/// switch to desktop once rotated. Desktop windows are exempt, so a tall window
-/// on a portrait monitor is still a desktop.
+/// True for any window wider than [kDesktopWidthBreakpoint] — except on a touch
+/// screen that is either a phone or a tablet held in portrait:
+///
+/// * A phone turned sideways is often wider than the breakpoint (a 915x412
+///   landscape screen), but far too short for three columns of desktop chrome.
+///   It keeps the phone layout in its landscape form instead — see
+///   `isPhoneLandscape`.
+/// * The three-column layout is a landscape arrangement, so a tablet stays on
+///   the phone layout when upright and switches to desktop once rotated.
+///
+/// Desktop windows are exempt, so a tall window on a portrait monitor is still
+/// a desktop.
 bool isDesktopViewportSize(Size size) {
   if (size.width < kDesktopWidthBreakpoint) return false;
-  final portraitTablet =
-      _isTouchPlatform &&
-      size.shortestSide >= kTabletShortestSideBreakpoint &&
-      size.height > size.width;
-  return !portraitTablet;
+  if (!_isTouchPlatform) return true;
+  final tablet = size.shortestSide >= kTabletShortestSideBreakpoint;
+  return tablet && size.width >= size.height;
 }
 
 /// Whether the *window* is desktop-shaped, ignoring the "force mobile layout"

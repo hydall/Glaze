@@ -12,6 +12,7 @@ import 'package:glaze_flutter/shared/shell/desktop/desktop_window_view.dart';
 import 'package:glaze_flutter/shared/shell/desktop/sidebar_resizer.dart';
 import 'package:glaze_flutter/shared/shell/desktop/sidebar_sheet_provider.dart';
 import 'package:glaze_flutter/shared/shell/desktop/sidebar_tool_panels.dart';
+import 'package:glaze_flutter/shared/shell/phone_landscape.dart';
 import 'package:glaze_flutter/shared/shell/shell_header_provider.dart';
 import 'package:glaze_flutter/shared/widgets/responsive_grid.dart';
 
@@ -112,6 +113,19 @@ void main() {
         ),
         isFalse,
       );
+    });
+
+    testWidgets('a phone turned sideways keeps the phone layout', (
+      tester,
+    ) async {
+      // 915x412 is past the width breakpoint, but a phone is far too short
+      // for the desktop layout; it gets the phone layout's landscape form.
+      expect(await reportsDesktop(tester, const Size(915, 412)), isFalse);
+      expect(await reportsDesktop(tester, const Size(780, 360)), isFalse);
+      expect(isPhoneLandscapeSize(const Size(915, 412)), isTrue);
+      // Upright phones and landscape tablets are not "phone landscape".
+      expect(isPhoneLandscapeSize(const Size(412, 915)), isFalse);
+      expect(isPhoneLandscapeSize(const Size(1280, 800)), isFalse);
     });
 
     testWidgets('desktop windows keep the width rule in portrait', (

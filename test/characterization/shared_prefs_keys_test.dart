@@ -24,6 +24,7 @@ void main() {
       'virtualKeyboardSend': bool,
       'showOurPicks': bool,
       'gz_force_mobile_layout': bool,
+      'gz_nav_rail_left': bool,
       'gz_chat_max_width': double,
       'addBlockAtTop': bool,
       'openCardAfterImport': bool,
@@ -245,6 +246,7 @@ void main() {
         'virtualKeyboardSend',
         'showOurPicks',
         'gz_force_mobile_layout',
+        'gz_nav_rail_left',
         'addBlockAtTop',
         'activeApiConfigId',
         'activeEmbeddingConfigId',
@@ -326,6 +328,8 @@ bool _getBoolDefault(AppSettings s, String key) {
       return s.showOurPicks;
     case 'gz_force_mobile_layout':
       return s.forceMobileLayout;
+    case 'gz_nav_rail_left':
+      return s.navRailLeft;
     case 'addBlockAtTop':
       return s.addBlockAtTop;
     case 'openCardAfterImport':

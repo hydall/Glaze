@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/platform/haptics.dart';
+import '../../../core/platform/screen_orientation.dart';
 import '../../../core/platform/system_settings.dart';
 import '../../../shared/shell/desktop/desktop_floating_provider.dart';
 import '../../catalog/widgets/third_party_providers_screen.dart';
@@ -94,6 +95,24 @@ List<MenuSearchEntry> buildSettingsSearchIndex() {
       const ['tooltips', 'hints', 'подсказки'],
       groupKey: 'settings_group_appearance',
     ),
+    if (ScreenOrientation.isConfigurable)
+      row(
+        'nav_rail_left',
+        'menu_nav_rail_left',
+        'desc_nav_rail_left',
+        Icons.border_left_rounded,
+        const [
+          'tabs',
+          'navigation',
+          'landscape',
+          'left-handed',
+          'вкладки',
+          'навигация',
+          'альбомная',
+          'левша',
+        ],
+        groupKey: 'settings_group_appearance',
+      ),
     // ── Chat ────────────────────────────────────────────────────────────────
     row(
       'dialog_grouping',

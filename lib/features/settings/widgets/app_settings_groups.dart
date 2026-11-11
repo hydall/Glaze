@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/shell/desktop/desktop_floating_provider.dart';
+import '../../../core/platform/screen_orientation.dart';
 import '../../../core/platform/system_settings.dart';
 import '../../../shared/shell/desktop/desktop_layout_provider.dart';
 import '../../../shared/theme/app_colors.dart';
@@ -120,6 +121,16 @@ class _AppearanceGroup extends SettingsGroup {
           onChanged: (v) =>
               notifierOf(ref).save(settings.copyWith(hideTooltips: !v)),
         ),
+        // Only where the screen turns: a desktop window has no rail.
+        if (ScreenOrientation.isConfigurable)
+          toggle(
+            id: 'nav_rail_left',
+            label: 'menu_nav_rail_left'.tr(),
+            description: 'desc_nav_rail_left'.tr(),
+            value: settings.navRailLeft,
+            onChanged: (v) =>
+                notifierOf(ref).save(settings.copyWith(navRailLeft: v)),
+          ),
       ],
     );
   }

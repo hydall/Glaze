@@ -180,6 +180,11 @@ abstract class AppSettings with _$AppSettings {
     /// phone layout. This switch forces the phone layout back on for users who
     /// prefer it.
     @Default(false) bool forceMobileLayout,
+
+    /// Puts the tab rail of a phone held sideways along the left edge instead
+    /// of the right. Right by default: that is where the thumb of the hand
+    /// holding the phone rests for most people.
+    @Default(false) bool navRailLeft,
     @Default(false) bool addBlockAtTop,
     @Default(true) bool openCardAfterImport,
     @Default(true) bool hapticFeedback,
@@ -256,6 +261,7 @@ abstract final class AppSettingsPreferences {
     'virtualKeyboardSend',
     'showOurPicks',
     'gz_force_mobile_layout',
+    'gz_nav_rail_left',
     'gz_chat_max_width',
     'addBlockAtTop',
     'openCardAfterImport',
@@ -314,6 +320,8 @@ abstract final class AppSettingsPreferences {
       forceMobileLayout:
           _coerceBool(prefs.get('gz_force_mobile_layout')) ??
           defaults.forceMobileLayout,
+      navRailLeft:
+          _coerceBool(prefs.get('gz_nav_rail_left')) ?? defaults.navRailLeft,
       chatMaxWidth:
           _coerceDouble(prefs.get('gz_chat_max_width')) ??
           defaults.chatMaxWidth,
@@ -372,6 +380,7 @@ abstract final class AppSettingsPreferences {
       'virtualKeyboardSend': normalized.virtualKeyboardSend,
       'showOurPicks': normalized.showOurPicks,
       'gz_force_mobile_layout': normalized.forceMobileLayout,
+      'gz_nav_rail_left': normalized.navRailLeft,
       'gz_chat_max_width': normalized.chatMaxWidth,
       'addBlockAtTop': normalized.addBlockAtTop,
       'openCardAfterImport': normalized.openCardAfterImport,
@@ -489,6 +498,7 @@ abstract final class AppSettingsPreferences {
     virtualKeyboardSend: values['virtualKeyboardSend'] as bool,
     showOurPicks: values['showOurPicks'] as bool,
     forceMobileLayout: values['gz_force_mobile_layout'] as bool,
+    navRailLeft: values['gz_nav_rail_left'] as bool,
     chatMaxWidth: values['gz_chat_max_width'] as double,
     addBlockAtTop: values['addBlockAtTop'] as bool,
     openCardAfterImport: values['openCardAfterImport'] as bool,

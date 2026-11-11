@@ -19,6 +19,9 @@ import {
 import { createSkin } from './skin.js';
 
 const DISMISS_DRAG_PX = 28;
+// How long the field takes to grow to fullscreen above the keyboard, or to
+// shrink back to the capsule; matches .gc-anim in style.js.
+const FULL_MS = 260;
 
 export function createComposer(ctx) {
   const st = {
@@ -49,6 +52,15 @@ export function createComposer(ctx) {
   let lineHeight = 0;
   let guideLineHeight = 0;
 
+  // A phone held sideways with the keyboard up leaves a band too short to
+  // type in beside the messages: the composer then takes all of it (see
+  // typing()), over a scrim that dims the chat. Tapping the scrim puts the
+  // keyboard away.
+  const scrim = h('div', 'gc-scrim gc-hidden', ctx.root);
+  onTap(scrim, () => {
+    S.blurRaw(input);
+    S.blurRaw(guideInput);
+  });
   const root = h('div', 'gc-cmp gc-hidden tavo-composer', ctx.root);
 
   /* ---- Compose ---- */
@@ -93,6 +105,38 @@ export function createComposer(ctx) {
   const pins = h('div', 'gc-pins', row);
   const pinsInner = h('div', 'gc-pins-inner', pins);
   const sendWrap = h('div', 'gc-send-wrap', row);
+
+  // A phone held sideways: the pinned buttons move to the strip down the side
+  // of the screen (strip.js), and the field and the send button share one
+  // line in the pill, one capsule tall. The same nodes move, so their taps,
+  // drag targets and reports carry over.
+  const line = h('div', 'gc-line gc-hidden', pill.content);
+  let wide = false;
+  // Whether the composer fills the screen above the keyboard right now
+  // (typing()), and its height from just before: what the message list keeps
+  // clear of, so the list doesn't jump under the scrim and back.
+  // `full` is what typing() last asked for; `shown` stays true while the
+  // field shrinks back after it (placeFull()).
+  let full = false;
+  let shown = false;
+  let leaveTimer = 0;
+  let restHeight = 0;
+  let pillHeight = 0;
+  function arrange(on) {
+    if (on === wide) return;
+    wide = on;
+    if (on) {
+      S.appendChild(ctx.strip.pins, pins);
+      S.appendChild(line, input);
+      S.appendChild(line, sendWrap);
+      setClass(line, 'gc-line');
+    } else {
+      S.appendChild(pill.content, input);
+      S.appendChild(row, pins);
+      S.appendChild(row, sendWrap);
+      setClass(line, 'gc-line gc-hidden');
+    }
+  }
   const sendBtn = h('button', 'gc-send tavo-composer-send-icon', sendWrap);
   let sendGlyph = null;
   let sendGlyphKey = null;
@@ -209,7 +253,14 @@ export function createComposer(ctx) {
   }
 
   function growAll() {
-    grow(input, lineHeight, 5, 24, 56);
+    // Sideways the screen is short: the capsule is 48 tall and the field
+    // grows to three lines rather than five — or, while typing there, fills
+    // all the room above the keyboard and scrolls.
+    if (shown) {
+      css(input, 'height', '');
+      css(input, 'overflow-y', 'auto');
+    } else if (wide) grow(input, lineHeight, 3, 24, 48);
+    else grow(input, lineHeight, 5, 24, 56);
     if (st.guidance) grow(guideInput, guideLineHeight, 3, 16, 0);
     ctx.scheduleReport();
   }
@@ -254,6 +305,17 @@ export function createComposer(ctx) {
     ctx.send('focus', { f: true });
   });
   S.on(input, 'blur', () => ctx.send('focus', { f: false }));
+  // Which field has the caret, for typing(): only the composer's own fields
+  // take it fullscreen, not the header's search box.
+  let focused = false;
+  function focusChanged(on) {
+    focused = on;
+    if (typing() !== full) render();
+  }
+  S.on(input, 'focus', () => focusChanged(true));
+  S.on(input, 'blur', () => focusChanged(false));
+  S.on(guideInput, 'focus', () => focusChanged(true));
+  S.on(guideInput, 'blur', () => focusChanged(false));
 
   function wantsNewline() {
     // Enter-to-send is for physical keyboards: while the soft keyboard is up
@@ -377,10 +439,10 @@ export function createComposer(ctx) {
     }
   }
 
-  function circle(parent, spec, color, enabled, onPress) {
+  function circle(parent, spec, color, enabled, onPress, size = 20) {
     const surface = glass('gc-circle', parent);
     css(surface.el, 'border-radius', px(20 * ctx.theme.cornerScale));
-    const mark = icon(spec, 20, surface.content);
+    const mark = icon(spec, size, surface.content);
     css(mark, 'color', color);
     applyNoise(surface, ctx.theme, 40, 40);
     attachPress(surface.el, ctx, enabled);
@@ -394,7 +456,7 @@ export function createComposer(ctx) {
   }
 
   function renderPins() {
-    const key = S.jsonStringify([st.pins, st.editing, ctx.themeKey]);
+    const key = S.jsonStringify([st.pins, st.editing, ctx.themeKey, wide]);
     if (key === st.pinsKey) return;
     if (ctx.drag.active) {
       ctx.drag.whenIdle(renderPins);
@@ -424,7 +486,9 @@ export function createComposer(ctx) {
       const surface = circle(cell, pin.icon, pinColor(pin), () => !st.editing && !!pin.tap, () => {
         if (pin.insert) insertSurround(pin.insert);
         ctx.send('pinTap', { key: pin.key });
-      });
+      // In the strip (a phone held sideways) the pins are bare icons, larger,
+      // the way the tab rail's are.
+      }, wide ? 28 : 20);
       if (st.editing && !pin.permanent) {
         const badge = h('button', 'gc-badge', cell);
         css(badge, 'width', '18px');
@@ -558,22 +622,139 @@ export function createComposer(ctx) {
 
   let barKey = '';
 
+  /**
+   * Typing on a phone held sideways: the capsule layout, the soft keyboard up
+   * and the caret in the composer's own field. The composer then fills the
+   * room above the keyboard, without the header or the strip.
+   */
+  function typing() {
+    const l = ctx.layout;
+    const barMode = st.mode === 'search' || st.mode === 'selection';
+    return wide && st.show && !barMode && !st.locked && focused &&
+      !!l.softKeyboard && (l.keyboard || 0) > 0;
+  }
+
+  /**
+   * Whether the pins are in the strip and it should show now. The strip
+   * stays put while typing fullscreen: the field grows over it.
+   */
+  function stripVisible() {
+    const barMode = st.mode === 'search' || st.mode === 'selection';
+    return wide && st.show && !barMode;
+  }
+
+  /** The frame's box: top, left and right edges, and the room under the pill. */
+  function frame(top, left, right, under) {
+    css(root, 'top', px(top));
+    css(root, 'left', px(left));
+    css(root, 'right', px(right));
+    css(root, 'padding-bottom', px(under));
+  }
+
+  /**
+   * Shows or fades out the header while the field is fullscreen. It paints
+   * over the composer, so it is gone well before the growing field reaches
+   * it, and comes back as the field shrinks away.
+   */
+  function hideHeader(on) {
+    const el = ctx.layers.header;
+    const out = S.mathRound(FULL_MS * 0.4);
+    css(el, 'transition', on ? `opacity ${out}ms, visibility 0s ${out}ms` : `opacity ${FULL_MS}ms`);
+    css(el, 'opacity', on ? '0' : '');
+    css(el, 'visibility', on ? 'hidden' : '');
+  }
+
+  /**
+   * Enters or leaves the fullscreen field. The pill grows from where the
+   * capsule is to the whole room above the keyboard, and on the way out
+   * shrinks back to where the capsule will be, while the keyboard moves the
+   * bottom edge; only then does the composer return to the capsule.
+   */
+  function placeFull(on) {
+    const layout = ctx.layout;
+    const box = S.getBoundingClientRect(ctx.root);
+    if (on) {
+      S.clearTimer(leaveTimer);
+      leaveTimer = 0;
+      if (!shown) {
+        // Start the frame exactly on the capsule, without a transition.
+        const p = S.getBoundingClientRect(pill.el);
+        restHeight = S.getBoundingClientRect(root).height;
+        pillHeight = p.height;
+        shown = true;
+        setClass(root, 'gc-cmp gc-full');
+        setClass(scrim, 'gc-scrim');
+        frame(p.top, p.left, box.width - p.right, box.bottom - p.bottom - placedBottom());
+        // Settle the start styles, so what follows transitions from them.
+        S.getBoundingClientRect(root);
+        S.getBoundingClientRect(scrim);
+      }
+      full = true;
+      setClass(root, 'gc-cmp gc-full gc-anim gc-open');
+      setClass(scrim, 'gc-scrim gc-on');
+      hideHeader(true);
+      frame(0, 0, 0, 0);
+      return;
+    }
+    if (!shown) {
+      full = false;
+      css(root, 'top', '');
+      css(root, 'left', px(layout.gutter));
+      css(root, 'right', px(layout.gutter));
+      return;
+    }
+    if (full) {
+      // Back to where the capsule will sit once the keyboard is down.
+      full = false;
+      setClass(root, 'gc-cmp gc-full gc-anim');
+      setClass(scrim, 'gc-scrim');
+      hideHeader(false);
+      const height = layout.viewportH || box.height;
+      const under = 16;
+      frame(height - (layout.safeBottom || 0) - under - pillHeight, layout.gutter + 16, layout.gutter + 16, under);
+      leaveTimer = S.setTimer(() => {
+        leaveTimer = 0;
+        shown = false;
+        setClass(scrim, 'gc-scrim gc-hidden');
+        render();
+      }, FULL_MS);
+    }
+  }
+
+  /** The composer's bottom edge above the screen's, as placeBottom() set it. */
+  function placedBottom() {
+    return S.mathMax(0, (ctx.layout.inset || 0) - ctx.shrink());
+  }
+
   function render() {
     const theme = ctx.theme;
     const layout = ctx.layout;
-    setClass(root, st.show ? 'gc-cmp' : 'gc-cmp gc-hidden');
+    // Pins in the strip and one capsule on a phone held sideways — unless a
+    // theme lays the composer out itself.
+    const capsule = !!layout.wide && !!layout.strip && !skin.active;
+    arrange(capsule);
+    // The safe area the fullscreen field pads its text by.
+    css(root, '--gc-st', px(layout.safeTop || 0));
+    css(root, '--gc-sl', px(layout.safeLeft || 0));
+    css(root, '--gc-sr', px(layout.safeRight || 0));
+    const want = typing();
+    if (want !== full || (!want && !shown)) placeFull(want);
+    if (!shown) setClass(root, st.show ? 'gc-cmp' : 'gc-cmp gc-hidden');
+    ctx.strip.place(stripVisible());
     if (!st.show) return;
-    css(root, 'left', px(layout.gutter));
-    css(root, 'right', px(layout.gutter));
     const barMode = st.mode === 'search' || st.mode === 'selection';
     // The search and selection bars sit in a SafeArea of their own on top of
     // the inset the whole composer rides on, as ChatInputBar's did.
-    css(root, 'padding-bottom', px(16 + (barMode ? st.extraBottom : 0)));
-    setClass(compose, classes(barMode ? 'gc-hidden' : '', { 'g-skinned': skin.active }));
+    if (!shown) css(root, 'padding-bottom', px(16 + (barMode ? st.extraBottom : 0)));
+    setClass(compose, classes(barMode ? 'gc-hidden' : '', {
+      'g-skinned': skin.active,
+      'gc-wide': capsule,
+      'gc-typing': shown,
+    }));
     setClass(barPill.el, barMode ? 'gc-glass gc-pill' : 'gc-glass gc-pill gc-hidden');
 
     const radius = px(28 * theme.cornerScale);
-    css(pill.el, 'border-radius', radius);
+    css(pill.el, 'border-radius', full ? '0px' : radius);
     css(barPill.el, 'border-radius', radius);
 
     if (barMode) {
@@ -642,6 +823,11 @@ export function createComposer(ctx) {
       render();
     },
     render,
+    stripVisible,
+    /** Re-renders when the keyboard coming or going changes typing(). */
+    placeTyping() {
+      if (typing() !== full) render();
+    },
     themeChanged() {
       measureLines();
       st.pinsKey = '';
@@ -660,6 +846,9 @@ export function createComposer(ctx) {
       growAll();
     },
     setSkin(tpl) {
+      // The skin lays out the default arrangement; render() folds it back
+      // into the capsule if that still applies.
+      arrange(false);
       skin.set(tpl);
       setClass(compose, skin.active ? 'g-skinned' : '');
       updateSkin();
@@ -684,7 +873,7 @@ export function createComposer(ctx) {
     },
     report(out) {
       if (!st.show) return;
-      out.composerHeight = S.getBoundingClientRect(root).height;
+      out.composerHeight = shown ? restHeight : S.getBoundingClientRect(root).height;
       const barMode = st.mode === 'search' || st.mode === 'selection';
       out.composer = ctx.rect(barMode ? barPill.el : pill.el);
       if (barMode) return;
