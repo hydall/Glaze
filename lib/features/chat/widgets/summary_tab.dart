@@ -4,6 +4,9 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/llm/summary_service.dart'
+    show summaryShortenSlackPercent;
+import '../../../core/llm/tokenizer.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../core/models/summary_block.dart';
 import '../../../core/state/summary_providers.dart';
@@ -26,12 +29,13 @@ import 'summary_block_editor_sheet.dart';
 /// of old messages and is sent in their place. The tab lists the active
 /// chain in story order, the archive of merged-away blocks below it, and the
 /// actions that change the chain — compact now, merge a selection, add a note,
-/// write one block again. Compacting runs in `summaryCompactionProvider`,
-/// block after block until the backlog is retold, with its progress and a
-/// Stop button in the action bar, and goes on when the sheet is closed. A
-/// block written again comes back as a draft on its card and replaces the
-/// block's text only once approved, the way a Memory Books draft becomes an
-/// entry.
+/// write one block again, shorten one. Compacting runs in
+/// `summaryCompactionProvider`, block after block until the backlog is retold,
+/// with its progress and a Stop button in the action bar, and goes on when the
+/// sheet is closed. A block written again comes back as a draft on its card
+/// and replaces the block's text only once approved, the way a Memory Books
+/// draft becomes an entry; so does a block shortened to the block size, which
+/// the card of a block past that size offers.
 ///
 /// Everything else — the master switch, the template, when compaction runs,
 /// the injection point — is behind the header's settings button, in
@@ -108,10 +112,12 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
     return switch (error.reason) {
       'busy' => 'summary_error_busy'.tr(),
       'not_shorter' => 'summary_error_not_shorter'.tr(),
+      'not_shortened' => 'summary_error_not_shortened'.tr(),
       'not_adjacent' => 'summary_error_not_adjacent'.tr(),
       'mixed_levels' => 'summary_error_mixed_levels'.tr(),
       'select_two' => 'summary_error_select_two'.tr(),
       'stale_merge' => 'summary_error_stale_merge'.tr(),
+      'stale' => 'summary_block_stale'.tr(),
       'sources_gone' => 'summary_error_sources_gone'.tr(),
       'nothing_to_compact' => 'summary_nothing_to_compact'.tr(),
       _ => 'summary_error_changed'.tr(),
@@ -163,6 +169,36 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
         blockId: block.id,
       ),
     );
+  }
+
+  /// As [_regenerate]: the run belongs to [summaryRegenerationProvider].
+  void _shorten(SummaryBlock block) {
+    final session = _session;
+    if (session == null) return;
+    setState(() => _error = null);
+    unawaited(_regeneration.shorten(session: session, blockId: block.id));
+  }
+
+  /// Whether a card offers Shorten: a live block past the block size by more
+  /// than the slack the summarizer itself allows
+  /// ([summaryShortenSlackPercent]), with no draft waiting on it. A block
+  /// just past the size has nothing worth a summarizer call to cut. A stale
+  /// block is not sent, so there is nothing to gain; a draft is shortened by
+  /// approving a shorter one later. A block from before sizes were stored
+  /// reads 0 and is counted from its text.
+  bool _canShorten(
+    SummaryBlock block,
+    Map<String, ChatMessage> byId,
+    int? blockTarget,
+  ) {
+    if (blockTarget == null || block.isNote || block.draft != null) {
+      return false;
+    }
+    final tokens = block.tokens > 0
+        ? block.tokens
+        : estimateTokens(block.content);
+    return tokens * 100 > blockTarget * summaryShortenSlackPercent &&
+        !SummaryChain.isStale(block, byId);
   }
 
   void _stop(SummaryBlock block) {
@@ -333,6 +369,10 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
     final messages = session?.messages ?? const <ChatMessage>[];
     final regeneration = ref.watch(summaryRegenerationProvider);
     final regenerating = session != null && regeneration.isBusy(session.id);
+    final blockTarget = ref
+        .watch(summaryCompactionSettingsProvider)
+        .value
+        ?.blockTargetTokens;
     final compacting = session == null
         ? null
         : ref.watch(summaryCompactionProvider.select((s) => s.run(session.id)));
@@ -398,6 +438,9 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
                         onRegenerate: block.isNote
                             ? null
                             : () => _regenerate(block),
+                        onShorten: _canShorten(block, byId, blockTarget)
+                            ? () => _shorten(block)
+                            : null,
                         generatingSince: session == null
                             ? null
                             : regeneration.since(session.id, block.id),

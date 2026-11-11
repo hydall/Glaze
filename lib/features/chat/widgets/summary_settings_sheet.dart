@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/models/chat_message.dart';
 import '../../../core/models/preset.dart';
 import '../../../core/services/memory_prompt_presets.dart'
     show MemoryPromptPreset;
@@ -22,6 +23,8 @@ import '../../../shared/widgets/menu_group.dart';
 import '../../../shared/widgets/sheet_view.dart';
 import '../../presets/preset_list_provider.dart';
 import '../../settings/api_settings_screen.dart';
+import '../chat_provider.dart';
+import '../services/summary_generation_service.dart';
 import 'custom_prompt_manager_sheet.dart';
 import '../../../shared/widgets/glaze_sheet.dart';
 
@@ -72,6 +75,13 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
   bool _loading = true;
   bool _enabled = true;
   SummaryCompactionSettings _compaction = const SummaryCompactionSettings();
+
+  /// The summary and fresh history as the outlook reads them, counted once
+  /// with the settings; the outlook itself follows the sliders.
+  SummaryOutlookCounts _outlookCounts = const SummaryOutlookCounts(
+    summaryTokens: 0,
+    historyTokens: 0,
+  );
 
   /// Saved prompts, buffered like the rest of the form so the manager sheet
   /// and the picker agree before anything is written.
@@ -153,10 +163,19 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
       )),
     );
     final block = preset?.blocks.where((b) => b.id == 'summary').firstOrNull;
+    final outlookCounts = await ref
+        .read(summaryGenerationServiceProvider)
+        .outlookCounts(
+          widget.sessionId,
+          ref.read(chatProvider(widget.charId)).value?.session?.messages ??
+              const <ChatMessage>[],
+        );
+    if (!mounted) return;
 
     setState(() {
       _enabled = enabled;
       _compaction = compaction;
+      _outlookCounts = outlookCounts;
       _tailTokens.text = '${compaction.manualTailTokens}';
       _floorTokens.text = '${compaction.autoTailFloorTokens}';
       _ownPrompt = prompt;
@@ -281,6 +300,43 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
         .updatePreset(preset.copyWith(blocks: blocks));
   }
 
+  /// The outlook for the sliders as they stand, in the reader's words.
+  String _outlookText() {
+    final outlook = ref
+        .read(summaryGenerationServiceProvider)
+        .outlook(
+          charId: widget.charId,
+          counts: _outlookCounts,
+          settings: _compaction,
+        );
+    if (outlook == null) return 'summary_outlook_none'.tr();
+    final text = 'summary_outlook_text'.tr(
+      namedArgs: {
+        'total': _tokens(outlook.total),
+        'fixed': _tokens(outlook.fixedTokens),
+        'summary': _tokens(outlook.summaryTokens),
+        'history': _tokens(outlook.historyTokens),
+        'trigger': _tokens(outlook.triggerTokens),
+        'compactTo': _tokens(outlook.compactToTokens),
+        'floor': _tokens(outlook.floorTokens),
+        'tail': _tokens(outlook.tailTokens),
+      },
+    );
+    if (!outlook.floorOnly) return text;
+    return '$text\n\n${'summary_outlook_floor_only'.tr()}';
+  }
+
+  /// 12345 as "12 345": thousands set apart, no locale machinery.
+  static String _tokens(int n) {
+    final digits = n.toString();
+    final out = StringBuffer();
+    for (var i = 0; i < digits.length; i++) {
+      if (i > 0 && (digits.length - i) % 3 == 0) out.write('\u202f');
+      out.write(digits[i]);
+    }
+    return out.toString();
+  }
+
   static String _tailUnitLabel(SummaryManualTailUnit unit) => switch (unit) {
     SummaryManualTailUnit.percent => 'summary_manual_tail_unit_percent'.tr(),
     SummaryManualTailUnit.tokens => 'summary_manual_tail_unit_tokens'.tr(),
@@ -361,6 +417,11 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                         onChanged: (v) => setState(() => _enabled = v),
                       ),
                     ],
+                  ),
+                  MenuGroup(
+                    header: 'summary_outlook_header'.tr(),
+                    description: _outlookText(),
+                    items: const [],
                   ),
                   MenuGroup(
                     header: 'summary_generation_section'.tr(),

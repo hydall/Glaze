@@ -254,6 +254,75 @@ void main() {
     expect(result.created, 0);
   });
 
+  test('a run goes on to the line it compacts to, not just under the trigger', () async {
+    // 28 messages (3500) beside a fixed part of 300. Compacting to 20 %
+    // (620) leaves a tail of 320; the summarizer takes 2000 a step, so the
+    // first block leaves 1500 raw — under the 2325 trigger, but far above
+    // the line. The run goes on to the line.
+    final session = _sessionOf(28);
+    final container = await _container(
+      300,
+      settings: {
+        'autoEnabled': true,
+        'triggerPercent': 75,
+        'compactToPercent': 20,
+        'blockTargetTokens': 200,
+      },
+    );
+    final result = await container
+        .read(summaryGenerationServiceProvider)
+        .compact(charId: 'char', session: session);
+
+    expect(result.created, 2);
+    var raw = 0;
+    for (final id in await _rawIds(container, session)) {
+      raw += estimateTokens(
+        session.messages.firstWhere((m) => m.id == id).content,
+      );
+    }
+    expect(raw, lessThanOrEqualTo(320 + perMessage));
+    expect(raw, greaterThan(0));
+  });
+
+  test('the outlook says what a run would leave, and when only the floor', () {
+    const settings = SummaryCompactionSettings(
+      triggerPercent: 75,
+      compactToPercent: 50,
+    );
+    final roomy = SummaryRunOutlook.of(
+      total: 3100,
+      fixedTokens: 500,
+      summaryTokens: 100,
+      historyTokens: 900,
+      settings: settings,
+    );
+    expect(roomy.triggerTokens, 2325);
+    expect(roomy.compactToTokens, 1550);
+    expect(roomy.floorTokens, 310);
+    // The room under the line is 950, but only 900 of history is there.
+    expect(roomy.tailTokens, 900);
+    expect(roomy.floorOnly, isFalse);
+
+    final bigHistory = SummaryRunOutlook.of(
+      total: 3100,
+      fixedTokens: 500,
+      summaryTokens: 100,
+      historyTokens: 4000,
+      settings: settings,
+    );
+    expect(bigHistory.tailTokens, 950);
+
+    final crowded = SummaryRunOutlook.of(
+      total: 3100,
+      fixedTokens: 1300,
+      summaryTokens: 300,
+      historyTokens: 900,
+      settings: settings,
+    );
+    expect(crowded.tailTokens, 310);
+    expect(crowded.floorOnly, isTrue);
+  });
+
   test('a run with a small fixed part leaves the room under the trigger', () async {
     final container = await _container(500);
     final result = await container

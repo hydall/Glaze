@@ -46,8 +46,8 @@ class SummaryRegenerationState {
       startedAt.keys.any((k) => k.startsWith('$sessionId/'));
 }
 
-/// Owns the summary-block regenerations in flight: their start times, their
-/// cancel tokens and the last failure.
+/// Owns the summary-block regenerations and shortenings in flight: their
+/// start times, their cancel tokens and the last failure.
 ///
 /// Lives in the container, not in the Memory sheet, the way
 /// `MemoryDraftJobsNotifier` does: the run outlives the sheet, the draft is
@@ -66,7 +66,36 @@ class SummaryRegenerationNotifier extends Notifier<SummaryRegenerationState> {
     required String charId,
     required ChatSession session,
     required String blockId,
-  }) async {
+  }) => _run(
+    session,
+    blockId,
+    (token) => ref
+        .read(summaryGenerationServiceProvider)
+        .regenerateBlock(
+          charId: charId,
+          session: session,
+          blockId: blockId,
+          cancelToken: token,
+        ),
+  );
+
+  /// Shortens [blockId] to the block size as a draft, the same way.
+  Future<void> shorten({
+    required ChatSession session,
+    required String blockId,
+  }) => _run(
+    session,
+    blockId,
+    (token) => ref
+        .read(summaryGenerationServiceProvider)
+        .shortenBlock(session: session, blockId: blockId, cancelToken: token),
+  );
+
+  Future<void> _run(
+    ChatSession session,
+    String blockId,
+    Future<void> Function(CancelToken token) job,
+  ) async {
     final jobKey = SummaryRegenerationState.key(session.id, blockId);
     if (_tokens.containsKey(jobKey)) return;
     final token = CancelToken();
@@ -76,14 +105,7 @@ class SummaryRegenerationNotifier extends Notifier<SummaryRegenerationState> {
       lastFailure: state.lastFailure,
     );
     try {
-      await ref
-          .read(summaryGenerationServiceProvider)
-          .regenerateBlock(
-            charId: charId,
-            session: session,
-            blockId: blockId,
-            cancelToken: token,
-          );
+      await job(token);
     } catch (e) {
       // A stop is not a failure: the reader asked for it.
       if (token.isCancelled || !ref.mounted) return;
