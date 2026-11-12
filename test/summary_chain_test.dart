@@ -346,4 +346,75 @@ void main() {
       'a',
     );
   });
+
+  group('forBranch', () {
+    final messages = _chat(6);
+    Set<String> keep(int count) => {for (var i = 0; i < count; i++) 'm$i'};
+
+    test('keeps blocks inside the branch and drops ones past it', () {
+      final blocks = [
+        const SummaryBlock(id: 'note', level: 0, content: 'Note'),
+        _block('a', messages, ['m0', 'm1']),
+        _block('b', messages, ['m2', 'm3']),
+        _block('c', messages, ['m4', 'm5']),
+      ];
+      final branched = SummaryChain.forBranch(blocks, keep(4));
+      expect(branched.map((b) => b.id), ['note', 'a', 'b']);
+      expect(SummaryChain.live(branched, messages.sublist(0, 4)), hasLength(3));
+    });
+
+    test('a merge past the branch point gives back the parts that fit', () {
+      final blocks = [
+        _block('a', messages, ['m0', 'm1'], archived: true),
+        _block('b', messages, ['m2', 'm3'], archived: true),
+        _block('c', messages, ['m4', 'm5'], archived: true),
+        _block(
+          'abc',
+          messages,
+          ['m0', 'm1', 'm2', 'm3', 'm4', 'm5'],
+          level: 2,
+          childIds: ['a', 'b', 'c'],
+        ),
+      ];
+      final branched = SummaryChain.forBranch(blocks, keep(4));
+      expect(branched.map((b) => b.id), ['a', 'b']);
+      expect(branched.every((b) => !b.archived), isTrue);
+    });
+
+    test('a merge inside the branch keeps its archive', () {
+      final blocks = [
+        _block('a', messages, ['m0', 'm1'], archived: true),
+        _block('b', messages, ['m2', 'm3'], archived: true),
+        _block(
+          'ab',
+          messages,
+          ['m0', 'm1', 'm2', 'm3'],
+          level: 2,
+          childIds: ['a', 'b'],
+        ),
+      ];
+      final branched = SummaryChain.forBranch(blocks, keep(5));
+      expect(branched.map((b) => (b.id, b.archived)), [
+        ('a', true),
+        ('b', true),
+        ('ab', false),
+      ]);
+    });
+
+    test('drops the legacy note and drafts over dropped messages', () {
+      final blocks = [
+        const SummaryBlock(
+          id: SummaryBlock.legacyNoteId,
+          level: 0,
+          content: 'Old summary',
+        ),
+        _block('a', messages, ['m0', 'm1']).withDraft(
+          const SummaryDraft(content: 'Redo', messageIds: ['m0', 'm1', 'm2']),
+        ),
+      ];
+      final branched = SummaryChain.forBranch(blocks, keep(2));
+      expect(branched.map((b) => b.id), ['a']);
+      expect(branched.single.draft, isNull);
+    });
+  });
 }

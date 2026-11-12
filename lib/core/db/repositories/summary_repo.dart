@@ -2,6 +2,8 @@ import 'package:drift/drift.dart';
 
 import '../app_db.dart';
 import '../tables.dart';
+import '../../models/chat_message.dart' hide ChatSummary;
+import '../../models/summary_block.dart';
 import '../../utils/time_helpers.dart';
 
 part 'summary_repo.g.dart';
@@ -162,23 +164,34 @@ class SummaryRepo extends DatabaseAccessor<AppDatabase>
     )..where((t) => t.sessionId.equals(sessionId))).go().then((_) {});
   }
 
-  /// Carries user settings but not the blocks: a branch's messages are its
-  /// own, and blocks are bound to the source messages they were written from.
-  Future<void> copySettingsForSessionBranch({
+  /// Carries the summary over to a branch: the user settings, and the
+  /// blocks whose source messages the branch keeps ([SummaryChain.forBranch]).
+  /// A summary from before blocks existed records no sources, so nothing
+  /// says it stops at the branch point; only its settings carry over.
+  Future<void> copyForSessionBranch({
     required String fromSessionId,
     required String toSessionId,
+    required List<ChatMessage> messages,
   }) async {
     final source = await get(fromSessionId);
     if (source == null) return;
+    final blocks = source.blocksJson == null
+        ? const <SummaryBlock>[]
+        : SummaryChain.forBranch(SummaryBlock.decodeList(source.blocksJson), {
+            for (final message in messages) message.id,
+          });
+    final carried = blocks.isNotEmpty;
     await into(chatSummaries).insertOnConflictUpdate(
       ChatSummariesCompanion.insert(
         sessionId: toSessionId,
-        content: '',
+        content: carried
+            ? SummaryChain.render(SummaryChain.inPrompt(blocks, messages))
+            : '',
         enabled: Value(source.enabled),
-        messageCount: const Value(0),
+        messageCount: Value(carried ? messages.length : 0),
         prompt: Value(source.prompt),
         updatedAt: Value(currentTimestampSeconds()),
-        blocksJson: const Value(null),
+        blocksJson: Value(carried ? SummaryBlock.encodeList(blocks) : null),
       ),
     );
   }
