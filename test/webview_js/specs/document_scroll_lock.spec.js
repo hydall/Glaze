@@ -89,6 +89,37 @@ test('a caret reveal scrolls the container and leaves the document at zero', asy
   expect(containerTop).toBeGreaterThan(0);
 });
 
+// A keyboard that overlays the WebView leaves the visual viewport shorter than
+// the layout viewport, and the browser pans through the difference to reveal
+// the focused field — which lifts the whole page by the keyboard's height on
+// top of the lift Flutter's inset already gives the composer. Zooming the page
+// gives the harness the same smaller-than-layout visual viewport, and
+// revealing a fixed box at the bottom pans it the way a focused composer does.
+test('a visual viewport pan is undone', async ({ page }) => {
+  await openChat(page);
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
+  await page.waitForTimeout(100);
+
+  const panned = await page.evaluate(async () => {
+    const vv = window.visualViewport;
+    let peak = 0;
+    vv.addEventListener('scroll', () => { peak = Math.max(peak, vv.offsetTop); });
+    const field = document.createElement('div');
+    field.style.cssText = 'position: fixed; left: 0; bottom: 0; width: 10px; height: 10px;';
+    document.body.appendChild(field);
+    field.scrollIntoView({ block: 'end', behavior: 'instant' });
+    const atOnce = vv.offsetTop;
+    await new Promise((r) => setTimeout(r, 200));
+    return { atOnce, peak, settled: vv.offsetTop, scale: vv.scale };
+  });
+
+  // The pan really happened, so the guard is what brought it back.
+  expect(panned.scale).toBe(2);
+  expect(Math.max(panned.atOnce, panned.peak)).toBeGreaterThan(50);
+  expect(panned.settled).toBe(0);
+});
+
 test('a document scroll is undone and handed to the container', async ({ page }) => {
   await openChat(page);
 

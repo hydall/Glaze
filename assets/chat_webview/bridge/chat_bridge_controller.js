@@ -683,8 +683,31 @@ export class Bridge {
   // belt to that suspenders. A document scroll is undone and the same movement
   // is handed to the container, so the caret/selection reveal still scrolls the
   // chat instead of the WebView.
+  //
+  // The second way the page slides is the visual viewport. A keyboard that
+  // overlays the WebView instead of resizing it leaves the visual viewport
+  // shorter than the layout viewport, and that difference — the keyboard's own
+  // height — is room the browser may pan through to reveal the focused field.
+  // It does so when the keyboard lands before Flutter's inset has lifted the
+  // composer: the page goes up by the keyboard's height, then the inset lifts
+  // the composer by the same amount again, and it ends at the top of the screen
+  // over an empty page until the keyboard closes. No CSS takes that room away
+  // and `window.scrollTo` does not reach the visual viewport, so the pan is
+  // undone the way it was made: revealing a `position: fixed` box moves the
+  // visual viewport only, and the root element is one that starts at its top.
   _setupDocumentScrollLock() {
+    const vv = window.visualViewport;
+    const unpanVisualViewport = () => {
+      if (!vv) return;
+      if (!(vv.offsetTop > 0.5) && !(vv.offsetLeft > 0.5)) return;
+      try {
+        document.documentElement.scrollIntoView({
+          block: 'start', inline: 'start', behavior: 'instant',
+        });
+      } catch (_) {}
+    };
     const pin = () => {
+      unpanVisualViewport();
       const doc = document.scrollingElement;
       if (!doc) return;
       const top = doc.scrollTop;
@@ -697,8 +720,11 @@ export class Bridge {
     };
     window.addEventListener('scroll', pin, { passive: true });
     document.addEventListener('scroll', pin, { passive: true });
-    if (window.visualViewport) {
-      window.visualViewport.addEventListener('scroll', pin, { passive: true });
+    if (vv) {
+      vv.addEventListener('scroll', pin, { passive: true });
+      // The keyboard arriving is a resize; a pan made in the same step may not
+      // announce itself with a scroll of its own.
+      vv.addEventListener('resize', pin, { passive: true });
     }
   }
 
