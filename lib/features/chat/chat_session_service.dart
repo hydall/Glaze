@@ -439,9 +439,10 @@ class ChatSessionService {
           );
       await _ref
           .read(summaryRepoProvider)
-          .copySettingsForSessionBranch(
+          .copyForSessionBranch(
             fromSessionId: current.id,
             toSessionId: branch.id,
+            messages: branch.messages,
           );
       return (await repo.getById(branch.id))!;
     });

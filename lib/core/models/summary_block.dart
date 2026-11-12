@@ -782,6 +782,52 @@ class SummaryChain {
     ];
   }
 
+  /// The chain a branch keeps when it retains only [keptMessageIds] of the
+  /// source chat. A block whose sources all survive carries over unchanged —
+  /// the branch keeps the same message ids and text, so it is not stale
+  /// there. An active block reaching past the branch point is dropped, and a
+  /// merge gives back its parts, each settled the same way, so the branch
+  /// keeps every retelling of the messages it has. Reader notes carry over;
+  /// the [SummaryBlock.legacyNoteId] note does not — it retells the whole
+  /// old chat and records no sources, so nothing keeps it to the branch's
+  /// part. A draft written over a dropped message is discarded.
+  static List<SummaryBlock> forBranch(
+    List<SummaryBlock> blocks,
+    Set<String> keptMessageIds,
+  ) {
+    bool fits(List<String> ids) => ids.every(keptMessageIds.contains);
+    final byId = {for (final block in blocks) block.id: block};
+    final dropped = <String>{};
+    final revived = <String>{};
+    void settle(SummaryBlock block) {
+      if (block.id != SummaryBlock.legacyNoteId && fits(block.messageIds)) {
+        if (block.archived) revived.add(block.id);
+        return;
+      }
+      if (!dropped.add(block.id)) return;
+      for (final childId in block.childIds) {
+        final child = byId[childId];
+        if (child != null) settle(child);
+      }
+    }
+
+    for (final block in blocks) {
+      if (!block.archived) settle(block);
+    }
+    return [
+      for (final block in blocks)
+        if (!dropped.contains(block.id))
+          switch (revived.contains(block.id)
+              ? block.copyWith(archived: false)
+              : block) {
+            final kept
+                when kept.draft != null && !fits(kept.draft!.messageIds) =>
+              kept.withDraft(null),
+            final kept => kept,
+          },
+    ];
+  }
+
   /// Removes an active block. A merge gives its parts back to the chain; a
   /// level-1 block lets its messages return to the prompt.
   static List<SummaryBlock> delete(List<SummaryBlock> blocks, String id) {
