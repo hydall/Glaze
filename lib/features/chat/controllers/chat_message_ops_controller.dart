@@ -350,11 +350,14 @@ class ChatMessageOpsController {
     final view = await _ref
         .read(summaryServiceProvider)
         .getPromptView(session.id, session.messages);
+    if (!_ref.mounted) return;
+    // The chat may have moved to another session over the await: the pin
+    // belongs to the session it was asked on, and so does the check below.
+    if (_getState().value?.session?.id != session.id) return;
     if (view?.coveredMessageIds.contains(message.id) ?? false) {
       GlazeToast.warningWithoutContext('history_anchor_pin_summarized'.tr());
       return;
     }
-    if (!_ref.mounted) return;
     final previousAnchor = session.historyAnchorId;
     final previousPinned = session.historyAnchorPinned;
     await _writeHistoryAnchor(session.id, message.id, pinned: true);
