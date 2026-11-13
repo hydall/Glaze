@@ -69,6 +69,7 @@ class SyncEngine {
   final Future<void> Function(Set<String>)? _reconcilePulledSessions;
   final int _operationDelayMs;
   final Duration _wipePollInterval;
+  final SyncPluginStore? _pluginStore;
   final SyncQueue _queue = SyncQueue();
   late final SyncBinaryAssetSyncer _binarySyncer;
   bool _includeApiKeys = false;
@@ -106,6 +107,7 @@ class SyncEngine {
     this._reconcilePulledSessions,
     this._operationDelayMs = 300,
     this._wipePollInterval = const Duration(seconds: 2),
+    this._pluginStore,
   ]) {
     _binarySyncer = SyncBinaryAssetSyncer(
       _adapter,
@@ -141,6 +143,9 @@ class SyncEngine {
     await _adapter.ensureFolder('$cloudBase/character_knowledge');
     await _adapter.ensureFolder('$cloudBase/session_lorebook_overlays');
     await _adapter.ensureFolder('$cloudBase/reconciliation_state');
+    if (_pluginStore != null) {
+      await _adapter.ensureFolder('$cloudBase/plugins');
+    }
 
     onProgress(const SyncProgress(message: 'Building sync manifest...'));
     final previousManifest = await _manifestBuilder.readLocalManifest();
@@ -801,6 +806,9 @@ class SyncEngine {
     if (json.length > maxSyncPayloadBytes) {
       throw Exception('Payload exceeds limit for ${entry.key}');
     }
+    // A plugin's files go up before the entry that lists them, so a device
+    // pulling in between never finds the entry without its files.
+    if (entry.type == 'plugins') await _pushPluginFiles(entry, data);
     await _adapter.upload(entry.path, json);
 
     if (entry.type == 'character') {
@@ -814,6 +822,41 @@ class SyncEngine {
     // batch keyed by preset id rather than per manifest entry.
     if (entry.type == 'theme_presets') {
       await _binarySyncer.pushPresetImages();
+    }
+  }
+
+  /// Uploads the zip of every plugin whose files differ from the cloud's,
+  /// and removes those of plugins the cloud lists no more.
+  Future<void> _pushPluginFiles(
+    SyncManifestEntry entry,
+    Map<String, dynamic> data,
+  ) async {
+    final store = _pluginStore;
+    if (store == null) return;
+    Map<String, String> hashes(Map<String, dynamic>? payload) => {
+      for (final item in (payload?['items'] as List?) ?? const [])
+        if (item is Map &&
+            item['record'] is Map &&
+            item['record']['id'] is String &&
+            item['hash'] is String)
+          item['record']['id'] as String: item['hash'] as String,
+    };
+    final cloud = hashes(
+      await SyncSerialization.readCloudEntity(_adapter, entry),
+    );
+    final local = hashes(data);
+    for (final e in local.entries) {
+      if (cloud[e.key] == e.value) continue;
+      await _adapter.uploadBinary(
+        pluginFilesCloudPath(e.key),
+        await store.pack(e.key),
+      );
+    }
+    for (final id in cloud.keys) {
+      if (local.containsKey(id)) continue;
+      try {
+        await _adapter.deleteFile(pluginFilesCloudPath(id));
+      } catch (_) {}
     }
   }
 
@@ -976,6 +1019,9 @@ class SyncEngine {
           return {'__singleton': true, 'settings': s.toJson()};
         case 'local_storage':
           return _readLocalStorage();
+        case 'plugins':
+          if (_pluginStore == null) return null;
+          return {'__singleton': true, ...await _pluginStore.read()};
         case 'info_block':
           // id == sessionId for info_block entries
           final blocks = await _infoBlockStore.getBySessionId(id);
@@ -1073,6 +1119,14 @@ class SyncEngine {
         case 'local_storage':
           await _applyLocalStorage(data);
           break;
+        case 'plugins':
+          if (_pluginStore != null) {
+            await _pluginStore.apply(
+              data,
+              (id) => _adapter.downloadBinary(pluginFilesCloudPath(id)),
+            );
+          }
+          break;
         case 'info_block':
           await _applyCloudInfoBlocks(id, data);
           break;
@@ -1132,6 +1186,7 @@ class SyncEngine {
       if (type == 'chat' ||
           type == 'lorebooks' ||
           type == 'extension_preset' ||
+          type == 'plugins' ||
           type == 'tracker_snapshot' ||
           type == 'tracker_value' ||
           type == 'reconciliation_state' ||

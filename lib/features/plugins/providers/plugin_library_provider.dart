@@ -17,11 +17,7 @@ import '../services/plugin_store.dart';
 final pluginRefProvider = Provider<Ref>((ref) => ref);
 
 final pluginStoreProvider = FutureProvider<PluginStore>((ref) async {
-  final base = await getAppDataDir();
-  return PluginStore(
-    root: p.join(base, 'plugins'),
-    dataRoot: p.join(base, 'plugin_data'),
-  );
+  return PluginStore.inAppData(await getAppDataDir());
 });
 
 /// The one store behind every chat's `glaze.variables`.

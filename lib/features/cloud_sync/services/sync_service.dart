@@ -44,6 +44,7 @@ class SyncService {
   final SyncCharacterKnowledgeStore? _characterKnowledgeStore;
   final SyncSessionLorebookOverlayStore? _sessionLorebookOverlayStore;
   final SyncReconciliationStateStore? _reconciliationStateStore;
+  final SyncPluginStore? _pluginStore;
   final SessionDeletionStore _sessionDeletionStore;
   final CharacterDeletionStore _characterDeletionStore;
   final Future<void> Function(LorebookActivations) _saveLorebookActivations;
@@ -120,6 +121,7 @@ class SyncService {
     this._characterKnowledgeStore,
     this._sessionLorebookOverlayStore,
     this._reconciliationStateStore,
+    this._pluginStore,
     required SessionDeletionStore sessionDeletionStore,
     required CharacterDeletionStore characterDeletionStore,
     required Future<void> Function(LorebookActivations) saveLorebookActivations,
@@ -162,6 +164,7 @@ class SyncService {
     sessionLorebookOverlayStore: _sessionLorebookOverlayStore,
     reconciliationStateStore: _reconciliationStateStore,
     imageStore: _imageStorage,
+    pluginStore: _pluginStore,
   );
 
   SyncEngine get _engine => SyncEngine(
@@ -195,6 +198,9 @@ class SyncService {
     _reconciliationStateStore,
     _sessionLorebookOverlayStore,
     _reconcilePulledSessions,
+    300,
+    const Duration(seconds: 2),
+    _pluginStore,
   );
 
   Future<void> init() async {

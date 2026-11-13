@@ -7,6 +7,8 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../features/plugins/services/plugin_snapshot.dart';
+import '../../../features/plugins/services/plugin_store.dart';
 import '../../db/app_db.dart';
 import '../file_export_service.dart';
 import '../image_storage_service.dart';
@@ -33,7 +35,13 @@ class BackupExporter {
   //  13 — Collector journals use three-reconciliation batches.
   //  14 — added generic folders (lorebooks/personas/image styles/regex) and
   //         preset folders, alongside the existing character folders.
-  static const int schemaVersion = 14;
+  //  15 — added installed plugins: packages under plugins/ and their data
+  //         under plugin_data/ (manifest flag 'plugins').
+  static const int schemaVersion = 15;
+
+  /// Manifest flag: the archive carries the installed plugins, so a restore
+  /// replaces them. Older archives leave the device's plugins alone.
+  static const pluginsFlag = 'plugins';
 
   /// Rows fetched per page while serializing a table. The whole table is never
   /// materialized at once — `chat_sessions` stores every message of every chat
@@ -172,6 +180,7 @@ class BackupExporter {
       'exportedAt': DateTime.now().toIso8601String(),
       'tables': tableNames,
       BackupSecrets.manifestFlag: includeApiKeys,
+      pluginsFlag: true,
     };
     final manifestBytes = utf8.encode(jsonEncode(manifest));
     encoder.addArchiveFile(ArchiveFile.bytes('manifest.json', manifestBytes));
@@ -256,6 +265,15 @@ class BackupExporter {
           await encoder.addFile(f, 'gallery/$charId/${p.basename(f.path)}');
         }
       }
+    }
+
+    // 6. plugins/... and plugin_data/... — installed plugin packages, the
+    // registry and what each plugin keeps, copied from disk as-is.
+    final plugins = PluginSnapshot(
+      PluginStore.inAppData(_imageStorage.baseDir),
+    );
+    for (final e in (await plugins.backupFiles()).entries) {
+      await encoder.addFile(e.value, e.key);
     }
   }
 

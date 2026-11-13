@@ -1813,6 +1813,23 @@ the owner's frames get its values pushed, and only with `variables`; the
 uninstall drops its chat variables (`PluginVariableStore.forgetPlugin`). All
 are separate from block variables.
 
+**Backup and sync.** `PluginSnapshot` carries the installed plugins: packages,
+the registry, and every plugin's data (`localStorage`, global and shared
+variables, `global` and `chat` files, settings). Chat and message variables
+live in the chat rows and travel with the chats. `files/tmp` and installs in
+progress never travel. A `.glz` backup (schema 15, manifest flag `plugins`)
+holds `plugins/...` and `plugin_data/...` as they are on disk, request and
+network logs included; restoring it replaces the device's plugins, and an
+older backup leaves them alone. Cloud sync has one `plugins` singleton
+(records without permissions, each with a hash of the plugin's files, plus
+the shared variables) and one zip per plugin at `plugins/<id>.zip`, pushed
+before the singleton and fetched only when the hash differs. A pull downloads
+everything first, then replaces changed plugins, removes those the cloud no
+longer lists and keeps this device's logs. Permissions never travel
+(`PluginPermissionSettler`): a plugin the device already had from the same
+author keeps what it was allowed there, with newly asked permissions off; any
+other plugin arrives like a fresh install, everything off and no internet.
+
 **Isolation.** Every main script, panel and file-handler run gets its own
 `sandbox="allow-scripts"` iframe (null origin). `plugin_host.js` maps each
 frame window to its plugin (and message, for message panels) and stamps those

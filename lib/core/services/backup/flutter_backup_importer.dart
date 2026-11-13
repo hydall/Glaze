@@ -7,6 +7,8 @@ import 'package:drift/drift.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../features/plugins/services/plugin_snapshot.dart';
+import '../../../features/plugins/services/plugin_store.dart';
 import '../../db/app_db.dart';
 import '../../db/repositories/session_lorebook_embedding_job_repo.dart';
 import '../../llm/transport/endpoint_normalizer.dart';
@@ -15,6 +17,7 @@ import '../../models/studio_preset_codec.dart';
 import '../image_storage_service.dart';
 import 'archive_stream.dart';
 import 'backup_cancel.dart';
+import 'backup_exporter.dart';
 import 'backup_helpers.dart';
 import 'backup_secrets.dart';
 
@@ -24,7 +27,7 @@ class FlutterBackupImporter extends BackupHelpers {
   /// Table entries larger than this are decompressed to a temp file and read
   /// back from disk instead of being materialised in memory.
   static const int _spillToDiskBytes = 8 * 1024 * 1024;
-  static const int _maxSchemaVersion = 14;
+  static const int _maxSchemaVersion = 15;
 
   @override
   final AppDatabase db;
@@ -117,6 +120,7 @@ class FlutterBackupImporter extends BackupHelpers {
     final galleryFiles = archive.files
         .where((f) => f.isFile && f.name.startsWith('gallery/'))
         .toList();
+    final hasPlugins = manifestJson[BackupExporter.pluginsFlag] == true;
 
     // Pre-fetch existing columns.
     final existingColumns = <String, Set<String>>{};
@@ -223,8 +227,35 @@ class FlutterBackupImporter extends BackupHelpers {
     _cancel.check();
     await _restoreGalleryFromZip(galleryFiles);
 
+    if (hasPlugins) {
+      onProgress?.call('Restoring plugins...');
+      _cancel.check();
+      await _restorePlugins(archive);
+    }
+
     onProgress?.call('Restoring settings...');
     await _restorePreferences(archive, keysStripped: keysStripped);
+  }
+
+  /// Replaces the installed plugins with the archive's. Permissions stay
+  /// with this device (see `PluginPermissionSettler`).
+  Future<void> _restorePlugins(Archive archive) async {
+    final snapshot = PluginSnapshot(
+      PluginStore.inAppData(imageStorage.baseDir),
+    );
+    await snapshot.restoreBackup(() async {
+      for (final f in archive.files) {
+        if (!f.isFile) continue;
+        final target = snapshot.backupTarget(f.name);
+        if (target == null) continue;
+        final bytes = f.readBytes();
+        f.clear();
+        if (bytes == null) continue;
+        final file = File(target);
+        await file.parent.create(recursive: true);
+        await file.writeAsBytes(bytes, flush: true);
+      }
+    });
   }
 
   /// The device's credentials, keyed by table, captured before a keyless
@@ -451,7 +482,7 @@ class FlutterBackupImporter extends BackupHelpers {
       p.join(
         Directory.systemTemp.path,
         'glaze_restore_${DateTime.now().microsecondsSinceEpoch}_'
-            '${p.basename(file.name)}',
+        '${p.basename(file.name)}',
       ),
     );
     try {
