@@ -13,7 +13,10 @@ import '../../../core/state/lorebook_provider.dart'
 import '../../../core/state/preset_folder_provider.dart';
 import '../../../shared/theme/theme_preset_storage.dart';
 import 'adapters/ext_blocks_sync_stores.dart';
+import '../plugins/providers/plugin_library_provider.dart'
+    show pluginStoreProvider;
 import 'adapters/folder_sync_store.dart';
+import 'adapters/plugin_sync_store.dart';
 import 'services/sync_conflict.dart';
 import 'services/sync_engine.dart';
 import 'services/sync_service.dart';
@@ -25,6 +28,7 @@ final syncServiceProvider = FutureProvider<SyncService>((ref) async {
 
   final imageStorage = await ref.watch(imageStorageProvider.future);
   final themeStorage = await ThemePresetStorage.create();
+  final pluginStore = await ref.watch(pluginStoreProvider.future);
 
   final service = SyncService(
     characterRepo: ref.watch(characterRepoProvider),
@@ -67,6 +71,7 @@ final syncServiceProvider = FutureProvider<SyncService>((ref) async {
     reconciliationStateStore: ReconciliationStateSyncStore(
       ref.watch(appDbProvider),
     ),
+    pluginStore: PluginSyncStore(pluginStore),
     sessionDeletionStore: ref.watch(sessionDeletionRepoProvider),
     characterDeletionStore: ref.watch(characterDeletionRepoProvider),
     saveLorebookActivations: saveLorebookActivations,

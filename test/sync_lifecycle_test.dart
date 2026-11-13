@@ -20,6 +20,10 @@ import 'package:glaze_flutter/core/utils/sync_deletion_tracker.dart';
 import 'package:glaze_flutter/core/application/session_deletion_store.dart';
 import 'package:glaze_flutter/core/application/character_deletion_store.dart';
 import 'package:glaze_flutter/features/cloud_sync/adapters/ext_blocks_sync_stores.dart';
+import 'package:glaze_flutter/features/cloud_sync/adapters/plugin_sync_store.dart';
+import 'package:glaze_flutter/features/plugins/services/plugin_manifest_parser.dart';
+import 'package:glaze_flutter/features/plugins/services/plugin_package_reader.dart';
+import 'package:glaze_flutter/features/plugins/services/plugin_store.dart';
 import 'package:glaze_flutter/features/cloud_sync/sync_repo_interfaces.dart';
 import 'package:glaze_flutter/shared/theme/theme_preset.dart';
 import 'package:glaze_flutter/features/cloud_sync/cloud_adapter.dart';
@@ -589,6 +593,7 @@ class InMemoryManifestProvider implements SyncManifestProvider {
     SyncStudioPresetStore? studioPresetStore,
     SyncSessionLorebookOverlayStore? sessionLorebookOverlayStore,
     SyncReconciliationStateStore? reconciliationStateStore,
+    SyncPluginStore? pluginStore,
   }) : _builder = SyncManifestBuilder(
          characterRepo: characterRepo,
          chatRepo: chatRepo,
@@ -609,6 +614,7 @@ class InMemoryManifestProvider implements SyncManifestProvider {
          studioPresetStore: studioPresetStore,
          sessionLorebookOverlayStore: sessionLorebookOverlayStore,
          reconciliationStateStore: reconciliationStateStore,
+         pluginStore: pluginStore,
        );
 
   @override
@@ -681,8 +687,10 @@ class SyncWorld {
   late final FakeCharacterDeletionStore characterDeletions;
   late final FakeReconciliationStateStore? reconciliationStates;
   late final FakeSessionLorebookOverlayStore? sessionLorebookOverlays;
+  final SyncPluginStore? pluginStore;
 
   SyncWorld({
+    this.pluginStore,
     FakeReconciliationStateStore? reconciliationStateStore,
     FakeSessionLorebookOverlayStore? sessionLorebookOverlayStore,
     Future<void> Function(Set<String>)? reconcilePulledSessions,
@@ -718,6 +726,7 @@ class SyncWorld {
       studioPresetStore: studioPresets,
       sessionLorebookOverlayStore: sessionLorebookOverlays,
       reconciliationStateStore: reconciliationStates,
+      pluginStore: pluginStore,
     );
   }
 
@@ -756,6 +765,7 @@ class SyncWorld {
     _reconcilePulledSessions,
     0,
     Duration.zero,
+    pluginStore,
   );
 }
 
@@ -1685,6 +1695,84 @@ void main() {
       ]);
     },
   );
+
+  test('Cloud round-trip carries installed plugins and their data', () async {
+    final temp = await Directory.systemTemp.createTemp('plugin_sync_test');
+    addTearDown(() => temp.delete(recursive: true));
+    final sourceStore = PluginStore.inAppData('${temp.path}/source');
+    final manifest = {
+      'format': 1,
+      'id': 'com.example.note',
+      'name': 'Note',
+      'version': '1.0.0',
+      'main': 'main.js',
+      'author': 'Example',
+      'permissions': ['network'],
+    };
+    await sourceStore.install(
+      PluginPackage(
+        manifest: parsePluginManifest(manifest),
+        files: {
+          'plugin.json': utf8.encode(jsonEncode(manifest)),
+          'main.js': utf8.encode('console.log(1)'),
+        },
+      ),
+    );
+    final storage = File(
+      '${sourceStore.dataDir('com.example.note')}/storage.json',
+    );
+    await storage.parent.create(recursive: true);
+    await storage.writeAsString('{"notes":"hi"}');
+
+    final source = SyncWorld(pluginStore: PluginSyncStore(sourceStore));
+    await source.engine.pushEntities(onProgress: (_) {});
+    expect(
+      source.cloud.files.keys,
+      containsAll([
+        cloudPath('plugins', 'plugins'),
+        pluginFilesCloudPath('com.example.note'),
+      ]),
+    );
+
+    SharedPreferences.setMockInitialValues({});
+    final targetStore = PluginStore.inAppData('${temp.path}/target');
+    final target = SyncWorld(pluginStore: PluginSyncStore(targetStore));
+    target.cloud.files.addAll(source.cloud.files);
+    await target.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+
+    final plugins = await targetStore.loadAll();
+    expect(plugins.map((p) => p.id), ['com.example.note']);
+    expect(plugins.single.grants, isEmpty);
+    expect(
+      await File(
+        '${targetStore.dataDir('com.example.note')}/storage.json',
+      ).readAsString(),
+      '{"notes":"hi"}',
+    );
+
+    // The pulled device now matches the cloud: nothing left to push.
+    final pushed = <String>[];
+    await target.engine.pushEntities(
+      onProgress: (p) {
+        final m = p.message;
+        if (m != null && m.startsWith('Pushing plugins')) pushed.add(m);
+      },
+    );
+    expect(pushed, isEmpty);
+
+    // A plugin removed at the source goes on the other device too.
+    await sourceStore.uninstall('com.example.note');
+    await source.engine.pushEntities(onProgress: (_) {});
+    expect(
+      source.cloud.files.containsKey(pluginFilesCloudPath('com.example.note')),
+      isFalse,
+    );
+    target.cloud.files
+      ..clear()
+      ..addAll(source.cloud.files);
+    await target.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+    expect(await targetStore.loadAll(), isEmpty);
+  });
 
   test('Cloud round-trip restores the active Studio preset', () async {
     const activePreset = 'studio_loom_causal_direct_v1';

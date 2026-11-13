@@ -33,6 +33,7 @@ class SyncManifestBuilder implements SyncManifestProvider {
   final SyncSessionLorebookOverlayStore? _sessionLorebookOverlayStore;
   final SyncReconciliationStateStore? _reconciliationStateStore;
   final SyncImageStore? _imageStore;
+  final SyncPluginStore? _pluginStore;
 
   static const _manifestKey = 'gz_sync_manifest_v2';
   static const _deviceIdKey = 'gz_sync_device_id';
@@ -62,6 +63,7 @@ class SyncManifestBuilder implements SyncManifestProvider {
     this._sessionLorebookOverlayStore,
     this._reconciliationStateStore,
     this._imageStore,
+    this._pluginStore,
   });
 
   @override
@@ -725,6 +727,31 @@ class SyncManifestBuilder implements SyncManifestProvider {
         now: now,
       );
 
+      entries[key] = SyncManifestEntry(
+        type: type,
+        id: type,
+        path: cloudPath(type, type),
+        updatedAt: updatedAt,
+        hash: hash,
+      );
+    }
+
+    // Installed plugins — singleton; each item carries a hash of the
+    // plugin's files, so a change to its data changes this entry.
+    if (_pluginStore != null) {
+      const type = 'plugins';
+      final payload = await _pluginStore.read();
+      final hash = SyncSerialization.computeSyncHash(payload);
+      final key = entryKey(type, type);
+      final items = payload['items'];
+      final updatedAt = items is List && items.isEmpty
+          ? 0
+          : _resolveUpdatedAt(
+              hash: hash,
+              prevEntry: previous.entries[key],
+              cloudEntry: cloudManifest?.entries[key],
+              now: now,
+            );
       entries[key] = SyncManifestEntry(
         type: type,
         id: type,

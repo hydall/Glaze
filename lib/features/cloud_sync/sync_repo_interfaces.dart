@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 export '../../core/application/sync_repo_interfaces.dart';
 export '../../shared/application/sync_theme_store.dart';
 
@@ -23,6 +25,24 @@ abstract class SyncInfoBlockStore {
   Future<List<InfoBlock>> getBySessionId(String sessionId);
   Future<void> deleteBySessionId(String sessionId);
   Future<void> insert(InfoBlock block);
+}
+
+/// The installed plugins as one sync entity. Packages and plugin data
+/// travel as one zip per plugin, next to the entity.
+abstract class SyncPluginStore {
+  /// `{"items": [{"record", "hash"}], "shared"}`: each plugin's record
+  /// without its permissions and a hash of its files, in install order.
+  Future<Map<String, dynamic>> read();
+
+  /// Plugin [id]'s files as a zip.
+  Future<Uint8List> pack(String id);
+
+  /// Makes this device's plugins those of [data], fetching each plugin
+  /// whose files differ with [download].
+  Future<void> apply(
+    Map<String, dynamic> data,
+    Future<Uint8List> Function(String id) download,
+  );
 }
 
 abstract class SyncManifestProvider {
