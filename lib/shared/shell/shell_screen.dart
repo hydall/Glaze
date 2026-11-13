@@ -190,20 +190,29 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
               Positioned.fill(
                 left: contentLeft,
                 right: contentRight,
-                child: MediaQuery.removePadding(
-                  context: context,
-                  removeLeft: insetSides,
-                  removeRight: insetSides,
-                  child: Stack(
-                    children: [
-                      Positioned.fill(child: widget.navigationShell),
-                      Positioned(
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        child: _PersistentHeader(branchIndex: currentIndex),
-                      ),
-                    ],
+                // The Builder's context is the Scaffold body's, whose
+                // MediaQuery already has the keyboard inset taken out (the
+                // body is resized above it) and the bottom bar's height put
+                // in. The shell's own context still carries the raw keyboard
+                // inset: rebuilt from it, every screen below would pad for a
+                // keyboard the body already shrank away from, and its fields
+                // would be lifted off the top of the screen.
+                child: Builder(
+                  builder: (context) => MediaQuery.removePadding(
+                    context: context,
+                    removeLeft: insetSides,
+                    removeRight: insetSides,
+                    child: Stack(
+                      children: [
+                        Positioned.fill(child: widget.navigationShell),
+                        Positioned(
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          child: _PersistentHeader(branchIndex: currentIndex),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
