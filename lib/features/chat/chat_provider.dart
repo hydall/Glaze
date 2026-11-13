@@ -121,6 +121,12 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   Future<ChatState> build() async {
     ref.keepAlive();
     _sessionCtrl = _createSessionController(ref);
+    // These are built once and keep their state through a rebuild, so they
+    // are handed the Ref of this build rather than made again.
+    _abortHandler.rebind(ref);
+    _messageOpsCtrl.rebind(ref);
+    _swipeCtrl.rebind(ref);
+    _draftCtrl.rebind(ref);
     // Mirror this character's generation state into the global registry so the
     // chat list can show a live "typing" indicator for the session without
     // building its full state. Generation outlives the chat screen
@@ -323,7 +329,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   void _invalidateHistory() => ref.invalidate(chatHistoryProvider);
 
   // Delegate methods to controllers
-  Future<void> editMessage(
+  Future<MessageEditOutcome> editMessage(
     int index,
     String newContent, {
     String? tagStart,

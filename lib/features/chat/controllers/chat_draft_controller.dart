@@ -6,7 +6,7 @@ import '../chat_state.dart';
 import '../state/chat_session_write_queue.dart';
 
 class ChatDraftController {
-  final Ref _ref;
+  Ref _ref;
   final void Function(AsyncValue<ChatState>) _setState;
   final AsyncValue<ChatState> Function() _getState;
 
@@ -27,6 +27,10 @@ class ChatDraftController {
     required this._getState,
     required this._writes,
   });
+
+  /// The Ref of the provider build under way; the notifier outlives a
+  /// rebuild, the Ref it was built on does not. Called from every build.
+  void rebind(Ref ref) => _ref = ref;
 
   /// Persists the composer's contents as this session's draft.
   ///
