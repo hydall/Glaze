@@ -22,7 +22,7 @@ window.GLAZE = {
     ],
   },
 
-  devVersion: '0.9.0',
+  devVersion: '0.10.0',
 
   // Where the Download page's Nightly channel looks for builds.
   nightly: { workflow: 'build-branch.yml', branch: 'nightly' },
@@ -137,7 +137,7 @@ window.GLAZE = {
       },
       dl_all: 'Все релизы',
       dl_loading: 'Загружаем данные релиза…',
-      dl_api_failed: 'Не удалось связаться с GitHub. Показаны ссылки на v0.9.0.',
+      dl_api_failed: 'Не удалось связаться с GitHub. Показаны ссылки на v0.10.0.',
       dl_missing: 'В этом релизе нет',
       dl_how: {
         android: 'Скачайте APK и откройте его. Разрешите установку из этого источника, если система спросит. Есть универсальная сборка, а также отдельные под arm64 и arm32.',
@@ -289,7 +289,7 @@ window.GLAZE = {
       },
       dl_all: 'All releases',
       dl_loading: 'Loading release data…',
-      dl_api_failed: 'Could not reach GitHub. Showing links for v0.9.0.',
+      dl_api_failed: 'Could not reach GitHub. Showing links for v0.10.0.',
       dl_missing: 'Not in this release',
       dl_how: {
         android: 'Download the APK and open it. Allow installs from this source if the system asks. There is a universal build, plus separate arm64 and arm32 ones.',
@@ -600,6 +600,19 @@ window.GLAZE = {
   // languages it is written in; any other shows the first one with a notice.
   articles: [
     {
+      slug: '0.10.0',
+      kind: 'changelog',
+      date: '2026-11-13',
+      author: 'hydall',
+      langs: ['ru', 'en'],
+      download: 'v0.10.0',
+      title: { ru: 'Glaze beta 0.10.0', en: 'Glaze beta 0.10.0' },
+      lead: {
+        ru: 'Сжатие истории в саммари в стабильной версии, разметка чата в темах, альбомная ориентация на телефоне и свой установщик для Windows.',
+        en: 'History compaction on stable, chat layouts in themes, a phone landscape layout and a Windows setup of our own.',
+      },
+    },
+    {
       slug: '0.9.0',
       kind: 'changelog',
       date: '2026-10-18',
@@ -732,9 +745,66 @@ window.GLAZE = {
       ],
     },
     {
+      version: '0.10.0',
+      date: '2026-11-13',
+      status: 'latest',
+      channel: 'beta',
+      tag: 'v0.10.0',
+      article: '0.10.0',
+      title: { ru: 'Саммари, темы и Windows', en: 'Summary, themes and Windows' },
+      groups: [
+        {
+          title: { ru: 'Новое', en: 'New' },
+          items: {
+            ru: [
+              'Сжатие истории в блоки саммари: фоновое сжатие всего бэклога, блоки на месте сообщений, перегенерация в черновик',
+              'Шапка, поле ввода и шторка чата в WebView, своя разметка чата в темах, импорт тем Tavo',
+              'Альбомная ориентация на телефоне',
+              'Модель чата создаёт и редактирует персонажей через инструменты',
+              'Папки и множественный выбор в списке regex',
+              'Лорбуки за несколько запросов, ожидание очереди JanitorAI',
+              'Провайдер TensorArt',
+              'Свой установщик для Windows и обновление из приложения',
+              'Обновлён NoriMyn, правленая копия сохраняется как Old NoriMyn',
+            ],
+            en: [
+              'History compaction into summary blocks: the whole backlog in the background, blocks in place of their messages, regeneration into drafts',
+              'Chat header, composer and drawer in the WebView, chat layouts in themes, Tavo theme import',
+              'Phone landscape layout',
+              'The chat model creates and edits characters through tools',
+              'Folders and multi-select in the regex list',
+              'Lorebooks built in several requests, JanitorAI queue waited out',
+              'TensorArt provider',
+              'A Windows setup of our own, with in-app updates',
+              'NoriMyn updated, an edited copy is kept as Old NoriMyn',
+            ],
+          },
+        },
+        {
+          title: { ru: 'Исправления', en: 'Fixes' },
+          items: {
+            ru: [
+              'Клавиатура не сдвигает вид чата, шторка не выходит за экран',
+              'Поиск по чату за пределами загруженной истории',
+              'Импорт большого бэкапа Tavo не зависает',
+              'Loopback-серверы на iOS после возврата из фона',
+              'Множество правок интерфейса на телефоне и ПК',
+            ],
+            en: [
+              'The keyboard no longer pans the chat, the drawer stays on screen',
+              'Chat search past the loaded history',
+              'A large Tavo backup import no longer hangs',
+              'Loopback servers on iOS after returning from the background',
+              'Many interface fixes on phone and desktop',
+            ],
+          },
+        },
+      ],
+    },
+    {
       version: '0.9.0',
       date: '2026-10-18',
-      status: 'latest',
+      status: 'released',
       channel: 'beta',
       tag: 'v0.9.0',
       article: '0.9.0',
