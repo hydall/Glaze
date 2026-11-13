@@ -76,10 +76,11 @@ class RoutMyConstants {
     return id;
   }
 
-  /// Reference images are documented only on `/v1/images/edits`, and the live
-  /// catalog advertises that endpoint only for the `openai/gpt-image-*`
-  /// family. Every other rout.my image model is generation-only, so its
-  /// references are gated off (see [providerMaxReferences]).
+  /// Reference images for the images API go through `/v1/images/edits`, and
+  /// the live catalog advertises that endpoint only for the
+  /// `openai/gpt-image-*` family. Gemini models are different: the dispatcher
+  /// sends them through rout.my's Gemini-compatible route with inlineData
+  /// references instead (see [isRoutmyGeminiModel]).
   static bool supportsReferences(String? model) =>
       (model ?? '').toLowerCase().contains('gpt-image');
 
@@ -102,6 +103,60 @@ class RoutMyConstants {
 
   static const imageSizes = ['1K', '2K', '4K'];
   static const seedreamImageSizes = ['1K', '2K'];
+}
+
+/// TensorArt / Tusi OpenAPI (`/openworks/v1`).
+///
+/// The API is task-based rather than model-based: `tool/list` describes the
+/// available generation tools, `task` submits one, `task/query` polls it and
+/// the finished files are downloaded from the returned URLs.
+class TensorArtConstants {
+  static const String defaultEndpoint =
+      'https://openapi.tensor.art/openworks/v1';
+
+  /// Host used by Tusi access keys (`ak_tusi...`).
+  static const String tusiEndpoint = 'https://openapi.tusiart.cn/openworks/v1';
+
+  static const String accessKeyUrl = 'https://tensor.art/settings/access-key';
+
+  /// Cheap anime text-to-image tool available in the shipped catalog.
+  static const String defaultTool = 'anime_lab_wai_illustrious';
+
+  static const aspectRatios = [
+    'auto',
+    '21:9',
+    '16:9',
+    '4:3',
+    '3:2',
+    '1:1',
+    '9:16',
+    '3:4',
+    '2:3',
+    '5:4',
+    '4:5',
+  ];
+
+  static const imageSizes = ['1K', '2K', '4K'];
+
+  static const int maxReferences = 10;
+
+  /// Resolves the API base: an explicit endpoint wins, otherwise the key
+  /// prefix selects the TensorArt or Tusi host. A bare host gets the
+  /// `/openworks/v1` suffix so users can paste either form.
+  static String resolveEndpoint(String endpoint, String accessKey) {
+    var base = endpoint.trim().replaceFirst(RegExp(r'/+$'), '');
+    if (base.isEmpty) {
+      base = accessKey.trim().startsWith('ak_tusi')
+          ? tusiEndpoint
+          : defaultEndpoint;
+    }
+    if (base.endsWith('/openworks')) {
+      base = '$base/v1';
+    } else if (!base.contains('/openworks')) {
+      base = '$base/openworks/v1';
+    }
+    return base;
+  }
 }
 
 class NaisteraConstants {

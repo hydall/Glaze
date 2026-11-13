@@ -40,6 +40,7 @@ class ImageReferenceCollector {
     Character? character,
     Persona? persona,
     List<String>? recentImageContexts,
+    List<Map<String, String>> leadingReferences = const [],
   }) async {
     final maxRefs = providerMaxReferences(settings);
     if (maxRefs <= 0) return const [];
@@ -47,26 +48,60 @@ class ImageReferenceCollector {
     final transform = _transformFor(settings);
 
     final refs = <Map<String, String>>[];
+    final seen = <String>{};
+
+    void add(Map<String, String>? entry) {
+      if (entry == null) return;
+      final image = entry['image'] ?? '';
+      if (image.isEmpty || !seen.add(image)) return;
+      refs.add(entry);
+    }
+
+    // References handed over by a plugin come first, in their own order: a
+    // gallery pose reference is meant to steer the whole picture, faces after
+    // it. The same bytes are never sent twice, even if they are also an
+    // avatar or a library entry.
+    for (final raw in leadingReferences) {
+      final image = (raw['image'] ?? '').trim();
+      if (image.isEmpty) continue;
+      final normalized = await _normalizeBase64(
+        image,
+        mime: raw['mime'] ?? '',
+        transform: transform,
+      );
+      if (normalized == null) continue;
+      final name = (raw['name'] ?? '').trim();
+      final description = (raw['description'] ?? '').trim();
+      add({
+        'name': name,
+        'image': normalized.$1,
+        'mime': normalized.$2,
+        'description': description.isEmpty ? name : description,
+        'source': 'additional',
+      });
+    }
 
     if (settings.sendsCharAvatarImage && character?.avatarPath != null) {
-      final entry = await _fromFile(
-        character!.avatarPath!,
-        name: character.name,
-        description: character.name,
-        source: 'char',
-        transform: transform,
+      add(
+        await _fromFile(
+          character!.avatarPath!,
+          name: character.name,
+          description: character.name,
+          source: 'char',
+          transform: transform,
+        ),
       );
-      if (entry != null) refs.add(entry);
     }
     if (settings.sendUserAvatar && persona?.avatarPath != null) {
-      final entry = await _fromFile(
-        persona!.avatarPath!,
-        name: persona.name,
-        description: persona.name,
-        source: 'user',
-        transform: transform,
+      add(
+        await _fromFile(
+          persona!.avatarPath!,
+          name: persona.name,
+          description: persona.name,
+          source: 'user',
+          transform: transform,
+        ),
       );
-      if (entry != null) refs.add(entry);
     }
 
     for (final ref in matchReferences(prompt, settings.references)) {
@@ -81,7 +116,7 @@ class ImageReferenceCollector {
           mime = 'image/png';
         }
       }
-      refs.add({
+      add({
         'name': ref.name.trim(),
         'image': image,
         'mime': mime,
@@ -96,14 +131,15 @@ class ImageReferenceCollector {
       final count = settings.imageContextCount.clamp(1, 3);
       for (final context in recentImageContexts.take(count)) {
         final path = ImageTagMarkup.normalizeImageResultPayload(context);
-        final entry = await _fromFile(
-          path,
-          name: 'context',
-          description: '',
-          source: 'context',
-          transform: transform,
+        add(
+          await _fromFile(
+            path,
+            name: 'context',
+            description: '',
+            source: 'context',
+            transform: transform,
+          ),
         );
-        if (entry != null) refs.add(entry);
       }
     }
 
@@ -113,7 +149,8 @@ class ImageReferenceCollector {
   /// The preprocessing the active provider/model needs. Only reached when the
   /// provider takes references at all ([providerMaxReferences] gates it).
   static _ReferenceTransform _transformFor(ImageGenSettings settings) {
-    if (settings.apiType == ImageGenApiType.routmy) {
+    if (settings.apiType == ImageGenApiType.routmy &&
+        !isRoutmyGeminiModel(settings.routmyModel)) {
       return _ReferenceTransform.downscaleJpeg;
     }
     if (settings.apiType == ImageGenApiType.novelai &&
@@ -130,6 +167,35 @@ class ImageReferenceCollector {
         base64Decode(base64Image),
       );
       return padded == null ? null : base64Encode(padded);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Applies the provider's preprocessing to a reference that already
+  /// arrived as base64 (a plugin's `referenceImages` / `characters`).
+  Future<(String, String)?> _normalizeBase64(
+    String image, {
+    required String mime,
+    required _ReferenceTransform transform,
+  }) async {
+    try {
+      final bytes = base64Decode(_stripDataUrl(image));
+      switch (transform) {
+        case _ReferenceTransform.none:
+          return (base64Encode(bytes), mime.isEmpty ? 'image/png' : mime);
+        case _ReferenceTransform.downscaleJpeg:
+          final resized =
+              await compute(
+                _decodeAndResizeJpeg,
+                _ResizeArgs(bytes, 512, 85),
+              ) ??
+              bytes;
+          return (base64Encode(resized), 'image/jpeg');
+        case _ReferenceTransform.novelAiPad:
+          final padded = await compute(padNovelAiReference, bytes) ?? bytes;
+          return (base64Encode(padded), 'image/png');
+      }
     } catch (_) {
       return null;
     }

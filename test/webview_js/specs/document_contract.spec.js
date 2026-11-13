@@ -126,6 +126,59 @@ test('INV-MR5 only https is hoisted; the rest is reported', async ({ page }) => 
   expect(shape.colour, 'the rest of the card CSS still applies').toBe('rgb(3, 4, 5)');
 });
 
+test('INV-MR5 an embedded data: @font-face is registered with the document', async ({ page }) => {
+  // Chromium ignores @font-face in a shadow-root stylesheet, so the card's
+  // own font never applied — and was reported as a network load.
+  const body = card('fandom-guide-card').text;
+  await render(page, body);
+  await render(page, body);
+  const shape = await page.evaluate(() => {
+    const root = window.harness.currentRoot();
+    const hoisted = Array.from(document.head.querySelectorAll('style[data-glaze-font-face]'));
+    return {
+      count: hoisted.length,
+      onlyFontFaces: hoisted.every((s) => /^@font-face\s*\{[^{}]*\}$/.test(s.textContent.trim())),
+      families: Array.from(document.fonts).map((f) => f.family.replace(/"/g, '')),
+      report: root.querySelector('.glaze-css-error')?.textContent || '',
+    };
+  });
+  expect(shape.count, 'two faces, each hoisted once').toBe(2);
+  expect(shape.onlyFontFaces).toBe(true);
+  expect(shape.families).toContain('Shino Larp Display');
+  expect(shape.families).toContain('Shino Larp Text');
+  expect(shape.report, 'an embedded font is not a problem to report').toBe('');
+});
+
+test('INV-MR5 an https @font-face is registered with the document', async ({ page }) => {
+  await render(page, card('https-font-face-card').text);
+  const shape = await page.evaluate(() => {
+    const root = window.harness.currentRoot();
+    const hoisted = Array.from(document.head.querySelectorAll('style[data-glaze-font-face]'));
+    return {
+      sources: hoisted.map((s) => s.textContent),
+      report: root.querySelector('.glaze-css-error')?.textContent || '',
+    };
+  });
+  expect(shape.sources).toHaveLength(1);
+  expect(shape.sources[0]).toContain('https://fonts.example/net.woff2');
+  expect(shape.report).toBe('');
+});
+
+test('INV-MR5 an http @font-face is refused and reported', async ({ page }) => {
+  await render(page, card('http-font-face-card').text);
+  const shape = await page.evaluate(() => {
+    const root = window.harness.currentRoot();
+    return {
+      hoisted: document.head.querySelectorAll('style[data-glaze-font-face]').length,
+      report: root.querySelector('.glaze-css-error')?.textContent || '',
+      colour: getComputedStyle(root.querySelector('.pf-title')).color,
+    };
+  });
+  expect(shape.hoisted).toBe(0);
+  expect(shape.report).toContain('@font-face "Plain Card Font" ignored');
+  expect(shape.colour, 'the rest of the card CSS still applies').toBe('rgb(6, 7, 9)');
+});
+
 test('INV-MR2 the app keeps its own document while a message runs', async ({ page }) => {
   await render(page, card('doc-body-card').text);
   const restored = await page.evaluate(() => {
@@ -161,4 +214,86 @@ test('a card script survives its own comparisons', async ({ page }) => {
   expect(shape.out, 'the script ran').toBe('ok2');
   expect(shape.formatted).toContain('i<n');
   expect(shape.formatted).not.toContain('&lt;n');
+});
+
+test('a card script keeps its template literals', async ({ page }) => {
+  // The backticks of `${x}` are not inline code: a closed <script> is held
+  // before the inline-code pass reads the message.
+  await render(page, card('script-template-literal').text);
+  const out = await page.evaluate(() =>
+    window.harness.currentRoot().querySelector('#tl-out').innerHTML);
+  expect(out).toBe('<b>привет, мир</b>!');
+  expect(page.__failures).toEqual([]);
+});
+
+test('INV-MR1 currentScript describes the element the script was written in', async ({ page }) => {
+  await render(page, `<section class="cs-wrap" data-k="w"><span id="cs-prev">a</span><script data-role="probe">
+var s = document.currentScript;
+window.__cs = {
+  prev: s.previousElementSibling && s.previousElementSibling.id,
+  next: s.nextElementSibling && s.nextElementSibling.id,
+  parent: s.parentElement && s.parentElement.className,
+  closest: s.closest('[data-k]') && s.closest('[data-k]').dataset.k,
+  role: s.dataset.role,
+  attr: s.getAttribute('data-role'),
+};
+var root = s.getRootNode;
+setTimeout(function () { window.__csRoot = root() instanceof ShadowRoot; }, 0);
+</script><i id="cs-next">b</i></section>`);
+  await page.waitForFunction(() => window.__csRoot !== undefined);
+  const shape = await page.evaluate(() => ({ ...window.__cs, root: window.__csRoot }));
+  expect(shape).toEqual({
+    prev: 'cs-prev',
+    next: 'cs-next',
+    parent: 'cs-wrap',
+    closest: 'w',
+    role: 'probe',
+    attr: 'probe',
+    root: true,
+  });
+});
+
+test('INV-MR8 a timer a card schedules runs with the message document', async ({ page }) => {
+  await render(page, `<div id="tm-out">-</div><script>
+setTimeout(function () {
+  document.getElementById('tm-out').textContent = 'timeout';
+  requestAnimationFrame(function () {
+    document.getElementById('tm-out').textContent += '+frame';
+  });
+}, 0);
+</script>`);
+  await page.waitForFunction(() =>
+    window.harness.currentRoot().querySelector('#tm-out').textContent === 'timeout+frame');
+  const own = await page.evaluate(() =>
+    ['setTimeout', 'setInterval', 'requestAnimationFrame'].map((name) =>
+      window[name] === Window.prototype[name] ||
+        String(window[name]).includes('[native code]')));
+  expect(own, 'the timers are the browser\'s own once the scope is gone').toEqual([true, true, true]);
+});
+
+test('INV-MR8 the app\'s own listeners and timers keep the app\'s document', async ({ page }) => {
+  await render(page, `<button id="ap-btn" onclick="setTimeout(function () {
+  document.getElementById('ap-out').textContent = 'card';
+}, 0)">go</button><div id="ap-out">-</div><script>window.__apReady = 1;</script>`);
+  await page.evaluate(() => {
+    window.__app = null;
+    document.addEventListener('click', () => {
+      const inEvent = document.body;
+      setTimeout(() => {
+        window.__app = {
+          inEvent: inEvent === document.querySelector('body'),
+          inTimer: document.body === document.querySelector('body') &&
+            String(document.getElementById).includes('[native code]'),
+        };
+      }, 0);
+    }, { once: true });
+    window.harness.currentRoot().querySelector('#ap-btn').click();
+  });
+  await page.waitForFunction(() => window.__app !== null);
+  const shape = await page.evaluate(() => ({
+    app: window.__app,
+    card: window.harness.currentRoot().querySelector('#ap-out').textContent,
+  }));
+  expect(shape.app).toEqual({ inEvent: true, inTimer: true });
+  expect(shape.card, 'the card\'s own timer still sees the message').toBe('card');
 });

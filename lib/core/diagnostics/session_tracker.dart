@@ -13,7 +13,8 @@ enum SessionState {
   /// ends here is not a crash.
   background,
 
-  /// The window was closed (desktop) or the engine detached.
+  /// The window was closed (desktop; `DesktopCloseHandler` records it, since
+  /// the close itself reaches no lifecycle callback) or the engine detached.
   closed,
 }
 

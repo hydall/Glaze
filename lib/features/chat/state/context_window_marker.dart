@@ -95,7 +95,7 @@ final contextWindowRecountProvider = Provider.autoDispose.family<void, String>((
     debounce?.cancel();
     debounce = Timer(
       const Duration(milliseconds: 600),
-      () => unawaited(_recountBreakdown(ref, charId)),
+      () => unawaited(recountContextWindow(ref, charId)),
     );
   }
 
@@ -120,7 +120,12 @@ final contextWindowRecountProvider = Provider.autoDispose.family<void, String>((
   );
 });
 
-Future<void> _recountBreakdown(Ref ref, String charId) async {
+/// Counts the open chat's next prompt and stores its breakdown, so the
+/// CONTEXT LIMIT rule and the Context screen answer for the prompt the app
+/// would send now. Only when no breakdown is stored — a caller that wants a
+/// recount clears the cached one first — and never during a turn, which
+/// stores its own.
+Future<void> recountContextWindow(Ref ref, String charId) async {
   if (!ref.mounted) return;
   // Studio builds its own window — from its own connection — and its breakdown
   // carries no rule; the ordinary prompt counted here would draw a false one.

@@ -2,6 +2,8 @@ import 'package:drift/drift.dart';
 
 import '../app_db.dart';
 import '../tables.dart';
+import '../../models/chat_message.dart' hide ChatSummary;
+import '../../models/summary_block.dart';
 import '../../utils/time_helpers.dart';
 
 part 'summary_repo.g.dart';
@@ -40,9 +42,59 @@ class SummaryRepo extends DatabaseAccessor<AppDatabase>
         messageCount: Value(messageCount),
         prompt: Value(prompt ?? existing?.prompt),
         updatedAt: Value(currentTimestampSeconds()),
+        blocksJson: Value(existing?.blocksJson),
       ),
     );
   }
+
+  /// Writes the block chain and the text rendered from it, leaving the
+  /// switch and the template alone.
+  Future<void> putBlocks({
+    required String sessionId,
+    required String blocksJson,
+    required String content,
+    required int messageCount,
+  }) async {
+    final existing = await get(sessionId);
+    await into(chatSummaries).insertOnConflictUpdate(
+      ChatSummariesCompanion.insert(
+        sessionId: sessionId,
+        content: content,
+        enabled: Value(existing?.enabled ?? true),
+        messageCount: Value(messageCount),
+        prompt: Value(existing?.prompt),
+        updatedAt: Value(currentTimestampSeconds()),
+        blocksJson: Value(blocksJson),
+      ),
+    );
+  }
+
+  /// Atomically rewrites the block chain from the row as stored now.
+  /// [mutate] gets that row (null when there is none) and returns the new
+  /// chain and the text rendered from it, or null to write nothing — two
+  /// writers can no longer lose each other's change. Returns whether it wrote.
+  Future<bool> mutateBlocks({
+    required String sessionId,
+    required int messageCount,
+    required ({String blocksJson, String content})? Function(ChatSummary? row)
+    mutate,
+  }) => transaction(() async {
+    final existing = await get(sessionId);
+    final next = mutate(existing);
+    if (next == null) return false;
+    await into(chatSummaries).insertOnConflictUpdate(
+      ChatSummariesCompanion.insert(
+        sessionId: sessionId,
+        content: next.content,
+        enabled: Value(existing?.enabled ?? true),
+        messageCount: Value(messageCount),
+        prompt: Value(existing?.prompt),
+        updatedAt: Value(currentTimestampSeconds()),
+        blocksJson: Value(next.blocksJson),
+      ),
+    );
+    return true;
+  });
 
   Future<void> putSynced({
     required String sessionId,
@@ -51,6 +103,7 @@ class SummaryRepo extends DatabaseAccessor<AppDatabase>
     required bool enabled,
     required String? prompt,
     required int updatedAt,
+    String? blocksJson,
   }) async {
     await into(chatSummaries).insertOnConflictUpdate(
       ChatSummariesCompanion.insert(
@@ -60,6 +113,7 @@ class SummaryRepo extends DatabaseAccessor<AppDatabase>
         messageCount: Value(messageCount),
         prompt: Value(prompt),
         updatedAt: Value(updatedAt),
+        blocksJson: Value(blocksJson),
       ),
     );
   }
@@ -81,6 +135,7 @@ class SummaryRepo extends DatabaseAccessor<AppDatabase>
         messageCount: Value(existing?.messageCount ?? 0),
         prompt: Value(prompt),
         updatedAt: Value(currentTimestampSeconds()),
+        blocksJson: Value(existing?.blocksJson),
       ),
     );
   }
@@ -98,6 +153,7 @@ class SummaryRepo extends DatabaseAccessor<AppDatabase>
         messageCount: Value(existing?.messageCount ?? 0),
         prompt: Value(existing?.prompt),
         updatedAt: Value(currentTimestampSeconds()),
+        blocksJson: Value(existing?.blocksJson),
       ),
     );
   }
@@ -108,20 +164,35 @@ class SummaryRepo extends DatabaseAccessor<AppDatabase>
     )..where((t) => t.sessionId.equals(sessionId))).go().then((_) {});
   }
 
-  /// Carries user settings, but resets generated content because this model
-  /// has only a message count and cannot prove that a summary predates a cut.
-  Future<void> copySettingsForSessionBranch({
+  /// Carries the summary over to a branch: the user settings, and the
+  /// blocks whose source messages the branch keeps ([SummaryChain.forBranch]).
+  /// A summary from before blocks existed records no sources, so nothing
+  /// says it stops at the branch point; only its settings carry over.
+  Future<void> copyForSessionBranch({
     required String fromSessionId,
     required String toSessionId,
+    required List<ChatMessage> messages,
   }) async {
     final source = await get(fromSessionId);
     if (source == null) return;
-    await put(
-      sessionId: toSessionId,
-      content: '',
-      messageCount: 0,
-      enabled: source.enabled,
-      prompt: source.prompt,
+    final blocks = source.blocksJson == null
+        ? const <SummaryBlock>[]
+        : SummaryChain.forBranch(SummaryBlock.decodeList(source.blocksJson), {
+            for (final message in messages) message.id,
+          });
+    final carried = blocks.isNotEmpty;
+    await into(chatSummaries).insertOnConflictUpdate(
+      ChatSummariesCompanion.insert(
+        sessionId: toSessionId,
+        content: carried
+            ? SummaryChain.render(SummaryChain.inPrompt(blocks, messages))
+            : '',
+        enabled: Value(source.enabled),
+        messageCount: Value(carried ? messages.length : 0),
+        prompt: Value(source.prompt),
+        updatedAt: Value(currentTimestampSeconds()),
+        blocksJson: Value(carried ? SummaryBlock.encodeList(blocks) : null),
+      ),
     );
   }
 }

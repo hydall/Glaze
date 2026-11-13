@@ -19,6 +19,7 @@ import 'chub_login_sheet.dart';
 import 'datacat/datacat_account_sheet.dart';
 import 'janitor_login_sheet.dart';
 import 'janitor_source_settings.dart';
+import 'lorebook_build_settings.dart';
 import 'provider_logo.dart';
 import 'saucepan_login_sheet.dart';
 
@@ -47,6 +48,9 @@ class ThirdPartyProvidersScreen extends ConsumerWidget {
     final disabled = ref.watch(thirdPartyProvidersProvider);
     final catalogEnabled = ref.watch(catalogMasterEnabledProvider);
     final blurNsfw = ref.watch(blurNsfwImagesProvider);
+    final janitorSource = ref.watch(
+      appSettingsProvider.select((s) => s.value?.janitorSource),
+    );
     // Inside the desktop floating window the frame supplies the title bar, so
     // the space reserved for a header would be a gap.
     final topPad = DetachedShellHost.of(context)
@@ -95,8 +99,24 @@ class ThirdPartyProvidersScreen extends ConsumerWidget {
               ),
             ],
           ),
-          for (final p in ThirdPartyProvider.values)
+          for (final p in ThirdPartyProvider.values) ...[
             _providerGroup(context, ref, p, enabled: !disabled.contains(p)),
+            // Lorebook builds are part of the local JanitorAI flow (closed and
+            // scripted lorebooks), so their connection and prompts follow its
+            // group — the same settings the capture sheet's gear opens. DataCat
+            // rebuilds nothing, so there they would be settings for nothing.
+            if (p == ThirdPartyProvider.janitor &&
+                !disabled.contains(p) &&
+                janitorSource == ExtractionSource.local)
+              MenuCollapsibleSection(
+                label: 'lorebook_build_settings_section'.tr(),
+                helpTerm: 'lorebook-build-prompt',
+                children: const [
+                  LorebookBuildLlmGroup(),
+                  LorebookBuildPromptsGroup(),
+                ],
+              ),
+          ],
         ],
       ),
     );

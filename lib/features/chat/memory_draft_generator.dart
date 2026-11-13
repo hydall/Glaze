@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:dio/dio.dart';
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart';
 
@@ -25,6 +26,40 @@ import '../../core/state/global_regex_provider.dart';
 import '../../core/state/studio_regex_provider.dart';
 import '../settings/api_list_provider.dart';
 
+/// Why [draft] cannot be retold from [chat] as the reader should hear it,
+/// or null when every source is in place. Hidden messages are skipped, not
+/// refused. The manifest captured at generation refuses an empty or failed
+/// message and one that is gone, and a draft left pointing at one failed
+/// the same way on every attempt, saying only that its sources were
+/// "missing, reordered, or unavailable". Those messages are named by their
+/// place in the chat so the reader can regenerate or restore them and
+/// generate again; they are not skipped, which would leave the memory with
+/// a gap.
+String? memoryDraftSourceProblems(MemoryDraft draft, List<ChatMessage> chat) {
+  final problems = MemorySourceManifest.problems(draft.messageIds, chat);
+  if (problems.isEmpty) return null;
+  final named = <String>[];
+  var deleted = 0;
+  for (final problem in problems) {
+    final key = switch (problem.kind) {
+      MemorySourceProblemKind.allHidden => 'memory_draft_source_all_hidden',
+      MemorySourceProblemKind.error => 'memory_draft_source_error',
+      MemorySourceProblemKind.empty => 'memory_draft_source_empty',
+      MemorySourceProblemKind.deleted => null,
+    };
+    if (key == null) {
+      deleted++;
+    } else {
+      named.add(key.tr(args: ['${problem.position}']));
+    }
+  }
+  // Deleted sources have no position to name: one item with their count.
+  if (deleted > 0) {
+    named.add('memory_draft_source_deleted'.tr(args: ['$deleted']));
+  }
+  return 'memory_draft_source_problems'.tr(args: [named.join(', ')]);
+}
+
 class MemoryDraftGenerator {
   final T Function<T>(ProviderListenable<T> provider) _read;
   final AuxLlmClient _llm;
@@ -47,10 +82,11 @@ class MemoryDraftGenerator {
     required Map<String, String> sessionVars,
     CancelToken? cancelToken,
   }) async {
+    // Hidden messages are skipped: the reader kept them out of the story.
     final manifest = MemorySourceManifest.capture(
       sessionId,
-      messages,
-      draft.messageIds,
+      messages.where((m) => !m.isHidden).toList(growable: false),
+      MemorySourceManifest.withoutHidden(draft.messageIds, messages),
     );
     final character = await _read(characterRepoProvider).getById(charId);
     if (character == null) throw StateError('Character not found: $charId');

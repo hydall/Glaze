@@ -16,6 +16,7 @@ import '../catalog_models.dart';
 import '../catalog_provider.dart';
 import '../services/cf_challenge_service.dart';
 import '../services/janitor_session.dart';
+import '../services/janitor_waiting_room.dart';
 import '../services/janitor_webview_proxy.dart';
 import '../services/chub_provider.dart';
 import '../services/datacat/datacat_discovery.dart';
@@ -70,6 +71,16 @@ class CatalogGrid extends ConsumerWidget {
               child: CatalogControls(state: state, notifier: notifier),
             ),
           ),
+          if (state.activeProvider == CatalogProvider.janitor)
+            SliverToBoxAdapter(
+              child: ValueListenableBuilder<JanitorWaitingRoom?>(
+                valueListenable: JanitorWebViewProxy.instance.waitingRoom,
+                builder: (context, room, _) {
+                  if (room == null) return const SizedBox.shrink();
+                  return _JanitorQueueBanner(room: room);
+                },
+              ),
+            ),
           if (state.filters.nsfw ||
               state.filters.tagIds.isNotEmpty ||
               state.filters.tagNames.isNotEmpty)
@@ -555,6 +566,54 @@ class _ActiveTagsRow extends StatelessWidget {
               ),
             ));
           },
+        ),
+      ),
+    );
+  }
+}
+
+/// Explains a catalog load that is sitting in JanitorAI's admission queue. The
+/// proxy keeps the request open and continues on its own; this is the only sign
+/// of it, because the waiting room is a normal page and not an error.
+class _JanitorQueueBanner extends StatelessWidget {
+  final JanitorWaitingRoom room;
+
+  const _JanitorQueueBanner({required this.room});
+
+  @override
+  Widget build(BuildContext context) {
+    final wait = room.estimatedWait;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: context.cs.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: context.cs.outlineVariant),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.hourglass_top_rounded,
+              size: 18,
+              color: context.cs.primary,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                wait == null
+                    ? 'catalog_janitor_queue'.tr()
+                    : 'catalog_janitor_queue_wait'.tr(
+                        namedArgs: {'wait': wait},
+                      ),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: context.cs.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

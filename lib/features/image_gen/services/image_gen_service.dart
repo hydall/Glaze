@@ -188,6 +188,7 @@ class ImageGenService {
     Character? character,
     Persona? persona,
     List<String>? recentImageContexts,
+    List<Map<String, String>> pluginReferences = const [],
     String? instructionAspectRatio,
     String? instructionImageSize,
     CancelToken? cancelToken,
@@ -199,6 +200,7 @@ class ImageGenService {
       character: character,
       persona: persona,
       recentImageContexts: recentImageContexts,
+      leadingReferences: pluginReferences,
     );
 
     final isNaistera = settings.apiType == ImageGenApiType.naistera;

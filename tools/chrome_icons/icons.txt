@@ -1,0 +1,89 @@
+# Material icons the chat chrome (assets/chat_webview/chrome) can draw.
+# One Flutter `Icons.` name per line; regenerate icons.js after editing.
+
+# Header
+arrow_back_ios_new_rounded
+search
+search_rounded
+close
+close_rounded
+
+# Composer
+stop_rounded
+check_rounded
+send_rounded
+account_circle_rounded
+keyboard_arrow_up
+keyboard_arrow_down
+keyboard_double_arrow_up
+keyboard_double_arrow_down
+visibility
+visibility_off
+delete
+tips_and_updates_outlined
+arrow_downward
+undo
+
+# Drawer chrome
+check
+edit_outlined
+add
+extension_rounded
+
+# Composer actions (composer_pins_provider.dart)
+auto_awesome
+attach_file
+fullscreen
+north_east
+star_border
+format_quote
+translate
+
+# Tools catalog (magic_drawer_catalog.dart)
+travel_explore
+subject
+history
+account_box
+library_books
+code
+cloud
+description
+manage_accounts
+image
+edit_note
+menu_book
+extension_outlined
+widgets_outlined
+
+# Quick replies (quick_reply_icons.dart, quick_replies_provider.dart)
+bolt
+keyboard_double_arrow_right
+chat_bubble_outline
+help_outline
+lightbulb_outline
+star_outline
+favorite_border
+local_fire_department_outlined
+visibility_outlined
+directions_walk
+directions_run
+back_hand_outlined
+mic_none
+theater_comedy_outlined
+masks_outlined
+sports_martial_arts
+shield_outlined
+auto_fix_high_outlined
+auto_awesome_outlined
+nightlight_outlined
+wb_sunny_outlined
+schedule
+map_outlined
+meeting_room_outlined
+menu_book_outlined
+sticky_note_2_outlined
+refresh
+fast_forward_outlined
+outlined_flag
+warning_amber_outlined
+local_cafe_outlined

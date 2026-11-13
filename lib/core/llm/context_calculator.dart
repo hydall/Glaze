@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'history_trim.dart';
 import 'tokenizer.dart';
 import 'history_assembler.dart';
@@ -44,14 +46,22 @@ class ContextCalculator {
   final String historyTrimMode;
 
   /// Oldest message the last stepped trim anchored on, when there is one. It is
-  /// honoured only while the window it opens still fits the budget — that check
-  /// is what makes a smaller window (a raised `maxTokens`, a grown lorebook)
-  /// move the anchor instead of silently overflowing.
+  /// honoured only while the window it opens still fits under the trigger line
+  /// — that check is what makes a smaller window (a raised `maxTokens`, a
+  /// grown lorebook) move the anchor instead of silently overflowing.
   final String? historyAnchorId;
 
-  /// Stepped mode: how full the held window may get before the anchor moves,
-  /// and how much of the budget the move gives back. Percentages of the history
-  /// budget, clamped to sane ranges by the trim itself.
+  /// Whether [historyAnchorId] is the reader's own choice (the chat's "Pin
+  /// cache anchor"). A pinned anchor is held as long as it fits under the
+  /// trigger line and is never moved back to the refill level: the reader
+  /// asked for the history to start there. Once it stops fitting it steps
+  /// like any other, and the pin is gone.
+  final bool historyAnchorPinned;
+
+  /// Stepped mode: how full the prompt may get before the anchor moves, and
+  /// how much of the context window the move gives back. Percentages of the
+  /// context window (see [kDefaultHistoryTrimTriggerPercent]), clamped to sane
+  /// ranges by the trim itself.
   final int historyTrimTriggerPercent;
   final int historyTrimStepPercent;
 
@@ -62,6 +72,7 @@ class ContextCalculator {
     this.excludeReasoningFromContextBudget = false,
     String historyTrimMode = HistoryTrimMode.sliding,
     this.historyAnchorId,
+    this.historyAnchorPinned = false,
     this.historyTrimTriggerPercent = kDefaultHistoryTrimTriggerPercent,
     this.historyTrimStepPercent = kDefaultHistoryTrimStepPercent,
   }) : historyTrimMode = HistoryTrimMode.normalize(historyTrimMode);
@@ -124,7 +135,7 @@ class ContextCalculator {
     final historyBudget =
         safeContext - staticTotal - effectiveReserve - memoryTokens;
 
-    final (trimmedHistory, cutoffIndex) = _trimHistory(
+    final (trimmedHistory, cutoffIndex, pinHeld) = _trimHistory(
       historyMessages,
       historyBudget > 0 ? historyBudget : 0,
     );
@@ -164,6 +175,7 @@ class ContextCalculator {
       cutoffIndex: cutoffIndex,
       trimmedHistory: trimmedHistory,
       historyAnchorId: resolvedAnchor,
+      historyAnchorPinned: resolvedAnchor != null && pinHeld,
       lorebookReserveTokens: lorebookReserveTokens,
       memoryTokens: memoryTokens,
       vectorLoreTokens: vectorLoreTokens,
@@ -194,14 +206,37 @@ class ContextCalculator {
     };
   }
 
-  (List<PromptMessage>, int) _trimHistory(
+  /// The kept history, the cutoff, and whether a pinned anchor was held.
+  (List<PromptMessage>, int, bool) _trimHistory(
     List<PromptMessage> messages,
     int budget,
   ) {
-    if (budget <= 0) return (<PromptMessage>[], messages.length);
-    return historyTrimMode == HistoryTrimMode.stepped
-        ? _trimStepped(messages, budget)
-        : _trimSliding(messages, budget);
+    if (budget <= 0) return (<PromptMessage>[], messages.length, false);
+    if (historyTrimMode != HistoryTrimMode.stepped) {
+      final (kept, cutoff) = _trimSliding(messages, budget);
+      return (kept, cutoff, false);
+    }
+    return _trimStepped(messages, budget);
+  }
+
+  /// Tokens of the context window a share of it comes to.
+  int _shareOfContext(int percent) => (contextSize * percent / 100).floor();
+
+  /// How much history the window may hold at the trigger line: the share of
+  /// the context the trigger names — never past what the reply's reservation
+  /// leaves — less everything else the request carries. Negative when that
+  /// fixed part alone is past the line, in which case there is nothing to
+  /// hold and the history is cut to what fits, every turn.
+  ///
+  /// [budget] is what the history may take at the very most, so the fixed
+  /// part is what the budget leaves off [safeContext].
+  int _triggerRoom(int budget) {
+    final fixed = safeContext - budget;
+    final line = math.min(
+      _shareOfContext(historyTrimTriggerPercent.clamp(1, 100)),
+      safeContext,
+    );
+    return line - fixed;
   }
 
   /// Keeps the start of the history still for as long as it fits, then jumps it
@@ -210,10 +245,24 @@ class ContextCalculator {
   /// Between jumps every request begins with the same bytes, which is what lets
   /// a provider's prefix cache hit; a sliding cut moves the start almost every
   /// turn and misses every time. See [HistoryTrimMode.stepped].
-  (List<PromptMessage>, int) _trimStepped(
+  ///
+  /// Both knobs are shares of the context window, counted the way the prompt
+  /// inspector counts the prompt: the trigger is where the whole prompt may
+  /// get to before the anchor moves, and the step is how much of the window a
+  /// move frees. The preset, the character, the lorebooks and memory are the
+  /// fixed part under the history; what they leave above it up to the trigger
+  /// line is the room the held window may fill.
+  (List<PromptMessage>, int, bool) _trimStepped(
     List<PromptMessage> messages,
     int budget,
   ) {
+    final room = _triggerRoom(budget);
+    // The level a step refills to. A step bigger than the room — a fixed
+    // part close to the line — frees half the room instead: freeing all of
+    // it would leave nothing to hold, and the next turn would step again.
+    final step = _shareOfContext(historyTrimStepPercent.clamp(1, 95));
+    final target = room > 0 ? math.max(room - step, room ~/ 2) : 0;
+
     final anchorId = historyAnchorId;
     if (anchorId != null && anchorId.isNotEmpty) {
       final index = messages.indexWhere((m) => m.sourceMessageId == anchorId);
@@ -221,25 +270,30 @@ class ContextCalculator {
       // step afresh rather than silently falling back to the whole history.
       if (index >= 0) {
         final kept = messages.sublist(index);
-        // Trigger below 100 %: stepping only once the window is already over
-        // budget leaves no room for the turn that pushed it there, and the
-        // anchor would have to move again immediately.
-        final trigger = historyTrimTriggerPercent.clamp(1, 100) / 100;
-        if (_historyTokens(kept) <= budget * trigger) return (kept, index);
+        final tokens = _historyTokens(kept);
+        if (tokens <= room) {
+          // A window far below the refill level has more room than a step
+          // would have left it: the fixed part swelled for a turn, cut the
+          // history deep, and shrank back. The anchor moves back to the
+          // level a step would have set — unless the reader pinned it there.
+          final slack = _shareOfContext(kHistoryAnchorRefillSlackPercent);
+          final starved =
+              !historyAnchorPinned && index > 0 && tokens < target - slack;
+          if (!starved) return (kept, index, historyAnchorPinned);
+        }
       }
     }
 
     // Re-anchor with headroom: the freed share is what the following turns
     // grow into, and how long the prefix — and the cache with it — holds still.
-    final step = historyTrimStepPercent.clamp(1, 95) / 100;
-    final target = (budget * (1 - step)).floor();
     if (target > 0) {
-      final stepped = _trimSliding(messages, target);
+      final (kept, cutoff) = _trimSliding(messages, target);
       // Unless the newest message alone is bigger than the reduced target: a
       // stepped prompt must never carry less history than a sliding one would.
-      if (stepped.$1.isNotEmpty) return stepped;
+      if (kept.isNotEmpty) return (kept, cutoff, false);
     }
-    return _trimSliding(messages, budget);
+    final (kept, cutoff) = _trimSliding(messages, budget);
+    return (kept, cutoff, false);
   }
 
   (List<PromptMessage>, int) _trimSliding(
@@ -304,6 +358,11 @@ class TokenBreakdown {
   /// Oldest kept message under [HistoryTrimMode.stepped] — the anchor the next
   /// turn should reuse. Null in sliding mode, where there is nothing to hold.
   final String? historyAnchorId;
+
+  /// Whether [historyAnchorId] is a pin the reader set that the trim held.
+  /// False once the pinned window stopped fitting and the trim stepped past
+  /// it — the caller persisting the anchor drops the pin with it.
+  final bool historyAnchorPinned;
   final int lorebookReserveTokens;
   final int memoryTokens;
   final int vectorLoreTokens;
@@ -321,6 +380,7 @@ class TokenBreakdown {
     required this.cutoffIndex,
     required this.trimmedHistory,
     this.historyAnchorId,
+    this.historyAnchorPinned = false,
     this.lorebookReserveTokens = 0,
     this.memoryTokens = 0,
     this.vectorLoreTokens = 0,
@@ -339,6 +399,7 @@ class TokenBreakdown {
     'cutoffIndex': cutoffIndex,
     'trimmedHistory': trimmedHistory.map((m) => m.toJson()).toList(),
     'historyAnchorId': historyAnchorId,
+    'historyAnchorPinned': historyAnchorPinned,
     'lorebookReserveTokens': lorebookReserveTokens,
     'memoryTokens': memoryTokens,
     'vectorLoreTokens': vectorLoreTokens,
@@ -359,6 +420,7 @@ class TokenBreakdown {
         .map((m) => PromptMessage.fromJson(m as Map<String, dynamic>))
         .toList(),
     historyAnchorId: json['historyAnchorId'] as String?,
+    historyAnchorPinned: json['historyAnchorPinned'] as bool? ?? false,
     lorebookReserveTokens: json['lorebookReserveTokens'] as int? ?? 0,
     memoryTokens: json['memoryTokens'] as int? ?? 0,
     vectorLoreTokens: json['vectorLoreTokens'] as int? ?? 0,
@@ -407,6 +469,7 @@ class TokenBreakdown {
       cutoffIndex: cutoffIndex,
       trimmedHistory: trimmedHistory,
       historyAnchorId: historyAnchorId,
+      historyAnchorPinned: historyAnchorPinned,
       lorebookReserveTokens: lorebookReserveTokens,
       memoryTokens: memoryTokens,
       vectorLoreTokens: vectorLoreTokens,
@@ -433,6 +496,7 @@ class TokenBreakdown {
       cutoffIndex: cutoffIndex,
       trimmedHistory: trimmedHistory,
       historyAnchorId: historyAnchorId,
+      historyAnchorPinned: historyAnchorPinned,
       lorebookReserveTokens: lorebookReserveTokens,
       memoryTokens: memoryTokens,
       vectorLoreTokens: tokens,

@@ -19,7 +19,7 @@ import '../bridge/chat_webview_settings.dart';
 import '../../settings/app_settings_provider.dart';
 import 'chat_webview_callbacks.dart';
 import 'chat_webview_ext_block_callbacks.dart';
-import 'chat_webview_trackpad_scroll.dart';
+import 'chat_webview_scroll_relay.dart';
 import 'message_scripts_prompt_sheet.dart';
 import 'webview_callbacks.dart';
 
@@ -44,6 +44,7 @@ class ChatWebViewSurface extends ConsumerStatefulWidget {
     required this.lifecycleEpoch,
     required this.isActive,
     required this.sessionSwitching,
+    required this.ready,
     required this.refreshPanel,
     required this.bgImageBytes,
     required this.bgBlur,
@@ -73,6 +74,14 @@ class ChatWebViewSurface extends ConsumerStatefulWidget {
   final int lifecycleEpoch;
   final bool Function(int epoch) isActive;
   final bool sessionSwitching;
+
+  /// The page has painted this chat. Until then the surface is covered the
+  /// way it is during a session switch: a chat used to open onto the bare
+  /// native view — blank while it was created, then the page's own spinner
+  /// going out before the messages had laid out, then the jump to the
+  /// bottom — which read as the app lagging. One cover from the first frame
+  /// to the first paint, faded out, reads as the chat loading.
+  final bool ready;
   final Future<void> Function(String sessionId, String messageId) refreshPanel;
   final Uint8List? bgImageBytes;
   final double bgBlur;
@@ -119,6 +128,7 @@ class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
     super.initState();
     if (Platform.isWindows) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) debugPrint('[perf] chat view: native view mounting');
         if (mounted) setState(() => _mountNativeView = true);
       });
     }
@@ -172,18 +182,24 @@ class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
     return widget.isActive(epoch) && widget.isCurrentSession(widget.sessionId);
   }
 
+  /// The message content policy from settings, as one bridge call per flag.
+  String _contentPolicyJs() {
+    final settings = ref.read(appSettingsProvider).value;
+    final scripts = settings?.allowMessageScripts ?? false;
+    final media = settings?.allowExternalMedia ?? true;
+    return 'window.bridge?.setAllowMessageScripts($scripts);'
+        'window.bridge?.setAllowExternalMedia($media);';
+  }
+
   Future<void> _onWebViewCreated(InAppWebViewController controller) async {
     final epoch = widget.lifecycleEpoch;
     if (!_callbackIsActive(epoch)) return;
+    debugPrint('[perf] chat view: native view created');
     PerfDebug.chatWebViewSurfaceCreated();
     final jsBridgeService = await widget.bridgeHost.buildJsBridgeService();
     if (!_callbackIsActive(epoch) || jsBridgeService == null) return;
     final bridge = ChatBridgeController(controller, jsBridgeService);
-    final allowMessageScripts =
-        ref.read(appSettingsProvider).value?.allowMessageScripts ?? false;
-    await bridge.evalJs(
-      'window.bridge?.setAllowMessageScripts($allowMessageScripts)',
-    );
+    await bridge.evalJs(_contentPolicyJs());
     if (!_callbackIsActive(epoch)) return;
     widget.onBridgeReady(bridge);
     PerfDebug.chatWebViewBridgeReady();
@@ -262,13 +278,11 @@ class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
   Future<void> _onLoadStop(InAppWebViewController controller, Uri? url) async {
     final epoch = widget.lifecycleEpoch;
     if (!_callbackIsActive(epoch)) return;
+    debugPrint('[perf] chat view: page loaded');
     PerfDebug.chatWebViewLoadStopped();
     await ref
         .read(chatBridgeRegistryProvider(widget.charId))
-        ?.evalJs(
-          'window.bridge?.setAllowMessageScripts('
-          '${ref.read(appSettingsProvider).value?.allowMessageScripts ?? false})',
-        );
+        ?.evalJs(_contentPolicyJs());
     if (_callbackIsActive(epoch)) {
       await widget.onInitWebView();
     }
@@ -284,17 +298,26 @@ class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
             .read(chatBridgeRegistryProvider(widget.charId))
             ?.evalJs('window.bridge?.setAllowMessageScripts($newValue)');
       }
+      final oldMedia = previous?.value?.allowExternalMedia ?? true;
+      final newMedia = next.value?.allowExternalMedia ?? true;
+      if (oldMedia != newMedia) {
+        ref
+            .read(chatBridgeRegistryProvider(widget.charId))
+            ?.evalJs('window.bridge?.setAllowExternalMedia($newMedia)');
+      }
     });
+    final covered = widget.sessionSwitching || !widget.ready;
     return Stack(
       children: [
         Positioned.fill(child: _background(context)),
         Positioned.fill(
           child: IgnorePointer(
-            ignoring: widget.sessionSwitching,
-            // Windows touchpad panning is forwarded by this wrapper. Keeping it
-            // below IgnorePointer freezes native interaction during a switch.
+            ignoring: covered,
+            // Windows touchpad panning and wheel notches are forwarded by this
+            // wrapper. Keeping it below IgnorePointer freezes native
+            // interaction during a switch.
             child: _mountNativeView
-                ? ChatWebViewTrackpadScroll(
+                ? ChatWebViewScrollRelay(
                     charId: widget.charId,
                     child: InAppWebView(
                       key: ValueKey<int>(widget.rebuildGeneration),
@@ -336,9 +359,17 @@ class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
                 : const SizedBox.expand(),
           ),
         ),
-        if (widget.sessionSwitching)
-          Positioned.fill(child: IgnorePointer(child: _background(context))),
-        if (widget.sessionSwitching) const Center(child: GlazeSpinner()),
+        Positioned.fill(
+          child: ChatSurfaceCover(
+            visible: covered,
+            child: Stack(
+              children: [
+                Positioned.fill(child: _background(context)),
+                const Center(child: GlazeSpinner()),
+              ],
+            ),
+          ),
+        ),
         if (widget.bottomInset > 0)
           Positioned.fill(
             child: IgnorePointer(
@@ -357,6 +388,59 @@ class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// The cover over the surface: up at once, down with a fade.
+///
+/// Raised synchronously — the first frame of a session switch, or of a chat
+/// that has not painted yet, must already hide the native view. Lowered over
+/// [fade], and only taken out of the tree once the fade has ended: the page is
+/// underneath by then, so what the reader sees is the chat settling in rather
+/// than appearing. Never takes a touch, so the view below gets its own
+/// `IgnorePointer` for the time the cover is meant to block it.
+class ChatSurfaceCover extends StatefulWidget {
+  const ChatSurfaceCover({
+    super.key,
+    required this.visible,
+    required this.child,
+  });
+
+  final bool visible;
+  final Widget child;
+
+  static const fade = Duration(milliseconds: 280);
+
+  @override
+  State<ChatSurfaceCover> createState() => _ChatSurfaceCoverState();
+}
+
+class _ChatSurfaceCoverState extends State<ChatSurfaceCover> {
+  /// Whether the cover is in the tree: from the moment it is asked for until
+  /// its fade-out has ended.
+  late bool _present = widget.visible;
+
+  @override
+  void didUpdateWidget(ChatSurfaceCover old) {
+    super.didUpdateWidget(old);
+    if (widget.visible && !_present) _present = true;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_present) return const SizedBox.shrink();
+    return IgnorePointer(
+      child: AnimatedOpacity(
+        opacity: widget.visible ? 1 : 0,
+        // Up at once; the fade is for the way down.
+        duration: widget.visible ? Duration.zero : ChatSurfaceCover.fade,
+        curve: Curves.easeOut,
+        onEnd: () {
+          if (!widget.visible && mounted) setState(() => _present = false);
+        },
+        child: widget.child,
+      ),
     );
   }
 }

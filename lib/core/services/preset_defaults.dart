@@ -39,7 +39,7 @@ List<PresetBlock> defaultPresetBlocks({String mainPrompt = "Write {{char}}'s nex
     PresetBlock(id: 'main', name: 'Main Prompt', role: 'system', content: mainPrompt, enabled: true),
     ...mandatoryBlocks.where((b) => b.id != 'chat_history'),
     PresetBlock(id: 'memory', name: 'Memory Book', role: 'system', content: '', enabled: true, isStatic: true),
-    PresetBlock(id: 'summary', name: 'Summary', role: 'system', content: '', enabled: true, isStatic: true, depth: 4, insertionMode: 'depth', prefix: 'Summary: '),
+    PresetBlock(id: 'summary', name: 'Summary', role: 'system', content: '', enabled: true, isStatic: true, depth: 4, insertionMode: summaryInPlaceInsertion, prefix: 'Summary: '),
     PresetBlock(id: 'authors_note', name: "Author's Note", role: 'system', content: '', enabled: true, isStatic: true, insertionMode: 'relative'),
     PresetBlock(id: 'guided_generation', name: 'Guided Generation', role: 'system', content: kDefaultGuidedGenerationPrompt, enabled: true, isStatic: true, insertionMode: 'relative'),
     mandatoryBlocks.firstWhere((b) => b.id == 'chat_history'),
@@ -72,7 +72,7 @@ Preset finalizeImportedPreset(Preset preset) {
   if (!existingIds.contains('summary')) {
     final chatHistoryIdx = blocks.indexWhere((b) => b.id == 'chat_history');
     final insertIdx = chatHistoryIdx != -1 ? chatHistoryIdx : blocks.length;
-    blocks.insert(insertIdx, const PresetBlock(id: 'summary', name: 'Summary', role: 'system', content: '', enabled: true, isStatic: true, depth: 4, insertionMode: 'depth', prefix: 'Summary: '));
+    blocks.insert(insertIdx, const PresetBlock(id: 'summary', name: 'Summary', role: 'system', content: '', enabled: true, isStatic: true, depth: 4, insertionMode: summaryInPlaceInsertion, prefix: 'Summary: '));
   }
 
   if (!existingIds.contains('authors_note')) {

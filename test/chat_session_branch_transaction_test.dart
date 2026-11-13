@@ -22,6 +22,7 @@ import 'package:glaze_flutter/core/models/lorebook.dart';
 import 'package:glaze_flutter/core/models/persona.dart';
 import 'package:glaze_flutter/core/models/preset.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
+import 'package:glaze_flutter/core/models/summary_block.dart';
 import 'package:glaze_flutter/core/models/tracker.dart';
 import 'package:glaze_flutter/core/models/tracker_snapshot.dart';
 import 'package:glaze_flutter/core/state/active_selection_provider.dart';
@@ -436,6 +437,53 @@ void main() {
       );
     },
   );
+
+  test('branch carries the summary blocks it keeps the messages of', () async {
+    final messages = [_message('m0'), _message('m1'), _message('m2')];
+    final current = ChatSession(
+      id: 'c1_0',
+      characterId: 'c1',
+      sessionIndex: 0,
+      messages: messages,
+    );
+    await container.read(chatRepoProvider).put(current);
+    final byId = SummaryChain.index(messages);
+    SummaryBlock block(String id, List<String> ids) => SummaryBlock(
+      id: id,
+      level: 1,
+      content: 'Block $id',
+      messageIds: ids,
+      sourceHash: SummaryChain.fingerprint(ids, byId),
+      tokens: 5,
+    );
+    await container
+        .read(summaryRepoProvider)
+        .putBlocks(
+          sessionId: 'c1_0',
+          blocksJson: SummaryBlock.encodeList([
+            block('kept', ['m0', 'm1']),
+            block('future', ['m2']),
+          ]),
+          content: 'Block kept\n\nBlock future',
+          messageCount: 3,
+        );
+
+    final branch = await container
+        .read(_serviceProvider)
+        .branchSession('c1', current, 1);
+
+    final summary = await container.read(summaryRepoProvider).get(branch.id);
+    expect(SummaryBlock.decodeList(summary?.blocksJson).map((b) => b.id), [
+      'kept',
+    ]);
+    expect(summary?.content, 'Block kept');
+    expect(summary?.messageCount, 2);
+    final view = SummaryChain.promptView(
+      SummaryBlock.decodeList(summary?.blocksJson),
+      branch.messages,
+    );
+    expect(view.coveredMessageIds, {'m0', 'm1'});
+  });
 
   test('branch fails closed and retains no lorebook provenance', () async {
     final current = ChatSession(

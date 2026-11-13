@@ -114,7 +114,7 @@ lib/
 │   │   ├── sse_client.dart           # SSE + non-streaming completions via Dio
 │   │   ├── stream_accumulator.dart   # Parses inline <think…> tags from stream
 │   │   ├── response_normalizer.dart  # Extracts content from non-streaming response body
-│   │   ├── summary_service.dart      # Reads/writes summaries, triggers LLM regeneration
+│   │   ├── summary_service.dart      # Summary blocks: storage, prompt view, retell/merge calls
 │   │   ├── tokenizer.dart            # estimateTokens() with LRU cache, base64 stripping
 │   │   ├── request_tokens.dart       # countRequestTokens(): one rule for the inspector's next and captured requests
 │   │   ├── macro_engine.dart         # SillyTavern-compatible macro replacement engine
@@ -593,6 +593,7 @@ the result to recover which blocks landed where.
 | Image gen | `ChatState.isGeneratingImage` + `_imgGenCancelToken` | No (one-shot) | `_imgGenCancelToken` in `ChatNotifier` |
 | Summary (manual) | Widget-local in `summary_tab.dart` | No | Not abortable (INV-S2). Runs on the Memory slot (`memoryBookApi`), like memory drafts |
 | Summary (auto) | `AutoSummaryStage`, from `PostGenCoordinator` | No | Not abortable (INV-S2) |
+| Summary block regeneration | `summaryRegenerationProvider` (app-scoped; the Summary tab only starts and reads it) | No | Per-block `CancelToken` (Stop on the card); the result is a draft that waits for approval (INV-S5) |
 | Memory draft | `memoryDraftJobsProvider` (app-scoped; the memory sheet only starts and reads it) | No | Per-draft `CancelToken`; memory-workflow leases via `memory_active_drafts_provider`; 5xx/timeouts retried by `AuxLlmClient` |
 
 ### Reasoning / Thinking
@@ -880,7 +881,7 @@ finishes.
 - `{{reasoningPrefix}}`, `{{reasoningSuffix}}` — inline reasoning tag config
 
 **Dynamic content:**
-- `{{summary}}` — current chat summary (user-authored only)
+- `{{summary}}` — live summary blocks; the messages they cover are left out of the history (INV-S6). The `summary` preset block can instead send them in place of those messages (`in_place` insertion)
 - `{{memory}}` — triggered memory book entries. Memory can enter the prompt three ways: a dedicated `memory` ("Memory Book") preset block (addable from the editor, resolves like the macro), the `{{memory}}` macro, or — with `injectionTarget='hard_block'` (default) — an auto-injected "Memory Book" system message. With `injectionTarget='macro'` and no `{{memory}}` macro or `memory` block present, memory is dropped and `memoryMacroMissing` is flagged. See INV-PS5.
 - `{{lorebooks}}` — triggered lorebook content
 - `{{guidance}}` — guided swipe instruction
@@ -1117,11 +1118,19 @@ sent; a request that already ran answers from its own stored manifest
 **Requests tab** (`widgets/requests/`, `state/request_timeline.dart`): the
 Prompt Inspector's timeline of what this chat actually sent, read from the
 always-on capture sink (`llmRequestCaptureInstallationProvider` →
-`llm_request_capture_rows`) and cut at `AppRuntime.startedAt` so a restart does
-not mix runs. Rows are folded into groups by `messageId` (one chat turn: the
-main model or the agent shards, then cleaner, ledger, ext blocks) or by
-`pipelineRunId` (a background job — card rewrite, reconciliation), and the two
-kinds share one chronological list. Plugin calls (`glaze.generate`,
+`llm_request_capture_rows`), across app runs — each row shows its date when it
+was not today, and an "app restart" separator at `AppRuntime.startedAt`
+(`restartSeparatorIndex`) parts this run's requests from earlier ones. The
+list is flat: one row per logical call, newest first, with only the retries of
+one call collapsed into it. A call is keyed by its call id
+within its owner (`messageId`, else `pipelineRunId`), and an attempt number that
+does not go up starts a new row, because older main-request ids repeat across
+runs. Rows are not nested under their turn — a step re-run later would land
+inside an old turn — but a row still names its turn and the reply's first words
+in its subtitle. Call events are joined to a request by call id *and* time
+(`PromptCaptureViewService.eventsForRow`): an event belongs to the newest
+request of that id and attempt sent at or before it. Plugin calls
+(`glaze.generate`,
 `glaze.images.generate`) carry the open chat, a stage of their own
 (`plugin.generate`, `image.plugin`) and the plugin's id as the step name, and
 record their outcome, so each shows as a call of its own with its response.
@@ -1734,7 +1743,11 @@ listed hosts (any port), or any https/wss host in the any-host mode; only with
 local network access does it allow http/ws as well (and, in the any-host mode,
 drop the policy), and without it listed hosts on the local network are
 dropped. The SDK also refuses fetch/XHR/WebSocket/EventSource calls to local
-addresses and names (`localhost`, `*.local`, private and link-local IPs).
+addresses and names (`*.local`, private and link-local IPs). Loopback
+(`localhost`, `*.localhost`, `127.0.0.0/8`, `::1`) is this device, not a
+network, so the local network switch does not gate it: it follows the plugin's
+general internet access and, in the listed-hosts mode, its host list, and plain
+http is allowed there without the switch.
 Home devices rarely speak TLS, so https-only keeps frames off them; on Android
 the network security config already refuses cleartext except to loopback. Each
 plugin frame sits in a wrapper frame (`wrapperDoc`) carrying the same policy:
@@ -1837,12 +1850,22 @@ to its boxes so it only takes its own taps. On iOS and macOS a touch goes to
 the topmost native view and cannot be passed down, so the panels stay in the
 chat page there, clipped to their boxes, and the Flutter controls are cut out
 where they draw (`PluginHolesCutter`). Frames
-inside the page may only load `about:srcdoc`/`about:blank`
-(`chatWebViewNavigationPolicy`); iOS asks about those too. Message panels sit in `.msg-content-stack`, message actions in the
-footer's `.msg-trailing-actions`. Package scripts, CSS and assets
-(`/plugins/<id>/…`) are inlined by `plugin_html_inliner.dart`, since a
-null-origin frame cannot fetch them; only the plugin's own package is read, so
-a panel cannot pull in another plugin's files. Layout insets are exposed as
+inside the page may only load `about:srcdoc`/`about:blank` and the frame
+documents the package server hands out (`chatWebViewNavigationPolicy`); iOS
+asks about those too. Message panels sit in `.msg-content-stack`, message actions in the
+footer's `.msg-trailing-actions`. Installed packages are served over a
+loopback HTTP server (`plugin_package_server.dart`, started with the runtime,
+revived with the chat's servers) at `/plugins/<id>/<path>`, as Tavo serves
+them. The host builds each frame's document (policy, SDK, boot data, the
+plugin's HTML) and hands it over with the internal `frames.open`; the server
+serves it once, at the panel's (or main script's) path in the package, so the
+frame has a real address and the plugin's scripts, stylesheets, fonts and
+`fetch` of its own files resolve as on the web — nothing is inlined. The
+frames keep their sandbox (opaque origin); each one's policy names its own
+package path, so a plugin reaches only its own files, which the SDK does not
+count as network. Package files go out with CORS and a policy that lets a
+file loaded as a page run nothing. Without the server, frames are made inline
+(srcdoc) as before. Layout insets are exposed as
 `--glaze-inset-*` CSS variables. The top bar inset is the status bar alone:
 panels draw over the app's header.
 The soft keyboard lays over the WebView and shrinks only the page's visual
@@ -1851,10 +1874,29 @@ to the visual viewport while the keyboard is up; plugins laid out on `100vh`,
 `innerHeight` or their own `visualViewport` stay above it. That frame's
 insets are measured from the keyboard's top and carry its height as
 `keyboard` (`--glaze-inset-keyboard`); other panels keep the full page.
-A panel's small fixed boxes (floating buttons) are kept between the status
-bar and the message box by the SDK — after a drag, when they appear and when
-the insets settle — so one dropped on the gesture strip stays reachable;
-boxes half the screen or larger are left alone.
+A panel's fixed boxes (floating buttons and windows) are kept between the
+safe top and the safe bottom by the SDK — after a drag, when they appear and
+when the insets settle — so one dropped on the status bar or the gesture
+strip stays reachable. The app's header and composer may be overlapped. A box
+taller or wider than that band keeps the off edge on screen; only a panel
+covering the whole viewport is left alone.
+
+**The ExtBlocks page** (`extensions/services/page/ext_blocks_page.dart`).
+With the active ExtBlocks preset's `chat_page` permission, `PluginChatHost`
+also runs a plugin of the app's own, `_extblocks` (a manifest id cannot start
+with `_`): one chat panel with the `extblocks` compat layer
+(`compat/extblocks_page.js`), which swaps the plugin `glaze` for the script
+API of `glaze_sdk.js` carried over the plugin method `extblocks.bridge` to the
+chat's `JsBridgeService`. `ChatBridgeController.runJsBlock` sends scripts of
+the original ExtBlocks there (`extBlocksPageRun`) instead of its one-shot
+sandbox; they run as the action `action:extblocks:run`, whose handler's return
+value an action reply now carries (`PluginActionResult.value`). The page keeps
+a hidden mirror of the chat in SillyTavern's markup, sent as the
+`extblocks:mirror` emit (`PluginChatRuntime.emitTo`). Its network is the
+"Allow external media" setting; `mediaOrigins` in a payload entry adds the
+app's loopback file server to `img-src`/`media-src` only. Hit boxes and the
+floating-window rescue walk from `<html>`, so boxes a script hangs next to
+`<body>` take touches as well. See EXTBLOCKS_OVERVIEW.md.
 
 **Hooks.** `PluginChatHost` (wraps the chat screen) starts the runtime once the
 chat bridge is published and registers a `PluginHookRunner` in
@@ -1902,7 +1944,14 @@ all of it (`PluginLibraryNotifier.setPermissions`). For converted
 plugins the runtime also loads `tavo_compat.js`, which defines `tavo.*` (and
 `triggerSlash`) on top of `glaze.*` and then removes `glaze`, maps
 `input:beforeSend|afterSend` onto `send:*`, reports Tavo's version from
-`tavo.app` and sets the `--tavo-inset-*` variables instead of Glaze's. TTS is not supported: importing a package that asks
+`tavo.app` and sets the `--tavo-inset-*` variables instead of Glaze's.
+Tavo runs a plugin's entry script and its `/chat` fragments in its chat page,
+and plugins share globals between them, so a converted plugin's payload says
+`onePage`: its main script and every chat panel go into one frame (the main
+script first), where the chat panels are — the plugin layer when there is
+one. `PluginChatRuntime` sends that plugin's hooks, actions and file handlers
+to the page its main script is in, running a hook through the pages in turn
+so the plugin order holds. `/messages` fragments stay frames of their own. TTS is not supported: importing a package that asks
 for `tts` or calls `tavo.tts`/`glaze.tts` shows a warning sheet first
 (`plugin_compatibility.dart`).
 

@@ -207,6 +207,7 @@ When editing files matching a pattern below, READ the corresponding rule file FI
 | Architecture details, full flow | `docs/ARCHITECTURE.md` |
 | Formal invariants with code references | `docs/INVARIANTS.md` |
 | Message rendering — `assets/chat_webview/formatter/`, `renderer/`, `useVirtualScroll.js` | `docs/rules/message-rendering.md` + `docs/INVARIANTS.md` (INV-MR1–8) |
+| A theme's own layout (templates for messages and chrome, theme CSS) | `docs/THEME_LAYOUTS.md` |
 | Custom `==...==` markdown markers | `docs/markdown-markers.md` |
 | Windows/build failures, dependency overrides | `docs/BUILD_NOTES.md` |
 | Class/file organization, decomposition | `docs/CODE_STYLE.md` |
@@ -215,6 +216,7 @@ When editing files matching a pattern below, READ the corresponding rule file FI
 | Plugins (`.glzp`, `plugin.json`), `glaze.*` bridge, consent, plugin frames and hooks, Tavo `.tpg` compatibility — `lib/features/plugins/`, `assets/chat_webview/plugins/` | `docs/ARCHITECTURE.md` § 9.1 |
 | Variable storage (`chat` / `character` / `global` / `message` scopes) | `docs/rules/database.md` (atomic repo methods) |
 | Build channels, dev-mode / watermark defaults, `--dart-define` wiring | `docs/RELEASE_CHANNELS.md` |
+| Windows installer (`windows/installer/`), in-app updates (`lib/core/services/installer_update/`) | `docs/WINDOWS_INSTALLER.md` |
 
 ## Workflow
 

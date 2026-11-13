@@ -1,532 +1,418 @@
+import 'dart:async';
 import 'dart:convert';
 
-import 'package:dynamic_color/dynamic_color.dart';
-import 'package:flutter/foundation.dart';
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/models/character.dart';
 import '../../shared/theme/app_colors.dart';
-import '../../shared/theme/app_theme.dart';
 import '../../shared/theme/theme_font_provider.dart';
 import '../../shared/theme/theme_preset.dart';
-import '../../shared/widgets/glaze_scaffold.dart';
-import '../chat/widgets/chat_header.dart';
-import '../chat/widgets/chat_input_bar.dart';
+import '../../shared/theme/theme_provider.dart';
+import '../../shared/theme/theme_settings_schema.dart';
+import '../../shared/theme/ui_scale.dart';
+import '../chat/bridge/chat_webview_environment.dart';
+import '../chat/bridge/chat_webview_settings.dart';
+import '../chat/bridge/chat_webview_theme_builder.dart';
+import '../chat/chrome/chat_chrome_channel.dart';
+import '../chat/chrome/chrome_json.dart';
+import 'app_settings_provider.dart';
 
-/// Live preview of a theme preset, framed like the avatar card in
-/// generic_editor.dart:319. Intrinsic height; the message style follows the
-/// user's `chatLayout` setting (default = standard, no bubbles; bubble = bubbles).
-class ThemeChatPreview extends ConsumerWidget {
-  final ThemePreset preset;
-  final Color borderColor;
+/// The preview page next to the chat page (`assets/chat_webview/`).
+const String kThemePreviewPage = 'theme_preview.html';
 
-  const ThemeChatPreview({
-    super.key,
-    required this.preset,
-    required this.borderColor,
-  });
+/// Live preview of the active theme: a few sample messages and the chat's
+/// header and composer, drawn in a WebView by the chat page's own renderer,
+/// stylesheet and chrome — so a theme's CSS and templates show exactly as
+/// they will in a chat.
+///
+/// Follows the active preset by itself; edits made anywhere in the theme
+/// editor show up as they are made.
+class ThemeChatPreview extends ConsumerStatefulWidget {
+  const ThemeChatPreview({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    // The preview shows the theme on screen, so it shares the app's brightness.
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    // Resolve the live UI/chat fonts through the same providers the real app
-    // uses, so custom/google/glaze selections render in the preview (these load
-    // the font into the engine on demand and return its family name).
-    final previewFont = ref.watch(uiFontFamilyProvider).value;
-    final chatFontFamily = ref.watch(chatFontFamilyProvider).value;
-    if (!preset.isMaterialYou) {
-      return _buildPreview(isDark, previewFont, chatFontFamily, null);
-    }
-    // Material You takes its palette from the system, same as app.dart does —
-    // without it the preview falls back to the seeded Glaze palette.
-    return DynamicColorBuilder(
-      builder: (lightDynamic, darkDynamic) {
-        final useDynamic = defaultTargetPlatform == TargetPlatform.android;
-        final scheme = useDynamic ? (isDark ? darkDynamic : lightDynamic) : null;
-        return _buildPreview(isDark, previewFont, chatFontFamily, scheme);
-      },
-    );
+  ConsumerState<ThemeChatPreview> createState() => _ThemeChatPreviewState();
+}
+
+class _ThemeChatPreviewState extends ConsumerState<ThemeChatPreview> {
+  late final InAppWebViewSettings _settings = chatWebViewInAppSettings();
+  InAppWebViewController? _controller;
+  bool _ready = false;
+  bool _flushQueued = false;
+
+  /// Bumped to build a new WebView after its page process died.
+  int _generation = 0;
+
+  /// What the page holds, by section — compared before sending so a slider
+  /// drag sends only what it moved.
+  final Map<String, Object?> _sent = {};
+  Map<String, Object?> _latest = const {};
+
+  void _onPageGone() {
+    if (!mounted) return;
+    setState(() {
+      _ready = false;
+      _controller = null;
+      _sent.clear();
+      _generation++;
+    });
   }
 
-  Widget _buildPreview(
-    bool isDark,
-    String? previewFont,
-    String? chatFontFamily,
-    ColorScheme? dynamicScheme,
-  ) {
-    final previewTheme = isDark
-        ? AppTheme.dark(
-            preset,
-            fontFamily: previewFont,
-            dynamicScheme: dynamicScheme,
-          )
-        : AppTheme.light(
-            preset,
-            fontFamily: previewFont,
-            dynamicScheme: dynamicScheme,
-          );
-    final accent = preset.isMaterialYou
-        ? _toHex(previewTheme.colorScheme.primary)
-        : preset.accentColor;
-    final previewCharacter = Character(
-      id: 'preview_character',
-      name: 'Rei',
-      color: accent,
-    );
-    final chatLayout = preset.chatLayout;
-    final isStandard = chatLayout == 'default';
+  void _onChromeIntent(List<dynamic> args) {
+    if (args.length < 2 || args[1] is! String) return;
+    try {
+      final intent = jsonDecode(args[1] as String);
+      if (intent is! Map || intent['t'] != 'layout') return;
+      final data = intent['d'];
+      if (data is! Map) return;
+      final report = ChromeLayoutReport.fromJson(
+        Map<String, dynamic>.from(data),
+      );
+      final top = (report.header?.bottom ?? 0) + 8;
+      final bottom = report.composerHeight + 8;
+      unawaited(
+        _send({
+          'insets': {'top': top, 'bottom': bottom},
+        }),
+      );
+    } catch (_) {}
+  }
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
-      child: Theme(
-        data: previewTheme,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: previewTheme.scaffoldBackgroundColor,
-            border: Border.all(color: borderColor),
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: AbsorbPointer(
-            child: _PreviewChatScene(
-              preset: preset,
-              character: previewCharacter,
-              isStandard: isStandard,
-              chatFontFamily: chatFontFamily,
-              chatFontSize: preset.chatFontSizeValue,
-              chatLetterSpacing: preset.chatLetterSpacing,
-              chatBgColor:
-                  preset.chatBgMode == 'color' ? preset.chatBgColorParsed : null,
-              chatBgImageBytes: preset.chatBgMode == 'custom'
-                  ? _decodeDataUri(preset.chatBgImage)
-                  : null,
+  Future<void> _send(Map<String, Object?> msg) async {
+    final controller = _controller;
+    if (controller == null || !_ready || msg.isEmpty) return;
+    try {
+      await controller.evaluateJavascript(
+        source:
+            'window.__glazePreview&&window.__glazePreview.apply(${jsonEncode(jsonEncode(msg))})',
+      );
+    } catch (e) {
+      debugPrint('[ThemePreview] apply failed: $e');
+    }
+  }
+
+  void _scheduleFlush() {
+    if (_flushQueued) return;
+    _flushQueued = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _flushQueued = false;
+      if (!mounted) return;
+      final msg = <String, Object?>{};
+      _latest.forEach((section, value) {
+        if (_same(_sent[section], value)) return;
+        _sent[section] = value;
+        msg[section] = value;
+      });
+      unawaited(_send(msg));
+    });
+  }
+
+  /// Big strings (fonts, images as data URLs) are compared by identity
+  /// first: they are the same String object until the preset changes them.
+  static bool _same(Object? a, Object? b) {
+    if (identical(a, b)) return true;
+    if (a is _Section && b is _Section) return a.key == b.key;
+    return jsonEncode(a) == jsonEncode(b);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ref.watch(themeProvider);
+    final preset = theme.activePreset;
+    final fontStyle = ref.watch(chatFontStyleProvider);
+    final fontData = ref.watch(chatFontDataProvider).value;
+    final uiFontFamily = ref.watch(uiFontFamilyProvider).value;
+    final uiFontData = ref.watch(uiFontDataProvider).value;
+    final app = ref.watch(appSettingsProvider).value ?? const AppSettings();
+
+    _latest = _sections(
+      context,
+      preset,
+      fontStyle: fontStyle,
+      fontData: fontData,
+      uiFontFamily: uiFontFamily,
+      uiFontData: uiFontData,
+      app: app,
+    );
+    if (_ready) _scheduleFlush();
+
+    return ColoredBox(
+      color: context.cs.surface,
+      child: InAppWebView(
+        key: ValueKey<int>(_generation),
+        webViewEnvironment: chatWebViewEnvironment,
+        initialFile: chatWebViewInitialFile(kThemePreviewPage),
+        initialUrlRequest: chatWebViewInitialUrlRequest(kThemePreviewPage),
+        initialSettings: _settings,
+        initialUserScripts: chatWebViewUserScripts(),
+        onWebViewCreated: (controller) {
+          _controller = controller;
+          controller.addJavaScriptHandler(
+            handlerName: 'onChromeIntent',
+            callback: (JavaScriptHandlerFunctionData data) =>
+                _onChromeIntent(data.args),
+          );
+        },
+        onLoadStop: (controller, url) {
+          if (!mounted) return;
+          _ready = true;
+          _sent.clear();
+          _scheduleFlush();
+        },
+        onRenderProcessGone: (controller, detail) => _onPageGone(),
+        onWebContentProcessDidTerminate: (controller) => _onPageGone(),
+        shouldOverrideUrlLoading: (controller, request) async =>
+            chatWebViewNavigationPolicy(
+              request.request.url,
+              mainFrame: request.isForMainFrame,
+              page: kThemePreviewPage,
             ),
-          ),
-        ),
       ),
     );
   }
 
-  static String _toHex(Color c) {
-    String ch(double v) =>
-        (v * 255).round().clamp(0, 255).toRadixString(16).padLeft(2, '0');
-    return '#${ch(c.r)}${ch(c.g)}${ch(c.b)}'.toUpperCase();
+  Map<String, Object?> _sections(
+    BuildContext context,
+    ThemePreset preset, {
+    required ChatFontStyle fontStyle,
+    required String? fontData,
+    required String? uiFontFamily,
+    required String? uiFontData,
+    required AppSettings app,
+  }) {
+    final cs = context.cs;
+    final accent = cs.primary;
+    final bgImage = switch (preset.chatBgMode) {
+      'custom' => preset.chatBgImage,
+      'color' || 'avatar' => null,
+      _ => preset.bgImage,
+    };
+    final base = preset.chatBgMode == 'color'
+        ? (preset.chatBgColorParsed ?? cs.surface)
+        : cs.surface;
+    final chromeTheme_ = chromeTheme(
+      context,
+      preset,
+      batterySaver: false,
+      desktop: false,
+      fontFamily: uiFontFamily,
+    );
+    return {
+      'theme': ChatWebViewThemeBuilder.build(
+        context,
+        ChatWebViewThemeInput(
+          elementOpacity: preset.elementOpacity,
+          elementBlur: preset.elementBlur,
+          chatFontSize: fontStyle.fontSize,
+          chatLayout: preset.chatLayout,
+          bgDim: bgImage == null ? 0 : preset.bgDim,
+          uiFontWeight: preset.uiFontWeight,
+          userMessageFontWeight: preset.userMessageFontWeight,
+          charMessageFontWeight: preset.charMessageFontWeight,
+          userBubbleRadius: preset.userBubbleRadius,
+          charBubbleRadius: preset.charBubbleRadius,
+          showUserAvatar: preset.showUserAvatar,
+          showCharAvatar: preset.showCharAvatar,
+          showUserName: preset.showUserName,
+          showCharName: preset.showCharName,
+          avatarRoundness: preset.avatarRoundness,
+          userBubbleGradient: preset.userBubbleGradientParsed,
+          charBubbleGradient: preset.charBubbleGradientParsed,
+          textBgOpacity: preset.textBgOpacity,
+        ),
+      ),
+      'font': _Section(
+        '${fontStyle.fontFamily}|${identityHashCode(fontData)}|'
+        '${fontStyle.fontSize}|${fontStyle.letterSpacing}',
+        {
+          'family': fontStyle.fontFamily,
+          'data': fontData,
+          'size': fontStyle.fontSize,
+          'letterSpacing': fontStyle.letterSpacing,
+        },
+      ),
+      'background': _Section(
+        '${base.toARGB32()}|${identityHashCode(bgImage)}|${preset.bgBlur}|'
+        '${preset.bgNoiseOpacity}|${preset.bgNoiseIntensity}',
+        {
+          'color': _css(base),
+          'url': bgImage == null
+              ? null
+              : chatWebViewResolveLocalFileUrl(bgImage),
+          'blur': preset.bgBlur.round(),
+          'noiseOpacity': preset.bgNoiseOpacity,
+          'noiseIntensity': preset.bgNoiseIntensity,
+        },
+      ),
+      'settings': {
+        'hideMessageId': preset.hideMessageId ?? app.hideMessageId,
+        'hideGenerationTime':
+            preset.hideGenerationTime ?? app.hideGenerationTime,
+        'hideTokenCount': preset.hideTokenCount ?? app.hideTokenCount,
+        'studioEnabled': false,
+      },
+      'layout': preset.messageLayoutPayload,
+      'messages': _sampleMessages(accent),
+      'chrome': _Section(
+        '${jsonEncode(chromeTheme_)}|${identityHashCode(uiFontData)}|'
+        '${jsonEncode(preset.chromeLayoutPayload)}',
+        {
+          'theme': chromeTheme_,
+          'skin': preset.chromeLayoutPayload,
+          'font': chromeFont(
+            uiFontData,
+            variable: preset.uiFontMode == 'glaze',
+          ),
+          'layout': const {
+            'safeTop': 0,
+            'safeBottom': 0,
+            'inset': 0,
+            'keyboard': 0,
+            'gutter': 0,
+            'fades': true,
+            'drawer': {'show': false, 'height': 0, 'progress': 0},
+          },
+          'header': {
+            'show': true,
+            'hidden': false,
+            'flush': false,
+            'radius': 20,
+            'title': 'Rei',
+            'session': 'Session #4',
+            'avatar': {'color': chromeColor(accent), 'initial': 'R'},
+            'search': {'kind': 'mobile', 'open': false, 'hint': ''},
+          },
+          'composer': {
+            'show': true,
+            'mode': 'compose',
+            'placeholder': 'chat_placeholder'.tr(),
+            'readOnly': true,
+            'pins': [
+              for (final (key, icon) in const [
+                ('preview:spark', Icons.auto_awesome),
+                ('preview:bolt', Icons.bolt),
+              ])
+                {'key': key, 'icon': chromeIcon(icon), 'tap': false},
+            ],
+            'send': {
+              'icon': chromeIcon(Icons.send_rounded),
+              'tap': false,
+              'slot': false,
+            },
+          },
+        },
+      ),
+    };
   }
 
-  static Color textOn(Color bg) {
-    return bg.computeLuminance() > 0.45
-        ? const Color(0xFF1C1D22)
-        : const Color(0xFFF4F6FA);
-  }
+  static String _css(Color c) =>
+      'rgba(${(c.r * 255).round()}, ${(c.g * 255).round()}, '
+      '${(c.b * 255).round()}, ${c.a.toStringAsFixed(3)})';
 
-  static Uint8List? _decodeDataUri(String? data) {
-    if (data == null || data.isEmpty) return null;
-    try {
-      final commaIdx = data.indexOf(',');
-      if (commaIdx == -1) return null;
-      return base64Decode(data.substring(commaIdx + 1));
-    } catch (_) {
-      return null;
-    }
+  static List<Map<String, Object?>> _sampleMessages(Color accent) {
+    final hex =
+        '#${(accent.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}';
+    final start = DateTime(2026, 3, 24, 10, 8).millisecondsSinceEpoch;
+    return [
+      {
+        'id': 'preview_1',
+        'role': 'assistant',
+        'text':
+            '*Rei looks up from the book and smiles.* "You made it. The tea\'s still warm."',
+        'timestamp': start,
+        'displayName': 'Rei',
+        'avatarColor': hex,
+        'messageIndex': 0,
+        'isHidden': false,
+        'isError': false,
+      },
+      {
+        'id': 'preview_2',
+        'role': 'user',
+        'text':
+            '*I drop into the chair across the table.* "Sorry, the train was late."',
+        'timestamp': start + 60 * 1000,
+        'displayName': 'You',
+        'messageIndex': 1,
+        'isHidden': false,
+        'isError': false,
+      },
+      {
+        'id': 'preview_3',
+        'role': 'assistant',
+        'text':
+            'She slides a cup toward you. "**Careful**, it\'s hot — and `oolong`, your favourite."',
+        'timestamp': start + 2 * 60 * 1000,
+        'displayName': 'Rei',
+        'avatarColor': hex,
+        'messageIndex': 2,
+        'swipeIndex': 0,
+        'swipeTotal': 3,
+        'genTime': '4.2s',
+        'tokens': 128,
+        'isLast': true,
+        'isHidden': false,
+        'isError': false,
+      },
+    ];
   }
 }
 
-class _PreviewChatScene extends StatelessWidget {
-  final ThemePreset preset;
-  final Character character;
-  final bool isStandard;
-  final String? chatFontFamily;
-  final double chatFontSize;
-  final double chatLetterSpacing;
-  final Color? chatBgColor;
-  final Uint8List? chatBgImageBytes;
+/// [ThemeChatPreview] in a rounded frame of a fixed [height], the way the
+/// theme editor and its colour picker show it.
+class ThemePreviewCard extends StatelessWidget {
+  final double height;
 
-  const _PreviewChatScene({
-    required this.preset,
-    required this.character,
-    required this.isStandard,
-    required this.chatFontFamily,
-    required this.chatFontSize,
-    required this.chatLetterSpacing,
-    this.chatBgColor,
-    this.chatBgImageBytes,
-  });
+  const ThemePreviewCard({super.key, required this.height});
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    final cs = context.cs;
-    final charText = colors.charText ?? ThemeChatPreview.textOn(cs.surface);
-    final userText =
-        colors.userText ?? ThemeChatPreview.textOn(colors.userBubble);
-
-    return Material(
-      color: chatBgColor ?? cs.surface,
-      child: _withChatBg(
-        Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
-            child: GlazeAppBar(
-              showBack: true,
-              onBack: () {},
-              titleWidget: ChatHeader(
-                character: character,
-                sessionName: 'Session #4',
-              ),
-              actions: [
-                IconButton(
-                  icon: const Icon(Icons.search),
-                  color: cs.primary,
-                  onPressed: () {},
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 4),
-          _PreviewDateSeparator(label: '24 March 2026'),
-          const SizedBox(height: 4),
-          if (isStandard) ...[
-            _PreviewStandardMessage(
-              character: character,
-              isUser: false,
-              showAvatar: preset.showCharAvatar,
-              showName: preset.showCharName,
-              metaColor: cs.onSurfaceVariant,
-              italicColor: colors.charItalic ?? cs.onSurface,
-              quoteColor: colors.charQuote ?? cs.primary,
-              fontWeight: preset.charMessageFontWeightValue,
-              fontFamily: chatFontFamily,
-              fontSize: chatFontSize,
-              letterSpacing: chatLetterSpacing,
-              text: 'Rei looks up from the book and smiles.',
-              quoted: '"You made it. The tea\'s still warm."',
-              index: 1,
-              time: '10:08',
-            ),
-            _PreviewStandardMessage(
-              character: Character(
-                id: 'preview_user',
-                name: 'You',
-                color: character.color,
-              ),
-              isUser: true,
-              showAvatar: preset.showUserAvatar,
-              showName: preset.showUserName,
-              metaColor: cs.onSurfaceVariant,
-              italicColor: colors.userItalic ?? cs.onSurface,
-              quoteColor: colors.userQuote ?? cs.primary,
-              fontWeight: preset.userMessageFontWeightValue,
-              fontFamily: chatFontFamily,
-              fontSize: chatFontSize,
-              letterSpacing: chatLetterSpacing,
-              text: 'I drop into the chair across the table.',
-              quoted: '"Sorry, the train was late."',
-              index: 2,
-              time: '10:09',
-            ),
-          ] else ...[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
-              child: _PreviewBubble(
-                alignment: Alignment.centerLeft,
-                color: colors.charBubble,
-                gradient: preset.charBubbleGradientValue,
-                textColor: charText,
-                italicColor: colors.charItalic,
-                quoteColor: colors.charQuote ?? cs.primary,
-                radius: preset.charBubbleRadius,
-                fontWeight: preset.charMessageFontWeightValue,
-                fontFamily: chatFontFamily,
-                fontSize: chatFontSize,
-                letterSpacing: chatLetterSpacing,
-                text: 'Rei looks up from the book and smiles.',
-                quoted: '"You made it. The tea\'s still warm."',
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-              child: _PreviewBubble(
-                alignment: Alignment.centerRight,
-                color: colors.userBubble,
-                gradient: preset.userBubbleGradientValue,
-                textColor: userText,
-                italicColor: colors.userItalic,
-                quoteColor: colors.userQuote ?? cs.primary,
-                radius: preset.userBubbleRadius,
-                fontWeight: preset.userMessageFontWeightValue,
-                fontFamily: chatFontFamily,
-                fontSize: chatFontSize,
-                letterSpacing: chatLetterSpacing,
-                text: 'I drop into the chair across the table.',
-                quoted: '"Sorry, the train was late."',
-              ),
-            ),
-          ],
-          ChatInputBar(
-            focusNode: FocusNode(canRequestFocus: false, skipTraversal: true),
-            isGenerating: false,
-            onSend: (_) async => true,
-            initialDraft: '',
+    final radius = context.glazeBorderRadius(20);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: radius,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.28),
+            blurRadius: 22,
+            offset: const Offset(0, 10),
           ),
         ],
-        ),
       ),
-    );
-  }
-
-  /// Layer a custom chat background image behind [child]. Color-mode is handled
-  /// by the [Material] color, so only the image needs a stacked layer here.
-  Widget _withChatBg(Widget child) {
-    final bytes = chatBgImageBytes;
-    if (bytes == null) return child;
-    return Stack(
-      children: [
-        Positioned.fill(
-          child: Image.memory(bytes, fit: BoxFit.cover, gaplessPlayback: true),
-        ),
-        child,
-      ],
-    );
-  }
-}
-
-class _PreviewDateSeparator extends StatelessWidget {
-  final String label;
-  const _PreviewDateSeparator({required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    final line = context.cs.outlineVariant.withValues(alpha: 0.6);
-    return Row(
-      children: [
-        Expanded(child: Container(height: 1, color: line)),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 11,
-              color: context.cs.onSurfaceVariant,
-            ),
-          ),
-        ),
-        Expanded(child: Container(height: 1, color: line)),
-      ],
-    );
-  }
-}
-
-/// Standard ("default") chat layout — no bubble, full-width italic text,
-/// avatar + name + #index row above. Mirrors the standard layout in WebView renderer.
-class _PreviewStandardMessage extends StatelessWidget {
-  final Character character;
-  final bool isUser;
-  final bool showAvatar;
-  final bool showName;
-  final Color metaColor;
-  final Color italicColor;
-  final Color quoteColor;
-  final FontWeight fontWeight;
-  final String? fontFamily;
-  final double fontSize;
-  final double letterSpacing;
-  final String text;
-  final String? quoted;
-  final int index;
-  final String time;
-
-  const _PreviewStandardMessage({
-    required this.character,
-    required this.isUser,
-    required this.showAvatar,
-    required this.showName,
-    required this.metaColor,
-    required this.italicColor,
-    required this.quoteColor,
-    required this.fontWeight,
-    required this.fontFamily,
-    required this.fontSize,
-    required this.letterSpacing,
-    required this.text,
-    required this.quoted,
-    required this.index,
-    required this.time,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final initial =
-        character.name.isNotEmpty ? character.name[0].toUpperCase() : '?';
-    final avatarBg = isUser ? context.cs.primary : const Color(0xFFCCCCCC);
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+      child: ClipRRect(
+        borderRadius: radius,
+        child: SizedBox(
+          height: height,
+          child: Stack(
+            fit: StackFit.expand,
             children: [
-              if (showAvatar)
-                CircleAvatar(
-                  radius: 12,
-                  backgroundColor: avatarBg,
-                  child: Text(
-                    initial,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
+              const ThemeChatPreview(),
+              IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: radius,
+                    border: Border.all(
+                      color: context.cs.outlineVariant.withValues(alpha: 0.75),
                     ),
                   ),
                 ),
-              if (showAvatar) const SizedBox(width: 8),
-              if (showName)
-                Text(
-                  character.name,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: metaColor,
-                  ),
-                ),
-              if (showName) const SizedBox(width: 6),
-              Text(
-                '#$index',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: metaColor.withValues(alpha: 0.55),
-                ),
-              ),
-              const Spacer(),
-              Text(
-                time,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: metaColor.withValues(alpha: 0.55),
-                ),
               ),
             ],
           ),
-          const SizedBox(height: 6),
-          RichText(
-            text: TextSpan(
-              style: TextStyle(
-                fontFamily: fontFamily,
-                fontSize: fontSize,
-                letterSpacing: letterSpacing,
-                height: 1.4,
-                fontStyle: FontStyle.italic,
-                color: italicColor,
-                fontWeight: fontWeight,
-                fontVariations: [
-                  FontVariation('wght', fontWeight.value.toDouble()),
-                ],
-              ),
-              children: [
-                TextSpan(text: text),
-                if (quoted != null) ...[
-                  const TextSpan(text: ' '),
-                  TextSpan(
-                    text: quoted,
-                    style: const TextStyle(
-                      fontStyle: FontStyle.normal,
-                      fontWeight: FontWeight.w500,
-                      fontVariations: [FontVariation('wght', 500)],
-                    ).copyWith(color: quoteColor),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
 }
 
-/// "Bubble" chat layout — message in a colored bubble. Mirrors the bubble layout
-/// in WebView renderer.
-class _PreviewBubble extends StatelessWidget {
-  final Alignment alignment;
-  final Color color;
-  final Gradient? gradient;
-  final Color textColor;
-  final Color? italicColor;
-  final Color quoteColor;
-  final double radius;
-  final FontWeight fontWeight;
-  final String? fontFamily;
-  final double fontSize;
-  final double letterSpacing;
-  final String text;
-  final String? quoted;
+/// A section whose payload is too big to compare as JSON on every rebuild;
+/// [key] stands for it.
+class _Section {
+  const _Section(this.key, this.value);
+  final String key;
+  final Object? value;
 
-  const _PreviewBubble({
-    required this.alignment,
-    required this.color,
-    this.gradient,
-    required this.textColor,
-    required this.italicColor,
-    required this.quoteColor,
-    required this.radius,
-    required this.fontWeight,
-    required this.fontFamily,
-    required this.fontSize,
-    required this.letterSpacing,
-    required this.text,
-    required this.quoted,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Align(
-      alignment: alignment,
-      child: Container(
-        constraints: const BoxConstraints(maxWidth: 260),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: gradient == null ? color : null,
-          gradient: gradient,
-          borderRadius: BorderRadius.circular(radius),
-          border: Border.all(
-            color: context.cs.outline.withValues(alpha: 0.35),
-          ),
-        ),
-        child: RichText(
-          text: TextSpan(
-            style: TextStyle(
-              fontFamily: fontFamily,
-              fontSize: fontSize,
-              letterSpacing: letterSpacing,
-              height: 1.4,
-              fontStyle: FontStyle.italic,
-              color: italicColor ?? textColor,
-              fontWeight: fontWeight,
-              fontVariations: [
-                FontVariation('wght', fontWeight.value.toDouble()),
-              ],
-            ),
-            children: [
-              TextSpan(text: text),
-              if (quoted != null) ...[
-                const TextSpan(text: ' '),
-                TextSpan(
-                  text: quoted,
-                  style: const TextStyle(
-                    fontStyle: FontStyle.normal,
-                    fontWeight: FontWeight.w500,
-                    fontVariations: [FontVariation('wght', 500)],
-                  ).copyWith(color: quoteColor),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+  Object? toJson() => value;
 }

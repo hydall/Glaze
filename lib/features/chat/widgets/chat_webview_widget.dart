@@ -15,6 +15,7 @@ import '../../../../shared/theme/theme_font_provider.dart';
 import '../../../../shared/theme/theme_preset.dart';
 import '../bridge/chat_bridge_controller.dart';
 import '../bridge/chat_overlay_blur_region.dart';
+import '../chrome/chat_chrome_channel.dart';
 import '../bridge/chat_webview_bridge_host.dart';
 import '../bridge/chat_webview_theme_builder.dart';
 import '../../../core/models/chat_message.dart';
@@ -32,6 +33,7 @@ import 'chat_webview_ext_block_callbacks.dart';
 import 'chat_webview_initializer.dart';
 import 'chat_webview_panel_refresher.dart';
 import 'chat_webview_recovery.dart';
+import 'chat_webview_scroll_relay.dart';
 import 'chat_webview_surface.dart';
 import 'chat_webview_sync_dispatcher.dart';
 import 'message_scripts_prompt_sheet.dart';
@@ -89,8 +91,17 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
   /// the WebView (blurs the Flutter-side global background) — the widgets'
   /// own BackdropFilter cannot sample the platform view or anything under it.
   final List<ChatOverlayBlurRegion> blurRegions;
+
+  /// The header, composer and drawer drawn in this page. Attached to every
+  /// page the widget initializes, before the first messages are painted.
+  final ChatChromeChannel? chromeChannel;
   final String? searchQuery;
   final int searchCurrentIndex;
+
+  /// The active hit counted over the whole chat, as the search bar shows it.
+  /// [searchCurrentIndex] is the same hit as the page numbers it; this tells
+  /// the reader moving to a hit apart from the window merely growing.
+  final int searchActiveIndex;
 
   /// Bumped by `ChatSearchDelegate` whenever the match list is recounted over
   /// a changed message list. The query and the active index can both survive
@@ -98,6 +109,10 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
   /// this is what tells the sync dispatcher to re-run the highlight pass.
   final int searchRevision;
   final String? chatLayout;
+
+  /// The theme's own message layout — its template and stylesheet as JSON;
+  /// null for the built-in layout. See [ThemePreset.messageLayout].
+  final String? themeLayout;
 
   /// Changes when preset colors/layout tokens affecting the WebView change.
   final String? themeSyncKey;
@@ -115,6 +130,7 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
   final bool showCharAvatar;
   final bool showUserName;
   final bool showCharName;
+  final double avatarRoundness;
   final int greetingTotal;
   final String? chatFontName;
   final String? chatFontDataUrl;
@@ -182,10 +198,13 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
     this.viewportHeight = 0,
     this.topInset = 0,
     this.blurRegions = const [],
+    this.chromeChannel,
     this.searchQuery,
     this.searchCurrentIndex = 0,
+    this.searchActiveIndex = 0,
     this.searchRevision = 0,
     this.chatLayout,
+    this.themeLayout,
     this.themeSyncKey,
     this.elementOpacity = 0.8,
     this.elementBlur = 12,
@@ -201,6 +220,7 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
     this.showCharAvatar = true,
     this.showUserName = true,
     this.showCharName = true,
+    this.avatarRoundness = 1.0,
     this.greetingTotal = 0,
     this.chatFontName,
     this.chatFontDataUrl,
@@ -488,12 +508,18 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     _resetAfterDomRework();
     PerfDebug.chatWebViewInitAttempted();
     try {
-      await _waitForJsBridgeReady();
+      await PerfDebug.slowAwait(
+        'chat page bridge ready',
+        _waitForJsBridgeReady,
+      );
       // The WebView is kept alive across chats, so the JS header tracker still
       // holds the previous chat's hidden state and scroll baseline. Clear both
       // before the initial render, or the load's jump to the bottom reads as a
       // downward scroll and this chat opens with its header already gone.
       await _showChatHeader(bridge);
+      // The chrome claims its keys before any message is rendered: a message
+      // that runs scripts must never get to ask for them first.
+      await _attachChrome(bridge);
       final initializer = ChatWebViewInitializer(
         ref: ref,
         bridge: bridge,
@@ -540,7 +566,9 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
         ),
         onReady: () {
           if (!mounted || !identical(_bridge, bridge)) return;
-          _ready = true;
+          // A rebuild, so the surface lowers its cover: the page is painted
+          // and the reader may see it now.
+          setState(() => _ready = true);
           // The page is alive and painted: whatever it took to get here is no
           // longer evidence of a rebuild storm.
           _recovery.noteHealthy();
@@ -548,11 +576,20 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
           // trackpad sink until the page bridge and its DOM are initialized.
           ref.read(chatBridgeRegistryProvider(widget.charId).notifier).state =
               bridge;
+          // Every page init, not once per controller: a reloaded page starts
+          // with its native wheel on again, and the same controller may be
+          // published to the registry already, so nothing else would notice.
+          if (ChatWebViewScrollRelay.isSupported) {
+            unawaited(bridge.relayNativeWheel(true));
+          }
         },
         onSyncExtBlockPanels: _syncExtBlockPanels,
         applyTheme: _applyThemeToBridge,
       );
-      await initializer.run().timeout(_kWebViewInitTimeout);
+      await PerfDebug.slowAwait(
+        'chat page first paint (${widget.messages.length} messages)',
+        () => initializer.run().timeout(_kWebViewInitTimeout),
+      );
       // The list the first frame was rewritten with, for the post-init
       // staleness check below.
       _syncState.paintedDisplayRegexes = initializer.paintedDisplayRegexes;
@@ -649,7 +686,10 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
   /// Tells the reader the chat view could not be brought up, once per widget.
   void _notifyWebViewFailure(Object message) {
     if (!mounted || _bridgeFailureNotified) return;
-    _bridgeFailureNotified = true;
+    // Also lowers the surface cover: the page will not report its first
+    // paint now, and a spinner that never ends over a view that takes no
+    // input would read as still loading.
+    setState(() => _bridgeFailureNotified = true);
     GlazeErrorDialog.show(
       context,
       message,
@@ -684,6 +724,16 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       return;
     }
     _notifyWebViewFailure(e);
+  }
+
+  Future<void> _attachChrome(ChatBridgeController bridge) async {
+    final channel = widget.chromeChannel;
+    if (channel == null) return;
+    try {
+      await channel.attach(bridge).timeout(_kBridgeOpTimeout);
+    } catch (e) {
+      debugPrint('[ChatWebView] chrome attach failed: $e');
+    }
   }
 
   /// Re-shows the chat header and re-baselines the JS hide-on-scroll tracker.
@@ -1143,8 +1193,11 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       blurRegions: w.blurRegions,
       searchQuery: w.searchQuery,
       searchCurrentIndex: w.searchCurrentIndex,
+      searchActiveIndex: w.searchActiveIndex,
       searchRevision: w.searchRevision,
+      visibleStartIndex: w.visibleStartIndex,
       chatLayout: w.chatLayout,
+      themeLayout: w.themeLayout,
       themeSyncKey: w.themeSyncKey,
       elementOpacity: w.elementOpacity,
       elementBlur: w.elementBlur,
@@ -1157,6 +1210,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       showCharAvatar: w.showCharAvatar,
       showUserName: w.showUserName,
       showCharName: w.showCharName,
+      avatarRoundness: w.avatarRoundness,
       chatFontName: w.chatFontName,
       chatFontDataUrl: w.chatFontDataUrl,
       chatFontSize: w.chatFontSize,
@@ -1191,6 +1245,12 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     if (widget.charId != oldWidget.charId) {
       _clearBridgeRegistry?.call();
       _bindBridgeRegistry(widget.charId);
+    }
+    final bridgeNow = _bridge;
+    if (widget.chromeChannel != oldWidget.chromeChannel &&
+        _ready &&
+        bridgeNow != null) {
+      unawaited(_attachChrome(bridgeNow));
     }
     if (!_ready &&
         (widget.charId != oldWidget.charId ||
@@ -1292,11 +1352,13 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
                 widget.sessionId == sessionId) {
               // Runs after the message sync above so the highlight pass reads
               // the edited bubbles: re-numbering the matches over the old text
-              // is what left the counter and the highlights out of step.
+              // is what left the counter and the highlights out of step. It
+              // scrolls only when the sync prepended the older messages the
+              // active hit lives in — the reader asked to go there.
               _syncDispatcher.applySearch(
                 bridge: bridge,
                 fields: _fieldsFor(widget),
-                scroll: false,
+                scroll: result.scrollToSearchMatch,
               );
             }
             if (placeholder == null || !isCurrent()) return;
@@ -1434,6 +1496,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       isActive: (epoch) =>
           mounted && _lifecycleActive && epoch == _lifecycleEpoch,
       sessionSwitching: _sessionSwitching,
+      ready: _ready || _bridgeFailureNotified,
       refreshPanel: _refreshExtBlocksPanel,
       bgImageBytes: bgImageBytes,
       bgBlur: widget.bgBlur,
@@ -1470,6 +1533,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
         showCharAvatar: widget.showCharAvatar,
         showUserName: widget.showUserName,
         showCharName: widget.showCharName,
+        avatarRoundness: widget.avatarRoundness,
       ),
     );
     return {
@@ -1482,6 +1546,8 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
 
   Future<void> _applyThemeToBridge() async {
     await _bridge?.applyTheme(_buildThemeMap());
+    // After the colors, so a theme's stylesheet has their variables to read.
+    await _bridge?.setThemeLayout(widget.themeLayout);
   }
 
   /// True once the WebView's JS bridge has fully initialized and the chat is

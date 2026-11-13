@@ -221,6 +221,9 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
     CharacterRepo charRepo,
   ) async {
     final data = await _buildFromMetadata(allMeta, charRepo);
+    // The stream keeps delivering while this is awaiting; a result that lands
+    // after the provider was disposed has nowhere to go.
+    if (!ref.mounted) return;
     if (_lastResult != null &&
         _lastResult!.length == data.length &&
         _listEquals(_lastResult!, data)) {

@@ -145,7 +145,10 @@ export class SelectionManager {
 
     const id = section.dataset.messageId;
     const isSelected = this._selectedIds.has(id);
-    const onBody = !!e.target.closest('.msg-body');
+    // Reasoning text is selectable like the body; without it here the long
+    // press that selects it gets preventDefault()ed and the native
+    // copy / translate menu never shows.
+    const onBody = !!e.target.closest('.msg-body, .msg-reasoning-inner');
 
     if (this._selectionMode && isSelected && onBody) {
       return false;

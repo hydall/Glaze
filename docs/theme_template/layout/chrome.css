@@ -1,0 +1,4 @@
+/* The chrome gets the same --theme-* variables and theme-* classes, on its
+   own root (.gc), so its stylesheet can follow the theme's settings too. */
+.gc-hdr { box-shadow: inset 0 -2px 0 var(--theme-card-edge, transparent); }
+.gc.theme-edge-none .gc-hdr { box-shadow: none; }

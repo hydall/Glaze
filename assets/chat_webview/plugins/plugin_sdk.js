@@ -4,7 +4,7 @@
 // The host (plugin_host.js) writes `window.__pluginBoot` first:
 //   { pluginId, kind: 'main'|'panel'|'message'|'file', panelId?, messageId?,
 //     channel, config, i18n, vars: { chat, global }, storage, methods: [...],
-//     insets, compat, network, rtcToken }
+//     insets, compat, network, rtcToken, package, main? }
 // Every call goes to the parent as a `<channel>call` postMessage; the parent
 // attributes it to this frame's plugin and forwards it to Dart.
 //
@@ -25,7 +25,8 @@
   // The host is the chat page, past the wrapper frame this one sits in.
   var parentWin = window.parent.parent;
   var kind = boot.kind || 'main';
-  var isMain = kind === 'main';
+  // A chat panel may share its page with the main script (`main`).
+  var isMain = kind === 'main' || boot.main === true;
   var seq = 0;
   var pending = new Map();
 
@@ -69,7 +70,23 @@
     var seen = new Set();
     var network = boot.network;
     var local = boot.localNetwork === true;
+    // The plugin's own package, served on the loopback ('…/plugins/<id>/'):
+    // its own files, not the network.
+    var pkg = typeof boot.package === 'string' ? boot.package : null;
+    function own(url) {
+      if (!pkg) return false;
+      try { return new URL(String(url), location.href).href.indexOf(pkg) === 0; } catch (e) { return false; }
+    }
     // Same rule as the host's frame policy, which is what actually blocks.
+    // Loopback is this device, not the local network: the switch for that does
+    // not gate it.
+    function isLoopbackHost(host) {
+      host = String(host).toLowerCase().replace(/^\[|\]$/g, '');
+      if (host === 'localhost' || /\.localhost$/.test(host)) return true;
+      var v4 = /^127\.(\d+)\.(\d+)\.(\d+)$/.exec(host);
+      if (v4) return +v4[1] <= 255 && +v4[2] <= 255 && +v4[3] <= 255;
+      return host === '::1' || host === '0:0:0:0:0:0:0:1';
+    }
     function isLocalHost(host) {
       host = String(host).toLowerCase().replace(/^\[|\]$/g, '');
       if (host === 'localhost' || /\.(localhost|local|lan|home\.arpa|internal)$/.test(host)) return true;
@@ -85,7 +102,7 @@
       return false;
     }
     function allowed(host) {
-      if (!local && isLocalHost(host)) return false;
+      if (!local && !isLoopbackHost(host) && isLocalHost(host)) return false;
       if (network === true) return true;
       if (!Array.isArray(network)) return false;
       return network.some(function (rule) {
@@ -103,14 +120,16 @@
       seen.add(key);
       post({ type: P + 'net', host: host, blocked: !!blocked });
     }
-    function remote(url) { return /^(https?|wss?):/i.test(String(url)); }
+    function remote(url) { return /^(https?|wss?):/i.test(String(url)) && !own(url); }
     function hostOf(url) {
       try { return new URL(String(url), location.href).hostname.toLowerCase(); } catch (e) { return ''; }
     }
     // A call to the local network without access to it fails like a
     // network error, before anything is sent.
     function refused(url) {
-      return !local && network !== false && remote(url) && isLocalHost(hostOf(url));
+      var host = hostOf(url);
+      return !local && network !== false && remote(url) &&
+        !isLoopbackHost(host) && isLocalHost(host);
     }
 
     /* Request log: a 'req' message when a call goes out, one when it ends. */
@@ -831,7 +850,12 @@
         var fn = (handlers.get(d.event) || [])[0];
         if (!fn) { post({ type: P + 'reply', id: d.id, result: { ok: false, reason: 'missing-handler' } }); return; }
         Promise.resolve().then(function () { return fn(d.args ? Object.freeze(d.args) : undefined); }).then(
-          function () { post({ type: P + 'reply', id: d.id, result: { ok: true } }); },
+          // What the handler returns rides along when it survives JSON.
+          function (value) {
+            var result = { ok: true };
+            try { if (value != null) result.value = JSON.parse(JSON.stringify(value)); } catch (e) { /* dropped */ }
+            post({ type: P + 'reply', id: d.id, result: result });
+          },
           function (err) {
             console.error('[plugin] action', err);
             post({ type: P + 'reply', id: d.id, result: { ok: false, reason: 'handler-error', message: String(err && err.message || err) } });
@@ -861,17 +885,17 @@
     }
   });
 
-  /* ---------- Floating buttons stay reachable ---------- */
-  // A panel's draggable button could be dropped onto the message box or the
+  /* ---------- Floating windows stay reachable ---------- */
+  // A panel's draggable window could be dropped onto the status bar or the
   // system gesture strip, where a finger can no longer pick it up (the strip
   // belongs to the OS, and dragging out of it is the home gesture) — and a
-  // plugin that saves its position put it back there on every open. Small
-  // fixed boxes are moved back between the status bar and the message box
-  // after a drag, when they appear and when the insets settle. Anything as
-  // large as half the screen is a panel meant to cover it, and stays put.
+  // plugin that saves its position put it back there on every open. Fixed
+  // boxes are moved back between the safe top and the safe bottom after a
+  // drag, when they appear and when the insets settle. The app's header and
+  // composer may be overlapped: they are not the system's. A box covering the
+  // whole viewport is a panel meant to cover it, and stays put.
   function keepFloatersReachable() {
     var MARGIN = 8;
-    var MAX_SHARE = 0.5;
     // The keyboard, or a bottom inset this tall (a drawer): temporary, and
     // moving buttons out from under it would strand them mid-screen.
     var MAX_RESTING_INSET = 0.35;
@@ -882,7 +906,7 @@
     var band = function () {
       return {
         top: (insets.topSafe || 0) + MARGIN,
-        bottom: window.innerHeight - (insets.bottomInput || 0) - MARGIN,
+        bottom: window.innerHeight - (insets.bottomSafe || 0) - MARGIN,
         left: MARGIN,
         right: window.innerWidth - MARGIN,
       };
@@ -911,10 +935,24 @@
           cs.pointerEvents === 'none') return;
       var r = el.getBoundingClientRect();
       if (r.width < 1 || r.height < 1) return;
+      // A panel covering the viewport exactly is a page of its own, not a
+      // window: it is drawn behind the status bar on purpose.
+      var vw = window.innerWidth, vh = window.innerHeight;
+      if (r.left >= -0.5 && r.left <= 0.5 && r.top >= -0.5 && r.top <= 0.5 &&
+          r.right >= vw - 0.5 && r.right <= vw + 0.5 &&
+          r.bottom >= vh - 0.5 && r.bottom <= vh + 0.5) return;
       var b = band();
-      if (r.height > (b.bottom - b.top) * MAX_SHARE || r.width > (b.right - b.left) * MAX_SHARE) return;
-      var dy = r.bottom > b.bottom ? b.bottom - r.bottom : r.top < b.top ? b.top - r.top : 0;
-      var dx = r.right > b.right ? b.right - r.right : r.left < b.left ? b.left - r.left : 0;
+      // A box taller (or wider) than the band cannot fit whole: bring the off
+      // edge back, so its handle stays on screen instead of vanishing past
+      // the safe area.
+      var tall = r.height > b.bottom - b.top;
+      var wide = r.width > b.right - b.left;
+      var dy = tall
+        ? (r.top < b.top ? b.top - r.top : r.top > b.bottom ? b.top - r.top : 0)
+        : (r.bottom > b.bottom ? b.bottom - r.bottom : r.top < b.top ? b.top - r.top : 0);
+      var dx = wide
+        ? (r.left < b.left ? b.left - r.left : r.left > b.right ? b.left - r.left : 0)
+        : (r.right > b.right ? b.right - r.right : r.left < b.left ? b.left - r.left : 0);
       if (Math.abs(dy) >= 1) shift(el, cs, dy, 'top', 'bottom');
       if (Math.abs(dx) >= 1) shift(el, cs, dx, 'left', 'right');
     };
@@ -930,7 +968,10 @@
           if (depth < 2) walk(c, depth + 1);
         }
       };
-      if (document.body) walk(document.body, 0);
+      // From <html>, as the hit boxes are: a box may hang next to <body>.
+      walk(document.documentElement, -1);
+      seen.delete(document.head);
+      seen.delete(document.body);
       seen.forEach(rescue);
     };
     var scheduleScan = function (ms) {
@@ -977,7 +1018,7 @@
   if (kind === 'panel') {
     // A chat panel covers the whole page, but only the boxes the plugin
     // draws may take touches; the host clips the frame to these rectangles.
-    var SKIP = { SCRIPT: 1, STYLE: 1, LINK: 1, META: 1, TEMPLATE: 1, NOSCRIPT: 1 };
+    var SKIP = { HEAD: 1, SCRIPT: 1, STYLE: 1, LINK: 1, META: 1, TEMPLATE: 1, NOSCRIPT: 1 };
     var MAX_RECTS = 48;
     var lastKey = '';
     var scheduled = false;
@@ -1007,7 +1048,8 @@
           }
         }
       };
-      if (document.body) walk(document.body, null);
+      // From <html>: a script may hang its boxes there, next to <body>.
+      walk(document.documentElement, null);
       if (rects.length > MAX_RECTS) {
         var u = rects.reduce(function (a, b) {
           return { left: Math.min(a.left, b.left), top: Math.min(a.top, b.top),

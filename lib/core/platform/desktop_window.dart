@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -5,6 +6,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
+
+import '../diagnostics/app_log.dart';
 
 const _prefsKey = 'gz_window_geometry';
 const Size _defaultSize = Size(1280, 820);
@@ -51,6 +54,94 @@ Future<void> initDesktopWindow() async {
     await windowManager.focus();
   });
   windowManager.addListener(_GeometryPersister());
+  // The close button no longer destroys the window on its own: the request
+  // comes to [DesktopCloseHandler], which marks the run as closed first.
+  await windowManager.setPreventClose(true);
+  windowManager.addListener(
+    DesktopCloseHandler(
+      markClosed: AppLog.markClosed,
+      unmarkClosed: AppLog.unmarkClosed,
+      closeWindow: _letClose,
+    ),
+  );
+}
+
+/// Closes the main window the same way the close button does, so the run is
+/// recorded as ended on purpose. Used when the app hands over to its
+/// installer.
+Future<void> closeDesktopApp() async {
+  if (!isDesktopAppWindow) return;
+  await windowManager.close();
+}
+
+/// Lets the close go through the way it did before it was intercepted: the
+/// intercept is lifted and the close requested again, so the system destroys
+/// the window at once and the process winds down behind it.
+///
+/// Not `windowManager.destroy()`: on Windows that only posts the quit message,
+/// and the window then stays on screen through the whole engine teardown —
+/// several seconds with a large chat open — looking hung.
+Future<void> _letClose() async {
+  try {
+    await windowManager.setPreventClose(false);
+    await windowManager.close();
+  } catch (e) {
+    // The intercept would not lift: the window still has to go, even the
+    // slow way.
+    debugPrint('[desktop] close could not be released ($e); destroying');
+    await windowManager.destroy();
+  }
+}
+
+/// Closes the window on the user's request, after the run is recorded as
+/// ended on purpose.
+///
+/// Closing the window — the system's X on Windows and Linux, the title bar's
+/// own button, Alt+F4 — destroyed the window straight away, and the process
+/// went with it before anything in Dart heard of it: neither
+/// `AppLifecycleListener.onExitRequested` nor the `detached` state fires on
+/// that path. The session marker was left saying `foreground`, which is what
+/// a crash looks like, so every launch after a normal close offered a crash
+/// report. With the close intercepted, the marker and the log are written
+/// first, then the close is let through as before.
+class DesktopCloseHandler extends WindowListener {
+  final void Function() markClosed;
+
+  /// Undoes [markClosed] when the window did not go after all.
+  final void Function() unmarkClosed;
+  final Future<void> Function() closeWindow;
+
+  DesktopCloseHandler({
+    required this.markClosed,
+    required this.closeWindow,
+    void Function()? unmarkClosed,
+  }) : unmarkClosed = unmarkClosed ?? _noop;
+
+  static void _noop() {}
+
+  bool _closing = false;
+
+  @override
+  void onWindowClose() {
+    // The close let through below comes back here as a second request, as
+    // does a double click on the X: neither marks or closes again.
+    if (_closing) return;
+    _closing = true;
+    try {
+      markClosed();
+    } finally {
+      // Whatever the marker did, the user asked to leave: the window goes.
+      // If it will not, the next click gets to try again rather than find
+      // the button dead.
+      unawaited(
+        closeWindow().catchError((Object e, StackTrace s) {
+          _closing = false;
+          unmarkClosed();
+          debugPrint('[desktop] close failed: $e');
+        }),
+      );
+    }
+  }
 }
 
 class _Geometry {

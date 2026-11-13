@@ -147,8 +147,9 @@ void main() {
       );
     });
 
-    test('rout.my gates references by model', () {
-      // Generation-only models do not advertise `/images/edits`.
+    test('rout.my opens references for Gemini and edit models', () {
+      // Gemini models take inlineData references through rout.my's
+      // Gemini-compatible route; gpt-image models use `/images/edits`.
       expect(
         providerMaxReferences(
           const ImageGenSettings(
@@ -156,7 +157,7 @@ void main() {
             routmyModel: 'google/gemini-3.1-flash-image-preview',
           ),
         ),
-        0,
+        greaterThan(0),
       );
       expect(
         providerMaxReferences(
@@ -166,6 +167,47 @@ void main() {
           ),
         ),
         greaterThan(0),
+      );
+    });
+
+    test('TensorArt gates references by the selected tool', () {
+      expect(
+        providerMaxReferences(
+          const ImageGenSettings(
+            apiType: ImageGenApiType.tensorart,
+            tensorart: TensorArtImageSettings(
+              tools: [
+                TensorArtTool(
+                  name: 'text2image',
+                  inputs: [
+                    TensorArtToolInput(type: 'STRING', description: 'prompt'),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        0,
+      );
+      expect(
+        providerMaxReferences(
+          const ImageGenSettings(
+            apiType: ImageGenApiType.tensorart,
+            tensorart: TensorArtImageSettings(
+              toolName: 'image_edit',
+              tools: [
+                TensorArtTool(
+                  name: 'image_edit',
+                  inputs: [
+                    TensorArtToolInput(type: 'STRING', description: 'prompt'),
+                    TensorArtToolInput(type: 'FILE', description: 'source'),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        TensorArtConstants.maxReferences,
       );
     });
 

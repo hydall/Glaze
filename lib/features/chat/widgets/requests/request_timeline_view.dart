@@ -2,6 +2,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/app_runtime.dart';
 import '../../../../core/models/chat_message.dart';
 import '../../../../core/state/studio_feature_provider.dart';
 import '../../../../shared/theme/app_colors.dart';
@@ -20,14 +21,14 @@ import 'request_group_card.dart';
 import 'request_rows.dart';
 import 'request_stage_label.dart';
 
-/// Everything this chat has sent to a model since the app started, in one
-/// timeline: each turn with the stages it set off, and the background jobs
-/// (card rewrite, reconciliation, summary, embeddings, images) in their own
-/// place in time.
+/// Everything this chat has sent to a model that the capture store still
+/// keeps, across app runs, in one timeline: one row per request — a turn's
+/// stages and the background jobs (card rewrite, reconciliation, summary,
+/// embeddings, images) alike — each in its own place in time.
 ///
-/// Grouping lives in [buildRequestTimeline]; this widget only decides what is
-/// open. Three levels: timeline → the steps of one group → the payload of one
-/// step. The inspector hides its tab strip for the last two.
+/// Folding lives in [buildRequestTimeline]; this widget only decides what is
+/// open: the timeline, or the payload of one request. The inspector hides its
+/// tab strip for the latter.
 ///
 /// Coverage is not a view next to this one any more, and not a row either: a
 /// past request's coverage is a block inside that request, and the next
@@ -215,6 +216,7 @@ class RequestTimelineViewState extends ConsumerState<RequestTimelineView> {
     // falls back to everything instead of showing an empty timeline.
     final filter = present.contains(_familyFilter) ? _familyFilter : null;
     final shown = filter == null ? groups : _filterGroups(groups, filter);
+    final restartAt = restartSeparatorIndex(shown, AppRuntime.startedAtMs);
 
     return ListView(
       padding: withInspectorBottomInset(
@@ -224,7 +226,7 @@ class RequestTimelineViewState extends ConsumerState<RequestTimelineView> {
       children: [
         RequestPreviewRow(onTap: () => _open(preview: true)),
         InspectorSectionTitle(
-          'requests_since_start'.tr(),
+          'requests_history'.tr(),
           trailing: IconButton(
             visualDensity: VisualDensity.compact,
             icon: const Icon(Icons.refresh_rounded, size: 18),
@@ -248,7 +250,7 @@ class RequestTimelineViewState extends ConsumerState<RequestTimelineView> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 18),
             child: Text(
-              'requests_none_since_start'.tr(),
+              'requests_none'.tr(),
               style: TextStyle(
                 fontSize: 13,
                 color: context.cs.onSurfaceVariant,
@@ -256,7 +258,8 @@ class RequestTimelineViewState extends ConsumerState<RequestTimelineView> {
             ),
           )
         else
-          for (final group in shown)
+          for (final (index, group) in shown.indexed) ...[
+            if (index == restartAt) const _AppRestartSeparator(),
             RequestGroupCard(
               group: group,
               expanded: _expandedGroups.contains(group.key),
@@ -269,6 +272,7 @@ class RequestTimelineViewState extends ConsumerState<RequestTimelineView> {
               }),
               onOpenEntry: (entry) => _open(capture: entry.capture),
             ),
+          ],
       ],
     );
   }
@@ -310,5 +314,46 @@ class RequestTimelineViewState extends ConsumerState<RequestTimelineView> {
     final text = messages[index].content.trim().replaceAll(RegExp(r'\s+'), ' ');
     if (text.isEmpty) return null;
     return text.length <= 48 ? text : '${text.substring(0, 48)}…';
+  }
+}
+
+/// A thin rule with a label, between this run's requests (above) and the ones
+/// from before the app last started (below).
+class _AppRestartSeparator extends StatelessWidget {
+  const _AppRestartSeparator();
+
+  @override
+  Widget build(BuildContext context) {
+    final color = context.cs.onSurfaceVariant;
+    final line = Expanded(
+      child: Container(height: 1, color: color.withValues(alpha: 0.3)),
+    );
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 8, 4, 16),
+      child: Row(
+        children: [
+          line,
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.restart_alt_rounded, size: 13, color: color),
+                const SizedBox(width: 4),
+                Text(
+                  'requests_app_restart'.tr(),
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: color,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          line,
+        ],
+      ),
+    );
   }
 }

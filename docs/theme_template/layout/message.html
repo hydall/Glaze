@@ -1,0 +1,11 @@
+<div class="card {{role}}">
+  <div class="who">
+    <g-part name="avatar"></g-part>
+    <span class="nm">{{name}}</span>
+    <span class="idx" g-if="index && !theme.compact">#{{index}}</span>
+    <span class="sw" g-if="swipe.total > 1">{{swipe.index}}/{{swipe.total}}</span>
+    <g-part name="time"></g-part>
+  </div>
+  <g-part name="guidance"></g-part>
+  <g-part name="content"></g-part>
+</div>

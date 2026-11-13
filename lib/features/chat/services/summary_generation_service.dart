@@ -1,76 +1,976 @@
+import 'dart:math' as math;
+
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/llm/game_time.dart';
 import '../../../core/llm/macro_engine.dart';
 import '../../../core/llm/memory_book_api_config_resolver.dart';
+import '../../../core/llm/tokenizer.dart';
 import '../../../core/llm/transport/llm_protocol.dart';
 import '../../../core/models/api_config.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../core/models/memory_book_api_settings.dart';
+import '../../../core/models/summary_block.dart';
+import '../../../core/services/summary_preamble.dart';
+import '../../../core/services/summary_prompt_presets.dart';
 import '../../../core/state/active_selection_provider.dart';
 import '../../../core/state/character_provider.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/state/summary_providers.dart';
 import '../../settings/api_list_provider.dart';
+import '../state/cached_token_breakdown.dart';
 
 final summaryGenerationServiceProvider = Provider<SummaryGenerationService>(
   (ref) => SummaryGenerationService(ref),
 );
 
-/// Resolves everything a summary run needs from the provider layer — the API
-/// connection, character, persona, the session's stored prompt template and the
-/// macro context — and hands it to the provider-free `SummaryService`.
+/// What one compaction run did.
+class SummaryCompactionResult {
+  final int created;
+  final int merged;
+
+  const SummaryCompactionResult({this.created = 0, this.merged = 0});
+
+  bool get changed => created > 0 || merged > 0;
+}
+
+/// What an automatic run would do in a chat as it stands: the prompt's
+/// numbers as [SummaryGenerationService.compact] reads them, the lines the
+/// settings draw on them, and the fresh history a run would leave. The
+/// compaction settings show it, so a reader sees why a run keeps only the
+/// floor when the line to compact to lies under the fixed part.
+class SummaryRunOutlook {
+  /// What the prompt may use.
+  final int total;
+
+  /// Neither history nor summary: preset, card, persona, lorebooks, memory.
+  final int fixedTokens;
+
+  /// The live summary, notes left out.
+  final int summaryTokens;
+
+  /// Messages no block stands in for.
+  final int historyTokens;
+
+  final int triggerTokens;
+  final int compactToTokens;
+  final int floorTokens;
+
+  /// The fresh history a run would leave as written: the tail it keeps, or
+  /// all the history there is when that is less.
+  final int tailTokens;
+
+  const SummaryRunOutlook({
+    required this.total,
+    required this.fixedTokens,
+    required this.summaryTokens,
+    required this.historyTokens,
+    required this.triggerTokens,
+    required this.compactToTokens,
+    required this.floorTokens,
+    required this.tailTokens,
+  });
+
+  /// The line to compact to lies under the fixed part with the summary: a
+  /// run can only leave the floor, and frees little.
+  bool get floorOnly =>
+      compactToTokens - fixedTokens - summaryTokens < floorTokens;
+
+  factory SummaryRunOutlook.of({
+    required int total,
+    required int fixedTokens,
+    required int summaryTokens,
+    required int historyTokens,
+    required SummaryCompactionSettings settings,
+  }) {
+    final compactTo = settings.compactToTokens(total);
+    final floor = settings.autoTailFloor(total);
+    return SummaryRunOutlook(
+      total: total,
+      fixedTokens: fixedTokens,
+      summaryTokens: summaryTokens,
+      historyTokens: historyTokens,
+      triggerTokens: total * settings.triggerPercent ~/ 100,
+      compactToTokens: compactTo,
+      floorTokens: floor,
+      tailTokens: math.min(
+        historyTokens,
+        SummaryGenerationService.autoTailBudget(
+          compactToTokens: compactTo,
+          floorTokens: floor,
+          fixedTokens: fixedTokens,
+          summaryTokens: summaryTokens,
+        ),
+      ),
+    );
+  }
+}
+
+/// The chat's side of a [SummaryRunOutlook]: the live summary and the fresh
+/// history, counted the way [SummaryGenerationService.compact] counts them.
+/// Counting walks every message, so it is done once; the outlook itself is
+/// cheap to work out again as the settings change.
+class SummaryOutlookCounts {
+  final int summaryTokens;
+  final int historyTokens;
+
+  const SummaryOutlookCounts({
+    required this.summaryTokens,
+    required this.historyTokens,
+  });
+}
+
+/// Where a compaction run stands, reported before each request it sends.
+class SummaryCompactionProgress {
+  /// Blocks written so far in this run.
+  final int created;
+  final int merged;
+
+  /// Adjacent blocks are being merged a level up rather than messages retold.
+  final bool merging;
+
+  /// Ids of the messages being retold now; empty while merging, and before
+  /// the first request has been planned.
+  final List<String> sourceIds;
+
+  /// Summarizable messages outside the fresh tail still uncovered once the
+  /// step under way lands.
+  final int remainingMessages;
+
+  const SummaryCompactionProgress({
+    this.created = 0,
+    this.merged = 0,
+    this.merging = false,
+    this.sourceIds = const [],
+    this.remainingMessages = 0,
+  });
+}
+
+/// Keeps the chat's summary chain in shape and runs every change to it.
 ///
-/// Shared by the Memory sheet's "Summarize" button, the auto-summary stage and
-/// `ChatActionsService`, so all three produce identical prompts.
+/// Compaction is driven by how full the prompt is, not by a message count —
+/// messages range from a line to a page, so a count says little about room.
+/// Once the prompt passes the trigger share of what it may use, the oldest
+/// messages are retold as a level-1 block, which then stands in for them,
+/// until the prompt is under the line it compacts to (the trigger, or lower
+/// — `SummaryCompactionSettings.compactToPercent`): the fresh tail sent as
+/// written is what fits under that line next to the rest of the prompt (see
+/// [autoTailBudget]). The source is always the oldest messages no block
+/// stands in for yet, so what the history trim dropped from the prompt is
+/// retold first once a run is due. When the live blocks themselves outgrow
+/// their share, adjacent blocks of one level are merged a level up.
 ///
 /// The connection is the Memory slot's (`PipelineSettings.memoryBookApi`), the
-/// same one memory drafts run on: both are the same kind of work — a small
-/// model reading the transcript and writing prose about it — and a reader who
-/// picks a cheap connection for one means it for the other. The slot falls
-/// back to the active chat connection when it names none, which is what every
-/// summary used to run on. Whatever it resolves to, the request goes out
-/// through that connection's own chat protocol.
+/// same one memory drafts run on, falling back to the active chat connection.
+///
+/// Shared by the Memory sheet, the auto-summary stage and
+/// `ChatActionsService`, so all of them produce identical prompts.
 class SummaryGenerationService {
   final Ref _ref;
 
-  const SummaryGenerationService(this._ref);
+  SummaryGenerationService(this._ref);
 
-  /// Generates and persists the summary for [session]. Throws when no usable
-  /// chat API config exists, or whatever the transport throws on failure.
-  Future<String> generate({
+  /// Sessions with a compaction or merge in flight. One at a time per session:
+  /// two runs would pick the same messages.
+  static final Set<String> _running = {};
+
+  static bool isRunning(String sessionId) => _running.contains(sessionId);
+
+  /// Upper bound on steps of an automatic run: it goes between two turns of
+  /// the chat, so it stops short rather than hold the next one up.
+  static const _maxSteps = 12;
+
+  /// Steps in a row that wrote nothing — the chat was edited under each of
+  /// them — before a run gives up. Keeps a run from spinning on a chat that
+  /// changes faster than it is retold.
+  static const _maxIdleSteps = 3;
+
+  /// Compacts [session] until the prompt is under the line it compacts to:
+  /// the trigger starts a run, the line ends it. [force]
+  /// ignores the trigger and the minimum run size, keeps only the manual tail
+  /// (`manualTailBudget`) as raw history rather than the rest of the window,
+  /// and keeps going, one block at a time, until everything older is
+  /// summarized — the whole backlog of a long chat, however many blocks it
+  /// takes.
+  ///
+  /// [onProgress] hears where the run stands before each request. A
+  /// cancelled [cancelToken] ends the run after the step under way: the
+  /// request already sent is not aborted, its block is written, and nothing
+  /// follows. Every block written stays.
+  ///
+  /// Throws [SummaryChainException] `busy` when a run is already going, and
+  /// whatever the transport throws.
+  Future<SummaryCompactionResult> compact({
     required String charId,
     required ChatSession session,
+    bool force = false,
+    CancelToken? cancelToken,
+    void Function(SummaryCompactionProgress progress)? onProgress,
+  }) {
+    return _exclusive(session.id, () async {
+      final settings = await _ref.read(
+        summaryCompactionSettingsProvider.future,
+      );
+      final slot = _ref.read(pipelineSettingsProvider).memoryBookApi;
+      final apiConfig = await _requireConfig(slot);
+      final service = _ref.read(summaryServiceProvider);
+      final template = await _retellTemplate(session.id);
+      final mergeTemplate = await _mergeTemplate();
+      final shortenTemplate = await _shortenTemplate();
+      final inputCap = _summarizerInputCap(apiConfig);
+
+      var messages = await _messages(session.id, session.messages);
+      final budget = _promptBudget(charId);
+      final compactTo = settings.compactToTokens(budget.total);
+      var created = 0;
+      var merged = 0;
+      var idle = 0;
+
+      for (var step = 0; force || step < _maxSteps; step++) {
+        if (cancelToken?.isCancelled == true) break;
+        messages = await _messages(session.id, session.messages);
+        final blocks = await _cleanBlocks(session.id, messages);
+        final counts = _count(blocks, messages);
+        final summaryTokens = counts.summaryTokens;
+        final used =
+            budget.fixedTokens + summaryTokens + counts.historyTokens;
+
+        if (summaryTokens > budget.total * settings.mergePercent ~/ 100) {
+          final parts = SummaryChain.mergeCandidate(
+            blocks,
+            messages,
+            maxInputTokens: inputCap,
+          );
+          if (parts.isNotEmpty) {
+            onProgress?.call(
+              SummaryCompactionProgress(
+                created: created,
+                merged: merged,
+                merging: true,
+              ),
+            );
+            await _merge(
+              sessionId: session.id,
+              parts: parts,
+              messages: messages,
+              apiConfig: apiConfig,
+              settings: settings,
+              template: mergeTemplate,
+              shortenTemplate: shortenTemplate,
+              temperature: slot.generationTemperature,
+              // Not [cancelToken]: a stop lets the step under way land.
+            );
+            merged++;
+            continue;
+          }
+        }
+
+        final triggerTokens = budget.total * settings.triggerPercent ~/ 100;
+        // The trigger starts a run; the line the run compacts to ends it,
+        // through the tail planSource leaves. A run that stopped at the
+        // trigger instead left the prompt just under it after one block,
+        // and the next reply started the next run.
+        if (!force && created == 0 && used < triggerTokens) break;
+        final tail = autoTailBudget(
+          compactToTokens: compactTo,
+          floorTokens: settings.autoTailFloor(budget.total),
+          fixedTokens: budget.fixedTokens,
+          summaryTokens: summaryTokens,
+        );
+        final plan = SummaryChain.planSource(
+          blocks: blocks,
+          messages: messages,
+          tailBudgetTokens: force
+              ? settings.manualTailBudget(_contextSize(budget))
+              : tail,
+          maxSourceTokens: inputCap,
+        );
+        if (plan.source.isEmpty) break;
+        final overflow = used > budget.total;
+        final minSource = math.max(1000, settings.blockTargetTokens * 2);
+        if (!force && !overflow && plan.sourceTokens < minSource) break;
+        final target = _targetFor(plan.sourceTokens, settings);
+        // A block barely smaller than its messages frees nothing.
+        if (target * 11 ~/ 10 >= plan.sourceTokens) break;
+
+        final earlier = SummaryChain.liveBefore(
+          blocks,
+          messages,
+          plan.source.first.id,
+        );
+        onProgress?.call(
+          SummaryCompactionProgress(
+            created: created,
+            merged: merged,
+            sourceIds: [for (final m in plan.source) m.id],
+            remainingMessages: plan.remainingMessages - plan.source.length,
+          ),
+        );
+
+        final text = await service.summarizeMessages(
+          sessionId: session.id,
+          source: plan.source,
+          apiConfig: apiConfig,
+          targetTokens: target,
+          earlierSummary: SummaryChain.render(earlier),
+          customPrompt: template,
+          shortenTemplate: shortenTemplate,
+          macroContext: _macroContext(charId: charId, session: session),
+          // Not [cancelToken]: a stop lets the step under way land.
+          temperature: slot.generationTemperature,
+        );
+        final tokens = _acceptedTokens(text, plan.sourceTokens);
+        final ids = [for (final m in plan.source) m.id];
+        final block = SummaryBlock(
+          id: _newId(),
+          level: 1,
+          content: text,
+          messageIds: ids,
+          sourceHash: SummaryChain.fingerprint(
+            ids,
+            SummaryChain.index(messages),
+          ),
+          tokens: tokens,
+          sourceTokens: plan.sourceTokens,
+          createdAt: DateTime.now().millisecondsSinceEpoch,
+        );
+        if (!await _commit(session.id, session.messages, (blocks, current) {
+          // Edited while the summarizer was writing: the block describes
+          // text that no longer exists. The next step picks the run again.
+          if (SummaryChain.isStale(block, SummaryChain.index(current))) {
+            return null;
+          }
+          return SummaryChain.commitSource(blocks, current, block);
+        })) {
+          if (++idle >= _maxIdleSteps) break;
+          continue;
+        }
+        idle = 0;
+        created++;
+      }
+      return SummaryCompactionResult(created: created, merged: merged);
+    });
+  }
+
+  /// Merges the reader's selection — adjacent live blocks of one level.
+  Future<void> mergeSelected({
+    required ChatSession session,
+    required Set<String> blockIds,
+    CancelToken? cancelToken,
+  }) {
+    return _exclusive(session.id, () async {
+      final settings = await _ref.read(
+        summaryCompactionSettingsProvider.future,
+      );
+      final slot = _ref.read(pipelineSettingsProvider).memoryBookApi;
+      final apiConfig = await _requireConfig(slot);
+      final messages = await _messages(session.id, session.messages);
+      final blocks = await _cleanBlocks(session.id, messages);
+      final parts = SummaryChain.manualMergeSelection(
+        blocks,
+        messages,
+        blockIds,
+      );
+      await _merge(
+        sessionId: session.id,
+        parts: parts,
+        messages: messages,
+        apiConfig: apiConfig,
+        settings: settings,
+        template: await _mergeTemplate(),
+        shortenTemplate: await _shortenTemplate(),
+        temperature: slot.generationTemperature,
+        cancelToken: cancelToken,
+      );
+    });
+  }
+
+  /// Writes an active block again over the same sources, on the prompts
+  /// chosen now, and leaves the result on it as a [SummaryDraft] for the
+  /// reader to approve ([approveDraft]) — the block keeps its text until then.
+  /// A level-1 block retells its messages as they read today, so approving
+  /// brings a stale one back; a merge is merged again from its parts. A merge
+  /// whose messages changed is refused (`stale_merge`): its parts are as out
+  /// of date as it is, and deleting it gives them back. A stopped run
+  /// ([cancelToken]) writes nothing.
+  Future<void> regenerateBlock({
+    required String charId,
+    required ChatSession session,
+    required String blockId,
+    CancelToken? cancelToken,
+  }) {
+    return _exclusive(session.id, () async {
+      final settings = await _ref.read(
+        summaryCompactionSettingsProvider.future,
+      );
+      final slot = _ref.read(pipelineSettingsProvider).memoryBookApi;
+      final apiConfig = await _requireConfig(slot);
+      final service = _ref.read(summaryServiceProvider);
+      final messages = await _messages(session.id, session.messages);
+      final byId = SummaryChain.index(messages);
+      final blocks = await service.getBlocks(session.id);
+      final block = blocks
+          .where((b) => b.id == blockId && !b.archived && !b.isNote)
+          .firstOrNull;
+      if (block == null) throw const SummaryChainException('not_live');
+
+      final String text;
+      final List<String> ids;
+      final int sourceTokens;
+      if (block.childIds.isEmpty) {
+        final source = [
+          for (final id in block.messageIds)
+            if (byId[id] case final message?
+                when SummaryChain.isSummarizable(message))
+              message,
+        ];
+        if (source.isEmpty) throw const SummaryChainException('sources_gone');
+        ids = [for (final m in source) m.id];
+        sourceTokens = source.fold(
+          0,
+          (sum, m) => sum + estimateTokens(m.content),
+        );
+        final earlier = SummaryChain.liveBefore(
+          blocks,
+          messages,
+          ids.first,
+        ).where((b) => b.id != block.id);
+        text = await service.summarizeMessages(
+          sessionId: session.id,
+          source: source,
+          apiConfig: apiConfig,
+          targetTokens: _targetFor(sourceTokens, settings),
+          earlierSummary: SummaryChain.render(earlier),
+          customPrompt: await _retellTemplate(session.id),
+          shortenTemplate: await _shortenTemplate(),
+          macroContext: _macroContext(charId: charId, session: session),
+          cancelToken: cancelToken,
+          temperature: slot.generationTemperature,
+        );
+      } else {
+        if (SummaryChain.isStale(block, byId)) {
+          throw const SummaryChainException('stale_merge');
+        }
+        final parts = [
+          for (final id in block.childIds)
+            ?blocks.where((b) => b.id == id).firstOrNull,
+        ];
+        if (parts.length != block.childIds.length) {
+          throw const SummaryChainException('not_live');
+        }
+        ids = block.messageIds;
+        sourceTokens = parts.fold(0, (sum, b) => sum + b.tokens);
+        text = await service.mergeBlocks(
+          sessionId: session.id,
+          parts: parts,
+          apiConfig: apiConfig,
+          targetTokens: mergeTargetFor(sourceTokens, settings),
+          template: await _mergeTemplate(),
+          shortenTemplate: await _shortenTemplate(),
+          cancelToken: cancelToken,
+          temperature: slot.generationTemperature,
+        );
+      }
+
+      final tokens = _acceptedTokens(text, sourceTokens);
+      final draft = SummaryDraft(
+        content: text,
+        messageIds: ids,
+        sourceHash: SummaryChain.fingerprint(ids, byId),
+        tokens: tokens,
+        sourceTokens: sourceTokens,
+        createdAt: DateTime.now().millisecondsSinceEpoch,
+      );
+      bool stopped() => cancelToken?.isCancelled ?? false;
+      final committed = await _commit(session.id, messages, (current, now) {
+        // Stopped, or edited while the summarizer was writing: the draft
+        // describes messages that no longer read that way.
+        if (stopped() ||
+            SummaryChain.isDraftStale(draft, SummaryChain.index(now))) {
+          return null;
+        }
+        return SummaryChain.putDraft(current, block.id, draft);
+      });
+      if (!committed && !stopped()) {
+        throw const SummaryChainException('changed');
+      }
+    });
+  }
+
+  /// Shortens an active block as it stands — its own text through the
+  /// shortening prompt, aimed at the block size the settings name — and
+  /// leaves the result on it as a [SummaryDraft], as [regenerateBlock] does.
+  /// For a block that came out far past that size: a merge the summarizer
+  /// would not fit, a block written under a bigger setting. Its messages are
+  /// not retold, so the draft is bound as the block is; a stale block is
+  /// refused (`stale`) before the summarizer is asked, since it is not sent
+  /// and there is nothing to shorten for the prompt. The text must come out
+  /// shorter than the block (`not_shortened` — not `not_shorter`, whose
+  /// advice to lower the block size does not fit here). A stopped run
+  /// ([cancelToken]) writes nothing.
+  Future<void> shortenBlock({
+    required ChatSession session,
+    required String blockId,
+    CancelToken? cancelToken,
+  }) {
+    return _exclusive(session.id, () async {
+      final settings = await _ref.read(
+        summaryCompactionSettingsProvider.future,
+      );
+      final slot = _ref.read(pipelineSettingsProvider).memoryBookApi;
+      final apiConfig = await _requireConfig(slot);
+      final service = _ref.read(summaryServiceProvider);
+      final messages = await _messages(session.id, session.messages);
+      final blocks = await service.getBlocks(session.id);
+      final block = blocks
+          .where((b) => b.id == blockId && !b.archived && !b.isNote)
+          .firstOrNull;
+      if (block == null) throw const SummaryChainException('not_live');
+      if (SummaryChain.isStale(block, SummaryChain.index(messages))) {
+        // A stale merge has the more useful advice: delete it for its parts.
+        throw SummaryChainException(
+          block.childIds.isNotEmpty ? 'stale_merge' : 'stale',
+        );
+      }
+
+      final text = await service.shortenText(
+        sessionId: session.id,
+        text: block.content,
+        apiConfig: apiConfig,
+        targetTokens: settings.blockTargetTokens,
+        template: await _shortenTemplate(),
+        cancelToken: cancelToken,
+        temperature: slot.generationTemperature,
+      );
+      // Counted now, not read off the block: a block from before sizes were
+      // stored reads 0 and would refuse any text.
+      final int tokens;
+      try {
+        tokens = _acceptedTokens(text, estimateTokens(block.content));
+      } on SummaryChainException {
+        throw const SummaryChainException('not_shortened');
+      }
+      final draft = SummaryDraft(
+        content: text,
+        messageIds: block.messageIds,
+        sourceHash: block.sourceHash,
+        tokens: tokens,
+        sourceTokens: block.sourceTokens,
+        createdAt: DateTime.now().millisecondsSinceEpoch,
+      );
+      bool stopped() => cancelToken?.isCancelled ?? false;
+      final committed = await _commit(session.id, messages, (current, now) {
+        if (stopped() ||
+            SummaryChain.isDraftStale(draft, SummaryChain.index(now))) {
+          return null;
+        }
+        return SummaryChain.putDraft(current, block.id, draft);
+      });
+      if (!committed && !stopped()) {
+        throw const SummaryChainException('changed');
+      }
+    });
+  }
+
+  /// Puts the draft [regenerateBlock] left on [blockId] in place of the
+  /// block's text. Throws `changed` when its messages changed after it was
+  /// written.
+  Future<void> approveDraft({
+    required ChatSession session,
+    required String blockId,
+  }) async {
+    await _commit(
+      session.id,
+      session.messages,
+      (blocks, messages) =>
+          SummaryChain.approveDraft(blocks, messages, blockId),
+    );
+  }
+
+  Future<void> editDraft({
+    required ChatSession session,
+    required String blockId,
+    required String content,
+  }) async {
+    if (content.trim().isEmpty) return;
+    await _commit(
+      session.id,
+      session.messages,
+      (blocks, _) => SummaryChain.editDraft(blocks, blockId, content),
+    );
+  }
+
+  /// Drops the draft of [blockId]; the block keeps the text it has.
+  Future<void> discardDraft({
+    required ChatSession session,
+    required String blockId,
+  }) async {
+    await _commit(
+      session.id,
+      session.messages,
+      (blocks, _) => SummaryChain.putDraft(blocks, blockId, null),
+    );
+  }
+
+  Future<void> editBlock({
+    required ChatSession session,
+    required String blockId,
+    required String content,
+  }) async {
+    if (content.trim().isEmpty) {
+      return deleteBlock(session: session, blockId: blockId);
+    }
+    await _commit(
+      session.id,
+      session.messages,
+      (blocks, _) => SummaryChain.edit(blocks, blockId, content),
+    );
+  }
+
+  /// Deletes an active block. A merge gives its parts back; a level-1 block
+  /// lets its messages return to the prompt.
+  Future<void> deleteBlock({
+    required ChatSession session,
+    required String blockId,
+  }) => _commit(
+    session.id,
+    session.messages,
+    (blocks, _) => SummaryChain.delete(blocks, blockId),
+  );
+
+  /// Adds a note the reader writes: sent with the summary, standing in for
+  /// no messages.
+  Future<void> addNote({
+    required ChatSession session,
+    required String content,
+  }) async {
+    final text = content.trim();
+    if (text.isEmpty) return;
+    await _commit(
+      session.id,
+      session.messages,
+      (blocks, _) => [
+        ...blocks,
+        SummaryBlock(
+          id: _newId(),
+          level: 0,
+          content: text,
+          tokens: estimateTokens(text),
+          createdAt: DateTime.now().millisecondsSinceEpoch,
+        ),
+      ],
+    );
+  }
+
+  /// Empties the chain, archive included. Messages are untouched and return
+  /// to the prompt.
+  Future<void> clear({required ChatSession session}) =>
+      _commit(session.id, session.messages, (_, _) => const []);
+
+  Future<void> _merge({
+    required String sessionId,
+    required List<SummaryBlock> parts,
+    required List<ChatMessage> messages,
+    required ApiConfig apiConfig,
+    required SummaryCompactionSettings settings,
+    String? template,
+    String? shortenTemplate,
+    double? temperature,
     CancelToken? cancelToken,
   }) async {
-    final slot = _ref.read(pipelineSettingsProvider).memoryBookApi;
+    final sourceTokens = parts.fold(0, (sum, b) => sum + b.tokens);
+    final target = mergeTargetFor(sourceTokens, settings);
+    final text = await _ref
+        .read(summaryServiceProvider)
+        .mergeBlocks(
+          sessionId: sessionId,
+          parts: parts,
+          apiConfig: apiConfig,
+          targetTokens: target,
+          template: template,
+          shortenTemplate: shortenTemplate,
+          cancelToken: cancelToken,
+          temperature: temperature,
+        );
+    final tokens = _acceptedTokens(text, sourceTokens);
+    final ids = [for (final part in parts) ...part.messageIds];
+    final merged = SummaryBlock(
+      id: _newId(),
+      level: parts.first.level + 1,
+      content: text,
+      messageIds: ids,
+      sourceHash: SummaryChain.fingerprint(ids, SummaryChain.index(messages)),
+      childIds: [for (final part in parts) part.id],
+      tokens: tokens,
+      sourceTokens: sourceTokens,
+      createdAt: DateTime.now().millisecondsSinceEpoch,
+    );
+    final committed = await _commit(sessionId, messages, (blocks, current) {
+      if (SummaryChain.isStale(merged, SummaryChain.index(current))) {
+        return null;
+      }
+      return SummaryChain.commitMerge(blocks, merged);
+    });
+    if (!committed) throw const SummaryChainException('changed');
+  }
+
+  /// The summarizer's answer as the size of the block it makes. Text no
+  /// shorter than its source frees nothing (`not_shorter`) and is not written.
+  static int _acceptedTokens(String text, int sourceTokens) {
+    final tokens = estimateTokens(text);
+    if (tokens >= sourceTokens) {
+      throw const SummaryChainException('not_shorter');
+    }
+    return tokens;
+  }
+
+  /// The chat's own prompt text when it still has one, else the chosen
+  /// retelling preset — with the reader's preamble in front when it is on.
+  Future<String> _retellTemplate(String sessionId) async {
+    final own = await _ref
+        .read(summaryServiceProvider)
+        .getSummaryPrompt(sessionId);
+    if (own != null) return _withPreamble(own);
+    final selection = await _ref.read(summaryPromptSelectionProvider.future);
+    final custom = await _ref.read(summaryCustomPromptsProvider.future);
+    return _withPreamble(
+      SummaryPromptPresets.resolve(selection.retellKey, custom).prompt,
+    );
+  }
+
+  Future<String> _mergeTemplate() async {
+    final selection = await _ref.read(summaryPromptSelectionProvider.future);
+    final custom = await _ref.read(summaryCustomMergePromptsProvider.future);
+    return _withPreamble(
+      SummaryMergePromptPresets.resolve(selection.mergeKey, custom).prompt,
+    );
+  }
+
+  Future<String> _shortenTemplate() async {
+    final selection = await _ref.read(summaryPromptSelectionProvider.future);
+    final custom = await _ref.read(summaryCustomShortenPromptsProvider.future);
+    return _withPreamble(
+      SummaryShortenPromptPresets.resolve(selection.shortenKey, custom).prompt,
+    );
+  }
+
+  /// [template] behind the preamble ([SummaryPreamble]) when the reader has
+  /// it on: first in every summary prompt, so it is read before the prompt it
+  /// is meant to steer. Off, [template] goes as it is.
+  Future<String> _withPreamble(String template) async {
+    final preamble = await _ref.read(summaryPreambleProvider.future);
+    return preamble.apply(template);
+  }
+
+  /// Reads the messages fresh, then applies [change] to the blocks as stored
+  /// and saves them in one transaction. A null from [change] skips the write.
+  /// Returns whether anything was written.
+  Future<bool> _commit(
+    String sessionId,
+    List<ChatMessage> fallbackMessages,
+    List<SummaryBlock>? Function(
+      List<SummaryBlock> blocks,
+      List<ChatMessage> messages,
+    )
+    change,
+  ) async {
+    final messages = await _messages(sessionId, fallbackMessages);
+    final written = await _ref
+        .read(summaryServiceProvider)
+        .mutateBlocks(
+          sessionId: sessionId,
+          messages: messages,
+          change: (blocks) => change(blocks, messages),
+        );
+    if (written) _notifyChanged();
+    return written;
+  }
+
+  /// Drops stale blocks before anything is planned on top of them.
+  Future<List<SummaryBlock>> _cleanBlocks(
+    String sessionId,
+    List<ChatMessage> messages,
+  ) async {
+    var cleaned = const <SummaryBlock>[];
+    final written = await _ref
+        .read(summaryServiceProvider)
+        .mutateBlocks(
+          sessionId: sessionId,
+          messages: messages,
+          change: (blocks) {
+            cleaned = SummaryChain.withoutStale(blocks, messages);
+            return identical(cleaned, blocks) ? null : cleaned;
+          },
+        );
+    if (written) _notifyChanged();
+    return cleaned;
+  }
+
+  void _notifyChanged() {
+    if (!_ref.mounted) return;
+    _ref.read(summaryRevisionProvider.notifier).state++;
+  }
+
+  Future<T> _exclusive<T>(String sessionId, Future<T> Function() run) async {
+    if (!_running.add(sessionId)) {
+      throw const SummaryChainException('busy');
+    }
+    try {
+      return await run();
+    } finally {
+      _running.remove(sessionId);
+    }
+  }
+
+  /// The session's messages as stored now — a run outlives the copy it was
+  /// started with.
+  Future<List<ChatMessage>> _messages(
+    String sessionId,
+    List<ChatMessage> fallback,
+  ) async {
+    final stored = await _ref.read(chatRepoProvider).getById(sessionId);
+    return stored?.messages ?? fallback;
+  }
+
+  /// The live summary and the fresh history of [blocks] over [messages].
+  static SummaryOutlookCounts _count(
+    List<SummaryBlock> blocks,
+    List<ChatMessage> messages,
+  ) {
+    final view = SummaryChain.promptView(blocks, messages);
+    var history = 0;
+    for (final message in messages) {
+      if (SummaryChain.isSummarizable(message) &&
+          !view.coveredMessageIds.contains(message.id)) {
+        history += estimateTokens(message.content);
+      }
+    }
+    return SummaryOutlookCounts(
+      summaryTokens: SummaryChain.liveTokens(blocks, messages),
+      historyTokens: history,
+    );
+  }
+
+  /// The summary and the fresh history of [sessionId] as [compact] would
+  /// count them now: the messages as stored, stale blocks left out (without
+  /// writing anything — a run drops them itself). [fallback] stands in for
+  /// a session not stored yet.
+  Future<SummaryOutlookCounts> outlookCounts(
+    String sessionId,
+    List<ChatMessage> fallback,
+  ) async {
+    final messages = await _messages(sessionId, fallback);
+    final blocks = await _ref.read(summaryServiceProvider).getBlocks(sessionId);
+    return _count(SummaryChain.withoutStale(blocks, messages), messages);
+  }
+
+  /// The prompt's numbers as [compact] reads them, with the lines [settings]
+  /// draw on them, over [counts] from [outlookCounts]; null when no prompt
+  /// has been built in this chat yet, so nothing is known of the fixed part.
+  SummaryRunOutlook? outlook({
+    required String charId,
+    required SummaryOutlookCounts counts,
+    required SummaryCompactionSettings settings,
+  }) {
+    if (_ref.read(cachedTokenBreakdownProvider(charId)) == null) return null;
+    final budget = _promptBudget(charId);
+    return SummaryRunOutlook.of(
+      total: budget.total,
+      fixedTokens: budget.fixedTokens,
+      summaryTokens: counts.summaryTokens,
+      historyTokens: counts.historyTokens,
+      settings: settings,
+    );
+  }
+
+  /// What the main prompt may use, and how much of it is neither history nor
+  /// summary. Taken from the last prompt build when there is one: it carries
+  /// the real preset, lorebooks and memory. Without one, only the connection
+  /// is known and the fixed part counts as zero.
+  _PromptBudget _promptBudget(String charId) {
+    final breakdown = _ref.read(cachedTokenBreakdownProvider(charId));
+    if (breakdown != null) {
+      final total =
+          breakdown.historyBudget +
+          breakdown.fixedTotal -
+          breakdown.vectorLoreTokens;
+      if (total > 0) {
+        // The builder counts the summary text it was handed under this key,
+        // whichever block carried it.
+        final summaryNow = breakdown.macroTokens['summary'] ?? 0;
+        final fixed =
+            breakdown.totalTokens - breakdown.historyTokens - summaryNow;
+        return _PromptBudget(total: total, fixedTokens: math.max(0, fixed));
+      }
+    }
+    final chat = _ref.read(activeApiConfigProvider);
+    final total = chat == null ? 0 : chat.contextSize - chat.maxTokens;
+    return _PromptBudget(total: total > 0 ? total : 32000, fixedTokens: 0);
+  }
+
+  /// The raw history an automatic run leaves as written: what fits under the
+  /// line the run compacts to ([compactToTokens], the trigger at most) next
+  /// to the fixed part and the live summary, so the run brings the prompt
+  /// under that line. Counting the tail from the window instead (the rest
+  /// past the trigger) let a prompt with a large fixed part — preset,
+  /// lorebooks, memory — sit far above the trigger with nothing to retell,
+  /// until the history trim cut it first.
+  ///
+  /// Never less than [floorTokens] (the reader's least raw history, see
+  /// [SummaryCompactionSettings.autoTailFloor]): a fixed part past the line
+  /// cannot be compacted away, and the newest exchanges still have to reach
+  /// the model as written.
+  @visibleForTesting
+  static int autoTailBudget({
+    required int compactToTokens,
+    required int floorTokens,
+    required int fixedTokens,
+    required int summaryTokens,
+  }) => math.max(compactToTokens - fixedTokens - summaryTokens, floorTokens);
+
+  /// The chat connection's context size, which a manual tail in percent is a
+  /// share of; the prompt budget when no connection is set.
+  int _contextSize(_PromptBudget budget) {
+    final size = _ref.read(activeApiConfigProvider)?.contextSize ?? 0;
+    return size > 0 ? size : budget.total;
+  }
+
+  /// How much transcript one summarizer request may carry: its window, less
+  /// the answer and room for the instructions.
+  static int _summarizerInputCap(ApiConfig config) {
+    final output = config.maxTokens > 0 ? config.maxTokens : 4096;
+    return (config.contextSize - output - 2000).clamp(2000, 60000);
+  }
+
+  /// A small source gets a small block; the setting is the ceiling.
+  static int _targetFor(int sourceTokens, SummaryCompactionSettings settings) =>
+      math.min(settings.blockTargetTokens, math.max(150, sourceTokens ~/ 3));
+
+  /// A merge aims at the block size itself, as a retelling does, and at most
+  /// half of its parts, so two small blocks make a small one. The parts are
+  /// summaries already: a third of them, as [_targetFor] asks of messages,
+  /// cut continuity rather than words, and the summarizer overshot it anyway,
+  /// so merges came out past the block size whatever it was set to.
+  @visibleForTesting
+  static int mergeTargetFor(
+    int sourceTokens,
+    SummaryCompactionSettings settings,
+  ) => math.min(settings.blockTargetTokens, math.max(150, sourceTokens ~/ 2));
+
+  static int _idSeq = 0;
+
+  static String _newId() =>
+      'sum-${DateTime.now().microsecondsSinceEpoch}-${_idSeq++}';
+
+  Future<ApiConfig> _requireConfig(MemoryBookApiSettings slot) async {
     final apiConfig = await _resolveConfig(slot);
     if (apiConfig == null || apiConfig.mode == 'embedding') {
       throw Exception(
         'No chat API config found. Add one in API Settings first.',
       );
     }
-
-    final service = _ref.read(summaryServiceProvider);
-    final template = await service.getSummaryPrompt(session.id);
-
-    final gameTime = await _readGameTime(session.id);
-    return service.generateSummary(
-      sessionId: session.id,
-      history: session.messages,
-      apiConfig: apiConfig,
-      customPrompt: template,
-      // Only when the slot pins one. Summarizing stays at its own low default
-      // otherwise: a hot summariser invents facts.
-      temperature: slot.generationTemperature,
-      macroContext: _macroContext(
-        charId: charId,
-        session: session,
-        gameTime: gameTime,
-      ),
-      cancelToken: cancelToken,
-    );
+    return apiConfig;
   }
 
   /// The Memory slot's connection, as one [ApiConfig] the summary can run on:
@@ -107,21 +1007,9 @@ class SummaryGenerationService {
     );
   }
 
-  Future<GameTimeState> _readGameTime(String sessionId) async {
-    try {
-      final trackers = await _ref
-          .read(trackerRepoProvider)
-          .getBySessionAndScope(sessionId, 'ledger');
-      return GameTimeState.fromTrackers(trackers);
-    } catch (_) {
-      return const GameTimeState();
-    }
-  }
-
   MacroContext _macroContext({
     required String charId,
     required ChatSession session,
-    GameTimeState gameTime = const GameTimeState(),
   }) {
     final character = _ref.read(characterByIdProvider(charId));
     final persona = _ref.read(
@@ -140,9 +1028,13 @@ class SummaryGenerationService {
       globalVars: _ref.read(globalVarsProvider),
       charId: charId,
       sessionId: session.id,
-      gameTime: gameTime.time,
-      gameDate: gameTime.date,
-      gameDay: gameTime.day?.toString(),
     );
   }
+}
+
+class _PromptBudget {
+  final int total;
+  final int fixedTokens;
+
+  const _PromptBudget({required this.total, required this.fixedTokens});
 }

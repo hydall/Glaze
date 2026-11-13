@@ -9,7 +9,9 @@ import '../shell/shell_header_provider.dart';
 import 'glass_surface.dart';
 import 'glow_ripple.dart';
 import 'help_tip.dart';
+import 'glaze_slider.dart';
 import 'glaze_switch.dart';
+import '../theme/ui_scale.dart';
 
 enum MenuGroupHeaderVariant { standard, accentCaps }
 
@@ -70,9 +72,12 @@ class _MenuCollapsibleSectionState extends State<MenuCollapsibleSection> {
           mouseCursor: SystemMouseCursors.click,
           // Only the top corners round while the section is open: the card
           // continues past the header into its own content.
+          // GlassSurface scales the card's corners; the ripple has to match.
           borderRadius: _expanded
-              ? BorderRadius.vertical(top: radius.topLeft)
-              : radius,
+              ? BorderRadius.vertical(
+                  top: context.scaleBorderRadius(radius).topLeft,
+                )
+              : context.scaleBorderRadius(radius),
           onTap: () {
             Haptics.selectionClick();
             setState(() => _expanded = !_expanded);
@@ -738,15 +743,15 @@ class MenuFieldItem extends StatelessWidget {
               fillColor: context.inputFill,
               suffixIcon: suffix,
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: context.glazeBorderRadius(12),
                 borderSide: BorderSide(color: context.cs.outlineVariant),
               ),
               enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: context.glazeBorderRadius(12),
                 borderSide: BorderSide(color: context.cs.outlineVariant),
               ),
               focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: context.glazeBorderRadius(12),
                 borderSide: BorderSide(
                   color: context.cs.primary.withValues(alpha: 0.5),
                   width: 1.5,
@@ -770,15 +775,25 @@ class MenuFieldItem extends StatelessWidget {
         children: [
           Row(
             children: [
-              Text(
-                label,
-                style: TextStyle(
-                  color: context.cs.onSurfaceVariant,
-                  fontSize: 13,
+              // One Expanded holds label + help tip: a long label wraps on a
+              // narrow screen, and the expand button stays at the right edge
+              // (Flexible + Spacer would split the free space and strand it).
+              Expanded(
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        label,
+                        style: TextStyle(
+                          color: context.cs.onSurfaceVariant,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                    if (helpTerm != null) HelpTip(term: helpTerm!, size: 14),
+                  ],
                 ),
               ),
-              if (helpTerm != null) HelpTip(term: helpTerm!, size: 14),
-              const Spacer(),
               if (onExpand != null)
                 MouseRegion(
                   cursor: SystemMouseCursors.click,
@@ -1067,15 +1082,15 @@ class _MenuRangeItemState extends State<MenuRangeItem> {
             ),
             contentPadding: const EdgeInsets.symmetric(horizontal: 8),
             border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: context.glazeBorderRadius(10),
               borderSide: BorderSide(color: context.cs.outlineVariant),
             ),
             enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: context.glazeBorderRadius(10),
               borderSide: BorderSide(color: context.cs.outlineVariant),
             ),
             focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: context.glazeBorderRadius(10),
               borderSide: BorderSide(
                 color: context.cs.primary.withValues(alpha: 0.5),
                 width: 1.5,
@@ -1097,16 +1112,9 @@ class _MenuRangeItemState extends State<MenuRangeItem> {
 
   /// The parameter slider itself.
   Widget _buildSlider(BuildContext context) {
-    return SliderTheme(
-      data: SliderTheme.of(context).copyWith(
-        activeTrackColor: context.cs.primary,
-        thumbColor: context.cs.primary,
-        inactiveTrackColor: context.cs.primary.withValues(alpha: 0.18),
-        overlayColor: context.cs.primary.withValues(alpha: 0.1),
-        trackHeight: 3,
-        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
-      ),
-      child: Slider(
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: GlazeSlider(
         value: widget.value.clamp(widget.min, widget.max),
         min: widget.min,
         max: widget.max,
@@ -1336,7 +1344,7 @@ class MenuSelectorItem extends StatelessWidget {
                     constraints: const BoxConstraints(minHeight: 48),
                     decoration: BoxDecoration(
                       color: context.inputFill,
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: context.glazeBorderRadius(12),
                       border: Border.all(color: context.cs.outlineVariant),
                     ),
                     child: Row(

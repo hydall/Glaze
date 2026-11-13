@@ -120,14 +120,61 @@ final class PromptCaptureViewService {
     for (final event in events.reversed) {
       eventsByCall.putIfAbsent(event.callId, () => []).add(event);
     }
+    final rowsByCall = <String, List<LlmRequestCaptureRow>>{};
+    for (final row in rows.reversed) {
+      final callId = row.callId;
+      if (callId != null) rowsByCall.putIfAbsent(callId, () => []).add(row);
+    }
     return [
       for (final row in rows)
         ?PromptCaptureView.tryParse(
           row,
-          callEvents: row.callId == null
-              ? const []
-              : eventsByCall[row.callId] ?? const [],
+          callEvents: eventsForRow(
+            row,
+            sameCallRows: row.callId == null
+                ? const []
+                : rowsByCall[row.callId]!,
+            callEvents: row.callId == null
+                ? const []
+                : eventsByCall[row.callId] ?? const [],
+          ),
         ),
+    ];
+  }
+
+  /// The call events that belong to [row], out of every event sharing its
+  /// call id.
+  ///
+  /// A call id is not always unique over time: the main request's id was built
+  /// from a generation counter that starts over with every app run, so several
+  /// turns can share one. Joining on the id alone gave a new request every old
+  /// turn's outcome, and the view showed the oldest. An event is taken as this
+  /// row's only if it was recorded at or after the row was sent, and before the
+  /// next row with the same id *and the same attempt* was — that next row is a
+  /// different run of the call, not a retry of this one.
+  ///
+  /// [sameCallRows] and [callEvents] are oldest first.
+  static List<LlmCallEventRow> eventsForRow(
+    LlmRequestCaptureRow row, {
+    required List<LlmRequestCaptureRow> sameCallRows,
+    required List<LlmCallEventRow> callEvents,
+  }) {
+    if (callEvents.isEmpty) return const [];
+    int? untilMs;
+    for (final other in sameCallRows) {
+      if (other.id == row.id || other.attempt != row.attempt) continue;
+      final later =
+          other.createdAtMs > row.createdAtMs ||
+          (other.createdAtMs == row.createdAtMs && other.id > row.id);
+      if (later && (untilMs == null || other.createdAtMs < untilMs)) {
+        untilMs = other.createdAtMs;
+      }
+    }
+    return [
+      for (final event in callEvents)
+        if (event.createdAtMs >= row.createdAtMs &&
+            (untilMs == null || event.createdAtMs < untilMs))
+          event,
     ];
   }
 }

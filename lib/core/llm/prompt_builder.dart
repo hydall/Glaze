@@ -33,6 +33,7 @@ import 'prompt/recalled_message_chunk.dart';
 import 'prompt/recalled_messages_resolver.dart';
 import 'prompt/resolved_block.dart';
 import 'prompt/runtime_prompt_block.dart';
+import 'prompt/summary_in_place.dart';
 import '../models/ledger_prompt_injection_mode.dart';
 import '../models/ledger_prompt_injection_policy.dart';
 import 'prompt/effective_canon_prompt_materializer.dart';
@@ -216,6 +217,7 @@ PromptResult _buildPromptOnce(PromptPayload payload) {
 
   final depthBlocks = <ResolvedDepthBlock>[];
   final relativeBlocks = <ResolvedRelativeBlock>[];
+  var inPlaceSummary = const <InPlaceSummaryMessage>[];
 
   final deferMemoryMacro = payload.memorySelection != null;
   final loreContext = const LorebookContextResolver().resolve(
@@ -328,6 +330,19 @@ PromptResult _buildPromptOnce(PromptPayload payload) {
     }
 
     if (resolved == null) continue;
+
+    if (id == 'summary' && rawBlock.insertionMode == summaryInPlaceInsertion) {
+      inPlaceSummary = resolveInPlaceSummary(
+        payload: payload,
+        block: rawBlock,
+        char: char,
+        persona: persona,
+        macroCtx: currentMacroCtx,
+        sessionVars: currentSessionVars,
+        globalVars: currentGlobalVars,
+      );
+      continue;
+    }
 
     final blockIsSummary =
         id == 'summary' || rawBlock.content.contains('{{summary}}');
@@ -475,6 +490,7 @@ PromptResult _buildPromptOnce(PromptPayload payload) {
   return _assembleMessages(
     relativeBlocks: relativeBlocks,
     depthBlocks: depthBlocks,
+    inPlaceSummary: inPlaceSummary,
     loreBefore: loreBefore,
     loreAfter: loreAfter,
     history: payload.history,
@@ -543,6 +559,7 @@ ExactLorebookManifest _buildExactLorebookManifest({
 PromptResult _assembleMessages({
   required List<ResolvedRelativeBlock> relativeBlocks,
   required List<ResolvedDepthBlock> depthBlocks,
+  List<InPlaceSummaryMessage> inPlaceSummary = const [],
   required List<PromptMessage> loreBefore,
   required List<PromptMessage> loreAfter,
   required List<ChatMessage> history,
@@ -786,6 +803,15 @@ PromptResult _assembleMessages({
   injectLoreBefore();
   injectLoreAfter();
 
+  // A summary sent in place of its messages counts from here on; it is put
+  // into the history last (placeInPlaceSummary), after the context blocks in
+  // front of the history have settled.
+  for (final summary in inPlaceSummary) {
+    attributionBlocks.add(
+      StaticBlock(id: 'summary', content: summary.message.content),
+    );
+  }
+
   // Memory block injection.
   // - payload.memoryContent set, payload.memorySelection == null:
   //     legacy path — inject hard block before cutoff. Source-window
@@ -856,6 +882,8 @@ PromptResult _assembleMessages({
         payload.apiConfig.excludeReasoningFromContextBudget,
     historyTrimMode: payload.apiConfig.historyTrimMode,
     historyAnchorId: payload.sessionVars[ChatSessionX.historyAnchorVarKey],
+    historyAnchorPinned:
+        payload.sessionVars[ChatSessionX.historyAnchorPinnedVarKey] == '1',
     historyTrimTriggerPercent: payload.apiConfig.historyTrimTriggerPercent,
     historyTrimStepPercent: payload.apiConfig.historyTrimStepPercent,
   );
@@ -887,7 +915,6 @@ PromptResult _assembleMessages({
               excerptChunksPerEntry: payload.memoryExcerptChunksPerEntry,
               chunkFirstTopEntries: payload.chunkFirstTopEntries,
               chunkFirstTopChunks: payload.chunkFirstTopChunks,
-              summaryExcerpt: payload.summaryContent,
               gameTime: requestClock,
             )
             .excerptSelection
@@ -966,6 +993,7 @@ PromptResult _assembleMessages({
 
   final finalMessages = <PromptMessage>[];
   orderContinuityContextBlocks(messages);
+  placeInPlaceSummary(messages, inPlaceSummary);
   var historySeen = 0;
   for (final msg in messages) {
     if (msg.isHistory) {

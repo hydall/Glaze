@@ -5,7 +5,10 @@ import '../models/character.dart';
 import '../models/persona.dart';
 import '../models/chat_message.dart' show TriggeredEntry;
 import 'macro_engine.dart';
+import 'regex_passes.dart';
 import 'regex_validator.dart';
+
+export 'regex_passes.dart';
 
 class RegexApplyContext {
   final Character? char;
@@ -47,6 +50,11 @@ void resetStoppedRegexScripts() => _stoppedScripts.clear();
 
 /// [onScript] is told about each script just before it runs on [text], which
 /// is how the display worker knows which one to blame when time runs out.
+///
+/// [underDeadline] says the caller can interrupt a script that hangs (the
+/// display worker's isolate). The ReDoS heuristic is then not consulted: it
+/// cannot tell a real nested quantifier from a bounded one, and skipping on a
+/// guess silently drops tracker cards that would have run in milliseconds.
 String applyRegexes(
   String text,
   int placementFilter,
@@ -58,6 +66,7 @@ String applyRegexes(
   bool ignoreEphemerality = false,
   List<TriggeredEntry>? triggered,
   void Function(PresetRegex script)? onScript,
+  bool underDeadline = false,
 }) {
   var result = text;
 
@@ -65,34 +74,40 @@ String applyRegexes(
     if (script.disabled) continue;
     if (isRegexScriptStopped(script)) continue;
 
+    // Placement holds in the prompt pass too: ST's prompt-only "saver" scripts
+    // (placement 2, AI output) strip old tracker blocks from past replies, and
+    // run on the preset's own blocks they would cut the very output template
+    // the model is asked to follow.
     final sPlacement = script.placement;
     if (sPlacement.isNotEmpty && !sPlacement.contains(placementFilter)) {
-      if (!(script.promptOnly && isPrompt)) {
+      continue;
+    }
+    // Where the script runs is one answer, whichever way the script says it
+    // (see [RegexPasses]): SillyTavern's "Only Format Display" /
+    // "Only Format Prompt" flags when it carries either — an imported script
+    // — else Glaze's own ephemerality list. Reading both and requiring both
+    // is what left an imported display script dead: its list said prompt
+    // only, from an older import, while its flag said display.
+    //
+    // The display and prompt passes say which they are. Every other pass —
+    // the storage pass on edit, the Studio and ExtBlocks passes — says
+    // neither and keeps to the list, and the storage pass still skips every
+    // flagged script: a display- or prompt-scoped rewrite must never be
+    // baked into the stored message.
+    if (isMarkdown || isPrompt) {
+      final runsHere = ignoreEphemerality && !script.usesStFlags
+          ? true
+          : (isMarkdown && script.altersDisplay) ||
+                (isPrompt && script.altersPrompt);
+      if (!runsHere) continue;
+    } else {
+      if (script.usesStFlags) continue;
+      final sEphemerality = script.ephemerality;
+      if (!ignoreEphemerality &&
+          sEphemerality.isNotEmpty &&
+          !sEphemerality.contains(ephemeralityFilter)) {
         continue;
       }
-    }
-    // ST semantics: "Only Format Display" (markdownOnly) and "Only Format
-    // Prompt" (promptOnly) are two independent opt-ins, not one exclusive
-    // switch — `getRegexedString` ORs the two clauses. A script that ticks
-    // both therefore runs in the display pass *and* in the prompt pass.
-    // Requiring both at once made such a script dead everywhere, because no
-    // caller passes `isMarkdown` and `isPrompt` together.
-    //
-    // The storage pass (run-on-edit) passes neither flag, and still skips
-    // both kinds: a display- or prompt-scoped rewrite must never be baked
-    // into the stored message.
-    if (script.promptOnly || script.markdownOnly) {
-      final wantsThisPass =
-          (script.promptOnly && isPrompt) ||
-          (script.markdownOnly && isMarkdown);
-      if (!wantsThisPass) continue;
-    }
-
-    final sEphemerality = script.ephemerality;
-    if (!ignoreEphemerality &&
-        sEphemerality.isNotEmpty &&
-        !sEphemerality.contains(ephemeralityFilter)) {
-      continue;
     }
 
     if (ctx.depth != null) {
@@ -104,7 +119,12 @@ String applyRegexes(
 
     onScript?.call(script);
     final before = result;
-    result = _applySingleScript(result, script, ctx);
+    result = _applySingleScript(
+      result,
+      script,
+      ctx,
+      underDeadline: underDeadline,
+    );
 
     // Mirror Glaze's tracking: a script counts as "triggered" only when it
     // actually changed the text. Used to surface which regex fired on a
@@ -129,8 +149,9 @@ String applyRegexes(
 String _applySingleScript(
   String text,
   PresetRegex script,
-  RegexApplyContext ctx,
-) {
+  RegexApplyContext ctx, {
+  required bool underDeadline,
+}) {
   var processed = text;
 
   var pattern = script.regex;
@@ -172,8 +193,8 @@ String _applySingleScript(
 
   if (pattern.isEmpty) return processed;
 
-  final safety = classifyRegexSafety(pattern);
-  if (safety == RegexSafety.pathological) {
+  if (!underDeadline &&
+      classifyRegexSafety(pattern) == RegexSafety.pathological) {
     debugPrint(
       '[regex] skipping pathological pattern "${script.name}": $pattern',
     );

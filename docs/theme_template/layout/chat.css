@@ -1,0 +1,20 @@
+/* Every --theme-* variable and theme-* class here comes from the "Theme" tab
+   declared in settings.json. */
+.card {
+  margin: 6px 12px;
+  padding: var(--theme-card-pad, 12px);
+  border-radius: 18px;
+  background: var(--char-bubble-bg);
+  color: var(--char-text-color);
+}
+.card.user {
+  background: var(--user-bubble-bg);
+  color: var(--user-text-color);
+}
+#chat-container.theme-edge-left .card { border-left: 3px solid var(--theme-card-edge, #C42A4A); }
+#chat-container.theme-edge-top .card { border-top: 3px solid var(--theme-card-edge, #C42A4A); }
+.who { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+.who .nm { font-weight: 600; }
+.who .idx, .who .sw { opacity: 0.55; font-size: 12px; }
+.who .msg-time { margin-left: auto; opacity: 0.55; font-size: 12px; }
+#chat-container.theme-compact .who .nm { font-size: 12px; }

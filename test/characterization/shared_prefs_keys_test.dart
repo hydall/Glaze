@@ -18,11 +18,13 @@ void main() {
       'hideTooltips': bool,
       'disableSwipeRegeneration': bool,
       'allowMessageScripts': bool,
+      'allowExternalMedia': bool,
       'confirmMessageDelete': bool,
       'language': String,
       'virtualKeyboardSend': bool,
       'showOurPicks': bool,
       'gz_force_mobile_layout': bool,
+      'gz_nav_rail_left': bool,
       'gz_chat_max_width': double,
       'addBlockAtTop': bool,
       'openCardAfterImport': bool,
@@ -31,6 +33,9 @@ void main() {
       'janitorSource': String,
       'lorebookBuildPrompt': String,
       'lorebookBuildPromptJs': String,
+      'lorebookBuildApiConfigId': String,
+      'lorebookBuildModel': String,
+      'lorebookBuildChunkTokens': int,
       'useStandardRandomizer': bool,
       'hideContextCard': bool,
     };
@@ -57,6 +62,7 @@ void main() {
                 entry.key == 'hapticFeedback' ||
                 entry.key == 'messageVibration' ||
                 entry.key == 'confirmMessageDelete' ||
+                entry.key == 'allowExternalMedia' ||
                 entry.key == 'dialogGrouping') {
               expect(
                 _getBoolDefault(defaults, entry.key),
@@ -79,6 +85,11 @@ void main() {
               expect(defaults.janitorSource, ExtractionSource.datacat);
             } else if (entry.key == 'batterySaverMode') {
               expect(defaults.batterySaverMode, BatterySaverMode.system);
+            }
+          // ignore: type_literal_in_constant_pattern
+          case int:
+            if (entry.key == 'lorebookBuildChunkTokens') {
+              expect(defaults.lorebookBuildChunkTokens, 24000);
             }
           // ignore: type_literal_in_constant_pattern
           case double:
@@ -235,6 +246,7 @@ void main() {
         'virtualKeyboardSend',
         'showOurPicks',
         'gz_force_mobile_layout',
+        'gz_nav_rail_left',
         'addBlockAtTop',
         'activeApiConfigId',
         'activeEmbeddingConfigId',
@@ -308,12 +320,16 @@ bool _getBoolDefault(AppSettings s, String key) {
       return s.disableSwipeRegeneration;
     case 'confirmMessageDelete':
       return s.confirmMessageDelete;
+    case 'allowExternalMedia':
+      return s.allowExternalMedia;
     case 'virtualKeyboardSend':
       return s.virtualKeyboardSend;
     case 'showOurPicks':
       return s.showOurPicks;
     case 'gz_force_mobile_layout':
       return s.forceMobileLayout;
+    case 'gz_nav_rail_left':
+      return s.navRailLeft;
     case 'addBlockAtTop':
       return s.addBlockAtTop;
     case 'openCardAfterImport':

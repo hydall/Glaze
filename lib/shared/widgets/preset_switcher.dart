@@ -9,6 +9,7 @@ import 'glass_surface.dart';
 import 'glaze_bottom_sheet.dart';
 import 'glaze_list_item.dart';
 import 'list_controls.dart';
+import '../theme/ui_scale.dart';
 
 /// The preset dropdown shared by every screen that runs on a named preset.
 ///
@@ -294,12 +295,12 @@ class _SwitcherLeading extends StatelessWidget {
       height: 32,
       decoration: BoxDecoration(
         color: context.cs.primary.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: context.glazeBorderRadius(8),
       ),
       alignment: Alignment.center,
       child: favicon != null && !entry.isActive
           ? ClipRRect(
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: context.glazeBorderRadius(6),
               child: Image.network(
                 favicon,
                 width: 20,
@@ -428,7 +429,7 @@ class PresetPill extends StatelessWidget {
         constraints: BoxConstraints(maxWidth: maxWidth),
         decoration: BoxDecoration(
           color: color.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: context.glazeBorderRadius(16),
           border: Border.all(color: color.withValues(alpha: 0.22)),
         ),
         child: Row(

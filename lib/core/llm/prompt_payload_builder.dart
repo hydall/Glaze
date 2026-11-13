@@ -13,6 +13,7 @@ import '../models/lorebook.dart';
 import '../models/memory_book.dart';
 import '../models/persona.dart';
 import '../models/preset.dart';
+import '../models/summary_block.dart';
 import '../models/tracker.dart';
 import '../models/ledger_prompt_injection_policy.dart';
 import '../state/active_selection_provider.dart';
@@ -256,6 +257,7 @@ class PromptPayloadBuilder {
     final lorebookActivations = _ref.read(lorebookActivationsProvider);
 
     String? summaryContent;
+    List<SummarySegment> summarySegments = const [];
     Map<String, dynamic> memoryCoverage = {};
     List<TriggeredEntry> triggeredMemories = [];
     List<RuntimePromptBlock> runtimePromptBlocks = const [];
@@ -292,10 +294,20 @@ class PromptPayloadBuilder {
       throwIfAborted();
       runtimePromptBlocks = _readRuntimePromptBlocks(session.id);
 
-      final summaryService = _ref.read(summaryServiceProvider);
-      summaryContent = historicalWindow == null
-          ? await summaryService.getSummary(session.id)
-          : null;
+      // On a historical request (a regeneration or swipe) [session] holds
+      // the messages before the target, and the view is read over those: a
+      // block whose sources are all there stands in for them as on any
+      // other turn, one that reaches past the target counts as stale and
+      // its messages come back as written. Leaving the summary out of every
+      // regeneration sent the model a chat with no past at all whenever the
+      // reader swiped.
+      final summaryView = await _ref
+          .read(summaryServiceProvider)
+          .getPromptView(session.id, session.messages);
+      summaryContent = summaryView?.content;
+      summarySegments = summaryView?.segments ?? const [];
+      // Summarized messages are not sent: their block stands in for them.
+      history = SummaryChain.withoutCovered(history, summaryView);
       throwIfAborted();
 
       final memoryService = _ref.read(memoryInjectionServiceProvider);
@@ -559,6 +571,7 @@ class PromptPayloadBuilder {
       lorebookActivations: lorebookActivations,
       vectorEntries: vectorEntries,
       summaryContent: summaryContent,
+      summarySegments: summarySegments,
       memoryContent: null,
       memoryMacroContent: null,
       memoryInjectionTarget: memoryInjectionTarget,

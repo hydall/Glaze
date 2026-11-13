@@ -298,6 +298,35 @@ test('Tavo plugins get tavo.* mapped onto glaze.*', async ({ page }) => {
   await expect.poll(() => toasts(page)).toEqual(['value-for-t|hi', 'went']);
 });
 
+test('Tavo regex rules keep their display / prompt scope', async ({ page }) => {
+  await setup(page, [
+    plugin('t', {
+      compat: 'tavo',
+      methods: ['regex.create', 'regex.update', 'ui.toast'],
+      main: `
+        (async () => {
+          // SillyTavern-style export entry: display-only, user + char.
+          await tavo.regex.create({ name: 'st', entries: [{ findRegex: 'a', replaceString: 'b',
+            placement: [1, 2], markdownOnly: true, promptOnly: false }] });
+          await tavo.regex.create({ name: 'tv', entries: [{ findRegex: 'a', placements: ['user'], timing: 'send' }] });
+          await tavo.regex.create({ name: 'df', entries: [{ findRegex: 'a' }] });
+          await tavo.regex.update('r1', { name: 'st', entries: [{ findRegex: 'a', timing: 'display' }] });
+          tavo.utils.toast('done');
+        })().catch((e) => tavo.utils.toast('failed: ' + e.message));
+      `,
+    }),
+  ]);
+  await expect.poll(() => toasts(page)).toEqual(['done']);
+  const created = (await calls(page, 'regex.create')).map((c) => c.request.params[0]);
+  expect(created.map((r) => [r.name, r.placement, r.markdownOnly, r.promptOnly])).toEqual([
+    ['st', [1, 2], true, false],
+    ['tv', [1], false, true],
+    ['df', [2], true, true],
+  ]);
+  const updated = (await calls(page, 'regex.update'))[0].request.params[0];
+  expect(updated).toMatchObject({ id: 'r1', name: 'st', markdownOnly: true, promptOnly: false });
+});
+
 test('glaze.net.fetch goes through the app and answers with a Response', async ({ page }) => {
   await setup(page, [
     plugin('n', {
@@ -394,8 +423,7 @@ test('with the network permission hosts are logged', async ({ page }) => {
   await setup(page, [
     plugin('on', {
       network: true,
-      // The test server is on loopback.
-      localNetwork: true,
+      // The test server is on loopback, which needs no local network access.
       main: `fetch('http://127.0.0.1:4176/test/webview_js/harness/plugins.html').catch(() => {}).then(() => glaze.ui.toast('done'));`,
     }),
   ]);
@@ -435,24 +463,29 @@ test('with a host list only those hosts are reachable', async ({ page }) => {
 const LOCAL_PROBE = `
   (async () => {
     const page = 'http://127.0.0.1:4176/test/webview_js/harness/plugins.html';
-    const plain = await fetch(page, { mode: 'no-cors' }).then(() => 'ok', () => 'fail');
+    const loop = await fetch(page, { mode: 'no-cors' }).then(() => 'ok', () => 'fail');
     // Refused like a network failure, so the plugin cannot tell.
-    const secure = await fetch('https://192.168.0.1/', { mode: 'no-cors' }).then(() => 'ok', (e) => e.message === 'Failed to fetch' ? 'refused' : 'other');
-    glaze.ui.toast(plain + '|' + secure);
+    const privateHost = await fetch('https://192.168.0.1/', { mode: 'no-cors' }).then(() => 'ok', (e) => e.message === 'Failed to fetch' ? 'refused' : 'other');
+    glaze.ui.toast(loop + '|' + privateHost);
   })();
 `;
 
-test('the local network is out of reach unless allowed', async ({ page }) => {
+// Loopback is this device, not the user's network: the local network switch
+// does not gate it. A private address still needs that switch.
+test('loopback needs no local network access; a private host does', async ({ page }) => {
   await setup(page, [
     plugin('any', { network: true, main: LOCAL_PROBE }),
     plugin('list', { network: ['127.0.0.1', '192.168.0.1'], main: LOCAL_PROBE }),
+    // Reaching a private address may just hang, so the allowed plugin asks
+    // the loopback page again.
     plugin('local', { network: true, localNetwork: true, main: LOCAL_PROBE.replace("'https://192.168.0.1/'", 'page') }),
   ]);
-  await expect.poll(async () => (await toasts(page)).sort()).toEqual(['fail|refused', 'fail|refused', 'ok|ok']);
+  await expect.poll(async () => (await toasts(page)).sort()).toEqual(['ok|ok', 'ok|refused', 'ok|refused']);
   const reports = await netReports(page);
-  expect(reports).toContainEqual({ pluginId: 'any', host: '127.0.0.1', blocked: true });
   expect(reports).toContainEqual({ pluginId: 'list', host: '192.168.0.1', blocked: true });
-  expect(reports.filter((r) => r.pluginId === 'local').every((r) => !r.blocked)).toBe(true);
+  for (const r of reports.filter((r) => r.host === '127.0.0.1')) {
+    expect(r.blocked).toBe(false);
+  }
 });
 
 test('what plugin frames post never reaches the page past the plugin host', async ({ page }) => {
@@ -655,7 +688,7 @@ const fabRect = (page) => page.frameLocator('iframe[data-glaze-plugin="p"]')
   .frameLocator('iframe').locator('#fab')
   .evaluate((el) => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left }; });
 
-test('a panel button dragged onto the message box comes back above it', async ({ page }) => {
+test('a panel button dragged into the safe bottom comes back', async ({ page }) => {
   await page.setViewportSize({ width: 400, height: 700 });
   await setup(page, [fabPanel(200)]);
   const frame = page.locator('iframe[data-glaze-plugin="p"]');
@@ -666,15 +699,16 @@ test('a panel button dragged onto the message box comes back above it', async ({
   await page.mouse.move(128, 690, { steps: 6 });
   await page.mouse.up();
 
-  // Bottom inset 80, 8 px margin: the button may end no lower than 612.
-  await expect.poll(async () => (await fabRect(page)).bottom).toBe(612);
+  // Safe bottom 0, 8 px margin: the button may end no lower than 692, over
+  // the message box.
+  await expect.poll(async () => (await fabRect(page)).bottom).toBe(692);
   expect((await fabRect(page)).left).toBe(100);
 });
 
-test('a panel button restored into the message box is moved out on open', async ({ page }) => {
+test('a panel button restored into the safe bottom is moved out on open', async ({ page }) => {
   await page.setViewportSize({ width: 400, height: 700 });
   await setup(page, [fabPanel(660)]);
-  await expect.poll(async () => (await fabRect(page)).bottom).toBe(612);
+  await expect.poll(async () => (await fabRect(page)).bottom).toBe(692);
 });
 
 test('a panel button anchored by bottom keeps that anchor', async ({ page }) => {
@@ -682,7 +716,7 @@ test('a panel button anchored by bottom keeps that anchor', async ({ page }) => 
   await setup(page, [fabPanel(0, 'top:auto;bottom:4px;')]);
   const style = () => page.frameLocator('iframe[data-glaze-plugin="p"]').frameLocator('iframe')
     .locator('#fab').evaluate((el) => [el.style.top, el.style.bottom]);
-  await expect.poll(style).toEqual(['auto', '88px']);
+  await expect.poll(style).toEqual(['auto', '8px']);
 });
 
 test('a full-screen panel is left where the plugin put it', async ({ page }) => {
@@ -696,6 +730,51 @@ test('a full-screen panel is left where the plugin put it', async ({ page }) => 
   const style = await page.frameLocator('iframe[data-glaze-plugin="p"]').frameLocator('iframe')
     .locator('#big').evaluate((el) => el.style.cssText);
   expect(style).toBe('position: fixed; inset: 0px; background: rgb(0, 0, 0);');
+});
+
+// A floating window the way a launcher plugin writes one: bigger than a
+// button, so the old half-screen rule let it leave the safe area.
+function windowPanel(style) {
+  return plugin('p', {
+    panels: [{
+      id: 'window',
+      placement: 'chat',
+      html: `<div id="window" style="position:fixed;background:#000;${style}"></div>`,
+    }],
+  });
+}
+
+const windowRect = (page) => page.frameLocator('iframe[data-glaze-plugin="p"]')
+  .frameLocator('iframe').locator('#window')
+  .evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return { top: r.top, bottom: r.bottom };
+  });
+
+test('a large floating window restored into the safe bottom is moved out', async ({ page }) => {
+  await page.setViewportSize({ width: 400, height: 700 });
+  await setup(page, [windowPanel('left:60px;top:400px;width:280px;height:400px')]);
+  await expect.poll(async () => (await windowRect(page)).bottom).toBe(692);
+});
+
+test('a floating window may overlap the app header and the message box', async ({ page }) => {
+  await page.setViewportSize({ width: 400, height: 700 });
+  await setup(page, [windowPanel('left:60px;top:20px;width:280px;height:660px')]);
+  await expect.poll(async () => (await windowRect(page))).toEqual({ top: 20, bottom: 680 });
+});
+
+test('a tall floating window past the safe top is brought back', async ({ page }) => {
+  await page.setViewportSize({ width: 400, height: 700 });
+  await setup(page, [windowPanel('left:60px;top:-120px;width:280px;height:720px')]);
+  // Safe top 0, 8 px margin: the handle may not sit above 8, even though the
+  // window is taller than the band and its bottom must hang below it.
+  await expect.poll(async () => (await windowRect(page)).top).toBe(8);
+});
+
+test('a tall floating window dropped past the bottom comes back', async ({ page }) => {
+  await page.setViewportSize({ width: 400, height: 700 });
+  await setup(page, [windowPanel('left:60px;top:760px;width:280px;height:720px')]);
+  await expect.poll(async () => (await windowRect(page)).top).toBe(8);
 });
 
 // Stands in for the WebView's visual viewport, which the soft keyboard
@@ -859,4 +938,95 @@ test('two panels in the plugin layer are clipped to take their own taps', async 
   await page.mouse.click(60, 120);
   await page.mouse.click(340, 120);
   await expect.poll(async () => (await handlerCalls(page, 'pluginBridge')).map((r) => r.pluginId)).toEqual(['a', 'b']);
+});
+
+// A plugin whose package the app serves (harness/server.js stands in for the
+// package server).
+function packaged(extra) {
+  return plugin('pk', {
+    package: 'http://127.0.0.1:4177/plugins/pk/',
+    panels: [{ id: 'main', placement: 'chat', src: 'ui/panel.html', html: '<div id="x">x</div><script src="/plugins/pk/ui/probe.js"></script>' }],
+    ...extra,
+  });
+}
+
+for (const compat of [null, 'tavo']) {
+  test(`a served panel loads its own files, and only those (${compat || 'glaze'})`, async ({ page }) => {
+    const errors = await setup(page, [packaged({ compat })]);
+    await expect.poll(() => toasts(page)).toEqual(['rgb(1, 2, 3)|1|{"ok":1}|blocked']);
+    const frame = page.locator('iframe[data-glaze-plugin="pk"]');
+    const src = await frame.evaluate((f) => f.contentDocument === null);
+    expect(src).toBe(true);
+    // Its own files are not the network.
+    expect((await page.evaluate(() => window.__calls.filter((c) => c.name === 'pluginNetwork')))
+      .map((c) => c.request.host)).toEqual(['127.0.0.1']);
+    expect(errors).toEqual([]);
+  });
+}
+
+test('a frame document is served once, from the package path', async ({ page }) => {
+  await setup(page, [packaged()]);
+  await expect.poll(() => toasts(page)).toHaveLength(1);
+  const urls = await page.evaluate(() => window.__frameUrls);
+  expect(urls).toHaveLength(1);
+  expect(urls[0]).toMatch(/^http:\/\/127\.0\.0\.1:4177\/plugins\/pk\/ui\/panel\.html\?glaze-frame=/);
+  expect((await page.request.get(urls[0])).status()).toBe(404);
+});
+
+test('a raw package page runs nothing', async ({ page }) => {
+  await setup(page, [packaged({
+    panels: [{
+      id: 'main', placement: 'chat', src: 'ui/panel.html',
+      html: `<script>
+        addEventListener('message', (e) => { if (typeof e.data === 'string') glaze.ui.toast(e.data); });
+        const f = document.createElement('iframe');
+        f.src = '/plugins/pk/page.html';
+        f.onload = () => setTimeout(() => glaze.ui.toast('loaded'), 300);
+        document.body.append(f);
+      </script>`,
+    }],
+  })]);
+  await expect.poll(() => toasts(page)).toEqual(['loaded']);
+});
+
+// A Tavo plugin: its main script and chat panels run in one page, as in
+// Tavo's chat page, and share globals.
+function onePagePlugin(extra) {
+  return plugin('t', {
+    compat: 'tavo',
+    onePage: true,
+    methods: ['ui.toast'],
+    main: `
+      globalThis.__bus = { from: 'main' };
+      tavo.plugin.on('input:beforeSend', (e) => { e.text = e.text + ' [' + globalThis.__bus.from + ']'; });
+      tavo.plugin.onInputAction('go', () => tavo.utils.toast('went:' + globalThis.__bus.from));
+    `,
+    panels: [
+      { id: 'a', placement: 'chat', src: 'ui/a.html', html: `<script>globalThis.__bus.from += '+a';</script>` },
+      { id: 'b', placement: 'chat', src: 'ui/b.html', html: `<script>globalThis.__bus.from += '+b'; tavo.utils.toast(globalThis.__bus.from);</script>` },
+    ],
+    ...extra,
+  });
+}
+
+test('a Tavo main script and its chat panels share one page', async ({ page }) => {
+  await setup(page, [onePagePlugin()]);
+  await expect.poll(() => toasts(page)).toEqual(['main+a+b']);
+  expect(await page.locator('iframe[data-glaze-plugin="t"]').count()).toBe(1);
+  await expect.poll(() => page.evaluate(() =>
+    window.glazePlugins.intercept('send:before', { text: 'x' }).then((r) => r.text))).toBe('x [main+a+b]');
+  expect(await page.evaluate(() => window.glazePlugins.runAction('t', 'action:composer:go'))).toEqual({ ok: true });
+  await expect.poll(() => toasts(page)).toEqual(['main+a+b', 'went:main+a+b']);
+});
+
+test('the shared page is where the chat panels are', async ({ page }) => {
+  // The chat page under a plugin layer runs neither.
+  await setup(page, [onePagePlugin(), plugin('g', { main: `glaze.plugin.on('send:before', (e) => { e.text += ' [g]'; });` })], { layer: 'chat' });
+  await expect.poll(() => page.evaluate(() => window.glazePlugins.hasSubscribers('send:before'))).toBe(true);
+  expect(await page.locator('iframe[data-glaze-plugin="t"]').count()).toBe(0);
+  // Each page runs the plugins the app names for it.
+  expect(await page.evaluate(() =>
+    window.glazePlugins.intercept('send:before', { text: 'x' }, ['g']).then((r) => r.text))).toBe('x [g]');
+  expect(await page.evaluate(() =>
+    window.glazePlugins.intercept('send:before', { text: 'x' }, ['t']).then((r) => r.text))).toBe('x');
 });

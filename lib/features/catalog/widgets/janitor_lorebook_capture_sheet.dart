@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/llm/tokenizer.dart';
@@ -22,6 +24,7 @@ import '../../../shared/widgets/menu_group.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/sheet_view.dart';
+import '../../settings/api_list_provider.dart';
 import '../../settings/app_settings_provider.dart';
 import '../janitor_account_provider.dart';
 import '../services/catalog_error_labels.dart';
@@ -38,17 +41,21 @@ import 'datacat_phase_label.dart';
 import 'janitor_build_widgets.dart';
 import 'janitor_extraction_settings_sheet.dart';
 import 'janitor_lorebooks_tab.dart';
+import 'janitor_phase_label.dart';
 import '../../../shared/widgets/glaze_sheet.dart';
 
 /// Glossary term the help tip beside the sheet title opens.
 const String _kHelpTermExtraction = 'janitor-extraction';
 
-/// The three stages of the closed-lorebook flow, named in the sheet header so
-/// it is always clear which one is on screen and how far the flow goes.
-enum _Phase { collect, build, save }
+/// The stages of the closed-lorebook flow, named in the sheet header so it is
+/// always clear which one is on screen and how far the flow goes. [character]
+/// only exists when the sheet opens over a character import still running
+/// ("Character + lorebooks").
+enum _Phase { character, collect, build, save }
 
 extension _PhaseLabel on _Phase {
   String get label => switch (this) {
+    _Phase.character => 'catalog_lorebooks_phase_character'.tr(),
     _Phase.collect => 'catalog_lorebooks_phase_collect'.tr(),
     _Phase.build => 'catalog_lorebooks_phase_build'.tr(),
     _Phase.save => 'catalog_lorebooks_phase_save'.tr(),
@@ -72,7 +79,7 @@ Future<void> showJanitorLorebookCaptureSheet(
   BuildContext context, {
   required JanitorLorebookArgs args,
   String? characterId,
-  ExtractionResult? initialExtraction,
+  JanitorPendingCharacter? pendingCharacter,
 }) async {
   return showGlazeSheet<void>(
     context: context,
@@ -86,9 +93,36 @@ Future<void> showJanitorLorebookCaptureSheet(
     builder: (_) => JanitorLorebookCapture(
       args: args,
       characterId: characterId,
-      initialExtraction: initialExtraction,
+      pendingCharacter: pendingCharacter,
     ),
   );
+}
+
+/// The character half of a "Character + lorebooks" import, handed to the
+/// capture sheet while it still runs.
+///
+/// The sheet opens straight away and says the character is being imported,
+/// with the live [phase]; its lorebook options appear once [result] lands.
+/// [result] failing closes the sheet, and the caller — which owns the import —
+/// reports the error.
+class JanitorPendingCharacter {
+  /// Raw extractor phase (see `janitorPhaseLabel`), null between steps.
+  final ValueListenable<String?> phase;
+  final Future<JanitorImportedCharacter> result;
+
+  const JanitorPendingCharacter({required this.phase, required this.result});
+}
+
+/// A character the import put in the library.
+class JanitorImportedCharacter {
+  final String characterId;
+
+  /// The capture the import ran for a closed card, if it ran one. Its entries
+  /// were triggered with the default context; the sheet offers them as a
+  /// shortcut instead of making a second capture mandatory.
+  final ExtractionResult? extraction;
+
+  const JanitorImportedCharacter({required this.characterId, this.extraction});
 }
 
 /// The JanitorAI lorebook capture + build UI — a Flutter port of JAR's
@@ -113,18 +147,16 @@ class JanitorLorebookCapture extends ConsumerStatefulWidget {
   /// Glaze character the saved books are attached to. Null → saved switched off.
   final String? characterId;
 
-  /// A capture the caller already ran (the import flow captures the hidden card
-  /// through the same pass). When set, the sheet starts from it instead of
-  /// driving a second capture — one extraction mutates the JanitorAI account
-  /// (preset, generation settings, a chat, a persona), so repeating it for the
-  /// same character in the same flow is churn the user pays for twice.
-  final ExtractionResult? initialExtraction;
+  /// A character import still running when the sheet opens. Until it lands the
+  /// sheet shows its progress instead of the lorebooks, and the books are then
+  /// attached to the character it imported.
+  final JanitorPendingCharacter? pendingCharacter;
 
   const JanitorLorebookCapture({
     super.key,
     required this.args,
     this.characterId,
-    this.initialExtraction,
+    this.pendingCharacter,
   });
 
   @override
@@ -160,6 +192,20 @@ class _ContextSources {
 
 class _JanitorLorebookCaptureState
     extends ConsumerState<JanitorLorebookCapture> {
+  /// The character the saved books are attached to: the one passed in, or the
+  /// one [JanitorLorebookCapture.pendingCharacter] imports, once it has.
+  late String? _characterId = widget.characterId;
+
+  /// The pending character import has not landed yet.
+  late bool _importingCharacter = widget.pendingCharacter != null;
+
+  /// The capture the character import ran, kept as a shortcut: its entries
+  /// were triggered with the default context, so the collect stage offers to
+  /// continue with them rather than forcing a second capture — one capture
+  /// mutates the JanitorAI account (preset, generation settings, a chat, a
+  /// persona), and repeating it is churn the user pays for twice.
+  ExtractionResult? _importCapture;
+
   // Public lorebooks.
   bool _loadingPublic = true;
   List<PublicLorebook> _public = const [];
@@ -200,6 +246,15 @@ class _JanitorLorebookCaptureState
   Lorebook? _built;
   Timer? _timer;
   int _elapsed = 0;
+
+  /// Progress of a build split into several requests, as `(done, total)`;
+  /// null while the build is a single request (or none is running).
+  (int, int)? _buildProgress;
+
+  /// Parts of a split build that already came back, so retrying a build that
+  /// broke halfway resumes instead of starting over. Dropped with the capture
+  /// they were built from — see `rebuildLorebookWithActiveLlm`.
+  final _buildPartCache = <String, List<LorebookEntry>>{};
 
   /// The character's **closed** lorebooks: attached books that couldn't be
   /// downloaded whole (private, or an inaccessible advanced script). These are
@@ -274,16 +329,39 @@ class _JanitorLorebookCaptureState
   void initState() {
     super.initState();
     _loadPublic();
-    final seeded = widget.initialExtraction;
-    if (seeded != null) {
-      _extraction = seeded;
-      _nameController.text =
-          '${seeded.character.charData.name} — Closed Lorebook';
+    final pending = widget.pendingCharacter;
+    if (pending != null) {
+      pending.phase.addListener(_onCharacterPhase);
+      pending.result.then(_onCharacterImported, onError: (_) {
+        // The caller owns the import and reports the failure; the sheet only
+        // gets out of its way.
+        if (mounted) Navigator.of(context).pop();
+      });
     }
+  }
+
+  void _onCharacterPhase() {
+    if (mounted) setState(() {});
+  }
+
+  void _onCharacterImported(JanitorImportedCharacter imported) {
+    if (!mounted) return;
+    final capture = imported.extraction;
+    setState(() {
+      _characterId = imported.characterId;
+      _importingCharacter = false;
+      _importCapture = capture != null && capture.hasLorebook ? capture : null;
+      if (capture != null && _nameController.text.trim().isEmpty) {
+        _nameController.text =
+            '${capture.character.charData.name} — Closed Lorebook';
+      }
+    });
+    _maybeShowCaptureTour();
   }
 
   @override
   void dispose() {
+    widget.pendingCharacter?.phase.removeListener(_onCharacterPhase);
     _timer?.cancel();
     _extractExtraController.dispose();
     _buildExtraController.dispose();
@@ -303,11 +381,10 @@ class _JanitorLorebookCaptureState
 
   /// Walks the reader through the sheet the first time it opens. Deferred to
   /// after the frame the lorebooks landed in, so the controls the tour points
-  /// at are laid out. A capture the caller already ran
-  /// ([JanitorLorebookCapture.initialExtraction]) opens straight at the build
-  /// stage, which the collect-stage tour does not describe, so it is skipped.
+  /// at are laid out; while a character import is still running they are not
+  /// on screen yet, and the tour waits for it to land.
   void _maybeShowCaptureTour() {
-    if (widget.initialExtraction != null) return;
+    if (_loadingPublic || _importingCharacter) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) maybeShowGuide(context, AppGuide.lorebookCapture);
     });
@@ -327,7 +404,7 @@ class _JanitorLorebookCaptureState
           onTap: () async {
             Navigator.of(context, rootNavigator: true).pop();
             final ok = await _saveLorebook(
-              book.toLorebook(characterId: widget.characterId),
+              book.toLorebook(characterId: _characterId),
             );
             if (ok) _markDownloaded(book.id);
           },
@@ -414,7 +491,7 @@ class _JanitorLorebookCaptureState
             jsSource: book.jsSource,
             name: book.title.isNotEmpty ? book.title : 'Janitor Lorebook',
             meta: widget.args.meta,
-            characterId: widget.characterId,
+            characterId: _characterId,
           );
       if (!mounted) return;
       setState(() {
@@ -465,7 +542,7 @@ class _JanitorLorebookCaptureState
         try {
           final converted = _convertedScripts[book.id];
           final lb = !book.isJs
-              ? book.toLorebook(characterId: widget.characterId)
+              ? book.toLorebook(characterId: _characterId)
               : converted ??
                     await ref
                         .read(janitorExtractorProvider)
@@ -475,7 +552,7 @@ class _JanitorLorebookCaptureState
                               ? book.title
                               : 'Janitor Lorebook',
                           meta: widget.args.meta,
-                          characterId: widget.characterId,
+                          characterId: _characterId,
                         );
           // The sheet can be closed mid-run: stop before writing anything more,
           // whatever was already saved stays saved.
@@ -638,6 +715,7 @@ class _JanitorLorebookCaptureState
       _built = null;
       _buildError = null;
       _buildDebug = null;
+      _buildPartCache.clear();
     });
     try {
       final result = await ref
@@ -708,6 +786,7 @@ class _JanitorLorebookCaptureState
       _buildDebug = null;
       _built = null;
       _elapsed = 0;
+      _buildProgress = null;
     });
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -729,7 +808,13 @@ class _JanitorLorebookCaptureState
                 ? ex.lorebookDescsContext
                 : '',
             extra: _buildSources.extra ? _buildExtraController.text.trim() : '',
-            characterId: widget.characterId,
+            characterId: _characterId,
+            onProgress: (done, total) {
+              if (mounted && total > 1) {
+                setState(() => _buildProgress = (done, total));
+              }
+            },
+            partCache: _buildPartCache,
           );
       if (mounted) setState(() => _built = book);
     } catch (e) {
@@ -746,7 +831,12 @@ class _JanitorLorebookCaptureState
       }
     } finally {
       _timer?.cancel();
-      if (mounted) setState(() => _building = false);
+      if (mounted) {
+        setState(() {
+          _building = false;
+          _buildProgress = null;
+        });
+      }
     }
   }
 
@@ -759,27 +849,42 @@ class _JanitorLorebookCaptureState
 
   /// Show the exact messages the build would send, in their own sheet — the
   /// prompt carries the whole extracted text, far too much to unfold inline.
+  ///
+  /// Text too long for one request is built in several; the preview shows the
+  /// first and says how many there are — the rest differ only in their slice
+  /// of the text.
   void _preview() {
     final ex = _extraction;
     if (ex == null) return;
+    final settings = ref.read(appSettingsProvider).value;
+    final requests = planLorebookBuild(
+      _withoutPublicScripts(ex.lorebookText),
+      // Split the way the build will: the budget depends on the build
+      // connection's context size.
+      config: resolveLorebookBuildConfig(
+        settings,
+        configs: ref.read(apiListProvider).value ?? const [],
+        active: ref.read(activeApiConfigProvider),
+      ),
+      chunkTokens:
+          settings?.lorebookBuildChunkTokens ??
+          kDefaultLorebookBuildChunkTokens,
+      // The preview must show what the build would really send, so it takes
+      // the same system prompt — the edited one when the user changed it in
+      // the extraction settings.
+      systemPrompt: lorebookSystemPrompt(settings),
+      card: _buildSources.card ? ex.cardContext : '',
+      catalog: _buildSources.catalog ? ex.catalogContext : '',
+      scenario: _buildSources.scenario ? ex.scenarioContext : '',
+      greetings: _buildSources.greetings ? ex.greetingsContext : '',
+      lorebookDescs:
+          _buildSources.lorebookDescs ? ex.lorebookDescsContext : '',
+      extra: _buildSources.extra ? _buildExtraController.text.trim() : '',
+    );
     showJanitorPromptPreviewSheet(
       context,
-      buildLorebookMessages(
-        _withoutPublicScripts(ex.lorebookText),
-        // The preview must show what the build would really send, so it takes
-        // the same system prompt — the edited one when the user changed it in
-        // the extraction settings.
-        systemPrompt: lorebookSystemPrompt(
-          ref.read(appSettingsProvider).value,
-        ),
-        card: _buildSources.card ? ex.cardContext : '',
-        catalog: _buildSources.catalog ? ex.catalogContext : '',
-        scenario: _buildSources.scenario ? ex.scenarioContext : '',
-        greetings: _buildSources.greetings ? ex.greetingsContext : '',
-        lorebookDescs:
-            _buildSources.lorebookDescs ? ex.lorebookDescsContext : '',
-        extra: _buildSources.extra ? _buildExtraController.text.trim() : '',
-      ),
+      requests.first,
+      requestCount: requests.length,
     );
   }
 
@@ -835,7 +940,9 @@ class _JanitorLorebookCaptureState
 
   /// Which stage of the closed-lorebook flow is on screen, derived from what
   /// has been produced so far rather than tracked separately.
-  _Phase get _phase => !_hasFlow
+  _Phase get _phase => _importingCharacter
+      ? _Phase.character
+      : !_hasFlow
       ? _Phase.collect
       : _built != null
       ? _Phase.save
@@ -874,6 +981,12 @@ class _JanitorLorebookCaptureState
   Future<void> _close() async {
     if (await _confirmClose() && mounted) Navigator.of(context).pop();
   }
+
+  /// Stages a back gesture closes the sheet from instead of stepping back: the
+  /// character import (nothing before it) and the collect stage (the import is
+  /// done and is not undone by going back).
+  bool get _onFirstStage =>
+      _phase == _Phase.character || _phase == _Phase.collect;
 
   /// One step back through the flow, the way the header arrow goes.
   void _stepBack() {
@@ -916,10 +1029,10 @@ class _JanitorLorebookCaptureState
       // capture or a build in flight is never torn down by an accidental back.
       // On the first stage back closes the sheet, which — until a lorebook has
       // been delivered — asks first; so does flinging it away.
-      canPop: _phase == _Phase.collect && _delivered,
+      canPop: _onFirstStage && _delivered,
       confirmDismiss: _confirmClose,
       onBack: () {
-        if (_phase == _Phase.collect) {
+        if (_onFirstStage) {
           _close();
           return;
         }
@@ -933,7 +1046,7 @@ class _JanitorLorebookCaptureState
           onPressed: () => showJanitorExtractionSettingsSheet(context),
         ),
       ],
-      headerBottom: _hasFlow ? _phaseStrip(cs) : null,
+      headerBottom: _hasFlow || _importingCharacter ? _phaseStrip(cs) : null,
       // No horizontal padding on the list: MenuGroup carries its own 16 px
       // margin, and the loose text between groups is padded individually.
       body: AnimatedSwitcher(
@@ -944,6 +1057,11 @@ class _JanitorLorebookCaptureState
             FadeTransition(opacity: anim, child: child),
         child: _allDownloaded
             ? const _AllDownloaded(key: ValueKey('done'))
+            : _importingCharacter
+            ? _CharacterImporting(
+                key: const ValueKey('character'),
+                phase: widget.pendingCharacter!.phase.value,
+              )
             : _loadingPublic
             ? const _SheetLoading(key: ValueKey('loading'))
             : KeyedSubtree(key: const ValueKey('list'), child: _list()),
@@ -994,6 +1112,8 @@ class _JanitorLorebookCaptureState
   /// about the text recovered from them.
   Widget _stageContent(ColorScheme cs, List<PublicLorebook> closed) {
     final children = switch (_phase) {
+      // The body shows the import's progress instead of the list meanwhile.
+      _Phase.character => const <Widget>[],
       _Phase.collect => [
         GuideAnchor(
           id: GuideIds.lorebookCapturePublic,
@@ -1029,7 +1149,12 @@ class _JanitorLorebookCaptureState
   /// with the label that says where you are, not in the middle of the content.
   Widget _phaseStrip(ColorScheme cs) {
     final phase = _phase;
-    final showBack = phase != _Phase.collect;
+    final showBack = !_onFirstStage;
+    // The character stage is only named when this sheet carries an import.
+    final stages = [
+      for (final p in _Phase.values)
+        if (p != _Phase.character || widget.pendingCharacter != null) p,
+    ];
     final canGoBack = showBack && !_building && !_extracting;
     return Row(
       children: [
@@ -1079,7 +1204,7 @@ class _JanitorLorebookCaptureState
             alignment: Alignment.centerLeft,
             child: Row(
               children: [
-                for (final (i, p) in _Phase.values.indexed) ...[
+                for (final (i, p) in stages.indexed) ...[
                   if (i > 0)
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -1092,7 +1217,10 @@ class _JanitorLorebookCaptureState
                   AnimatedDefaultTextStyle(
                     duration: const Duration(milliseconds: 220),
                     curve: Curves.easeOutCubic,
+                    // A whole style, not a merge: carry the theme's font over
+                    // or the labels fall back to the platform default.
                     style: TextStyle(
+                      fontFamily: Theme.of(context).textTheme.bodyMedium?.fontFamily,
                       fontSize: 13,
                       fontWeight: p == phase ? FontWeight.w700 : FontWeight.w500,
                       color: p == phase
@@ -1158,14 +1286,54 @@ class _JanitorLorebookCaptureState
             // The capture's live phase reads inside the button it belongs to —
             // one busy control, not a button plus a status line under it.
             label: _extracting
-                ? (_extractPhase ?? 'catalog_lorebooks_extracting'.tr())
+                ? (_extractPhase != null
+                      ? janitorPhaseLabel(_extractPhase)
+                      : 'catalog_lorebooks_extracting'.tr())
                 : 'catalog_lorebooks_collect_btn'.tr(),
             onTap: _canRebuild ? _extractAll : null,
           ),
         ),
       ),
       _buildExtractStatus(cs),
+      if (_importCapture != null) ..._importCaptureShortcut(cs, _importCapture!),
     ];
+  }
+
+  /// The entries the character import already triggered, offered as a way
+  /// past a second capture. They were triggered with the default context, so
+  /// collecting again is still the way to reach entries that context missed.
+  List<Widget> _importCaptureShortcut(ColorScheme cs, ExtractionResult capture) {
+    final tokens = estimateTokens(_withoutPublicScripts(capture.lorebookText));
+    return [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+        child: _Hint(
+          'catalog_lorebooks_import_capture_note'.tr(args: ['$tokens']),
+          cs: cs,
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        child: ActionTile(
+          icon: Icons.fast_forward_rounded,
+          expand: true,
+          label: 'catalog_lorebooks_use_import_capture'.tr(),
+          onTap: _extracting ? null : () => _useCapture(capture),
+        ),
+      ),
+    ];
+  }
+
+  /// Moves to the build stage with [capture] — the one the import ran.
+  void _useCapture(ExtractionResult capture) {
+    setState(() {
+      _extraction = capture;
+      _extractError = null;
+      if (_nameController.text.trim().isEmpty) {
+        _nameController.text =
+            '${capture.character.charData.name} — Closed Lorebook';
+      }
+    });
   }
 
   /// Stage 1 as DataCat does it: one request for whatever book DataCat's copy of
@@ -1241,7 +1409,7 @@ class _JanitorLorebookCaptureState
       }
       final converted = convertCharacterBook(
         Map<String, dynamic>.from(book),
-        widget.characterId ?? '',
+        _characterId ?? '',
       );
       if (converted.entries.isEmpty) {
         setState(() => _datacatError = 'catalog_lorebooks_datacat_none'.tr());
@@ -1253,8 +1421,8 @@ class _JanitorLorebookCaptureState
         // active for the character when there is one, otherwise saved off.
         converted.copyWith(
           enabled: false,
-          activationScope: widget.characterId != null ? 'character' : 'global',
-          activationTargetId: widget.characterId,
+          activationScope: _characterId != null ? 'character' : 'global',
+          activationTargetId: _characterId,
         ),
       );
     } catch (e) {
@@ -1388,9 +1556,17 @@ class _JanitorLorebookCaptureState
             children: [
               ActionTile(
                 icon: Icons.auto_awesome_rounded,
-                label: _building
+                label: !_building
+                    ? 'catalog_lorebooks_build_btn'.tr()
+                    : _buildProgress == null
                     ? 'catalog_lorebooks_building'.tr(args: ['$_elapsed'])
-                    : 'catalog_lorebooks_build_btn'.tr(),
+                    : 'catalog_lorebooks_building_parts'.tr(
+                        args: [
+                          '${math.min(_buildProgress!.$1 + 1, _buildProgress!.$2)}',
+                          '${_buildProgress!.$2}',
+                          '$_elapsed',
+                        ],
+                      ),
                 primary: true,
                 busy: _building,
                 onTap: _build,
@@ -1403,8 +1579,8 @@ class _JanitorLorebookCaptureState
             ],
           ),
         ),
-        // A build is one long non-streaming request over the whole extracted
-        // text; on a slow model it sits silent for minutes. Say so next to the
+        // A build is one long non-streaming request per part of the extracted
+        // text; on a slow model each sits silent for minutes. Say so next to the
         // button rather than let it read as a hang.
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
@@ -1504,12 +1680,12 @@ class _JanitorLorebookCaptureState
           id: GuideIds.lorebookCaptureExtract,
           child: ContextSourceTile(
             label: 'catalog_ctx_card'.tr(),
-            content: _extraction?.cardContext ?? '',
+            content: (_extraction ?? _importCapture)?.cardContext ?? '',
             // The card only exists inside the assembled prompt, so before the
             // capture there is nothing to show — but the capture's first send
             // reveals it in time for the trigger, so the switch stays live.
             emptyNote: 'catalog_ctx_card_pending'.tr(),
-            pending: _extraction == null,
+            pending: (_extraction ?? _importCapture) == null,
             value: _extractSources.card,
             onChanged: (v) => setState(() => _extractSources.card = v),
           ),
@@ -1528,7 +1704,16 @@ class _JanitorLorebookCaptureState
         ),
         ContextSourceTile(
           label: 'catalog_ctx_greetings'.tr(),
-          content: _previewCtx.greetings,
+          // A closed card withholds its greetings from the catalog metadata;
+          // the capture's chat still carries them, so like the card they are
+          // shown once a capture has run and stay selectable before it.
+          content: _previewCtx.greetings.trim().isNotEmpty
+              ? _previewCtx.greetings
+              : (_extraction ?? _importCapture)?.greetingsContext ?? '',
+          emptyNote: (_extraction ?? _importCapture) == null
+              ? 'catalog_ctx_greetings_pending'.tr()
+              : null,
+          pending: (_extraction ?? _importCapture) == null,
           value: _extractSources.greetings,
           onChanged: (v) => setState(() => _extractSources.greetings = v),
         ),
@@ -1613,6 +1798,67 @@ class _JanitorLorebookCaptureState
 }
 
 // ─── Sub-widgets ──────────────────────────────────────────────────────────────
+
+/// What the sheet shows while the character half of "Character + lorebooks"
+/// runs: the character is being put in the library, the live step of it, and
+/// that the lorebook options come right after.
+class _CharacterImporting extends StatelessWidget {
+  /// Raw extractor phase, null between steps or on a plain catalog import.
+  final String? phase;
+
+  const _CharacterImporting({super.key, this.phase});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = context.cs;
+    final step = janitorPhaseLabel(phase);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 44,
+              height: 44,
+              child: GlazeSpinner(color: cs.primary),
+            ),
+            const SizedBox(height: 18),
+            Text(
+              'catalog_lorebooks_character_importing'.tr(),
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: cs.onSurface,
+              ),
+            ),
+            const SizedBox(height: 6),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 200),
+              child: Text(
+                step.isEmpty ? '…' : '$step…',
+                key: ValueKey(step),
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 13, color: cs.primary),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'catalog_lorebooks_character_importing_hint'.tr(),
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.4,
+                color: cs.onSurfaceVariant.withValues(alpha: 0.7),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 /// What the sheet shows until the character's lorebooks are known: nothing can
 /// be listed and no stage can be entered yet, so the whole sheet is the wait.
@@ -1960,23 +2206,32 @@ class _ClosedRow extends StatelessWidget {
 /// own. Port of JAR's `#promptPreview`, promoted out of an inline disclosure:
 /// the prompt carries the whole extracted lorebook, so reading it inside the
 /// capture sheet meant scrolling the flow away to get to it.
+///
+/// [requestCount] is how many requests the build is split into; [messages]
+/// is the first of them.
 void showJanitorPromptPreviewSheet(
   BuildContext context,
-  List<Map<String, String>> messages,
-) {
+  List<Map<String, String>> messages, {
+  int requestCount = 1,
+}) {
   showGlazeSheet<void>(
     context: context,
     useRootNavigator: true,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
     barrierColor: Colors.black54,
-    builder: (_) => _PromptPreviewSheet(messages: messages),
+    builder: (_) =>
+        _PromptPreviewSheet(messages: messages, requestCount: requestCount),
   );
 }
 
 class _PromptPreviewSheet extends StatelessWidget {
   final List<Map<String, String>> messages;
-  const _PromptPreviewSheet({required this.messages});
+  final int requestCount;
+  const _PromptPreviewSheet({
+    required this.messages,
+    required this.requestCount,
+  });
 
   String get _plainText =>
       messages.map((m) => '### ${m['role']}\n${m['content']}').join('\n\n');
@@ -2006,6 +2261,16 @@ class _PromptPreviewSheet extends StatelessWidget {
             bottom: MediaQuery.paddingOf(inner).bottom + 24,
           ),
           children: [
+            if (requestCount > 1)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: _GroupNote(
+                  'catalog_lorebooks_preview_parts'.tr(
+                    args: ['$requestCount'],
+                  ),
+                  top: 0,
+                ),
+              ),
             for (final m in messages)
               MenuGroup(
                 header: m['role'] ?? '',

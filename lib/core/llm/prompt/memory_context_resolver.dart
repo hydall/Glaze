@@ -33,7 +33,6 @@ final class MemoryContextResolver {
     required int excerptChunksPerEntry,
     required int chunkFirstTopEntries,
     required int chunkFirstTopChunks,
-    String? summaryExcerpt,
     GameTimeState gameTime = const GameTimeState(),
   }) {
     final refiltered = _refilterSelection(
@@ -52,15 +51,10 @@ final class MemoryContextResolver {
       chunkFirstTopEntries: chunkFirstTopEntries,
       chunkFirstTopChunks: chunkFirstTopChunks,
       gameTime: gameTime,
-      summaryExcerpt: summaryExcerpt,
     );
     final content = excerpted.items.isEmpty
         ? null
-        : packer.format(
-            excerpted.items,
-            summaryExcerpt: summaryExcerpt,
-            gameTime: gameTime,
-          );
+        : packer.format(excerpted.items, gameTime: gameTime);
     return MemoryContextResolution(
       selection: refiltered,
       excerptSelection: excerpted,

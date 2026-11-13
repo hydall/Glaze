@@ -140,6 +140,51 @@ class MemoryActionTile extends StatelessWidget {
   }
 }
 
+/// The Cancel / Save pair under a memory or summary editor sheet: a glass
+/// tile acting as the button — the kit has no generic button, and a
+/// `FilledButton` there rendered in stock Material grey whatever the preset.
+class MemoryEditorButton extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
+  final bool emphasised;
+
+  const MemoryEditorButton({
+    super.key,
+    required this.label,
+    required this.onTap,
+    this.emphasised = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final radius = BorderRadius.circular(14);
+    return GlassSurface(
+      borderRadius: radius,
+      tint: emphasised ? context.cs.primary.withValues(alpha: 0.18) : null,
+      border: Border.all(
+        color: emphasised
+            ? context.cs.primary.withValues(alpha: 0.3)
+            : context.cs.outlineVariant,
+      ),
+      onTap: onTap,
+      glowColor: context.cs.primary,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 13),
+        child: Center(
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: emphasised ? context.cs.primary : context.cs.onSurface,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// The shared shell for one entry or draft in the list.
 ///
 /// The Prompt Inspector's plaque, so a memory reads as the same kind of object

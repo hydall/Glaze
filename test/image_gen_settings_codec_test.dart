@@ -288,5 +288,43 @@ void main() {
 
       expect(restored, settings);
     });
+
+    test('round-trips the TensorArt tool catalog and parameters', () {
+      const settings = ImageGenSettings(
+        apiType: ImageGenApiType.tensorart,
+        tensorart: TensorArtImageSettings(
+          accessKey: 'ak_tensor_key',
+          endpoint: 'https://openapi.tensor.art',
+          toolName: 'smart_edit_nano_banana2',
+          aspectRatio: '16:9',
+          imageSize: '2K',
+          width: 832,
+          height: 1216,
+          count: 3,
+          tools: [
+            TensorArtTool(
+              name: 'smart_edit_nano_banana2',
+              description: 'image editing',
+              taskType: 'TENSOR_ART_V1',
+              estimatedCost: '54.20',
+              inputs: [
+                TensorArtToolInput(
+                  type: 'STRING',
+                  description: 'editing prompt',
+                ),
+                TensorArtToolInput(type: 'ARRAY', description: 'source'),
+              ],
+            ),
+          ],
+        ),
+      );
+
+      final restored = ImageGenSettingsCodec.fromJson(
+        ImageGenSettingsCodec.toJson(settings),
+      );
+
+      expect(restored, settings);
+      expect(restored.tensorart.supportsReferences, isTrue);
+    });
   });
 }

@@ -11,6 +11,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
   <title>Glaze Chat</title>
   <style>
+    /* Safe-area insets, pushed by the chrome on every layout change; theme
+       layouts can use them without reaching into Flutter. */
+    :root { --sat: 0px; --sab: 0px; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     /* The page itself never scrolls: #chat-container is the only scroller.
        `position: fixed` gives the document no scroll range at all, so the
@@ -40,6 +43,12 @@
       width: 100%; height: 100vh; height: 100dvh;
       overflow-y: auto; overflow-x: hidden;
       -webkit-overflow-scrolling: touch;
+      /* No overscroll effect at the scroll edges: Chromium on Android 12+
+         stretches the scroller's content when a drag runs past the top or
+         bottom, and WebKit rubber-bands it. `disallowOverScroll` only covers
+         the native WebView scroll, which the pinned document never uses; this
+         is the scroller that actually moves. */
+      overscroll-behavior: none;
       padding: 0;
       background: transparent;
     }
@@ -69,6 +78,9 @@
   <div id="loading-screen"><glaze-spinner></glaze-spinner></div>
   <div id="chat-container" class="layout-default"></div>
 
+  <!-- First module on purpose: the chrome captures the DOM primitives it uses
+       before anything else in the page has run. See chrome/safe.js. -->
+  <script type="module" src="chrome/index.js"></script>
   <script type="module" src="formatter/index.js"></script>
   <script src="RollingNumber.js"></script>
   <script type="module" src="renderer/index.js"></script>

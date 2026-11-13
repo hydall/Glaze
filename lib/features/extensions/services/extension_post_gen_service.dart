@@ -613,7 +613,8 @@ class ExtensionPostGenService {
   ///
   /// The block's type has nothing to do with it: what makes this possible is
   /// image tags in the stored content, so any generated block that produced a
-  /// picture can be redrawn the same way.
+  /// picture can be redrawn the same way. [imageIndex] narrows it to one
+  /// picture of the block, the one the reader tapped.
   Future<void> rerunImageOnly({
     required String blockId,
     required String messageId,
@@ -623,6 +624,7 @@ class ExtensionPostGenService {
     required String charId,
     required Character character,
     required Persona? persona,
+    int? imageIndex,
   }) async {
     final preset = _resolveActivePreset(charId, character);
     if (preset == null) return;
@@ -662,6 +664,7 @@ class ExtensionPostGenService {
           placeholderId: existing.id,
           placeholder: existing,
         ),
+        blockIndex: imageIndex,
       );
     } finally {
       _finishBlockRun(cancelToken);

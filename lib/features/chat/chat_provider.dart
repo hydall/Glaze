@@ -168,6 +168,21 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     );
   }
 
+  /// Widens the scrollback window to hold the message at [index] — a search
+  /// hit further back than the reader has scrolled. The page can only scroll
+  /// to a message it holds, so the window grows to a page before it, the way
+  /// scrolling up loads one. No-op when the message is already in it.
+  void revealMessageIndex(int index) {
+    final current = state.value;
+    if (current == null || index < 0 || index >= current.visibleStartIndex) {
+      return;
+    }
+    final newStart = index > ChatState.olderPageSize
+        ? index - ChatState.olderPageSize
+        : 0;
+    state = AsyncData(current.copyWith(visibleStartIndex: newStart));
+  }
+
   late final AbortHandler _abortHandler = AbortHandler(
     ref: ref,
     charId: arg,
@@ -355,6 +370,13 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       _messageOpsCtrl.toggleImageHidden(index);
 
   Future<void> unhideAllMessages() => _messageOpsCtrl.unhideAllMessages();
+
+  /// See [ChatMessageOpsController.pinHistoryAnchor].
+  Future<void> pinHistoryAnchor(int index) =>
+      _messageOpsCtrl.pinHistoryAnchor(index);
+
+  /// See [ChatMessageOpsController.unpinHistoryAnchor].
+  Future<void> unpinHistoryAnchor() => _messageOpsCtrl.unpinHistoryAnchor();
 
   Future<void> hideTopMessages(int count) =>
       _messageOpsCtrl.hideTopMessages(count);

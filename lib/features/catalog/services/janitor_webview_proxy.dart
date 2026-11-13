@@ -3,14 +3,18 @@ import 'dart:collection';
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
+import '../../../core/debug/perf_debug.dart';
+import '../../../core/services/generation_notification_service.dart';
 import '../../chat/bridge/chat_webview_environment.dart';
 import 'cf_challenge_service.dart';
 import 'janitor_lore_budget.dart';
 import 'janitor_separate.dart';
 import 'janitor_session.dart';
+import 'janitor_waiting_room.dart';
 
 void _log(String m) => debugPrint('[CF-proxy] $m');
 
@@ -88,6 +92,51 @@ const String _findTokenJs = r'''
     } catch (e) {}
     return null;
   };
+''';
+
+/// Reads Cloudflare's Waiting Room out of the page currently loaded in the
+/// offscreen WebView.
+///
+/// While JanitorAI is admitting people, every navigation lands on this page
+/// instead of the app. It is a normal `200` document, so the only way to tell
+/// it apart is by its own words: the `Please wait — janitor` title, the
+/// "janitor is managing traffic" description, or the "Traffic is high right
+/// now … You're in line" body. Returns `null` when the page is not readable
+/// (mid-navigation), so the caller can tell "not the queue" from "no answer
+/// yet" instead of assuming admission.
+const String _waitingRoomProbeJs = r'''
+  (() => {
+    try {
+      const title = document.title || '';
+      const body = document.body
+        ? (document.body.innerText || document.body.textContent || '')
+        : '';
+      const descEl = document.querySelector('meta[name="description"]');
+      const desc = descEl ? (descEl.content || '') : '';
+      const hay = (title + '\n' + desc + '\n' + body).toLowerCase();
+      const lowTitle = title.toLowerCase();
+      const queue =
+        hay.indexOf('janitor is managing traffic') >= 0 ||
+        (hay.indexOf('traffic is high right now') >= 0 &&
+          hay.indexOf('letting people in slowly') >= 0) ||
+        (lowTitle.indexOf('please wait') >= 0 &&
+          lowTitle.indexOf('janitor') >= 0) ||
+        (hay.indexOf('this page refreshes every') >= 0 &&
+          hay.indexOf('in line') >= 0);
+      if (!queue) return { ready: true, queue: false };
+      const m = body.match(/Estimated wait:\s*([^\n\r]+)/i);
+      const refreshEl = document.querySelector('meta[http-equiv="refresh"]');
+      const parsed = refreshEl ? parseInt(refreshEl.content, 10) : 20;
+      return {
+        ready: true,
+        queue: true,
+        refresh: parsed > 0 ? parsed : 20,
+        wait: m ? m[1].trim() : '',
+      };
+    } catch (e) {
+      return { ready: false, queue: false };
+    }
+  })()
 ''';
 
 /// Document-start user script installed before navigating to a chat page when
@@ -548,6 +597,15 @@ class JanitorRefusedException implements Exception {
 
   bool get isProxyForbidden => message.toLowerCase().contains('prox');
 
+  /// A rate limit or queue refusal, not a property of the character: it can
+  /// clear by itself, so it must not be remembered against [characterId].
+  bool get isTransient =>
+      status == 408 ||
+      status == 429 ||
+      status == 502 ||
+      status == 503 ||
+      status == 504;
+
   @override
   String toString() => message.isEmpty ? 'generateAlpha failed ($status)' : message;
 }
@@ -648,9 +706,42 @@ class JanitorWebViewProxy {
   bool _active = false;
   Timer? _shutdownTimer;
 
-  /// Requests and captures queued on [_gate] or running. The WebView is never
-  /// torn down under one of them.
+  /// Requests and captures queued on [_gate] or running, plus the long waits
+  /// that must survive the catalog going out of sight (the admission queue and
+  /// the startup that reaches it). The WebView is never torn down under one of
+  /// them.
   int _pending = 0;
+
+  /// Keeps the WebView alive across an operation, cancelling any idle shutdown
+  /// already scheduled. Paired with [_endHold].
+  void _beginHold() {
+    _pending++;
+    _shutdownTimer?.cancel();
+    _shutdownTimer = null;
+  }
+
+  void _endHold() {
+    _pending--;
+    _scheduleIdleShutdown();
+  }
+
+  /// Non-null while the offscreen WebView is sitting on JanitorAI's admission
+  /// queue. Exposed so the catalog and the import sheets can say why a request
+  /// is taking minutes instead of showing a bare spinner.
+  final ValueNotifier<JanitorWaitingRoom?> _waitingRoom = ValueNotifier(null);
+
+  ValueListenable<JanitorWaitingRoom?> get waitingRoom => _waitingRoom;
+
+  /// How long Glaze is willing to sit in the queue before giving up. The
+  /// estimate JanitorAI shows is usually a few minutes; this is deliberately
+  /// generous because the alternative is losing a capture that was already
+  /// minutes in.
+  static const Duration _waitLimit = Duration(minutes: 20);
+
+  void _setWaitingRoom(JanitorWaitingRoom? room) {
+    if (_waitingRoom.value == room) return;
+    _waitingRoom.value = room;
+  }
 
   /// Called by the catalog UI to mark the JanitorAI catalog visible/hidden.
   /// On hide we tear the WebView down after a short grace period (debounces the
@@ -682,25 +773,32 @@ class JanitorWebViewProxy {
     if (_active || _pending > 0) return;
     if (_webView == null && _starting == null) return;
     _shutdownTimer?.cancel();
-    _shutdownTimer = Timer(const Duration(seconds: 3), () {
+    _shutdownTimer = Timer(_idleShutdownGrace, () {
       if (!_active && _pending == 0) dispose();
     });
   }
 
+  /// How long the WebView outlives the catalog going out of sight.
+  ///
+  /// Tearing a WebView down is native work on the platform thread, which on
+  /// desktop is the thread the UI runs on: a short grace put it three seconds
+  /// after the reader left the character list — right in the middle of the
+  /// chat they had just opened, as a hitch in its loading. Long enough now for
+  /// the chat to be on screen, and short enough that a page left running in
+  /// the background is still gone within the minute.
+  static const _idleShutdownGrace = Duration(seconds: 45);
+
   /// Queues [task] on [_gate], holding the WebView up until it is done.
   Future<T> _enqueue<T>(Future<T> Function() task) {
     final completer = Completer<T>();
-    _pending++;
-    _shutdownTimer?.cancel();
-    _shutdownTimer = null;
+    _beginHold();
     _gate = _gate.then((_) async {
       try {
         completer.complete(await task());
       } catch (e, st) {
         completer.completeError(e, st);
       } finally {
-        _pending--;
-        _scheduleIdleShutdown();
+        _endHold();
       }
     });
     return completer.future;
@@ -727,7 +825,9 @@ class JanitorWebViewProxy {
   /// the card text (+ optional [triggerText], e.g. the catalog description) to
   /// maximise lorebook keyword matches, and return the captured payload. Pass
   /// `includeCard: false` to leave the recovered card out of that second send —
-  /// the user deselected it as a trigger source. The chat, the
+  /// the user deselected it as a trigger source. `includeChatGreetings: true`
+  /// appends the greetings the capture's chat carries — for a closed card they
+  /// exist nowhere the caller could read them beforehand. The chat, the
   /// persona and the throwaway proxy preset are all removed afterwards, and the
   /// account's API settings are restored. Throws on timeout / login / CF failure.
   ///
@@ -743,6 +843,7 @@ class JanitorWebViewProxy {
     required String characterId,
     String triggerText = '',
     bool includeCard = true,
+    bool includeChatGreetings = false,
     JanitorLoreBudget? loreBudget,
     void Function(String phase)? onPhase,
   }) =>
@@ -751,6 +852,7 @@ class JanitorWebViewProxy {
           characterId,
           triggerText,
           includeCard,
+          includeChatGreetings,
           loreBudget,
           onPhase,
         ),
@@ -766,6 +868,7 @@ class JanitorWebViewProxy {
     String characterId,
     String triggerText,
     bool includeCard,
+    bool includeChatGreetings,
     JanitorLoreBudget? loreBudget,
     void Function(String phase)? onPhase,
   ) async {
@@ -775,7 +878,7 @@ class JanitorWebViewProxy {
     }
 
     phase('starting');
-    await _ensureStarted();
+    await _ensureStarted(onPhase: phase);
 
     if (!await isLoggedIn()) {
       throw Exception('Not logged into JanitorAI — log in first (Menu → JanitorAI).');
@@ -860,6 +963,8 @@ class JanitorWebViewProxy {
           final parts = <String>[
             if (includeCard && card.isNotEmpty) card,
             if (triggerText.trim().isNotEmpty) triggerText.trim(),
+            if (includeChatGreetings && greetings.isNotEmpty)
+              greetings.join('\n\n---\n\n'),
           ];
           trigger = parts.isEmpty ? '.' : parts.join('\n\n');
           phase('triggering (lorebook)');
@@ -1026,6 +1131,7 @@ class JanitorWebViewProxy {
       );
       await _awaitLoad();
       await _waitForClearance();
+      await _waitForAdmission(onPhase: phase);
 
       // JanitorAI caches the selected proxy preset in its client store, so the
       // dummy preset switched in by _enterExtractionMode() may not take effect
@@ -1038,6 +1144,7 @@ class JanitorWebViewProxy {
       await controller.reload();
       await _awaitLoad();
       await _waitForClearance();
+      await _waitForAdmission(onPhase: phase);
 
       // Wait for the React chat app to actually mount its composer instead of
       // sleeping a constant: hydration takes as long as the device and the
@@ -1455,7 +1562,9 @@ class JanitorWebViewProxy {
   /// become a [JanitorAuthException] and are never cached.
   Object _refusalError(String characterId, JanitorRefusedException refusal) {
     if (refusal.status == 401) return const JanitorAuthException();
-    _refusals[characterId] = refusal;
+    // A queue or rate-limit answer says nothing about the card itself; caching
+    // it would make every later import report a permanent refusal.
+    if (!refusal.isTransient) _refusals[characterId] = refusal;
     return refusal;
   }
 
@@ -1797,6 +1906,19 @@ class JanitorWebViewProxy {
 
     var result = await _rawFetch(url, method: method, body: body);
 
+    // While the admission queue is up, JanitorAI answers API calls with the
+    // waiting-room HTML under a plain 200. `_ensureStarted` normally clears the
+    // queue before the request, but admission can expire between calls (or the
+    // first probe can land mid-navigation), so the body is checked too.
+    if (_isWaitingRoomBody(result)) {
+      _log('waiting room answered the fetch — waiting for admission');
+      await _recoverFromQueue();
+      result = await _rawFetch(url, method: method, body: body);
+    }
+    if (_isWaitingRoomBody(result)) {
+      throw JanitorQueueException(parseJanitorWaitingRoom(result.body));
+    }
+
     // Soft block: reload the page to re-run Turnstile and refresh cf_clearance.
     if (_isCfBlocked(result)) {
       _log('CF block on fetch — reloading session');
@@ -1850,21 +1972,28 @@ class JanitorWebViewProxy {
     return result.body;
   }
 
-  Future<void> _ensureStarted() {
-    if (_controller != null) return Future<void>.value();
+  Future<void> _ensureStarted({void Function(String)? onPhase}) {
+    if (_controller != null) return _waitForAdmission(onPhase: onPhase);
     if (_starting != null) return _starting!.future;
     final c = Completer<void>();
     _starting = c;
-    _start().then((_) {
-      c.complete();
-    }).catchError((Object e, StackTrace st) {
-      _starting = null;
-      c.completeError(e, st);
-    });
+    // Startup can sit in the admission queue for minutes. The catalog may be
+    // collapsed long before it gets in, and without a hold the idle timer would
+    // tear the WebView down mid-queue.
+    _beginHold();
+    _start(onPhase: onPhase)
+        .then((_) {
+          c.complete();
+        })
+        .catchError((Object e, StackTrace st) {
+          _starting = null;
+          c.completeError(e, st);
+        })
+        .whenComplete(_endHold);
     return c.future;
   }
 
-  Future<void> _start() async {
+  Future<void> _start({void Function(String)? onPhase}) async {
     _log('starting headless webview');
     final created = Completer<void>();
     _loadStop = Completer<void>();
@@ -1907,6 +2036,7 @@ class JanitorWebViewProxy {
     await created.future;
     await _awaitLoad();
     await _waitForClearance();
+    await _waitForAdmission(onPhase: onPhase);
     // A session stored before the app was last closed usually comes back with
     // an expired access token; catch it here, once per proxy lifetime, rather
     // than on the first authenticated call.
@@ -1918,6 +2048,196 @@ class JanitorWebViewProxy {
     if (controller == null) return;
     _loadStop = Completer<void>();
     await controller.loadUrl(urlRequest: URLRequest(url: _origin));
+    await _awaitLoad();
+    await _waitForClearance();
+    await _waitForAdmission();
+  }
+
+  /// Sits out JanitorAI's admission queue until the app page replaces it.
+  ///
+  /// The waiting room is a real page, not an HTTP error: it refuses to serve the
+  /// app and answers every request below it with its own HTML. It also carries
+  /// a `refresh` meta tag and reloads itself, and that reload is what advances
+  /// the queue. So this polls the page, reports the estimate through
+  /// [waitingRoom] (and [onPhase], when the caller has a progress line), and
+  /// drives a reload itself if the page did not refresh within its own
+  /// interval.
+  ///
+  /// Throws [JanitorQueueException] when [_waitLimit] runs out. A capture that
+  /// reaches this is minutes into account setup, so the limit is generous.
+  Future<void> _waitForAdmission({void Function(String)? onPhase}) async {
+    if (_controller == null) return;
+    // The whole point of this wait is to outlive the catalog being collapsed or
+    // navigated away from: the page keeps refreshing in the offscreen WebView,
+    // so it must not be torn down while the queue is still letting people in.
+    _beginHold();
+    try {
+      await _waitForAdmissionLocked(onPhase: onPhase);
+    } finally {
+      _endHold();
+    }
+  }
+
+  Future<void> _waitForAdmissionLocked({void Function(String)? onPhase}) async {
+    final deadline = DateTime.now().add(_waitLimit);
+    JanitorWaitingRoom? lastRoom;
+    var unreadableSince = DateTime.now();
+
+    // Android may freeze a backgrounded process, which would stop the offscreen
+    // WebView's own refresh timer and with it the queue. The foreground service
+    // keeps the process alive; it is acquired only once the queue is actually
+    // seen, so a plain admission probe costs nothing.
+    ForegroundWorkHold? notificationHold;
+    var notificationHoldUnavailable = false;
+
+    Future<void> ensureNotificationHold() async {
+      if (notificationHold != null || notificationHoldUnavailable) return;
+      try {
+        notificationHold = await GenerationNotificationService.instance
+            .acquireWorkHold(
+              title: 'Glaze',
+              text: 'notification_queue'.tr(),
+            );
+      } catch (e) {
+        // A notification the OS refuses must not cost the queue wait itself.
+        notificationHoldUnavailable = true;
+        _log('queue work hold failed: $e');
+      }
+    }
+
+    void announce(JanitorWaitingRoom room) {
+      if (room == lastRoom) return;
+      lastRoom = room;
+      _log('waiting room — ${room.estimatedWait ?? 'estimate unknown'}');
+      onPhase?.call(
+        'waiting in queue'
+        '${room.estimatedWait == null ? '' : ' (${room.estimatedWait})'}',
+      );
+    }
+
+    try {
+      while (DateTime.now().isBefore(deadline)) {
+        final probe = await _probeWaitingRoom();
+        if (!probe.ready) {
+          // A navigation is in flight. Keep polling; if it never becomes
+          // readable again, drive a reload so a wedged page cannot hang the
+          // wait forever.
+          if (DateTime.now().difference(unreadableSince) >
+              const Duration(seconds: 30)) {
+            await _reloadCurrentPage();
+            unreadableSince = DateTime.now();
+          } else {
+            await Future<void>.delayed(const Duration(seconds: 1));
+          }
+          continue;
+        }
+        unreadableSince = DateTime.now();
+
+        final room = probe.room;
+        if (room == null) {
+          _setWaitingRoom(null);
+          return;
+        }
+        _setWaitingRoom(room);
+        announce(room);
+        await ensureNotificationHold();
+
+        // Give the page its own refresh interval to advance the queue, polling
+        // so admission is noticed as soon as the app document lands.
+        final until = DateTime.now().add(
+          room.refreshInterval + const Duration(seconds: 6),
+        );
+        var moved = false;
+        while (DateTime.now().isBefore(until) &&
+            DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(seconds: 1));
+          final again = await _probeWaitingRoom();
+          if (!again.ready) continue;
+          if (again.room == null) {
+            _setWaitingRoom(null);
+            return;
+          }
+          if (again.room != room) {
+            _setWaitingRoom(again.room);
+            announce(again.room!);
+            moved = true;
+            break;
+          }
+        }
+        if (!moved) {
+          // The waiting room did not cycle by itself; drive the reload that
+          // advances it.
+          await _reloadCurrentPage();
+        }
+      }
+
+      _setWaitingRoom(null);
+      throw JanitorQueueException(lastRoom);
+    } finally {
+      await notificationHold?.release();
+    }
+  }
+
+  /// One reading of the page's waiting-room state. `ready` is false while the
+  /// document is mid-navigation or otherwise unreadable; `room` is null once
+  /// the real site is on screen.
+  Future<({bool ready, JanitorWaitingRoom? room})> _probeWaitingRoom() async {
+    final controller = _controller;
+    if (controller == null) return (ready: false, room: null);
+    try {
+      final res = await controller.evaluateJavascript(
+        source: _waitingRoomProbeJs,
+      );
+      if (res is! Map) return (ready: false, room: null);
+      if (res['ready'] != true) return (ready: false, room: null);
+      if (res['queue'] != true) return (ready: true, room: null);
+      final refresh = (res['refresh'] as num?)?.toInt();
+      final wait = (res['wait'] ?? '').toString().trim();
+      return (
+        ready: true,
+        room: JanitorWaitingRoom(
+          refreshInterval: Duration(
+            seconds: (refresh != null && refresh > 0) ? refresh : 20,
+          ),
+          estimatedWait: wait.isEmpty ? null : wait,
+        ),
+      );
+    } catch (_) {
+      return (ready: false, room: null);
+    }
+  }
+
+  /// Gets back through the queue after a response carried the waiting-room
+  /// page.
+  ///
+  /// When the reply arrived but the document is already the app, only waiting
+  /// would never advance the queue: the waiting-room refresh is what moves it,
+  /// so the document is cycled first. A chat that was on screen is restored to
+  /// its composer afterwards, because the capture may have been between sends.
+  Future<void> _recoverFromQueue() async {
+    final controller = _controller;
+    final url = controller == null ? null : await controller.getUrl();
+    final onChat = url?.path.contains('/chats/') ?? false;
+    final probe = await _probeWaitingRoom();
+    if (probe.ready && probe.room == null) {
+      await _reloadCurrentPage();
+    }
+    await _waitForAdmission();
+    if (onChat) {
+      if (!await _waitForComposer(const Duration(seconds: 60))) {
+        _log('composer never came back after the queue — sending anyway');
+      }
+    }
+  }
+
+  /// Reloads whatever page is loaded, without diverting to the origin: a chat
+  /// URL that landed on the waiting room must keep pointing at that chat.
+  Future<void> _reloadCurrentPage() async {
+    final controller = _controller;
+    if (controller == null) return;
+    _log('reloading the queued page');
+    _loadStop = Completer<void>();
+    await controller.reload();
     await _awaitLoad();
     await _waitForClearance();
   }
@@ -2029,6 +2349,9 @@ class JanitorWebViewProxy {
     return false;
   }
 
+  bool _isWaitingRoomBody(({int status, String body}) r) =>
+      r.status == 200 && parseJanitorWaitingRoom(r.body) != null;
+
   /// Tears the offscreen WebView down. Invoked when the catalog is hidden (see
   /// [setActive]); the next [fetch] transparently recreates it.
   Future<void> dispose() async {
@@ -2040,8 +2363,12 @@ class JanitorWebViewProxy {
     _controller = null;
     _starting = null;
     _loadStop = null;
+    _setWaitingRoom(null);
     try {
-      await webView?.dispose();
+      await PerfDebug.slowAwait(
+        'catalog webview teardown',
+        () async => webView?.dispose(),
+      );
     } catch (_) {}
   }
 }

@@ -24,6 +24,7 @@ import '../catalog/services/janitor_public_lorebook.dart';
 import '../catalog/widgets/catalog_comments_section.dart';
 import '../catalog/widgets/datacat/datacat_community_section.dart';
 import '../catalog/widgets/janitor_lorebooks_tab.dart';
+import '../catalog/widgets/janitor_phase_label.dart';
 import '../../core/services/persona_character_converter.dart';
 import '../../core/utils/html_to_markdown.dart';
 import '../../core/utils/platform_paths.dart';
@@ -1019,11 +1020,16 @@ class _ImportFab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Busy, the label says what is happening and the line under it which step
+    // of it — the raw extractor step alone ("configuring proxy") did not say
+    // that an import was running at all.
+    final step = importing ? janitorPhaseLabel(phase) : '';
     return GlazeFab(
       icon: Icons.download_rounded,
-      label: importing && phase != null && phase!.isNotEmpty
-          ? phase!
+      label: importing
+          ? 'catalog_import_busy'.tr()
           : 'catalog_import'.tr(),
+      subtitle: step.isEmpty ? null : step,
       tooltip: 'catalog_import'.tr(),
       busy: importing,
       onTap: onTap,
@@ -1377,7 +1383,18 @@ class _HeroNameState extends State<_HeroName>
           return text;
         }
 
-        final clipped = SizedBox(height: layout.viewport, child: text);
+        // The text has to lay out at its full height inside the capped box:
+        // squeezed to the viewport, [Text] clips its own paint to that height
+        // and the scroll would only move the already-cut-off first lines.
+        final clipped = SizedBox(
+          height: layout.viewport,
+          child: OverflowBox(
+            alignment: AlignmentDirectional.topStart,
+            minHeight: 0,
+            maxHeight: double.infinity,
+            child: text,
+          ),
+        );
         if (!animate) {
           _setTicking(false);
           return ClipRect(child: clipped);

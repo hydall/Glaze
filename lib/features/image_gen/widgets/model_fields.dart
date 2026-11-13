@@ -232,7 +232,7 @@ List<Widget> buildOpenaiModelFields(
     rows.ImageGenTextFieldItem(
       label: 'Model',
       value: s.customModel,
-      hint: 'dall-e-3',
+      hint: 'gpt-image-1.5',
       onChanged: (v) => onUpdate(s.copyWith(customModel: v)),
       suffix: rows.ImageGenFetchButton(
         isFetching: isFetching,

@@ -7,10 +7,12 @@ import { MessageUpdateBatcher } from './message_update_batcher.js';
 import { SelectionManager } from './selection_manager.js';
 import { EditController } from './edit_controller.js';
 import { SwipeGestureHandler } from './swipe_gesture_handler.js';
-import { TrackpadScroll } from './trackpad_scroll.js';
+import { ScrollRelay } from './scroll_relay.js';
 import { InteractionDispatch } from './interaction_dispatch.js';
 import { PanelHost } from './panel_host.js';
 import { sanitizeExtBlockHtml } from './html_sanitizer.js';
+import { stripExternalMedia } from './external_media.js';
+import { dropExternalHoists } from '../renderer/message_document.js';
 import { parseImageResultElement, parseImagePendingPayload } from '../formatter/formatter.js';
 
 /* Breathing room the caret keeps from the chrome it is being revealed past.
@@ -29,6 +31,14 @@ const USER_SCROLL_INPUT_WINDOW_MS = 1000;
 import { ICON } from '../renderer/icon_library.js';
 import { applyTypingPhase } from '../renderer/typing_phase.js';
 import { retryFailedLocalImages } from '../renderer/local_image_retry.js';
+import { refreshMessageLayout, setMessageLayout } from '../renderer/theme_layout.js';
+import {
+  BackgroundLayers,
+  applyMessageSettingsClasses,
+  applyThemeVars,
+  normalizeLayout,
+  setChatFont,
+} from './page_theme.js';
 
 /* Id of the virtual typing placeholder. It is not a persisted message: Flutter
  * owns one constant id for it and the page keeps it pinned to the tail, so a
@@ -41,6 +51,7 @@ export class Bridge {
   constructor(renderer, virtualList) {
     this.renderer = renderer;
     this.virtualList = virtualList;
+    this._background = new BackgroundLayers();
     // Display-only translations, id -> { original, text, label }. `text` is
     // null while the request is in flight. Never written into the section's
     // datasets: rawText / sourceText keep the original, so edit, copy and
@@ -120,9 +131,10 @@ export class Bridge {
       () => this.isGenerating,
       () => this.disableSwipeRegeneration,
     );
-    // Windows-only fallback path: the embedder never delivers touchpad pans to
-    // WebView2 as wheel events, so Flutter replays them through here.
-    this._trackpadScroll = new TrackpadScroll(() => this.virtualList.container);
+    // Windows-only path: the embedder never delivers touchpad pans to WebView2
+    // as wheel events, and the plugin shrinks mouse-wheel notches, so Flutter
+    // relays both through here.
+    this._scrollRelay = new ScrollRelay(() => this.virtualList.container);
     // Bottom-inset reconciliation state — see setBottomPadding().
     // `_bottomInsetPx` is the inset Flutter measured from the bottom edge of the
     // full-size WebView box (input bar + keyboard/drawer + safe area);
@@ -177,6 +189,7 @@ export class Bridge {
 
       const label = section.querySelector('.msg-name-label');
       if (label) label.textContent = newName;
+      refreshMessageLayout(section, { name: newName, avatarUrl: newAvatarUrl || '' });
 
       const avatar = section.querySelector('.msg-avatar');
       if (!avatar) return;
@@ -350,10 +363,35 @@ export class Bridge {
 
   /* ---------- Scroll / load-more ---------- */
 
-  // Windows touchpad pan replayed by Flutter as a wheel at the cursor. See
-  // ./trackpad_scroll.js for why the embedder can't deliver it itself.
+  // Windows touchpad pan relayed by Flutter, a frame's worth in CSS pixels;
+  // evened out and followed a frame or two behind. See ./scroll_relay.js for
+  // why the embedder can't deliver it itself.
   trackpadScroll(dx, dy, x, y) {
-    this._trackpadScroll.scrollBy(dx, dy, x, y);
+    this._scrollRelay.pan(dx, dy, x, y);
+  }
+
+  // The fingers touched the pad: a flick still gliding stops.
+  trackpadScrollStart() {
+    this._scrollRelay.panStart();
+  }
+
+  // The fingers left the pad at (vx, vy) CSS px/s, wheel sign: the chat
+  // carries the motion on and lets it die away, as a Flutter list does.
+  trackpadScrollEnd(vx, vy) {
+    this._scrollRelay.panEnd(vx, vy);
+  }
+
+  // Windows mouse-wheel notch relayed by Flutter, in the CSS pixels a browser
+  // would scroll it; spread over the frames that follow. See ./scroll_relay.js
+  // for why the copy the plugin forwards itself is no use.
+  wheelScroll(dx, dy, x, y) {
+    this._scrollRelay.wheel(dx, dy, x, y);
+  }
+
+  // Flutter relays the mouse wheel through wheelScroll from now on: the
+  // trusted copy the plugin still forwards for every notch is to be dropped.
+  relayNativeWheel(on) {
+    this._scrollRelay.relayNativeWheel(on);
   }
 
   // True while the list is being scrolled by us rather than by the user. The
@@ -592,7 +630,8 @@ export class Bridge {
     }, { passive: true });
 
     // A reader's scroll always has one of these in front of it (the Windows
-    // touchpad is replayed as a synthetic wheel — see TrackpadScroll), so the
+    // touchpad and wheel are replayed as a synthetic wheel — see ScrollRelay),
+    // so the
     // timestamp is the tell between a real upward scroll and a layout
     // correction. Passive: none of them preventDefault.
     for (const type of ['wheel', 'touchstart', 'touchmove', 'keydown']) {
@@ -644,8 +683,31 @@ export class Bridge {
   // belt to that suspenders. A document scroll is undone and the same movement
   // is handed to the container, so the caret/selection reveal still scrolls the
   // chat instead of the WebView.
+  //
+  // The second way the page slides is the visual viewport. A keyboard that
+  // overlays the WebView instead of resizing it leaves the visual viewport
+  // shorter than the layout viewport, and that difference — the keyboard's own
+  // height — is room the browser may pan through to reveal the focused field.
+  // It does so when the keyboard lands before Flutter's inset has lifted the
+  // composer: the page goes up by the keyboard's height, then the inset lifts
+  // the composer by the same amount again, and it ends at the top of the screen
+  // over an empty page until the keyboard closes. No CSS takes that room away
+  // and `window.scrollTo` does not reach the visual viewport, so the pan is
+  // undone the way it was made: revealing a `position: fixed` box moves the
+  // visual viewport only, and the root element is one that starts at its top.
   _setupDocumentScrollLock() {
+    const vv = window.visualViewport;
+    const unpanVisualViewport = () => {
+      if (!vv) return;
+      if (!(vv.offsetTop > 0.5) && !(vv.offsetLeft > 0.5)) return;
+      try {
+        document.documentElement.scrollIntoView({
+          block: 'start', inline: 'start', behavior: 'instant',
+        });
+      } catch (_) {}
+    };
     const pin = () => {
+      unpanVisualViewport();
       const doc = document.scrollingElement;
       if (!doc) return;
       const top = doc.scrollTop;
@@ -658,8 +720,11 @@ export class Bridge {
     };
     window.addEventListener('scroll', pin, { passive: true });
     document.addEventListener('scroll', pin, { passive: true });
-    if (window.visualViewport) {
-      window.visualViewport.addEventListener('scroll', pin, { passive: true });
+    if (vv) {
+      vv.addEventListener('scroll', pin, { passive: true });
+      // The keyboard arriving is a resize; a pan made in the same step may not
+      // announce itself with a scroll of its own.
+      vv.addEventListener('resize', pin, { passive: true });
     }
   }
 
@@ -934,6 +999,10 @@ export class Bridge {
     // remember the current reading position so the batch replace below doesn't
     // yank the chat back to the top/bottom.
     const anchor = preserveScroll ? this.virtualList.captureAnchor() : null;
+    // A chat replaced outright (a session switch, a reopen) starts still: a
+    // notch or a flick left over from the last one would pull the new chat
+    // away from its jump to the bottom.
+    if (!preserveScroll) this._scrollRelay.stop();
     this._panelHost?.closeAll();
     const container = document.getElementById('chat-container') || document.body;
     if (![...container.classList].some(c => c.startsWith('layout-'))) {
@@ -1258,6 +1327,7 @@ export class Bridge {
     const prevLast = document.querySelector('.message-section[data-is-last="true"]');
     if (prevLast) {
       delete prevLast.dataset.isLast;
+      refreshMessageLayout(prevLast, { isLast: false });
       const center = prevLast.querySelector('.msg-center-controls');
       if (center) {
         center.querySelector('.msg-regenerate')?.remove();
@@ -1268,6 +1338,7 @@ export class Bridge {
     const newLast = document.querySelector(`[data-message-id="${newLastId}"]`);
     if (!newLast) return;
     newLast.dataset.isLast = 'true';
+    refreshMessageLayout(newLast, { isLast: true });
 
     // For user messages: inject regen button directly into DOM
     if (newLast.classList.contains('user')) {
@@ -1408,62 +1479,29 @@ export class Bridge {
   setSearch(query, activeIndex, scroll = true) { this.renderer.setSearch(query, activeIndex, scroll); }
 
   setChatFont(fontFamily, fontDataUrl, fontSize, letterSpacing) {
-    const root = document.documentElement;
-    if (fontSize != null) {
-      root.style.setProperty('--font-size', fontSize + 'px');
-      root.style.setProperty('--chat-font-size', fontSize + 'px');
-    }
-    if (letterSpacing != null) {
-      root.style.setProperty('--letter-spacing', letterSpacing + 'px');
-      root.style.setProperty('--chat-letter-spacing', letterSpacing + 'px');
-    }
-
-    let fontFace = document.getElementById('custom-font-face');
-    if (fontDataUrl) {
-      if (!fontFace) {
-        fontFace = document.createElement('style');
-        fontFace.id = 'custom-font-face';
-        document.head.appendChild(fontFace);
-      }
-      fontFace.textContent = `@font-face { font-family: '${fontFamily || 'CustomChatFont'}'; src: url('${fontDataUrl}'); font-display: swap; }`;
-      root.style.setProperty('--font-family', `'${fontFamily || 'CustomChatFont'}', sans-serif`);
-    } else {
-      if (fontFace) fontFace.remove();
-      if (fontFamily) root.style.setProperty('--font-family', fontFamily);
-      else root.style.removeProperty('--font-family');
-    }
+    setChatFont(fontFamily, fontDataUrl, fontSize, letterSpacing);
   }
 
-  _normalizeLayout(layout) {
-    const raw = String(layout || '').trim().toLowerCase();
-    return (raw === 'bubble' || raw === 'bubbles') ? 'bubble' : 'default';
+  /* A theme's own layout: its message template and its stylesheet for the
+   * page (renderer/theme_layout.js). Every section is laid out again in place,
+   * the ones the list has not mounted included. Returns the template's
+   * problems, for Flutter to log. */
+  setThemeLayout(layoutJson) {
+    let layout = null;
+    try { layout = layoutJson ? JSON.parse(layoutJson) : null; } catch (_) { layout = null; }
+    const sections = this.virtualList
+      ? this.virtualList.items.map((it) => it.el)
+      : Array.from(document.querySelectorAll('.message-section'));
+    const anchor = this.virtualList ? this.virtualList.captureAnchor() : null;
+    const errors = setMessageLayout(layout, sections);
+    if (anchor) this.virtualList.restoreAnchor(anchor);
+    return errors;
   }
+
+  _normalizeLayout(layout) { return normalizeLayout(layout); }
 
   applyTheme(themeJson) {
-    const theme = JSON.parse(themeJson);
-    const container = document.getElementById('chat-container') || document.body;
-
-    for (const [key, value] of Object.entries(theme)) {
-      if (key === 'chat-layout') {
-        const layout = this._normalizeLayout(value);
-        container.classList.remove('layout-bubble', 'layout-default');
-        container.classList.add(`layout-${layout}`);
-        document.querySelectorAll('.message-section').forEach(el => {
-          el.classList.remove('layout-bubble', 'layout-default');
-          el.classList.add(`layout-${layout}`);
-        });
-        continue;
-      }
-      document.documentElement.style.setProperty(`--${key}`, value);
-    }
-
-    const toggleClass = (className, enabled) => {
-      container.classList.toggle(className, !!enabled);
-    };
-    toggleClass('hide-user-avatar', theme['show-user-avatar'] === '0');
-    toggleClass('hide-char-avatar', theme['show-char-avatar'] === '0');
-    toggleClass('hide-user-name', theme['show-user-name'] === '0');
-    toggleClass('hide-char-name', theme['show-char-name'] === '0');
+    applyThemeVars(JSON.parse(themeJson));
   }
 
   // [px] is the bottom inset Flutter measured from the bottom edge of the
@@ -1767,14 +1805,9 @@ export class Bridge {
     catch (_) { s = {}; }
     this.batterySaver = !!s.batterySaver;
     this.disableSwipeRegeneration = !!s.disableSwipeRegeneration;
-    const container = document.getElementById('chat-container') || document.body;
-    container.classList.toggle('battery-saver', this.batterySaver);
-    container.classList.toggle('hide-message-id', !!s.hideMessageId);
-    container.classList.toggle('hide-gen-time', !!s.hideGenerationTime);
-    container.classList.toggle('hide-token-count', !!s.hideTokenCount);
-    // Re-run cleaner is a Studio-only affordance — hide it when Studio is off.
-    container.classList.toggle('hide-rerun-cleaner', !s.studioEnabled);
+    applyMessageSettingsClasses(s);
     this.translationEnabled = !!s.translationEnabled;
+    const container = document.getElementById('chat-container') || document.body;
     container.classList.toggle('translation-enabled', this.translationEnabled);
     if (!this.translationEnabled) this.clearAllTranslations();
     // Battery saver kills the overlay backdrop-filter strips too.
@@ -1790,6 +1823,26 @@ export class Bridge {
     if (this.renderer.allowMessageScripts !== previous) {
       this.renderer.rerenderMessageBodies();
     }
+  }
+
+  setAllowExternalMedia(enabled) {
+    const previous = this.renderer.allowExternalMedia;
+    this.renderer.allowExternalMedia = enabled !== false;
+    if (this.renderer.allowExternalMedia === previous) return;
+    if (!this.renderer.allowExternalMedia) {
+      dropExternalHoists();
+      // ExtBlock panels are not re-sent on a settings change: strip what is
+      // on screen in place. Switching back on restores them on their next
+      // update.
+      document.querySelectorAll('.ext-blocks-panel').forEach(stripExternalMedia);
+    }
+    this.renderer.rerenderMessageBodies();
+  }
+
+  _extBlockHtml(html) {
+    return sanitizeExtBlockHtml(html, {
+      allowExternalMedia: this.renderer.allowExternalMedia,
+    });
   }
 
   /**
@@ -1831,188 +1884,9 @@ export class Bridge {
     if (section) this._reapplyTranslation(section);
   }
 
-  setBackgroundImage(url, blur) {
-    // Duplicate the app background inside the WebView so its own
-    // backdrop-filter blur regions have real pixels to sample — CSS
-    // backdrop-filter can't see the natively-composited Flutter layer
-    // behind the transparent WebView. Flutter keeps painting the same
-    // background underneath as a fallback; this opaque copy sits on top.
-    //
-    // The bg blur must be BAKED into the image (offscreen canvas), not a
-    // live `filter: blur()` on #bg-layer: a CSS filter turns the element
-    // into a backdrop root (isolated composited layer), which excludes it
-    // from every sibling backdrop-filter's sampling set — the overlay-blur
-    // strips under the Flutter glass and the bubbles' element-blur would
-    // silently go flat whenever bg blur is enabled.
-    let bg = document.getElementById('bg-layer');
-    if (!url) {
-      this._bgBlurToken = null;
-      if (bg) {
-        bg.style.display = 'none';
-        bg.style.backgroundImage = '';
-      }
-      return;
-    }
-    if (!bg) {
-      bg = document.createElement('div');
-      bg.id = 'bg-layer';
-      document.body.insertBefore(bg, document.body.firstChild);
-    }
-    bg.style.display = 'block';
-    // The layer stays fully opaque: darkening is the `--bg-dim` overlay in
-    // #bg-layer::after. Fading the layer itself would let the transparent
-    // WebView show the Flutter background painted behind it.
-    bg.style.opacity = '';
+  setBackgroundImage(url, blur) { this._background.setImage(url, blur); }
 
-    const b = Math.max(0, Number(blur) || 0);
-    if (b <= 0) {
-      this._bgBlurToken = null;
-      bg.style.backgroundImage = `url("${url}")`;
-      bg.style.filter = '';
-      bg.style.inset = '0';
-      return;
-    }
-
-    const cacheKey = `${b}|${url}`;
-    if (this._bgBlurCache && this._bgBlurCache.key === cacheKey) {
-      this._bgBlurToken = null;
-      this._applyPreBlurredBg(bg, this._bgBlurCache.dataUrl);
-      return;
-    }
-
-    // Immediate placeholder while the canvas render is in flight — and the
-    // permanent fallback when canvas 2D filters are unsupported. CSS blur on
-    // an inset:0 layer bleeds transparent (darkened) edges, unlike Flutter's
-    // TileMode.clamp; overscan so the fringe falls outside the viewport.
-    bg.style.backgroundImage = `url("${url}")`;
-    bg.style.filter = `blur(${b}px)`;
-    bg.style.inset = `-${b * 2}px`;
-
-    const token = cacheKey;
-    this._bgBlurToken = token;
-    this._preBlurImage(url, b).then((dataUrl) => {
-      if (!dataUrl) return; // canvas filter unsupported/failed → keep fallback
-      this._bgBlurCache = { key: cacheKey, dataUrl };
-      if (this._bgBlurToken !== token) return; // superseded by a newer call
-      const layer = document.getElementById('bg-layer');
-      if (!layer || layer.style.display === 'none') return;
-      this._applyPreBlurredBg(layer, dataUrl);
-    });
-  }
-
-  // Swap #bg-layer to the pre-blurred image with no live CSS filter.
-  // #bg-layer transitions `filter` 0.3s; suppress it for the swap so the
-  // baked blur + decaying live blur don't visibly stack.
-  _applyPreBlurredBg(layer, dataUrl) {
-    const prevTransition = layer.style.transition;
-    layer.style.transition = 'none';
-    layer.style.backgroundImage = `url("${dataUrl}")`;
-    layer.style.filter = '';
-    layer.style.inset = '0';
-    void layer.offsetWidth; // flush so the un-transitioned state commits
-    layer.style.transition = prevTransition;
-  }
-
-  // Renders [url] blurred into an offscreen canvas, once, at a capped working
-  // resolution. Resolves to a data URL, or null when canvas 2D filters are
-  // unavailable (older WKWebView) or the render fails — callers keep the live
-  // CSS-filter fallback in that case.
-  _preBlurImage(url, blur) {
-    return new Promise((resolve) => {
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      if (!ctx || typeof ctx.filter !== 'string') {
-        resolve(null);
-        return;
-      }
-      const img = new Image();
-      img.onload = () => {
-        try {
-          const iw = img.naturalWidth;
-          const ih = img.naturalHeight;
-          if (!iw || !ih) {
-            resolve(null);
-            return;
-          }
-          // The blur destroys detail anyway, so a capped resolution keeps
-          // the canvas + data URL small; scale the radius to match.
-          const scale = Math.min(1, 1536 / Math.max(iw, ih));
-          const scaledBlur = Math.max(0.5, blur * scale);
-          canvas.width = Math.max(1, Math.round(iw * scale));
-          canvas.height = Math.max(1, Math.round(ih * scale));
-          // Overscan: draw expanded by 2×blur per side so the transparent
-          // blurred fringe lands outside the canvas and edges stay clamped
-          // (Flutter TileMode.clamp equivalent), at the cost of a slight
-          // zoom-crop.
-          const pad = Math.ceil(scaledBlur * 2);
-          ctx.filter = `blur(${scaledBlur}px)`;
-          ctx.drawImage(
-            img,
-            -pad,
-            -pad,
-            canvas.width + pad * 2,
-            canvas.height + pad * 2,
-          );
-          // WebP keeps the alpha channel (PNG wallpapers) unlike JPEG;
-          // engines without a WebP encoder silently return PNG instead.
-          resolve(canvas.toDataURL('image/webp', 0.9));
-        } catch (_) {
-          resolve(null);
-        }
-      };
-      img.onerror = () => resolve(null);
-      img.src = url;
-    });
-  }
-
-  setBackgroundNoise(opacity, intensity) {
-    let noise = document.getElementById('bg-noise-layer');
-    if (!noise) {
-      noise = document.createElement('div');
-      noise.id = 'bg-noise-layer';
-      const bg = document.getElementById('bg-layer');
-      if (bg && bg.nextSibling) {
-        document.body.insertBefore(noise, bg.nextSibling);
-      } else {
-        document.body.insertBefore(noise, document.body.firstChild);
-      }
-    }
-    const op = Math.max(0, Math.min(1, opacity || 0));
-    if (op <= 0) {
-      noise.style.display = 'none';
-      noise.style.backgroundImage = '';
-      return;
-    }
-    const i = Math.max(0, Math.min(2, intensity == null ? 1 : intensity));
-    noise.style.display = 'block';
-    noise.style.opacity = op;
-    noise.style.backgroundImage = `url("${this._noiseTile(i)}")`;
-    noise.style.backgroundSize = '128px 128px';
-  }
-
-  _noiseTile(intensity) {
-    if (!this._noiseCache) this._noiseCache = new Map();
-    const key = intensity.toFixed(2);
-    const hit = this._noiseCache.get(key);
-    if (hit) return hit;
-    const size = 128;
-    const canvas = document.createElement('canvas');
-    canvas.width = canvas.height = size;
-    const ctx = canvas.getContext('2d');
-    const img = ctx.createImageData(size, size);
-    const data = img.data;
-    for (let p = 0; p < data.length; p += 4) {
-      const a = Math.min(1, Math.random() * intensity);
-      data[p] = 255;
-      data[p + 1] = 255;
-      data[p + 2] = 255;
-      data[p + 3] = Math.round(a * 255);
-    }
-    ctx.putImageData(img, 0, 0);
-    const url = canvas.toDataURL('image/png');
-    this._noiseCache.set(key, url);
-    return url;
-  }
+  setBackgroundNoise(opacity, intensity) { this._background.setNoise(opacity, intensity); }
 
   setPerformanceMode(enabled) {
     const container = document.getElementById('chat-container') || document.body;
@@ -2460,7 +2334,7 @@ export class Bridge {
     if (hasImgResult && !hasImgGen && !hasImgError && !hasHtmlMarkup) {
       const imgMatch = content.match(imgResultRegex);
       const wrapper = document.createElement('span');
-      wrapper.innerHTML = sanitizeExtBlockHtml(this._renderExtBlockImageHtml(imgMatch[1]));
+      wrapper.innerHTML = this._extBlockHtml(this._renderExtBlockImageHtml(imgMatch[1]));
       body.appendChild(wrapper.firstElementChild);
       retryFailedLocalImages(body);
       return;
@@ -2481,7 +2355,7 @@ export class Bridge {
 
     const htmlEl = document.createElement('div');
     htmlEl.className = 'ext-block-content';
-    htmlEl.innerHTML = sanitizeExtBlockHtml(html);
+    htmlEl.innerHTML = this._extBlockHtml(html);
     body.appendChild(htmlEl);
     retryFailedLocalImages(body);
   }
@@ -2571,7 +2445,7 @@ export class Bridge {
     win.appendChild(hdr);
     const content = document.createElement('div');
     content.className = 'error-content';
-    content.innerHTML = sanitizeExtBlockHtml(block.content || '');
+    content.innerHTML = this._extBlockHtml(block.content || '');
     win.appendChild(content);
     inner.appendChild(win);
   }

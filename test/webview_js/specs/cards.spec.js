@@ -102,12 +102,44 @@ test('<details> keeps its summary and toggles', async ({ page }) => {
   const shape = await page.evaluate(() => {
     const details = window.harness.currentRoot().querySelector('details');
     const before = details.open;
-    details.querySelector('summary').click();
-    return { hasSummary: !!details.querySelector('summary'), before, after: details.open };
+    const summary = details.querySelector('summary');
+    summary.click();
+    return {
+      hasSummary: !!summary,
+      before,
+      after: details.open,
+      // No app arrow: a plain summary keeps the browser's own marker.
+      display: getComputedStyle(summary).display,
+    };
   });
+  expect(shape.display).toBe('list-item');
   expect(shape.hasSummary).toBe(true);
   expect(shape.before).toBe(false);
   expect(shape.after).toBe(true);
+});
+
+test('a <summary> is laid out by the card alone', async ({ page }) => {
+  await render(page, card('fandom-guide-card').text);
+  const shape = await page.evaluate(() => {
+    const root = window.harness.currentRoot();
+    const box = (selector) => root.querySelector(selector).getBoundingClientRect();
+    const intro = box('.sg-intro');
+    const now = box('.sg-now');
+    const label = box('.sg-chapter .sg-label');
+    const thumb = box('.sg-chapter .sg-thumb');
+    return {
+      arrows: root.querySelectorAll('.glaze-arrow, .glaze-flex-wrap').length,
+      nowBelowIntro: now.top >= intro.bottom - 1,
+      fandomWidth: box('.sg-fandom').width,
+      labelBesideThumb: label.left >= thumb.right,
+      labelWidth: label.width,
+    };
+  });
+  expect(shape.arrows, 'the app adds nothing to a summary').toBe(0);
+  expect(shape.nowBelowIntro, 'the "now" paragraph sits under the cover').toBe(true);
+  expect(shape.fandomWidth, 'the subtitle is not one letter wide').toBeGreaterThan(80);
+  expect(shape.labelBesideThumb).toBe(true);
+  expect(shape.labelWidth).toBeGreaterThan(80);
 });
 
 test('a <br> inside a card stays inside that card', async ({ page }) => {
@@ -175,9 +207,9 @@ test('a tag inside backticks is shown, not rendered', async ({ page }) => {
     const root = window.harness.currentRoot();
     return {
       codeTexts: Array.from(root.querySelectorAll('code')).map((c) => c.textContent),
-      // The code-block wrapper is ours; any other <div> would mean the tag
-      // inside the backticks was parsed as markup.
-      realDivs: root.querySelectorAll('div:not(.code-block-wrapper)').length,
+      // The code-block wrapper and its header are ours; any other <div> would
+      // mean the tag inside the backticks was parsed as markup.
+      realDivs: root.querySelectorAll('div:not(.code-block-wrapper, .code-block-header)').length,
     };
   });
   expect(shape.codeTexts).toContain('<div>');
@@ -198,6 +230,45 @@ test('a fenced code block shows its HTML as text', async ({ page }) => {
   expect(shape.hasPre).toBe(true);
   expect(shape.body).toContain('<div class="card">');
   expect(shape.realCards).toBe(0);
+});
+
+test('a fenced code block keeps the <style> and <script> it shows', async ({ page }) => {
+  await render(page, card('fenced-code-with-script').text);
+  const shape = await page.evaluate(() => {
+    const root = window.harness.currentRoot();
+    const code = root.querySelector('pre code');
+    return {
+      body: code ? code.textContent : '',
+      leaks: window.harness.consoleErrors.filter((e) => e.includes('LEAK')),
+    };
+  });
+  expect(shape.body).toContain('<style>.a { color: red; }</style>');
+  expect(shape.body).toContain('<script>let x = 1;</script>');
+  expect(shape.leaks).toEqual([]);
+});
+
+test('a <style> tag in backticks does not swallow the rest of the message', async ({ page }) => {
+  await render(page, card('inline-code-style-tag').text);
+  const shape = await page.evaluate(() => {
+    const root = window.harness.currentRoot();
+    return {
+      codeTexts: Array.from(root.querySelectorAll('code')).map((c) => c.textContent),
+      bold: root.querySelector('strong')?.textContent ?? null,
+      styles: root.querySelectorAll('style').length,
+    };
+  });
+  expect(shape.codeTexts).toContain('<style>');
+  expect(shape.bold).toBe('жирный');
+  expect(shape.styles).toBe(0);
+});
+
+test('a reasoning block with a <script> renders without placeholders', async ({ page }) => {
+  await render(page, card('think-with-script').text);
+  const visible = await text(page);
+  expect(visible).toContain('план');
+  expect(visible).toContain('готов');
+  expect(visible).toContain('Ответ');
+  expect(visible).not.toContain('undefined');
 });
 
 test('markdown prose renders emphasis, strike and quotes', async ({ page }) => {
@@ -387,6 +458,30 @@ test('a finished image block renders its variant switcher', async ({ page }) => 
   expect(shape.variants).toContain(';;');
   expect(shape.count).toBe('1/2');
   expect(shape.brokenImg).toBe(1);
+});
+
+test('a finished image keeps the place its card gave it', async ({ page }) => {
+  await render(page, card('imggen-authored-layout').text);
+  const shape = await page.evaluate(() => {
+    const root = window.harness.currentRoot();
+    const frame = root.querySelector('.pol-frame');
+    const img = root.querySelector('img.imggen-result');
+    const f = frame.getBoundingClientRect();
+    const i = img.getBoundingClientRect();
+    return {
+      classes: img.className,
+      filter: getComputedStyle(img).filter,
+      // The picture covers the aspect box instead of falling below it.
+      offset: [i.top - f.top, i.left - f.left, i.width - f.width, i.height - f.height],
+      ratio: f.height / f.width,
+      hasOptions: !!root.querySelector('.imggen-options-btn'),
+    };
+  });
+  expect(shape.classes).toBe('imggen-result pol-photo');
+  expect(shape.filter).toContain('sepia');
+  for (const delta of shape.offset) expect(Math.abs(delta)).toBeLessThan(1);
+  expect(shape.ratio).toBeCloseTo(0.663, 2);
+  expect(shape.hasOptions).toBe(true);
 });
 
 test('inline tags in prose keep their paragraphs and their markdown', async ({ page }) => {

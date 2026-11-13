@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 import '../../../core/llm/transport/endpoint_normalizer.dart';
 import '../image_gen_models.dart';
 import 'comfyui_image_provider.dart';
+import 'tensor_art_image_provider.dart';
 
 /// Lightweight connectivity and model-discovery requests for the image-gen
 /// settings sheet. Generation itself remains in the provider-specific clients.
@@ -108,6 +109,11 @@ class ImageGenConnectionService {
           null,
           extraHeaders: _comfyUiAuthHeaders(settings.comfyui.apiKey),
         );
+      case ImageGenApiType.tensorart:
+        await TensorArtImageProvider().checkConnection(
+          accessKey: settings.tensorart.accessKey,
+          endpoint: settings.tensorart.endpoint,
+        );
     }
   }
 
@@ -156,9 +162,13 @@ class ImageGenConnectionService {
         RoutmyModelInfo(
           id: id,
           name: raw['name']?.toString() ?? '',
-          supportsEdits: endpointList.any(
-            (endpoint) => endpoint.contains('/images/edits'),
-          ),
+          // No endpoint list at all: keep the shipped gpt-image rule rather
+          // than closing references for every model in the catalog.
+          supportsEdits: endpointList.isEmpty
+              ? RoutMyConstants.supportsReferences(id)
+              : endpointList.any(
+                  (endpoint) => endpoint.contains('/images/edits'),
+                ),
         ),
       );
     }

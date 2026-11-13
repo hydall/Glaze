@@ -11,6 +11,12 @@ import '../../core/models/chat_message.dart';
 import '../../core/state/db_provider.dart';
 import '../../core/utils/platform_paths.dart';
 import '../../core/utils/time_helpers.dart';
+import '../../core/state/character_provider.dart';
+import '../../core/state/persona_resolution.dart';
+import '../extensions/providers/info_blocks_provider.dart';
+import '../extensions/services/card_blocks.dart';
+import '../extensions/services/ext_blocks_inline_display.dart';
+import '../extensions/services/extension_post_gen_service.dart';
 import '../image_gen/services/image_tag_markup.dart';
 import 'services/image_gen_processor.dart';
 import 'chat_generation_service.dart';
@@ -83,35 +89,56 @@ class ImageRecoveryService {
         currentMsg,
         currentMsg.content,
       );
-      if (jsonEncode(alignedMsg.toJson()) != jsonEncode(currentMsg.toJson())) {
+      // Structural equality, not a JSON round trip. This runs over every
+      // message each time a chat is opened, and encoding each one twice to
+      // compare the strings took a second of the UI isolate on a long chat —
+      // most of it the swipe metadata, which is the bulk of a stored message.
+      if (alignedMsg != currentMsg) {
         currentMsg = alignedMsg;
         changed = true;
       }
 
-      final cleanedAgentSwipes = currentMsg.agentSwipes
-          .map(
-            (swipe) =>
-                swipe.copyWith(content: cleanStuckImgGenTags(swipe.content)),
-          )
-          .toList();
-      final cleanedMeta = currentMsg.swipesMeta.map((entry) {
-        final meta = Map<String, dynamic>.from(entry);
-        final stored = meta['agentSwipes'];
-        if (stored is List) {
-          meta['agentSwipes'] = stored.map((value) {
-            if (value is! Map) return value;
-            final swipe = Map<String, dynamic>.from(value);
-            final content = swipe['content'];
-            if (content is String) {
-              swipe['content'] = cleanStuckImgGenTags(content);
-            }
-            return swipe;
-          }).toList();
+      // Cleaning returns the very string it was given when there is nothing
+      // to clean, so a message with nothing stuck costs a scan and no copies.
+      var agentSwipesChanged = false;
+      final cleanedAgentSwipes = <AgentSwipe>[];
+      for (final swipe in currentMsg.agentSwipes) {
+        final cleaned = cleanStuckImgGenTags(swipe.content);
+        if (identical(cleaned, swipe.content)) {
+          cleanedAgentSwipes.add(swipe);
+        } else {
+          cleanedAgentSwipes.add(swipe.copyWith(content: cleaned));
+          agentSwipesChanged = true;
         }
-        return meta;
-      }).toList();
-      if (!_agentSwipeListsEqual(cleanedAgentSwipes, currentMsg.agentSwipes) ||
-          !_metaListsEqual(cleanedMeta, currentMsg.swipesMeta)) {
+      }
+      var metaChanged = false;
+      final cleanedMeta = <Map<String, dynamic>>[];
+      for (final entry in currentMsg.swipesMeta) {
+        final stored = entry['agentSwipes'];
+        if (stored is! List) {
+          cleanedMeta.add(entry);
+          continue;
+        }
+        var entryChanged = false;
+        final swipes = stored.map((value) {
+          if (value is! Map) return value;
+          final content = value['content'];
+          if (content is! String) return value;
+          final cleaned = cleanStuckImgGenTags(content);
+          if (identical(cleaned, content)) return value;
+          entryChanged = true;
+          return Map<String, dynamic>.from(value)..['content'] = cleaned;
+        }).toList();
+        if (!entryChanged) {
+          cleanedMeta.add(entry);
+          continue;
+        }
+        cleanedMeta.add(
+          Map<String, dynamic>.from(entry)..['agentSwipes'] = swipes,
+        );
+        metaChanged = true;
+      }
+      if (agentSwipesChanged || metaChanged) {
         currentMsg = currentMsg.copyWith(
           agentSwipes: cleanedAgentSwipes,
           swipesMeta: cleanedMeta,
@@ -125,15 +152,6 @@ class ImageRecoveryService {
     return session.copyWith(messages: messages);
   }
 
-  static bool _agentSwipeListsEqual(List<AgentSwipe> a, List<AgentSwipe> b) =>
-      jsonEncode(a.map((swipe) => swipe.toJson()).toList()) ==
-      jsonEncode(b.map((swipe) => swipe.toJson()).toList());
-
-  static bool _metaListsEqual(
-    List<Map<String, dynamic>> a,
-    List<Map<String, dynamic>> b,
-  ) => jsonEncode(a) == jsonEncode(b);
-
   static String cleanStuckImgGenTags(String text) {
     if (!ImgGenPatterns.imgGenRegex.hasMatch(text) &&
         !ImgGenPatterns.htmlIigTagRegex.hasMatch(text) &&
@@ -142,20 +160,17 @@ class ImageRecoveryService {
       return text;
     }
     var result = text;
-    result = result.replaceAll(
-      ImgGenPatterns.imgSrcGenRegex,
-      '[IMG:ERROR:${jsonEncode({'error': 'Generation interrupted'})}]',
-    );
     // Only elements still waiting for a picture; the same element with an
     // image in its `src` is a finished block, which an interrupted generation
     // must never turn into an error card.
     String interrupted(Match m) {
       if (!ImgGenPatterns.isPendingIigElement(m.group(0)!)) return m.group(0)!;
-      final errorJson = jsonEncode({
+      final presentation = ImageTagMarkup.presentationOf(m.group(0)!);
+      return ImageTagMarkup.errorTag({
         'error': 'Generation interrupted',
         'instruction': m.group(1) ?? '',
+        if (presentation.isNotEmpty) 'presentation': presentation,
       });
-      return '[IMG:ERROR:$errorJson]';
     }
 
     result = result.replaceAllMapped(
@@ -166,6 +181,15 @@ class ImageRecoveryService {
       ImgGenPatterns.htmlIigTagDoubleRegex,
       interrupted,
     );
+    // After the instruction elements: their `src` is `[IMG:GEN]` too, and
+    // taken here first they lost their prompt and their presentation.
+    result = result.replaceAllMapped(ImgGenPatterns.imgSrcGenRegex, (m) {
+      final presentation = ImageTagMarkup.presentationOf(m.group(0)!);
+      return ImageTagMarkup.errorTag({
+        'error': 'Generation interrupted',
+        if (presentation.isNotEmpty) 'presentation': presentation,
+      });
+    });
     result = result.replaceAllMapped(ImgGenPatterns.imgGenRegex, (m) {
       final instruction = m.group(1) ?? '';
       final errorJson = instruction.isNotEmpty
@@ -176,7 +200,9 @@ class ImageRecoveryService {
           : jsonEncode({'error': 'Generation interrupted'});
       return '[IMG:ERROR:$errorJson]';
     });
-    return result;
+    // A finished block matches the patterns but comes back as an equal new
+    // string; hand back the original so callers can tell by `identical`.
+    return result == text ? text : result;
   }
 
   static String replaceFirstImgErrorOrGen(String text, String resultPath) {
@@ -249,6 +275,20 @@ class ImageRecoveryService {
 
     final message = session.messages.firstWhereOrNull((m) => m.id == messageId);
     if (message == null || message.role != 'assistant') return;
+    final inline = _inlineImage(session.id, message, blockIndex);
+    if (inline != null) {
+      final row = inline.block.row;
+      final content = ImageTagMarkup.setImageBlockVariant(
+        row.content,
+        inline.index,
+        variantIndex,
+      );
+      if (content == row.content) return;
+      await _ref
+          .read(infoBlocksProvider(session.id).notifier)
+          .updateContent(row.id, content);
+      return;
+    }
     if (ImageTagMarkup.setImageBlockVariant(
           message.content,
           blockIndex,
@@ -326,10 +366,7 @@ class ImageRecoveryService {
                 !ImageTagMarkup.hasImageGenTags(content)) {
               return null;
             }
-            return ImageGenProcessor.resetImageContentInPlace(
-              message,
-              content,
-            );
+            return ImageGenProcessor.resetImageContentInPlace(message, content);
           },
         );
     if (resetSession == null) return;
@@ -437,6 +474,12 @@ class ImageRecoveryService {
     final msg = current.messages[messageIndex];
     if (msg.role != 'assistant') return;
 
+    final inline = _inlineImage(current.session!.id, msg, blockIndex);
+    if (inline != null) {
+      await _redrawInlineImage(current.session!.id, msg, inline);
+      return;
+    }
+
     final resetContent = reset(msg.content);
     if (resetContent == msg.content) return;
 
@@ -450,10 +493,7 @@ class ImageRecoveryService {
             if (message.role != 'assistant') return null;
             final content = reset(message.content);
             if (content == message.content) return null;
-            return ImageGenProcessor.resetImageContentInPlace(
-              message,
-              content,
-            );
+            return ImageGenProcessor.resetImageContentInPlace(message, content);
           },
         );
     if (resetSession == null) return;
@@ -543,7 +583,10 @@ class ImageRecoveryService {
     final msg = current.messages[msgIdx];
     final targetSwipeId = msg.swipeId;
     final targetAgentSwipeId = msg.agentSwipeId;
-    final Set<String> claimedPaths = {};
+    final Set<String> claimedPaths = {
+      for (final row in _ref.read(infoBlocksProvider(current.session!.id)))
+        ...ImageTagMarkup.extractImageResultPaths(row.content),
+    };
     for (final m in current.messages) {
       claimedPaths.addAll(ImageTagMarkup.extractImageResultPaths(m.content));
       for (final s in m.swipes) {
@@ -605,6 +648,21 @@ class ImageRecoveryService {
     // Stored relative to the data root, like every other image path.
     final foundPath = relativeGlazeFilePath(bestMatch.path);
 
+    final inline = _inlineImage(current.session!.id, msg, blockIndex);
+    if (inline != null) {
+      final row = inline.block.row;
+      final content = ImageTagMarkup.replaceImageBlockWithResult(
+        row.content,
+        inline.index,
+        foundPath,
+      );
+      if (content == row.content) return;
+      await _ref
+          .read(infoBlocksProvider(current.session!.id).notifier)
+          .updateContent(row.id, content);
+      return;
+    }
+
     final updatedContent = attach(msg.content, foundPath);
     if (updatedContent == msg.content) return;
 
@@ -637,5 +695,52 @@ class ImageRecoveryService {
       ownsOperation: liveState?.session?.id == sessionId,
     );
     if (merged != null) _setState(AsyncData(merged));
+  }
+
+  /// The block shown inside [message] that the [blockIndex]-th image of the
+  /// message as displayed belongs to, or null when the image is the
+  /// message's own (INV-IG15).
+  ({InlineExtBlock block, int index})? _inlineImage(
+    String sessionId,
+    ChatMessage message,
+    int? blockIndex,
+  ) {
+    if (blockIndex == null) return null;
+    return inlineExtBlockImageAt(
+      preset: effectiveExtBlocksPreset(_ref.read, _charId),
+      rows: _ref.read(infoBlocksProvider(sessionId)),
+      message: message,
+      imageIndex: blockIndex,
+    );
+  }
+
+  /// Draws one picture of a block shown inside [message] again, where the
+  /// block keeps it: in its stored result, not in the message text.
+  Future<void> _redrawInlineImage(
+    String sessionId,
+    ChatMessage message,
+    ({InlineExtBlock block, int index}) inline,
+  ) async {
+    final character = _ref.read(characterByIdProvider(_charId));
+    if (character == null) return;
+    final row = inline.block.row;
+    await _ref
+        .read(extensionPostGenServiceProvider)
+        .rerunImageOnly(
+          blockId: inline.block.config.id,
+          messageId: message.id,
+          swipeId: row.swipeId,
+          agentSwipeId: row.agentSwipeId,
+          sessionId: sessionId,
+          charId: _charId,
+          character: character,
+          persona: _ref.read(
+            effectivePersonaForChatProvider((
+              charId: _charId,
+              sessionId: sessionId,
+            )),
+          ),
+          imageIndex: inline.index,
+        );
   }
 }

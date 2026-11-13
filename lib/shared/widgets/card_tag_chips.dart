@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
+import '../theme/ui_scale.dart';
 
 /// Compact, colour-coded tag chips shown on character / catalog cards.
 ///
@@ -44,7 +45,7 @@ class CardTagChips extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
           decoration: BoxDecoration(
             color: bg,
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: context.glazeBorderRadius(8),
             border: Border.all(color: border),
           ),
           child: Text(

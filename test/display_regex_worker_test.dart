@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/llm/display_regex_worker.dart';
 import 'package:glaze_flutter/core/llm/regex_service.dart';
+import 'package:glaze_flutter/core/llm/regex_validator.dart';
 import 'package:glaze_flutter/core/models/preset.dart';
 
 /// The tracker-widget pattern from the report: with a field too few in the
@@ -90,6 +91,44 @@ void main() {
     );
     expect(inline, _brokenTrackerMessage);
   });
+
+  test(
+    'runs a script the ReDoS heuristic flags; the deadline guards it',
+    () async {
+      // Flagged by the heuristic, yet linear: every iteration must eat a `"`
+      // or a char that is not one.
+      const attrs = PresetRegex(
+        id: 'attrs',
+        name: 'header',
+        regex: r'''/<h\b((?:[^<>"']|"[^"<>]*")*?)\/?>/gi''',
+        replacement: r'<b>$1</b>',
+        placement: [2],
+        markdownOnly: true,
+      );
+      expect(classifyRegexSafety(attrs.regex), RegexSafety.pathological);
+
+      final run = await DisplayRegexWorker.apply(
+        const [DisplayRegexJob(text: '<h a="1"/>', placement: 2)],
+        const [attrs],
+        const RegexApplyContext(),
+      );
+
+      expect(run.stopped, isEmpty);
+      expect(run.results.single.text, '<b> a="1"</b>');
+      // The inline passes, which nothing can interrupt, still skip it.
+      expect(
+        applyRegexes(
+          '<h a="1"/>',
+          2,
+          1,
+          const [attrs],
+          const RegexApplyContext(),
+          isMarkdown: true,
+        ),
+        '<h a="1"/>',
+      );
+    },
+  );
 
   test('an edited pattern of a stopped script runs again', () {
     markRegexScriptStopped(_tracker);

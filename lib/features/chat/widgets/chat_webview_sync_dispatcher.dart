@@ -223,7 +223,7 @@ class ChatWebViewSyncDispatcher {
     _maybeApplyChatFont(bridge: bridge, old: old, current: current);
     _maybeApplySelectionMode(bridge: bridge, old: old, current: current);
     _maybeApplyMessageSettings(bridge: bridge, old: old, current: current);
-    final rehighlightSearch = _maybeApplySearch(
+    final searchApply = _maybeApplySearch(
       bridge: bridge,
       old: old,
       current: current,
@@ -320,7 +320,8 @@ class ChatWebViewSyncDispatcher {
       appendPlaceholder: shouldInjectPlaceholder,
       sessionSwitched: false,
       placeholder: shouldInjectPlaceholder ? buildStreamingPlaceholder() : null,
-      rehighlightSearch: rehighlightSearch,
+      rehighlightSearch: searchApply != _SearchApply.done,
+      scrollToSearchMatch: searchApply == _SearchApply.deferredScroll,
     );
   }
 
@@ -356,12 +357,16 @@ class ChatWebViewSyncDispatcher {
     required ChatWebViewWidgetFields old,
     required ChatWebViewWidgetFields current,
   }) {
+    if (current.themeLayout != old.themeLayout) {
+      unawaited(bridge.setThemeLayout(current.themeLayout));
+    }
     if (current.themeSyncKey != old.themeSyncKey ||
         current.chatLayout != old.chatLayout ||
         current.elementOpacity != old.elementOpacity ||
         current.elementBlur != old.elementBlur ||
         current.chatFontSize != old.chatFontSize ||
-        current.chatColumnWidth != old.chatColumnWidth) {
+        current.chatColumnWidth != old.chatColumnWidth ||
+        current.avatarRoundness != old.avatarRoundness) {
       bridge.applyTheme(current.buildThemeMap());
     }
   }
@@ -445,8 +450,8 @@ class ChatWebViewSyncDispatcher {
     }
   }
 
-  /// Returns `true` when the highlight pass must run *after* the message sync
-  /// instead of now.
+  /// Pushes the search now, or says the highlight pass must run *after* the
+  /// message sync instead.
   ///
   /// A revision bump means the messages themselves changed under an open
   /// search (an edit, a delete, a swipe). Highlighting reads the bubbles that
@@ -454,18 +459,37 @@ class ChatWebViewSyncDispatcher {
   /// is queued after this dispatch — re-highlighting here would number the
   /// matches over the *old* text and then have the edited bubble rewritten on
   /// top, which is exactly the stale highlight this defers around.
-  bool _maybeApplySearch({
+  ///
+  /// A wider scrollback window means the active hit sits in a message the
+  /// page is only now being handed (`ChatNotifier.revealMessageIndex`): the
+  /// older messages are prepended by that same queued sync, so the scroll to
+  /// the hit has to wait for them too — this time with the scroll, since the
+  /// reader asked to go there. Only then: the window also grows when the
+  /// reader scrolls up, which renumbers the page's hits under the same
+  /// active one, and pulling the reader back to it would undo the scroll.
+  _SearchApply _maybeApplySearch({
     required ChatBridgeController bridge,
     required ChatWebViewWidgetFields old,
     required ChatWebViewWidgetFields current,
   }) {
-    if (current.searchRevision != old.searchRevision) return true;
+    if (current.searchRevision != old.searchRevision) {
+      return _SearchApply.deferred;
+    }
     if (current.searchQuery == old.searchQuery &&
         current.searchCurrentIndex == old.searchCurrentIndex) {
-      return false;
+      return _SearchApply.done;
+    }
+    if (current.visibleStartIndex != old.visibleStartIndex &&
+        (current.searchQuery?.isNotEmpty ?? false)) {
+      final moved =
+          current.searchQuery != old.searchQuery ||
+          current.searchActiveIndex != old.searchActiveIndex ||
+          // The hit was waiting outside the window for this.
+          old.searchCurrentIndex < 0;
+      return moved ? _SearchApply.deferredScroll : _SearchApply.deferred;
     }
     applySearch(bridge: bridge, fields: current);
-    return false;
+    return _SearchApply.done;
   }
 
   /// Pushes the current query + active index into the page. Public so the
@@ -649,6 +673,10 @@ class ChatWebViewSyncDispatcher {
   }
 }
 
+/// What a dispatch did about the search: pushed it, or left it for the
+/// caller to push once the queued message sync has landed.
+enum _SearchApply { done, deferred, deferredScroll }
+
 /// Result of a [ChatWebViewSyncDispatcher.dispatch] call.
 class ChatWebViewSyncResult {
   const ChatWebViewSyncResult({
@@ -657,6 +685,7 @@ class ChatWebViewSyncResult {
     required this.sessionSwitched,
     this.placeholder,
     this.rehighlightSearch = false,
+    this.scrollToSearchMatch = false,
   });
 
   /// `true` when the caller should call
@@ -680,6 +709,11 @@ class ChatWebViewSyncResult {
   /// message mutations have landed — the message list changed under an open
   /// search, so the page is showing highlights numbered over the old text.
   final bool rehighlightSearch;
+
+  /// With [rehighlightSearch]: the deferred pass also scrolls to the active
+  /// hit. Set when the scrollback window was widened to reach it; an edit
+  /// under an open search re-numbers without moving the reader.
+  final bool scrollToSearchMatch;
 }
 
 /// Pure data snapshot of all the [ChatWebViewWidget] fields that the
@@ -705,8 +739,11 @@ class ChatWebViewWidgetFields {
     this.blurRegions = const [],
     required this.searchQuery,
     required this.searchCurrentIndex,
+    this.searchActiveIndex = 0,
     this.searchRevision = 0,
+    this.visibleStartIndex = 0,
     required this.chatLayout,
+    required this.themeLayout,
     required this.themeSyncKey,
     required this.elementOpacity,
     required this.elementBlur,
@@ -719,6 +756,7 @@ class ChatWebViewWidgetFields {
     required this.showCharAvatar,
     required this.showUserName,
     required this.showCharName,
+    required this.avatarRoundness,
     required this.chatFontName,
     required this.chatFontDataUrl,
     required this.chatFontSize,
@@ -774,7 +812,19 @@ class ChatWebViewWidgetFields {
   /// Bumped when the search matches were recounted over a changed message
   /// list. See [ChatWebViewSyncResult.rehighlightSearch].
   final int searchRevision;
+
+  /// The active hit counted over the whole chat; see
+  /// `ChatWebViewWidget.searchActiveIndex`.
+  final int searchActiveIndex;
+
+  /// Where the scrollback window the page holds starts, as an index into the
+  /// whole chat. A change widens or narrows the message list the page is
+  /// handed; see [_maybeApplySearch].
+  final int visibleStartIndex;
   final String? chatLayout;
+
+  /// The theme's own message layout as JSON; null for the built-in one.
+  final String? themeLayout;
   final String? themeSyncKey;
   final double elementOpacity;
   final double elementBlur;
@@ -787,6 +837,7 @@ class ChatWebViewWidgetFields {
   final bool showCharAvatar;
   final bool showUserName;
   final bool showCharName;
+  final double avatarRoundness;
   final String? chatFontName;
   final String? chatFontDataUrl;
   final double chatFontSize;

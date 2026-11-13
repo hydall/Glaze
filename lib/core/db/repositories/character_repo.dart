@@ -288,6 +288,29 @@ class CharacterRepo implements SyncCharacterStore {
     });
   }
 
+  /// Read-mutate-write of one card inside a transaction, so a change computed
+  /// against an older copy cannot overwrite a newer write. Null when the
+  /// character no longer exists.
+  Future<Character?> mutate(
+    String charId,
+    Character Function(Character latest) mutate,
+  ) {
+    return _db.transaction(() async {
+      final row = await (_db.select(
+        _db.characters,
+      )..where((t) => t.charId.equals(charId))).getSingleOrNull();
+      if (row == null) return null;
+      final next = mutate(_toModel(row));
+      final withTokens = next.copyWith(
+        tokenCount: estimateCharacterTokens(next),
+      );
+      await _db
+          .into(_db.characters)
+          .insertOnConflictUpdate(_toCompanion(withTokens));
+      return withTokens;
+    });
+  }
+
   Future<Map<String, dynamic>> updateExtensionsJson(
     String charId,
     Map<String, dynamic> Function(Map<String, dynamic> extensions) update,

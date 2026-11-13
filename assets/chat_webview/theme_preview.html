@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Glaze Theme Preview</title>
+  <!-- The theme editor's preview: a few sample messages and the chat chrome,
+       drawn by the chat page's own renderer, stylesheet and chrome so the
+       preview is the chat, not a picture of it. See theme_preview.js. -->
+  <style>
+    :root { --sat: 0px; --sab: 0px; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { background: transparent;
+      color: var(--text-color, #e0e0e0);
+      font-family: var(--font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif);
+      font-size: var(--font-size, 15px);
+      letter-spacing: var(--letter-spacing, 0);
+      position: fixed; inset: 0;
+      width: 100%; height: 100%;
+      overflow: hidden;
+      overscroll-behavior: none;
+    }
+    #chat-container {
+      width: 100%; height: 100%;
+      overflow-y: auto; overflow-x: hidden;
+      padding: var(--preview-top, 72px) 0 var(--preview-bottom, 96px);
+      background: transparent;
+    }
+    #chat-container::-webkit-scrollbar { display: none; width: 0; }
+  </style>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="chat-container" class="layout-default"></div>
+
+  <!-- First module on purpose, as on the chat page: the chrome captures the
+       DOM primitives it uses before anything else has run. -->
+  <script type="module" src="chrome/index.js"></script>
+  <script src="RollingNumber.js"></script>
+  <script type="module" src="theme_preview.js"></script>
+</body>
+</html>

@@ -1,5 +1,6 @@
 import '../../models/character.dart';
 import '../../models/persona.dart';
+import '../../models/summary_block.dart' show SummarySegment;
 import '../../models/preset.dart' show Preset, PresetRegex;
 import '../../models/chat_message.dart'
     show ChatMessage, AuthorsNote, TriggeredEntry;
@@ -30,6 +31,9 @@ class PromptPayload {
   final Map<String, String> globalVars;
   final String? summaryContent;
   final String? summaryPrefix;
+  /// The summary cut where history runs between its blocks, for a summary
+  /// sent in place of its messages. See [SummarySegment].
+  final List<SummarySegment> summarySegments;
   final String? memoryContent;
 
   /// Raw entry text joined with \n\n — used in summary_macro mode to append
@@ -144,6 +148,7 @@ class PromptPayload {
     this.globalVars = const {},
     this.summaryContent,
     this.summaryPrefix,
+    this.summarySegments = const [],
     this.memoryContent,
     this.memoryMacroContent,
     this.memoryInjectionTarget = 'summary_block',
@@ -243,6 +248,7 @@ class PromptPayload {
       globalVars: inputs.globalVars,
       summaryContent: inputs.summaryContent,
       summaryPrefix: inputs.summaryPrefix,
+      summarySegments: inputs.summarySegments,
       memoryContent: inputs.memoryContent,
       memoryMacroContent: inputs.memoryMacroContent,
       memoryInjectionTarget: inputs.memoryInjectionTarget,
@@ -312,6 +318,7 @@ class PromptPayload {
     globalVars: globalVars,
     summaryContent: summaryContent,
     summaryPrefix: summaryPrefix,
+    summarySegments: summarySegments,
     memoryContent: memoryContent,
     memoryMacroContent: memoryMacroContent,
     memoryInjectionTarget: memoryInjectionTarget,

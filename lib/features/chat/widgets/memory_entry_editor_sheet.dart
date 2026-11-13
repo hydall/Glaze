@@ -3,9 +3,8 @@ import 'package:flutter/material.dart';
 
 import '../../../core/models/memory_book.dart';
 import '../../../shared/widgets/generic_editor.dart';
-import '../../../shared/widgets/glass_surface.dart';
 import '../../../shared/widgets/glaze_toast.dart';
-import '../../../shared/theme/app_colors.dart';
+import 'memory/memory_books_controls.dart';
 
 /// Editor for one memory entry or draft.
 ///
@@ -116,14 +115,14 @@ class _MemoryEntryEditorSheetState extends State<MemoryEntryEditorSheet> {
           child: Row(
             children: [
               Expanded(
-                child: _EditorButton(
+                child: MemoryEditorButton(
                   label: 'btn_cancel'.tr(),
                   onTap: () => Navigator.pop(context),
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
-                child: _EditorButton(
+                child: MemoryEditorButton(
                   label: 'btn_save'.tr(),
                   emphasised: true,
                   onTap: _save,
@@ -133,49 +132,6 @@ class _MemoryEntryEditorSheetState extends State<MemoryEntryEditorSheet> {
           ),
         ),
       ],
-    );
-  }
-}
-
-/// A glass tile acting as the button — the kit has no generic button, and a
-/// `FilledButton` here rendered in stock Material grey whatever the preset.
-class _EditorButton extends StatelessWidget {
-  final String label;
-  final VoidCallback onTap;
-  final bool emphasised;
-
-  const _EditorButton({
-    required this.label,
-    required this.onTap,
-    this.emphasised = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final radius = BorderRadius.circular(14);
-    return GlassSurface(
-      borderRadius: radius,
-      tint: emphasised ? context.cs.primary.withValues(alpha: 0.18) : null,
-      border: Border.all(
-        color: emphasised
-            ? context.cs.primary.withValues(alpha: 0.3)
-            : context.cs.outlineVariant,
-      ),
-      onTap: onTap,
-      glowColor: context.cs.primary,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 13),
-        child: Center(
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: emphasised ? context.cs.primary : context.cs.onSurface,
-            ),
-          ),
-        ),
-      ),
     );
   }
 }

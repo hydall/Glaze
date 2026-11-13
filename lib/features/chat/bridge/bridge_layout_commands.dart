@@ -121,7 +121,9 @@ class LayoutBridgeCommands {
   /// wheel semantics: positive [dy] scrolls the content down). [x]/[y] are
   /// the pointer's client coordinates, used to pick the element under the
   /// cursor so nested scrollers (edit textarea, panels) behave as they do
-  /// with a real wheel.
+  /// with a real wheel. The page evens the frame-by-frame deltas out and
+  /// follows them a frame or two behind, since the embedder's sums carry the
+  /// pad's sample jitter.
   Future<void> trackpadScroll({
     required double dx,
     required double dy,
@@ -133,5 +135,53 @@ class LayoutBridgeCommands {
       '${dx.toStringAsFixed(2)}, ${dy.toStringAsFixed(2)}, '
       '${x.toStringAsFixed(1)}, ${y.toStringAsFixed(1)})',
     );
+  }
+
+  /// The fingers touched the pad: a flick the page still glides from stops.
+  Future<void> trackpadScrollStart() {
+    return _host.evalJs('window.bridge?.trackpadScrollStart()');
+  }
+
+  /// The fingers left the pad at [vx]/[vy] CSS pixels per second (wheel
+  /// sign): the page carries the motion on and lets it die away, the glide a
+  /// Flutter list gives a flick. Nothing in the embedder's pan stream does
+  /// that for a WebView.
+  Future<void> trackpadScrollEnd({required double vx, required double vy}) {
+    return _host.evalJs(
+      'window.bridge?.trackpadScrollEnd('
+      '${vx.toStringAsFixed(1)}, ${vy.toStringAsFixed(1)})',
+    );
+  }
+
+  /// Replays a Windows mouse-wheel notch as a smooth scroll inside the page.
+  ///
+  /// `flutter_inappwebview_windows` does forward the notch to WebView2, but
+  /// hands it Flutter's delta — logical pixels, divided by the device pixel
+  /// ratio — as wheel units, 120 to a notch, so the page sees a fraction of a
+  /// notch and jumps by it. The Flutter side captures the notch as well,
+  /// converts it back to the CSS pixels a browser would scroll and hands it
+  /// here; the page spreads it over the frames that follow and, once
+  /// [relayNativeWheel] is on, drops the plugin's copy.
+  ///
+  /// Same units and sign as [trackpadScroll].
+  Future<void> wheelScroll({
+    required double dx,
+    required double dy,
+    required double x,
+    required double y,
+  }) {
+    return _host.evalJs(
+      'window.bridge?.wheelScroll('
+      '${dx.toStringAsFixed(2)}, ${dy.toStringAsFixed(2)}, '
+      '${x.toStringAsFixed(1)}, ${y.toStringAsFixed(1)})',
+    );
+  }
+
+  /// Tells the page that the mouse wheel arrives through [wheelScroll] from
+  /// now on, so the trusted `wheel` event the plugin forwards for the same
+  /// notch is to be ignored. Off by default: every other platform keeps its
+  /// native wheel.
+  Future<void> relayNativeWheel(bool on) {
+    return _host.evalJs('window.bridge?.relayNativeWheel($on)');
   }
 }

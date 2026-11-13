@@ -8,6 +8,7 @@ import '../shell/desktop/desktop_floating_provider.dart';
 import '../shell/shell_header_provider.dart';
 import '../shell/title_bar_header.dart';
 import '../theme/app_colors.dart';
+import '../theme/ui_scale.dart';
 import 'glass_surface.dart';
 import 'glaze_background.dart';
 
@@ -74,6 +75,12 @@ class GlazeScaffold extends StatefulWidget {
   /// it; the pill treatment stays everywhere else.
   final bool flushHeader;
 
+  /// False when the screen draws its floating header itself — the chat, whose
+  /// header is part of its WebView page. Nothing is drawn in the header's
+  /// place then; the title-bar and window cases still publish [title],
+  /// [titleWidget] and [actions] as usual.
+  final bool drawHeader;
+
   /// When true, this scaffold does not draw its own floating header. Instead it
   /// publishes its title/actions/back into the shell's persistent header (see
   /// [shellHeaderProvider]) and reserves the same vertical space. Only set this
@@ -107,6 +114,7 @@ class GlazeScaffold extends StatefulWidget {
     this.headerBackdropKey,
     this.flushHeader = false,
     this.headerWrapper,
+    this.drawHeader = true,
   });
 
   @override
@@ -214,6 +222,8 @@ class _GlazeScaffoldState extends State<GlazeScaffold> {
               child: SizedBox(height: 56),
             ),
           )
+        : (!widget.drawHeader && !inTitleBar)
+        ? const SizedBox.shrink()
         : animatedHeader;
 
     final scaffold = PopScope(
@@ -481,7 +491,7 @@ class GlazePillButton extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14),
         decoration: BoxDecoration(
           color: context.cs.primary.withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: context.glazeBorderRadius(20),
           border: Border.all(color: context.cs.primary.withValues(alpha: 0.2)),
         ),
         child: Row(

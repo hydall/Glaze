@@ -1,0 +1,267 @@
+{
+  "tabs": [
+    {
+      "id": "font",
+      "label": "@tab_font",
+      "icon": "text_fields",
+      "groups": [
+        {
+          "header": "@theme_chat_font",
+          "items": [
+            {
+              "field": "chatFontMode"
+            },
+            {
+              "field": "chatFontSize"
+            },
+            {
+              "field": "chatLetterSpacing"
+            },
+            {
+              "field": "userMessageFontWeight"
+            },
+            {
+              "field": "charMessageFontWeight"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "colors",
+      "label": "@tab_colors",
+      "icon": "palette",
+      "groups": [
+        {
+          "header": "@theme_bubble_colors",
+          "when": "chatLayout == 'bubble'",
+          "items": [
+            {
+              "field": "userBubbleColor"
+            },
+            {
+              "field": "charBubbleColor"
+            },
+            {
+              "field": "userBubbleRadius"
+            },
+            {
+              "field": "charBubbleRadius"
+            }
+          ]
+        },
+        {
+          "header": "@theme_identity",
+          "items": [
+            {
+              "field": "showUserAvatar"
+            },
+            {
+              "field": "showCharAvatar"
+            },
+            {
+              "field": "showUserName"
+            },
+            {
+              "field": "showCharName"
+            }
+          ]
+        },
+        {
+          "header": "@theme_message_meta",
+          "items": [
+            {
+              "field": "hideMessageId"
+            },
+            {
+              "field": "hideGenerationTime"
+            },
+            {
+              "field": "hideTokenCount"
+            }
+          ]
+        },
+        {
+          "header": "@theme_reply_colors",
+          "items": [
+            {
+              "field": "userQuoteColor"
+            },
+            {
+              "field": "charQuoteColor"
+            }
+          ]
+        },
+        {
+          "header": "@theme_text_colors",
+          "items": [
+            {
+              "field": "userTextColor"
+            },
+            {
+              "field": "charTextColor"
+            }
+          ]
+        },
+        {
+          "header": "@theme_italic_colors",
+          "items": [
+            {
+              "field": "userItalicColor"
+            },
+            {
+              "field": "charItalicColor"
+            }
+          ]
+        },
+        {
+          "header": "@theme_desktop_effects",
+          "when": "desktop && chatLayout != 'bubble'",
+          "items": [
+            {
+              "field": "textBgOpacity"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "general",
+      "label": "@tab_general",
+      "icon": "tune",
+      "groups": [
+        {
+          "header": "@menu_chat_layout",
+          "items": [
+            {
+              "field": "chatLayout"
+            }
+          ]
+        },
+        {
+          "header": "@theme_chat_background",
+          "items": [
+            {
+              "field": "chatBgMode"
+            },
+            {
+              "field": "chatBgColor",
+              "when": "chatBgMode == 'color'"
+            },
+            {
+              "field": "chatBgImage",
+              "when": "chatBgMode == 'custom'"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "theme",
+      "label": {
+        "en": "Theme",
+        "ru": "Тема"
+      },
+      "icon": "brush",
+      "groups": [
+        {
+          "header": {
+            "en": "Cards",
+            "ru": "Карточки"
+          },
+          "items": [
+            {
+              "type": "color",
+              "key": "card-edge",
+              "label": {
+                "en": "Card edge",
+                "ru": "Кромка карточки"
+              },
+              "default": "#C42A4A"
+            },
+            {
+              "type": "select",
+              "key": "edge",
+              "label": {
+                "en": "Edge side",
+                "ru": "Сторона кромки"
+              },
+              "options": [
+                {
+                  "value": "left",
+                  "label": {
+                    "en": "Left",
+                    "ru": "Слева"
+                  }
+                },
+                {
+                  "value": "top",
+                  "label": {
+                    "en": "Top",
+                    "ru": "Сверху"
+                  }
+                },
+                {
+                  "value": "none",
+                  "label": {
+                    "en": "None",
+                    "ru": "Нет"
+                  }
+                }
+              ],
+              "default": "left"
+            },
+            {
+              "type": "slider",
+              "key": "card-pad",
+              "label": {
+                "en": "Padding",
+                "ru": "Отступ"
+              },
+              "min": 4,
+              "max": 24,
+              "step": 1,
+              "unit": "px",
+              "default": 12
+            },
+            {
+              "type": "switch",
+              "key": "compact",
+              "label": {
+                "en": "Compact header",
+                "ru": "Компактная шапка"
+              },
+              "default": false,
+              "description": {
+                "en": "Hides the message number and shrinks the name.",
+                "ru": "Прячет номер сообщения и уменьшает имя."
+              }
+            }
+          ]
+        },
+        {
+          "header": {
+            "en": "Bubbles",
+            "ru": "Пузыри"
+          },
+          "when": "chatLayout == 'bubble'",
+          "items": [
+            {
+              "type": "note",
+              "label": {
+                "en": "A group can mix the theme's own settings with the app's fields.",
+                "ru": "В одной группе могут быть и свои настройки темы, и поля приложения."
+              }
+            },
+            {
+              "field": "userBubbleRadius"
+            },
+            {
+              "field": "charBubbleRadius"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

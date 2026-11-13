@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/platform/desktop_window.dart';
 import '../theme/app_colors.dart';
+import '../theme/ui_scale.dart';
 import '../shell/desktop/sidebar_sheet_provider.dart';
 import '../shell/nav_height_provider.dart';
 import '../shell/shell_header_provider.dart';
@@ -1056,15 +1057,19 @@ class _SheetViewState extends ConsumerState<SheetView>
                 // expanded to full height. It used to taper to 0 on the way up,
                 // which made a sheet opened by tapping the handle end as a
                 // square-cornered slab flush against the status bar.
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(_kSheetCornerRadius),
+                borderRadius: BorderRadius.vertical(
+                  top: Radius.circular(
+                    context.glazeRadius(_kSheetCornerRadius),
+                  ),
                 ),
                 child: DecoratedBox(
                   // Foreground, so the pinned header's scrim cannot cover it.
                   position: DecorationPosition.foreground,
                   decoration: BoxDecoration(
-                    borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(_kSheetCornerRadius),
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(
+                        context.glazeRadius(_kSheetCornerRadius),
+                      ),
                     ),
                     border: glazeSheetBorder(context),
                   ),
@@ -1592,15 +1597,15 @@ class _SheetTabButton extends StatelessWidget {
       color: active
           ? context.cs.primary.withValues(alpha: 0.12)
           : Colors.white.withValues(alpha: 0.04),
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: context.glazeBorderRadius(12),
       child: InkWell(
         mouseCursor: SystemMouseCursors.click,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: context.glazeBorderRadius(12),
         onTap: onTap,
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: context.glazeBorderRadius(12),
             border: Border.all(
               color: active
                   ? context.cs.primary.withValues(alpha: 0.28)

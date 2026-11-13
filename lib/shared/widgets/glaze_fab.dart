@@ -13,6 +13,10 @@ import 'glaze_spinner.dart';
 class GlazeFab extends StatelessWidget {
   final IconData icon;
   final String? label;
+
+  /// A smaller second line under [label] — the live step of a long action, so
+  /// the label can keep saying what the action is.
+  final String? subtitle;
   final String tooltip;
 
   /// Null, or [busy], disables the button and fades it.
@@ -27,6 +31,7 @@ class GlazeFab extends StatelessWidget {
     required this.onTap,
     this.icon = Icons.add_rounded,
     this.label,
+    this.subtitle,
     this.busy = false,
   });
 
@@ -67,15 +72,32 @@ class GlazeFab extends StatelessWidget {
                   leading,
                   const SizedBox(width: 10),
                   Flexible(
-                    child: Text(
-                      label!,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: glyph,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 15,
-                      ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          label!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: glyph,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 15,
+                          ),
+                        ),
+                        if (subtitle != null && subtitle!.isNotEmpty)
+                          Text(
+                            subtitle!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: glyph.withValues(alpha: 0.75),
+                              fontWeight: FontWeight.w500,
+                              fontSize: 12,
+                            ),
+                          ),
+                      ],
                     ),
                   ),
                 ],

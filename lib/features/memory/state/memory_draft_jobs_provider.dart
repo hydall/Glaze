@@ -185,6 +185,28 @@ class MemoryDraftJobsNotifier extends Notifier<MemoryDraftJobsState> {
       );
       return;
     }
+    // A source the manifest would refuse: say which message, on the card and
+    // in the toast, rather than send a request that cannot succeed.
+    final problem = memoryDraftSourceProblems(draft, session.messages);
+    if (problem != null) {
+      await repo.mutateDraft(
+        sessionId: sessionId,
+        draftId: draftId,
+        mutate: (current) => current.copyWith(
+          status: 'needs_regeneration',
+          error: problem,
+          updatedAt: DateTime.now().millisecondsSinceEpoch,
+        ),
+      );
+      _recordFailure(
+        sessionId: sessionId,
+        draftId: draftId,
+        message: problem,
+        wasRegeneration: draft.content.isNotEmpty,
+      );
+      _bumpBookRevision();
+      return;
+    }
 
     // Re-checked after the awaits above: two taps in the same frame both get
     // this far before either has registered a token.

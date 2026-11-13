@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
@@ -98,6 +99,12 @@ class TavoBackupInspection {
     final hasAux = zip.findFile('objectbox_aux/data.mdb') != null;
     return TavoBackupInspection(info: info, skipped: _skipped(db, hasAux));
   }
+
+  factory TavoBackupInspection.fromData(TavoBackupData data) =>
+      TavoBackupInspection(
+        info: data.info,
+        skipped: _skipped(data.tavo, data.aux != null),
+      );
 
   static List<TavoSkipped> _skipped(TavoDatabase db, bool hasAux) {
     final out = <TavoSkipped>[];
@@ -214,6 +221,51 @@ class TavoBackupInspection {
   }
 }
 
+/// The decoded databases of a Tavo backup and what the archive says about
+/// itself — everything the importer reads apart from the avatar files.
+class TavoBackupData {
+  final TavoBackupInfo info;
+  final TavoDatabase tavo;
+
+  /// The auxiliary store, which only Tavo's "Full backup" writes.
+  final TavoDatabase? aux;
+
+  const TavoBackupData({required this.info, required this.tavo, this.aux});
+
+  factory TavoBackupData.fromArchive(Archive zip) {
+    final info = TavoBackupInfo.fromArchive(zip);
+    final mdbFile =
+        zip.findFile('objectbox/data.mdb') ??
+        zip.files.firstWhere(
+          (f) => f.isFile && f.name.toLowerCase().endsWith('data.mdb'),
+          orElse: () => throw const FormatException(
+            'No data.mdb found in Tavo backup zip.',
+          ),
+        );
+    final tavo = parseTavoObjectBox(mdbFile.readBytes()!);
+    mdbFile.clear();
+    final auxFile = zip.findFile('objectbox_aux/data.mdb');
+    final aux = auxFile == null
+        ? null
+        : parseTavoObjectBox(auxFile.readBytes()!);
+    auxFile?.clear();
+    return TavoBackupData(info: info, tavo: tavo, aux: aux);
+  }
+
+  /// Reads the backup at [path] on a background isolate. Inflating the
+  /// database of a large backup and decoding every object in it takes
+  /// seconds; on the UI isolate the app froze for all of it. The result comes
+  /// back through `Isolate.exit`, without a copy.
+  static Future<TavoBackupData> load(String path) => Isolate.run(() {
+    final input = InputFileStream(path);
+    try {
+      return TavoBackupData.fromArchive(ZipDecoder().decodeStream(input));
+    } finally {
+      input.closeSync();
+    }
+  });
+}
+
 class TavoImportResult {
   /// The backup's own version stamp; see [TavoBackupInfo.isTested].
   TavoBackupInfo info = const TavoBackupInfo();
@@ -293,6 +345,7 @@ class TavoBackupImporter {
   late final ApiConfigRepo _apiRepo;
   late final ChatRepo _chatRepo;
   late final SummaryRepo _summaryRepo;
+  void Function(int done, int total)? _onCount;
 
   TavoBackupImporter(this._db, this._imageStorage, [this._cancel = noCancel]) {
     _charRepo = CharacterRepo(_db);
@@ -304,55 +357,65 @@ class TavoBackupImporter {
     _summaryRepo = SummaryRepo(_db);
   }
 
+  /// [data] is the backup as [TavoBackupData.load] already read it (for the
+  /// pre-restore inspection); without it the file is read here.
+  ///
+  /// [onCount] reports how far the current stage is, for the stages that
+  /// take a while.
   Future<TavoImportResult> importFromFile(
     String filePath, {
+    TavoBackupData? data,
     void Function(String stage)? onProgress,
+    void Function(int done, int total)? onCount,
   }) async {
-    final archive = ZipDecoder().decodeStream(InputFileStream(filePath));
-    return _import(archive, onProgress: onProgress);
+    // Parsed before anything is cleared, so a broken file leaves the current
+    // data alone.
+    onProgress?.call('backup_progress_reading'.tr());
+    final parsed = data ?? await TavoBackupData.load(filePath);
+    _cancel.check();
+    // Only the avatars are read from this one.
+    final input = InputFileStream(filePath);
+    try {
+      return await _import(
+        parsed,
+        ZipDecoder().decodeStream(input),
+        onProgress: onProgress,
+        onCount: onCount,
+      );
+    } finally {
+      await input.close();
+    }
   }
 
   Future<TavoImportResult> import(
     Uint8List zipBytes, {
     void Function(String stage)? onProgress,
+    void Function(int done, int total)? onCount,
   }) async {
     final archive = ZipDecoder().decodeBytes(zipBytes);
-    return _import(archive, onProgress: onProgress);
+    onProgress?.call('backup_progress_reading'.tr());
+    return _import(
+      TavoBackupData.fromArchive(archive),
+      archive,
+      onProgress: onProgress,
+      onCount: onCount,
+    );
   }
 
   Future<TavoImportResult> _import(
+    TavoBackupData data,
     Archive zip, {
     void Function(String stage)? onProgress,
+    void Function(int done, int total)? onCount,
   }) async {
-    final result = TavoImportResult()..info = TavoBackupInfo.fromArchive(zip);
-
-    // Parsed before anything is cleared, so a broken file leaves the current
-    // data alone.
-    onProgress?.call('backup_progress_reading'.tr());
-    final mdbFile =
-        zip.findFile('objectbox/data.mdb') ??
-        zip.files.firstWhere(
-          (f) => f.isFile && f.name.toLowerCase().endsWith('data.mdb'),
-          orElse: () => throw const FormatException(
-            'No data.mdb found in Tavo backup zip.',
-          ),
-        );
-    final tavo = parseTavoObjectBox(mdbFile.readBytes()!);
-    mdbFile.clear();
-    // Tavo keeps the alternatives of a regenerated reply in a second store,
-    // which only the "Full backup" option writes into the archive.
-    final auxFile = zip.findFile('objectbox_aux/data.mdb');
-    final aux = auxFile == null
-        ? null
-        : parseTavoObjectBox(auxFile.readBytes()!);
-    auxFile?.clear();
-    _cancel.check();
+    final result = TavoImportResult()..info = data.info;
+    _onCount = onCount;
 
     onProgress?.call('backup_progress_clearing'.tr());
     await _clearAllTables();
     _cancel.check();
 
-    final s = _ImportState(tavo, zip, aux);
+    final s = _ImportState(data.tavo, zip, data.aux);
 
     onProgress?.call('backup_progress_personas'.tr());
     await _importPersonas(s, result);
@@ -650,70 +713,119 @@ class TavoBackupImporter {
 
   // ── Characters ────────────────────────────────────────────────────────────
 
+  /// Rows are written in batches: every write wakes the list watchers, which
+  /// re-read the whole table, so one write per row made importing a large
+  /// library quadratic.
+  static const _writeChunkSize = 20;
+
+  /// Avatars saved at once. Each one is decoded for its thumbnail on its own
+  /// isolate; a few side by side keep the cores busy without holding many
+  /// full-size decode buffers at the same time.
+  static const _avatarParallelism = 4;
+
+  /// Messages a chat batch holds before it is written.
+  static const _chatChunkMessages = 2000;
+
   Future<void> _importCharacters(
     _ImportState s,
     TavoImportResult result,
   ) async {
-    for (final row in _sorted(s.tavo.rows('Character'))) {
-      _cancel.check();
-      try {
-        final id = _uniqueId();
-        final ext = Map<String, dynamic>.from(_jsonMap(row['dbExtensions']));
-        // CCv3 fields Glaze has no column for travel in the extensions, which
-        // a card export writes back out.
-        final groupGreetings = _strings(row['groupOnlyGreetings']);
-        if (groupGreetings.isNotEmpty) {
-          ext['group_only_greetings'] = groupGreetings;
-        }
-        final multilingual = _jsonMap(row['dbCreatorNotesMultilingual']);
-        if (multilingual.isNotEmpty) {
-          ext['creator_notes_multilingual'] = multilingual;
-        }
-        final card = <String, dynamic>{'extensions': ext};
-        final depthPrompt = ext['depth_prompt'] is Map
-            ? ext['depth_prompt'] as Map
-            : null;
-        final avatarBytes = s.file(_str(row['avatar']));
-        final nickname = _str(row['nickname']);
-        final version = _str(row['characterVersion']);
-        final world = ext['world'];
+    final rows = _sorted(s.tavo.rows('Character'));
+    final pending = <(int, Character)>[];
 
-        final character = Character(
-          id: id,
-          name: _str(row['name']).isNotEmpty ? _str(row['name']) : 'Unknown',
-          avatarPath: avatarBytes == null
-              ? null
-              : await _imageStorage.saveAvatar(id, avatarBytes),
-          description: _str(row['description']),
-          personality: _str(row['personality']),
-          scenario: _str(row['scenario']),
-          firstMes: _str(row['firstMes']),
-          mesExample: _str(row['mesExample']),
-          systemPrompt: _str(row['systemPrompt']),
-          postHistoryInstructions: _str(row['postHistoryInstructions']),
-          creator: _str(row['creator']),
-          creatorNotes: _str(row['creatorNotes']),
-          tags: _strings(row['tags']),
-          alternateGreetings: _strings(row['alternateGreetings']),
-          createdAt: _seconds(row['creationDate']),
-          updatedAt: _seconds(row['updateAt']),
-          fav: ext['fav'] == true,
-          extensions: extractExtensionsJson(card),
-          characterVersion: version.isNotEmpty ? version : '1',
-          depthPrompt: _str(depthPrompt?['prompt']),
-          depthPromptDepth: _int(depthPrompt?['depth']) ?? 4,
-          depthPromptRole: depthPrompt?['role'] is String
-              ? depthPrompt!['role'] as String
-              : 'system',
-          world: world is String && world.isNotEmpty ? world : null,
-          macroName: nickname.isNotEmpty ? nickname : null,
-        );
-        await _charRepo.put(character);
-        s.characters[_id(row)] = character;
-        result.characters++;
+    Future<void> flush() async {
+      if (pending.isEmpty) return;
+      try {
+        await _charRepo.putAll([for (final (_, c) in pending) c]);
+        for (final (tavoId, c) in pending) {
+          s.characters[tavoId] = c;
+        }
+        result.characters += pending.length;
       } catch (e) {
-        result.errors.add('Tavo Character ${row['name']}: $e');
+        result.errors.add('Tavo Character batch: $e');
       }
+      pending.clear();
+    }
+
+    for (var i = 0; i < rows.length; i += _avatarParallelism) {
+      _cancel.check();
+      final group = rows.skip(i).take(_avatarParallelism).toList();
+      final built = await Future.wait([
+        for (final row in group) _character(s, row, result),
+      ]);
+      for (var j = 0; j < group.length; j++) {
+        final character = built[j];
+        if (character != null) pending.add((_id(group[j]), character));
+      }
+      if (pending.length >= _writeChunkSize) await flush();
+      _onCount?.call(i + group.length, rows.length);
+    }
+    await flush();
+  }
+
+  /// One Tavo character with its avatar saved; null, with the error noted,
+  /// when the row cannot be read.
+  Future<Character?> _character(
+    _ImportState s,
+    Map<String, dynamic> row,
+    TavoImportResult result,
+  ) async {
+    try {
+      final id = _uniqueId();
+      final ext = Map<String, dynamic>.from(_jsonMap(row['dbExtensions']));
+      // CCv3 fields Glaze has no column for travel in the extensions, which
+      // a card export writes back out.
+      final groupGreetings = _strings(row['groupOnlyGreetings']);
+      if (groupGreetings.isNotEmpty) {
+        ext['group_only_greetings'] = groupGreetings;
+      }
+      final multilingual = _jsonMap(row['dbCreatorNotesMultilingual']);
+      if (multilingual.isNotEmpty) {
+        ext['creator_notes_multilingual'] = multilingual;
+      }
+      final card = <String, dynamic>{'extensions': ext};
+      final depthPrompt = ext['depth_prompt'] is Map
+          ? ext['depth_prompt'] as Map
+          : null;
+      final avatarBytes = s.file(_str(row['avatar']));
+      final nickname = _str(row['nickname']);
+      final version = _str(row['characterVersion']);
+      final world = ext['world'];
+
+      final character = Character(
+        id: id,
+        name: _str(row['name']).isNotEmpty ? _str(row['name']) : 'Unknown',
+        avatarPath: avatarBytes == null
+            ? null
+            : await _imageStorage.saveAvatar(id, avatarBytes),
+        description: _str(row['description']),
+        personality: _str(row['personality']),
+        scenario: _str(row['scenario']),
+        firstMes: _str(row['firstMes']),
+        mesExample: _str(row['mesExample']),
+        systemPrompt: _str(row['systemPrompt']),
+        postHistoryInstructions: _str(row['postHistoryInstructions']),
+        creator: _str(row['creator']),
+        creatorNotes: _str(row['creatorNotes']),
+        tags: _strings(row['tags']),
+        alternateGreetings: _strings(row['alternateGreetings']),
+        createdAt: _seconds(row['creationDate']),
+        updatedAt: _seconds(row['updateAt']),
+        fav: ext['fav'] == true,
+        extensions: extractExtensionsJson(card),
+        characterVersion: version.isNotEmpty ? version : '1',
+        depthPrompt: _str(depthPrompt?['prompt']),
+        depthPromptDepth: _int(depthPrompt?['depth']) ?? 4,
+        depthPromptRole: depthPrompt?['role'] is String
+            ? depthPrompt!['role'] as String
+            : 'system',
+        world: world is String && world.isNotEmpty ? world : null,
+        macroName: nickname.isNotEmpty ? nickname : null,
+      );
+      return character;
+    } catch (e) {
+      result.errors.add('Tavo Character ${row['name']}: $e');
+      return null;
     }
   }
 
@@ -725,7 +837,27 @@ class TavoBackupImporter {
   /// (see [_importChats]); a book that came from a card is also scoped to that
   /// character, so new chats with it pick the book up as they did in Tavo.
   Future<void> _importLorebooks(_ImportState s, TavoImportResult result) async {
-    for (final row in _sorted(s.tavo.rows('Lorebook'))) {
+    final rows = _sorted(s.tavo.rows('Lorebook'));
+    // Written in batches, for the reason given at [_writeChunkSize].
+    final pending = <(int, Lorebook)>[];
+    final relinked = <String, Character>{};
+
+    Future<void> flush() async {
+      if (pending.isEmpty) return;
+      try {
+        await _lorebookRepo.putAll([for (final (_, b) in pending) b]);
+        for (final (tavoId, b) in pending) {
+          s.lorebookIds[tavoId] = b.id;
+        }
+        result.lorebooks += pending.length;
+      } catch (e) {
+        result.errors.add('Tavo Lorebook batch: $e');
+      }
+      pending.clear();
+    }
+
+    for (var n = 0; n < rows.length; n++) {
+      final row = rows[n];
       _cancel.check();
       try {
         final name = _str(row['name']);
@@ -737,7 +869,8 @@ class TavoBackupImporter {
           if (e is Map) entries.add(_lorebookEntry(e, _id(row), i));
         }
         final id = 'tavo_lb_${_id(row)}_${_uniqueId()}';
-        await _lorebookRepo.put(
+        pending.add((
+          _id(row),
           Lorebook(
             id: id,
             name: name.isNotEmpty ? name : 'Tavo Lorebook',
@@ -749,20 +882,26 @@ class TavoBackupImporter {
             entries: entries,
             updatedAt: _seconds(row['updateAt']),
           ),
-        );
-        s.lorebookIds[_id(row)] = id;
+        ));
         // Tavo renames a card's book to `<character>'s Lorebook (<book>)`;
         // the card's link has to name the book as it exists here, or the
         // editor shows a lorebook that is not in the list.
         if (owner != null && name.isNotEmpty && owner.world != name) {
           final linked = owner.copyWith(world: name);
-          await _charRepo.put(linked);
+          relinked[linked.id] = linked;
           s.characters.updateAll((_, c) => c.id == owner.id ? linked : c);
         }
-        result.lorebooks++;
       } catch (e) {
         result.errors.add('Tavo Lorebook ${row['name']}: $e');
       }
+      if (pending.length >= _writeChunkSize) await flush();
+      _onCount?.call(n + 1, rows.length);
+    }
+    await flush();
+    try {
+      await _charRepo.putAll(relinked.values.toList());
+    } catch (e) {
+      result.errors.add('Tavo Lorebook links: $e');
     }
   }
 
@@ -917,9 +1056,33 @@ class TavoBackupImporter {
       );
     final nextIndex = <String, int>{};
     final latest = <String, (int, int)>{};
+    final summaries = <(String, String, int, bool)>[];
+
+    // Written in batches, for the reason given at [_writeChunkSize]; a batch
+    // also ends at [_chatChunkMessages], so long chats are not all held at
+    // once.
+    final pending = <(ChatSession, void Function())>[];
+    var pendingMessages = 0;
+    var done = 0;
+
+    Future<void> flush() async {
+      if (pending.isEmpty) return;
+      try {
+        await _chatRepo.putAll([for (final (c, _) in pending) c]);
+        for (final (_, written) in pending) {
+          written();
+        }
+        result.chats += pending.length;
+      } catch (e) {
+        result.errors.add('Tavo Chat batch: $e');
+      }
+      pending.clear();
+      pendingMessages = 0;
+    }
 
     for (final conv in conversations) {
       _cancel.check();
+      _onCount?.call(++done, conversations.length);
       final convId = _id(conv);
       try {
         final messages = [...?messagesByConversation[convId]]
@@ -993,62 +1156,87 @@ class TavoBackupImporter {
 
         final title = _str(conv['title']);
         final updatedAt = _seconds(conv['updateAt']);
-        await _chatRepo.put(
-          ChatSession(
-            id: sessionId,
-            characterId: character.id,
-            sessionIndex: idx,
-            messages: chatMessages,
-            updatedAt: updatedAt,
-            sessionVars: {if (title.isNotEmpty) 'sessionName': title},
-          ),
+        final session = ChatSession(
+          id: sessionId,
+          characterId: character.id,
+          sessionIndex: idx,
+          messages: chatMessages,
+          updatedAt: updatedAt,
+          sessionVars: {if (title.isNotEmpty) 'sessionName': title},
         );
-        result.chats++;
 
-        final prev = latest[character.id];
-        if (prev == null || updatedAt >= prev.$2) {
-          latest[character.id] = (idx, updatedAt);
+        // Applied once the chat is actually written.
+        void written() {
+          final prev = latest[character.id];
+          if (prev == null || updatedAt >= prev.$2) {
+            latest[character.id] = (idx, updatedAt);
+          }
+
+          if (personaId != null) s.personaByChat[sessionId] = personaId;
+          final presetId = s.presetIds[_int(conv['overridePresetId'])];
+          if (presetId != null) s.presetByChat[sessionId] = presetId;
+          final books = [
+            for (final lb in s.tavo.related(
+              'Conversation.overrideLorebooks',
+              convId,
+            ))
+              ?s.lorebookIds[lb],
+          ];
+          if (books.isNotEmpty) s.lorebooksByChat[sessionId] = books;
+
+          // Tavo's long-term memory is one running summary kept as lines,
+          // all of it injected every turn — Glaze's chat summary.
+          final ltm = ltmByConversation[convId];
+          final memories = _strings(ltm?['memories']);
+          if (memories.isNotEmpty) {
+            summaries.add((
+              sessionId,
+              memories.join('\n'),
+              chatMessages.length,
+              ltm?['enabled'] == true,
+            ));
+          }
         }
 
-        if (personaId != null) s.personaByChat[sessionId] = personaId;
-        final presetId = s.presetIds[_int(conv['overridePresetId'])];
-        if (presetId != null) s.presetByChat[sessionId] = presetId;
-        final books = [
-          for (final lb in s.tavo.related(
-            'Conversation.overrideLorebooks',
-            convId,
-          ))
-            ?s.lorebookIds[lb],
-        ];
-        if (books.isNotEmpty) s.lorebooksByChat[sessionId] = books;
-
-        // Tavo's long-term memory is one running summary kept as lines,
-        // all of it injected every turn — Glaze's chat summary.
-        final ltm = ltmByConversation[convId];
-        final memories = _strings(ltm?['memories']);
-        if (memories.isNotEmpty) {
-          await _summaryRepo.put(
-            sessionId: sessionId,
-            content: memories.join('\n'),
-            messageCount: chatMessages.length,
-            enabled: ltm?['enabled'] == true,
-          );
-          result.summaries++;
+        pending.add((session, written));
+        pendingMessages += chatMessages.length;
+        if (pending.length >= _writeChunkSize ||
+            pendingMessages >= _chatChunkMessages) {
+          await flush();
         }
       } catch (e) {
         result.errors.add('Tavo Chat $convId: $e');
       }
     }
+    await flush();
 
-    for (final entry in latest.entries) {
-      _cancel.check();
-      final character = await _charRepo.getById(entry.key);
-      if (character != null) {
-        await _charRepo.put(
-          character.copyWith(currentSessionIndex: entry.value.$1),
-        );
+    _cancel.check();
+    if (summaries.isNotEmpty) {
+      try {
+        await _db.transaction(() async {
+          for (final (sessionId, content, count, enabled) in summaries) {
+            await _summaryRepo.put(
+              sessionId: sessionId,
+              content: content,
+              messageCount: count,
+              enabled: enabled,
+            );
+          }
+        });
+        result.summaries += summaries.length;
+      } catch (e) {
+        result.errors.add('Tavo Chat memory: $e');
       }
     }
+
+    // One transaction, so the character watchers wake once rather than once
+    // per character.
+    _cancel.check();
+    await _db.transaction(() async {
+      for (final entry in latest.entries) {
+        await _charRepo.setCurrentSessionIndex(entry.key, entry.value.$1);
+      }
+    });
   }
 
   // ── Active selections ─────────────────────────────────────────────────────

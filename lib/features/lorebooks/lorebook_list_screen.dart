@@ -57,7 +57,82 @@ class _LorebookListScreenState extends ConsumerState<LorebookListScreen> {
 
   void _leaveFolder() => setState(() => _currentFolderId = null);
 
+  /// Search by name: the magnifier swaps the title for a field, the way the
+  /// Chats and Characters tabs search. A query looks through every lorebook,
+  /// whatever folder it is in.
+  final _searchCtrl = TextEditingController();
+  final _searchFocus = FocusNode();
+  bool _searchExpanded = false;
+  String _searchQuery = '';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    _searchFocus.dispose();
+    super.dispose();
+  }
+
+  void _openSearch() {
+    setState(() => _searchExpanded = true);
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _searchFocus.requestFocus(),
+    );
+  }
+
+  void _closeSearch() {
+    _searchCtrl.clear();
+    setState(() {
+      _searchExpanded = false;
+      _searchQuery = '';
+    });
+  }
+
+  Widget _buildSearchField() {
+    return TextField(
+      controller: _searchCtrl,
+      focusNode: _searchFocus,
+      autofocus: true,
+      onChanged: (v) => setState(() => _searchQuery = v),
+      textInputAction: TextInputAction.search,
+      cursorColor: context.cs.primary,
+      style: TextStyle(color: context.cs.onSurface, fontSize: 16),
+      decoration: InputDecoration(
+        isDense: true,
+        border: InputBorder.none,
+        hintText: 'lorebook_search_hint'.tr(),
+        hintStyle: TextStyle(color: context.cs.onSurfaceVariant, fontSize: 16),
+      ),
+    );
+  }
+
+  /// Opens the vector settings — or, without a configured embedding
+  /// connection, their setup.
+  Future<void> _openEmbeddingSettings() async {
+    await ref.read(apiListProvider.future);
+    if (!mounted) return;
+    if (!ref.read(embeddingConfiguredProvider)) {
+      showVectorSetupSheet(context);
+      return;
+    }
+    // On desktop a window; a page would cover the whole app.
+    await (isDesktopLayout(context)
+        ? showGlazeSheet<void>(
+            context: context,
+            useRootNavigator: true,
+            builder: (_) => const EmbeddingSettingsScreen(),
+          )
+        : Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => const EmbeddingSettingsScreen(),
+            ),
+          ));
+  }
+
   void _handleBack() {
+    if (_searchExpanded) {
+      _closeSearch();
+      return;
+    }
     if (_currentFolderId != null) {
       _leaveFolder();
       return;
@@ -83,7 +158,9 @@ class _LorebookListScreenState extends ConsumerState<LorebookListScreen> {
       startExpanded: widget.startExpanded,
       showRouteBackground: false,
       shellBranchIndex: 2,
-      titleWidget: folderId == null
+      titleWidget: _searchExpanded
+          ? _buildSearchField()
+          : folderId == null
           ? Row(
               children: [
                 Flexible(
@@ -120,31 +197,21 @@ class _LorebookListScreenState extends ConsumerState<LorebookListScreen> {
         onTap: () => _openLorebookMenu(context),
       ),
       actions: [
-        // Without a configured embedding connection this leads to its setup
-        // instead of the vector settings.
+        // The magnifier searches, as it does everywhere else in the app; the
+        // vector settings it used to open sit behind the gear next to it.
         SheetViewAction(
-          icon: const Icon(Icons.search, size: 20),
+          icon: Icon(
+            _searchExpanded ? Icons.close_rounded : Icons.search,
+            size: 20,
+          ),
+          tooltip: (_searchExpanded ? 'btn_close' : 'lorebook_search_tooltip')
+              .tr(),
+          onPressed: _searchExpanded ? _closeSearch : _openSearch,
+        ),
+        SheetViewAction(
+          icon: const Icon(Icons.settings_outlined, size: 20),
           tooltip: 'lorebook_embedding_settings_tooltip'.tr(),
-          onPressed: () async {
-            await ref.read(apiListProvider.future);
-            if (!context.mounted) return;
-            if (!ref.read(embeddingConfiguredProvider)) {
-              showVectorSetupSheet(context);
-              return;
-            }
-            // On desktop a window; a page would cover the whole app.
-            await (isDesktopLayout(context)
-                ? showGlazeSheet<void>(
-                    context: context,
-                    useRootNavigator: true,
-                    builder: (_) => const EmbeddingSettingsScreen(),
-                  )
-                : Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const EmbeddingSettingsScreen(),
-                    ),
-                  ));
-          },
+          onPressed: _openEmbeddingSettings,
         ),
       ],
       body: lorebooksAsync.when(
@@ -159,8 +226,14 @@ class _LorebookListScreenState extends ConsumerState<LorebookListScreen> {
                       const [])
                   .isNotEmpty;
 
+          final query = _searchQuery.trim().toLowerCase();
+          final searching = query.isNotEmpty;
           final List<Lorebook> lorebooks;
-          if (folderId != null) {
+          if (searching) {
+            lorebooks = all
+                .where((lb) => lb.name.toLowerCase().contains(query))
+                .toList();
+          } else if (folderId != null) {
             final ids = memberships.membersIn(folderId);
             lorebooks = all.where((lb) => ids.contains(lb.id)).toList();
           } else {
@@ -181,7 +254,8 @@ class _LorebookListScreenState extends ConsumerState<LorebookListScreen> {
                 ),
               ),
               children: [
-                if (folderId == null) ...[
+                // A search shows only its hits: no settings or folders above.
+                if (folderId == null && !searching) ...[
                   const LorebookGlobalSettingsSection(),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -192,7 +266,16 @@ class _LorebookListScreenState extends ConsumerState<LorebookListScreen> {
                     ),
                   ),
                 ],
-                if (lorebooks.isEmpty && !(folderId == null && hasFolders))
+                if (searching && lorebooks.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: Text(
+                      'search_no_results'.tr(),
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: context.cs.onSurfaceVariant),
+                    ),
+                  )
+                else if (lorebooks.isEmpty && !(folderId == null && hasFolders))
                   _EmptyState(
                     onCreate: () => _createLorebook(context),
                     onImport: () => _importSTLorebook(context),
@@ -661,7 +744,11 @@ class _LorebookCard extends ConsumerWidget {
     // In a sidebar panel the lorebook is a row of the list, edge to edge.
     if (inSidebarPanel(context)) {
       return FlatGroupSurface(
-        child: InkWell(mouseCursor: SystemMouseCursors.click, onTap: onTap, child: content),
+        child: InkWell(
+          mouseCursor: SystemMouseCursors.click,
+          onTap: onTap,
+          child: content,
+        ),
       );
     }
     return Padding(

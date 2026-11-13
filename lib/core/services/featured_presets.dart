@@ -118,6 +118,10 @@ const featuredPresets = <FeaturedPreset>[
     reasoningEnabled: true,
     reasoningStart: '<think>',
     reasoningEnd: '</think>',
+    // v2: NoriMyn for 4Argon 3.8 Flash.
+    revision: 2,
+    previousJsonAsset: 'assets/presets/norimyn_old.json',
+    previousImageAsset: 'assets/presets/norimyn_old.jpg',
   ),
 ];
 

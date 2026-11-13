@@ -270,7 +270,7 @@ Vue + Capacitor + Electron веткой `zzarchive/legacy-vue`. Vue здесь �
 | 8.2 | Кнопка Magic на ПК не скрыта | Vue: `.desktop-mode #btn-magic { display: none }` и `.magic-drawer { display: none }` — на ПК Magic живёт в правом сайдбаре. Flutter: кнопка в `chat_input_bar.dart:690` остаётся, а `renderDrawer` на ПК всегда `false` (`chat_screen.dart:1351`). При этом `panelHeight` считается из `drawerCtrl` без учёта ПК (`chat_screen.dart:1286`) → нажатие поднимает поле ввода, открывая **пустой отступ**. *Требует проверки в рантайме — агент не может запускать `flutter run`.* | **Высокий** |
 | 8.3 | Градиенты статуса | Vue: `.chat-status-gradient` скрыты на ПК | во Flutter десктопной ветки нет | Низкий |
 | 8.4 | Действия над сообщением | Vue: наведение мыши; во Flutter — тач-жесты (`message_actions.dart`), hover-варианта нет | Средний |
-| 8.5 | Скролл тачпадом | — | ✔ реализовано (`chat_webview_trackpad_scroll.dart`) ⭐ | — |
+| 8.5 | Скролл тачпадом и колесом мыши | — | ✔ реализовано (`chat_webview_scroll_relay.dart`: пан тачпада и щелчок колеса ретранслируются в страницу, колесо — с плавной анимацией) ⭐ | — |
 
 ---
 

@@ -12,8 +12,12 @@
 // attribute / CSS policy below. It is inserted into the light DOM next to the
 // app's own chrome rather than into a per-message shadow root, so its rules
 // stay scoped and its element set stays narrow.
+//
+// Both honour the "Allow external media" setting: with it off, every load
+// from a third-party host is dropped first (see external_media.js).
 
 import { sanitizeCssText, sanitizeStyleDeclaration } from './css_sanitizer.js';
+import { stripExternalMedia } from './external_media.js';
 
 const BLOCKED_ELEMENTS = new Set([
   'script', 'iframe', 'object', 'embed', 'form', 'math', 'meta',
@@ -62,9 +66,10 @@ function sanitizeStyleElement(element, cssScope) {
   element.textContent = safe;
 }
 
-function sanitizeHtml(html, cssScope) {
+function sanitizeHtml(html, cssScope, allowExternalMedia) {
   const template = document.createElement('template');
   template.innerHTML = String(html == null ? '' : html);
+  if (!allowExternalMedia) stripExternalMedia(template.content);
 
   for (const element of Array.from(template.content.querySelectorAll('*'))) {
     const localName = element.localName.toLowerCase();
@@ -130,11 +135,8 @@ function isMessageCodeUrl(compact) {
 // Strips the code out of message HTML and touches nothing else: no element is
 // dropped for how it looks, and `<style>` / `style="…"` are left byte-identical
 // so the message renders exactly as written.
-function stripMessageCode(html) {
-  const template = document.createElement('template');
-  template.innerHTML = String(html == null ? '' : html);
-
-  for (const element of Array.from(template.content.querySelectorAll('*'))) {
+function stripMessageCode(container) {
+  for (const element of Array.from(container.querySelectorAll('*'))) {
     if (MESSAGE_CODE_ELEMENTS.has(element.localName.toLowerCase())) {
       element.remove();
       continue;
@@ -153,18 +155,24 @@ function stripMessageCode(html) {
       if (isMessageCodeUrl(compact)) element.removeAttribute(attribute.name);
     }
   }
-
-  return template.innerHTML;
 }
 
 // [allowScripts] mirrors the app's message-script setting. With execution on
 // the message HTML is inserted verbatim; with it off the code is removed and
-// the markup and CSS are still inserted verbatim.
-export function sanitizeMessageHtml(html, { allowScripts = false } = {}) {
-  if (allowScripts) return String(html == null ? '' : html);
-  return stripMessageCode(html);
+// the markup and CSS are still inserted verbatim. [allowExternalMedia] off
+// additionally drops every load from a third-party host (external_media.js).
+export function sanitizeMessageHtml(
+  html,
+  { allowScripts = false, allowExternalMedia = true } = {},
+) {
+  if (allowScripts && allowExternalMedia) return String(html == null ? '' : html);
+  const template = document.createElement('template');
+  template.innerHTML = String(html == null ? '' : html);
+  if (!allowScripts) stripMessageCode(template.content);
+  if (!allowExternalMedia) stripExternalMedia(template.content);
+  return template.innerHTML;
 }
 
-export function sanitizeExtBlockHtml(html) {
-  return sanitizeHtml(html, EXT_BLOCK_CSS_SCOPE);
+export function sanitizeExtBlockHtml(html, { allowExternalMedia = true } = {}) {
+  return sanitizeHtml(html, EXT_BLOCK_CSS_SCOPE, allowExternalMedia);
 }

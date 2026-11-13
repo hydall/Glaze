@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
+import '../../../core/debug/perf_debug.dart';
 import '../../../core/llm/display_regex_worker.dart';
 import '../../../core/models/chat_message.dart';
 import '../../regex/stopped_regex_sheet.dart';
@@ -49,24 +50,26 @@ class MessageBridgeCommands {
     _host.clearCachedTriggeredRegexes();
     final regexed = await _regexed(messages);
     final List<Map<String, dynamic>> mapped = [];
-    for (int i = 0; i < messages.length; i++) {
-      final map = ChatMessageMapper.toMap(
-        messages[i],
-        _host.mapperContext,
-        isLast: i == messages.length - 1,
-        messageIndex: visibleStartIndex + i,
-        displayRegexes: _host.displayRegexes,
-        character: _host.regexCharacter,
-        persona: _host.regexPersona,
-        sessionVars: _host.regexSessionVars,
-        globalVars: _host.regexGlobalVars,
-        inlineExtBlocks: _host.inlineExtBlocks(messages[i]),
-        regexed: regexed?[i],
-      );
-      _resolveMappedFileUrls(map);
-      _host.cacheMappedTriggeredRegexes(map);
-      mapped.add(map);
-    }
+    PerfDebug.slowPhase('map ${messages.length} messages for the page', () {
+      for (int i = 0; i < messages.length; i++) {
+        final map = ChatMessageMapper.toMap(
+          messages[i],
+          _host.mapperContext,
+          isLast: i == messages.length - 1,
+          messageIndex: visibleStartIndex + i,
+          displayRegexes: _host.displayRegexes,
+          character: _host.regexCharacter,
+          persona: _host.regexPersona,
+          sessionVars: _host.regexSessionVars,
+          globalVars: _host.regexGlobalVars,
+          inlineExtBlocks: _host.inlineExtBlocks(messages[i]),
+          regexed: regexed?[i],
+        );
+        _resolveMappedFileUrls(map);
+        _host.cacheMappedTriggeredRegexes(map);
+        mapped.add(map);
+      }
+    });
     final resolved = await Future.wait(
       mapped.map((m) => _host.resolveImgResults(m['text'] as String)),
     );

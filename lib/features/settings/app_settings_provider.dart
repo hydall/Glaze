@@ -12,6 +12,12 @@ part 'app_settings_provider.freezed.dart';
 
 const supportedAppLanguages = {'en', 'ru'};
 
+/// Default for [AppSettings.lorebookBuildChunkTokens]. The model copies every
+/// entry body back out inside its JSON, so a build reply runs at least as long
+/// as the text it was given: this keeps it inside the output limit common
+/// providers allow, with room left for keys and JSON.
+const kDefaultLorebookBuildChunkTokens = 24000;
+
 /// Where a JanitorAI card, its hidden definition or its lorebooks are read
 /// from.
 ///
@@ -69,6 +75,13 @@ bool? _coerceBool(Object? value) {
     if (normalized == '1' || normalized == 'true') return true;
     if (normalized == '0' || normalized == 'false') return false;
   }
+  return null;
+}
+
+int? _coerceInt(Object? value) {
+  if (value is int) return value;
+  if (value is double) return value.round();
+  if (value is String) return int.tryParse(value.trim());
   return null;
 }
 
@@ -142,6 +155,12 @@ abstract class AppSettings with _$AppSettings {
     @Default(false) bool disableSwipeRegeneration,
     @Default(false) bool allowMessageScripts,
 
+    /// Whether message HTML and CSS may load anything from the network:
+    /// `<img>`/`<video>`/`<audio>` with a remote source, `url(https://…)` in
+    /// CSS, `@import` and remote `@font-face`. On by default; off works like
+    /// SillyTavern's "Forbid external media" — embedded `data:` media stays.
+    @Default(true) bool allowExternalMedia,
+
     /// Whether deleting one or more chat messages asks for confirmation first.
     /// On by default: a delete also rolls back Studio trackers, MemoryBook
     /// entries and other data derived from the deleted point onward, so the
@@ -161,6 +180,11 @@ abstract class AppSettings with _$AppSettings {
     /// phone layout. This switch forces the phone layout back on for users who
     /// prefer it.
     @Default(false) bool forceMobileLayout,
+
+    /// Puts the tab rail of a phone held sideways along the left edge instead
+    /// of the right. Right by default: that is where the thumb of the hand
+    /// holding the phone rests for most people.
+    @Default(false) bool navRailLeft,
     @Default(false) bool addBlockAtTop,
     @Default(true) bool openCardAfterImport,
     @Default(true) bool hapticFeedback,
@@ -190,6 +214,20 @@ abstract class AppSettings with _$AppSettings {
     /// concatenated bodies. Empty → `kLorebookSystemPromptJs`.
     @Default('') String lorebookBuildPromptJs,
 
+    /// Connection lorebook builds run on (the closed-lorebook rebuild and the
+    /// scripted-lorebook conversion). Empty means the chat's selected
+    /// connection — see `resolveLorebookBuildConfig`.
+    @Default('') String lorebookBuildApiConfigId,
+
+    /// Model override for lorebook builds on that connection. Empty keeps the
+    /// connection's own model.
+    @Default('') String lorebookBuildModel,
+
+    /// Most lorebook text one build request carries, in tokens; longer text is
+    /// built in several requests (see `planLorebookBuild`). 0 turns the split
+    /// off and sends everything in one request, however long.
+    @Default(kDefaultLorebookBuildChunkTokens) int lorebookBuildChunkTokens,
+
     /// When on, the shuffle button opens a random character straight in the
     /// detail sheet (the classic behaviour) instead of the randomizing
     /// (Holocard) discovery overlay. Off by default.
@@ -217,11 +255,13 @@ abstract final class AppSettingsPreferences {
     'hideTooltips',
     'disableSwipeRegeneration',
     'allowMessageScripts',
+    'allowExternalMedia',
     'confirmMessageDelete',
     'language',
     'virtualKeyboardSend',
     'showOurPicks',
     'gz_force_mobile_layout',
+    'gz_nav_rail_left',
     'gz_chat_max_width',
     'addBlockAtTop',
     'openCardAfterImport',
@@ -230,6 +270,9 @@ abstract final class AppSettingsPreferences {
     'janitorSource',
     'lorebookBuildPrompt',
     'lorebookBuildPromptJs',
+    'lorebookBuildApiConfigId',
+    'lorebookBuildModel',
+    'lorebookBuildChunkTokens',
     'useStandardRandomizer',
     'hideContextCard',
   };
@@ -260,6 +303,9 @@ abstract final class AppSettingsPreferences {
       allowMessageScripts:
           _coerceBool(prefs.get('allowMessageScripts')) ??
           defaults.allowMessageScripts,
+      allowExternalMedia:
+          _coerceBool(prefs.get('allowExternalMedia')) ??
+          defaults.allowExternalMedia,
       confirmMessageDelete:
           _coerceBool(prefs.get('confirmMessageDelete')) ??
           defaults.confirmMessageDelete,
@@ -274,6 +320,8 @@ abstract final class AppSettingsPreferences {
       forceMobileLayout:
           _coerceBool(prefs.get('gz_force_mobile_layout')) ??
           defaults.forceMobileLayout,
+      navRailLeft:
+          _coerceBool(prefs.get('gz_nav_rail_left')) ?? defaults.navRailLeft,
       chatMaxWidth:
           _coerceDouble(prefs.get('gz_chat_max_width')) ??
           defaults.chatMaxWidth,
@@ -297,6 +345,14 @@ abstract final class AppSettingsPreferences {
       lorebookBuildPromptJs:
           prefs.getString('lorebookBuildPromptJs') ??
           defaults.lorebookBuildPromptJs,
+      lorebookBuildApiConfigId:
+          prefs.getString('lorebookBuildApiConfigId') ??
+          defaults.lorebookBuildApiConfigId,
+      lorebookBuildModel:
+          prefs.getString('lorebookBuildModel') ?? defaults.lorebookBuildModel,
+      lorebookBuildChunkTokens:
+          _coerceInt(prefs.get('lorebookBuildChunkTokens')) ??
+          defaults.lorebookBuildChunkTokens,
       useStandardRandomizer:
           _coerceBool(prefs.get('useStandardRandomizer')) ??
           defaults.useStandardRandomizer,
@@ -318,11 +374,13 @@ abstract final class AppSettingsPreferences {
       'hideTooltips': normalized.hideTooltips,
       'disableSwipeRegeneration': normalized.disableSwipeRegeneration,
       'allowMessageScripts': normalized.allowMessageScripts,
+      'allowExternalMedia': normalized.allowExternalMedia,
       'confirmMessageDelete': normalized.confirmMessageDelete,
       'language': normalized.language,
       'virtualKeyboardSend': normalized.virtualKeyboardSend,
       'showOurPicks': normalized.showOurPicks,
       'gz_force_mobile_layout': normalized.forceMobileLayout,
+      'gz_nav_rail_left': normalized.navRailLeft,
       'gz_chat_max_width': normalized.chatMaxWidth,
       'addBlockAtTop': normalized.addBlockAtTop,
       'openCardAfterImport': normalized.openCardAfterImport,
@@ -331,6 +389,9 @@ abstract final class AppSettingsPreferences {
       'janitorSource': normalized.janitorSource.name,
       'lorebookBuildPrompt': normalized.lorebookBuildPrompt,
       'lorebookBuildPromptJs': normalized.lorebookBuildPromptJs,
+      'lorebookBuildApiConfigId': normalized.lorebookBuildApiConfigId,
+      'lorebookBuildModel': normalized.lorebookBuildModel,
+      'lorebookBuildChunkTokens': normalized.lorebookBuildChunkTokens,
       'useStandardRandomizer': normalized.useStandardRandomizer,
       'hideContextCard': normalized.hideContextCard,
     };
@@ -345,6 +406,8 @@ abstract final class AppSettingsPreferences {
       final value = entry.value;
       if (value is bool) {
         await prefs.setBool(entry.key, value);
+      } else if (value is int) {
+        await prefs.setInt(entry.key, value);
       } else if (value is double) {
         await prefs.setDouble(entry.key, value);
       } else if (value is String) {
@@ -367,6 +430,9 @@ abstract final class AppSettingsPreferences {
       if (current is bool) {
         final parsed = _coerceBool(incoming);
         if (parsed != null) merged[key] = parsed;
+      } else if (current is int) {
+        final parsed = _coerceInt(incoming);
+        if (parsed != null && parsed >= 0) merged[key] = parsed;
       } else if (current is double) {
         final parsed = _coerceDouble(incoming);
         if (parsed != null) merged[key] = parsed;
@@ -426,11 +492,13 @@ abstract final class AppSettingsPreferences {
     hideTooltips: values['hideTooltips'] as bool,
     disableSwipeRegeneration: values['disableSwipeRegeneration'] as bool,
     allowMessageScripts: values['allowMessageScripts'] as bool,
+    allowExternalMedia: values['allowExternalMedia'] as bool,
     confirmMessageDelete: values['confirmMessageDelete'] as bool,
     language: values['language'] as String,
     virtualKeyboardSend: values['virtualKeyboardSend'] as bool,
     showOurPicks: values['showOurPicks'] as bool,
     forceMobileLayout: values['gz_force_mobile_layout'] as bool,
+    navRailLeft: values['gz_nav_rail_left'] as bool,
     chatMaxWidth: values['gz_chat_max_width'] as double,
     addBlockAtTop: values['addBlockAtTop'] as bool,
     openCardAfterImport: values['openCardAfterImport'] as bool,
@@ -441,6 +509,9 @@ abstract final class AppSettingsPreferences {
         const AppSettings().janitorSource,
     lorebookBuildPrompt: values['lorebookBuildPrompt'] as String,
     lorebookBuildPromptJs: values['lorebookBuildPromptJs'] as String,
+    lorebookBuildApiConfigId: values['lorebookBuildApiConfigId'] as String,
+    lorebookBuildModel: values['lorebookBuildModel'] as String,
+    lorebookBuildChunkTokens: values['lorebookBuildChunkTokens'] as int,
     useStandardRandomizer: values['useStandardRandomizer'] as bool,
     hideContextCard: values['hideContextCard'] as bool,
   );

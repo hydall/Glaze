@@ -6,6 +6,7 @@ import 'package:gpt_markdown/gpt_markdown.dart';
 import '../utils/color_utils.dart';
 import 'app_colors.dart';
 import 'theme_preset.dart';
+import 'ui_scale.dart';
 
 const String kInterFontFamily = 'Inter';
 
@@ -256,6 +257,8 @@ class AppTheme {
     ColorScheme? dynamicScheme,
   }) {
     final isMaterialYou = preset.isMaterialYou;
+    final corner = preset.cornerScale.clamp(0.0, 4.0);
+    final avatar = preset.avatarRoundness.clamp(0.0, 1.0);
     final colorScheme = isMaterialYou
         ? _materialYouScheme(dynamicScheme, isDark: true)
         : _buildColorScheme(preset, isDark: true);
@@ -280,11 +283,11 @@ class AppTheme {
       colorScheme: colorScheme,
       useMaterial3: true,
       blendLevel: 0,
-      subThemesData: const FlexSubThemesData(
+      subThemesData: FlexSubThemesData(
         inputDecoratorIsFilled: true,
         inputDecoratorBorderType: FlexInputBorderType.outline,
-        cardRadius: 16,
-        dialogRadius: 16,
+        cardRadius: 16 * corner,
+        dialogRadius: 16 * corner,
       ),
       visualDensity: VisualDensity.compact,
       fontFamily: effectiveFont,
@@ -301,11 +304,15 @@ class AppTheme {
       ),
       dialogTheme: DialogThemeData(
         backgroundColor: colorScheme.surfaceContainerHighest,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16 * corner)),
       ),
       bottomSheetTheme: BottomSheetThemeData(
         backgroundColor: colorScheme.surfaceContainerHighest,
         modalBackgroundColor: colorScheme.surfaceContainerHighest,
         surfaceTintColor: colorScheme.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20 * corner)),
+        ),
         // `showModalBottomSheet` falls back to this when a call site passes no
         // constraints of its own, so one line here caps every sheet in the app.
         // Without it a sheet spans the whole window on desktop — a full-width
@@ -316,6 +323,7 @@ class AppTheme {
       popupMenuTheme: PopupMenuThemeData(
         color: colorScheme.surfaceContainerHighest,
         surfaceTintColor: colorScheme.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12 * corner)),
       ),
       appBarTheme: AppBarTheme(
         backgroundColor: Colors.transparent,
@@ -327,7 +335,7 @@ class AppTheme {
         color: colorScheme.surfaceContainerHighest,
         elevation: 0,
         shape: RoundedRectangleBorder(
-          borderRadius: const BorderRadius.all(Radius.circular(16)),
+          borderRadius: BorderRadius.circular(16 * corner),
           side: BorderSide(color: colorScheme.outline),
         ),
       ),
@@ -335,15 +343,15 @@ class AppTheme {
         filled: true,
         fillColor: colorScheme.surfaceContainerHighest,
         border: OutlineInputBorder(
-          borderRadius: const BorderRadius.all(Radius.circular(12)),
+          borderRadius: BorderRadius.circular(12 * corner),
           borderSide: BorderSide(color: colorScheme.outline),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: const BorderRadius.all(Radius.circular(12)),
+          borderRadius: BorderRadius.circular(12 * corner),
           borderSide: BorderSide(color: colorScheme.outline),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: const BorderRadius.all(Radius.circular(12)),
+          borderRadius: BorderRadius.circular(12 * corner),
           borderSide: BorderSide(color: colorScheme.primary),
         ),
       ),
@@ -351,13 +359,39 @@ class AppTheme {
         style: ElevatedButton.styleFrom(
           backgroundColor: btnBg,
           foregroundColor: btnFg,
-          shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(8)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8 * corner),
+          ),
+        ),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: (base.filledButtonTheme.style ?? const ButtonStyle()).copyWith(
+          shape: WidgetStatePropertyAll(
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20 * corner)),
+          ),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: (base.outlinedButtonTheme.style ?? const ButtonStyle()).copyWith(
+          shape: WidgetStatePropertyAll(
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20 * corner)),
           ),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
-        style: TextButton.styleFrom(foregroundColor: colorScheme.onSurface),
+        style: (base.textButtonTheme.style ?? const ButtonStyle()).copyWith(
+          foregroundColor: WidgetStatePropertyAll(colorScheme.onSurface),
+          shape: WidgetStatePropertyAll(
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20 * corner)),
+          ),
+        ),
+      ),
+      iconButtonTheme: IconButtonThemeData(
+        style: (base.iconButtonTheme.style ?? const ButtonStyle()).copyWith(
+          shape: WidgetStatePropertyAll(
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20 * corner)),
+          ),
+        ),
       ),
       switchTheme: SwitchThemeData(
         thumbColor: WidgetStateProperty.all(Colors.white),
@@ -377,6 +411,7 @@ class AppTheme {
         fontWeight: uiWeight,
       ),
       extensions: [
+        GlazeUiScale(cornerScale: corner, avatarRoundness: avatar),
         glazeColors,
         GptMarkdownThemeData(
           brightness: Brightness.dark,
@@ -427,6 +462,8 @@ class AppTheme {
     ColorScheme? dynamicScheme,
   }) {
     final isMaterialYou = preset.isMaterialYou;
+    final corner = preset.cornerScale.clamp(0.0, 4.0);
+    final avatar = preset.avatarRoundness.clamp(0.0, 1.0);
     final colorScheme = isMaterialYou
         ? _materialYouScheme(dynamicScheme, isDark: false)
         : _buildColorScheme(preset, isDark: false);
@@ -451,11 +488,11 @@ class AppTheme {
       colorScheme: colorScheme,
       useMaterial3: true,
       blendLevel: 0,
-      subThemesData: const FlexSubThemesData(
+      subThemesData: FlexSubThemesData(
         inputDecoratorIsFilled: true,
         inputDecoratorBorderType: FlexInputBorderType.outline,
-        cardRadius: 16,
-        dialogRadius: 16,
+        cardRadius: 16 * corner,
+        dialogRadius: 16 * corner,
       ),
       visualDensity: VisualDensity.compact,
       fontFamily: effectiveFont,
@@ -472,11 +509,15 @@ class AppTheme {
       ),
       dialogTheme: DialogThemeData(
         backgroundColor: colorScheme.surfaceContainerHighest,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16 * corner)),
       ),
       bottomSheetTheme: BottomSheetThemeData(
         backgroundColor: colorScheme.surfaceContainerHighest,
         modalBackgroundColor: colorScheme.surfaceContainerHighest,
         surfaceTintColor: colorScheme.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20 * corner)),
+        ),
         // `showModalBottomSheet` falls back to this when a call site passes no
         // constraints of its own, so one line here caps every sheet in the app.
         // Without it a sheet spans the whole window on desktop — a full-width
@@ -487,6 +528,7 @@ class AppTheme {
       popupMenuTheme: PopupMenuThemeData(
         color: colorScheme.surfaceContainerHighest,
         surfaceTintColor: colorScheme.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12 * corner)),
       ),
       appBarTheme: AppBarTheme(
         backgroundColor: Colors.transparent,
@@ -498,7 +540,7 @@ class AppTheme {
         color: colorScheme.surface,
         elevation: 0,
         shape: RoundedRectangleBorder(
-          borderRadius: const BorderRadius.all(Radius.circular(16)),
+          borderRadius: BorderRadius.circular(16 * corner),
           side: BorderSide(color: colorScheme.outline),
         ),
       ),
@@ -506,15 +548,15 @@ class AppTheme {
         filled: true,
         fillColor: colorScheme.surfaceContainerHighest,
         border: OutlineInputBorder(
-          borderRadius: const BorderRadius.all(Radius.circular(12)),
+          borderRadius: BorderRadius.circular(12 * corner),
           borderSide: BorderSide(color: colorScheme.outline),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: const BorderRadius.all(Radius.circular(12)),
+          borderRadius: BorderRadius.circular(12 * corner),
           borderSide: BorderSide(color: colorScheme.outline),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: const BorderRadius.all(Radius.circular(12)),
+          borderRadius: BorderRadius.circular(12 * corner),
           borderSide: BorderSide(color: colorScheme.primary),
         ),
       ),
@@ -522,13 +564,39 @@ class AppTheme {
         style: ElevatedButton.styleFrom(
           backgroundColor: btnBg,
           foregroundColor: btnFg,
-          shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(8)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8 * corner),
+          ),
+        ),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: (base.filledButtonTheme.style ?? const ButtonStyle()).copyWith(
+          shape: WidgetStatePropertyAll(
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20 * corner)),
+          ),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: (base.outlinedButtonTheme.style ?? const ButtonStyle()).copyWith(
+          shape: WidgetStatePropertyAll(
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20 * corner)),
           ),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
-        style: TextButton.styleFrom(foregroundColor: colorScheme.onSurface),
+        style: (base.textButtonTheme.style ?? const ButtonStyle()).copyWith(
+          foregroundColor: WidgetStatePropertyAll(colorScheme.onSurface),
+          shape: WidgetStatePropertyAll(
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20 * corner)),
+          ),
+        ),
+      ),
+      iconButtonTheme: IconButtonThemeData(
+        style: (base.iconButtonTheme.style ?? const ButtonStyle()).copyWith(
+          shape: WidgetStatePropertyAll(
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20 * corner)),
+          ),
+        ),
       ),
       switchTheme: SwitchThemeData(
         thumbColor: WidgetStateProperty.all(Colors.white),
@@ -548,6 +616,7 @@ class AppTheme {
         fontWeight: uiWeight,
       ),
       extensions: [
+        GlazeUiScale(cornerScale: corner, avatarRoundness: avatar),
         glazeColors,
         GptMarkdownThemeData(
           brightness: Brightness.light,

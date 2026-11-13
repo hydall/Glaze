@@ -78,6 +78,31 @@ void main() {
       expect(harness.container.read(memoryActiveDraftsProvider), isEmpty);
     },
   );
+
+  test(
+    'a draft over a hidden message skips it and is generated',
+    () async {
+      final harness = await _createHarness(autoGenerate: true);
+      addTearDown(harness.dispose);
+      final session = harness.session.copyWith(
+        messages: [
+          harness.session.messages[0],
+          harness.session.messages[1].copyWith(isHidden: true),
+        ],
+      );
+      final lease = harness.stage.reserveAutoGeneration(session);
+
+      await harness.stage.run(session, generationLease: lease);
+
+      final book = await harness.container
+          .read(memoryBookRepoProvider)
+          .getBySessionId('s1');
+      expect(harness.calls(), 1);
+      expect(book!.pendingDrafts.single.status, 'pending_approval');
+      expect(book.pendingDrafts.single.content, 'Generated memory');
+      expect(harness.container.read(memoryActiveDraftsProvider), isEmpty);
+    },
+  );
 }
 
 Future<_Harness> _createHarness({

@@ -182,10 +182,13 @@ class JanitorExtractor {
       // single latest user turn so every keyword stays within JanitorAI's
       // server-side scan depth. The card is added by the capture itself (it
       // only exists inside the assembled prompt, which the first send reveals).
+      // A closed card withholds its greetings from the metadata; then the
+      // capture adds the ones its chat carries, the way it adds the card.
+      final metaGreetings = metaCtx.greetings.trim().isNotEmpty;
       final triggerText = [
         if (trigger.catalog) metaCtx.catalog,
         if (trigger.scenario) metaCtx.scenario,
-        if (trigger.greetings) metaCtx.greetings,
+        if (trigger.greetings && metaGreetings) metaCtx.greetings,
         if (trigger.lorebookDescs) lorebookDescs,
         trigger.extra,
       ].map((s) => s.trim()).where((s) => s.isNotEmpty).join('\n\n');
@@ -199,6 +202,7 @@ class JanitorExtractor {
         characterId: characterId,
         triggerText: triggerText,
         includeCard: trigger.card,
+        includeChatGreetings: trigger.greetings && !metaGreetings,
         loreBudget: loreBudget,
         onPhase: onPhase,
       );
@@ -476,7 +480,8 @@ class JanitorExtractor {
   /// Rebuilds [lorebookText] into a structured [Lorebook] with the active LLM,
   /// using the selected context strings for key inference. Used by the catalog
   /// Lorebooks tab's "Build" action (the extractor owns the provider [Ref] that
-  /// `rebuildLorebookWithActiveLlm` needs). [characterId] scopes the book.
+  /// `rebuildLorebookWithActiveLlm` needs). [characterId] scopes the book;
+  /// [onProgress] and [partCache] follow a build split into several requests.
   Future<Lorebook> buildLorebook({
     required String lorebookText,
     required String name,
@@ -487,6 +492,8 @@ class JanitorExtractor {
     String lorebookDescs = '',
     String extra = '',
     String? characterId,
+    void Function(int done, int total)? onProgress,
+    Map<String, List<LorebookEntry>>? partCache,
   }) => rebuildLorebookWithActiveLlm(
     _ref,
     lorebookText: lorebookText,
@@ -498,6 +505,8 @@ class JanitorExtractor {
     lorebookDescs: lorebookDescs,
     extra: extra,
     characterId: characterId,
+    onProgress: onProgress,
+    partCache: partCache,
   );
 
   /// The key-inference context that is knowable from the character's catalog
@@ -511,13 +520,28 @@ class JanitorExtractor {
   ///
   /// Lorebook descriptions are not included here: the caller already has the
   /// public books and can pass them through `buildLorebookDescsContext`.
+  ///
+  /// Greetings read `first_messages` as well as `first_message`: a row can
+  /// carry the whole set in the plural field with the singular one empty, and
+  /// reading only the latter left the source looking empty (and locked).
   ({String catalog, String scenario, String greetings}) contextFromMeta(
     Map<String, dynamic>? meta,
-  ) => (
-    catalog: _buildCatalogContext(meta),
-    scenario: _htmlToText((meta?['scenario'] ?? '').toString()),
-    greetings: _htmlToText((meta?['first_message'] ?? '').toString()),
-  );
+  ) {
+    final greetings = normalizeGreetings(
+      primary: meta?['first_message'] is String
+          ? meta!['first_message'] as String
+          : null,
+      others: greetingList(meta?['first_messages']),
+    );
+    return (
+      catalog: _buildCatalogContext(meta),
+      scenario: _htmlToText((meta?['scenario'] ?? '').toString()),
+      greetings: [
+        if (greetings.firstMes.isNotEmpty) greetings.firstMes,
+        ...greetings.alternates,
+      ].map(_htmlToText).where((g) => g.trim().isNotEmpty).join('\n\n---\n\n'),
+    );
+  }
 
   /// Rebuilds a public **JavaScript** lorebook (a JanitorAI "advanced" / Nine
   /// API script) into a structured [Lorebook] with the active LLM. Unlike a JSON

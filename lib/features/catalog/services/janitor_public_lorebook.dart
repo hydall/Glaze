@@ -269,9 +269,17 @@ Future<PublicLorebook> fetchPublicLorebook(
 }
 
 /// Fetch every public lorebook attached to a character (from its metadata).
+/// Stands in for [fetchPublicLorebooks] under test, where the WebView proxy
+/// the real fetch goes through has no platform to run on.
+@visibleForTesting
+Future<List<PublicLorebook>> Function(Map<String, dynamic>? meta)?
+debugFetchPublicLorebooks;
+
 Future<List<PublicLorebook>> fetchPublicLorebooks(
   Map<String, dynamic>? meta,
 ) async {
+  final override = debugFetchPublicLorebooks;
+  if (override != null) return override(meta);
   final refs = lorebookScriptRefs(meta);
   final out = <PublicLorebook>[];
   for (final ref in refs) {

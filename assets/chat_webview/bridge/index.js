@@ -1,7 +1,7 @@
 import { Bridge } from './chat_bridge_controller.js';
 import { Formatter } from '../formatter/index.js';
 import { Renderer } from '../renderer/index.js';
-import { WHEEL_PIXEL_SCALE } from './trackpad_scroll.js';
+import { WHEEL_PIXEL_SCALE } from './scroll_relay.js';
 
 export { Bridge } from './chat_bridge_controller.js';
 export { EditController } from './edit_controller.js';
@@ -12,7 +12,7 @@ export { MessageUpdateBatcher } from './message_update_batcher.js';
 export { PanelHost } from './panel_host.js';
 export { SelectionManager } from './selection_manager.js';
 export { SwipeGestureHandler } from './swipe_gesture_handler.js';
-export { TrackpadScroll } from './trackpad_scroll.js';
+export { ScrollRelay } from './scroll_relay.js';
 
 window.Bridge = Bridge;
 

@@ -7,6 +7,7 @@ import 'package:dio/dio.dart';
 import '../../models/plugin_manifest.dart';
 import '../../../../core/utils/id_generator.dart';
 import '../plugin_api.dart';
+import '../plugin_network.dart';
 import '../plugin_request_capture.dart';
 import 'files_api.dart';
 
@@ -145,7 +146,9 @@ Future<Object?> _fetch(PluginCall c) async {
       if (uri == null || !const {'http', 'https'}.contains(uri.scheme)) {
         throw const PluginApiError('invalid_arguments', 'Only http(s) URLs');
       }
-      if (uri.scheme == 'http' && !c.plugin.localNetwork) {
+      if (uri.scheme == 'http' &&
+          !c.plugin.localNetwork &&
+          !isLoopbackHostName(uri.host)) {
         throw const PluginApiError(
           'permission_denied',
           'Plain http needs local network access',

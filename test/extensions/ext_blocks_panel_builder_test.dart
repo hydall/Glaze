@@ -58,6 +58,7 @@ void main() {
     required int agentSwipeId,
     String blockType = 'infoblock',
     BlockRunStatus status = BlockRunStatus.done,
+    String content = 'stored',
   }) async {
     await container
         .read(infoBlocksRepoProvider)
@@ -70,7 +71,7 @@ void main() {
             blockId: blockId,
             blockName: blockId,
             blockType: blockType,
-            content: 'stored',
+            content: content,
             createdAt: 1,
             status: status,
           ),
@@ -174,6 +175,67 @@ void main() {
       );
     },
   );
+
+  test('a script that finished with nothing to say leaves no row', () async {
+    final container = await containerWith(const [
+      BlockConfig(id: 'album', name: 'Album', type: BlockType.script, order: 0),
+      BlockConfig(
+        id: 'report',
+        name: 'Report',
+        type: BlockType.script,
+        order: 1,
+      ),
+    ]);
+    await storeRow(
+      container,
+      blockId: 'album',
+      agentSwipeId: -1,
+      blockType: 'script',
+      content: '',
+    );
+    await storeRow(
+      container,
+      blockId: 'report',
+      agentSwipeId: -1,
+      blockType: 'script',
+      content: 'Done.',
+    );
+    expect(statusesOf(container), ['report:done']);
+  });
+
+  test('a script that is still running or failed keeps its row', () async {
+    final container = await containerWith(const [
+      BlockConfig(
+        id: 'running',
+        name: 'Running',
+        type: BlockType.script,
+        order: 0,
+      ),
+      BlockConfig(
+        id: 'failed',
+        name: 'Failed',
+        type: BlockType.script,
+        order: 1,
+      ),
+    ]);
+    await storeRow(
+      container,
+      blockId: 'running',
+      agentSwipeId: -1,
+      blockType: 'script',
+      status: BlockRunStatus.running,
+      content: '',
+    );
+    await storeRow(
+      container,
+      blockId: 'failed',
+      agentSwipeId: -1,
+      blockType: 'script',
+      status: BlockRunStatus.error,
+      content: '',
+    );
+    expect(statusesOf(container), ['running:running', 'failed:error']);
+  });
 
   test('run-all shows up while an automatic block is unfinished', () async {
     final container = await containerWith(const [

@@ -126,6 +126,14 @@ class ChatGroup extends SettingsGroup {
           onChanged: (v) => _setScripts(context, ref, v),
         ),
         toggle(
+          id: 'allow_external_media',
+          label: 'menu_allow_external_media'.tr(),
+          description: 'desc_allow_external_media'.tr(),
+          value: settings.allowExternalMedia,
+          onChanged: (v) =>
+              notifierOf(ref).save(settings.copyWith(allowExternalMedia: v)),
+        ),
+        toggle(
           id: 'confirm_message_delete',
           label: 'menu_confirm_message_delete'.tr(),
           description: 'desc_confirm_message_delete'.tr(),

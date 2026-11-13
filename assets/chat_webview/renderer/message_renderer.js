@@ -16,6 +16,13 @@ import {
   roleKey,
 } from './message_template.js';
 import { SHADOW_STYLE } from './shadow_style.js';
+import {
+  applyContentStyle,
+  applyMessageLayout,
+  hasMessageLayout,
+  messageData as layoutData,
+  refreshMessageLayout,
+} from './theme_layout.js';
 import { DEFAULT_TYPING_TEXT } from './typing_phase.js';
 
 /* ============================================================
@@ -49,6 +56,8 @@ export class Renderer {
     this._lastTimestamps = { date: null, idx: -1 };
     this.selectionManager = null;
     this.allowMessageScripts = false;
+    // The "Allow external media" setting; on until Flutter says otherwise.
+    this.allowExternalMedia = true;
     // Id of the oldest message the next prompt still carries. Every render of
     // that message draws the CONTEXT LIMIT rule above it; null draws none.
     // Held here rather than on the message map so a re-render (a preset switch,
@@ -144,7 +153,15 @@ export class Renderer {
     // they sit on an edge, since greeting navigation no longer wraps around.
     if (messageData.greetingIndex != null) section.dataset.greetingId = String(messageData.greetingIndex);
 
-    const classes = ['message-section', this._roleKey(role), `layout-${layout}`];
+    const roleKey = this._roleKey(role);
+    const classes = ['message-section', roleKey, `layout-${layout}`];
+    // Tavo theme compatibility: a Tavo theme's custom CSS addresses these
+    // names (renderer/../bridge/../tavo_theme_css.dart sorts its rules by
+    // where they can match).
+    classes.push('tavo-bubble');
+    if (roleKey === 'user') classes.push('tavo-user-bubble');
+    else if (roleKey === 'char') classes.push('tavo-character-bubble');
+    if (hasMessageLayout()) classes.push('layout-themed');
     if (isError) classes.push('error');
     if (isHidden) classes.push('msg-hidden');
 if (messageData.isEditing) classes.push('editing');
@@ -186,14 +203,16 @@ if (messageData.isEditing) classes.push('editing');
     wrapper.className = 'msg-transition-wrapper';
 
     const body = document.createElement('div');
-    body.className = 'msg-body';
+    body.className = 'msg-body tavo-bubble-content';
+    if (roleKey === 'user') body.classList.add('tavo-user-bubble-content');
+    else if (roleKey === 'char') body.classList.add('tavo-character-bubble-content');
 
     if (isTyping && (!text || !text.trim())) {
       body.appendChild(this._createTypingContainer());
     } else if (isError) {
       body.appendChild(this._createErrorWindow(messageData));
     } else {
-      const content = this._createContentContainer();
+      const content = this._createContentContainer(roleKey);
       body.appendChild(content);
       this._writeShadowContent(content, text, this._isUser(role), false, {
         messageId: id,
@@ -228,6 +247,10 @@ if (messageData.isEditing) classes.push('editing');
       section.appendChild(this.createContextLimitMarker(true));
     }
 
+    // A theme's own layout moves the pieces built above (theme_layout.js).
+    const name = messageData.displayName || messageData.personaName || this._getDefaultName(role);
+    applyMessageLayout(section, layoutData(messageData, window.bridge || null, name));
+
     // Avatars and attachments are the message's light-DOM pictures, so the
     // body's own pass (writeShadowContent) never sees them.
     retryFailedLocalImages(section);
@@ -241,9 +264,11 @@ if (messageData.isEditing) classes.push('editing');
     header.className = 'msg-header';
 
     /* Avatar */
-    const avatar = document.createElement('div');
-    avatar.className = 'msg-avatar';
     const roleKey = this._roleKey(m.role);
+    const avatar = document.createElement('div');
+    avatar.className = 'msg-avatar tavo-avatar';
+    if (roleKey === 'user') avatar.classList.add('tavo-user-avatar', 'tavo-group-user-avatar');
+    else if (roleKey === 'char') avatar.classList.add('tavo-character-avatar', 'tavo-group-character-avatar');
     const finalName = m.displayName || m.personaName || this._getDefaultName(m.role);
     const identity = window.bridge || null;
     // `avatarFallback` means the message names a persona with no avatar to
@@ -268,7 +293,7 @@ if (messageData.isEditing) classes.push('editing');
 
     /* Name span */
     const nameEl = document.createElement('span');
-    nameEl.className = 'msg-name';
+    nameEl.className = 'msg-name tavo-speaker-name';
 
     const label = document.createElement('span');
     label.className = 'msg-name-label';
@@ -358,7 +383,7 @@ if (messageData.isEditing) classes.push('editing');
   /* ----- Reasoning ----- */
   _createReasoningBlock(reasoning, isUser) {
     const block = document.createElement('div');
-    block.className = 'msg-reasoning collapsed';
+    block.className = 'msg-reasoning collapsed tavo-message-reasoning';
 
     const header = document.createElement('div');
     header.className = 'msg-reasoning-header';
@@ -372,7 +397,10 @@ if (messageData.isEditing) classes.push('editing');
     const inner = document.createElement('div');
     inner.className = 'msg-reasoning-inner';
 
-    const shadowHost = this._createContentContainer();
+    const shadowHost = this._createContentContainer(
+      isUser ? 'user' : 'char',
+      { tavoMessage: false },
+    );
     inner.appendChild(shadowHost);
     this._writeShadowContent(shadowHost, reasoning, isUser, false, {
       isReasoning: true,
@@ -627,7 +655,7 @@ if (messageData.isEditing) classes.push('editing');
 
     /* --- Center controls --- */
     const center = document.createElement('div');
-    center.className = 'msg-center-controls';
+    center.className = 'msg-center-controls tavo-action-bar-button-group';
 
     const isChar = this._roleKey(m.role) === 'char';
     const hasSwipes = isChar && m.swipeTotal && m.swipeTotal > 1;
@@ -658,7 +686,7 @@ if (messageData.isEditing) classes.push('editing');
     if (isChar && m.isLast && !m.isGenerating && !m.isEditing &&
         m.agentSwipeTotal && m.agentSwipeTotal >= 1) {
       const rerun = document.createElement('div');
-      rerun.className = 'msg-rerun-cleaner';
+      rerun.className = 'msg-rerun-cleaner tavo-action-bar-button';
       rerun.dataset.action = 'rerun-cleaner';
       rerun.dataset.messageId = m.id;
       rerun.title = 'Re-run cleaner';
@@ -668,7 +696,7 @@ if (messageData.isEditing) classes.push('editing');
 
     if (isChar && m.isLast && !m.isGenerating && !m.isEditing) {
       const guided = document.createElement('div');
-      guided.className = 'msg-guided-swipe-btn';
+      guided.className = 'msg-guided-swipe-btn tavo-action-bar-button';
       guided.dataset.action = 'toggle-guided';
       guided.dataset.messageId = m.id;
       guided.title = 'Guided swipe';
@@ -678,7 +706,7 @@ if (messageData.isEditing) classes.push('editing');
 
     if (showRegen) {
       const regen = document.createElement('div');
-      regen.className = 'msg-regenerate';
+      regen.className = 'msg-regenerate tavo-action-bar-button';
       if (hasSwipes || hasGreetings || hasAgentSwipes) regen.classList.add('icon-only');
       regen.dataset.action = 'regenerate';
       regen.dataset.messageId = m.id;
@@ -707,12 +735,12 @@ if (messageData.isEditing) classes.push('editing');
       // Bridge.setMessageSettings); the section's `translating` /
       // `translated` class picks which glyph it wears.
       const trailing = document.createElement('div');
-      trailing.className = 'msg-trailing-actions';
+      trailing.className = 'msg-trailing-actions tavo-action-bar-button-group';
       // Built on streaming and error bubbles too, because the footer is not
       // rebuilt when the run ends; CSS hides it on those until then.
       if (this._roleKey(m.role) !== 'system') {
         const translate = document.createElement('div');
-        translate.className = 'msg-translate-btn';
+        translate.className = 'msg-translate-btn tavo-action-bar-button';
         translate.dataset.action = 'translate';
         translate.dataset.messageId = m.id;
         translate.title = 'Translate';
@@ -720,7 +748,7 @@ if (messageData.isEditing) classes.push('editing');
         trailing.appendChild(translate);
       }
       const actions = document.createElement('div');
-      actions.className = 'msg-actions-btn';
+      actions.className = 'msg-actions-btn tavo-action-bar-button';
       actions.dataset.action = 'open-actions';
       actions.dataset.messageId = m.id;
       actions.innerHTML = ICON.menu;
@@ -733,12 +761,12 @@ if (messageData.isEditing) classes.push('editing');
 
   _createSwitcher(messageId, index, total, kind) {
     const wrap = document.createElement('div');
-    wrap.className = 'msg-switcher';
+    wrap.className = 'msg-switcher tavo-action-bar-button-group';
     wrap.dataset.kind = kind;
     if (kind === 'agent-swipe') wrap.classList.add('agent-switcher');
 
     const prev = document.createElement('div');
-    prev.className = 'msg-switcher-btn prev';
+    prev.className = 'msg-switcher-btn prev tavo-action-bar-button';
     prev.dataset.action = kind === 'greeting' ? 'greeting-prev'
       : kind === 'agent-swipe' ? 'agent-swipe-left' : 'swipe-left';
     prev.dataset.messageId = messageId;
@@ -751,7 +779,7 @@ if (messageData.isEditing) classes.push('editing');
     wrap.appendChild(count);
 
     const next = document.createElement('div');
-    next.className = 'msg-switcher-btn next';
+    next.className = 'msg-switcher-btn next tavo-action-bar-button';
     next.dataset.action = kind === 'greeting' ? 'greeting-next'
       : kind === 'agent-swipe' ? 'agent-swipe-right' : 'swipe-right';
     next.dataset.messageId = messageId;
@@ -763,10 +791,10 @@ if (messageData.isEditing) classes.push('editing');
 
   _createEditButtons(id) {
     const box = document.createElement('div');
-    box.className = 'edit-buttons';
+    box.className = 'edit-buttons tavo-action-bar-button-group';
 
     const cancel = document.createElement('div');
-    cancel.className = 'edit-btn cancel';
+    cancel.className = 'edit-btn cancel tavo-action-bar-button';
     cancel.dataset.action = 'edit-cancel';
     cancel.dataset.messageId = id;
     cancel.title = 'Cancel';
@@ -774,7 +802,7 @@ if (messageData.isEditing) classes.push('editing');
     box.appendChild(cancel);
 
     const save = document.createElement('div');
-    save.className = 'edit-btn save';
+    save.className = 'edit-btn save tavo-action-bar-button';
     save.dataset.action = 'edit-save';
     save.dataset.messageId = id;
     save.title = 'Save';
@@ -785,9 +813,14 @@ if (messageData.isEditing) classes.push('editing');
   }
 
   /* ----- Shadow DOM content host ----- */
-  _createContentContainer() {
+  _createContentContainer(roleKey = '', { tavoMessage = true } = {}) {
     const host = document.createElement('div');
     host.className = 'message-content';
+    if (roleKey) host.classList.add(roleKey);
+    if (tavoMessage) {
+      host.classList.add('tavo-message-content', 'tavo-bubble-content-body');
+      if (roleKey) host.classList.add(`tavo-${roleKey}-bubble-content`);
+    }
     if (!host.shadowRoot) {
       const shadow = host.attachShadow({ mode: 'open' });
       const style = document.createElement('style');
@@ -797,6 +830,7 @@ if (messageData.isEditing) classes.push('editing');
       root.className = 'glaze-message';
       shadow.appendChild(root);
     }
+    applyContentStyle(host);
     return host;
   }
 
@@ -824,6 +858,7 @@ if (messageData.isEditing) classes.push('editing');
       searchQuery: this.searchQuery,
       applySearchHighlight: (html) => this._applySearchHighlight(html),
       allowMessageScripts: this.allowMessageScripts,
+      allowExternalMedia: this.allowExternalMedia,
     });
   }
 
@@ -875,6 +910,7 @@ if (messageData.isEditing) classes.push('editing');
           } else {
             sectionEl.querySelector('.msg-reasoning')?.remove();
           }
+          refreshMessageLayout(sectionEl, { text, reasoning, isTyping });
           return;
         }
       }
@@ -922,6 +958,8 @@ if (messageData.isEditing) classes.push('editing');
       reasoningEl.remove();
     }
 
+    refreshMessageLayout(sectionEl, { text, reasoning, isTyping });
+
     if (animate) {
       sectionEl.classList.add('swipe-animating');
       const dir = sectionEl.dataset.swipeDirection || 'left';
@@ -948,6 +986,7 @@ if (messageData.isEditing) classes.push('editing');
   }
 
   updateMessageMeta(sectionEl, msg) {
+    refreshMessageLayout(sectionEl, msg);
     // In-game clock: the ledger stamps the message after the turn, so the
     // element usually appears (or updates) via this live path rather than at
     // initial render.
@@ -1208,9 +1247,9 @@ if (messageData.isEditing) classes.push('editing');
 
   /**
    * Re-writes every message body (and reasoning block) from the raw text kept
-   * on the section's dataset. Used when `allowMessageScripts` flips, so the
-   * messages already on screen pick up the new policy instead of waiting for
-   * the next content update.
+   * on the section's dataset. Used when `allowMessageScripts` or
+   * `allowExternalMedia` flips, so the messages already on screen pick up the
+   * new policy instead of waiting for the next content update.
    */
   rerenderMessageBodies() {
     // `virtualList.items` also covers messages the list has not mounted, so a
@@ -1316,6 +1355,7 @@ if (messageData.isEditing) classes.push('editing');
             // the scripts it keeps are dropped right after, unexecuted.
             root.innerHTML = sanitizeMessageHtml(highlighted, {
               allowScripts: this.allowMessageScripts,
+              allowExternalMedia: this.allowExternalMedia,
             });
             root.querySelectorAll('script').forEach(script => script.remove());
             // The rewrite dropped the re-keyed `:target` rules with the rest

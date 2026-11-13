@@ -1,21 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
-import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 
-import '../../core/platform/haptics.dart';
-import '../../core/state/character_provider.dart';
 import '../../features/guides/guide_anchor.dart';
 import '../shell/nav_height_provider.dart';
-import '../shell/nav_retap_provider.dart';
 import '../theme/app_colors.dart';
 import 'glass_surface.dart';
-import 'glaze_toast.dart';
+import 'nav_tab_button.dart';
 
-String _iconSvg(String path) =>
-    '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="$path"/></svg>';
-
+/// The shell's tab bar along the bottom of a phone held upright.
 class GlassNavBar extends ConsumerStatefulWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
@@ -30,35 +23,8 @@ class GlassNavBar extends ConsumerStatefulWidget {
   ConsumerState<GlassNavBar> createState() => _GlassNavBarState();
 }
 
-/// Index of the Characters tab in [_GlassNavBarState._items]. Tapping it
-/// [kRevealHiddenTapCount] times within [kRevealHiddenTapWindow] reveals hidden
-/// characters (secret gesture).
-const int _kCharactersTabIndex = 1;
-
 class _GlassNavBarState extends ConsumerState<GlassNavBar> {
   final _key = GlobalKey();
-
-  static const _items = [
-    _NavItem(
-      labelKey: 'tab_dialogs',
-      svgPath:
-          'M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z',
-    ),
-    _NavItem(
-      labelKey: 'tab_characters',
-      svgPath:
-          'M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z',
-    ),
-    _NavItem(
-      labelKey: 'tab_tools',
-      svgPath:
-          'm21.71 20.29l-1.42 1.42a1 1 0 0 1-1.41 0L7 9.85A3.81 3.81 0 0 1 6 10a4 4 0 0 1-3.78-5.3l2.54 2.54l.53-.53l1.42-1.42l.53-.53L4.7 2.22A4 4 0 0 1 10 6a3.81 3.81 0 0 1-.15 1l11.86 11.88a1 1 0 0 1 0 1.41M2.29 18.88a1 1 0 0 0 0 1.41l1.42 1.42a1 1 0 0 0 1.41 0l5.47-5.46l-2.83-2.83M20 2l-4 2v2l-2.17 2.17l2 2L18 8h2l2-4Z',
-    ),
-    _NavItem(
-      labelKey: 'tab_more',
-      svgPath: 'M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z',
-    ),
-  ];
 
   @override
   void initState() {
@@ -73,18 +39,6 @@ class _GlassNavBarState extends ConsumerState<GlassNavBar> {
     }
   }
 
-  void _registerCharactersTabTap() {
-    final revealed = ref
-        .read(revealHiddenCharactersProvider.notifier)
-        .registerCharactersTabTap();
-    if (revealed == null || !mounted) return;
-    Haptics.heavyImpact();
-    GlazeToast.show(
-      context,
-      revealed ? 'hidden_chars_revealed'.tr() : 'hidden_chars_hidden'.tr(),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final bottomPad = MediaQuery.of(context).padding.bottom;
@@ -97,27 +51,12 @@ class _GlassNavBarState extends ConsumerState<GlassNavBar> {
       padding: const EdgeInsets.symmetric(vertical: 7),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: List.generate(
-          _items.length,
-          (i) => GuideAnchor(
-            id: GuideIds.navTab(i),
-            child: _NavButton(
-              item: _items[i],
-              isActive: i == widget.currentIndex,
-              onTap: () {
-                if (i != widget.currentIndex) {
-                  Haptics.selectionClick();
-                } else {
-                  // Re-tap on the already-active tab: ask that branch's screen to
-                  // return to the top of its main view (sub-routes are popped by
-                  // the shell's goBranch(initialLocation: true)).
-                  ref.read(navReTapProvider.notifier).reTap(i);
-                }
-                if (i == _kCharactersTabIndex) _registerCharactersTabTap();
-                widget.onTap(i);
-              },
-            ),
-          ),
+        children: _buttons(
+          context,
+          ref,
+          currentIndex: widget.currentIndex,
+          onTap: widget.onTap,
+          padding: const EdgeInsets.symmetric(horizontal: 20),
         ),
       ),
     );
@@ -143,91 +82,122 @@ class _GlassNavBarState extends ConsumerState<GlassNavBar> {
   }
 }
 
-class _NavItem {
-  final String labelKey;
-  final String svgPath;
+/// Width of [GlassNavRail]'s glass pill.
+const double kGlassNavRailWidth = 76;
 
-  const _NavItem({required this.labelKey, required this.svgPath});
+/// Gap between [GlassNavRail]'s pill and the content beside it, and between
+/// the pill and the screen edge.
+const double kGlassNavRailMargin = 10;
+
+/// How much horizontal room [GlassNavRail] takes from its edge — the left one
+/// when [left], else the right — including the safe-area inset it sits in and
+/// the gap between the pill and the content beside it.
+double glassNavRailExtent(BuildContext context, {required bool left}) {
+  final padding = MediaQuery.paddingOf(context);
+  return (left ? padding.left : padding.right) +
+      kGlassNavRailMargin * 2 +
+      kGlassNavRailWidth;
 }
 
-class _NavButton extends StatelessWidget {
-  final _NavItem item;
-  final bool isActive;
-  final VoidCallback onTap;
+/// The same tabs as [GlassNavBar], down one side of a phone held sideways,
+/// where a bottom bar would eat a fifth of the short side.
+///
+/// The pill runs the full height of the screen inside the safe area, with the
+/// tabs spread evenly along it, so each one is a large target under the thumb.
+/// It sits inside its side's safe-area inset, so neither the pill nor the
+/// content beside it ever lands under a notch or camera cutout.
+class GlassNavRail extends ConsumerWidget {
+  final int currentIndex;
+  final ValueChanged<int> onTap;
 
-  const _NavButton({
-    required this.item,
-    required this.isActive,
+  /// Along the left edge instead of the right.
+  final bool left;
+
+  const GlassNavRail({
+    super.key,
+    required this.currentIndex,
     required this.onTap,
+    this.left = false,
   });
 
   @override
-  Widget build(BuildContext context) {
-    final target = isActive ? 1.0 : 0.0;
-    final label = item.labelKey.tr();
-    return GestureDetector(
+  Widget build(BuildContext context, WidgetRef ref) {
+    final padding = MediaQuery.paddingOf(context);
+    final buttons = _buttons(
+      context,
+      ref,
+      currentIndex: currentIndex,
       onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: TweenAnimationBuilder<double>(
-        tween: Tween(begin: target, end: target),
-        duration: const Duration(milliseconds: 125),
-        curve: Curves.easeInOut,
-        builder: (context, t, _) {
-          final inactive = context.cs.secondary;
-          final active = context.colors.accent;
-          final inactiveLum = inactive.computeLuminance();
-          final activeLum = active.computeLuminance();
-          final surfaceLum = context.cs.surface.computeLuminance();
-          final effectiveActive =
-              (activeLum > surfaceLum) == (inactiveLum > surfaceLum)
-              ? active
-              : (surfaceLum < 0.5
-                    ? HSLColor.fromColor(active)
-                          .withLightness(
-                            (HSLColor.fromColor(active).lightness + 0.3).clamp(
-                              0.0,
-                              1.0,
-                            ),
-                          )
-                          .toColor()
-                    : HSLColor.fromColor(active)
-                          .withLightness(
-                            (HSLColor.fromColor(active).lightness - 0.3).clamp(
-                              0.0,
-                              1.0,
-                            ),
-                          )
-                          .toColor());
-          final color = Color.lerp(inactive, effectiveActive, t)!;
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SvgPicture.string(
-                  _iconSvg(item.svgPath),
-                  width: 28,
-                  height: 28,
-                  colorFilter: ColorFilter.mode(color, BlendMode.srcIn),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w500,
-                    // The Inter variable font is loaded at runtime via
-                    // loadFontFromList, which ignores `fontWeight` — the weight
-                    // axis must be driven explicitly via `fontVariations`.
-                    fontVariations: const [FontVariation('wght', 500)],
-                    color: color,
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+      expand: true,
+    );
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        (left ? padding.left : 0) + kGlassNavRailMargin,
+        padding.top + kGlassNavRailMargin,
+        (left ? 0 : padding.right) + kGlassNavRailMargin,
+        padding.bottom + kGlassNavRailMargin,
+      ),
+      child: GuideAnchor(
+        id: GuideIds.navBar,
+        child: GlassSurface(
+          enableRipple: true,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: context.cs.outlineVariant),
+          child: SizedBox(
+            width: kGlassNavRailWidth,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final column = Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: buttons,
                   ),
-                ),
-              ],
+                );
+                // Normally the tabs spread over the whole height. On a screen
+                // too short for them (large font scale on a small phone) the
+                // column keeps its natural height and scrolls instead.
+                return SingleChildScrollView(
+                  physics: const ClampingScrollPhysics(),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      minHeight: constraints.maxHeight,
+                    ),
+                    child: column,
+                  ),
+                );
+              },
             ),
-          );
-        },
+          ),
+        ),
       ),
     );
   }
 }
+
+List<Widget> _buttons(
+  BuildContext context,
+  WidgetRef ref, {
+  required int currentIndex,
+  required ValueChanged<int> onTap,
+  required EdgeInsets padding,
+  bool expand = false,
+}) => List.generate(kNavTabItems.length, (i) {
+  final button = NavTabButton(
+    item: kNavTabItems[i],
+    isActive: i == currentIndex,
+    padding: padding,
+    onTap: () => handleNavTabTap(
+      context,
+      ref,
+      index: i,
+      currentIndex: currentIndex,
+      onTap: onTap,
+    ),
+  );
+  return GuideAnchor(
+    id: GuideIds.navTab(i),
+    child: expand ? SizedBox(width: double.infinity, child: button) : button,
+  );
+});

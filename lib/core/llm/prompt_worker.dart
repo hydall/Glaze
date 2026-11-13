@@ -500,7 +500,6 @@ PromptResult _buildFromInputs(PromptInputs inputs) {
       excerptChunksPerEntry: inputs.memoryExcerptChunksPerEntry,
       chunkFirstTopEntries: inputs.chunkFirstTopEntries,
       chunkFirstTopChunks: inputs.chunkFirstTopChunks,
-      summaryExcerpt: inputs.summaryContent,
     );
     final excerptSelection = resolved.excerptSelection;
 
@@ -547,6 +546,7 @@ PromptResult _buildFromInputs(PromptInputs inputs) {
     sessionVars: inputs.sessionVars,
     globalVars: inputs.globalVars,
     summaryContent: inputs.summaryContent,
+    summarySegments: inputs.summarySegments,
     guidanceText: inputs.guidanceText,
     lorebooks: inputs.lorebooks,
     lorebookSettings: inputs.lorebookSettings,

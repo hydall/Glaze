@@ -85,6 +85,21 @@ const _blockNameToId = <String, String>{
   'Guided Generation': 'guided_generation',
 };
 
+/// The SillyTavern identifier a Glaze block is written out under, so a file
+/// Glaze exports reads as a native preset there and maps back here through
+/// [_stBlockIds]. A block with no SillyTavern counterpart keeps its own id —
+/// any string is a valid identifier to SillyTavern, and Glaze's own canonical
+/// ids (`memory`, `summary`…) come back as themselves.
+String stIdentifierForBlockId(String id) {
+  for (final MapEntry(key: st, value: glaze) in _stBlockIds.entries) {
+    if (glaze == id) return st;
+  }
+  return id;
+}
+
+/// Whether [id] is one of the insertion points SillyTavern flags `marker`.
+bool isStMarkerBlockId(String id) => _markerBlockIds.contains(id);
+
 const _staticBlockIds = <String>{
   'worldInfoBefore',
   'worldInfoAfter',
@@ -276,13 +291,25 @@ Preset parseSillyTavernPreset(Map<String, dynamic> json, String fileName) {
       final isEnabled =
           item['enabled'] as bool? ?? p['enabled'] as bool? ?? true;
 
+      // A file Glaze wrote carries its own `insertion_mode` next to the
+      // SillyTavern injection fields, so a mode SillyTavern has no word for
+      // (the summary's in-place one) survives the round trip.
+      final ownMode = p['insertion_mode'];
       String insertionMode;
       int? depth;
       if (normalizedId == 'chat_history') {
         insertionMode = 'relative';
-      } else if (p['injection_position'] == 1) {
+      } else if (ownMode == 'depth' ||
+          (ownMode == null && p['injection_position'] == 1)) {
         insertionMode = 'depth';
-        depth = p['injection_depth'] as int? ?? 4;
+        final d = p['depth'] ?? p['injection_depth'];
+        depth = d is num ? d.toInt() : 4;
+      } else if (ownMode is String && ownMode.isNotEmpty) {
+        insertionMode = ownMode;
+        // Kept with the mode: the depth a block falls back to when it is
+        // switched to depth insertion later (the summary's default of 4).
+        final d = p['depth'];
+        depth = d is num ? d.toInt() : null;
       } else {
         insertionMode = 'relative';
       }
@@ -298,6 +325,7 @@ Preset parseSillyTavernPreset(Map<String, dynamic> json, String fileName) {
           isStatic: _staticBlockIds.contains(normalizedId),
           insertionMode: insertionMode,
           depth: depth,
+          appendToLastMessage: p['appendToLastMessage'] as bool? ?? false,
           sendEmptyBlock: p['sendEmptyBlock'] as bool? ?? false,
           folderId: _declaredFolderRef(p, folderIds),
         ),
@@ -346,6 +374,8 @@ Preset parseSillyTavernPreset(Map<String, dynamic> json, String fileName) {
       (json['extensions'] as Map<String, dynamic>?)?['regex_scripts']
           as List<dynamic>?;
   final regexSource = extRegexes ?? stRegexes;
+  final regexFolders = _parseRegexFolders(json);
+  final regexFolderIds = {for (final folder in regexFolders) folder.id};
   if (regexSource != null) {
     for (int i = 0; i < regexSource.length; i++) {
       final r = regexSource[i] as Map<String, dynamic>;
@@ -354,6 +384,10 @@ Preset parseSillyTavernPreset(Map<String, dynamic> json, String fileName) {
       if (r['isEnabled'] is bool) {
         normalized['disabled'] = !(r['isEnabled'] as bool);
       }
+      // Only a folder the file declares: a dangling reference is dropped.
+      final folder = r['folder'] ?? r['folderId'];
+      normalized['folderId'] =
+          folder is String && regexFolderIds.contains(folder) ? folder : null;
       regexes.add(PresetRegex.fromJson(normalized));
     }
   }
@@ -365,6 +399,7 @@ Preset parseSillyTavernPreset(Map<String, dynamic> json, String fileName) {
       blocks: blocks,
       blockFolders: blockFolders,
       regexes: regexes,
+      regexFolders: regexFolders,
       reasoningEnabled:
           json['reasoning'] as bool? ??
           json['reasoning_enabled'] as bool? ??
@@ -406,4 +441,26 @@ List<PresetBlockFolder> _parseBlockFolders(Map<String, dynamic> json) {
 String? _declaredFolderRef(Map<String, dynamic> prompt, Set<String> declared) {
   final id = prompt['folder'];
   return id is String && declared.contains(id) ? id : null;
+}
+
+/// Reads the preset's declared regex folders (`regex_folders`), Glaze's own
+/// key: anything without a usable id is skipped, duplicates collapse.
+List<PresetRegexFolder> _parseRegexFolders(Map<String, dynamic> json) {
+  final raw = json['regex_folders'];
+  if (raw is! List) return const [];
+  final seen = <String>{};
+  final folders = <PresetRegexFolder>[];
+  for (final entry in raw) {
+    if (entry is! Map) continue;
+    final id = entry['id'];
+    if (id is! String || id.isEmpty || !seen.add(id)) continue;
+    final name = entry['name'];
+    folders.add(
+      PresetRegexFolder(
+        id: id,
+        name: name is String && name.isNotEmpty ? name : id,
+      ),
+    );
+  }
+  return folders;
 }

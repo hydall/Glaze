@@ -14,6 +14,7 @@ import 'package:glaze_flutter/core/llm/transport/llm_request_capture.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/core/state/db_provider.dart';
+import 'package:glaze_flutter/core/state/global_regex_provider.dart';
 import 'package:glaze_flutter/features/chat/composer_text_bridge.dart';
 import 'package:glaze_flutter/features/chat/services/prompt_capture_view_service.dart';
 import 'package:glaze_flutter/features/plugins/models/installed_plugin.dart';
@@ -25,7 +26,7 @@ import 'package:glaze_flutter/features/plugins/runtime/plugin_bridge_service.dar
 import 'package:glaze_flutter/features/plugins/runtime/plugin_file_store.dart';
 import 'package:glaze_flutter/features/plugins/runtime/plugin_network.dart';
 import 'package:glaze_flutter/features/plugins/runtime/plugin_request_capture.dart';
-import 'package:glaze_flutter/features/plugins/runtime/plugin_html_inliner.dart';
+import 'package:glaze_flutter/features/plugins/runtime/plugin_package_server.dart';
 import 'package:glaze_flutter/features/plugins/runtime/plugin_message_diff.dart';
 import 'package:glaze_flutter/features/plugins/runtime/plugin_variable_store.dart';
 import 'package:glaze_flutter/features/plugins/services/plugin_manifest_parser.dart';
@@ -722,6 +723,77 @@ void main() {
     expect(host.ui.consents, isEmpty);
   });
 
+  test('a plugin regex asks first and keeps its display scope', () async {
+    SharedPreferences.setMockInitialValues({});
+    final s = service(const [
+      'library.read.regex',
+      'library.create.regex',
+      'library.update.regex',
+    ]);
+    // What tavo_compat.js sends for a display-only Tavo / ST rule.
+    final rule = {
+      'name': 'engine',
+      'regex': r'^([\s\S]*)$',
+      'replacement': '\$1\n<script>run()</script>',
+      'placement': [1, 2],
+      'markdownOnly': true,
+      'promptOnly': false,
+      'runOnEdit': false,
+    };
+    host.ui.answer = PluginConsentAnswer.once;
+    final created = await call(s, 'regex.create', [rule]);
+    expect(created['ok'], isTrue);
+    expect(host.ui.consents, [
+      'Test:library.create.regex:plugins_consent_regex_create',
+    ]);
+    final id = created['result'];
+    var stored = (await container.read(globalRegexProvider.future)).single;
+    expect(stored.id, id);
+    expect(stored.placement, [1, 2]);
+    expect(stored.markdownOnly, isTrue);
+    expect(stored.promptOnly, isFalse);
+
+    // An old rule that ran on the prompt too is put right by an update.
+    await container
+        .read(globalRegexProvider.notifier)
+        .updateRegex(stored.copyWith(markdownOnly: false));
+    host.ui.answer = PluginConsentAnswer.always;
+    final updated = await call(s, 'regex.update', [
+      {'id': id, ...rule},
+    ]);
+    expect(updated['ok'], isTrue);
+    stored = (await container.read(globalRegexProvider.future)).single;
+    expect(stored.markdownOnly, isTrue);
+    expect(host.ui.consents.last, endsWith('plugins_consent_regex_update'));
+
+    // "Always" holds: the next update goes through without the sheet.
+    await call(s, 'regex.update', [
+      {'id': id, ...rule},
+    ]);
+    expect(host.ui.consents, hasLength(2));
+
+    // Two at once both land.
+    await Future.wait([
+      call(s, 'regex.create', [
+        {...rule, 'name': 'a'},
+      ]),
+      call(s, 'regex.create', [
+        {...rule, 'name': 'b'},
+      ]),
+    ]);
+    expect(
+      (await container.read(globalRegexProvider.future)).map((r) => r.name),
+      unorderedEquals(['engine', 'a', 'b']),
+    );
+
+    // Refused, nothing is added.
+    final refused = service(const ['library.create.regex']);
+    host.ui.answer = PluginConsentAnswer.deny;
+    final out = await call(refused, 'regex.create', [rule]);
+    expect((out['error'] as Map)['code'], 'permission_denied');
+    expect(await container.read(globalRegexProvider.future), hasLength(3));
+  });
+
   test('a denied plugin is not asked again', () async {
     final s = service(const ['library.delete.characters']);
     host.ui.answer = PluginConsentAnswer.deny;
@@ -808,20 +880,33 @@ void main() {
     }
   });
 
-  test('downloads stay off the local network unless allowed', () async {
-    final s = service(const ['files', 'network']);
-    for (final url in [
-      'http://127.0.0.1:9/x',
-      'http://localhost/x',
-      'http://192.168.1.1/x',
-      'http://[::1]/x',
-      'http://printer.local/x',
-    ]) {
-      final out = await call(s, 'files.save', ['a.txt', url]);
-      expect((out['error'] as Map)['code'], 'permission_denied', reason: url);
-    }
-    expect(host.network.every((e) => e.endsWith(':blocked')), isTrue);
-  });
+  test(
+    'downloads reach loopback, but not the local network, unless allowed',
+    () async {
+      // Loopback is this device; nothing listens on the port, so the download
+      // fails as a connection, not as a refused host.
+      final s = service(const ['files', 'network']);
+      for (final url in [
+        'http://127.0.0.1:9/x',
+        'http://localhost/x',
+        'http://[::1]/x',
+      ]) {
+        final out = await call(s, 'files.save', ['a.txt', url]);
+        expect(
+          (out['error'] as Map)['code'],
+          isNot('permission_denied'),
+          reason: url,
+        );
+      }
+      for (final url in ['http://192.168.1.1/x', 'http://printer.local/x']) {
+        final out = await call(s, 'files.save', ['a.txt', url]);
+        expect((out['error'] as Map)['code'], 'permission_denied', reason: url);
+      }
+      expect(host.network, contains('127.0.0.1:ok'));
+      expect(host.network, contains('192.168.1.1:blocked'));
+      expect(host.network, contains('printer.local:blocked'));
+    },
+  );
 
   test('local addresses are told apart from public ones', () {
     for (final a in [
@@ -1089,13 +1174,18 @@ void main() {
     });
 
     test('follows the internet and local network settings', () async {
+      // Loopback works without the local network switch.
       var out = await fetch(service(const ['network']), '/echo');
-      expect((out['error'] as Map)['code'], 'permission_denied');
+      expect(out['ok'], isTrue);
+      expect(host.network, ['127.0.0.1:ok']);
+      // A private address is the local network, and needs the switch.
       out = await call(service(const ['network']), 'net.fetch', [
-        'https://127.0.0.1:${server.port}/echo',
+        'https://192.168.0.1/x',
       ]);
       expect((out['error'] as Map)['code'], 'permission_denied');
-      expect(host.network, ['127.0.0.1:blocked']);
+      expect(host.network, contains('192.168.0.1:blocked'));
+      // Without the network permission nothing is reached at all.
+      seen.clear();
       out = await fetch(service(const []), '/echo');
       expect((out['error'] as Map)['code'], 'permission_denied');
       expect(seen, isEmpty);
@@ -1127,46 +1217,14 @@ void main() {
     ]);
   });
 
-  test('package scripts, stylesheets and assets are inlined', () async {
-    final files = {
-      'js/a.js': 'window.x = "</script>";',
-      'ui/s.css': 'body{background:url(/plugins/p.one/img/bg.png)}',
-      'img/bg.png': 'PNG',
-    };
-    final html = await inlinePluginAssets(
-      '<link rel="stylesheet" href="/plugins/p.one/ui/s.css">'
-          '<script defer src="/plugins/p.one/js/a.js"></script>'
-          '<img src="/plugins/p.one/img/bg.png">',
-      'p.one',
-      (id, path) async => id == 'p.one' && files.containsKey(path)
-          ? Uint8List.fromList(utf8.encode(files[path]!))
-          : null,
-    );
-    expect(html, contains(r'window.x = "<\/script>";'));
-    expect(html, isNot(contains('src="/plugins')));
-    expect(html, contains('<style>body{background:url(data:image/png;base64,'));
-    expect(html, contains('<img src="data:image/png;base64,UE5H">'));
-  });
-
-  test("a panel cannot inline another plugin's package files", () async {
-    final read = <String>[];
-    final html = await inlinePluginAssets(
-      '<script src="/plugins/other/main.js"></script>'
-          '<link rel="stylesheet" href="/plugins/mine/s.css">'
-          '<img src="/plugins/other/key.txt">',
-      'mine',
-      (id, path) async {
-        read.add('$id/$path');
-        return Uint8List.fromList(
-          utf8.encode(
-            path == 's.css' ? '@import url(/plugins/other/x.css);' : 'secret',
-          ),
-        );
-      },
-    );
-    expect(read, ['mine/s.css']);
-    expect(html, isNot(contains('secret')));
-    expect(html, contains('<img src="/plugins/other/key.txt">'));
-    expect(html, contains('url(/plugins/other/x.css)'));
+  test('the host page opens a frame at its package address', () async {
+    await pluginPackageServer.start((id, path) async => null);
+    addTearDown(pluginPackageServer.stop);
+    final s = service([]);
+    final out = await call(s, 'frames.open', ['ui/panel.html', '<p>doc</p>']);
+    final url = Uri.parse(out['result'] as String);
+    expect(url.path, '/plugins/test.plugin/ui/panel.html');
+    expect(pluginPackageServer.isFrameUrl(url), isTrue);
+    expect(pluginMethodsFor(_plugin([])), isNot(contains('frames.open')));
   });
 }

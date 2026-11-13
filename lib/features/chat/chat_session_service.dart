@@ -97,8 +97,16 @@ class ChatSessionService {
     final currentIdx = character?.currentSessionIndex ?? 0;
 
     final directId = '${charId}_$currentIdx';
+    // Read from the database, not the cache: not every write to a session
+    // goes through this service (session vars, agent swipes, a restore), so
+    // a cached copy can be older than the row, and a later full `put` of it
+    // would write the old data back. The read fills the cache, so the
+    // `switchToSession` that follows an open does not decode it again.
     var session = await repo.getById(directId);
-    if (session?.characterId == charId) return session;
+    if (session?.characterId == charId) {
+      updateCache(session!);
+      return session;
+    }
 
     final sessions = await repo.getByCharacterId(charId);
     if (sessions.isEmpty) return null;
@@ -152,6 +160,11 @@ class ChatSessionService {
     return session;
   }
 
+  /// A neighbour this long (in characters of stored JSON) is not loaded ahead
+  /// of time: decoding it costs what it saves, and its messages would sit in
+  /// the cache — a long roleplay's branches are tens of megabytes each.
+  static const _prefetchMaxChars = 2 * 1024 * 1024;
+
   void _prefetchAdjacent(String charId, int currentIdx) {
     if (!_ref.mounted) return;
     final repo = _ref.read(chatRepoProvider);
@@ -169,17 +182,19 @@ class ChatSessionService {
           _touchCacheKey(key);
         }
 
+        Future<void> prefetch(String key) async {
+          final length = await repo.messagesJsonLength(key);
+          if (length == null || length > _prefetchMaxChars) return;
+          publish(key, await repo.getById(key));
+        }
+
         if (currentIdx > 0) {
           final prevKey = '${charId}_${currentIdx - 1}';
-          if (!_cache.containsKey(prevKey)) {
-            futures.add(repo.getById(prevKey).then((s) => publish(prevKey, s)));
-          }
+          if (!_cache.containsKey(prevKey)) futures.add(prefetch(prevKey));
         }
 
         final nextKey = '${charId}_${currentIdx + 1}';
-        if (!_cache.containsKey(nextKey)) {
-          futures.add(repo.getById(nextKey).then((s) => publish(nextKey, s)));
-        }
+        if (!_cache.containsKey(nextKey)) futures.add(prefetch(nextKey));
 
         if (futures.isNotEmpty) await Future.wait(futures);
       } catch (e) {
@@ -424,9 +439,10 @@ class ChatSessionService {
           );
       await _ref
           .read(summaryRepoProvider)
-          .copySettingsForSessionBranch(
+          .copyForSessionBranch(
             fromSessionId: current.id,
             toSessionId: branch.id,
+            messages: branch.messages,
           );
       return (await repo.getById(branch.id))!;
     });
@@ -552,7 +568,9 @@ class ChatSessionService {
   /// new one.
   Future<int> _nextSessionIndex(String charId) async {
     final repo = _ref.read(chatRepoProvider);
-    final sessions = await repo.getByCharacterId(charId);
+    // Indexes only: the full sessions would decode every message the
+    // character has, just to read `.sessionIndex` off them.
+    final sessions = await repo.getMetadataByCharacterId(charId);
     // No sessions at all → start over at 0, the index `createInitialSession`
     // uses. `currentSessionIndex` defaults to 0 and so cannot tell "never had
     // a chat" from "was on chat #1"; it is only a usable high-water mark while

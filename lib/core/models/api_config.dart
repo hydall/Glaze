@@ -25,8 +25,9 @@ abstract class ApiConfig with _$ApiConfig {
     /// is why it sits next to the window it is cut against.
     @Default('sliding') String historyTrimMode,
 
-    /// Stepped mode only: how full the held window may get before the anchor
-    /// moves, and how much of the budget a move gives back. See
+    /// Stepped mode only: how full the prompt may get before the anchor
+    /// moves, and how much of the context window a move gives back — both
+    /// shares of the context window, as the prompt inspector shows it. See
     /// [kDefaultHistoryTrimTriggerPercent] / [kDefaultHistoryTrimStepPercent].
     @Default(85) int historyTrimTriggerPercent,
     @Default(30) int historyTrimStepPercent,
@@ -85,6 +86,14 @@ abstract class ApiConfig with _$ApiConfig {
     /// Which tokenizer counts this connection's prompts: `auto` (picked from
     /// [model]) or a `TokenizerKind.id`.
     @Default('auto') String tokenizer,
+
+    /// Offer the chat model the app's tools (`lib/features/model_tools/`).
+    /// Off by default: a provider that rejects `tools` fails the whole reply.
+    @Default(false) bool toolCalling,
+
+    /// Tool groups switched off on this connection (`ModelToolGroup.id`).
+    /// Stored as the disabled set so a group added later starts enabled.
+    @Default(<String>[]) List<String> disabledToolGroups,
   }) = _ApiConfig;
 
   factory ApiConfig.fromJson(Map<String, dynamic> json) =>

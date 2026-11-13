@@ -115,76 +115,12 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
     if (mounted) setState(() => _hoverIndex = null);
   }
 
-  /// The "+" sheet: create a quick reply, or bring back a hidden insert action.
-  ///
-  /// One entry point instead of a bare create form, because a hidden button has
-  /// nowhere else to be restored from — it is gone from the grid by design.
-  Future<void> _showAddSheet() async {
-    final hiddenIds =
-        ref.read(hiddenComposerActionsProvider).value ?? const <String>{};
-    final hiddenActions = [
-      for (final action in ComposerAction.values)
-        if (action.isInsert && hiddenIds.contains(action.id)) action,
-    ];
-    final result = await GlazeBottomSheet.show<_AddSheetResult>(
-      context,
-      title: 'action_add'.tr(),
-      child: _ActionsAddSheet(hiddenActions: hiddenActions),
-    );
-    if (!mounted || result == null) return;
-    final restore = result.restore;
-    if (restore != null) {
-      await ref.read(hiddenComposerActionsProvider.notifier).show(restore);
-    } else {
-      await _showEditSheet();
-    }
-  }
+  Future<void> _showAddSheet() => showQuickRepliesAddSheet(context, ref);
 
-  Future<void> _showEditSheet({QuickReply? existing}) async {
-    final reply = existing;
-    final isNew = reply == null;
-    // Read before the sheet opens: on mobile the form's keyboard closes the
-    // drawer, which disposes this panel, so `ref` is dead by the time the
-    // user taps Add / Save / Delete.
-    final notifier = ref.read(quickRepliesProvider.notifier);
-    // Uses the shared Glaze sheet (glass surface + handle + header) instead of
-    // a bare Material sheet, which rendered as a plain light slab.
-    await GlazeBottomSheet.show<void>(
-      context,
-      title: isNew ? 'action_create_new'.tr() : 'action_edit'.tr(),
-      child: _QuickReplyEditForm(
-        initialLabel: reply?.label ?? '',
-        initialText: reply?.text ?? '',
-        initialIconId: reply?.iconId,
-        isNew: isNew,
-        // Continue runs the app's continue-generation call; it has no prompt
-        // body to edit and no delete button, so the form drops both.
-        builtIn: reply?.isBuiltIn ?? false,
-        onSubmit: (label, text, iconId) async {
-          if (isNew) {
-            await notifier.add(label, text, iconId: iconId);
-          } else {
-            await notifier.edit(
-              reply.id,
-              label: label,
-              text: text,
-              iconId: iconId,
-              clearIcon: iconId == null,
-            );
-          }
-        },
-        onDelete: (isNew || reply.isBuiltIn)
-            ? null
-            : () => notifier.remove(reply.id),
-      ),
-    );
-  }
+  Future<void> _showEditSheet({QuickReply? existing}) =>
+      showQuickReplyEditSheet(context, ref, existing: existing);
 
-  String _previewText(QuickReply reply) {
-    if (reply.isContinueAction) return 'quick_reply_continue_hint'.tr();
-    final t = reply.text.replaceAll('\n', ' ').trim();
-    return t.isEmpty ? '—' : t;
-  }
+  String _previewText(QuickReply reply) => quickReplyPreviewText(reply);
 
   @override
   Widget build(BuildContext context) {
@@ -422,6 +358,90 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
       child: content,
     );
   }
+}
+
+/// The line under a quick reply's label in the Actions tab.
+String quickReplyPreviewText(QuickReply reply) {
+  if (reply.isContinueAction) return 'quick_reply_continue_hint'.tr();
+  final t = reply.text.replaceAll('\n', ' ').trim();
+  return t.isEmpty ? '—' : t;
+}
+
+/// The Actions tab's "+" sheet: create a quick reply, or bring back a hidden
+/// insert action.
+///
+/// One entry point instead of a bare create form, because a hidden button has
+/// nowhere else to be restored from — it is gone from the grid by design.
+Future<void> showQuickRepliesAddSheet(
+  BuildContext context,
+  WidgetRef ref,
+) async {
+  final hiddenIds =
+      ref.read(hiddenComposerActionsProvider).value ?? const <String>{};
+  final hiddenActions = [
+    for (final action in ComposerAction.values)
+      if (action.isInsert && hiddenIds.contains(action.id)) action,
+  ];
+  // Read before the sheet opens: the drawer that asked for it may be gone by
+  // the time it closes.
+  final hidden = ref.read(hiddenComposerActionsProvider.notifier);
+  final result = await GlazeBottomSheet.show<_AddSheetResult>(
+    context,
+    title: 'action_add'.tr(),
+    child: _ActionsAddSheet(hiddenActions: hiddenActions),
+  );
+  if (!context.mounted || result == null) return;
+  final restore = result.restore;
+  if (restore != null) {
+    await hidden.show(restore);
+  } else {
+    await showQuickReplyEditSheet(context, ref);
+  }
+}
+
+/// The add / edit sheet of one quick reply ([existing] null to create one).
+Future<void> showQuickReplyEditSheet(
+  BuildContext context,
+  WidgetRef ref, {
+  QuickReply? existing,
+}) async {
+  final reply = existing;
+  final isNew = reply == null;
+  // Read before the sheet opens: on mobile the form's keyboard closes the
+  // drawer, which disposes whoever opened it, so `ref` is dead by the time
+  // the user taps Add / Save / Delete.
+  final notifier = ref.read(quickRepliesProvider.notifier);
+  // Uses the shared Glaze sheet (glass surface + handle + header) instead of
+  // a bare Material sheet, which rendered as a plain light slab.
+  await GlazeBottomSheet.show<void>(
+    context,
+    title: isNew ? 'action_create_new'.tr() : 'action_edit'.tr(),
+    child: _QuickReplyEditForm(
+      initialLabel: reply?.label ?? '',
+      initialText: reply?.text ?? '',
+      initialIconId: reply?.iconId,
+      isNew: isNew,
+      // Continue runs the app's continue-generation call; it has no prompt
+      // body to edit and no delete button, so the form drops both.
+      builtIn: reply?.isBuiltIn ?? false,
+      onSubmit: (label, text, iconId) async {
+        if (isNew) {
+          await notifier.add(label, text, iconId: iconId);
+        } else {
+          await notifier.edit(
+            reply.id,
+            label: label,
+            text: text,
+            iconId: iconId,
+            clearIcon: iconId == null,
+          );
+        }
+      },
+      onDelete: (isNew || reply.isBuiltIn)
+          ? null
+          : () => notifier.remove(reply.id),
+    ),
+  );
 }
 
 /// Add / edit form for a single quick reply, hosted inside a

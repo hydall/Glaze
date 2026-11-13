@@ -278,6 +278,16 @@ export class InteractionDispatch {
       'ext-block-regen-image': (e, el) => bridge._sendToFlutter('onExtBlockRegenImage', [el.dataset.blockId, el.dataset.messageId]),
       'ext-block-edit': (e, el) => bridge._sendToFlutter('onExtBlockEdit', [el.dataset.blockId, el.dataset.messageId]),
       'ext-block-delete': (e, el) => bridge._sendToFlutter('onExtBlockDelete', [el.dataset.blockId, el.dataset.messageId]),
+      // Copies through Flutter, the same way the selection bar does: the page
+      // clipboard API is not available on every WebView the chat runs in.
+      'copy-code': (e, el) => {
+        const code = el.closest('.code-block-wrapper')?.querySelector('pre code');
+        if (!code) return;
+        bridge._sendToFlutter('onSelectionAction', [JSON.stringify({ action: 'copy', text: code.textContent })]);
+        clearTimeout(el._copiedTimer);
+        el.dataset.copied = '1';
+        el._copiedTimer = setTimeout(() => { delete el.dataset.copied; }, 1200);
+      },
       'toggle-hidden': (e, el) => bridge._sendToFlutter('onToggleHidden', [el.dataset.messageId]),
       'toggle-image-hidden': (e, el) => {
         const section = el.closest('.message-section');

@@ -23,6 +23,29 @@ class ChatSearchDelegate extends ChangeNotifier {
   int get searchCurrentIndex => _searchCurrentIndex;
   int get matchCount => _searchMatches.length;
 
+  /// The match the reader is on, or null while there is none.
+  SearchMatch? get activeMatch =>
+      _searchMatches.isEmpty || _searchCurrentIndex >= _searchMatches.length
+      ? null
+      : _searchMatches[_searchCurrentIndex];
+
+  /// The active match as the page numbers it. [searchMatches] are counted
+  /// over the whole chat, but the page holds only the scrollback window —
+  /// the messages from [visibleStartIndex] on — and numbers its highlights
+  /// from the first of those. Handing it the chat-wide index sent it to the
+  /// wrong hit, or past its last one, which left the arrows looking dead.
+  /// -1 when the active match sits in a message the page does not have yet;
+  /// `ChatNotifier.revealMessageIndex` widens the window to it first.
+  int pageMatchIndex(int visibleStartIndex) {
+    final active = activeMatch;
+    if (active == null || active.messageIndex < visibleStartIndex) return -1;
+    var before = 0;
+    for (final match in _searchMatches) {
+      if (match.messageIndex < visibleStartIndex) before++;
+    }
+    return _searchCurrentIndex - before;
+  }
+
   /// Bumped every time the match list is recounted over a *changed* message
   /// list (see [syncWithMessages]). The query and the active index can both
   /// come out of such a recount unchanged, so they are not enough to tell the
@@ -84,10 +107,23 @@ class ChatSearchDelegate extends ChangeNotifier {
     search(query, messages);
   }
 
+  /// Where the scrollback window the page holds starts; kept up to date by
+  /// the chat screen. A new query starts on the first hit in that window —
+  /// where the reader is — rather than the first in the whole chat, which on
+  /// a long chat would load all of its history on the first keystroke. With
+  /// no hit in the window it starts on the newest hit before it, the nearest
+  /// one to load.
+  int windowStart = 0;
+
   void search(String query, List<ChatMessage> messages) {
     _searchQuery = query;
     _searchMatches = _collectMatches(query, messages);
-    _searchCurrentIndex = 0;
+    final inWindow = _searchMatches.indexWhere(
+      (m) => m.messageIndex >= windowStart,
+    );
+    _searchCurrentIndex = inWindow >= 0
+        ? inWindow
+        : (_searchMatches.isEmpty ? 0 : _searchMatches.length - 1);
     _countedMessagesSignature = _signatureOf(messages);
     notifyListeners();
   }

@@ -1,8 +1,12 @@
 /// Pure converter: OpenAI-shape messages → Anthropic Messages API shape.
 ///
 /// Ported from SillyTavern `src/prompt-converters.js::convertClaudeMessages`,
-/// minus tool_calls / tool_results (out of scope) and minus the SillyTavern
-/// `names` rewrites (no group-chat semantics here).
+/// minus the SillyTavern `names` rewrites (no group-chat semantics here).
+///
+/// Tool traffic: an assistant message's `tool_calls` become `tool_use` blocks
+/// (after its replayed `thinking_blocks`, which Anthropic requires first), and
+/// a `tool` message becomes a user turn holding one `tool_result` block —
+/// consecutive results squash into the single user turn the API expects.
 ///
 /// Output contract:
 /// - `system` is a list of `{type: 'text', text}` parts collected from the
@@ -74,6 +78,31 @@ ClaudeConversionResult convertClaudeMessages(
     if (m['role'] == 'system') {
       m['role'] = 'user';
     }
+    if (m['role'] == 'tool') {
+      m['role'] = 'user';
+      m['content'] = [
+        {
+          'type': 'tool_result',
+          'tool_use_id': m['tool_call_id'],
+          'content': _stringifyContent(m['content']),
+        },
+      ];
+      m.remove('tool_call_id');
+      m.remove('name');
+      continue;
+    }
+    final toolCalls = m.remove('tool_calls');
+    final thinkingBlocks = m.remove('thinking_blocks');
+    if (m['role'] == 'assistant' && toolCalls is List && toolCalls.isNotEmpty) {
+      final text = _stringifyContent(m['content']);
+      m['content'] = [
+        if (thinkingBlocks is List) ...thinkingBlocks,
+        if (text.trim().isNotEmpty) {'type': 'text', 'text': text},
+        for (final call in toolCalls.whereType<Map<dynamic, dynamic>>()) _toolUseBlock(call),
+      ];
+      m.remove('name');
+      continue;
+    }
     final content = m['content'];
     if (content is String) {
       m['content'] = [
@@ -114,16 +143,14 @@ ClaudeConversionResult convertClaudeMessages(
     if (j >= messages.length) {
       messages.insert(j, {'role': 'user', 'content': <dynamic>[]});
     }
-    final target = <dynamic>[
-      ...(messages[j]['content'] as List),
-      ...images,
-    ];
+    final target = <dynamic>[...(messages[j]['content'] as List), ...images];
     messages[j]['content'] = target;
   }
 
   // 4. Prefill handling.
   String? prefill;
-  if (extractPrefill && messages.isNotEmpty &&
+  if (extractPrefill &&
+      messages.isNotEmpty &&
       messages.last['role'] == 'assistant') {
     final parts = messages.last['content'] as List;
     final buffer = StringBuffer();
@@ -160,6 +187,27 @@ ClaudeConversionResult convertClaudeMessages(
     system: system,
     prefill: prefill,
   );
+}
+
+Map<String, dynamic> _toolUseBlock(Map<dynamic, dynamic> call) {
+  final function = call['function'];
+  final arguments = function is Map ? function['arguments'] : null;
+  Object? input;
+  if (arguments is String && arguments.trim().isNotEmpty) {
+    try {
+      input = jsonDecode(arguments);
+    } catch (_) {}
+  } else if (arguments is Map) {
+    input = arguments;
+  }
+  return {
+    'type': 'tool_use',
+    'id': call['id'],
+    'name': function is Map ? function['name'] : null,
+    // Anthropic requires an object; malformed arguments go back empty and the
+    // tool result already told the model they were rejected.
+    'input': input is Map ? input : const <String, dynamic>{},
+  };
 }
 
 dynamic _convertContentPart(dynamic part) {

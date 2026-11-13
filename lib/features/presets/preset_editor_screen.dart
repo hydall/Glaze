@@ -2026,6 +2026,10 @@ class _SummaryBlockEditor extends ConsumerWidget {
             label: 'label_insertion'.tr(),
             type: 'select',
             options: [
+              {
+                'label': 'injection_in_place'.tr(),
+                'value': summaryInPlaceInsertion,
+              },
               {'label': 'Relative', 'value': 'relative'},
               {'label': 'Depth', 'value': 'depth'},
             ],

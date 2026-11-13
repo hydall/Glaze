@@ -139,7 +139,7 @@ void main() {
 
     final summaryBlock = preset.blocks.firstWhere((b) => b.id == 'summary');
     expect(summaryBlock.content, equals(''));
-    expect(summaryBlock.insertionMode, equals('depth'));
+    expect(summaryBlock.insertionMode, equals(summaryInPlaceInsertion));
     expect(summaryBlock.depth, equals(4));
   });
 

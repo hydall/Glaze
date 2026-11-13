@@ -2,7 +2,12 @@
 //
 // Every plugin script runs in its own `sandbox="allow-scripts"` iframe (null
 // origin): one hidden main frame, one frame per chat panel, one per message
-// panel and message, and a short-lived frame per file-handler run. Frames
+// panel and message, and a short-lived frame per file-handler run. A frame's
+// document is built here and loaded from the plugin's package address on the
+// app's package server (`frames.open`), so the plugin's own files load as on
+// the web; without the server it is made inline (srcdoc). A plugin whose
+// main script shares one page with its chat panels (`onePage`: Tavo runs
+// both in its chat page) gets one frame for all of them instead. Frames
 // talk to this host with postMessage; the host knows which plugin (and which
 // message) owns each frame window and stamps that identity on every request
 // it forwards to Dart (`pluginBridge` handler), so a plugin cannot speak for
@@ -26,6 +31,9 @@
   var FILE_CAP_MS = 600000;
 
   var EVENT_KINDS = ['send', 'generation', 'chat', 'message'];
+  // CSP sources for loopback, which no local-network switch gates.
+  var LOOPBACK_SOURCES = ' http://localhost:* http://127.0.0.1:* http://[::1]:*' +
+    ' ws://localhost:* ws://127.0.0.1:* ws://[::1]:*';
   var sdkSource = '';
   var compatSources = {};
   var rtcToken = null;
@@ -41,6 +49,48 @@
   // 'all': every frame here. 'chat': all but chat panels, which are in the
   // plugin layer. 'panels': this is the plugin layer, chat panels only.
   var layer = 'all';
+
+  /* ---------- Over the chat chrome ---------- */
+  // The header and the message box are drawn in this page too, in the top
+  // layer (assets/chat_webview/chrome). Chat panels go over them, as they go
+  // over the app's controls where they are in the plugin layer: shown in the
+  // top layer after the chrome, in their own order. The chrome raises
+  // itself back over anything else that enters the top layer, but not over
+  // these, and puts them back on top whenever it does.
+  var showPopoverFn = typeof HTMLElement.prototype.showPopover === 'function'
+    ? HTMLElement.prototype.showPopover : null;
+  var hidePopoverFn = showPopoverFn ? HTMLElement.prototype.hidePopover : null;
+  var matchesFn = Element.prototype.matches;
+  var panelFrames = new WeakSet();
+
+  function panelsInTopLayer() {
+    return layer === 'all' && !!showPopoverFn;
+  }
+
+  function raisePanels() {
+    if (!panelsInTopLayer()) return;
+    var list = [];
+    wrappers.forEach(function (f) { if (f.kind === 'panel') list.push(f); });
+    list.sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
+    list.forEach(function (f) {
+      var el = f.iframe;
+      if (!el.isConnected) return;
+      try {
+        if (matchesFn.call(el, ':popover-open')) hidePopoverFn.call(el);
+        showPopoverFn.call(el);
+      } catch (e) { /* not a popover (any more) */ }
+    });
+  }
+
+  Object.defineProperty(window, '__glazePluginPanels', {
+    value: Object.freeze({
+      has: function (el) { return panelFrames.has(el); },
+      raise: raisePanels,
+    }),
+    writable: false,
+    configurable: false,
+    enumerable: false,
+  });
 
   function callHandler(name, arg) {
     if (window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
@@ -75,13 +125,27 @@
       compat: plugin.compat || null,
       network: plugin.network === true ? true : Array.isArray(plugin.network) ? plugin.network : false,
       localNetwork: plugin.network !== false && plugin.localNetwork === true,
+      // The address of the plugin's own files ('…/plugins/<id>/'), or null.
+      package: packageOf(plugin),
       // Only a plugin that may reach any host gets WebRTC back.
       rtcToken: plugin.network === true ? rtcToken : null,
     }, extra || {});
   }
 
-  // Hosts on the user's own network: loopback, private and link-local
-  // addresses and the names that only resolve inside a network.
+  // Loopback: this same device, not a network. Reaching it needs the
+  // plugin's general internet access and, in the listed-hosts mode, a host it
+  // names; the "local network" switch is about other devices on the user's
+  // network, so it does not apply here.
+  function isLoopbackHost(host) {
+    host = String(host).toLowerCase().replace(/^\[|\]$/g, '');
+    if (host === 'localhost' || /\.localhost$/.test(host)) return true;
+    var v4 = /^127\.(\d+)\.(\d+)\.(\d+)$/.exec(host);
+    if (v4) return +v4[1] <= 255 && +v4[2] <= 255 && +v4[3] <= 255;
+    return host === '::1' || host === '0:0:0:0:0:0:0:1';
+  }
+
+  // Hosts on the user's own network: private and link-local addresses and the
+  // names that only resolve inside a network.
   function isLocalHost(host) {
     host = String(host).toLowerCase().replace(/^\[|\]$/g, '');
     if (host === 'localhost' || /\.(localhost|local|lan|home\.arpa|internal)$/.test(host)) return true;
@@ -102,37 +166,61 @@
   // Without local network access only https/wss go out, which keeps the
   // frame away from home devices (they rarely speak TLS), and listed hosts
   // on the local network are dropped.
-  // Everything a plugin ships is inlined as data URLs, so it needs none.
+  // A plugin's own package (its path on the package server) is always in
+  // reach, and only its own: the policy names the path.
   // The source list a plugin may reach outside, '' for none; null when
   // nothing is restricted.
-  function reachable(network, local) {
+  function reachable(network, local, pkg) {
     if (network === true && local) return null;
-    var schemes = local ? ['https', 'http', 'wss', 'ws'] : ['https', 'wss'];
-    var hosts = '';
+    var hosts = pkg ? ' ' + pkg : '';
     if (network === true) {
-      hosts = ' https: wss:';
+      // Loopback stays reachable without the local network switch, plain http
+      // included.
+      hosts = ' https: wss:' + LOOPBACK_SOURCES;
     } else if (Array.isArray(network)) {
       network.forEach(function (h) {
         if (!/^(\*\.)?[a-z0-9.-]+$/.test(h)) return;
-        if (!local && isLocalHost(h.replace(/^\*\./, ''))) return;
+        var loopback = isLoopbackHost(h.replace(/^\*\./, ''));
+        if (!local && !loopback && isLocalHost(h.replace(/^\*\./, ''))) return;
+        var schemes = local || loopback
+          ? ['https', 'http', 'wss', 'ws']
+          : ['https', 'wss'];
         schemes.forEach(function (scheme) { hosts += ' ' + scheme + '://' + h + ':*'; });
       });
     }
     return hosts;
   }
 
-  function networkPolicy(network, local) {
-    var hosts = reachable(network, local);
+  // The package address of [plugin] when it is served: '<origin>/plugins/<id>/'.
+  function packageOf(plugin) {
+    var pkg = plugin.package;
+    if (typeof pkg !== 'string' || !/^http:\/\/127\.0\.0\.1:\d+\/plugins\/[a-z0-9._-]+\/$/.test(pkg)) return null;
+    return pkg.slice(pkg.indexOf('/plugins/') + 9, -1) === plugin.pluginId ? pkg : null;
+  }
+
+  // [media] are app origins a frame may show pictures and sound from (the
+  // ExtBlocks page shows the chat's generated images); nothing else of the
+  // page may load from them.
+  function networkPolicy(network, local, pkg, media) {
+    var hosts = reachable(network, local, pkg);
     if (hosts === null) return null;
     var outside = " data: blob:" + hosts;
+    var shown = outside + (media || []).map(function (o) { return ' ' + o; }).join('');
     return "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'" + outside +
-      "; style-src 'unsafe-inline'" + outside + "; img-src" + outside + "; media-src" + outside +
+      "; style-src 'unsafe-inline'" + outside + "; img-src" + shown + "; media-src" + shown +
       "; font-src" + outside + "; worker-src" + outside + "; frame-src" + outside +
       "; connect-src " + (hosts ? hosts.slice(1) : "'none'");
   }
 
+  // Loopback origins of the app's own file server, as the payload names them.
+  function mediaOf(plugin) {
+    return (Array.isArray(plugin.mediaOrigins) ? plugin.mediaOrigins : []).filter(function (o) {
+      return typeof o === 'string' && /^https?:\/\/(127\.0\.0\.1|localhost):\d+$/.test(o);
+    });
+  }
+
   function headScripts(plugin, boot) {
-    var policy = networkPolicy(plugin.network, boot.localNetwork);
+    var policy = networkPolicy(plugin.network, boot.localNetwork, packageOf(plugin), mediaOf(plugin));
     var html = (policy ? '<meta http-equiv="Content-Security-Policy" content="' + policy + '">' : '') +
       '<meta charset="utf-8">' +
       '<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">' +
@@ -190,20 +278,25 @@
   // stopped before the request goes out, unless its internet setting
   // reaches that host anyway. The plugin's document inherits that policy
   // too, so it must be the same one.
-  function wrapperDoc(plugin, srcdoc, local) {
-    var policy = networkPolicy(plugin.network, local);
+  // [doc] is the plugin's document inline, or `{ url }` to load it from.
+  function wrapperDoc(plugin, doc, local) {
+    var policy = networkPolicy(plugin.network, local, packageOf(plugin), mediaOf(plugin));
+    var inner = typeof doc === 'string' ? 'srcdoc="' + attr(doc) + '"' : 'src="' + attr(doc.url) + '"';
     return '<!doctype html><html><head>' +
       (policy ? '<meta http-equiv="Content-Security-Policy" content="' + policy + '">' : '') +
       '<style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent!important;color-scheme:normal}' +
       'iframe{display:block;border:0;width:100%;height:100%;background:transparent;color-scheme:normal}</style></head>' +
-      '<body><iframe sandbox="allow-scripts" allowtransparency="true" srcdoc="' + attr(srcdoc) + '"></iframe>' +
+      '<body><iframe sandbox="allow-scripts" allowtransparency="true" ' + inner + '></iframe>' +
       // A second load means the plugin left its document (the policy
       // decided whether the new one loaded); the host takes the frame down.
       '<script>(function(){var n=0;document.querySelector("iframe").addEventListener("load",function(){' +
       'if(++n>1)parent.postMessage({type:' + jsonForScript(P + 'gone') + '},"*");});})();<\/script></body></html>';
   }
 
-  function mountFrame(plugin, kind, srcdoc, opts) {
+  // Mounts a frame for [doc], loaded from [path] in the plugin's package when
+  // the package is served. The frame state is there at once; the page comes
+  // when the server has the document.
+  function mountFrame(plugin, kind, doc, path, opts) {
     opts = opts || {};
     var iframe = document.createElement('iframe');
     // Scripts are allowed so the inner frame keeps them; the wrapper has none.
@@ -227,16 +320,29 @@
       style.zIndex = String(FRAME_Z + (opts.order || 0));
       style.pointerEvents = 'none';
       style.clipPath = layer === 'panels' ? 'none' : 'polygon(0 0, 0 0, 0 0)';
+      if (panelsInTopLayer()) {
+        // A popover's UA box (margin: auto, padding, border, a Canvas
+        // background) would take the frame off the edges.
+        iframe.setAttribute('popover', 'manual');
+        style.margin = '0';
+        style.padding = '0';
+        style.inset = '0';
+        style.maxWidth = 'none';
+        style.maxHeight = 'none';
+        style.overflow = 'visible';
+        panelFrames.add(iframe);
+      }
     } else {
       style.display = 'block';
       style.width = '100%';
       style.height = '0';
     }
-    iframe.srcdoc = wrapperDoc(plugin, srcdoc, plugin.network !== false && plugin.localNetwork === true);
+    var local = plugin.network !== false && plugin.localNetwork === true;
     var state = {
       plugin: plugin,
       kind: kind,
       panelId: opts.panelId || null,
+      order: opts.order || 0,
       messageId: opts.messageId || null,
       iframe: iframe,
       ready: false,
@@ -248,6 +354,17 @@
     // bound when it first posts (see frameOf).
     state.wrapper = iframe.contentWindow;
     wrappers.set(state.wrapper, state);
+    var load = function (url) {
+      if (state.removed) return;
+      iframe.srcdoc = wrapperDoc(plugin, typeof url === 'string' && url ? { url: url } : doc, local);
+    };
+    if (!packageOf(plugin)) {
+      load(null);
+    } else {
+      Promise.resolve(callDart(state, 'frames.open', [String(path || ''), doc])).then(function (res) {
+        load(res && res.ok !== false ? res.result : null);
+      }, function () { load(null); });
+    }
     return state;
   }
 
@@ -269,6 +386,7 @@
   }
 
   function removeFrame(state) {
+    state.removed = true;
     if (state.win) frames.delete(state.win);
     wrappers.delete(state.wrapper);
     if (fitted === state) fitted = null;
@@ -287,8 +405,29 @@
     return out;
   }
 
+  // The frame running the plugin's main script: its own, or the one page it
+  // shares with the chat panels.
   function mainFrame(pluginId) {
-    return framesOf(pluginId).filter(function (f) { return f.kind === 'main'; })[0] || null;
+    return framesOf(pluginId).filter(isMain)[0] || null;
+  }
+
+  function isMain(f) { return f.kind === 'main' || f.hostsMain === true; }
+
+  // Main script and chat panels in one page: the panels' documents one after
+  // another, the main script first.
+  function onePage(plugin) {
+    return plugin.onePage === true &&
+      (plugin.panels || []).some(function (p) { return p.placement === 'chat'; });
+  }
+
+  function onePageHtml(plugin) {
+    var html = typeof plugin.main === 'string' && plugin.main
+      ? scriptTag(plugin.main + '\n//# sourceURL=plugin://' + plugin.pluginId + '/' + (plugin.mainPath || 'main.js'))
+      : '';
+    (plugin.panels || []).forEach(function (panel) {
+      if (panel.placement === 'chat') html += String(panel.html || '');
+    });
+    return html;
   }
 
   /* ---------- Hit regions (chat panels) ---------- */
@@ -459,7 +598,7 @@
           }
           return;
         }
-        if (state.kind === 'main') state.plugin.subscriptions.add(ev);
+        if (isMain(state)) state.plugin.subscriptions.add(ev);
         return;
       }
       case 'emit':
@@ -696,7 +835,7 @@
           if (existing && existing.iframe.isConnected && existing.iframe.parentNode === host) return;
           if (existing) removeFrame(existing);
           var boot = bootFor(plugin, 'message', { panelId: panel.id, messageId: messageId });
-          messageFrames.set(key, mountFrame(plugin, 'message', panelDoc(plugin, boot, panel.html), {
+          messageFrames.set(key, mountFrame(plugin, 'message', panelDoc(plugin, boot, panel.html), panel.src, {
             panelId: panel.id, messageId: messageId, parent: host,
           }));
         });
@@ -829,16 +968,28 @@
         refused: new Set(),
       });
       plugins.set(plugin.pluginId, plugin);
+      if (onePage(plugin)) {
+        // Where the chat panels are.
+        if (!panelsHere) return;
+        var chat = plugin.panels.filter(function (p) { return p.placement === 'chat'; });
+        var shared = mountFrame(plugin, 'panel',
+          panelDoc(plugin, bootFor(plugin, 'panel', { panelId: chat[0].id, main: true }), onePageHtml(plugin)),
+          chat[0].src, { panelId: chat[0].id, order: chat[0].order });
+        shared.hostsMain = true;
+        return;
+      }
       if (mainHere && typeof plugin.main === 'string' && plugin.main) {
-        mountFrame(plugin, 'main', runScriptsDoc(plugin, bootFor(plugin, 'main'), [{ name: 'main.js', source: plugin.main }]));
+        mountFrame(plugin, 'main', runScriptsDoc(plugin, bootFor(plugin, 'main'), [{ name: 'main.js', source: plugin.main }]),
+          plugin.mainPath);
       }
       (plugin.panels || []).forEach(function (panel) {
         if (!panelsHere || panel.placement !== 'chat') return;
-        mountFrame(plugin, 'panel', panelDoc(plugin, bootFor(plugin, 'panel', { panelId: panel.id }), panel.html), {
+        mountFrame(plugin, 'panel', panelDoc(plugin, bootFor(plugin, 'panel', { panelId: panel.id }), panel.html), panel.src, {
           panelId: panel.id, order: panel.order,
         });
       });
     });
+    raisePanels();
     scheduleReconcile();
     return plugins.size;
   }
@@ -870,15 +1021,18 @@
     scheduleReconcile();
   }
 
-  // Runs a blocking hook through every subscribed plugin in setup order.
+  // Runs a blocking hook through every subscribed plugin in setup order, or
+  // through those of [only] (plugin ids) when given: the app runs a hook
+  // through both pages when main scripts are in each.
   // Resolves `{ text, cancelled, cancelledBy?, message? }`.
-  async function intercept(type, payload) {
+  async function intercept(type, payload, only) {
     payload = Object.assign({}, payload || {});
     var text = typeof payload.text === 'string' ? payload.text : '';
     var order = Array.from(plugins.values());
     for (var i = 0; i < order.length; i++) {
       var plugin = order[i];
       if (!plugin.subscriptions.has(type)) continue;
+      if (Array.isArray(only) && only.indexOf(plugin.pluginId) < 0) continue;
       var main = mainFrame(plugin.pluginId);
       if (!main) continue;
       var cap = type === 'generation:prepare' ? INTERCEPT_CAP_MS : 30000;
@@ -912,7 +1066,7 @@
     if (!plugin) return { ok: false, error: { code: 'runtime-not-ready', message: 'Plugin is not running' } };
     var frame = null;
     if (Array.isArray(scripts) && scripts.length) {
-      frame = mountFrame(plugin, 'file', runScriptsDoc(plugin, bootFor(plugin, 'file'), scripts));
+      frame = mountFrame(plugin, 'file', runScriptsDoc(plugin, bootFor(plugin, 'file'), scripts), scripts[0].name);
     }
     var target = frame || mainFrame(pluginId);
     if (!target) return { ok: false, error: { code: 'runtime-not-ready', message: 'Plugin is not running' } };

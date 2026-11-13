@@ -3,6 +3,7 @@ import 'package:easy_localization/easy_localization.dart';
 import '../../../core/utils/error_format.dart';
 import 'catalog_error_source.dart';
 import 'janitor_lorebook_rebuilder.dart';
+import 'janitor_waiting_room.dart';
 import 'janitor_webview_proxy.dart';
 
 export 'catalog_error_source.dart';
@@ -44,6 +45,12 @@ LabeledError describeCatalogError(
     return LabeledError(
       CatalogErrorSource.janitor,
       '${error.message}.\n${'catalog_janitor_refused_body'.tr()}',
+    );
+  }
+  if (error is JanitorQueueException) {
+    return LabeledError(
+      CatalogErrorSource.janitor,
+      'catalog_error_janitor_queue'.tr(),
     );
   }
   if (error is JanitorCfException) {

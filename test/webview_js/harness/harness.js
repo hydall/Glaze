@@ -71,6 +71,7 @@ function render(text, options = {}) {
     isTyping = false,
     isReasoning = false,
     allowMessageScripts = true,
+    allowExternalMedia = true,
     searchQuery = '',
     keep = false,
   } = options;
@@ -91,6 +92,7 @@ function render(text, options = {}) {
     searchQuery,
     applySearchHighlight: (html) => html,
     allowMessageScripts,
+    allowExternalMedia,
   });
   return host;
 }

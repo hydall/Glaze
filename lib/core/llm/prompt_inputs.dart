@@ -6,6 +6,7 @@ import '../models/chat_message.dart';
 import '../models/api_config.dart';
 import '../models/lorebook.dart';
 import '../models/memory_book.dart';
+import '../models/summary_block.dart' show SummarySegment;
 import '../models/ledger_prompt_injection_mode.dart';
 import '../models/ledger_prompt_injection_policy.dart';
 import 'prompt_builder.dart';
@@ -25,6 +26,9 @@ class PromptInputs {
   final Map<String, String> sessionVars;
   final Map<String, String> globalVars;
   final String? summaryContent;
+  /// The summary cut where history runs between its blocks, for a summary
+  /// sent in place of its messages. See [SummarySegment].
+  final List<SummarySegment> summarySegments;
   final String? guidanceText;
   final List<Lorebook> lorebooks;
   final LorebookGlobalSettings lorebookSettings;
@@ -79,6 +83,7 @@ class PromptInputs {
     this.sessionVars = const {},
     this.globalVars = const {},
     this.summaryContent,
+    this.summarySegments = const [],
     this.guidanceText,
     this.lorebooks = const [],
     this.lorebookSettings = const LorebookGlobalSettings(),
@@ -134,6 +139,7 @@ class PromptInputs {
     'sessionVars': sessionVars,
     'globalVars': globalVars,
     'summaryContent': summaryContent,
+    'summarySegments': SummarySegment.encodeList(summarySegments),
     'guidanceText': guidanceText,
     'lorebooks': lorebooks.map((l) => l.toJson()).toList(),
     'lorebookSettings': lorebookSettings.toJson(),
@@ -195,6 +201,7 @@ class PromptInputs {
     sessionVars: Map<String, String>.from(json['sessionVars'] as Map? ?? {}),
     globalVars: Map<String, String>.from(json['globalVars'] as Map? ?? {}),
     summaryContent: json['summaryContent'] as String?,
+    summarySegments: SummarySegment.decodeList(json['summarySegments']),
     guidanceText: json['guidanceText'] as String?,
     lorebooks: (json['lorebooks'] as List)
         .map((l) => Lorebook.fromJson(l as Map<String, dynamic>))

@@ -25,11 +25,15 @@ import '../../../core/constants/image_gen_patterns.dart';
 /// * a pending block introduces its carried images with `@`, because its
 ///   payload is otherwise a bare instruction (JSON or plain prompt text) that
 ///   must keep parsing exactly as before.
+///
+/// [presentation] is not part of the tag payload: it rides on the element
+/// forms and the error card (see [ImageTagMarkup.presentationAttributes]).
 class ImageBlockPayload {
   const ImageBlockPayload({
     this.paths = const [],
     this.activeIndex = 0,
     this.instruction = '',
+    this.presentation = const {},
   });
 
   /// Every image generated for this block, oldest first.
@@ -40,6 +44,10 @@ class ImageBlockPayload {
 
   /// Instruction JSON (or raw prompt text) carried by the block.
   final String instruction;
+
+  /// The attributes the author put on the `<img>` besides the ones Glaze owns
+  /// (see [ImageTagMarkup.presentationAttributes]), unescaped.
+  final Map<String, String> presentation;
 
   static const String _separator = ';;';
 
@@ -123,12 +131,14 @@ class ImageBlockPayload {
     paths: [...paths, path],
     activeIndex: paths.length,
     instruction: instruction,
+    presentation: presentation,
   );
 
   ImageBlockPayload withActiveIndex(int index) => ImageBlockPayload(
     paths: paths,
     activeIndex: paths.isEmpty ? 0 : index.clamp(0, paths.length - 1),
     instruction: instruction,
+    presentation: presentation,
   );
 
   ImageBlockPayload withPaths(List<String> newPaths, {int? activeIndex}) =>
@@ -138,13 +148,23 @@ class ImageBlockPayload {
             ? 0
             : (activeIndex ?? this.activeIndex).clamp(0, newPaths.length - 1),
         instruction: instruction,
+        presentation: presentation,
       );
 
   ImageBlockPayload withInstruction(String value) => ImageBlockPayload(
     paths: paths,
     activeIndex: activeIndex,
     instruction: value,
+    presentation: presentation,
   );
+
+  ImageBlockPayload withPresentation(Map<String, String> value) =>
+      ImageBlockPayload(
+        paths: paths,
+        activeIndex: activeIndex,
+        instruction: instruction,
+        presentation: value,
+      );
 
   /// The path list on its own, as carried through an error card.
   String encodePathList() => _encodePathList();
@@ -166,7 +186,12 @@ class ImageResultElement {
 /// One pending image tag located in a message: the span it occupies and the
 /// raw instruction payload it carries.
 class PendingImageTag {
-  const PendingImageTag(this.start, this.end, this.payload);
+  const PendingImageTag(
+    this.start,
+    this.end,
+    this.payload, {
+    this.presentation = const {},
+  });
 
   /// Offset of the first character of the tag inside the scanned text.
   final int start;
@@ -177,6 +202,9 @@ class PendingImageTag {
   /// Raw instruction payload — the `data-iig-instruction` attribute value or
   /// whatever follows `[IMG:GEN:`. Empty when the tag carries no instruction.
   final String payload;
+
+  /// The author's attributes of an `<img>` form; empty for a bare tag.
+  final Map<String, String> presentation;
 }
 
 /// State of one image block inside a message.
@@ -203,6 +231,7 @@ class ImageBlock {
     this.imagePath = '',
     this.paths = const [],
     this.activeIndex = 0,
+    this.presentation = const {},
   });
 
   final int start;
@@ -222,17 +251,20 @@ class ImageBlock {
   /// Position of [imagePath] inside [paths].
   final int activeIndex;
 
+  /// The author's attributes of the block's `<img>`, kept across its states.
+  final Map<String, String> presentation;
+
+  ImageBlockPayload get payload => ImageBlockPayload(
+    paths: paths,
+    activeIndex: activeIndex,
+    instruction: instruction,
+    presentation: presentation,
+  );
+
   /// The block written back as a pending tag, prompt and earlier images
   /// included, so a regeneration neither asks the model for the prompt again
   /// nor loses the images the block already holds.
-  String get asPendingTag {
-    final payload = ImageBlockPayload(
-      paths: paths,
-      activeIndex: activeIndex,
-      instruction: instruction,
-    ).encodePending();
-    return payload.isEmpty ? '[IMG:GEN]' : '[IMG:GEN:$payload]';
-  }
+  String get asPendingTag => ImageTagMarkup.pendingTag(payload);
 }
 
 /// Pure text transformations for image-gen markup: the `<img data-iig-…>`
@@ -276,7 +308,7 @@ class ImageTagMarkup {
 
     void collect(
       RegExp pattern,
-      String? Function(RegExpMatch) payloadOf, {
+      PendingImageTag Function(RegExpMatch) tagOf, {
       bool Function(String element)? accept,
     }) {
       for (final match in pattern.allMatches(text)) {
@@ -285,9 +317,7 @@ class ImageTagMarkup {
           continue;
         }
         if (accept != null && !accept(match.group(0)!)) continue;
-        tags.add(
-          PendingImageTag(match.start, match.end, payloadOf(match) ?? ''),
-        );
+        tags.add(tagOf(match));
       }
     }
 
@@ -296,27 +326,115 @@ class ImageTagMarkup {
     // waiting for a picture count as pending here.
     collect(
       ImgGenPatterns.htmlIigTagRegex,
-      (m) => m.group(1),
+      _pendingElementTag,
       accept: ImgGenPatterns.isPendingIigElement,
     );
     collect(
       ImgGenPatterns.htmlIigTagDoubleRegex,
-      (m) => m.group(1),
+      _pendingElementTag,
       accept: ImgGenPatterns.isPendingIigElement,
     );
     // `<img src="[IMG:GEN:…]">` without the instruction attribute: the payload
     // lives in the src, but the whole element is what gets replaced.
     collect(
       ImgGenPatterns.imgSrcGenRegex,
-      (m) => ImgGenPatterns.imgGenRegex.firstMatch(m.group(0)!)?.group(1),
+      (m) => PendingImageTag(
+        m.start,
+        m.end,
+        ImgGenPatterns.imgGenRegex.firstMatch(m.group(0)!)?.group(1) ?? '',
+        presentation: presentationOf(m.group(0)!),
+      ),
     );
-    collect(ImgGenPatterns.imgGenRegex, (m) => m.group(1));
+    collect(
+      ImgGenPatterns.imgGenRegex,
+      (m) => PendingImageTag(m.start, m.end, m.group(1) ?? ''),
+    );
 
     tags.sort((a, b) => a.start.compareTo(b.start));
     return tags;
   }
 
+  /// A pending `<img data-iig-…>` element as a tag. The images a reset
+  /// block carries ride in [variantsAttribute], the same as on a finished one
+  /// (see [pendingTag]).
+  static PendingImageTag _pendingElementTag(RegExpMatch match) {
+    final element = match.group(0)!;
+    final attributes = ImgGenPatterns.imgAttributes(element);
+    final instruction = _unescapeAttribute(
+      attributes[instructionAttribute] ?? '',
+    );
+    final paths = ImageBlockPayload.decodePathList(
+      _unescapeAttribute(attributes[variantsAttribute] ?? ''),
+    );
+    final payload = paths.isEmpty
+        ? instruction
+        : ImageBlockPayload(
+            paths: paths,
+            activeIndex:
+                (int.tryParse(attributes[variantIndexAttribute] ?? '') ?? 0)
+                    .clamp(0, paths.length - 1),
+            instruction: instruction,
+          ).encodePending();
+    return PendingImageTag(
+      match.start,
+      match.end,
+      payload,
+      presentation: _presentationFrom(attributes),
+    );
+  }
+
   static bool hasImageGenTags(String text) => scanPendingTags(text).isNotEmpty;
+
+  /// Attributes of an author's `<img>` that only decide how the picture looks.
+  ///
+  /// A card lays its picture out with them — `<img style="position:absolute;
+  /// width:100%;height:100%" …>` inside a box with a fixed aspect ratio — so a
+  /// block keeps them through every state it passes: the stored element, a
+  /// reset back to pending, an error card. Without them the picture drops out
+  /// of the layout it was written for (INV-IG14). Everything else on the
+  /// element either belongs to Glaze or is not ours to carry.
+  static const List<String> presentationAttributes = [
+    'style',
+    'class',
+    'alt',
+    'title',
+    'width',
+    'height',
+  ];
+
+  /// The [presentationAttributes] of one `<img …>` element, unescaped.
+  static Map<String, String> presentationOf(String element) =>
+      _presentationFrom(ImgGenPatterns.imgAttributes(element));
+
+  static Map<String, String> _presentationFrom(Map<String, String> attributes) {
+    return {
+      for (final name in presentationAttributes)
+        if (attributes[name] case final value? when value.trim().isNotEmpty)
+          name: _unescapeAttribute(value),
+    };
+  }
+
+  static String _presentationMarkup(Map<String, String> presentation) => [
+    for (final MapEntry(:key, :value) in presentation.entries)
+      if (presentationAttributes.contains(key))
+        ' $key="${_escapeAttribute(value, '"')}"',
+  ].join();
+
+  static Map<String, String> _presentationFromJson(Object? value) {
+    if (value is! Map) return const {};
+    return _presentationFrom({
+      for (final MapEntry(:key, :value) in value.entries)
+        if (key is String && value is String) key: value,
+    });
+  }
+
+  /// An `[IMG:ERROR:…]` card for [fields].
+  ///
+  /// The card ends at the first `]`, so one inside the JSON — an instruction
+  /// or a style that happens to hold it — is written as its `\u005d` escape,
+  /// which every JSON reader turns back into the bracket.
+  static String errorTag(Map<String, Object?> fields) =>
+      '[IMG:ERROR:${jsonEncode(fields).replaceAll(']', r'\u005d')}]';
 
   // ── Stored `<img data-iig-…>` form of a finished block ──────────────────
 
@@ -341,20 +459,28 @@ class ImageTagMarkup {
   ///
   /// `[IMG:RESULT:…]` is still read, so older messages render unchanged, but
   /// it is never written any more.
+  ///
+  /// The author's [presentationAttributes] follow the `src`, so a card that
+  /// positioned its picture keeps it where it put it.
   static String encodeResultElement(ImageBlockPayload payload) {
     final buffer = StringBuffer('<img $instructionAttribute=')
       ..write("'${_escapeAttribute(payload.instruction, "'")}'");
-    if (payload.hasVariants) {
-      final joined = payload.paths.join(ImageBlockPayload.variantSeparator);
-      buffer
-        ..write(" $variantsAttribute='${_escapeAttribute(joined, "'")}'")
-        ..write(
-          " $variantIndexAttribute="
-          "'${payload.activeIndex.clamp(0, payload.paths.length - 1)}'",
-        );
-    }
-    buffer.write(' src="${_escapeAttribute(payload.activePath, '"')}">');
+    if (payload.hasVariants) _writeVariants(buffer, payload);
+    buffer
+      ..write(' src="${_escapeAttribute(payload.activePath, '"')}"')
+      ..write(_presentationMarkup(payload.presentation))
+      ..write('>');
     return buffer.toString();
+  }
+
+  static void _writeVariants(StringBuffer buffer, ImageBlockPayload payload) {
+    final joined = payload.paths.join(ImageBlockPayload.variantSeparator);
+    buffer
+      ..write(" $variantsAttribute='${_escapeAttribute(joined, "'")}'")
+      ..write(
+        " $variantIndexAttribute="
+        "'${payload.activeIndex.clamp(0, payload.paths.length - 1)}'",
+      );
   }
 
   /// Every finished block written in the stored `<img data-iig-…>` form, in
@@ -393,12 +519,17 @@ class ImageTagMarkup {
     final instruction = _unescapeAttribute(
       attributes[instructionAttribute] ?? '',
     );
+    final presentation = _presentationFrom(attributes);
     final variants = _unescapeAttribute(attributes[variantsAttribute] ?? '');
     final paths = variants.isEmpty
         ? <String>[src]
         : ImageBlockPayload.decodePathList(variants);
     if (paths.isEmpty) {
-      return ImageBlockPayload(paths: [src], instruction: instruction);
+      return ImageBlockPayload(
+        paths: [src],
+        instruction: instruction,
+        presentation: presentation,
+      );
     }
     // The declared index wins; without one the block shows whichever variant
     // the `src` names, so a hand-edited element still renders the right image.
@@ -408,6 +539,7 @@ class ImageTagMarkup {
       paths: paths,
       activeIndex: active < 0 ? 0 : active.clamp(0, paths.length - 1),
       instruction: instruction,
+      presentation: presentation,
     );
   }
 
@@ -421,7 +553,7 @@ class ImageTagMarkup {
       result = result.replaceRange(
         element.start,
         element.end,
-        _pendingTag(element.payload),
+        pendingTag(element.payload),
       );
     }
     return result;
@@ -486,6 +618,7 @@ class ImageTagMarkup {
     final instrJson = instruction.isNotEmpty ? jsonEncode(instruction) : '';
     final payload = ImageBlockPayload.parsePending(tag.payload)
         .withInstruction(instrJson)
+        .withPresentation(tag.presentation)
         .withNewImage(imagePath);
     return text.replaceRange(tag.start, tag.end, encodeResultElement(payload));
   }
@@ -498,12 +631,16 @@ class ImageTagMarkup {
     // The path list rides along as a plain string: the error payload is JSON,
     // and a JSON array would close the tag on its own `]`.
     final carried = ImageBlockPayload.parsePending(tag.payload).encodePathList();
-    final encoded = jsonEncode({
-      'error': error,
-      if (instructionJson.isNotEmpty) 'instruction': instructionJson,
-      if (carried.isNotEmpty) 'variants': carried,
-    });
-    return text.replaceRange(tag.start, tag.end, '[IMG:ERROR:$encoded]');
+    return text.replaceRange(
+      tag.start,
+      tag.end,
+      errorTag({
+        'error': error,
+        if (instructionJson.isNotEmpty) 'instruction': instructionJson,
+        if (carried.isNotEmpty) 'variants': carried,
+        if (tag.presentation.isNotEmpty) 'presentation': tag.presentation,
+      }),
+    );
   }
 
   /// Resolves every pending image tag to a retryable disabled-state error.
@@ -532,12 +669,13 @@ class ImageTagMarkup {
     return text.replaceAllMapped(ImgGenPatterns.imgErrorRegex, (m) {
       try {
         final json = jsonDecode(m.group(1)!) as Map<String, dynamic>;
-        return _pendingTag(
+        return pendingTag(
           ImageBlockPayload(
             paths: ImageBlockPayload.decodePathList(
               json['variants'] as String? ?? '',
             ),
             instruction: json['instruction'] as String? ?? '',
+            presentation: _presentationFromJson(json['presentation']),
           ),
         );
       } catch (_) {}
@@ -549,14 +687,30 @@ class ImageTagMarkup {
   /// its prompt and the images it already holds.
   static String resetResultTags(String text) {
     final reset = text.replaceAllMapped(ImgGenPatterns.imgResultRegex, (m) {
-      return _pendingTag(ImageBlockPayload.parseResult(m.group(1) ?? ''));
+      return pendingTag(ImageBlockPayload.parseResult(m.group(1) ?? ''));
     });
     return resetResultElements(reset);
   }
 
-  static String _pendingTag(ImageBlockPayload payload) {
-    final encoded = payload.encodePending();
-    return encoded.isEmpty ? '[IMG:GEN]' : '[IMG:GEN:$encoded]';
+  /// The pending spelling of [payload].
+  ///
+  /// A block that carries the author's [presentationAttributes] stays an
+  /// `<img>` element with `[IMG:GEN]` in its `src` and its images in
+  /// [variantsAttribute]: the bracket tag has nowhere to keep them, and the
+  /// picture the regeneration brings would lose the card's layout.
+  static String pendingTag(ImageBlockPayload payload) {
+    if (payload.presentation.isEmpty) {
+      final encoded = payload.encodePending();
+      return encoded.isEmpty ? '[IMG:GEN]' : '[IMG:GEN:$encoded]';
+    }
+    final buffer = StringBuffer('<img $instructionAttribute=')
+      ..write("'${_escapeAttribute(payload.instruction, "'")}'");
+    if (payload.paths.isNotEmpty) _writeVariants(buffer, payload);
+    buffer
+      ..write(' src="[IMG:GEN]"')
+      ..write(_presentationMarkup(payload.presentation))
+      ..write('>');
+    return buffer.toString();
   }
 
   /// Every image block of [text] in document order, whatever state it is in.
@@ -587,6 +741,7 @@ class ImageTagMarkup {
           imagePath: payload.activePath,
           paths: payload.paths,
           activeIndex: payload.activeIndex,
+          presentation: payload.presentation,
         ),
       );
     }
@@ -611,6 +766,7 @@ class ImageTagMarkup {
       if (insidePendingTag(match)) continue;
       var instruction = '';
       var carried = const <String>[];
+      var presentation = const <String, String>{};
       try {
         final parsed = jsonDecode(match.group(1) ?? '');
         if (parsed is Map) {
@@ -618,6 +774,7 @@ class ImageTagMarkup {
           carried = ImageBlockPayload.decodePathList(
             parsed['variants'] as String? ?? '',
           );
+          presentation = _presentationFromJson(parsed['presentation']);
         }
       } catch (_) {}
       blocks.add(
@@ -627,6 +784,7 @@ class ImageTagMarkup {
           kind: ImageBlockKind.error,
           instruction: instruction,
           paths: carried,
+          presentation: presentation,
         ),
       );
     }
@@ -673,7 +831,7 @@ class ImageTagMarkup {
       result = result.replaceRange(
         block.start,
         block.end,
-        _pendingTag(ImageBlockPayload(instruction: block.instruction)),
+        pendingTag(ImageBlockPayload(instruction: block.instruction)),
       );
     }
     return result;
@@ -706,7 +864,11 @@ class ImageTagMarkup {
       result = result.replaceRange(
         tag.start,
         tag.end,
-        _pendingTag(payload.withPaths(kept, activeIndex: active)),
+        pendingTag(
+          payload
+              .withPresentation(tag.presentation)
+              .withPaths(kept, activeIndex: active),
+        ),
       );
     }
     return result;
@@ -721,6 +883,7 @@ class ImageTagMarkup {
       instruction: payload.instruction,
       paths: payload.paths,
       activeIndex: payload.activeIndex,
+      presentation: tag.presentation,
     );
   }
 
@@ -745,11 +908,7 @@ class ImageTagMarkup {
     final blocks = scanImageBlocks(text);
     if (index < 0 || index >= blocks.length) return text;
     final block = blocks[index];
-    final payload = ImageBlockPayload(
-      paths: block.paths,
-      activeIndex: block.activeIndex,
-      instruction: block.instruction,
-    ).withNewImage(imagePath);
+    final payload = block.payload.withNewImage(imagePath);
     return text.replaceRange(
       block.start,
       block.end,
@@ -772,15 +931,10 @@ class ImageTagMarkup {
     if (block.kind != ImageBlockKind.result) return text;
     if (variantIndex < 0 || variantIndex >= block.paths.length) return text;
     if (variantIndex == block.activeIndex) return text;
-    final payload = ImageBlockPayload(
-      paths: block.paths,
-      activeIndex: variantIndex,
-      instruction: block.instruction,
-    );
     return text.replaceRange(
       block.start,
       block.end,
-      encodeResultElement(payload),
+      encodeResultElement(block.payload.withActiveIndex(variantIndex)),
     );
   }
 

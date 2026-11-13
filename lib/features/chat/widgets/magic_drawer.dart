@@ -20,6 +20,7 @@ import 'drawer_panel_scaffold.dart';
 import 'magic_drawer_catalog.dart';
 import 'magic_drawer_list_row.dart';
 import 'magic_drawer_models.dart';
+import 'magic_drawer_status.dart';
 import '../services/drawer_item_launcher.dart';
 import '../services/magic_drawer_layout_service.dart';
 import '../services/magic_drawer_stats_service.dart';
@@ -275,67 +276,23 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
     String id,
     ExtensionsSettings extSettings,
     List<ExtensionPreset> extPresets,
-  ) {
-    return switch (id) {
-      'inspector' =>
-        _stats.promptTokens > 0 && _stats.contextSize > 0
-            ? '${_stats.promptTokens}/${_stats.contextSize} tokens'
-            : _stats.approximateHistoryTokens > 0 && _stats.contextSize > 0
-            ? '~${_stats.approximateHistoryTokens}/${_stats.contextSize} tokens'
-            : null,
-      'memory' =>
-        _stats.summaryChars > 0
-            ? '${_stats.summaryChars} chars • ${_stats.memoryEntryCount} entries'
-            : '${_stats.memoryEntryCount} entries',
-      'sessions' => '${_stats.sessionCount} sessions',
-      'char-card' =>
-        _stats.characterTokens > 0
-            ? '${_stats.characterTokens} tokens'
-            : _stats.character?.name,
-      'lorebooks' => '${_stats.lorebookEntryCount} entries',
-      'regex' => '${_stats.regexCount} scripts',
-      'api' =>
-        _stats.apiConfig?.name.isNotEmpty == true
-            ? _stats.apiConfig!.name
-            : _stats.apiConfig?.model,
-      'presets' =>
-        _stats.activePresetDisplayName == null
-            ? 'label_default'.tr()
-            : _stats.presetTokens > 0
-            ? '${_stats.activePresetDisplayName} • ${_stats.presetTokens} tokens'
-            : _stats.activePresetDisplayName,
-      'personas' => _stats.activePersona?.name ?? 'label_default'.tr(),
-      'image-gen' => _stats.imageGenEnabled ? 'on'.tr() : 'off'.tr(),
-      'authors-note' =>
-        _stats.session?.authorsNote != null &&
-                _stats.session!.authorsNote!.content.isNotEmpty
-            ? '${_stats.session!.authorsNote!.content.length} chars'
-            : 'placeholder_empty'.tr(),
-      'ext-blocks' =>
-        extSettings.activePresetId == null
-            ? 'No preset'
-            : extPresets
-                      .where((p) => p.id == extSettings.activePresetId)
-                      .firstOrNull
-                      ?.name ??
-                  'No preset',
-      'plugins' => _pluginsStatus(),
-      _ => null,
-    };
-  }
+  ) => magicDrawerStatusFor(
+    id,
+    _stats,
+    extSettings: extSettings,
+    extPresets: extPresets,
+    pluginsStatus: id == 'plugins' ? _pluginsStatus() : null,
+  );
 
   /// How many installed plugins are on, read during build so the card
   /// follows a switch flipped in the sheet.
-  String? _pluginsStatus() {
-    final plugins = ref.watch(pluginLibraryProvider).value;
-    if (plugins == null) return null;
-    return 'plugins_drawer_status'.tr(
-      namedArgs: {
-        'on': '${plugins.where((x) => x.enabled).length}',
-        'total': '${plugins.length}',
-      },
-    );
-  }
+  String? _pluginsStatus() => pluginsDrawerStatus(
+    ref
+        .watch(pluginLibraryProvider)
+        .value
+        ?.map((x) => (enabled: x.enabled))
+        .toList(),
+  );
 
   Future<void> _removeItem(String id) async {
     setState(() {

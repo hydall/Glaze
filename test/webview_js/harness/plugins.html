@@ -36,6 +36,15 @@
         if (request.method === 'messages.count') {
           return { ok: false, error: { code: 'permission_denied', message: 'denied' } };
         }
+        if (request.method === 'frames.open') {
+          const [path, doc] = request.params;
+          const res = await fetch('http://127.0.0.1:4177/__frames', {
+            method: 'POST', body: JSON.stringify({ pluginId: request.pluginId, path, doc }),
+          });
+          const url = await res.text();
+          (window.__frameUrls = window.__frameUrls || []).push(url);
+          return { ok: true, result: url };
+        }
         if (request.method === 'net.fetch') {
           const [url, init] = request.params;
           if (url.endsWith('/slow')) return new Promise(() => {});

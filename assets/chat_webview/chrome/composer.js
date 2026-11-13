@@ -1,0 +1,891 @@
+// The composer: attachments, the input pill (with the guidance field as its
+// top half), the row of pinned buttons and the send button — and, in its
+// place while searching or selecting, the matching control bar. Mirrors
+// ChatInputBar.
+//
+// The text lives here, in the textarea, because that is where the keyboard
+// types; every change is reported to Flutter, which owns everything else:
+// what a button does, whether a send goes through, the draft, the drawer.
+// Flutter writes the text back only when it changes it itself (a send that
+// clears the box, impersonation streaming in, a translation, the fullscreen
+// editor).
+
+import * as S from './safe.js';
+import { ICON } from './icons.js';
+import {
+  h, css, px, text, rgba, setClass, classes, icon, drawIcon, iconKey, glass, attachGlow,
+  applyNoise, onTap, attachPress, attachTooltip, clear, detach,
+} from './ui.js';
+import { createSkin } from './skin.js';
+
+const DISMISS_DRAG_PX = 28;
+// How long the field takes to grow to fullscreen above the keyboard, or to
+// shrink back to the capsule; matches .gc-anim in style.js.
+const FULL_MS = 260;
+
+export function createComposer(ctx) {
+  const st = {
+    show: false,
+    mode: 'compose',
+    placeholder: '',
+    readOnly: false,
+    locked: false,
+    virtualSend: false,
+    enterSend: false,
+    guidance: null,
+    attachments: [],
+    pins: [],
+    editing: false,
+    send: null,
+    search: null,
+    selection: null,
+    extraBottom: 0,
+    pinsKey: '',
+    attsKey: '',
+  };
+  let hadSelection = false;
+  // The revision of the last text Flutter wrote into each field. Sent back
+  // with every change typed here, so Flutter can tell a change typed over a
+  // text it has since replaced.
+  let textRev = 0;
+  let guideRev = 0;
+  let lineHeight = 0;
+  let guideLineHeight = 0;
+
+  // A phone held sideways with the keyboard up leaves a band too short to
+  // type in beside the messages: the composer then takes all of it (see
+  // typing()), over a scrim that dims the chat. Tapping the scrim puts the
+  // keyboard away.
+  const scrim = h('div', 'gc-scrim gc-hidden', ctx.root);
+  onTap(scrim, () => {
+    S.blurRaw(input);
+    S.blurRaw(guideInput);
+  });
+  const root = h('div', 'gc-cmp gc-hidden tavo-composer', ctx.root);
+
+  /* ---- Compose ---- */
+  const compose = h('div', '', root);
+  const atts = h('div', 'gc-atts gc-hidden', compose);
+
+  const pill = glass('gc-pill', compose);
+  pill.el.classList.add('tavo-composer-shell');
+  attachGlow(pill.el, ctx);
+
+  const guide = h('div', 'gc-guide gc-hidden', pill.content);
+  const guideHead = h('div', 'gc-guide-head', guide);
+  const guideCaption = h('div', 'gc-guide-caption', guideHead);
+  const guideClose = h('button', 'gc-guide-x', guideHead);
+  icon(ICON.close_rounded, 16, guideClose);
+  onTap(guideClose, () => {
+    if (!st.locked) ctx.send('guidanceClose');
+  });
+  const guideBody = h('div', 'gc-guide-body', guide);
+  icon(ICON.tips_and_updates_outlined, 20, h('div', 'gc-guide-prefix', guideBody));
+  const guideInput = h('textarea', 'gc-guide-input', guideBody);
+  S.setAttribute(guideInput, 'rows', '1');
+  S.setAttribute(guideInput, 'autocapitalize', 'sentences');
+
+  const input = h('textarea', 'gc-input tavo-composer-input', pill.content);
+  S.setAttribute(input, 'rows', '1');
+  S.setAttribute(input, 'autocapitalize', 'sentences');
+
+  // Line heights come from the font: one empty row's scrollHeight, padding
+  // taken off. Measured on a hidden twin so the live field is never disturbed.
+  const measure = h('textarea', 'gc-input', ctx.root);
+  css(measure, 'position', 'absolute');
+  css(measure, 'visibility', 'hidden');
+  css(measure, 'left', '-9999px');
+  css(measure, 'top', '0');
+  css(measure, 'width', '200px');
+  S.setAttribute(measure, 'rows', '1');
+  S.setAttribute(measure, 'tabindex', '-1');
+  S.setAttribute(measure, 'aria-hidden', 'true');
+
+  const row = h('div', 'gc-row', compose);
+  const pins = h('div', 'gc-pins', row);
+  const pinsInner = h('div', 'gc-pins-inner', pins);
+  const sendWrap = h('div', 'gc-send-wrap', row);
+
+  // A phone held sideways: the pinned buttons move to the strip down the side
+  // of the screen (strip.js), and the field and the send button share one
+  // line in the pill, one capsule tall. The same nodes move, so their taps,
+  // drag targets and reports carry over.
+  const line = h('div', 'gc-line gc-hidden', pill.content);
+  let wide = false;
+  // Whether the composer fills the screen above the keyboard right now
+  // (typing()), and its height from just before: what the message list keeps
+  // clear of, so the list doesn't jump under the scrim and back.
+  // `full` is what typing() last asked for; `shown` stays true while the
+  // field shrinks back after it (placeFull()).
+  let full = false;
+  let shown = false;
+  let leaveTimer = 0;
+  let restHeight = 0;
+  let pillHeight = 0;
+  function arrange(on) {
+    if (on === wide) return;
+    wide = on;
+    if (on) {
+      S.appendChild(ctx.strip.pins, pins);
+      S.appendChild(line, input);
+      S.appendChild(line, sendWrap);
+      setClass(line, 'gc-line');
+    } else {
+      S.appendChild(pill.content, input);
+      S.appendChild(row, pins);
+      S.appendChild(row, sendWrap);
+      setClass(line, 'gc-line gc-hidden');
+    }
+  }
+  const sendBtn = h('button', 'gc-send tavo-composer-send-icon', sendWrap);
+  let sendGlyph = null;
+  let sendGlyphKey = null;
+  let sendBadge = null;
+  let sendFaceShown = null;
+
+  function hasText() {
+    return S.stringTrim(S.getValue(input)) !== '';
+  }
+
+  /**
+   * The send button's face (icon, tap, insert) for what the fields hold right
+   * now. Flutter sends one per state of the content; picking it here keeps
+   * the button in step with every keystroke, as it was when the composer was
+   * Flutter's, instead of a round trip behind it.
+   */
+  function sendFace() {
+    const s = st.send;
+    if (!s || !s.faces) return s;
+    const text = hasText();
+    const guide = !!st.guidance && S.stringTrim(S.getValue(guideInput)) !== '';
+    const atts = (st.attachments || []).length > 0;
+    const face = !text && !guide && !atts ? s.faces.empty
+      : guide && !text && !atts ? s.faces.guide
+      : s.faces.content;
+    return face || s;
+  }
+
+  attachPress(sendBtn, ctx, () => {
+    const face = sendFace();
+    return !!(face && face.tap);
+  });
+  attachTooltip(sendWrap, ctx, () => (st.send && st.send.slot && st.send.hint) || '');
+  function tapSend() {
+    const face = sendFace();
+    if (!face || !face.tap) return;
+    // The empty composer's button may be assigned an insert action: typed
+    // here, inside the tap, so the keyboard comes up with it.
+    if (face.insert) {
+      insertSurround(face.insert);
+      return;
+    }
+    ctx.send('sendTap', { v: S.getValue(input), g: S.getValue(guideInput) });
+  }
+  onTap(sendBtn, tapSend);
+  ctx.drag.target(sendWrap, {
+    group: 'send',
+    depth: 3,
+    accepts: (payload) => !!(st.editing && st.send && st.send.slot &&
+      payload !== st.send.emptyPin && payload.indexOf('tool:') !== 0),
+    enter: () => setClass(sendWrap, 'gc-send-wrap gc-candidate'),
+    leave: () => setClass(sendWrap, 'gc-send-wrap'),
+    drop: (payload) => ctx.send('assignEmpty', { key: payload }),
+  });
+
+  // A theme's own layout of the compose area (skin.js).
+  const skin = createSkin(compose, {
+    attachments: atts,
+    pill: pill.el,
+    guidance: guide,
+    input,
+    row,
+    pins,
+    send: sendWrap,
+  }, [
+    [compose, [atts, pill.el, row]],
+    [pill.content, [guide, input]],
+    [row, [pins, sendWrap]],
+  ], {
+    send: () => tapSend(),
+    focus: () => {
+      if (!st.locked) S.focusRaw(input);
+    },
+  });
+  let skinHasText = null;
+
+  function skinData() {
+    const list = st.pins || [];
+    const pinData = [];
+    for (let i = 0; i < list.length; i++) pinData[pinData.length] = { key: list[i].key, icon: list[i].icon || null };
+    const face = sendFace();
+    return {
+      placeholder: st.placeholder || '',
+      hasText: S.getValue(input) !== '',
+      locked: !!st.locked,
+      readOnly: !!st.readOnly,
+      editing: !!st.editing,
+      guidance: !!st.guidance,
+      attachments: (st.attachments || []).length,
+      pins: pinData,
+      send: { icon: (face && face.icon) || null, enabled: !!(face && face.tap) },
+    };
+  }
+
+  function updateSkin() {
+    if (!skin.active) return;
+    skinHasText = S.getValue(input) !== '';
+    skin.update(skinData());
+  }
+
+  /* ---- Search / selection bar ---- */
+  const barPill = glass('gc-pill', root);
+  attachGlow(barPill.el, ctx);
+  const bar = h('div', 'gc-bar', barPill.content);
+
+  /* ---- Text ---- */
+  function grow(el, lineH, maxLines, padV, minH) {
+    if (!lineH) return;
+    css(el, 'height', '0px');
+    const sh = S.getScrollHeight(el);
+    const max = lineH * maxLines + padV;
+    css(el, 'height', px(S.mathMax(minH, S.mathMin(sh, max))));
+    css(el, 'overflow-y', sh > max + 0.5 ? 'auto' : 'hidden');
+  }
+
+  function growAll() {
+    // Sideways the screen is short: the capsule is 48 tall and the field
+    // grows to three lines rather than five — or, while typing there, fills
+    // all the room above the keyboard and scrolls.
+    if (shown) {
+      css(input, 'height', '');
+      css(input, 'overflow-y', 'auto');
+    } else if (wide) grow(input, lineHeight, 3, 24, 48);
+    else grow(input, lineHeight, 5, 24, 56);
+    if (st.guidance) grow(guideInput, guideLineHeight, 3, 16, 0);
+    ctx.scheduleReport();
+  }
+
+  function measureLines() {
+    css(measure, 'font-size', px(16 * ctx.theme.fontScale));
+    css(measure, 'letter-spacing', px(ctx.theme.letterSpacing));
+    css(measure, 'padding', '0');
+    css(measure, 'line-height', '1.5');
+    css(measure, 'min-height', '0');
+    css(measure, 'height', '0px');
+    S.setValue(measure, '');
+    lineHeight = S.getScrollHeight(measure);
+    css(measure, 'font-size', px(14 * ctx.theme.fontScale));
+    guideLineHeight = S.getScrollHeight(measure);
+  }
+
+  /** What a change of the text changes besides: the send button, the guidance caption. */
+  function contentChanged() {
+    renderGuideText();
+    const face = sendFace();
+    const faceChanged = face !== sendFaceShown;
+    if (faceChanged) renderSend();
+    if (skin.active && (faceChanged || (S.getValue(input) !== '') !== skinHasText)) updateSkin();
+  }
+
+  S.on(input, 'input', (e) => {
+    growAll();
+    contentChanged();
+    if (!e.isTrusted) return;
+    ctx.send('text', { v: S.getValue(input), rev: textRev });
+  });
+  S.on(guideInput, 'input', (e) => {
+    growAll();
+    contentChanged();
+    if (!e.isTrusted) return;
+    ctx.send('guidanceText', { v: S.getValue(guideInput), rev: guideRev });
+  });
+  S.on(input, 'focus', (e) => {
+    if (!e.isTrusted) return;
+    hadSelection = true;
+    ctx.send('focus', { f: true });
+  });
+  S.on(input, 'blur', () => ctx.send('focus', { f: false }));
+  // Which field has the caret, for typing(): only the composer's own fields
+  // take it fullscreen, not the header's search box.
+  let focused = false;
+  function focusChanged(on) {
+    focused = on;
+    if (typing() !== full) render();
+  }
+  S.on(input, 'focus', () => focusChanged(true));
+  S.on(input, 'blur', () => focusChanged(false));
+  S.on(guideInput, 'focus', () => focusChanged(true));
+  S.on(guideInput, 'blur', () => focusChanged(false));
+
+  function wantsNewline() {
+    // Enter-to-send is for physical keyboards: while the soft keyboard is up
+    // its Enter (some keyboards send it as a key event) inserts a newline.
+    return ctx.layout.softKeyboard;
+  }
+
+  S.on(input, 'keydown', (e) => {
+    if (!e.isTrusted || st.locked) return;
+    if (S.keyOf(e) !== 'Enter' || S.shiftKeyOf(e) || S.keyIsComposing(e)) return;
+    if (st.enterSend && !wantsNewline()) {
+      S.preventDefault(e);
+      ctx.send('sendTap', { v: S.getValue(input), g: S.getValue(guideInput), enter: true });
+    }
+  });
+  // The soft keyboard's action key, when it is set to Send.
+  S.on(input, 'beforeinput', (e) => {
+    if (!e.isTrusted || !st.virtualSend || st.locked) return;
+    const type = S.inputTypeOf(e);
+    if (type !== 'insertLineBreak' && type !== 'insertParagraph') return;
+    if (S.inputIsComposing(e)) return;
+    if (st.enterSend && !wantsNewline()) return; // handled on keydown
+    S.preventDefault(e);
+    ctx.send('sendTap', { v: S.getValue(input), g: S.getValue(guideInput), enter: true });
+  });
+
+  // Images on the clipboard become attachments; a paste with no text at all
+  // asks Flutter, which can read clipboard images the page cannot see.
+  S.on(input, 'paste', (e) => {
+    if (!e.isTrusted || st.locked) return;
+    const dt = S.clipboardDataOf(e);
+    const files = S.clipboardFiles(dt);
+    const images = [];
+    for (let i = 0; i < files.length; i++) {
+      if (S.blobType(files[i]).indexOf('image/') === 0) images[images.length] = files[i];
+    }
+    if (images.length) {
+      S.preventDefault(e);
+      const urls = [];
+      let left = images.length;
+      for (let i = 0; i < images.length; i++) {
+        S.readDataUrl(images[i]).then((url) => {
+          if (url) urls[urls.length] = url;
+          if (--left === 0 && urls.length) ctx.send('attach', { urls });
+        });
+      }
+      return;
+    }
+    if (!S.clipboardHasText(dt)) {
+      S.preventDefault(e);
+      ctx.send('pasteRequest');
+    }
+  });
+
+  // A downward swipe over the composer puts the keyboard away.
+  let dragStartY = null;
+  let dragDist = 0;
+  S.on(root, 'touchstart', (e) => {
+    if (!e.isTrusted) return;
+    dragStartY = S.firstTouchY(e);
+    dragDist = 0;
+  }, { passive: true });
+  S.on(root, 'touchmove', (e) => {
+    if (dragStartY == null || !e.isTrusted) return;
+    const y = S.firstTouchY(e);
+    if (y == null) return;
+    const dy = y - dragStartY;
+    dragStartY = y;
+    dragDist = dy <= 0 ? 0 : dragDist + dy;
+  }, { passive: true });
+  S.on(root, 'touchend', () => {
+    if (dragStartY != null && dragDist >= DISMISS_DRAG_PX && ctx.layout.keyboard > 0) {
+      S.blurRaw(input);
+      S.blurRaw(guideInput);
+    }
+    dragStartY = null;
+    dragDist = 0;
+  }, { passive: true });
+
+  /** Wraps the caret / selection in a pair of [token] — insertSurroundingText. */
+  function insertSurround(token) {
+    if (!token || st.locked) return;
+    const value = S.getValue(input);
+    let start = value.length;
+    let end = value.length;
+    if (hadSelection) {
+      start = S.getSelectionStart(input);
+      end = S.getSelectionEnd(input);
+    }
+    const selected = value.slice(start, end);
+    const next = value.slice(0, start) + token + selected + token + value.slice(end);
+    S.setValue(input, next);
+    S.focusRaw(input);
+    const caret = start + token.length + selected.length;
+    S.setSelectionRange(input, caret, caret);
+    hadSelection = true;
+    growAll();
+    contentChanged();
+    ctx.send('text', { v: next, rev: textRev });
+  }
+
+  /* ---- Rendering ---- */
+  function renderAttachments() {
+    const key = S.jsonStringify(st.attachments);
+    if (key === st.attsKey) return;
+    st.attsKey = key;
+    clear(atts);
+    const list = st.attachments || [];
+    setClass(atts, list.length ? 'gc-atts' : 'gc-atts gc-hidden');
+    const single = list.length === 1;
+    for (let i = 0; i < list.length; i++) {
+      const item = list[i];
+      const box = h('div', single ? 'gc-att gc-single' : 'gc-att gc-multi', atts);
+      const img = h('img', '', box);
+      S.setAttribute(img, 'src', item.src);
+      S.setAttribute(img, 'alt', '');
+      S.setAttribute(img, 'draggable', 'false');
+      const x = h('button', 'gc-att-x', box);
+      icon(ICON.close, 14, x);
+      onTap(x, () => ctx.send('removeAttachment', { id: item.id }));
+    }
+  }
+
+  function circle(parent, spec, color, enabled, onPress, size = 20) {
+    const surface = glass('gc-circle', parent);
+    css(surface.el, 'border-radius', px(20 * ctx.theme.cornerScale));
+    const mark = icon(spec, size, surface.content);
+    css(mark, 'color', color);
+    applyNoise(surface, ctx.theme, 40, 40);
+    attachPress(surface.el, ctx, enabled);
+    if (onPress) onTap(surface.el, () => { if (enabled()) onPress(); });
+    css(surface.el, 'cursor', enabled() ? 'pointer' : 'default');
+    return surface;
+  }
+
+  function pinColor(pin) {
+    return pin.color ? rgba(pin.color) : rgba(ctx.theme.accent);
+  }
+
+  function renderPins() {
+    const key = S.jsonStringify([st.pins, st.editing, ctx.themeKey, wide]);
+    if (key === st.pinsKey) return;
+    if (ctx.drag.active) {
+      ctx.drag.whenIdle(renderPins);
+      return;
+    }
+    st.pinsKey = key;
+    clear(pinsInner);
+    ctx.drag.removeGroup('pins');
+    ctx.pinEls = S.dict();
+    const list = st.pins || [];
+    // An empty row still takes its share of the width, so the send button
+    // keeps its place at the end (the Expanded around a SizedBox.shrink).
+    setClass(pins, classes('gc-pins', { 'gc-editing': st.editing, 'gc-empty': !list.length }));
+    // The row as a whole takes a card dropped past its last button.
+    ctx.drag.target(pins, {
+      group: 'pins',
+      depth: 1,
+      accepts: (payload) => st.editing && !hasPin(payload),
+      drop: (payload) => ctx.send('pinDrop', { key: payload, target: null }),
+    });
+    for (let i = 0; i < list.length; i++) {
+      const pin = list[i];
+      const cell = h('div', 'gc-pin', pinsInner);
+      // For theme layouts: which action a pin is, without exposing its label.
+      S.setAttribute(cell, 'data-pin', pin.key);
+      ctx.pinEls[pin.key] = cell;
+      const surface = circle(cell, pin.icon, pinColor(pin), () => !st.editing && !!pin.tap, () => {
+        if (pin.insert) insertSurround(pin.insert);
+        ctx.send('pinTap', { key: pin.key });
+      // In the strip (a phone held sideways) the pins are bare icons, larger,
+      // the way the tab rail's are.
+      }, wide ? 28 : 20);
+      if (st.editing && !pin.permanent) {
+        const badge = h('button', 'gc-badge', cell);
+        css(badge, 'width', '18px');
+        css(badge, 'height', '18px');
+        css(badge, 'background', rgba(ctx.theme.accent));
+        css(badge, 'box-shadow', `0 4px 8px ${rgba(ctx.theme.accent, 0.3)}`);
+        icon(ICON.arrow_downward, 18 * 0.58, badge);
+        attachTooltip(badge, ctx, () => pin.badgeTip || '');
+        onTap(badge, () => ctx.send('unpin', { key: pin.key }));
+      }
+      if (st.editing) {
+        ctx.drag.source(cell, {
+          payload: () => pin.key,
+          enabled: () => st.editing,
+          axis: 'x',
+          ghostSource: () => surface.el,
+          ghosted: (on) => css(cell, 'opacity', on ? '0.25' : null),
+        });
+        ctx.drag.target(cell, {
+          group: 'pins',
+          depth: 2,
+          accepts: (payload) => st.editing && payload !== pin.key,
+          drop: (payload) => ctx.send('pinDrop', { key: payload, target: pin.key }),
+        });
+      }
+    }
+  }
+
+  function hasPin(key) {
+    const list = st.pins || [];
+    for (let i = 0; i < list.length; i++) if (list[i].key === key) return true;
+    return false;
+  }
+
+  function renderSend() {
+    const s = st.send;
+    if (!s) return;
+    const face = sendFace();
+    sendFaceShown = face;
+    const key = iconKey(face.icon);
+    if (key !== sendGlyphKey) {
+      const old = sendGlyph;
+      sendGlyphKey = key;
+      sendGlyph = h('span', 'gc-send-glyph', sendBtn);
+      icon(face.icon, 20, sendGlyph);
+      if (old && !ctx.theme.batterySaver) {
+        setClass(sendGlyph, 'gc-send-glyph gc-entering');
+        setClass(old, 'gc-send-glyph gc-leaving');
+        const fresh = sendGlyph;
+        S.raf(() => S.raf(() => setClass(fresh, 'gc-send-glyph')));
+        S.setTimer(() => detach(old), 200);
+      } else if (old) {
+        detach(old);
+      }
+    }
+    css(sendBtn, 'cursor', face.tap ? 'pointer' : 'default');
+    const wantBadge = st.editing && s.slot && s.badge;
+    if (wantBadge && !sendBadge) {
+      sendBadge = h('button', 'gc-badge', sendWrap);
+      css(sendBadge, 'width', '18px');
+      css(sendBadge, 'height', '18px');
+      icon(ICON.undo, 18 * 0.58, sendBadge);
+      attachTooltip(sendBadge, ctx, () => (st.send && st.send.badgeTip) || '');
+      onTap(sendBadge, () => ctx.send('resetEmpty'));
+    } else if (!wantBadge && sendBadge) {
+      detach(sendBadge);
+      sendBadge = null;
+    }
+    if (sendBadge) {
+      css(sendBadge, 'background', rgba(ctx.theme.accent));
+      css(sendBadge, 'box-shadow', `0 4px 8px ${rgba(ctx.theme.accent, 0.3)}`);
+    }
+  }
+
+  /** The guidance caption and hint: impersonating over an empty field, guiding a reply over a typed one. */
+  function renderGuideText() {
+    const g = st.guidance;
+    if (!g) return;
+    const face = (hasText() ? g.filled : g.empty) || g;
+    text(guideCaption, face.caption || '');
+    S.setAttribute(guideInput, 'placeholder', face.placeholder || '');
+  }
+
+  function renderBar() {
+    clear(bar);
+    const theme = ctx.theme;
+    const textColor = rgba(theme.text);
+    if (st.mode === 'search') {
+      const s = st.search || {};
+      css(h('div', '', bar), 'width', '18px');
+      const mark = icon(ICON.search, 20, bar);
+      css(mark, 'color', rgba(theme.accent));
+      css(mark, 'margin-right', '12px');
+      const label = h('div', 'gc-bar-label', bar);
+      css(label, 'font-size', px(16 * theme.fontScale));
+      css(label, 'letter-spacing', px(theme.letterSpacing));
+      text(label, s.label || '');
+      const prev = h('button', 'gc-iconbtn', bar);
+      icon(ICON.keyboard_arrow_up, 24, prev);
+      if (!s.prev) S.setAttribute(prev, 'disabled', '');
+      onTap(prev, () => { if (s.prev) ctx.send('searchPrev'); });
+      const next = h('button', 'gc-iconbtn', bar);
+      icon(ICON.keyboard_arrow_down, 24, next);
+      if (!s.next) S.setAttribute(next, 'disabled', '');
+      onTap(next, () => { if (s.next) ctx.send('searchNext'); });
+      css(h('div', '', bar), 'width', '8px');
+      return;
+    }
+    const s = st.selection || {};
+    css(h('div', '', bar), 'width', '8px');
+    circle(bar, ICON.close, rgba(theme.accent), () => true, () => ctx.send('selCancel'));
+    const label = h('div', 'gc-bar-label', bar);
+    css(label, 'margin-left', '10px');
+    css(label, 'font-size', px(16 * theme.fontScale));
+    css(label, 'font-weight', '600');
+    css(label, 'letter-spacing', px(theme.letterSpacing));
+    text(label, s.label || '');
+    circle(bar, ICON.keyboard_double_arrow_up, textColor, () => true, () => ctx.send('selAbove'));
+    css(h('div', '', bar), 'width', '6px');
+    circle(bar, ICON.keyboard_double_arrow_down, textColor, () => true, () => ctx.send('selBelow'));
+    css(h('div', '', bar), 'width', '6px');
+    circle(bar, s.allHidden ? ICON.visibility : ICON.visibility_off,
+      s.any ? rgba(theme.accent) : rgba(theme.text2, 0.5),
+      () => !!s.any, () => ctx.send('selHide'));
+    if (s.canDelete) {
+      css(h('div', '', bar), 'width', '6px');
+      circle(bar, ICON.delete, '#FF5252', () => !!s.any, () => ctx.send('selDelete'));
+    }
+    css(h('div', '', bar), 'width', '8px');
+  }
+
+  let barKey = '';
+
+  /**
+   * Typing on a phone held sideways: the capsule layout, the soft keyboard up
+   * and the caret in the composer's own field. The composer then fills the
+   * room above the keyboard, without the header or the strip.
+   */
+  function typing() {
+    const l = ctx.layout;
+    const barMode = st.mode === 'search' || st.mode === 'selection';
+    return wide && st.show && !barMode && !st.locked && focused &&
+      !!l.softKeyboard && (l.keyboard || 0) > 0;
+  }
+
+  /**
+   * Whether the pins are in the strip and it should show now. The strip
+   * stays put while typing fullscreen: the field grows over it.
+   */
+  function stripVisible() {
+    const barMode = st.mode === 'search' || st.mode === 'selection';
+    return wide && st.show && !barMode;
+  }
+
+  /** The frame's box: top, left and right edges, and the room under the pill. */
+  function frame(top, left, right, under) {
+    css(root, 'top', px(top));
+    css(root, 'left', px(left));
+    css(root, 'right', px(right));
+    css(root, 'padding-bottom', px(under));
+  }
+
+  /**
+   * Shows or fades out the header while the field is fullscreen. It paints
+   * over the composer, so it is gone well before the growing field reaches
+   * it, and comes back as the field shrinks away.
+   */
+  function hideHeader(on) {
+    const el = ctx.layers.header;
+    const out = S.mathRound(FULL_MS * 0.4);
+    css(el, 'transition', on ? `opacity ${out}ms, visibility 0s ${out}ms` : `opacity ${FULL_MS}ms`);
+    css(el, 'opacity', on ? '0' : '');
+    css(el, 'visibility', on ? 'hidden' : '');
+  }
+
+  /**
+   * Enters or leaves the fullscreen field. The pill grows from where the
+   * capsule is to the whole room above the keyboard, and on the way out
+   * shrinks back to where the capsule will be, while the keyboard moves the
+   * bottom edge; only then does the composer return to the capsule.
+   */
+  function placeFull(on) {
+    const layout = ctx.layout;
+    const box = S.getBoundingClientRect(ctx.root);
+    if (on) {
+      S.clearTimer(leaveTimer);
+      leaveTimer = 0;
+      if (!shown) {
+        // Start the frame exactly on the capsule, without a transition.
+        const p = S.getBoundingClientRect(pill.el);
+        restHeight = S.getBoundingClientRect(root).height;
+        pillHeight = p.height;
+        shown = true;
+        setClass(root, 'gc-cmp gc-full');
+        setClass(scrim, 'gc-scrim');
+        frame(p.top, p.left, box.width - p.right, box.bottom - p.bottom - placedBottom());
+        // Settle the start styles, so what follows transitions from them.
+        S.getBoundingClientRect(root);
+        S.getBoundingClientRect(scrim);
+      }
+      full = true;
+      setClass(root, 'gc-cmp gc-full gc-anim gc-open');
+      setClass(scrim, 'gc-scrim gc-on');
+      hideHeader(true);
+      frame(0, 0, 0, 0);
+      return;
+    }
+    if (!shown) {
+      full = false;
+      css(root, 'top', '');
+      css(root, 'left', px(layout.gutter));
+      css(root, 'right', px(layout.gutter));
+      return;
+    }
+    if (full) {
+      // Back to where the capsule will sit once the keyboard is down.
+      full = false;
+      setClass(root, 'gc-cmp gc-full gc-anim');
+      setClass(scrim, 'gc-scrim');
+      hideHeader(false);
+      const height = layout.viewportH || box.height;
+      const under = 16;
+      frame(height - (layout.safeBottom || 0) - under - pillHeight, layout.gutter + 16, layout.gutter + 16, under);
+      leaveTimer = S.setTimer(() => {
+        leaveTimer = 0;
+        shown = false;
+        setClass(scrim, 'gc-scrim gc-hidden');
+        render();
+      }, FULL_MS);
+    }
+  }
+
+  /** The composer's bottom edge above the screen's, as placeBottom() set it. */
+  function placedBottom() {
+    return S.mathMax(0, (ctx.layout.inset || 0) - ctx.shrink());
+  }
+
+  function render() {
+    const theme = ctx.theme;
+    const layout = ctx.layout;
+    // Pins in the strip and one capsule on a phone held sideways — unless a
+    // theme lays the composer out itself.
+    const capsule = !!layout.wide && !!layout.strip && !skin.active;
+    arrange(capsule);
+    // The safe area the fullscreen field pads its text by.
+    css(root, '--gc-st', px(layout.safeTop || 0));
+    css(root, '--gc-sl', px(layout.safeLeft || 0));
+    css(root, '--gc-sr', px(layout.safeRight || 0));
+    const want = typing();
+    if (want !== full || (!want && !shown)) placeFull(want);
+    if (!shown) setClass(root, st.show ? 'gc-cmp' : 'gc-cmp gc-hidden');
+    ctx.strip.place(stripVisible());
+    if (!st.show) return;
+    const barMode = st.mode === 'search' || st.mode === 'selection';
+    // The search and selection bars sit in a SafeArea of their own on top of
+    // the inset the whole composer rides on, as ChatInputBar's did.
+    if (!shown) css(root, 'padding-bottom', px(16 + (barMode ? st.extraBottom : 0)));
+    setClass(compose, classes(barMode ? 'gc-hidden' : '', {
+      'g-skinned': skin.active,
+      'gc-wide': capsule,
+      'gc-typing': shown,
+    }));
+    setClass(barPill.el, barMode ? 'gc-glass gc-pill' : 'gc-glass gc-pill gc-hidden');
+
+    const radius = px(28 * theme.cornerScale);
+    css(pill.el, 'border-radius', full ? '0px' : radius);
+    css(barPill.el, 'border-radius', radius);
+
+    if (barMode) {
+      const key = S.jsonStringify([st.mode, st.search, st.selection, ctx.themeKey]);
+      if (key !== barKey) {
+        barKey = key;
+        renderBar();
+      }
+      const r = S.getBoundingClientRect(barPill.el);
+      applyNoise(barPill, theme, r.width, r.height);
+      ctx.scheduleReport();
+      return;
+    }
+    barKey = '';
+
+    renderAttachments();
+
+    // Guidance.
+    const g = st.guidance;
+    setClass(pill.el, classes('gc-glass gc-pill', { 'gc-guiding': !!g }));
+    setClass(guide, g ? 'gc-guide' : 'gc-guide gc-hidden');
+    if (g) {
+      renderGuideText();
+      css(guideCaption, 'font-size', px(10 * theme.fontScale));
+      css(guideInput, 'font-size', px(14 * theme.fontScale));
+      css(guideInput, 'letter-spacing', px(theme.letterSpacing));
+    } else if (S.getValue(guideInput)) {
+      S.setValue(guideInput, '');
+    }
+
+    // Field.
+    S.setAttribute(input, 'placeholder', st.placeholder || '');
+    css(input, 'font-size', px(16 * theme.fontScale));
+    css(input, 'letter-spacing', px(theme.letterSpacing));
+    S.setAttribute(input, 'enterkeyhint', st.virtualSend ? 'send' : 'enter');
+    if (st.readOnly || st.locked) S.setAttribute(input, 'readonly', '');
+    else S.removeAttribute(input, 'readonly');
+    if (st.locked) {
+      // Editing a message: the composer can't be focused or selected into.
+      S.setAttribute(input, 'tabindex', '-1');
+      S.setAttribute(guideInput, 'readonly', '');
+      S.setAttribute(guideInput, 'tabindex', '-1');
+      S.blurRaw(input);
+      S.blurRaw(guideInput);
+    } else {
+      S.removeAttribute(input, 'tabindex');
+      S.removeAttribute(guideInput, 'readonly');
+      S.removeAttribute(guideInput, 'tabindex');
+    }
+    setClass(input, classes('gc-input', { 'gc-nocaret': st.locked }));
+    css(input, 'pointer-events', st.locked ? 'none' : null);
+
+    renderPins();
+    renderSend();
+    updateSkin();
+    growAll();
+    const r = S.getBoundingClientRect(pill.el);
+    applyNoise(pill, theme, r.width, r.height);
+    ctx.scheduleReport();
+  }
+
+  return {
+    root,
+    apply(next) {
+      for (const key in next) st[key] = next[key];
+      render();
+    },
+    render,
+    stripVisible,
+    /** Re-renders when the keyboard coming or going changes typing(). */
+    placeTyping() {
+      if (typing() !== full) render();
+    },
+    themeChanged() {
+      measureLines();
+      st.pinsKey = '';
+      barKey = '';
+      render();
+    },
+    setText(value, rev) {
+      if (typeof rev === 'number') textRev = rev;
+      if (S.getValue(input) !== value) {
+        S.setValue(input, value);
+        const end = value.length;
+        if (hadSelection) S.setSelectionRange(input, end, end);
+      }
+      contentChanged();
+      updateSkin();
+      growAll();
+    },
+    setSkin(tpl) {
+      // The skin lays out the default arrangement; render() folds it back
+      // into the capsule if that still applies.
+      arrange(false);
+      skin.set(tpl);
+      setClass(compose, skin.active ? 'g-skinned' : '');
+      updateSkin();
+      render();
+    },
+    setGuidanceText(value, rev) {
+      if (typeof rev === 'number') guideRev = rev;
+      if (S.getValue(guideInput) !== value) S.setValue(guideInput, value);
+      contentChanged();
+      growAll();
+    },
+    insertSurround,
+    setSendHover(on) {
+      setClass(sendWrap, on ? 'gc-send-wrap gc-candidate' : 'gc-send-wrap');
+    },
+    focus() {
+      if (!st.locked) S.focusRaw(input);
+    },
+    blur() {
+      S.blurRaw(input);
+      S.blurRaw(guideInput);
+    },
+    report(out) {
+      if (!st.show) return;
+      out.composerHeight = shown ? restHeight : S.getBoundingClientRect(root).height;
+      const barMode = st.mode === 'search' || st.mode === 'selection';
+      out.composer = ctx.rect(barMode ? barPill.el : pill.el);
+      if (barMode) return;
+      out.send = ctx.rect(sendWrap);
+      out.row = ctx.rect(pins);
+      const list = st.pins || [];
+      const rects = [];
+      for (let i = 0; i < list.length; i++) {
+        const el = ctx.pinEls && ctx.pinEls[list[i].key];
+        if (el) rects[rects.length] = { key: list[i].key, r: ctx.rect(el) };
+      }
+      out.pins = rects;
+    },
+  };
+}

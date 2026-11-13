@@ -15,6 +15,7 @@ import 'novelai_image_provider.dart';
 import 'openai_image_provider.dart';
 import 'openrouter_image_provider.dart';
 import 'routmy_image_provider.dart';
+import 'tensor_art_image_provider.dart';
 import 'xai_image_provider.dart';
 
 /// Routes a prepared prompt + reference set to the configured provider client.
@@ -168,6 +169,25 @@ class ImageGenDispatcher {
           prompt: prompt,
           cancelToken: cancelToken,
         );
+      case ImageGenApiType.tensorart:
+        final config = settings.tensorart;
+        return TensorArtImageProvider().generate(
+          settings: config.copyWith(
+            aspectRatio: _validOverride(
+              instructionAspectRatio,
+              TensorArtConstants.aspectRatios,
+              config.aspectRatio,
+            ),
+            imageSize: _validOverride(
+              instructionImageSize,
+              TensorArtConstants.imageSizes,
+              config.imageSize,
+            ),
+          ),
+          prompt: prompt,
+          references: references,
+          cancelToken: cancelToken,
+        );
     }
   }
 
@@ -181,6 +201,9 @@ class ImageGenDispatcher {
         ImageGenApiType.comfyui => settings.comfyui.model.isEmpty
             ? settings.apiType.name
             : settings.comfyui.model,
+        ImageGenApiType.tensorart => settings.tensorart.toolName.isEmpty
+            ? settings.apiType.name
+            : settings.tensorart.toolName,
         _ => settings.customModel.isEmpty
             ? settings.apiType.name
             : settings.customModel,
@@ -373,6 +396,34 @@ class ImageGenDispatcher {
     String? instructionImageSize, {
     CancelToken? cancelToken,
   }) {
+    // rout.my's Gemini image models live behind the Gemini-compatible route,
+    // not `/v1/images/edits`; it takes inlineData references there.
+    if (references.isNotEmpty && isRoutmyGeminiModel(settings.routmyModel)) {
+      final caps = geminiCapabilities(settings.routmyModel);
+      return GeminiImageProvider().generate(
+        endpoint: '${settings.routmyMirror.baseUrl}/compatible',
+        apiKey: settings.routmyApiKey,
+        model: settings.routmyModel,
+        prompt: prompt,
+        aspectRatio: _validOverride(
+          instructionAspectRatio,
+          caps.aspectRatios,
+          settings.routmyAspectRatio,
+        ),
+        imageSize: caps.imageSizes == null
+            ? null
+            : _resolveSize(
+                override: instructionImageSize,
+                allowed: caps.imageSizes!,
+                configured: settings.routmyImageSize,
+                width: settings.routmyCustomWidth,
+                height: settings.routmyCustomHeight,
+              ),
+        referenceImages: references.take(caps.maxReferences).toList(),
+        cancelToken: cancelToken,
+      );
+    }
+
     final images = _imagesOf(references);
     return RoutmyImageProvider(
       baseUrl: settings.routmyMirror.baseUrl,
@@ -395,6 +446,7 @@ class ImageGenDispatcher {
       ),
       quality: settings.routmyQuality,
       referenceImages: images,
+      supportsReferences: settings.routmySupportsReferences,
       cancelToken: cancelToken,
     );
   }

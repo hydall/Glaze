@@ -37,6 +37,10 @@ enum GenerationPhase {
   /// Visible reply tokens are streaming.
   streaming,
 
+  /// The model called tools; they run (or wait for the user to approve them)
+  /// before the next request goes out.
+  tools,
+
   /// Post-generation work (cleaner, ledger, extension blocks, image tags).
   finalizing,
 
@@ -58,6 +62,7 @@ enum GenerationPhase {
     GenerationPhase.waiting => 'gen_phase_waiting',
     GenerationPhase.reasoning => 'gen_phase_reasoning',
     GenerationPhase.streaming => 'gen_phase_streaming',
+    GenerationPhase.tools => 'gen_phase_tools',
     GenerationPhase.finalizing => 'gen_phase_finalizing',
     GenerationPhase.aborting => 'gen_phase_aborting',
   };

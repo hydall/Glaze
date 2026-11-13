@@ -5,6 +5,7 @@ import 'dart:isolate';
 import 'package:drift/drift.dart';
 
 import '../app_db.dart';
+import '../../debug/perf_debug.dart';
 import '../../llm/prompt/exact_lorebook_manifest.dart';
 import 'lorebook_use_manifest_repo.dart';
 import 'session_deletion_queries.dart';
@@ -34,21 +35,23 @@ class ChatRepo implements SyncChatStore {
     final rows = await (_db.select(
       _db.chatSessions,
     )..where((t) => t.characterId.equals(charId))).get();
-    return rows.map(_toModel).toList();
+    return [for (final row in rows) await _toModelAsync(row)];
   }
 
-  /// Lightweight per-character session listing: scans message counts without
-  /// deserializing every message (see [_toMetadata]). Use this when only
-  /// session indexes/counts are needed (e.g. the "Open chat" picker) — the
-  /// full [getByCharacterId] decodes all messages and is noticeably slower for
+  /// Lightweight per-character session listing: counts and previews are
+  /// projected in SQL, so no message is decoded. Use this when only session
+  /// indexes/counts are needed (e.g. the "Open chat" picker) — the full
+  /// [getByCharacterId] decodes all messages and is noticeably slower for
   /// characters with large histories.
   Future<List<SessionMetadata>> getMetadataByCharacterId(String charId) async {
-    final rows =
-        await (_db.select(_db.chatSessions)
-              ..where((t) => t.characterId.equals(charId))
-              ..orderBy([(t) => OrderingTerm(expression: t.sessionIndex)]))
-            .get();
-    return rows.map(_toMetadata).toList();
+    final rows = await _db
+        .customSelect(
+          '$_sessionMetadataSql WHERE character_id = ? ORDER BY session_index',
+          variables: [Variable.withString(charId)],
+          readsFrom: {_db.chatSessions},
+        )
+        .get();
+    return rows.map(_projectedMetadata).toList();
   }
 
   /// How many chat sessions one character has, aggregated in SQL.
@@ -91,14 +94,15 @@ class ChatRepo implements SyncChatStore {
     final rows = await (_db.select(
       _db.chatSessions,
     )..orderBy([(t) => OrderingTerm.desc(t.updatedAt)])).get();
-    return rows.map(_toModel).toList();
+    return [for (final row in rows) await _toModelAsync(row)];
   }
 
-  @override
-  Future<List<SessionMetadata>> getAllSessionMetadata() async {
-    final rows = await _db
-        .customSelect(
-          '''
+  /// What the chat list shows of a session, read in SQL: the count, the
+  /// first message's time and the last message, never the blob itself. A
+  /// long chat is tens of megabytes of JSON, and the whole table is hundreds;
+  /// handing that to Dart to scan for a count froze the app for half a
+  /// second — on every write to any chat, through [watchAllSessionMetadata].
+  static const _sessionMetadataSql = '''
 SELECT
   session_id,
   character_id,
@@ -108,22 +112,32 @@ SELECT
   json_array_length(messages_json) AS message_count,
   json_extract(messages_json, '\$[0].timestamp') AS first_timestamp,
   json_extract(messages_json, '\$[#-1]') AS last_message_json
-FROM chat_sessions
-ORDER BY updated_at DESC
-''',
+FROM chat_sessions''';
+
+  @override
+  Future<List<SessionMetadata>> getAllSessionMetadata() async {
+    final rows = await _db
+        .customSelect(
+          '$_sessionMetadataSql ORDER BY updated_at DESC',
           readsFrom: {_db.chatSessions},
         )
         .get();
     return rows.map(_projectedMetadata).toList();
   }
 
+  /// [getAllSessionMetadata], re-run on every write to the table. The
+  /// projection runs in the database's isolate; what reaches this one is a
+  /// few hundred bytes per session.
   Stream<List<SessionMetadata>> watchAllSessionMetadata() {
     var lastEmit = <SessionMetadata>[];
-    return (_db.select(_db.chatSessions)
-          ..orderBy([(t) => OrderingTerm.desc(t.updatedAt)]))
+    return _db
+        .customSelect(
+          '$_sessionMetadataSql ORDER BY updated_at DESC',
+          readsFrom: {_db.chatSessions},
+        )
         .watch()
-        .asyncMap((rows) async {
-          final meta = rows.map(_toMetadata).toList();
+        .map((rows) {
+          final meta = rows.map(_projectedMetadata).toList();
           if (_metadataEqual(lastEmit, meta)) return lastEmit;
           lastEmit = meta;
           return meta;
@@ -143,6 +157,18 @@ ORDER BY updated_at DESC
     return true;
   }
 
+  /// How many characters of JSON [sessionId]'s messages take, without reading
+  /// them; null for a session that does not exist. A cheap way to tell a
+  /// chat worth loading ahead of time from one that is not.
+  Future<int?> messagesJsonLength(String sessionId) async {
+    final length = _db.chatSessions.messagesJson.length;
+    final query = _db.selectOnly(_db.chatSessions)
+      ..addColumns([length])
+      ..where(_db.chatSessions.sessionId.equals(sessionId));
+    final row = await query.getSingleOrNull();
+    return row?.read(length);
+  }
+
   /// The character [sessionId] belongs to, without reading its messages.
   Future<String?> characterIdOf(String sessionId) async {
     final query = _db.selectOnly(_db.chatSessions)
@@ -157,14 +183,26 @@ ORDER BY updated_at DESC
     final row = await (_db.select(
       _db.chatSessions,
     )..where((t) => t.sessionId.equals(sessionId))).getSingleOrNull();
-    return row != null ? _toModel(row) : null;
+    return row != null ? await _toModelAsync(row) : null;
   }
 
   @override
   Future<void> put(ChatSession session) async {
     await _db
         .into(_db.chatSessions)
-        .insertOnConflictUpdate(_toCompanion(session));
+        .insertOnConflictUpdate(await _toCompanionAsync(session));
+  }
+
+  /// Writes [sessions] in a single batch, so the reactive watchers emit
+  /// **one** update instead of one per session (the mass-import path).
+  Future<void> putAll(List<ChatSession> sessions) async {
+    if (sessions.isEmpty) return;
+    final companions = [
+      for (final session in sessions) await _toCompanionAsync(session),
+    ];
+    await _db.batch((b) {
+      b.insertAllOnConflictUpdate(_db.chatSessions, companions);
+    });
   }
 
   /// Inserts a newly allocated session without replacing an existing owner of
@@ -173,7 +211,7 @@ ORDER BY updated_at DESC
     final inserted = await _db
         .into(_db.chatSessions)
         .insertReturningOrNull(
-          _toCompanion(session),
+          await _toCompanionAsync(session),
           mode: InsertMode.insertOrIgnore,
         );
     return inserted != null;
@@ -351,25 +389,34 @@ ORDER BY updated_at DESC
   /// Updates only the draft column, and only if [expectedMessageCount] still
   /// matches the row. A delayed input debounce from before Send must not write
   /// an old draft over a session that has since gained the user message.
-  Future<ChatSession?> updateDraftIfMessageCount({
+  ///
+  /// Returns the draft that landed, or null when the row had moved on. The
+  /// messages are neither read nor decoded: the count comes from SQL, and the
+  /// caller already holds the session the draft belongs to.
+  Future<String?> updateDraftIfMessageCount({
     required String sessionId,
     required String draft,
     required int expectedMessageCount,
   }) async {
     return _db.transaction(() async {
-      final row = await (_db.select(
-        _db.chatSessions,
-      )..where((t) => t.sessionId.equals(sessionId))).getSingleOrNull();
+      final row = await _db
+          .customSelect(
+            'SELECT json_array_length(messages_json) AS message_count '
+            'FROM chat_sessions WHERE session_id = ?',
+            variables: [Variable.withString(sessionId)],
+            readsFrom: {_db.chatSessions},
+          )
+          .getSingleOrNull();
       if (row == null) return null;
-
-      final (messageCount, _) = _scanTopLevelObjects(row.messagesJson);
-      if (messageCount != expectedMessageCount) return null;
+      if (row.readNullable<int>('message_count') != expectedMessageCount) {
+        return null;
+      }
 
       await (_db.update(_db.chatSessions)
             ..where((t) => t.sessionId.equals(sessionId)))
           .write(ChatSessionsCompanion(draft: Value(draft)));
 
-      return _toModel(row.copyWith(draft: Value(draft)));
+      return draft;
     });
   }
 
@@ -481,13 +528,11 @@ ORDER BY updated_at DESC
       )..where((t) => t.sessionId.equals(sessionId))).getSingleOrNull();
       if (row == null) return null;
 
-      final current = _toModel(row);
+      final current = await _toModelAsync(row);
       final updated = mutate(current);
       if (updated == null) return null;
       if (beforeWrite != null) await beforeWrite(current, updated);
-      final messagesJson = jsonEncode(
-        updated.messages.map((e) => e.toJson()).toList(),
-      );
+      final messagesJson = await _encodeMessagesAsync(updated.messages);
       final sessionVarsJson = updated.sessionVars.isNotEmpty
           ? jsonEncode(updated.sessionVars)
           : null;
@@ -512,16 +557,9 @@ ORDER BY updated_at DESC
         ),
       );
 
-      return _toModel(
-        row.copyWith(
-          messagesJson: messagesJson,
-          sessionVarsJson: Value(sessionVarsJson),
-          authorsNoteJson: Value(authorsNoteJson),
-          draft: Value(updated.draft),
-          lastScrollAnchorJson: Value(lastScrollAnchorJson),
-          updatedAt: durableUpdatedAt,
-        ),
-      );
+      // What was written, as it was written: decoding the blob again to say
+      // so cost as much as decoding it the first time.
+      return updated.copyWith(updatedAt: durableUpdatedAt);
     });
   }
 
@@ -543,7 +581,7 @@ ORDER BY updated_at DESC
               .getSingleOrNull();
       if (row == null) return null;
 
-      final latest = _toModel(row);
+      final latest = await _toModelAsync(row);
       final messages = List<ChatMessage>.from(latest.messages);
       ChatMessage? committed;
       if (regenTargetId != null) {
@@ -588,9 +626,7 @@ ORDER BY updated_at DESC
         ),
       );
       if (beforeWrite != null) await beforeWrite(latest, updated);
-      final messagesJson = jsonEncode(
-        updated.messages.map((e) => e.toJson()).toList(),
-      );
+      final messagesJson = await _encodeMessagesAsync(updated.messages);
       final sessionVarsJson = updated.sessionVars.isNotEmpty
           ? jsonEncode(updated.sessionVars)
           : null;
@@ -645,16 +681,7 @@ ORDER BY updated_at DESC
         );
       }
 
-      return _toModel(
-        row.copyWith(
-          messagesJson: messagesJson,
-          sessionVarsJson: Value(sessionVarsJson),
-          authorsNoteJson: Value(authorsNoteJson),
-          draft: Value(updated.draft),
-          lastScrollAnchorJson: Value(lastScrollAnchorJson),
-          updatedAt: generatedSession.updatedAt,
-        ),
-      );
+      return updated.copyWith(updatedAt: generatedSession.updatedAt);
     });
   }
 
@@ -754,9 +781,7 @@ ORDER BY updated_at DESC
       )..where((t) => t.sessionId.equals(sessionId))).getSingleOrNull();
       if (row == null) return false;
 
-      final messages = (jsonDecode(row.messagesJson) as List<dynamic>)
-          .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
-          .toList();
+      final messages = await _decodeMessagesAsync(row.messagesJson);
 
       var found = false;
       for (var i = messages.length - 1; i >= 0; i--) {
@@ -784,9 +809,7 @@ ORDER BY updated_at DESC
         _db.chatSessions,
       )..where((t) => t.sessionId.equals(sessionId))).write(
         ChatSessionsCompanion(
-          messagesJson: Value(
-            jsonEncode(messages.map((e) => e.toJson()).toList()),
-          ),
+          messagesJson: Value(await _encodeMessagesAsync(messages)),
         ),
       );
       return true;
@@ -811,9 +834,7 @@ ORDER BY updated_at DESC
       )..where((t) => t.sessionId.equals(sessionId))).getSingleOrNull();
       if (row == null) return false;
 
-      final messages = (jsonDecode(row.messagesJson) as List<dynamic>)
-          .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
-          .toList();
+      final messages = await _decodeMessagesAsync(row.messagesJson);
 
       var found = false;
       for (var i = messages.length - 1; i >= 0; i--) {
@@ -850,9 +871,7 @@ ORDER BY updated_at DESC
         _db.chatSessions,
       )..where((t) => t.sessionId.equals(sessionId))).write(
         ChatSessionsCompanion(
-          messagesJson: Value(
-            jsonEncode(messages.map((e) => e.toJson()).toList()),
-          ),
+          messagesJson: Value(await _encodeMessagesAsync(messages)),
         ),
       );
       return true;
@@ -887,9 +906,7 @@ ORDER BY updated_at DESC
       )..where((t) => t.sessionId.equals(sessionId))).getSingleOrNull();
       if (row == null) return false;
 
-      final messages = (jsonDecode(row.messagesJson) as List<dynamic>)
-          .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
-          .toList();
+      final messages = await _decodeMessagesAsync(row.messagesJson);
 
       var found = false;
       for (var i = messages.length - 1; i >= 0; i--) {
@@ -984,9 +1001,7 @@ ORDER BY updated_at DESC
         _db.chatSessions,
       )..where((t) => t.sessionId.equals(sessionId))).write(
         ChatSessionsCompanion(
-          messagesJson: Value(
-            jsonEncode(messages.map((e) => e.toJson()).toList()),
-          ),
+          messagesJson: Value(await _encodeMessagesAsync(messages)),
         ),
       );
       return true;
@@ -1024,9 +1039,7 @@ ORDER BY updated_at DESC
       )..where((t) => t.sessionId.equals(sessionId))).getSingleOrNull();
       if (row == null) return false;
 
-      final messages = (jsonDecode(row.messagesJson) as List<dynamic>)
-          .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
-          .toList();
+      final messages = await _decodeMessagesAsync(row.messagesJson);
 
       var found = false;
       for (var i = messages.length - 1; i >= 0; i--) {
@@ -1069,9 +1082,7 @@ ORDER BY updated_at DESC
         _db.chatSessions,
       )..where((t) => t.sessionId.equals(sessionId))).write(
         ChatSessionsCompanion(
-          messagesJson: Value(
-            jsonEncode(messages.map((e) => e.toJson()).toList()),
-          ),
+          messagesJson: Value(await _encodeMessagesAsync(messages)),
         ),
       );
       return true;
@@ -1103,9 +1114,7 @@ ORDER BY updated_at DESC
       )..where((t) => t.sessionId.equals(sessionId))).getSingleOrNull();
       if (row == null) return false;
 
-      final messages = (jsonDecode(row.messagesJson) as List<dynamic>)
-          .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
-          .toList();
+      final messages = await _decodeMessagesAsync(row.messagesJson);
 
       var found = false;
       for (var i = messages.length - 1; i >= 0; i--) {
@@ -1152,9 +1161,7 @@ ORDER BY updated_at DESC
         _db.chatSessions,
       )..where((t) => t.sessionId.equals(sessionId))).write(
         ChatSessionsCompanion(
-          messagesJson: Value(
-            jsonEncode(messages.map((e) => e.toJson()).toList()),
-          ),
+          messagesJson: Value(await _encodeMessagesAsync(messages)),
         ),
       );
       return true;
@@ -1199,95 +1206,6 @@ ORDER BY updated_at DESC
       }
       return ids;
     });
-  }
-
-  SessionMetadata _toMetadata(ChatSessionRow c) {
-    final json = c.messagesJson;
-
-    // Lightweight scan: count top-level objects and find last object start
-    // without deserializing the entire messages array.
-    int messageCount = 0;
-    String lastContent = '';
-    int lastTimestamp = 0;
-
-    if (json.length > 2) {
-      final (count, startIdx) = _scanTopLevelObjects(json);
-      messageCount = count;
-
-      if (startIdx >= 0) {
-        final lastBrace = json.lastIndexOf('}');
-        if (lastBrace > startIdx) {
-          try {
-            final lastMsg =
-                jsonDecode(json.substring(startIdx, lastBrace + 1))
-                    as Map<String, dynamic>;
-            final rawContent = lastMsg['content'];
-            if (rawContent is String) {
-              lastContent = rawContent;
-            } else if (rawContent is List) {
-              final parts = <String>[];
-              for (final p in rawContent) {
-                if (p is Map && p['type'] == 'text') {
-                  final t = p['text'];
-                  if (t is String) parts.add(t);
-                }
-              }
-              lastContent = parts.join(' ');
-            }
-            // A continued message grew at its tail, so the row must preview
-            // from the continuation boundary rather than the head (INV-CM7).
-            lastContent = previewSource(
-              lastContent,
-              lastMsg['continuationOffset'] as int?,
-            );
-            if (lastContent.length > 250) {
-              lastContent = lastContent.substring(0, 250);
-            }
-            lastTimestamp = (lastMsg['timestamp'] as int?) ?? 0;
-          } catch (_) {}
-        }
-      }
-    }
-
-    String? sessionName;
-    int? branchedAt;
-    if (c.sessionVarsJson != null && c.sessionVarsJson!.isNotEmpty) {
-      try {
-        final vars = jsonDecode(c.sessionVarsJson!) as Map;
-        sessionName = vars['sessionName'] as String?;
-        final b = vars['branchedAt'];
-        if (b is String) branchedAt = int.tryParse(b);
-      } catch (_) {}
-    }
-
-    // Origin event: a branch stamp wins over the creation time (the first
-    // message timestamp). Reported alongside — never folded into
-    // lastMessageTimestamp — so the cloud-sync metadata hash stays stable.
-    int originTimestamp = 0;
-    String? originKind;
-    if (branchedAt != null && branchedAt > 0) {
-      originTimestamp = branchedAt;
-      originKind = 'branched';
-    } else {
-      final firstTs = _firstMessageTimestamp(json);
-      if (firstTs > 0) {
-        originTimestamp = firstTs;
-        originKind = 'created';
-      }
-    }
-
-    return SessionMetadata(
-      sessionId: c.sessionId,
-      characterId: c.characterId,
-      sessionIndex: c.sessionIndex,
-      updatedAt: c.updatedAt,
-      messageCount: messageCount,
-      lastMessageContent: lastContent,
-      lastMessageTimestamp: lastTimestamp,
-      sessionName: sessionName,
-      originTimestamp: originTimestamp,
-      originKind: originKind,
-    );
   }
 
   SessionMetadata _projectedMetadata(QueryRow row) {
@@ -1350,97 +1268,12 @@ ORDER BY updated_at DESC
     );
   }
 
-  /// Timestamp (ms) of the first top-level message object, or 0. String-aware
-  /// brace scan that stops at the first object — cheap enough for the
-  /// metadata listing, which otherwise decodes only the last message.
-  static int _firstMessageTimestamp(String json) {
-    int depth = 0;
-    int start = -1;
-    bool inString = false;
-    for (int i = 0; i < json.length; i++) {
-      final ch = json.codeUnitAt(i);
-      if (inString) {
-        if (ch == 0x5C /* \ */ ) {
-          i++;
-        } else if (ch == 0x22 /* " */ ) {
-          inString = false;
-        }
-        continue;
-      }
-      if (ch == 0x22 /* " */ ) {
-        inString = true;
-      } else if (ch == 0x5B /* [ */ ) {
-        depth++;
-      } else if (ch == 0x7B /* { */ ) {
-        depth++;
-        if (depth == 2 && start < 0) start = i;
-      } else if (ch == 0x5D /* ] */ ) {
-        depth--;
-      } else if (ch == 0x7D /* } */ ) {
-        depth--;
-        if (start >= 0 && depth == 1) {
-          try {
-            final obj =
-                jsonDecode(json.substring(start, i + 1))
-                    as Map<String, dynamic>;
-            return (obj['timestamp'] as int?) ?? 0;
-          } catch (_) {
-            return 0;
-          }
-        }
-      }
-    }
-    return 0;
-  }
-
-  /// Single-pass scan of a JSON array string.
-  /// Returns (objectCount, lastObjectStartIndex) without full deserialization.
-  static (int, int) _scanTopLevelObjects(String json) {
-    int count = 0;
-    int lastStart = -1;
-    int depth = 0;
-    bool inString = false;
-
-    for (int i = 0; i < json.length; i++) {
-      final ch = json.codeUnitAt(i);
-      if (inString) {
-        if (ch == 0x5C /* \ */ ) {
-          i++; // skip escaped char
-        } else if (ch == 0x22 /* " */ ) {
-          inString = false;
-        }
-        continue;
-      }
-      switch (ch) {
-        case 0x22: // "
-          inString = true;
-        case 0x5B: // [
-          depth++;
-        case 0x5D: // ]
-          depth--;
-        case 0x7B: // {
-          depth++;
-          if (depth == 2) {
-            count++;
-            lastStart = i;
-          }
-        case 0x7D: // }
-          depth--;
-      }
-    }
-    return (count, lastStart);
-  }
-
   ChatSession _toModel(ChatSessionRow c, {List<ChatMessage>? messages}) =>
       ChatSession(
         id: c.sessionId,
         characterId: c.characterId,
         sessionIndex: c.sessionIndex,
-        messages:
-            messages ??
-            (jsonDecode(c.messagesJson) as List)
-                .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
-                .toList(),
+        messages: messages ?? _decodeMessages(c.messagesJson),
         updatedAt: c.updatedAt,
         sessionVars: c.sessionVarsJson != null
             ? Map<String, String>.from(jsonDecode(c.sessionVarsJson!) as Map)
@@ -1455,23 +1288,99 @@ ORDER BY updated_at DESC
             : {},
       );
 
-  ChatSessionsCompanion _toCompanion(ChatSession m) => ChatSessionsCompanion(
-    sessionId: Value(m.id),
-    characterId: Value(m.characterId),
-    sessionIndex: Value(m.sessionIndex),
-    messagesJson: Value(jsonEncode(m.messages.map((e) => e.toJson()).toList())),
-    updatedAt: Value(m.updatedAt),
-    sessionVarsJson: Value(
-      m.sessionVars.isNotEmpty ? jsonEncode(m.sessionVars) : null,
-    ),
-    authorsNoteJson: Value(
-      m.authorsNote != null ? jsonEncode(m.authorsNote!.toJson()) : null,
-    ),
-    draft: Value(m.draft),
-    lastScrollAnchorJson: Value(
-      m.lastScrollAnchor.isNotEmpty ? jsonEncode(m.lastScrollAnchor) : null,
-    ),
+  /// [_toModel] with the blob decoded off this isolate when it is big.
+  Future<ChatSession> _toModelAsync(ChatSessionRow c) async =>
+      _toModel(c, messages: await _decodeMessagesAsync(c.messagesJson));
+
+  /// A blob this long is decoded in another isolate. Below it, the decode is
+  /// quicker than starting one.
+  static const _offloadDecodeChars = 256 * 1024;
+
+  /// Past this many messages, the blob is encoded a slice at a time with the
+  /// event loop let through between slices, so frames keep coming.
+  static const _chunkedEncodeMessages = 48;
+
+  /// Messages per slice of a chunked encode: about a frame's worth of work on
+  /// a long chat.
+  static const _encodeSliceMessages = 16;
+
+  /// The stored message list as models. Timed: a long chat is one JSON blob,
+  /// and this is where opening it spends its time.
+  static List<ChatMessage> _decodeMessages(String json) => PerfDebug.slowPhase(
+    'decode chat (${PerfDebug.size(json.length)})',
+    () => _decodeChatMessages(json),
   );
+
+  /// [_decodeMessages], in another isolate when the blob is big: the 32 MB a
+  /// long roleplay comes to takes a third of a second to decode, and that
+  /// used to be a third of a second with no frames. The isolate hands the
+  /// models back without copying them (`Isolate.run` exits with the result).
+  static Future<List<ChatMessage>> _decodeMessagesAsync(String json) {
+    if (json.length < _offloadDecodeChars) {
+      return Future.value(_decodeMessages(json));
+    }
+    return PerfDebug.slowAwait(
+      'decode chat off-thread (${PerfDebug.size(json.length)})',
+      () => Isolate.run(() => _decodeChatMessages(json)),
+    );
+  }
+
+  /// The models as the stored blob. Timed like [_decodeMessages]: every
+  /// message mutation writes the whole chat back.
+  static String _encodeMessages(List<ChatMessage> messages) =>
+      PerfDebug.slowPhase(
+        'encode chat (${messages.length} messages)',
+        () => jsonEncode(messages.map((e) => e.toJson()).toList()),
+      );
+
+  /// [_encodeMessages] for a long chat, a slice at a time. Sending the
+  /// models to another isolate would copy them all first, on this isolate;
+  /// encoding them here in slices and yielding between slices keeps the UI
+  /// painting instead. The slices join to the very bytes [jsonEncode] gives
+  /// for the whole list: no whitespace, elements comma-separated.
+  ///
+  /// Inside a write transaction the yield keeps the transaction open across
+  /// frames, and other database work queues behind it for as long as the
+  /// encode takes — the same wait the whole-list encode imposed, only with
+  /// frames let through in the meantime.
+  static Future<String> _encodeMessagesAsync(List<ChatMessage> messages) async {
+    if (messages.length <= _chunkedEncodeMessages) {
+      return _encodeMessages(messages);
+    }
+    return PerfDebug.slowAwait('encode chat (${messages.length} messages) '
+        'in slices', () async {
+      final parts = <String>[];
+      for (var i = 0; i < messages.length; i++) {
+        parts.add(jsonEncode(messages[i].toJson()));
+        if (i % _encodeSliceMessages == _encodeSliceMessages - 1) {
+          await Future<void>.delayed(Duration.zero);
+        }
+      }
+      return '[${parts.join(',')}]';
+    });
+  }
+
+  Future<ChatSessionsCompanion> _toCompanionAsync(ChatSession m) async =>
+      _toCompanion(m, messagesJson: await _encodeMessagesAsync(m.messages));
+
+  ChatSessionsCompanion _toCompanion(ChatSession m, {String? messagesJson}) =>
+      ChatSessionsCompanion(
+        sessionId: Value(m.id),
+        characterId: Value(m.characterId),
+        sessionIndex: Value(m.sessionIndex),
+        messagesJson: Value(messagesJson ?? _encodeMessages(m.messages)),
+        updatedAt: Value(m.updatedAt),
+        sessionVarsJson: Value(
+          m.sessionVars.isNotEmpty ? jsonEncode(m.sessionVars) : null,
+        ),
+        authorsNoteJson: Value(
+          m.authorsNote != null ? jsonEncode(m.authorsNote!.toJson()) : null,
+        ),
+        draft: Value(m.draft),
+        lastScrollAnchorJson: Value(
+          m.lastScrollAnchor.isNotEmpty ? jsonEncode(m.lastScrollAnchor) : null,
+        ),
+      );
 
   AuthorsNote? _parseAuthorsNote(String? json) {
     if (json == null || json.isEmpty) return null;

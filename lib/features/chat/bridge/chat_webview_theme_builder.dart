@@ -23,6 +23,7 @@ class ChatWebViewThemeInput {
     required this.showCharAvatar,
     required this.showUserName,
     required this.showCharName,
+    this.avatarRoundness = 1.0,
     this.userBubbleGradient,
     this.charBubbleGradient,
     this.textBgOpacity = 0.0,
@@ -42,6 +43,9 @@ class ChatWebViewThemeInput {
   final bool showCharAvatar;
   final bool showUserName;
   final bool showCharName;
+
+  /// Avatar corner roundness: 1.0 is a circle, 0.0 a square.
+  final double avatarRoundness;
 
   /// When non-null, the bubble is painted with this 2-stop gradient instead
   /// of the solid `*Bubble` color.
@@ -111,6 +115,8 @@ class ChatWebViewThemeBuilder {
       'show-char-avatar': input.showCharAvatar ? '1' : '0',
       'show-user-name': input.showUserName ? '1' : '0',
       'show-char-name': input.showCharName ? '1' : '0',
+      'avatar-radius':
+          '${(input.avatarRoundness.clamp(0.0, 1.0) * 50).toStringAsFixed(1)}%',
       'text-bg-opacity': input.textBgOpacity.clamp(0.0, 1.0).toStringAsFixed(2),
       // Padding is non-zero only when the backdrop is actually visible.
       'text-bg-padding': input.textBgOpacity > 0.0 ? '8px 10px' : '0px',

@@ -5,6 +5,7 @@ import '../models/chat_message.dart'
 import '../models/lorebook.dart'
     show Lorebook, LorebookActivations, LorebookEntry, LorebookGlobalSettings;
 import '../models/persona.dart';
+import '../models/summary_block.dart' show SummarySegment;
 import '../models/ledger_prompt_injection_mode.dart';
 import '../models/ledger_prompt_injection_policy.dart';
 import '../models/preset.dart' show PresetRegex;
@@ -31,6 +32,9 @@ class GenerationContextInputs {
   final Map<String, String> globalVars;
   final String? summaryContent;
   final String? summaryPrefix;
+  /// The summary cut where history runs between its blocks, for a summary
+  /// sent in place of its messages. See [SummarySegment].
+  final List<SummarySegment> summarySegments;
   final String? memoryContent;
   final String? memoryMacroContent;
   final String memoryInjectionTarget;
@@ -92,6 +96,7 @@ class GenerationContextInputs {
     this.globalVars = const {},
     this.summaryContent,
     this.summaryPrefix,
+    this.summarySegments = const [],
     this.memoryContent,
     this.memoryMacroContent,
     this.memoryInjectionTarget = 'summary_block',

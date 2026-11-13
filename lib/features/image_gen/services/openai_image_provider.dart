@@ -118,8 +118,10 @@ class OpenaiImageProvider {
       if (isGptImageFamily(kind)) 'moderation': 'low',
     };
 
-    final multiRef =
-        allowMultiImageField && isGptImageFamily(kind) && references.length > 1;
+    // gpt-image and unknown custom-proxy models accept the repeated
+    // `image[]` field; Electron Hub turns it off for its single-image edit
+    // route. dall-e-2 / flux are capped to one reference before this point.
+    final multiRef = allowMultiImageField && references.length > 1;
     final imageFields = <(String, Uint8List, String, String)>[];
     for (var i = 0; i < (multiRef ? references.length : 1); i++) {
       // Always declared as PNG — matches the upstream extension, which wraps

@@ -14,6 +14,63 @@ ChatMessage _msg(String id, String content, {String? reasoning}) => ChatMessage(
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  group('ChatSearchDelegate.pageMatchIndex', () {
+    // Four messages, hits in the first and the last two; the page holds a
+    // scrollback window that starts at the third.
+    final messages = [
+      _msg('m1', 'foo'),
+      _msg('m2', 'none'),
+      _msg('m3', 'foo foo'),
+      _msg('m4', 'foo'),
+    ];
+
+    test('counts the active hit over the window the page holds', () {
+      final delegate = ChatSearchDelegate()..openSearch();
+      delegate.search('foo', messages);
+      expect(delegate.matchCount, 4);
+      expect(delegate.activeMatch?.messageIndex, 0);
+      // The first hit is in a message the page does not have.
+      expect(delegate.pageMatchIndex(2), -1);
+      // Once the window reaches it, it is the page's first hit too.
+      expect(delegate.pageMatchIndex(0), 0);
+
+      delegate.searchNext();
+      expect(delegate.activeMatch?.messageIndex, 2);
+      // Chat-wide hit 1 is the page's hit 0: the one before it is outside.
+      expect(delegate.pageMatchIndex(2), 0);
+      delegate.searchNext();
+      delegate.searchNext();
+      expect(delegate.pageMatchIndex(2), 2);
+      expect(delegate.pageMatchIndex(3), 0);
+      delegate.dispose();
+    });
+
+    test('a new query starts where the reader is, not at the chat start', () {
+      final delegate = ChatSearchDelegate()..openSearch();
+      delegate.windowStart = 2;
+      delegate.search('foo', messages);
+      // The first hit in the window (m3), not the one in m1.
+      expect(delegate.activeMatch?.messageIndex, 2);
+      expect(delegate.pageMatchIndex(2), 0);
+      // No hit in the window: the newest one before it, the nearest to load.
+      delegate.windowStart = 4;
+      delegate.search('foo', messages);
+      expect(delegate.activeMatch?.messageIndex, 3);
+      delegate.windowStart = 2;
+      delegate.search('none', messages);
+      expect(delegate.activeMatch?.messageIndex, 1);
+      delegate.dispose();
+    });
+
+    test('no hits, no active match', () {
+      final delegate = ChatSearchDelegate()..openSearch();
+      delegate.search('zzz', messages);
+      expect(delegate.activeMatch, isNull);
+      expect(delegate.pageMatchIndex(0), -1);
+      delegate.dispose();
+    });
+  });
+
   group('ChatSearchDelegate.syncWithMessages', () {
     test('recounts the matches after a message was edited', () {
       final delegate = ChatSearchDelegate()..openSearch();

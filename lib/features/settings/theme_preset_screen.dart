@@ -21,6 +21,7 @@ import '../../../shared/theme/theme_preset.dart';
 import '../../../shared/theme/theme_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/theme/app_theme.dart';
+import '../../../shared/theme/ui_scale.dart';
 import '../../../shared/widgets/glass_surface.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_fab.dart';
@@ -472,16 +473,27 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      preset.name,
-                      style: TextStyle(
-                        fontSize: hasImage ? 16 : 15,
-                        fontWeight: FontWeight.w600,
-                        color: labelColor,
-                        shadows: textShadows,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            preset.name,
+                            style: TextStyle(
+                              fontSize: hasImage ? 16 : 15,
+                              fontWeight: FontWeight.w600,
+                              color: labelColor,
+                              shadows: textShadows,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        // A theme with its own templates or stylesheets.
+                        if (preset.hasCustomLayout) ...[
+                          const SizedBox(width: 8),
+                          _CssThemeChip(accent: accent, onImage: hasImage),
+                        ],
+                      ],
                     ),
                     if (sublabel.isNotEmpty) ...[
                       const SizedBox(height: 2),
@@ -569,6 +581,9 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
       ),
     );
 
+    // GlassSurface scales its own corners; everything drawn beside it has to
+    // follow the theme's corner scale the same way.
+    final radius = context.glazeBorderRadius(12);
     final Widget base;
     if (hasImage) {
       base = Stack(
@@ -587,7 +602,7 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
           DecoratedBox(
             decoration: BoxDecoration(
               border: baseBorder,
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: radius,
             ),
           ),
         ],
@@ -606,7 +621,7 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
       curve: Curves.easeOut,
       decoration: BoxDecoration(
         color: isActive ? accent.withValues(alpha: 0.2) : Colors.transparent,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: radius,
         border: Border.all(
           color: isActive ? accent.withValues(alpha: 0.5) : Colors.transparent,
           width: highlightWidth,
@@ -617,7 +632,7 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: radius,
         child: Stack(
           children: [
             Positioned.fill(child: IgnorePointer(child: base)),
@@ -773,7 +788,7 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
     try {
       final result = await FilePicker.pickFiles(
         type: Platform.isIOS ? FileType.any : FileType.custom,
-        allowedExtensions: Platform.isIOS ? null : ['json', 'thm'],
+        allowedExtensions: Platform.isIOS ? null : ['json', 'thm', 'zip', 'gtheme'],
         dialogTitle: 'theme_import_theme'.tr(),
         withData: true,
       );
@@ -783,8 +798,12 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
       if (file.path == null) return;
       final path = file.path!;
       final lowerPath = path.toLowerCase();
-      final isSupported =
-          lowerPath.endsWith('.json') || lowerPath.endsWith('.thm');
+      final isSupported = const [
+        '.json',
+        '.thm',
+        '.zip',
+        '.gtheme',
+      ].any(lowerPath.endsWith);
       if (!isSupported) {
         if (mounted) {
           GlazeErrorDialog.show(context, 'theme_unsupported_file_type'.tr());
@@ -900,6 +919,43 @@ class _ThemeFab extends StatelessWidget {
       label: 'action_add'.tr(),
       tooltip: 'action_add'.tr(),
       onTap: onTap,
+    );
+  }
+}
+
+/// Marks a theme that brings its own layout — templates or stylesheets — in
+/// the theme list.
+class _CssThemeChip extends StatelessWidget {
+  final Color accent;
+  final bool onImage;
+
+  const _CssThemeChip({required this.accent, required this.onImage});
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = onImage ? Colors.white : accent;
+    return Tooltip(
+      message: 'theme_css_chip_hint'.tr(),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: onImage
+              ? Colors.black.withValues(alpha: 0.45)
+              : accent.withValues(alpha: 0.14),
+          borderRadius: context.glazeBorderRadius(6),
+          border: Border.all(color: fg.withValues(alpha: 0.45)),
+        ),
+        child: Text(
+          'CSS',
+          style: TextStyle(
+            fontSize: 10,
+            height: 1.2,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.6,
+            color: fg,
+          ),
+        ),
+      ),
     );
   }
 }

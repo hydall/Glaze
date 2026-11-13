@@ -11,6 +11,7 @@ import 'fullscreen_editor.dart';
 import 'glaze_bottom_sheet.dart';
 import 'glass_surface.dart';
 import 'menu_group.dart';
+import '../theme/ui_scale.dart';
 
 /// Room an editor leaves under its last field, past the bottom inset: clear of
 /// a phone's floating nav bar, but only a margin inside a desktop window, where
@@ -326,7 +327,7 @@ class _GenericEditorState extends State<GenericEditor> {
         constraints: BoxConstraints(minWidth: width, maxWidth: width),
         color: context.cs.surfaceContainerHigh,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: context.glazeBorderRadius(12),
           side: BorderSide(color: context.cs.outlineVariant),
         ),
         items: [
@@ -714,7 +715,7 @@ class _GenericEditorState extends State<GenericEditor> {
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
           child: Material(
             color: context.cs.primary.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: context.glazeBorderRadius(10),
             clipBehavior: Clip.antiAlias,
             child: InkWell(
               mouseCursor: SystemMouseCursors.click,
@@ -875,7 +876,7 @@ class _GreetingCard extends StatelessWidget {
     return Material(
       color: context.cs.outlineVariant.withValues(alpha: 0.08),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: context.glazeBorderRadius(12),
         side: BorderSide(color: context.cs.outlineVariant),
       ),
       clipBehavior: Clip.antiAlias,

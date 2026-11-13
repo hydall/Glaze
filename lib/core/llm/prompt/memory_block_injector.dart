@@ -343,7 +343,6 @@ DeferredMemoryResult finalizeDeferredMemory({
     excerptChunksPerEntry: payload.memoryExcerptChunksPerEntry,
     chunkFirstTopEntries: payload.chunkFirstTopEntries,
     chunkFirstTopChunks: payload.chunkFirstTopChunks,
-    summaryExcerpt: payload.summaryContent,
     gameTime: gameTime,
   );
   final refiltered = resolved.selection;

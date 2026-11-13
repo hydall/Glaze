@@ -6,6 +6,7 @@ import '../shell/desktop/desktop_layout_provider.dart';
 import '../shell/desktop/desktop_window_chrome.dart';
 import '../shell/desktop/desktop_window_geometry.dart';
 import '../shell/shell_header_provider.dart';
+import '../theme/ui_scale.dart';
 
 /// Width cap of a desktop sheet window. Matches the modal-sheet cap the theme
 /// applies on mobile (`kSheetMaxWidthConstraints`), kept here as a literal to
@@ -13,7 +14,7 @@ import '../shell/shell_header_provider.dart';
 const double kGlazeSheetWindowMaxWidth = 640;
 
 /// Fraction of the window height a desktop sheet window may occupy.
-const double _kGlazeSheetWindowHeightFactor = 0.85;
+const double kGlazeSheetWindowHeightFactor = 0.85;
 
 /// Outline of a modal bottom sheet: the top edge only, thinning out along the
 /// rounded corners. Paint it over the content — the sheet's pinned header scrim
@@ -297,7 +298,7 @@ class _GlazeSheetWindowState extends ConsumerState<GlazeSheetWindow> {
     final width = bounds.width * 0.92 < kGlazeSheetWindowMaxWidth
         ? bounds.width * 0.92
         : kGlazeSheetWindowMaxWidth;
-    final maxHeight = bounds.height * _kGlazeSheetWindowHeightFactor;
+    final maxHeight = bounds.height * kGlazeSheetWindowHeightFactor;
     final resizable = widget.chrome && !widget.contentSized;
 
     final Widget framed = widget.chrome
@@ -407,9 +408,10 @@ class _SheetPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final radius = context.glazeBorderRadius(16);
     return DecoratedBox(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: radius,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.5),
@@ -419,7 +421,7 @@ class _SheetPanel extends StatelessWidget {
         ],
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: radius,
         child: MediaQuery.removePadding(
           context: context,
           removeTop: true,

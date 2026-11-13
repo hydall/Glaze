@@ -6,6 +6,7 @@ import '../models/chat_message.dart';
 import '../models/api_config.dart';
 import '../models/lorebook.dart';
 import '../models/memory_book.dart';
+import '../models/summary_block.dart' show SummarySegment;
 import '../models/ledger_prompt_injection_mode.dart';
 import '../models/ledger_prompt_injection_policy.dart';
 import 'context_calculator.dart';
@@ -30,6 +31,7 @@ Map<String, dynamic> serializePayload(PromptPayload p) => {
   'globalVars': p.globalVars,
   'summaryContent': p.summaryContent,
   'summaryPrefix': p.summaryPrefix,
+  'summarySegments': SummarySegment.encodeList(p.summarySegments),
   'memoryContent': p.memoryContent,
   'memoryMacroContent': p.memoryMacroContent,
   'memoryInjectionTarget': p.memoryInjectionTarget,
@@ -126,6 +128,7 @@ PromptPayload deserializePayload(Map<String, dynamic> json) {
     globalVars: Map<String, String>.from(json['globalVars'] as Map? ?? {}),
     summaryContent: json['summaryContent'] as String?,
     summaryPrefix: json['summaryPrefix'] as String?,
+    summarySegments: SummarySegment.decodeList(json['summarySegments']),
     memoryContent: json['memoryContent'] as String?,
     memoryMacroContent: json['memoryMacroContent'] as String?,
     memoryInjectionTarget: migrateInjectionTarget(

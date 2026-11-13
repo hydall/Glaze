@@ -55,7 +55,7 @@ class ChatDraftController {
     // write, so state can believe the draft is empty while the row still
     // holds text. Skipping on that comparison is what let a sent message's
     // text survive in the column with nothing left to clear it.
-    final updatedSession = await _ref
+    final landed = await _ref
         .read(chatRepoProvider)
         .updateDraftIfMessageCount(
           sessionId: sessionId,
@@ -64,7 +64,7 @@ class ChatDraftController {
         );
     if (!_ref.mounted) return;
     if (epoch != _saveEpoch) return;
-    if (updatedSession == null) return;
+    if (landed == null) return;
     final latest = _getState().value;
     // A draft completion belongs only to the exact session snapshot that
     // started it. Never let a delayed debounce switch the UI back to an old
@@ -73,9 +73,7 @@ class ChatDraftController {
         latest!.session!.messages.length != expectedMessageCount) {
       return;
     }
-    final sessionWithDraft = latest.session!.copyWith(
-      draft: updatedSession.draft,
-    );
+    final sessionWithDraft = latest.session!.copyWith(draft: landed);
     ChatSessionService.updateCache(sessionWithDraft);
     _setState(AsyncData(latest.copyWith(session: sessionWithDraft)));
   }

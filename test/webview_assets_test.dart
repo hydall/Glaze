@@ -486,6 +486,35 @@ void main() {
       expect(body, contains("_sendToFlutter('onMessageScriptBlocked', [])"));
     });
 
+    test('external media policy reaches every message render', () {
+      // "Allow external media" off: third-party loads are dropped before the
+      // markup is inserted, already-hoisted ones are taken back, and the
+      // messages on screen re-render under the new policy.
+      final body = _extractBlockBody(
+        bridgeControllerJs,
+        bridgeControllerJs.indexOf('setAllowExternalMedia(enabled) {'),
+      );
+      expect(
+        body,
+        contains('this.renderer.allowExternalMedia = enabled !== false'),
+      );
+      expect(body, contains('dropExternalHoists()'));
+      expect(body, contains('this.renderer.rerenderMessageBodies()'));
+      expect(rendererMessageJs, contains('this.allowExternalMedia = true;'));
+      expect(
+        rendererMessageJs,
+        contains('allowExternalMedia: this.allowExternalMedia,'),
+      );
+      expect(
+        markdownJs,
+        contains('hoistStyleImports(styles, { allowExternalMedia })'),
+      );
+      expect(
+        htmlSanitizerJs,
+        contains('if (!allowExternalMedia) stripExternalMedia('),
+      );
+    });
+
     test('flipping the policy re-renders the messages already on screen', () {
       final body = _extractBlockBody(
         bridgeControllerJs,
@@ -503,13 +532,27 @@ void main() {
         contains("import { sanitizeExtBlockHtml } from './html_sanitizer.js'"),
       );
       expect(
-        RegExp(r'\.innerHTML\s*=(?!\s*sanitizeExtBlockHtml)').allMatches(
+        RegExp(
+          r'\.innerHTML\s*=(?!\s*(?:sanitizeExtBlockHtml|this\._extBlockHtml))',
+        ).allMatches(
           _extractBlockBody(
             bridgeControllerJs,
             bridgeControllerJs.indexOf('_fillExtBlockBody(body, block) {'),
           ),
         ),
         isEmpty,
+      );
+    });
+
+    test('ExtBlock HTML follows the external media setting', () {
+      final body = _extractBlockBody(
+        bridgeControllerJs,
+        bridgeControllerJs.indexOf('_extBlockHtml(html) {'),
+      );
+      expect(body, contains('sanitizeExtBlockHtml(html, {'));
+      expect(
+        body,
+        contains('allowExternalMedia: this.renderer.allowExternalMedia'),
       );
     });
 
@@ -563,7 +606,9 @@ void main() {
       expect(writeBlock, contains('if (!isTyping && !window.bridge?.isGenerating) {'));
       expect(
         writeBlock,
-        contains('reportCssErrors(root, cssPolicyNotes(styles, refusedImports));'),
+        contains(
+          'reportCssErrors(root, cssPolicyNotes(styles, refusedImports, refusedFontFaces));',
+        ),
       );
     });
 
@@ -656,21 +701,30 @@ void main() {
       );
       expect(
         htmlSanitizerJs,
-        contains('return sanitizeHtml(html, EXT_BLOCK_CSS_SCOPE)'),
+        contains(
+          'return sanitizeHtml(html, EXT_BLOCK_CSS_SCOPE, allowExternalMedia)',
+        ),
       );
     });
 
     test('message HTML is filtered for code only, never for markup', () {
       expect(
         htmlSanitizerJs,
-        contains('sanitizeMessageHtml(html, { allowScripts = false } = {})'),
+        contains('{ allowScripts = false, allowExternalMedia = true } = {},'),
       );
-      // Scripts on: the message HTML is inserted exactly as written.
+      // Scripts and external media on: the message HTML is inserted exactly
+      // as written.
       expect(
         htmlSanitizerJs,
-        contains("if (allowScripts) return String(html == null ? '' : html);"),
+        contains(
+          'if (allowScripts && allowExternalMedia) '
+          "return String(html == null ? '' : html);",
+        ),
       );
-      expect(htmlSanitizerJs, contains('return stripMessageCode(html);'));
+      expect(
+        htmlSanitizerJs,
+        contains('if (!allowScripts) stripMessageCode(template.content);'),
+      );
       // Scripts off: only the things that run code are removed. The strict
       // element / CSS policy is the ExtBlock path's, and must not be reached
       // from here — a card renders the same with execution on and off.
@@ -1221,7 +1275,7 @@ void main() {
       // A lazy image at the bottom edge of the WebView can be evaluated while
       // the row is still off-screen and never fetched, leaving the picture the
       // user waited for as a broken tag.
-      final imgIdx = formatterImageBlocksJs.indexOf('class="imggen-result"');
+      final imgIdx = formatterImageBlocksJs.indexOf(r'class="${imgClass}"');
       expect(imgIdx, isNot(-1));
       final chunk = formatterImageBlocksJs.substring(
         formatterImageBlocksJs.lastIndexOf('<img', imgIdx),
@@ -1764,73 +1818,23 @@ void main() {
     });
   });
 
-  // ─── details/summary arrow ────────────────────────────────────────────────
-  group('details/summary arrow (SHADOW_STYLE in renderer modules)', () {
-    test('::-webkit-details-marker is hidden', () {
+  // ─── details/summary ──────────────────────────────────────────────────────
+  group('details/summary (SHADOW_STYLE in renderer modules)', () {
+    test('a card summary is styled by its author alone', () {
+      // The app used to hide every marker and inject its own arrow into
+      // every <summary>, which flattened card headers into one flex row.
+      expect(rendererJs, isNot(contains('fixDetailsSummaryArrows')));
+      expect(rendererJs, isNot(contains('glaze-arrow')));
+      expect(rendererJs, isNot(contains('.glaze-message details summary')));
+      expect(rendererJs, isNot(contains('summary::marker')));
+      expect(rendererJs, isNot(contains('summary::before')));
+    });
+
+    test('only the reasoning panel gets app styling', () {
+      expect(rendererJs, contains('.glaze-message details.reasoning-block {'));
       expect(
         rendererJs,
-        contains('::-webkit-details-marker { display: none !important; }'),
-      );
-    });
-
-    test('::marker is hidden', () {
-      expect(rendererJs, contains('::marker { display: none !important;'));
-    });
-
-    test('::before is disabled (arrow injected as real DOM span instead)', () {
-      // display:flex on <summary> is ignored in some Android WebView versions.
-      // The arrow is injected as a real .glaze-arrow <span> by fixDetailsSummaryArrows()
-      // so it always participates in flex layout correctly.
-      final beforeBlock = _extractSummaryBeforeBlock(rendererJs);
-      expect(
-        beforeBlock,
-        contains('display: none !important'),
-        reason:
-            '::before must be hidden — real DOM .glaze-arrow span is used instead',
-      );
-    });
-
-    test('.glaze-arrow span is styled', () {
-      expect(
-        rendererJs,
-        contains('.glaze-arrow {'),
-        reason: 'Real DOM arrow span must have CSS styles',
-      );
-      expect(
-        rendererJs,
-        contains('transition: transform 0.2s'),
-        reason: '.glaze-arrow must have rotation transition',
-      );
-    });
-
-    test('.glaze-arrow-open rotates 90deg when details is open', () {
-      expect(
-        rendererJs,
-        contains('.glaze-arrow.glaze-arrow-open { transform: rotate(90deg); }'),
-      );
-    });
-
-    test('fixDetailsSummaryArrows injects .glaze-arrow into every summary', () {
-      expect(rendererJs, contains('fixDetailsSummaryArrows'));
-      expect(rendererJs, contains("arrow.className = 'glaze-arrow'"));
-    });
-
-    test('writeShadowContent calls fixDetailsSummaryArrows after innerHTML', () {
-      // Must be called AFTER root.innerHTML so it sees the inserted <details>.
-      final writeBlock = _extractWriteShadowContent(rendererJs);
-      final innerIdx = writeBlock.indexOf('root.innerHTML');
-      final fixIdx = writeBlock.indexOf('fixDetailsSummaryArrows');
-      expect(innerIdx, isNot(-1), reason: 'root.innerHTML must be present');
-      expect(
-        fixIdx,
-        isNot(-1),
-        reason: 'fixDetailsSummaryArrows must be called',
-      );
-      expect(
-        fixIdx > innerIdx,
-        isTrue,
-        reason:
-            'fixDetailsSummaryArrows must be called AFTER root.innerHTML = formatted',
+        contains('.glaze-message details.reasoning-block > summary {'),
       );
     });
   });
@@ -2004,7 +2008,7 @@ void main() {
             'stays in step with the trackpad replay and the edit textarea',
       );
       expect(
-        _bridgeAsset('trackpad_scroll.js'),
+        _bridgeAsset('scroll_relay.js'),
         contains('export const WHEEL_PIXEL_SCALE = 1'),
         reason:
             'WHEEL_PIXEL_SCALE=1 scrolls one CSS pixel per wheel delta unit — '
@@ -2227,7 +2231,10 @@ void main() {
     // lifts that single block out of the body and puts it back.
     test('the attachment block stays a single element', () {
       final embedJs = _rendererAsset('image_embed.js');
-      expect(embedJs, contains("wrap.className = 'msg-image-attachment'"));
+      expect(
+        embedJs,
+        contains("wrap.className = 'msg-image-attachment tavo-message-attachments'"),
+      );
       expect(
         rendererMessageJs,
         contains("const image = body.querySelector('.msg-image-attachment')"),
@@ -2352,8 +2359,8 @@ void main() {
       expect(
         markdownJs,
         contains(
-          "import { hoistStyleImports, installMessageDocument } from "
-          "'./message_document.js';",
+          "  installMessageDocument,\n"
+          "} from './message_document.js';",
         ),
       );
       expect(markdownJs, contains('installMessageDocument(root, { allowMessageScripts })'));
@@ -2504,8 +2511,12 @@ void main() {
       // A card's modal is appended from its click handler, long after its
       // <script> finished running.
       expect(messageDocumentJs, contains('const SCOPED_EVENTS ='));
-      expect(messageDocumentJs, contains('queueMicrotask(restore)'));
-      expect(messageDocumentJs, contains('setTimeout(restore, 0)'));
+      // It ends as the event reaches the shadow host, so the app's own
+      // listeners after it see the app's document; the microtask and the
+      // browser's own timeout are the backstops.
+      expect(messageDocumentJs, contains('host.addEventListener(type, finish)'));
+      expect(messageDocumentJs, contains('queueMicrotask(finish)'));
+      expect(messageDocumentJs, contains('REAL_SET_TIMEOUT(finish, 0)'));
       // …and only for a message whose own code has actually run, so the app's
       // document is untouched for every message that carries no script.
       expect(messageDocumentJs, contains('scripted.has(root)'));
@@ -2519,26 +2530,54 @@ void main() {
       expect(messageDocumentJs, contains('export function hoistStyleImports('));
       final body = _extractBlockBody(
         messageDocumentJs,
-        messageDocumentJs.indexOf('export function hoistStyleImports('),
+        messageDocumentJs.indexOf(
+          ') {',
+          messageDocumentJs.indexOf('export function hoistStyleImports('),
+        ),
       );
       expect(body, contains(r"if (!/^https:\/\//i.test(url))"));
       expect(body, contains('hoisted.has(url)'));
       expect(body, contains('hoisted.size >= MAX_HOISTED'));
       expect(body, contains("link.dataset.glazeImport = ''"));
       expect(body, contains('REAL_HEAD.appendChild(link)'));
-      expect(markdownJs, contains('hoistStyleImports(styles)'));
+      expect(
+        markdownJs,
+        contains('hoistStyleImports(styles, { allowExternalMedia })'),
+      );
 
       // The rules with nowhere to go are still dropped, and still reported.
       expect(
         cssDiagnosticsJs,
         contains('export function inspectBlockedAtRules('),
       );
-      expect(cssDiagnosticsJs, contains('@(font-face|page|namespace)'));
+      expect(cssDiagnosticsJs, contains('@(page|namespace)'));
       expect(
         cssSanitizerJs,
         contains('// @import, @font-face, @page, @namespace, @charset and anything unknown.'),
         reason: 'the sanitizer still strips the rule from message CSS itself; '
             'the hoist reads the source before it runs',
+      );
+    });
+
+    test('a @font-face is hoisted, and only from data: or https', () {
+      // INV-MR5: Chromium ignores @font-face inside a shadow root. A rule
+      // whose sources are all data:, https: or local() is copied into the
+      // document head; anything else is refused and reported.
+      expect(messageDocumentJs, contains('export function hoistStyleFontFaces('));
+      final body = _extractBlockBody(
+        messageDocumentJs,
+        messageDocumentJs.indexOf(
+          ') {',
+          messageDocumentJs.indexOf('export function hoistStyleFontFaces('),
+        ),
+      );
+      expect(body, contains('isAllowedFontSource('));
+      expect(body, contains('hoistedFontFaces.has(text)'));
+      expect(body, contains('hoistedFontFaces.size >= MAX_FONT_FACES'));
+      expect(body, contains("style.dataset.glazeFontFace = ''"));
+      expect(
+        markdownJs,
+        contains('hoistStyleFontFaces(styles, { allowExternalMedia })'),
       );
     });
   });
@@ -2878,7 +2917,7 @@ void main() {
     test('renderer always creates the actions button', () {
       expect(
         rendererMessageJs,
-        contains("actions.className = 'msg-actions-btn'"),
+        contains("actions.className = 'msg-actions-btn tavo-action-bar-button'"),
       );
       expect(rendererMessageJs, isNot(contains('shouldHideActions()')));
     });
@@ -3170,19 +3209,35 @@ void main() {
       expect(stylessCss, contains('animation: typingPhaseOut 0.13s'));
     });
   });
+
+  // ─── bundled assets ──────────────────────────────────────────────────────
+  group('the asset bundle', () {
+    test('lists every WebView asset directory', () {
+      final pubspec = File('pubspec.yaml').readAsStringSync();
+      final dirs =
+          Directory('assets/chat_webview')
+              .listSync(recursive: true)
+              .whereType<Directory>()
+              .where((d) => d.listSync().any((e) => e is File))
+              .map((d) => '${d.path}/')
+              .toList()
+            ..sort();
+      for (final dir in dirs) {
+        expect(
+          pubspec,
+          contains('- $dir'),
+          reason:
+              'Flutter bundles a declared directory, not the directories '
+              'below it. A new folder without its own line leaves the page '
+              'requesting modules the APK does not carry — every chat then '
+              'waits for a JS bridge that never starts.',
+        );
+      }
+    });
+  });
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
-
-/// Extracts the summary::before CSS block from SHADOW_STYLE in renderer modules.
-String _extractSummaryBeforeBlock(String src) {
-  final marker = 'summary::before {';
-  final idx = src.indexOf(marker);
-  if (idx == -1) return '';
-  final end = src.indexOf('}', idx);
-  if (end == -1) return src.substring(idx);
-  return src.substring(idx, end + 1);
-}
 
 /// Extracts the writeShadowContent method body from renderer modules.
 /// Looks for the definition (not a call), i.e. the line that starts with the name.

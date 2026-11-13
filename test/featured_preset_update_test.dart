@@ -36,8 +36,8 @@ void main() {
 
   final renri = featuredPresets.firstWhere((f) => f.id == 'default_renri');
 
-  /// An install that already had its first run, holding [stored] as Renri
-  /// from before revisions were tracked.
+  /// An install that already had its first run, holding [stored] as the
+  /// featured preset it belongs to, from before revisions were tracked.
   Future<(SharedPreferences, _MemoryPresetStore)> install(
     Preset stored, {
     List<String>? order,
@@ -141,5 +141,42 @@ void main() {
     final order = (jsonDecode(prefs.getString('presetOrder')!) as List)
         .cast<String>();
     expect(order, ['default_shino', 'default_renri', old.id, 'mine']);
+  });
+
+  test('NoriMyn ships a previous revision that is kept when edited', () async {
+    final norimyn = featuredPresets.firstWhere(
+      (f) => f.id == 'default_norimyn',
+    );
+    expect(norimyn.previousJsonAsset, isNotNull);
+    expect(norimyn.previousImageAsset, isNotNull);
+
+    final previous = await loadFeaturedPreset(
+      norimyn,
+      jsonAsset: norimyn.previousJsonAsset,
+    );
+
+    // Untouched: the update replaces it.
+    final (untouchedPrefs, untouchedStore) = await install(previous);
+    await syncFeaturedPresets(prefs: untouchedPrefs, repo: untouchedStore);
+    expect(await untouchedStore.getAll(), hasLength(1));
+    expect(
+      jsonEncode((await untouchedStore.getById(norimyn.id))!.toJson()),
+      jsonEncode((await loadFeaturedPreset(norimyn)).toJson()),
+    );
+
+    // Edited: the user's copy stays as "Old NoriMyn".
+    final edited = previous.copyWith(
+      blocks: [
+        for (final b in previous.blocks)
+          b.isStatic ? b : b.copyWith(content: '${b.content}\nmy edit'),
+      ],
+    );
+    final (prefs, store) = await install(edited);
+    await syncFeaturedPresets(prefs: prefs, repo: store);
+
+    final all = await store.getAll();
+    expect(all.map((p) => p.name), unorderedEquals(['NoriMyn', 'Old NoriMyn']));
+    final old = all.firstWhere((p) => p.id != norimyn.id);
+    expect(old.imagePath, 'assets/presets/norimyn_old.jpg');
   });
 }

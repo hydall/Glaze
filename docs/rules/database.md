@@ -57,6 +57,32 @@ include `appendSwipeToMessage`,
 
 ---
 
+## A chat is one blob: keep it off the UI isolate
+
+`chat_sessions.messages_json` holds the whole chat as one JSON array. A long
+roleplay is tens of megabytes, and the table hundreds; decoding or scanning
+that on the UI isolate is a visible freeze (a third of a second per 32 MB,
+measured on a release build).
+
+- Read a session through `ChatRepo` only: a blob past 256 KB is decoded in
+  another isolate (`_decodeMessagesAsync`), and a chat past 48 messages is
+  encoded a slice at a time with the event loop let through between slices
+  (`_encodeMessagesAsync`). Never `jsonDecode(row.messagesJson)` elsewhere.
+- Anything that needs counts, previews or indexes — the chat list, the
+  session picker, the next session index, a draft's message-count guard —
+  reads `SessionMetadata` (`getAllSessionMetadata`,
+  `watchAllSessionMetadata`, `getMetadataByCharacterId`), which is projected
+  in SQL (`json_array_length`, `json_extract`) in the database isolate.
+  `getByCharacterId` / `getAllSessions` decode every message and are for
+  callers that need the messages.
+- A repo method that already holds the session it wrote returns that
+  session; it does not decode the written blob again to say so.
+- `PerfDebug.slowPhase` / `slowAwait` time these paths and log any phase of
+  50 ms or more to the session log, so a freeze reported from a build names
+  what the app was doing.
+
+---
+
 ## Save before state cleanup
 
 When finalizing a generation, persist data to DB **before** clearing reactive state.
@@ -253,6 +279,9 @@ Migration history:
   update except the turn binding: `message_id` set once from NULL, every other
   column unchanged. The old one also rejected
   `LlmRequestCaptureRepo.bindTurnMessageId`.
+- v145: added `api_configs.tool_calling` BOOLEAN DEFAULT 0 and
+  `api_configs.disabled_tool_groups_json` TEXT DEFAULT `'[]'` (per-connection
+  model tool calling; see `lib/features/model_tools/`).
 
 ---
 

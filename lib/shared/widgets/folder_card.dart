@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
 import 'glass_surface.dart';
+import '../theme/ui_scale.dart';
 
 /// One folder row in a generic [FolderSection]. Mirrors the Presets folder card
 /// so every list that uses the shared folder layer reads the same.
@@ -77,11 +78,11 @@ class FolderCard extends StatelessWidget {
               height: 34,
               child: Material(
                 color: Colors.transparent,
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: context.glazeBorderRadius(8),
                 child: InkWell(
                   mouseCursor: SystemMouseCursors.click,
                   onTap: onMenu,
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: context.glazeBorderRadius(8),
                   child: Icon(
                     Icons.more_vert,
                     size: 18,

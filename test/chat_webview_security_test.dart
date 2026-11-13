@@ -214,9 +214,41 @@ void main() {
           r'await for \(final request in server\) \{\s*'
           r'unawaited\(_handleServerRequest\(',
         ).allMatches(source).length,
-        3,
+        1,
       );
       expect(source, contains('Future<void> _handleServerRequest('));
+    });
+  });
+
+  group('chat WebView server revival', () {
+    tearDown(stopChatWebViewLocalFileServerForTesting);
+
+    Future<bool> accepts(int port) async {
+      try {
+        final socket = await Socket.connect(InternetAddress.loopbackIPv4, port);
+        socket.destroy();
+        return true;
+      } on SocketException {
+        return false;
+      }
+    }
+
+    // iOS reclaims a suspended app's listening sockets, so after a long
+    // background every local picture in the chat turned into a broken image.
+    test('a reclaimed local-file server comes back on its old port', () async {
+      final port = await startChatWebViewLocalFileServerForTesting();
+      await dropChatWebViewLocalFileSocketForTesting();
+      expect(await accepts(port), isFalse);
+
+      await reviveChatWebViewServers();
+
+      expect(await accepts(port), isTrue);
+    });
+
+    test('a live server is left alone', () async {
+      final port = await startChatWebViewLocalFileServerForTesting();
+      await reviveChatWebViewServers();
+      expect(await accepts(port), isTrue);
     });
   });
 }

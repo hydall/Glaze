@@ -120,6 +120,38 @@ class AgentSwipe {
     studioOutputs: studioOutputs ?? this.studioOutputs,
     parentSwipeId: parentSwipeId ?? this.parentSwipeId,
   );
+
+  /// By value, as the freezed models around it: a message rebuilt with the
+  /// same swipes is the same message, which is what lets the open-time
+  /// fix-up tell a repaired message from an untouched one without encoding
+  /// both to JSON.
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is AgentSwipe &&
+          other.content == content &&
+          other.kind == kind &&
+          other.reasoning == reasoning &&
+          other.genTime == genTime &&
+          other.tokens == tokens &&
+          other.time == time &&
+          other.parentSwipeId == parentSwipeId &&
+          const DeepCollectionEquality().equals(
+            other.studioOutputs,
+            studioOutputs,
+          );
+
+  @override
+  int get hashCode => Object.hash(
+    content,
+    kind,
+    reasoning,
+    genTime,
+    tokens,
+    time,
+    parentSwipeId,
+    const DeepCollectionEquality().hash(studioOutputs),
+  );
 }
 
 @freezed
@@ -344,11 +376,23 @@ extension ChatSessionX on ChatSession {
   int get deletedMessageCount =>
       int.tryParse(sessionVars[deletedMessagesVarKey] ?? '') ?? 0;
 
+  /// Reserved [sessionVars] key, `'1'` while [historyAnchorVarKey] is the
+  /// reader's own choice — the chat's "Pin cache anchor". The stepped trim
+  /// holds a pinned anchor as long as its window fits under the trigger line
+  /// and never moves it back to the refill level; once it has to step past
+  /// it, the pin goes with it. Absent otherwise.
+  static const historyAnchorPinnedVarKey = '__historyAnchorPinned';
+
   /// Anchor the last stepped trim settled on. See [historyAnchorVarKey].
   String? get historyAnchorId {
     final value = sessionVars[historyAnchorVarKey];
     return value == null || value.isEmpty ? null : value;
   }
+
+  /// Whether [historyAnchorId] was pinned by the reader. See
+  /// [historyAnchorPinnedVarKey].
+  bool get historyAnchorPinned =>
+      historyAnchorId != null && sessionVars[historyAnchorPinnedVarKey] == '1';
 
   String get historyText => messages
       .where((m) => (m.role == 'user' || m.role == 'assistant') && !m.isHidden)

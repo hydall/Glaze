@@ -317,6 +317,30 @@ was waiting on. `Formatter.format` already receives `isUser`, so
 is kept as literal text — the same treatment a tag inside reasoning gets
 (INV-IG11).
 
+### INV-IG14: A block keeps the layout its card gave the picture
+
+A card often positions its picture itself — an aspect-ratio box
+(`padding-top:66.3%`) with `<img style="position:absolute;width:100%;
+height:100%">` inside, as the "Polaroid Diaries" ExtBlocks preset does. The
+block used to be rewritten as a bare `<img data-iig-…>` and rendered inside our
+own wrapper, so the picture fell below the box and left an empty frame.
+
+`ImageTagMarkup.presentationAttributes` (`style`, `class`, `alt`, `title`,
+`width`, `height`) are read off the author's `<img>` and carried through every
+state of the block: the stored element writes them after `src`; a reset with
+them stays an `<img … src="[IMG:GEN]">` element with its images in
+`data-iig-variants` (`ImageTagMarkup.pendingTag`) instead of a bracket tag that
+has nowhere to keep them; an error card holds them under `presentation`. No
+other attribute is carried — event handlers and the rest are not ours to keep.
+
+The formatter (`renderResult` in `formatter/image_blocks.js`) puts them on the
+rendered `<img>`, after our class, and marks the wrapper `imggen-authored`,
+which is `display: contents`: the author's `width:100%` and `position:absolute`
+resolve against the author's box, as in SillyTavern. The overlay buttons then
+anchor to the card's nearest positioned box. The loading placeholder and the
+error card stay app chrome (INV-IG10) and do not take the author's style; the
+model still sees only `[IMG:GEN:<instruction>]` (INV-IG12).
+
 ### INV-IG7: Regenerating an image never adds a message swipe
 
 `ImageRecoveryService` resets the retried blocks through
@@ -332,10 +356,10 @@ a text generation creates swipes.
 
 ### INV-S1: Summary is always non-streaming
 
-`SummaryService.generateSummary()` goes through `AuxLlmClient.callOnce()`, which
-calls the protocol's `ChatTransport` with `stream: false`. No SSE. The protocol
-comes from `ApiConfig.protocol` — the summary must never hardcode one provider's
-wire format.
+`SummaryService.summarizeMessages()` and `mergeBlocks()` go through
+`AuxLlmClient.callOnce()`, which calls the protocol's `ChatTransport` with
+`stream: false`. No SSE. The protocol comes from `ApiConfig.protocol` — the
+summary must never hardcode one provider's wire format.
 
 The connection is resolved by `SummaryGenerationService` from the Memory slot
 (`PipelineSettings.memoryBookApi`), the same slot memory drafts run on, falling
@@ -347,26 +371,141 @@ applied only when it is set, so summarizing otherwise stays at
 ### INV-S2: Summary does not create generation registry entries
 
 Summary generation does not touch `ChatState.isGenerating` or any `charId`-keyed
-generation guard. Neither the manual run (`summary_tab.dart`) nor the automatic
-one (`AutoSummaryStage`) passes a `CancelToken`, so once started it cannot be
-aborted.
+generation guard. Neither the manual merge (`summary_tab.dart`) nor the
+automatic run (`AutoSummaryStage`) passes a `CancelToken`, so once started it
+cannot be aborted. The manual compaction runs in `summaryCompactionProvider`
+with a `CancelToken` per session: Stop ends it after the block being written,
+and every block already written stays. Regenerating one block runs in
+`summaryRegenerationProvider` with a `CancelToken` per block, and a stopped
+run writes nothing. Both outlive the Memory sheet. Runs are serialized per
+session by `SummaryGenerationService`: a second run while one is going fails
+with `SummaryChainException('busy')`.
 
-### INV-S4: Auto-summary only fires on a bot turn
+### INV-S4: Auto-summary is driven by context fill, on a bot turn only
 
 `AutoSummaryStage` runs from `PostGenCoordinator` (post-assistant-turn only) and
 additionally requires `session.messages.last` to be a non-error assistant /
 character message. A user message must never trigger it.
 
-### INV-S5: A summary run is given the summary it replaces ✅ ENFORCED
+Whether it compacts is decided by tokens, never by a message count: once the
+prompt passes `SummaryCompactionSettings.triggerPercent` of what it may use,
+the oldest summarizable messages outside the fresh tail (the rest of the
+window, and at least `SummaryChain.minTailMessages`) are retold as a level-1
+block. A run that would not make the block meaningfully shorter than its source
+is skipped. The size target goes into every summary prompt in words and
+characters as well as tokens (`SummaryTarget`, worked out from the material of
+the request): a model keeps to those, not to a token count it cannot see.
+An answer more than `summaryShortenSlackPercent` of its target is
+sent back to be shortened, up to `summaryShortenRounds` times, with the chosen
+shortening prompt, and each shorter text kept — a round that takes off less
+than `summaryShortenMinGainPercent` of its text is the last; a block that
+still comes back no shorter than its source is rejected. Once the live blocks
+take more than
+`mergePercent` of the window, adjacent blocks of one level are merged a level
+up and the merged ones are archived. A retelling aims at the block size or a
+third of its messages, whichever is less; a merge at the block size or half of
+its parts (`mergeTargetFor`), since the parts are summaries already.
 
-`SummaryService.generateSummary` reads the stored summary before it writes the
-new one and passes it to `buildSummaryPrompt`, which places it at
-`{{previous_summary}}` or, when the template does not, under
-`summaryPreviousHeader` between the instructions and the transcript. A run must
-never re-derive the chat from the transcript alone — that silently drops
-whatever the previous summary had distilled out of messages the model now
-weighs differently. The first run of a session adds nothing. Covered by
+An automatic run makes at most `SummaryGenerationService._maxSteps` blocks, so
+it never holds the next turn for long; the manual run ("Compact history") has
+no such cap and goes on, one block per request, until nothing older than the
+fresh tail is left uncovered — a long chat's whole backlog in one press. Its
+tail is its own setting, not the rest of the window: a share of the chat
+connection's context size (`manualTailPercent`, 25 % by default) or a fixed
+number of tokens (`manualTailTokens`), as `manualTailUnit` says. The reader
+compacts up to nearly now and plays on from there. Any run gives up after `_maxIdleSteps` steps in a row
+that wrote nothing because the chat was edited under them.
+
+### INV-S5: The summary is a chain of blocks bound to their messages ✅ ENFORCED
+
+The summary is stored as `SummaryBlock`s (`chat_summaries.blocks_json`). A
+level-1 block records its source message ids and a fingerprint of their text;
+a merge records the union and its archived parts. Each run retells only its
+own messages; the live blocks before it are handed over as context
+(`{{previous_summary}}` or `summaryPreviousHeader`) and are not retold.
+
+The instructions go in the system message and the material — earlier summary
+and transcript, with speakers by name — in the user message; a template that
+places `{{history}}` is sent as one user message as written.
+
+The retelling, merging and shortening prompts are chosen by key from preset
+libraries, as in Memory Books (`SummaryPromptSelection`;
+`SummaryPromptPresets`, `SummaryMergePromptPresets` and
+`SummaryShortenPromptPresets` plus the reader's saved ones). A merge prompt gets
+`{{target_tokens}}`, `{{target_words}}`, `{{target_chars}}` and `{{level}}`,
+the level of the block it makes; a shortening prompt gets the three target
+placeholders (`SummaryTarget`; the target in words and characters is appended
+when a prompt places neither). Built-ins are
+read-only; a key that names nothing resolves to the built-in default. A chat
+that still holds a prompt text of its own retells with it until a preset is
+picked, which clears it. The reader may put one instruction in front of all
+three prompts (`SummaryPreamble`, `summaryPreambleProvider`; off by default):
+on, `SummaryGenerationService` prepends its text to the resolved retelling,
+merging and shortening prompt alike — a chat's own text included — so it is
+read first; off, the prompts go as chosen and the text is kept. The transcript
+is the message text alone: summarizing reads nothing from Ledger or Studio and
+runs after every bot turn, Studio on or off.
+
+A block whose sources were edited, swiped or deleted is stale: it is not sent,
+its messages return to the prompt, and the next compaction drops it together
+with its archive. Deleting a merge restores its parts; deleting a level-1 block
+returns its messages. A row from before blocks reads as one level-0 note that
+covers no messages. Covered by `test/summary_chain_test.dart` and
 `test/summary_service_test.dart`.
+
+Regenerating (`SummaryGenerationService.regenerateBlock`) writes one active
+block again on the prompts chosen now and leaves the result on it as a
+`SummaryDraft`, the way a Memory Books draft waits for approval. The draft is
+never sent: the block keeps its text in the prompt until the reader approves
+the draft (`approveDraft`), which puts it in place — same id, level, parts and
+place in the chain, the draft's sources and fingerprint. The reader may edit
+the draft first or discard it. A level-1 block retells its messages as they
+read today, with the live blocks before it as context, so approving brings a
+stale one back; until then compaction neither drops a stale block whose draft
+is fresh nor retells its messages again (`SummaryChain.awaitsReview`). A merge is merged again from its archived parts; a stale merge
+is refused (`stale_merge`), since its parts are as out of date as it is. Notes
+are never regenerated. Shortening (`shortenBlock`; the card of a live block
+past the block size offers it) sends the block's own text through the
+shortening prompt, aimed at the block size, and leaves the result as a draft
+the same way, bound as the block is; a stale block is refused (`stale`) before
+the summarizer is asked. The new text must be shorter than its source, and a
+draft whose messages changed after it was written is not approved
+(`changed`). A part merged away loses its draft. Covered by
+`test/summary_regenerate_test.dart`.
+
+Every change to the chain is one transaction over the stored blocks
+(`SummaryRepo.mutateBlocks`), so a draft landing while the reader approves
+another, or while auto-compaction writes, cannot drop either change.
+
+### INV-S6: Summarized messages are not sent ✅ ENFORCED
+
+`PromptPayloadBuilder.collectGenerationContext` and
+`PromptInputsCollector.collectInputs` drop from the history every message a
+live block covers (`SummaryChain.withoutCovered`, matched by id after ExtBlocks
+injection). The summary takes their place through the preset `summary` block or
+`{{summary}}`. A switched-off summary drops nothing. Historical requests carry
+neither the summary nor any exclusion. Covered by
+`test/summary_prompt_coverage_test.dart`.
+
+The `summary` block's insertion mode decides where the text goes. `relative`
+and `depth` place the whole summary like any other block. `in_place`
+(`summaryInPlaceInsertion`, the default; the v144 migration moves a block still
+on the old default, depth 4, and leaves any other placement) puts it into the
+history where the covered messages were: `SummaryChain.promptView` cuts the
+live blocks into runs with no carried message between them
+(`SummaryPromptView.segments`), and each run goes as one message, formatted
+like the block, right before the first message the history still carries after
+it — after the whole history when none follows. It is counted with the other
+blocks and placed last (`placeInPlaceSummary`), after the memory and recall
+blocks have settled in front of the history, so it always borders the messages
+that follow it. Trimming the history never drops it. Covered by
+`test/summary_in_place_test.dart`.
+
+### INV-S7: Memory Book never carries the summary
+
+The Memory Book block (hard block or `{{memory}}`) contains only memory
+entries. The summary is injected once, by its own block, and is not charged
+against the Memory Book budget.
 
 ### INV-S3: Summary does not mutate chat messages
 
@@ -1639,8 +1778,14 @@ script a function scope of its own, and the attribute pointed at nothing.
 
 `document.currentScript` is shimmed for the duration to the element the script
 was written next to, so ST-style cards that read
-`currentScript.previousElementSibling` still find what they decorate. The
-`<script>` is removed from the message afterwards, and so is the injected one.
+`currentScript.previousElementSibling` still find what they decorate. The shim
+answers `previousElementSibling`, `nextElementSibling`, `parentNode`,
+`parentElement`, `closest()`, `getRootNode()` (the message's shadow root, read
+before the script is removed), `dataset` and `getAttribute()`. The `<script>` is
+removed from the message afterwards, and so is the injected one.
+
+A closed `<script>` / `<style>` is held before the inline-code pass, so the
+backticks of a template literal are never read as inline code.
 
 ### INV-MR2: The app's own document is restored exactly
 
@@ -1685,8 +1830,31 @@ The cost is deliberate and bounded:
 - what remains is accepted knowingly: the sheet is fetched from a third party,
   which learns the reader's IP, and its rules apply to the whole document —
   app chrome included. `bridge/css_sanitizer.js` still rejects every `url()`
-  *inside* message CSS, and `@font-face`, `@page` and `@namespace` are still
-  dropped and reported (`inspectBlockedAtRules`).
+  *inside* message CSS, and `@page` and `@namespace` are still dropped and
+  reported (`inspectBlockedAtRules`).
+
+A `@font-face` is hoisted the same way (`hoistStyleFontFaces`), because
+Chromium does not register one from a shadow-root stylesheet: a card that
+brings its own font rendered in the fallback face. A rule whose every source
+is a `data:` URL, an `https:` URL or `local()` is copied, as the browser
+re-serialised it, into a `<style data-glaze-font-face>` in the head. Each rule
+once, at most 32 per session and 16M characters in total; `http:` and any
+other source is refused and reported. An `https:` font is a third-party fetch
+and the family name becomes document-wide — the same trade as `@import`, and
+the one SillyTavern makes when external media is allowed (there, message
+`@font-face` works as is, and `forbid_external_media` only strips `://`
+sources).
+
+**"Allow external media"** (app setting, on by default) is the reader's
+override for all of the above. Off, `bridge/external_media.js` drops every
+load from a third-party host before the markup is inserted — media `src` /
+`poster` / `srcset`, `<link>`, SVG references, and remote `url()`s in
+`<style>` and `style="…"` — and the hoists skip remote sheets and fonts
+without a report. `data:`/`blob:` media, `file://`, relative URLs and Glaze's
+own hosts (the page origin, loopback, `appassets.androidplatform.net`) keep
+working. A `<style>` with no remote URL stays byte-identical. Switching the
+setting off takes back what was already hoisted and re-renders the chat.
+ExtBlock HTML follows the same setting.
 
 ### INV-MR6: `document.body` is the message's overlay layer
 
@@ -1709,7 +1877,16 @@ message's scripts have all run. The app's own listeners are never touched.
 A card's modal is appended from its click handler, not from its `<script>`. The
 document scope is therefore re-installed for the length of any dispatch of a
 common interaction event whose composed path passes through a message root, and
-removed on the microtask that follows it.
+removed as the event reaches the message's shadow host — the card's own
+handlers have all run by then, and the app's listeners (and the timers they
+start) get the app's document. The microtask after the dispatch is the backstop
+for an event the card stopped inside the message.
+
+A callback handed to `setTimeout`, `setInterval` or `requestAnimationFrame`
+while the scope is installed is wrapped, and re-installs the scope for the
+length of its own run: a card that reveals its modal on a timer still finds
+its elements. The wrapped timers are own properties of `window`, removed with
+the rest of the scope (INV-MR2).
 
 Only for a message whose own code has actually run: a message with no
 `<script>` never needs the scope, so for all but a handful of messages the

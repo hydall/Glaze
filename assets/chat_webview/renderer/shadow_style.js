@@ -2,6 +2,7 @@
 export const SHADOW_STYLE = `
   :host { display: block; font-size: inherit; color: inherit; }
   .glaze-message { word-wrap: break-word; line-height: 1.6; color: inherit; }
+  :where(.glaze-message) :where(*, *::before, *::after) { box-sizing: border-box; }
   .glaze-message p { margin: 0 0 0.8em 0; }
   .glaze-message p:first-child { margin-top: 0; }
   .glaze-message p:last-child { margin-bottom: 0; }
@@ -85,11 +86,29 @@ export const SHADOW_STYLE = `
      contents so the node lays out where the card expected it to, while
      staying under the message's own stylesheet. */
   .glaze-message .glaze-message-overlay { display: contents; }
-  .glaze-message .code-lang {
-    position: absolute; top: 4px; right: 8px;
-    font-size: 10px; opacity: 0.4;
-    text-transform: uppercase; font-family: monospace;
+  .glaze-message .code-block-header {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; padding: 2px 4px 2px 12px;
+    background: rgba(0,0,0,0.28);
+    border-radius: 8px 8px 0 0;
   }
+  .glaze-message .code-block-wrapper > pre { margin: 0; border-radius: 0 0 8px 8px; }
+  .glaze-message .code-lang {
+    font-size: 11px; opacity: 0.6;
+    text-transform: lowercase; font-family: 'Consolas','Monaco','Courier New',monospace;
+  }
+  .glaze-message .code-copy-btn {
+    display: flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; padding: 0;
+    background: none; border: none; border-radius: 6px;
+    color: inherit; opacity: 0.6; cursor: pointer;
+  }
+  .glaze-message .code-copy-btn:hover { opacity: 1; background: rgba(255,255,255,0.08); }
+  .glaze-message .code-copy-btn svg { width: 16px; height: 16px; fill: currentColor; }
+  .glaze-message .code-copy-btn .code-copied-icon,
+  .glaze-message .code-copy-btn[data-copied] .code-copy-icon { display: none; }
+  .glaze-message .code-copy-btn[data-copied] .code-copied-icon { display: block; }
+  .glaze-message .code-copy-btn[data-copied] { opacity: 1; }
   .glaze-message .janitor-img-wrapper {
     display: inline-block; position: relative; max-width: 100%; margin: 4px 0;
   }
@@ -366,6 +385,15 @@ export const SHADOW_STYLE = `
     margin: 0;
     cursor: pointer;
   }
+  /* A picture whose card styled it (INV-IG14): the wrapper leaves the layout,
+     so the author's width/position resolve against the author's own box, and
+     the image is the plain <img> the card was written for. The overlay
+     buttons anchor to the nearest positioned box of the card. */
+  .glaze-message .imggen-result-wrapper.imggen-authored { display: contents; }
+  .glaze-message .imggen-authored > .imggen-result {
+    display: inline;
+    border-radius: 0;
+  }
   .glaze-message table tbody tr:nth-child(even) { background-color: rgba(255,255,255,0.02); }
   .glaze-message table td { padding: 8px 12px; border-bottom: 1px solid rgba(255,255,255,0.08); }
   .glaze-message .chat-table {
@@ -403,7 +431,9 @@ export const SHADOW_STYLE = `
     background-color: rgba(244, 67, 54, 0.8);
     color: #fff;
   }
-  .glaze-message details {
+  /* Only the app's own reasoning panel. A card's <details>/<summary> is
+     styled by its author alone — no frame, no marker swap, no arrow. */
+  .glaze-message details.reasoning-block {
     margin: 8px 0;
     border: 1px solid rgba(255,255,255,0.08);
     border-radius: 8px;
@@ -411,30 +441,13 @@ export const SHADOW_STYLE = `
     font-size: 0.95em;
     opacity: 0.9;
   }
-  .glaze-message details summary {
+  .glaze-message details.reasoning-block > summary {
     padding: 8px 12px;
     cursor: pointer;
     background: rgba(0,0,0,0.18);
     font-weight: 500;
-    list-style: none !important;
-    list-style-type: none !important;
     line-height: 1.4;
   }
-  .glaze-message details summary::-webkit-details-marker { display: none !important; }
-  .glaze-message details summary::marker { display: none !important; content: '' !important; }
-  .glaze-message details summary::before { display: none !important; content: '' !important; }
-  .glaze-message .glaze-arrow {
-    display: inline;
-    flex-shrink: 0;
-    font-size: 1em;
-    transition: transform 0.2s;
-    opacity: 0.7;
-    font-style: normal;
-    font-weight: normal;
-    user-select: none;
-    -webkit-user-select: none;
-  }
-  .glaze-message .glaze-arrow.glaze-arrow-open { transform: rotate(90deg); }
   .search-highlight-text {
     background-color: rgba(255,215,0,0.4);
     border-radius: 4px;

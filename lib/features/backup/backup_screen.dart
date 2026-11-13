@@ -38,7 +38,16 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
   int _importStage = 0;
   String _importProgressText = '';
 
-  bool get _isBusy => _isExporting || (_isImporting && !_importComplete);
+  /// How far the current stage is, as `done/total`; empty when the importer
+  /// does not say.
+  String _importCountText = '';
+
+  /// Reading a Tavo backup for the restore confirmation, which can take a
+  /// while for a large one.
+  bool _isInspecting = false;
+
+  bool get _isBusy =>
+      _isExporting || _isInspecting || (_isImporting && !_importComplete);
 
   bool get _canCancel => _isImporting && !_hasCleared;
 
@@ -111,11 +120,23 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
   }
 
   Widget _buildContent(BuildContext context) {
+    if (_isInspecting) {
+      return _ProgressView(
+        key: const ValueKey('inspecting'),
+        title: 'importing_data'.tr(),
+        subtitle: 'backup_progress_reading'.tr(),
+        progress: 0,
+        canCancel: false,
+        onCancel: () {},
+      );
+    }
     if (_isImporting && !_importComplete) {
       return _ProgressView(
         key: const ValueKey('progress'),
         title: 'importing_data'.tr(),
-        subtitle: _importProgressText,
+        subtitle: _importCountText.isEmpty
+            ? _importProgressText
+            : '$_importProgressText $_importCountText',
         progress: _importStage / _totalStages,
         canCancel: _canCancel,
         onCancel: _cancelImport,
@@ -179,13 +200,15 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
     final path = result.files.single.path;
     if (path == null) return;
 
+    final service = await ref.read(backupServiceProvider.future);
     TavoBackupInspection? tavo;
+    if (mounted) setState(() => _isInspecting = true);
     try {
-      tavo = await (await ref.read(
-        backupServiceProvider.future,
-      )).inspectTavoBackup(path);
+      tavo = await service.inspectTavoBackup(path);
     } catch (_) {
       // An unreadable backup fails the import itself, with the real error.
+    } finally {
+      if (mounted) setState(() => _isInspecting = false);
     }
     if (!mounted) return;
     final confirmed = await GlazeBottomSheet.show<bool>(
@@ -211,7 +234,10 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
         ),
       ],
     );
-    if (confirmed != true) return;
+    if (confirmed != true) {
+      service.releaseInspectedTavo();
+      return;
+    }
 
     final ext = path.split('.').last.toLowerCase();
 
@@ -221,6 +247,7 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
       _hasCleared = false;
       _importStage = 0;
       _importProgressText = 'backup_progress_preparing'.tr();
+      _importCountText = '';
     });
 
     try {
@@ -229,7 +256,6 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
           _importStage = 1;
           _importProgressText = 'backup_progress_reading'.tr();
         });
-        final service = await ref.read(backupServiceProvider.future);
         await service.importBackupFromFile(
           path,
           onDetected: (format) {
@@ -242,7 +268,12 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
               _hasCleared = true;
               _importStage = (_importStage + 1).clamp(1, _totalStages - 1);
               _importProgressText = stage;
+              _importCountText = '';
             });
+          },
+          onCount: (done, total) {
+            if (!mounted) return;
+            setState(() => _importCountText = '$done/$total');
           },
         );
         if (!mounted) return;

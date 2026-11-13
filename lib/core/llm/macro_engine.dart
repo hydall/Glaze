@@ -1,5 +1,9 @@
 import 'dart:math';
 
+import 'variable_macros.dart';
+
+export 'variable_macros.dart' show extractSetvarPayloads;
+
 class MacroContext {
   final String charName;
   final String? charDescription;
@@ -386,34 +390,20 @@ MacroResult replaceMacros(String text, MacroContext ctx) {
     (_) => ctx.guidanceText ?? '',
   );
 
-  result = _replaceSetVar(
-    result,
-    'setvar',
-    sessionVars,
-    () => varsChanged = true,
-  );
-  result = _replaceSetVar(
-    result,
-    'setglobalvar',
-    globalVars,
-    () => varsChanged = true,
-  );
-
-  result = result.replaceAllMapped(
-    RegExp(r'\{\{getvar::([\s\S]*?)\}\}', caseSensitive: false),
-    (m) {
-      final name = m.group(1)!.trim();
-      return sessionVars[name] ?? '';
+  result = VariableMacroEvaluator(
+    sessionVars: sessionVars,
+    globalVars: globalVars,
+    conditionMacros: {
+      'char': resolvedCharName,
+      'user': ctx.userName,
+      'description': ctx.charDescription ?? '',
+      'personality': ctx.charPersonality ?? '',
+      'scenario': ctx.charScenario ?? '',
+      'persona': ctx.personaPrompt ?? '',
+      'mesExamples': ctx.charMesExample ?? '',
     },
-  );
-
-  result = result.replaceAllMapped(
-    RegExp(r'\{\{getglobalvar::([\s\S]*?)\}\}', caseSensitive: false),
-    (m) {
-      final name = m.group(1)!.trim();
-      return globalVars[name] ?? '';
-    },
-  );
+    onVarsChanged: () => varsChanged = true,
+  ).evaluate(result);
 
   result = result.replaceAllMapped(
     RegExp(
@@ -561,7 +551,8 @@ class VariableMacroResult {
 }
 
 /// Expands ONLY `{{setvar}}`, `{{setglobalvar}}`, `{{getvar}}`,
-/// `{{getglobalvar}}`, and `{{trim}}` macros, leaving all other `{{...}}`
+/// `{{getglobalvar}}`, `{{if}}` (when its condition is already known) and
+/// `{{trim}}` macros, leaving all other `{{...}}`
 /// tags untouched for later chat-time expansion.
 ///
 /// This is used at Studio build time to resolve the setvar→getvar variable
@@ -584,17 +575,12 @@ VariableMacroResult expandVariableMacros(
   final sVars = Map<String, String>.from(sessionVars);
   final gVars = Map<String, String>.from(globalVars);
 
-  result = _replaceSetVar(result, 'setvar', sVars, () {});
-  result = _replaceSetVar(result, 'setglobalvar', gVars, () {});
-
-  result = result.replaceAllMapped(
-    RegExp(r'\{\{getvar::([\s\S]*?)\}\}', caseSensitive: false),
-    (m) => sVars[m.group(1)!.trim()] ?? '',
-  );
-  result = result.replaceAllMapped(
-    RegExp(r'\{\{getglobalvar::([\s\S]*?)\}\}', caseSensitive: false),
-    (m) => gVars[m.group(1)!.trim()] ?? '',
-  );
+  result = VariableMacroEvaluator(
+    sessionVars: sVars,
+    globalVars: gVars,
+    onVarsChanged: () {},
+    deferUnresolvedConditions: true,
+  ).evaluate(result);
 
   if (result.contains('{{trim}}')) {
     result = result.replaceAllMapped(
@@ -728,95 +714,6 @@ int? _rollDice(String spec) {
     total += random.nextInt(sides) + 1;
   }
   return total;
-}
-
-/// Extracts payload values from `{{setvar::name::value}}` / `{{setglobalvar::…}}`
-/// without mutating [vars]. Used for preset token accounting.
-List<String> extractSetvarPayloads(String text, String keyword) {
-  final tag = '{{$keyword::';
-  final values = <String>[];
-  var i = 0;
-  while (i < text.length) {
-    final idx = text.indexOf(tag, i);
-    if (idx < 0) break;
-    final afterTag = idx + tag.length;
-    final secondDblColon = text.indexOf('::', afterTag);
-    if (secondDblColon < 0) break;
-    final valueStart = secondDblColon + 2;
-    var depth = 1;
-    var pos = valueStart;
-    while (pos < text.length && depth > 0) {
-      if (pos + 1 < text.length && text[pos] == '{' && text[pos + 1] == '{') {
-        depth++;
-        pos += 2;
-      } else if (pos + 1 < text.length &&
-          text[pos] == '}' &&
-          text[pos + 1] == '}') {
-        depth--;
-        if (depth == 0) break;
-        pos += 2;
-      } else {
-        pos++;
-      }
-    }
-    if (depth != 0) break;
-    final value = text.substring(valueStart, pos).trim();
-    if (value.isNotEmpty) values.add(value);
-    i = pos + 2;
-  }
-  return values;
-}
-
-String _replaceSetVar(
-  String text,
-  String keyword,
-  Map<String, String> vars,
-  void Function() markChanged,
-) {
-  final tag = '{{$keyword::';
-  final buf = StringBuffer();
-  int i = 0;
-  while (i < text.length) {
-    final idx = text.indexOf(tag, i);
-    if (idx < 0) {
-      buf.write(text.substring(i));
-      break;
-    }
-    buf.write(text.substring(i, idx));
-    final afterTag = idx + tag.length;
-    final secondDblColon = text.indexOf('::', afterTag);
-    if (secondDblColon < 0) {
-      buf.write(text.substring(idx));
-      break;
-    }
-    final name = text.substring(afterTag, secondDblColon).trim();
-    final valueStart = secondDblColon + 2;
-    var depth = 1;
-    var pos = valueStart;
-    while (pos < text.length && depth > 0) {
-      if (pos + 1 < text.length && text[pos] == '{' && text[pos + 1] == '{') {
-        depth++;
-        pos += 2;
-      } else if (pos + 1 < text.length &&
-          text[pos] == '}' &&
-          text[pos + 1] == '}') {
-        depth--;
-        if (depth == 0) break;
-        pos += 2;
-      } else {
-        pos++;
-      }
-    }
-    if (depth != 0) {
-      buf.write(text.substring(idx));
-      break;
-    }
-    final value = text.substring(valueStart, pos).trim();
-    vars[name] = value;
-    markChanged();
-    i = pos + 2;
-  }
-  return buf.toString();
 }
 
 /// `{{ExtBlocks::name}}` and its alias `{{ExtBlocks-GetBlockByName::name}}`:

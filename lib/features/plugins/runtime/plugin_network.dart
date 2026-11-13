@@ -7,8 +7,29 @@ bool isLocalHostName(String host) {
       RegExp(r'\.(localhost|local|lan|home\.arpa|internal)$').hasMatch(h);
 }
 
+/// Loopback addresses: `127.0.0.0/8` and `::1`. The same device, not a
+/// network, so the "local network" switch does not apply to them.
+bool isLoopbackAddress(InternetAddress address) {
+  final b = address.rawAddress;
+  if (address.type == InternetAddressType.IPv4) return b[0] == 127;
+  if (b.length != 16) return false;
+  final mapped =
+      b.sublist(0, 10).every((x) => x == 0) && b[10] == 0xff && b[11] == 0xff;
+  if (mapped) return b[12] == 127;
+  return b.sublist(0, 15).every((x) => x == 0) && b[15] == 1; // ::1
+}
+
+/// `localhost`, any `*.localhost` (RFC 6761), and a loopback IP literal.
+bool isLoopbackHostName(String host) {
+  final h = host.toLowerCase().replaceAll(RegExp(r'^\[|\]$'), '');
+  if (h == 'localhost' || h.endsWith('.localhost')) return true;
+  final literal = InternetAddress.tryParse(h);
+  return literal != null && isLoopbackAddress(literal);
+}
+
 /// Loopback, private, shared (CGNAT), link-local, unspecified and multicast
-/// addresses: everything that is not a public internet host.
+/// addresses: everything that is not a public internet host. Mirrors the
+/// plugin frame policy, where loopback is handled apart from the rest.
 bool isLocalNetworkAddress(InternetAddress address) {
   final b = address.rawAddress;
   if (address.type == InternetAddressType.IPv4) {
@@ -41,6 +62,9 @@ bool _isLocalIPv4(List<int> b) {
 /// name that does not resolve counts as not local: the request fails anyway.
 Future<bool> isLocalNetworkHost(String host) async {
   final bare = host.replaceAll(RegExp(r'^\[|\]$'), '');
+  // This device is not the user's network; only general internet access and
+  // the host list apply to it.
+  if (isLoopbackHostName(bare)) return false;
   if (isLocalHostName(bare)) return true;
   final literal = InternetAddress.tryParse(bare);
   if (literal != null) return isLocalNetworkAddress(literal);

@@ -49,8 +49,10 @@ target_json() {
      + (if $tid == "" then {} else {message_thread_id: ($tid | tonumber)} end)'
 }
 
+# To stderr: send_message runs inside $(...), which would swallow the reason
+# along with the message id it prints.
 api_failed() { # $1 = method, $2 = response body
-  echo "::warning::$1 to chat $CHAT_ID failed: $(jq -r '.description // "unknown error"' <<<"$2")"
+  echo "::warning::$1 to chat $CHAT_ID failed: $(jq -r '.description // "unknown error"' <<<"$2" 2>/dev/null || printf '%s' "$2")" >&2
 }
 
 # $1 = HTML text, $2 = optional message id to reply to. Prints the new message id.

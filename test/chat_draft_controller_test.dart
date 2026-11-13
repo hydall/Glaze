@@ -14,12 +14,12 @@ import 'package:glaze_flutter/features/chat/state/chat_session_write_queue.dart'
 
 class _DelayedDraftRepo extends ChatRepo {
   final Completer<void> started = Completer<void>();
-  final Completer<ChatSession?> completion = Completer<ChatSession?>();
+  final Completer<String?> completion = Completer<String?>();
 
   _DelayedDraftRepo(super.db);
 
   @override
-  Future<ChatSession?> updateDraftIfMessageCount({
+  Future<String?> updateDraftIfMessageCount({
     required String sessionId,
     required String draft,
     required int expectedMessageCount,
@@ -82,7 +82,7 @@ void main() {
       final pending = controller.saveDraft('draft A');
       await repo.started.future;
       state = const AsyncData(ChatState(session: sessionB));
-      repo.completion.complete(sessionA.copyWith(draft: 'draft A'));
+      repo.completion.complete('draft A');
       await pending;
 
       expect(state.value!.session!.id, 'b');
@@ -115,7 +115,7 @@ void main() {
         ),
       ),
     );
-    repo.completion.complete(sessionA.copyWith(draft: 'draft A'));
+    repo.completion.complete('draft A');
     await pending;
 
     expect(state.value!.messages.map((item) => item.id), ['m1', 'u1']);

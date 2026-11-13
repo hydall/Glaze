@@ -98,6 +98,22 @@ class MemoryDraftStage {
             .where((message) => draft.messageIds.contains(message.id))
             .toList();
         if (draftMessages.isEmpty) continue;
+        // A source the manifest would refuse: the draft waits for the reader
+        // with the message named, instead of a request that cannot succeed.
+        final problem = memoryDraftSourceProblems(draft, session.messages);
+        if (problem != null) {
+          await repo.mutateDraft(
+            sessionId: session.id,
+            draftId: draft.id,
+            mutate: (current) => current.copyWith(
+              status: 'needs_regeneration',
+              error: problem,
+              updatedAt: DateTime.now().millisecondsSinceEpoch,
+            ),
+          );
+          _publishBookChange();
+          continue;
+        }
         try {
           final generated = await _generate(
             draft: draft,

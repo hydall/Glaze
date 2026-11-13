@@ -125,9 +125,55 @@ void main() {
       final hist = applyRegexes(input, 2, 2, [script], ctx());
       expect(hist, equals('aXb'));
 
-      final prompt = applyRegexes(input, 4, 2, [script], ctx(), isPrompt: true);
+      final prompt = applyRegexes(input, 2, 2, [script], ctx(), isPrompt: true);
       expect(prompt, equals('aYb'));
     });
+
+    test(
+      'promptOnly keeps its placement: AI-output saver skips preset blocks',
+      () {
+        // Sola's "Saver" scripts: prompt-only, AI output, from depth 5. They
+        // drop old trackers from past replies, never the format template in
+        // the preset block that asks for the tracker.
+        final saver = PresetRegex.fromJson({
+          'id': 'saver',
+          'name': 'Saver: Bond Radar',
+          'regex': r'/<bond[\s\S]*?<\/bond>/gi',
+          'replacement': '',
+          'promptOnly': true,
+          'placement': [2],
+          'minDepth': 5,
+        });
+        const template = 'Append:\n<bond>\nPair: [NPC]\n</bond>';
+
+        expect(
+          applyRegexes(template, 4, 2, [saver], ctx(), isPrompt: true),
+          equals(template),
+        );
+        expect(
+          applyRegexes(
+            '<bond>x</bond>',
+            1,
+            2,
+            [saver],
+            const RegexApplyContext(depth: 6),
+            isPrompt: true,
+          ),
+          equals('<bond>x</bond>'),
+        );
+        expect(
+          applyRegexes(
+            'hi<bond>x</bond>',
+            2,
+            2,
+            [saver],
+            const RegexApplyContext(depth: 6),
+            isPrompt: true,
+          ),
+          equals('hi'),
+        );
+      },
+    );
 
     test(
       'markdownOnly + promptOnly runs in both passes, never on stored text',
@@ -163,26 +209,29 @@ void main() {
       },
     );
 
-    test('promptOnly script rewrites spaces to figure spaces in the prompt', () {
-      final script = PresetRegex.fromJson({
-        'id': 'figure-spaces',
-        'name': 'Use Figure Spaces',
-        'regex': '/ /g',
-        'replacement': '\u2007',
-        'promptOnly': true,
-        'placement': [1, 2],
-        'ephemerality': [1, 2],
-      });
+    test(
+      'promptOnly script rewrites spaces to figure spaces in the prompt',
+      () {
+        final script = PresetRegex.fromJson({
+          'id': 'figure-spaces',
+          'name': 'Use Figure Spaces',
+          'regex': '/ /g',
+          'replacement': '\u2007',
+          'promptOnly': true,
+          'placement': [1, 2],
+          'ephemerality': [1, 2],
+        });
 
-      expect(
-        applyRegexes('a b', 2, 2, [script], ctx(), isPrompt: true),
-        equals('a\u2007b'),
-      );
-      expect(
-        applyRegexes('a b', 2, 1, [script], ctx(), isMarkdown: true),
-        equals('a b'),
-      );
-    });
+        expect(
+          applyRegexes('a b', 2, 2, [script], ctx(), isPrompt: true),
+          equals('a\u2007b'),
+        );
+        expect(
+          applyRegexes('a b', 2, 1, [script], ctx(), isMarkdown: true),
+          equals('a b'),
+        );
+      },
+    );
 
     test('World Info placement 5 applies to lorebook blocks', () {
       final script = PresetRegex.fromJson({

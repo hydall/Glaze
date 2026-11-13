@@ -64,7 +64,20 @@ String requestStepLabel({String? stage, String? agentId}) {
   return dot < 0 || dot == stage.length - 1 ? stage : stage.substring(dot + 1);
 }
 
-String formatRequestTime(DateTime time) =>
-    '${time.hour.toString().padLeft(2, '0')}:'
-    '${time.minute.toString().padLeft(2, '0')}:'
-    '${time.second.toString().padLeft(2, '0')}';
+/// Time of a request, with the date in front when it was not today — the
+/// timeline keeps requests across app runs, so a bare clock time would put
+/// yesterday's turn next to this morning's.
+String formatRequestTime(DateTime time, {DateTime? now}) {
+  String two(int value) => value.toString().padLeft(2, '0');
+  final clock = '${two(time.hour)}:${two(time.minute)}:${two(time.second)}';
+  final today = now ?? DateTime.now();
+  final sameDay =
+      time.year == today.year &&
+      time.month == today.month &&
+      time.day == today.day;
+  if (sameDay) return clock;
+  final date = time.year == today.year
+      ? '${two(time.day)}.${two(time.month)}'
+      : '${two(time.day)}.${two(time.month)}.${time.year}';
+  return '$date $clock';
+}
