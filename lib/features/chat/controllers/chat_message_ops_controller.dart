@@ -16,6 +16,7 @@ import '../state/cached_token_breakdown.dart';
 import '../state/context_window_marker.dart';
 import '../../../core/llm/regex_service.dart';
 import '../../../core/state/active_selection_provider.dart';
+import '../../../core/state/summary_providers.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../extensions/state/message_variables_notifier.dart';
 import '../../personas/persona_list_provider.dart';
@@ -343,6 +344,20 @@ class ChatMessageOpsController {
     final message = session.messages[index];
     // A hidden message is not in the prompt, so the trim could not find it.
     if (message.isHidden) return;
+    // Nor is one the summary stands in for: after a run the oldest raw
+    // message is the first the history can start at, and the one before it
+    // is in a block. Said so, not as "too far back", which no window fixes.
+    final view = await _ref
+        .read(summaryServiceProvider)
+        .getPromptView(session.id, session.messages);
+    if (!_ref.mounted) return;
+    // The chat may have moved to another session over the await: the pin
+    // belongs to the session it was asked on, and so does the check below.
+    if (_getState().value?.session?.id != session.id) return;
+    if (view?.coveredMessageIds.contains(message.id) ?? false) {
+      GlazeToast.warningWithoutContext('history_anchor_pin_summarized'.tr());
+      return;
+    }
     final previousAnchor = session.historyAnchorId;
     final previousPinned = session.historyAnchorPinned;
     await _writeHistoryAnchor(session.id, message.id, pinned: true);
