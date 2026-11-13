@@ -282,6 +282,7 @@ jobs:
             "--dart-define=BUILD_BRANCH=${{ needs.metadata.outputs.build_branch }}"
             "--dart-define=BUILD_COMMIT=${{ needs.metadata.outputs.git_sha }}"
             "--dart-define=BUILD_CHANNEL=${{ needs.metadata.outputs.build_channel }}"
+            "--dart-define=DATACAT_CLIENT_ID=${{ vars.DATACAT_CLIENT_ID }}"
           )
           # Universal: one file that runs on every ARM phone, 32- and 64-bit.
           flutter build apk --release --no-pub \
@@ -385,6 +386,7 @@ jobs:
           "--dart-define=BUILD_BRANCH=${{ needs.metadata.outputs.build_branch }}"
           "--dart-define=BUILD_COMMIT=${{ needs.metadata.outputs.git_sha }}"
           "--dart-define=BUILD_CHANNEL=${{ needs.metadata.outputs.build_channel }}"
+          "--dart-define=DATACAT_CLIENT_ID=${{ vars.DATACAT_CLIENT_ID }}"
 
       - name: Zip Windows build
         # Written outside the directory being archived so the zip cannot end up
@@ -517,7 +519,8 @@ jobs:
             "--dart-define=BUILD_DATE=${{ needs.metadata.outputs.build_date }}" \
             "--dart-define=BUILD_BRANCH=${{ needs.metadata.outputs.build_branch }}" \
             "--dart-define=BUILD_COMMIT=${{ needs.metadata.outputs.git_sha }}" \
-            "--dart-define=BUILD_CHANNEL=${{ needs.metadata.outputs.build_channel }}"
+            "--dart-define=BUILD_CHANNEL=${{ needs.metadata.outputs.build_channel }}" \
+            "--dart-define=DATACAT_CLIENT_ID=${{ vars.DATACAT_CLIENT_ID }}"
 
       - name: Create IPA (manual Payload method)
         run: |
@@ -621,6 +624,7 @@ jobs:
           "--dart-define=BUILD_BRANCH=${{ needs.metadata.outputs.build_branch }}"
           "--dart-define=BUILD_COMMIT=${{ needs.metadata.outputs.git_sha }}"
           "--dart-define=BUILD_CHANNEL=${{ needs.metadata.outputs.build_channel }}"
+          "--dart-define=DATACAT_CLIENT_ID=${{ vars.DATACAT_CLIENT_ID }}"
 
       - name: Rename Linux packages
         # The script skips a format whose tooling is missing instead of failing,
