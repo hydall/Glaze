@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:glaze_flutter/core/db/app_db.dart';
@@ -233,6 +234,25 @@ void main() {
 
     expect(find.byType(GlassNavBar), findsOneWidget);
     expect(find.byType(GlassNavRail), findsNothing);
+  });
+
+  testWidgets('an open keyboard is not handed down to the shell screens', (
+    tester,
+  ) async {
+    // The Scaffold body already shrinks above the keyboard. A screen that
+    // still saw the keyboard's inset would pad for it a second time and lift
+    // its fields off the top of the screen.
+    final container = await _pump(
+      tester,
+      size: _portrait,
+      padding: _portraitPadding,
+    );
+    await _go(tester, container, '/characters');
+    tester.view.viewInsets = const FakeViewPadding(bottom: 300 * _dpr);
+    await tester.pump();
+
+    final shell = tester.element(find.byType(StatefulNavigationShell));
+    expect(MediaQuery.viewInsetsOf(shell).bottom, 0);
   });
 
   group('screenshots', () {

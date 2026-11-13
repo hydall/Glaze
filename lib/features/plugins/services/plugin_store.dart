@@ -22,6 +22,12 @@ import 'plugin_package_reader.dart';
 class PluginStore {
   PluginStore({required this.root, required this.dataRoot});
 
+  /// The store under the app data folder [base].
+  factory PluginStore.inAppData(String base) => PluginStore(
+    root: p.join(base, 'plugins'),
+    dataRoot: p.join(base, 'plugin_data'),
+  );
+
   final String root;
   final String dataRoot;
 
@@ -29,6 +35,16 @@ class PluginStore {
 
   String packageDir(String id) => p.join(root, id);
   String dataDir(String id) => p.join(dataRoot, id);
+
+  /// The registry as stored: one record per plugin, in install order.
+  Future<List<Map<String, dynamic>>> readRecords() => _readRecords();
+
+  /// Replaces the registry with [records].
+  Future<void> writeRecords(List<Map<String, Object?>> records) =>
+      _writeRecords(records);
+
+  /// The manifest of the package unpacked in [dir].
+  Future<PluginManifest> readManifest(String dir) => _readManifest(dir);
 
   Future<List<Map<String, dynamic>>> _readRecords() async {
     final file = _registryFile;

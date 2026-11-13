@@ -30,6 +30,8 @@ import '../../chat/services/collector_view_service.dart';
 import '../../chat/services/reconciler_view_service.dart';
 import '../../chat/state/magic_drawer_stats_cache.dart';
 import '../../chat_history/chat_history_provider.dart';
+import '../../plugins/providers/plugin_library_provider.dart'
+    show pluginLibraryProvider;
 import '../sync_provider.dart';
 import '../sync_models.dart';
 import 'sync_engine.dart';
@@ -405,6 +407,9 @@ class SyncController {
     _ref.invalidate(composerEmptyActionProvider);
     _ref.invalidate(quickRepliesProvider);
     _ref.invalidate(magicDrawerLayoutCacheProvider);
+    // Plugins are files on disk the pull replaced; the library reads them
+    // once.
+    _ref.invalidate(pluginLibraryProvider);
     unawaited(_ref.read(sessionLorebookEmbeddingWorkerProvider).drain());
     await _ref.read(themeProvider.notifier).reload();
 

@@ -67,6 +67,8 @@ class SyncConflictDetector {
         return 'Theme State';
       case 'local_storage':
         return 'Local Settings';
+      case 'plugins':
+        return 'Plugins';
       case 'studio_config':
         return 'Studio session $id';
       case 'studio_preset':

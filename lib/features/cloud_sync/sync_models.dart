@@ -110,7 +110,8 @@ class SyncManifest {
   ///  12 — added merge-only `reconciliation_state` provenance.
   ///  13 — added immutable reconciliation effects to reconciliation state.
   ///  14 — added current session-local lorebook overlay projections.
-  static const int currentVersion = 14;
+  ///  15 — added the `plugins` singleton (installed plugins and their data).
+  static const int currentVersion = 15;
 
   final int version;
   final String deviceId;
@@ -260,6 +261,8 @@ String cloudPath(String type, String id) {
       return '$cloudBase/theme_state.json';
     case 'local_storage':
       return '$cloudBase/local_storage.json';
+    case 'plugins':
+      return '$cloudBase/plugins.json';
     case 'manifest':
       return '$cloudBase/manifest.json';
     default:
@@ -292,6 +295,11 @@ String galleryCloudPath(String charId, String imgId, String ext) =>
 
 String personaAvatarCloudPath(String personaId, String ext) =>
     '$cloudBase/persona_avatars/$personaId/avatar.$ext';
+
+/// Package and data of one installed plugin. The plugins themselves travel
+/// as the single `plugins` entry, so their files are keyed by plugin id here.
+String pluginFilesCloudPath(String pluginId) =>
+    '$cloudBase/plugins/$pluginId.zip';
 
 /// Cover image of an LLM preset. Presets themselves travel as the single
 /// `theme_presets` entry, so their binaries are keyed by preset id here.

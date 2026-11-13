@@ -1063,7 +1063,7 @@ void main() {
         ..addFile(
           ArchiveFile.bytes(
             'manifest.json',
-            utf8.encode(jsonEncode({'schemaVersion': 15})),
+            utf8.encode(jsonEncode({'schemaVersion': 16})),
           ),
         );
 
