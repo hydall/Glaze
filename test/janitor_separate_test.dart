@@ -4,33 +4,32 @@ import 'package:glaze_flutter/features/catalog/services/janitor_separate.dart';
 /// A synthetic JanitorAI `generateAlpha` payload: jailbreak prefix + character
 /// persona + user persona + scenario + two concatenated lorebook entry blocks.
 Map<String, dynamic> _payload() => {
-  'model': 'test',
-  'messages': [
-    {
-      'role': 'system',
-      'content':
-          '[Start a new chat][System: roleplay mode]\n'
-          "<Aria's Persona>\n"
-          'Aria is a knight of the northern keep. She is stoic and loyal.\n'
-          "</Aria's Persona>\n"
-          '<UserPersona>\n'
-          'You are a traveling merchant named Cole.\n'
-          '</UserPersona>\n'
-          '<Scenario>\n'
-          'A storm traps both travelers in a mountain inn.\n'
-          '</Scenario>\n'
-          'The Northern Keep is an ancient fortress carved into the cliffs. '
-          'It has stood for a thousand winters.\n'
-          '\n'
-          'The Frostfang Blade is a legendary sword said to never dull. '
-          'Only the worthy may wield it.',
-    },
-    {
-      'role': 'assistant',
-      'content': 'Aria nods at you from across the fire. "Cold night."',
-    },
-  ],
-};
+      'model': 'test',
+      'messages': [
+        {
+          'role': 'system',
+          'content': '[Start a new chat][System: roleplay mode]\n'
+              "<Aria's Persona>\n"
+              'Aria is a knight of the northern keep. She is stoic and loyal.\n'
+              "</Aria's Persona>\n"
+              '<UserPersona>\n'
+              'You are a traveling merchant named Cole.\n'
+              '</UserPersona>\n'
+              '<Scenario>\n'
+              'A storm traps both travelers in a mountain inn.\n'
+              '</Scenario>\n'
+              'The Northern Keep is an ancient fortress carved into the cliffs. '
+              'It has stood for a thousand winters.\n'
+              '\n'
+              'The Frostfang Blade is a legendary sword said to never dull. '
+              'Only the worthy may wield it.',
+        },
+        {
+          'role': 'assistant',
+          'content': 'Aria nods at you from across the fire. "Cold night."',
+        },
+      ],
+    };
 
 void main() {
   group('janitor_separate', () {
@@ -71,22 +70,13 @@ void main() {
 
       // Wrapper blocks were recorded as removed.
       final labels = sep.removed.map((r) => r.label).toSet();
-      expect(
-        labels,
-        containsAll(<String>['jailbreak', 'card', 'userPersona', 'scenario']),
-      );
+      expect(labels, containsAll(<String>['jailbreak', 'card', 'userPersona', 'scenario']));
     });
 
-    test(
-      'getSystemContent returns empty for a payload without a system msg',
-      () {
-        expect(
-          getSystemContent(<String, dynamic>{'messages': <dynamic>[]}),
-          '',
-        );
-        expect(getSystemContent(const <String, dynamic>{}), '');
-      },
-    );
+    test('getSystemContent returns empty for a payload without a system msg', () {
+      expect(getSystemContent(<String, dynamic>{'messages': <dynamic>[]}), '');
+      expect(getSystemContent(const <String, dynamic>{}), '');
+    });
 
     test('separate subtracts public-lorebook entry contents', () {
       // The Northern Keep entry is a PUBLIC lorebook entry — passed verbatim, it
@@ -129,10 +119,7 @@ void main() {
 
     test('withoutPublicEntries leaves the text alone with nothing to cut', () {
       final sep = separate(payload, extractCard(payload));
-      expect(
-        withoutPublicEntries(sep.lorebookText, const []),
-        sep.lorebookText,
-      );
+      expect(withoutPublicEntries(sep.lorebookText, const []), sep.lorebookText);
     });
   });
 

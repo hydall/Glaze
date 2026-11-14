@@ -33,10 +33,10 @@ void main() {
   group('mergePresetItems', () {
     test('agentic presets interleave by age instead of trailing every plain '
         'one', () {
-      final merged = mergePresetItems(
-        [_plain('old', 10), _plain('new', 30)],
-        [_agentic('studio_20')],
-      );
+      final merged = mergePresetItems([
+        _plain('old', 10),
+        _plain('new', 30),
+      ], [_agentic('studio_20')]);
 
       expect(_ids(merged), ['old', 'studio_20', 'new']);
     });
@@ -44,10 +44,11 @@ void main() {
     test('each store keeps its own order when its stamps do not ascend', () {
       // The plain list carries a legacy manual order of its own, so its
       // timestamps can run backwards. A merge must interleave, never re-sort.
-      final merged = mergePresetItems(
-        [_plain('a', 100), _plain('b', 1), _plain('c', 50)],
-        [_agentic('studio_200')],
-      );
+      final merged = mergePresetItems([
+        _plain('a', 100),
+        _plain('b', 1),
+        _plain('c', 50),
+      ], [_agentic('studio_200')]);
 
       expect(_ids(merged).where((id) => id != 'studio_200').toList(), [
         'a',
@@ -57,10 +58,9 @@ void main() {
     });
 
     test('an equal stamp leaves the plain preset in front', () {
-      final merged = mergePresetItems(
-        [_plain('p', 40)],
-        [_agentic('studio_40')],
-      );
+      final merged = mergePresetItems([
+        _plain('p', 40),
+      ], [_agentic('studio_40')]);
 
       expect(_ids(merged), ['p', 'studio_40']);
     });
@@ -77,10 +77,9 @@ void main() {
       // `default` is seeded at install and re-stamped on every save, so reading
       // its updatedAt as a creation time pinned it below every plain preset —
       // and floated it to the top of "newest first" whenever it was edited.
-      final merged = mergePresetItems(
-        [_plain('featured', 1)],
-        [_agentic('default', updatedAt: 9999)],
-      );
+      final merged = mergePresetItems([
+        _plain('featured', 1),
+      ], [_agentic('default', updatedAt: 9999)]);
 
       expect(_ids(merged), ['default', 'featured']);
     });
@@ -88,10 +87,10 @@ void main() {
     test('the merged order survives a manual sort nobody has dragged yet', () {
       // The regression this whole helper exists for: the manual mode ranks only
       // the rows the user dragged and leaves the rest in the incoming order.
-      final merged = mergePresetItems(
-        [_plain('old', 10), _plain('new', 30)],
-        [_agentic('studio_20')],
-      );
+      final merged = mergePresetItems([
+        _plain('old', 10),
+        _plain('new', 30),
+      ], [_agentic('studio_20')]);
 
       expect(_ids(sortPresetItems(merged, const PresetSortState())), [
         'old',

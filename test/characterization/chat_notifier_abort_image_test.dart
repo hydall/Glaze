@@ -20,8 +20,7 @@ void main() {
     });
 
     test('_replaceFirstImgErrorOrGen: HTML img tag replaced with RESULT', () {
-      const text =
-          """<img data-iig-instruction='{"prompt":"test"}' src="[IMG:GEN]">""";
+      const text = """<img data-iig-instruction='{"prompt":"test"}' src="[IMG:GEN]">""";
       final result = _replaceFirstImgErrorOrGen(text, '/path/to/img.png');
       expect(result, '[IMG:RESULT:/path/to/img.png]');
     });
@@ -96,8 +95,7 @@ void main() {
 
     test('StreamingState hasPartial check: both empty', () {
       const state = StreamingState(text: '', reasoning: null);
-      final hasPartial =
-          state.text.isNotEmpty ||
+      final hasPartial = state.text.isNotEmpty ||
           (state.reasoning != null && state.reasoning!.isNotEmpty);
       expect(hasPartial, isFalse);
     });
@@ -116,10 +114,7 @@ void main() {
         id: 's1',
         characterId: 'c1',
         sessionIndex: 0,
-        messages: List.generate(
-          10,
-          (i) => ChatMessage(id: 'm$i', role: 'user', content: 'msg$i'),
-        ),
+        messages: List.generate(10, (i) => ChatMessage(id: 'm$i', role: 'user', content: 'msg$i')),
       );
       final state = ChatState(session: session, visibleStartIndex: 5);
       expect(state.visibleMessages.length, 5);
@@ -184,40 +179,27 @@ void main() {
       expect(result, 'Start [IMG:GEN:] middle [IMG:RESULT:/img.png] end');
     });
 
-    test(
-      '_resetImgTagsToGen handles ERROR with JSON instruction correctly',
-      () {
-        final text =
-            'Text [IMG:ERROR:{"instruction":"sunset","error":"timeout"}] more';
-        final result = _resetImgTagsToGen(text);
-        expect(result.contains('[IMG:GEN:'), isTrue);
-        expect(result.contains('ERROR'), isFalse);
-      },
-    );
+    test('_resetImgTagsToGen handles ERROR with JSON instruction correctly', () {
+      final text = 'Text [IMG:ERROR:{"instruction":"sunset","error":"timeout"}] more';
+      final result = _resetImgTagsToGen(text);
+      expect(result.contains('[IMG:GEN:'), isTrue);
+      expect(result.contains('ERROR'), isFalse);
+    });
   });
 }
 
 String _replaceFirstImgErrorOrGen(String text, String resultPath) {
   if (ImgGenPatterns.imgErrorRegex.hasMatch(text)) {
-    return text.replaceFirst(
-      ImgGenPatterns.imgErrorRegex,
-      '[IMG:RESULT:$resultPath]',
-    );
+    return text.replaceFirst(ImgGenPatterns.imgErrorRegex, '[IMG:RESULT:$resultPath]');
   }
   if (ImgGenPatterns.imgGenHtmlRegex.hasMatch(text)) {
-    return text.replaceFirst(
-      ImgGenPatterns.imgGenHtmlRegex,
-      '[IMG:RESULT:$resultPath]',
-    );
+    return text.replaceFirst(ImgGenPatterns.imgGenHtmlRegex, '[IMG:RESULT:$resultPath]');
   }
   if (text.contains('[IMG:GEN]')) {
     return text.replaceFirst('[IMG:GEN]', '[IMG:RESULT:$resultPath]');
   }
   if (ImgGenPatterns.imgGenRegex.hasMatch(text)) {
-    return text.replaceFirst(
-      ImgGenPatterns.imgGenRegex,
-      '[IMG:RESULT:$resultPath]',
-    );
+    return text.replaceFirst(ImgGenPatterns.imgGenRegex, '[IMG:RESULT:$resultPath]');
   }
   return text;
 }
@@ -230,8 +212,7 @@ String _resetImgTagsToGen(String text) {
     try {
       final parsed = jsonDecode(data);
       if (parsed is Map<String, dynamic>) {
-        instruction =
-            (parsed['instruction'] ?? parsed['prompt'] ?? '') as String;
+        instruction = (parsed['instruction'] ?? parsed['prompt'] ?? '') as String;
       }
     } catch (_) {}
     if (instruction.isNotEmpty) {

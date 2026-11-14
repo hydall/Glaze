@@ -95,13 +95,13 @@ void main() {
     final result = await repo.deleteCharacters({'first', 'second'});
 
     expect(result.detachedLorebookIds, {'first-lorebook', 'second-lorebook'});
-    final remaining = await (db.select(
-      db.lorebooks,
-    )..where((row) => row.activationScope.equals('global'))).get();
-    expect(remaining.map((row) => row.lorebookId).toSet(), {
-      'first-lorebook',
-      'second-lorebook',
-    });
+    final remaining = await (db.select(db.lorebooks)
+          ..where((row) => row.activationScope.equals('global')))
+        .get();
+    expect(
+      remaining.map((row) => row.lorebookId).toSet(),
+      {'first-lorebook', 'second-lorebook'},
+    );
   });
 
   test(
@@ -138,29 +138,26 @@ void main() {
     expect(remaining.variantOrder, 0);
   });
 
-  test(
-    'deleting the group representative keeps a shared lorebook attached',
-    () async {
-      await db.customStatement(
-        "INSERT INTO characters (char_id, name, variant_group_id, variant_order) VALUES ('cover', 'cover', 'cover', 0)",
-      );
-      await db.customStatement(
-        "INSERT INTO characters (char_id, name, variant_group_id, variant_order) VALUES ('variant', 'variant', 'cover', 1)",
-      );
-      await db.customStatement(
-        "INSERT INTO lorebooks (lorebook_id, name, activation_scope, activation_target_id, entries_json) VALUES ('shared', 'Shared', 'character', 'cover', '[]')",
-      );
+  test('deleting the group representative keeps a shared lorebook attached', () async {
+    await db.customStatement(
+      "INSERT INTO characters (char_id, name, variant_group_id, variant_order) VALUES ('cover', 'cover', 'cover', 0)",
+    );
+    await db.customStatement(
+      "INSERT INTO characters (char_id, name, variant_group_id, variant_order) VALUES ('variant', 'variant', 'cover', 1)",
+    );
+    await db.customStatement(
+      "INSERT INTO lorebooks (lorebook_id, name, activation_scope, activation_target_id, entries_json) VALUES ('shared', 'Shared', 'character', 'cover', '[]')",
+    );
 
-      final result = await repo.deleteCharacters({'cover'});
+    final result = await repo.deleteCharacters({'cover'});
 
-      expect(result.detachedLorebookIds, isEmpty);
-      final shared = await (db.select(
-        db.lorebooks,
-      )..where((row) => row.lorebookId.equals('shared'))).getSingle();
-      expect(shared.activationScope, 'character');
-      expect(shared.activationTargetId, 'cover');
-    },
-  );
+    expect(result.detachedLorebookIds, isEmpty);
+    final shared = await (db.select(
+      db.lorebooks,
+    )..where((row) => row.lorebookId.equals('shared'))).getSingle();
+    expect(shared.activationScope, 'character');
+    expect(shared.activationTargetId, 'cover');
+  });
 
   test(
     'session deletion retains global transitions until character deletion',

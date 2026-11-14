@@ -53,7 +53,11 @@ void main() {
     testWidgets('a batch already running needs no explanation', (tester) async {
       // Mid-batch the reader is watching it work; the reason it did not start
       // by itself is not the thing to say at that moment.
-      await _pumpPanel(tester, autoGenerateEnabled: false, isGenerating: true);
+      await _pumpPanel(
+        tester,
+        autoGenerateEnabled: false,
+        isGenerating: true,
+      );
       expect(find.text(_hint), findsNothing);
     });
 

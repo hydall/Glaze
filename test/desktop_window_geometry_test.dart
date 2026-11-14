@@ -88,7 +88,9 @@ void main() {
     expect(host.rect.height, closeTo(480, 20));
   });
 
-  testWidgets('double-clicking the title bar toggles maximize', (tester) async {
+  testWidgets('double-clicking the title bar toggles maximize', (
+    tester,
+  ) async {
     final host = await pumpHost(tester);
 
     await tester.tap(find.byKey(const Key('title')));

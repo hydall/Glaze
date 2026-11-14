@@ -64,36 +64,31 @@ void main() {
     });
 
     test('getByScopeAndTarget filters correctly', () async {
-      await repo.put(
-        Lorebook(id: 'global1', name: 'Global LB', activationScope: 'global'),
-      );
-      await repo.put(
-        Lorebook(
-          id: 'char_lb',
-          name: 'Char LB',
-          activationScope: 'character',
-          activationTargetId: 'char1',
-        ),
-      );
-      await repo.put(
-        Lorebook(
-          id: 'char_lb2',
-          name: 'Char LB 2',
-          activationScope: 'character',
-          activationTargetId: 'char2',
-        ),
-      );
+      await repo.put(Lorebook(
+        id: 'global1',
+        name: 'Global LB',
+        activationScope: 'global',
+      ));
+      await repo.put(Lorebook(
+        id: 'char_lb',
+        name: 'Char LB',
+        activationScope: 'character',
+        activationTargetId: 'char1',
+      ));
+      await repo.put(Lorebook(
+        id: 'char_lb2',
+        name: 'Char LB 2',
+        activationScope: 'character',
+        activationTargetId: 'char2',
+      ));
 
       final forChar1 = await repo.getByScopeAndTarget('character', 'char1');
       expect(forChar1.length, 1);
       expect(forChar1.first.id, equals('char_lb'));
 
       final globals = await repo.getByScopeAndTarget('global', '');
-      expect(
-        globals.length,
-        0,
-        reason: 'Global lorebooks have null targetId, not empty string',
-      );
+      expect(globals.length, 0,
+          reason: 'Global lorebooks have null targetId, not empty string');
 
       final globalsDirect = (await repo.getAll())
           .where((lb) => lb.activationScope == 'global')
@@ -228,11 +223,7 @@ void main() {
     });
 
     test('put and getAll round-trip', () async {
-      final char = Character(
-        id: 'c1',
-        name: 'Alice',
-        tags: ['fantasy', 'mage'],
-      );
+      final char = Character(id: 'c1', name: 'Alice', tags: ['fantasy', 'mage']);
       await repo.put(char);
 
       final all = await repo.getAll();
@@ -267,72 +258,52 @@ void main() {
       expect(result, isEmpty);
     });
 
-    test(
-      'delete cascades to chat sessions, summaries, and memory book rows',
-      () async {
-        await repo.put(Character(id: 'c1', name: 'To Delete'));
+    test('delete cascades to chat sessions, summaries, and memory book rows', () async {
+      await repo.put(Character(id: 'c1', name: 'To Delete'));
 
-        await db
-            .into(db.chatSessions)
-            .insertOnConflictUpdate(
-              ChatSessionsCompanion.insert(
-                sessionId: 's1',
-                characterId: 'c1',
-                sessionIndex: 0,
-                messagesJson: '[]',
-              ),
-            );
+      await db.into(db.chatSessions).insertOnConflictUpdate(
+            ChatSessionsCompanion.insert(
+              sessionId: 's1',
+              characterId: 'c1',
+              sessionIndex: 0,
+              messagesJson: '[]',
+            ),
+          );
 
-        await db
-            .into(db.memoryBookRows)
-            .insertOnConflictUpdate(
-              MemoryBookRowsCompanion.insert(
-                sessionId: 's1',
-                entriesJson: const Value('[]'),
-              ),
-            );
+      await db.into(db.memoryBookRows).insertOnConflictUpdate(
+            MemoryBookRowsCompanion.insert(
+              sessionId: 's1',
+              entriesJson: const Value('[]'),
+            ),
+          );
 
-        await db
-            .into(db.chatSummaries)
-            .insertOnConflictUpdate(
-              ChatSummariesCompanion.insert(
-                sessionId: 's1',
-                content: 'summary text',
-              ),
-            );
+      await db.into(db.chatSummaries).insertOnConflictUpdate(
+            ChatSummariesCompanion.insert(
+              sessionId: 's1',
+              content: 'summary text',
+            ),
+          );
 
-        expect((await db.select(db.chatSessions).get()).length, 1);
-        expect((await db.select(db.memoryBookRows).get()).length, 1);
-        expect((await db.select(db.chatSummaries).get()).length, 1);
+      expect((await db.select(db.chatSessions).get()).length, 1);
+      expect((await db.select(db.memoryBookRows).get()).length, 1);
+      expect((await db.select(db.chatSummaries).get()).length, 1);
 
-        await repo.delete('c1');
+      await repo.delete('c1');
 
-        expect((await db.select(db.characters).get()).length, 0);
-        expect(
-          (await db.select(db.chatSessions).get()).length,
-          0,
-          reason: 'Chat sessions should be cascade-deleted',
-        );
-        expect(
-          (await db.select(db.memoryBookRows).get()).length,
-          0,
-          reason: 'Memory book rows should be cascade-deleted',
-        );
-        expect(
-          (await db.select(db.chatSummaries).get()).length,
-          0,
-          reason: 'Chat summaries should be cascade-deleted',
-        );
-      },
-    );
+      expect((await db.select(db.characters).get()).length, 0);
+      expect((await db.select(db.chatSessions).get()).length, 0,
+          reason: 'Chat sessions should be cascade-deleted');
+      expect((await db.select(db.memoryBookRows).get()).length, 0,
+          reason: 'Memory book rows should be cascade-deleted');
+      expect((await db.select(db.chatSummaries).get()).length, 0,
+          reason: 'Chat summaries should be cascade-deleted');
+    });
 
     test('delete with multiple sessions batches correctly', () async {
       await repo.put(Character(id: 'c1', name: 'Multi Session'));
 
       for (var i = 0; i < 5; i++) {
-        await db
-            .into(db.chatSessions)
-            .insertOnConflictUpdate(
+        await db.into(db.chatSessions).insertOnConflictUpdate(
               ChatSessionsCompanion.insert(
                 sessionId: 's$i',
                 characterId: 'c1',
@@ -340,17 +311,13 @@ void main() {
                 messagesJson: '[]',
               ),
             );
-        await db
-            .into(db.memoryBookRows)
-            .insertOnConflictUpdate(
+        await db.into(db.memoryBookRows).insertOnConflictUpdate(
               MemoryBookRowsCompanion.insert(
                 sessionId: 's$i',
                 entriesJson: const Value('[]'),
               ),
             );
-        await db
-            .into(db.chatSummaries)
-            .insertOnConflictUpdate(
+        await db.into(db.chatSummaries).insertOnConflictUpdate(
               ChatSummariesCompanion.insert(
                 sessionId: 's$i',
                 content: 'summary $i',
@@ -369,9 +336,7 @@ void main() {
       await repo.put(Character(id: 'c1', name: 'Delete Me'));
       await repo.put(Character(id: 'c2', name: 'Keep Me'));
 
-      await db
-          .into(db.chatSessions)
-          .insertOnConflictUpdate(
+      await db.into(db.chatSessions).insertOnConflictUpdate(
             ChatSessionsCompanion.insert(
               sessionId: 's1',
               characterId: 'c1',
@@ -379,9 +344,7 @@ void main() {
               messagesJson: '[]',
             ),
           );
-      await db
-          .into(db.chatSessions)
-          .insertOnConflictUpdate(
+      await db.into(db.chatSessions).insertOnConflictUpdate(
             ChatSessionsCompanion.insert(
               sessionId: 's2',
               characterId: 'c2',
@@ -432,9 +395,7 @@ void main() {
       final char = Character(
         id: 'c1',
         name: 'Extensions Test',
-        extensions: {
-          'depth_prompt': {'prompt': 'test', 'depth': 4},
-        },
+        extensions: {'depth_prompt': {'prompt': 'test', 'depth': 4}},
       );
 
       await repo.put(char);
@@ -503,16 +464,15 @@ void main() {
         int order, {
         String? variantName,
         List<String> tags = const [],
-      }) => repo.put(
-        Character(
-          id: id,
-          name: id,
-          variantGroupId: g,
-          variantOrder: order,
-          variantName: variantName,
-          tags: tags,
-        ),
-      );
+      }) =>
+          repo.put(Character(
+            id: id,
+            name: id,
+            variantGroupId: g,
+            variantOrder: order,
+            variantName: variantName,
+            tags: tags,
+          ));
 
       test('getPage / watchTotalCount only return representatives', () async {
         await putVariant('c1', 'c1', 0);
@@ -525,11 +485,8 @@ void main() {
           sort: CharacterSortField.name,
           dir: CharacterSortDir.asc,
         );
-        expect(
-          page.map((c) => c.id),
-          equals(['c1', 'c2']),
-          reason: 'Only variant_order 0 rows are list representatives',
-        );
+        expect(page.map((c) => c.id), equals(['c1', 'c2']),
+            reason: 'Only variant_order 0 rows are list representatives');
 
         final count = await repo.watchTotalCount().first;
         expect(count, 2);
@@ -538,18 +495,16 @@ void main() {
         expect((await repo.getAll()).length, 3);
       });
 
-      test(
-        'getVariants returns the group ordered, representative first',
-        () async {
-          await putVariant('c1b', 'c1', 1, variantName: 'NSFW');
-          await putVariant('c1', 'c1', 0);
+      test('getVariants returns the group ordered, representative first',
+          () async {
+        await putVariant('c1b', 'c1', 1, variantName: 'NSFW');
+        await putVariant('c1', 'c1', 0);
 
-          final variants = await repo.getVariants('c1');
-          expect(variants.map((c) => c.id), equals(['c1', 'c1b']));
-          expect(variants.first.variantName, isNull);
-          expect(variants.last.variantName, equals('NSFW'));
-        },
-      );
+        final variants = await repo.getVariants('c1');
+        expect(variants.map((c) => c.id), equals(['c1', 'c1b']));
+        expect(variants.first.variantName, isNull);
+        expect(variants.last.variantName, equals('NSFW'));
+      });
 
       test('nextVariantOrder is max + 1 (and 0 for a fresh group)', () async {
         expect(await repo.nextVariantOrder('c1'), 0);
@@ -567,11 +522,8 @@ void main() {
         final variants = await repo.getVariants('c1');
         expect(variants.length, 1);
         expect(variants.first.id, equals('c1b'));
-        expect(
-          variants.first.variantOrder,
-          equals(0),
-          reason: 'Sibling promoted to representative so the group survives',
-        );
+        expect(variants.first.variantOrder, equals(0),
+            reason: 'Sibling promoted to representative so the group survives');
 
         final page = await repo.getPage(
           limit: 50,
@@ -585,18 +537,16 @@ void main() {
       // Variations are ordered by creation and the user cannot reorder them:
       // the row at order 0 is the original, which is what makes "which one
       // represents the group" a question with only one answer.
-      test(
-        'getVariants returns the group in creation order, original first',
-        () async {
-          await putVariant('a', 'g', 0);
-          await putVariant('b', 'g', 1);
-          await putVariant('c', 'g', 2);
+      test('getVariants returns the group in creation order, original first',
+          () async {
+        await putVariant('a', 'g', 0);
+        await putVariant('b', 'g', 1);
+        await putVariant('c', 'g', 2);
 
-          final variants = await repo.getVariants('g');
-          expect(variants.map((v) => v.id), equals(['a', 'b', 'c']));
-          expect(variants.map((v) => v.variantOrder), equals([0, 1, 2]));
-        },
-      );
+        final variants = await repo.getVariants('g');
+        expect(variants.map((v) => v.id), equals(['a', 'b', 'c']));
+        expect(variants.map((v) => v.variantOrder), equals([0, 1, 2]));
+      });
 
       test('setHidden hides every variation in the group', () async {
         await putVariant('a', 'g', 0);
@@ -635,34 +585,29 @@ void main() {
         expect((await repo.getById('b'))!.hidden, isTrue);
       });
 
-      test(
-        'includeHidden surfaces hidden characters and counts them',
-        () async {
-          await repo.put(Character(id: 'a', name: 'Alice'));
-          await repo.put(Character(id: 'b', name: 'Bob', hidden: true));
+      test('includeHidden surfaces hidden characters and counts them', () async {
+        await repo.put(Character(id: 'a', name: 'Alice'));
+        await repo.put(Character(id: 'b', name: 'Bob', hidden: true));
 
-          final page = await repo.getPage(
-            limit: 50,
-            offset: 0,
-            sort: CharacterSortField.name,
-            dir: CharacterSortDir.asc,
-            includeHidden: true,
-          );
-          expect(page.map((c) => c.id), equals(['a', 'b']));
-          expect(await repo.watchTotalCount(includeHidden: true).first, 2);
-        },
-      );
+        final page = await repo.getPage(
+          limit: 50,
+          offset: 0,
+          sort: CharacterSortField.name,
+          dir: CharacterSortDir.asc,
+          includeHidden: true,
+        );
+        expect(page.map((c) => c.id), equals(['a', 'b']));
+        expect(await repo.watchTotalCount(includeHidden: true).first, 2);
+      });
 
       test('setHidden hides/reveals every row in a variation group', () async {
         await repo.put(Character(id: 'c1', name: 'c1', variantGroupId: 'c1'));
-        await repo.put(
-          Character(
-            id: 'c1b',
-            name: 'c1b',
-            variantGroupId: 'c1',
-            variantOrder: 1,
-          ),
-        );
+        await repo.put(Character(
+          id: 'c1b',
+          name: 'c1b',
+          variantGroupId: 'c1',
+          variantOrder: 1,
+        ));
 
         await repo.setHidden('c1', true);
         expect((await repo.getVariants('c1')).every((c) => c.hidden), isTrue);
@@ -679,38 +624,34 @@ void main() {
         expect((await repo.getVariants('c1')).any((c) => c.hidden), isFalse);
       });
 
-      test(
-        'setHidden hides a standalone row with empty variant_group_id',
-        () async {
-          // Legacy rows (and catalog imports predating the group backfill) can
-          // still carry an empty variant_group_id. setHidden resolves the group
-          // id to the char id for a standalone character, so it must match those
-          // rows by id — otherwise the hide toggle silently affects zero rows.
-          await db
-              .into(db.characters)
-              .insert(
-                const CharactersCompanion(
-                  charId: Value('legacy'),
-                  name: Value('Legacy'),
-                  variantGroupId: Value(''),
-                ),
-              );
+      test('setHidden hides a standalone row with empty variant_group_id',
+          () async {
+        // Legacy rows (and catalog imports predating the group backfill) can
+        // still carry an empty variant_group_id. setHidden resolves the group
+        // id to the char id for a standalone character, so it must match those
+        // rows by id — otherwise the hide toggle silently affects zero rows.
+        await db.into(db.characters).insert(
+              const CharactersCompanion(
+                charId: Value('legacy'),
+                name: Value('Legacy'),
+                variantGroupId: Value(''),
+              ),
+            );
 
-          await repo.setHidden('legacy', true);
-          expect((await repo.getById('legacy'))!.hidden, isTrue);
+        await repo.setHidden('legacy', true);
+        expect((await repo.getById('legacy'))!.hidden, isTrue);
 
-          final page = await repo.getPage(
-            limit: 50,
-            offset: 0,
-            sort: CharacterSortField.name,
-            dir: CharacterSortDir.asc,
-          );
-          expect(page, isEmpty);
+        final page = await repo.getPage(
+          limit: 50,
+          offset: 0,
+          sort: CharacterSortField.name,
+          dir: CharacterSortDir.asc,
+        );
+        expect(page, isEmpty);
 
-          await repo.setHidden('legacy', false);
-          expect((await repo.getById('legacy'))!.hidden, isFalse);
-        },
-      );
+        await repo.setHidden('legacy', false);
+        expect((await repo.getById('legacy'))!.hidden, isFalse);
+      });
 
       test('catalog imports are hideable', () async {
         await repo.createCharacterFromCatalog(id: 'cat', name: 'Cat');
@@ -744,33 +685,16 @@ void main() {
         ],
       };
 
-      final preset = parseSillyTavernPreset(
-        json,
-        'lucid_loom_v3_4_reminder.json',
-      );
+      final preset = parseSillyTavernPreset(json, 'lucid_loom_v3_4_reminder.json');
 
       expect(preset.name, equals('lucid_loom_v3_4_reminder'));
 
       // Custom blocks should be present
-      final customBlocks = preset.blocks
-          .where(
-            (b) => !{
-              'chat_history',
-              'char_card',
-              'char_personality',
-              'user_persona',
-              'example_dialogue',
-              'worldInfoBefore',
-              'worldInfoAfter',
-              'scenario',
-              'main',
-              'summary',
-              'authors_note',
-              'guided_generation',
-              'memory',
-            }.contains(b.id),
-          )
-          .toList();
+      final customBlocks = preset.blocks.where((b) => !{
+        'chat_history', 'char_card', 'char_personality', 'user_persona',
+        'example_dialogue', 'worldInfoBefore', 'worldInfoAfter', 'scenario',
+        'main', 'summary', 'authors_note', 'guided_generation', 'memory',
+      }.contains(b.id)).toList();
 
       expect(customBlocks.length, equals(2));
 
@@ -788,39 +712,34 @@ void main() {
       expect(block1.content, equals('You are Lumia.'));
     });
 
-    test(
-      'Glaze format: mandatory block names get normalized ids and empty content',
-      () {
-        final json = <String, dynamic>{
-          'name': 'test_preset',
-          'prompts': [
-            {
-              'name': 'Character Card',
-              'role': 'system',
-              'content': 'should be cleared',
-              'enabled': true,
-              'insertion_mode': 'relative',
-            },
-            {
-              'name': 'My Custom Block',
-              'role': 'system',
-              'content': 'keep this',
-              'enabled': true,
-              'insertion_mode': 'relative',
-            },
-          ],
-        };
+    test('Glaze format: mandatory block names get normalized ids and empty content', () {
+      final json = <String, dynamic>{
+        'name': 'test_preset',
+        'prompts': [
+          {
+            'name': 'Character Card',
+            'role': 'system',
+            'content': 'should be cleared',
+            'enabled': true,
+            'insertion_mode': 'relative',
+          },
+          {
+            'name': 'My Custom Block',
+            'role': 'system',
+            'content': 'keep this',
+            'enabled': true,
+            'insertion_mode': 'relative',
+          },
+        ],
+      };
 
-        final preset = parseSillyTavernPreset(json, 'test.json');
-        final charCard = preset.blocks.firstWhere((b) => b.id == 'char_card');
-        expect(charCard.content, equals(''));
+      final preset = parseSillyTavernPreset(json, 'test.json');
+      final charCard = preset.blocks.firstWhere((b) => b.id == 'char_card');
+      expect(charCard.content, equals(''));
 
-        final custom = preset.blocks.firstWhere(
-          (b) => b.name == 'My Custom Block',
-        );
-        expect(custom.content, equals('keep this'));
-      },
-    );
+      final custom = preset.blocks.firstWhere((b) => b.name == 'My Custom Block');
+      expect(custom.content, equals('keep this'));
+    });
 
     test('SillyTavern native format (with identifier) still works', () {
       final json = <String, dynamic>{

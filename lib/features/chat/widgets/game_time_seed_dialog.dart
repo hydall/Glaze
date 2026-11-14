@@ -65,10 +65,9 @@ class _GameTimeSeedDialogState extends State<GameTimeSeedDialog> {
     }
     final hour = int.parse(timeMatch.group(1)!).toString().padLeft(2, '0');
     final minute = timeMatch.group(2)!;
-    Navigator.of(
-      context,
-      rootNavigator: true,
-    ).pop(GameTimeSeedResult(time: '$hour:$minute', date: dateRaw));
+    Navigator.of(context, rootNavigator: true).pop(
+      GameTimeSeedResult(time: '$hour:$minute', date: dateRaw),
+    );
   }
 
   @override

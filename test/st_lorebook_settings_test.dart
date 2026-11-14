@@ -82,10 +82,7 @@ void main() {
       final restored = importSTLorebook({
         'name': 'Kestrel Bay',
         'entries': {
-          '0': {
-            'key': <String>['tide'],
-            'content': 'the tide is out',
-          },
+          '0': {'key': <String>['tide'], 'content': 'the tide is out'},
         },
         'glazeMetadata': {'settings': 'not a settings object'},
       }).lorebook;
@@ -114,16 +111,14 @@ void main() {
     /// `entry.caseSensitive ?? book ?? global` is how `LorebookScanner`
     /// resolves them, so null is a value with a meaning: follow the setting the
     /// reader chose. Defaulting it to false turned "inherit" into "never".
-    LorebookEntry entryFrom(Map<String, dynamic> raw) => importSTLorebook({
-      'name': 'b',
-      'entries': {'0': raw},
-    }).lorebook.entries.single;
+    LorebookEntry entryFrom(Map<String, dynamic> raw) =>
+        importSTLorebook({
+          'name': 'b',
+          'entries': {'0': raw},
+        }).lorebook.entries.single;
 
     test('an entry that says nothing still inherits', () {
-      final entry = entryFrom({
-        'key': <String>['tide'],
-        'content': 'x',
-      });
+      final entry = entryFrom({'key': <String>['tide'], 'content': 'x'});
       expect(entry.caseSensitive, isNull);
       expect(entry.matchWholeWords, isNull);
     });

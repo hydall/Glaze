@@ -105,7 +105,7 @@ enum StudioCyclePhase {
   cleaning,
   done,
   agentErrors,
-  error,
+  error
 }
 
 /// Global Studio tracker-cycle live state. Set by

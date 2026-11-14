@@ -64,27 +64,21 @@ void main() {
     expect(preset?.cheapApiConfigId, 'connection-custom');
   });
 
-  test(
-    'falls back to the default preset when no active id is stored',
-    () async {
-      await boot(activePresetId: '');
+  test('falls back to the default preset when no active id is stored', () async {
+    await boot(activePresetId: '');
 
-      final preset = await container.read(studioPresetProvider.future);
+    final preset = await container.read(studioPresetProvider.future);
 
-      expect(preset?.id, 'default');
-      expect(preset?.cheapApiConfigId, 'connection-default');
-    },
-  );
+    expect(preset?.id, 'default');
+    expect(preset?.cheapApiConfigId, 'connection-default');
+  });
 
-  test(
-    'falls back to the default preset when the active id is stale',
-    () async {
-      await boot(activePresetId: 'deleted-preset');
+  test('falls back to the default preset when the active id is stale', () async {
+    await boot(activePresetId: 'deleted-preset');
 
-      final preset = await container.read(studioPresetProvider.future);
+    final preset = await container.read(studioPresetProvider.future);
 
-      expect(preset?.id, 'default');
-      expect(preset?.cheapApiConfigId, 'connection-default');
-    },
-  );
+    expect(preset?.id, 'default');
+    expect(preset?.cheapApiConfigId, 'connection-default');
+  });
 }

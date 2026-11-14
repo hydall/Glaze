@@ -189,26 +189,23 @@ void main() {
     await EasyLocalization.ensureInitialized();
   });
 
-  test(
-    'a draft whose every message is hidden is refused, with no request',
-    () async {
-      final harness = await _seed(hideMessage: true);
+  test('a draft whose every message is hidden is refused, with no request', () async {
+    final harness = await _seed(hideMessage: true);
 
-      await harness.startGeneration();
+    await harness.startGeneration();
 
-      // No translations are loaded: the text is the key, which names the
-      // message by its place in the chat.
-      expect(harness.isRunning, isFalse);
-      expect(harness.generation.isCompleted, isFalse);
-      final draft = await harness.persistedDraft;
-      expect(draft.status, 'needs_regeneration');
-      expect(draft.error, contains('memory_draft_source'));
-      expect(
-        harness.container.read(memoryDraftJobsProvider).lastFailure?.message,
-        contains('memory_draft_source'),
-      );
-    },
-  );
+    // No translations are loaded: the text is the key, which names the
+    // message by its place in the chat.
+    expect(harness.isRunning, isFalse);
+    expect(harness.generation.isCompleted, isFalse);
+    final draft = await harness.persistedDraft;
+    expect(draft.status, 'needs_regeneration');
+    expect(draft.error, contains('memory_draft_source'));
+    expect(
+      harness.container.read(memoryDraftJobsProvider).lastFailure?.message,
+      contains('memory_draft_source'),
+    );
+  });
 
   testWidgets('a generation started from the sheet outlives closing it', (
     tester,

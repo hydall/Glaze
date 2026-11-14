@@ -62,7 +62,9 @@ void main() {
             lorebookId: 'book',
             content: 'lore',
             position: 'matchGlobal',
-            characterFilter: LorebookCharacterFilter(names: ['Character']),
+            characterFilter: LorebookCharacterFilter(
+              names: ['Character'],
+            ),
           ),
           source: 'keyword',
           classification: 'lorebooksMacro',

@@ -179,23 +179,20 @@ void main() {
     expect(thumbPath, endsWith('opaque1.jpg'));
   });
 
-  test(
-    're-saving transparent art as opaque drops the stale PNG thumb',
-    () async {
-      await service.saveAvatar('flip1', makeTransparentPng(200, 200));
-      expect(
-        await File(p.join(tmpDir.path, 'thumbnails', 'flip1.png')).exists(),
-        isTrue,
-      );
+  test('re-saving transparent art as opaque drops the stale PNG thumb', () async {
+    await service.saveAvatar('flip1', makeTransparentPng(200, 200));
+    expect(
+      await File(p.join(tmpDir.path, 'thumbnails', 'flip1.png')).exists(),
+      isTrue,
+    );
 
-      final avatarPath = await service.saveAvatar('flip1', makePng(200, 200));
-      expect(service.thumbnailPath(avatarPath), endsWith('flip1.jpg'));
-      expect(
-        await File(p.join(tmpDir.path, 'thumbnails', 'flip1.png')).exists(),
-        isFalse,
-      );
-    },
-  );
+    final avatarPath = await service.saveAvatar('flip1', makePng(200, 200));
+    expect(service.thumbnailPath(avatarPath), endsWith('flip1.jpg'));
+    expect(
+      await File(p.join(tmpDir.path, 'thumbnails', 'flip1.png')).exists(),
+      isFalse,
+    );
+  });
 
   test('thumbnail bounds both axes while preserving extreme aspect ratio', () {
     final portrait = img.decodeJpg(

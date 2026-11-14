@@ -202,8 +202,7 @@ class _MemoryGenerationSettingsSheetState
     // The screen may have changed the slot; take what it left behind so Save
     // does not write this sheet's older copy back over it.
     setState(
-      () => _draft.memoryBookApi = ref
-          .read(pipelineSettingsProvider)
+      () => _draft.memoryBookApi = ref.read(pipelineSettingsProvider)
           .memoryBookApi,
     );
   }

@@ -170,26 +170,29 @@ void main() {
     );
   });
 
-  test('warns when insertionMode is depth on a non-instruction block type', () {
-    const preset = StudioPreset(
-      id: 'depth-on-history',
-      blocks: [
-        StudioPresetBlock(
-          id: 'history',
-          type: StudioBlockType.history,
-          insertionMode: 'depth',
-          depth: 1,
-        ),
-      ],
-    );
+  test(
+    'warns when insertionMode is depth on a non-instruction block type',
+    () {
+      const preset = StudioPreset(
+        id: 'depth-on-history',
+        blocks: [
+          StudioPresetBlock(
+            id: 'history',
+            type: StudioBlockType.history,
+            insertionMode: 'depth',
+            depth: 1,
+          ),
+        ],
+      );
 
-    final issues = StudioPresetValidator.validate(preset);
+      final issues = StudioPresetValidator.validate(preset);
 
-    expect(
-      issues.map((issue) => issue.message),
-      contains('Depth insertion only applies to instructions.'),
-    );
-  });
+      expect(
+        issues.map((issue) => issue.message),
+        contains('Depth insertion only applies to instructions.'),
+      );
+    },
+  );
 
   test(
     'a well-formed depth instruction block produces no depth-related warnings',

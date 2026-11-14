@@ -25,7 +25,9 @@ void main() {
   }
 
   testWidgets('the sheet is solid, not glass', (tester) async {
-    await tester.pumpWidget(testApp(() {}));
+    await tester.pumpWidget(
+      testApp(() {}),
+    );
     await tester.pumpWidget(
       ProviderScope(
         child: MaterialApp(

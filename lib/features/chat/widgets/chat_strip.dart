@@ -23,11 +23,7 @@ class ChatStrip {
   /// Width of the strip.
   final double width;
 
-  const ChatStrip({
-    required this.left,
-    required this.edge,
-    required this.width,
-  });
+  const ChatStrip({required this.left, required this.edge, required this.width});
 
   /// How far in from its side of the screen the strip reaches: what the chat
   /// column has to stay clear of on that side.

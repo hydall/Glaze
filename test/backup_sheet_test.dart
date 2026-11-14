@@ -26,7 +26,9 @@ void main() {
             (ref) => Completer<BackupService>().future,
           ),
         ],
-        child: MaterialApp(home: BackupScreen(fromOnboarding: fromOnboarding)),
+        child: MaterialApp(
+          home: BackupScreen(fromOnboarding: fromOnboarding),
+        ),
       ),
     );
     await tester.pump();

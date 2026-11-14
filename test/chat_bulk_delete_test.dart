@@ -431,58 +431,48 @@ void main() {
     },
   );
 
-  test(
-    'deleting a message drops the ExtBlocks generated for it and later',
-    () async {
-      final db = AppDatabase.forTesting(NativeDatabase.memory());
-      final container = ProviderContainer(
-        overrides: [appDbProvider.overrideWithValue(db)],
-      );
-      addTearDown(() async {
-        container.dispose();
-        await db.close();
-      });
+  test('deleting a message drops the ExtBlocks generated for it and later', () async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [appDbProvider.overrideWithValue(db)],
+    );
+    addTearDown(() async {
+      container.dispose();
+      await db.close();
+    });
 
-      final session = ChatSession(
-        id: 's1',
-        characterId: 'c1',
-        sessionIndex: 0,
-        messages: const [
-          ChatMessage(id: 'm0', role: 'user', content: 'hi', timestamp: 1),
-          ChatMessage(
-            id: 'm1',
-            role: 'assistant',
-            content: 'reply',
-            timestamp: 2,
-          ),
-          ChatMessage(id: 'm2', role: 'user', content: 'next', timestamp: 3),
-        ],
-      );
-      await container.read(chatRepoProvider).put(session);
+    final session = ChatSession(
+      id: 's1',
+      characterId: 'c1',
+      sessionIndex: 0,
+      messages: const [
+        ChatMessage(id: 'm0', role: 'user', content: 'hi', timestamp: 1),
+        ChatMessage(id: 'm1', role: 'assistant', content: 'reply', timestamp: 2),
+        ChatMessage(id: 'm2', role: 'user', content: 'next', timestamp: 3),
+      ],
+    );
+    await container.read(chatRepoProvider).put(session);
 
-      final blocks = container.read(infoBlocksRepoProvider);
-      Future<void> insertBlock(String id, String messageId) => blocks.insert(
-        InfoBlock(
-          id: id,
-          sessionId: 's1',
-          messageId: messageId,
-          blockId: 'cfg-status',
-          blockName: 'Status',
-          blockType: 'infoblock',
-          content: 'body',
-          createdAt: 100,
-        ),
-      );
-      await insertBlock('b0', 'm0');
-      await insertBlock('b1', 'm1');
-      await insertBlock('b2', 'm2');
+    final blocks = container.read(infoBlocksRepoProvider);
+    Future<void> insertBlock(String id, String messageId) => blocks.insert(
+      InfoBlock(
+        id: id,
+        sessionId: 's1',
+        messageId: messageId,
+        blockId: 'cfg-status',
+        blockName: 'Status',
+        blockType: 'infoblock',
+        content: 'body',
+        createdAt: 100,
+      ),
+    );
+    await insertBlock('b0', 'm0');
+    await insertBlock('b1', 'm1');
+    await insertBlock('b2', 'm2');
 
-      await container.read(_messageServiceProvider).deleteMessages(session, {
-        1,
-      });
+    await container.read(_messageServiceProvider).deleteMessages(session, {1});
 
-      final surviving = await blocks.getBySessionId('s1');
-      expect(surviving.map((block) => block.id).toList(), ['b0']);
-    },
-  );
+    final surviving = await blocks.getBySessionId('s1');
+    expect(surviving.map((block) => block.id).toList(), ['b0']);
+  });
 }

@@ -74,10 +74,13 @@ void main() {
     });
 
     test('useSystemInstruction=false keeps system in contents', () {
-      final r = convertGoogleMessages([
-        {'role': 'system', 'content': 'sys'},
-        {'role': 'user', 'content': 'u'},
-      ], useSystemInstruction: false);
+      final r = convertGoogleMessages(
+        [
+          {'role': 'system', 'content': 'sys'},
+          {'role': 'user', 'content': 'u'},
+        ],
+        useSystemInstruction: false,
+      );
       expect((r.systemInstruction['parts'] as List), isEmpty);
       // system → user, then merged with user.
       expect(r.contents, hasLength(1));

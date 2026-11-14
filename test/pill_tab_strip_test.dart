@@ -30,7 +30,10 @@ void main() {
 
   /// The centre of a tab's icon+label group, in strip coordinates.
   double contentCentre(WidgetTester tester, String label) {
-    final row = find.ancestor(of: find.text(label), matching: find.byType(Row));
+    final row = find.ancestor(
+      of: find.text(label),
+      matching: find.byType(Row),
+    );
     final box = tester.getRect(row.first);
     return box.center.dx;
   }
@@ -49,8 +52,7 @@ void main() {
       (1, 'Prompt Blocks'),
       (2, 'Images'),
     ]) {
-      final expected =
-          tester.getRect(find.byType(GlazeTabBar)).left +
+      final expected = tester.getRect(find.byType(GlazeTabBar)).left +
           slot * index +
           slot / 2;
       expect(

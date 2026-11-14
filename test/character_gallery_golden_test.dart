@@ -102,9 +102,9 @@ void main() {
       container.dispose();
       await db.close();
     });
-    await container
-        .read(characterRepoProvider)
-        .put(const Character(id: 'c-juno', name: 'Juno', creator: 'VVADark'));
+    await container.read(characterRepoProvider).put(
+      const Character(id: 'c-juno', name: 'Juno', creator: 'VVADark'),
+    );
     await tester.binding.setSurfaceSize(const Size(412, 892));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await pumpGlazeApp(tester, container: container);

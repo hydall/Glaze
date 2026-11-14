@@ -67,7 +67,10 @@ class _ContextCoverageCardState extends ConsumerState<ContextCoverageCard> {
     final summary = memory == null ? null : MemoryActivitySummary.of(memory);
     final coverage = ref.watch(lorebookCoverageProvider(widget.charId)).value;
 
-    final layers = <_Layer>[if (memory != null) _Layer.memory, _Layer.lorebook];
+    final layers = <_Layer>[
+      if (memory != null) _Layer.memory,
+      _Layer.lorebook,
+    ];
     final active = layers.contains(_layer) ? _layer : layers.first;
 
     return Container(
@@ -171,54 +174,57 @@ class _ContextCoverageCardState extends ConsumerState<ContextCoverageCard> {
     );
   }
 
-  Widget _toolbar(BuildContext context, List<_Layer> layers, _Layer active) =>
-      Row(
-        children: [
-          if (layers.length > 1)
-            Expanded(
-              child: GlazeTabBar(
-                style: GlazeTabBarStyle.underline,
-                tabs: [
-                  for (final layer in layers)
-                    GlazeTabItem(label: _label(layer), icon: _icon(layer)),
-                ],
-                activeIndex: layers.indexOf(active),
-                onChanged: (i) => setState(() => _layer = layers[i]),
-              ),
-            )
-          else
-            Expanded(
-              child: Text(
-                _label(active),
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: context.cs.onSurfaceVariant,
-                ),
-              ),
-            ),
-          if (active == _Layer.lorebook)
-            IconButton(
-              visualDensity: VisualDensity.compact,
-              tooltip: 'action_refresh'.tr(),
-              icon: const Icon(Icons.refresh_rounded, size: 18),
-              onPressed: () =>
-                  ref.invalidate(lorebookCoverageProvider(widget.charId)),
-            ),
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            tooltip: 'coverage_open_inspector'.tr(),
-            icon: const Icon(Icons.open_in_full_rounded, size: 16),
-            onPressed: () => showPromptInspectorSheet(
-              context,
-              widget.charId,
-              initialTabId: active == _Layer.lorebook
-                  ? PromptInspectorSheet.coverageTabId
-                  : PromptInspectorSheet.contextTabId,
+  Widget _toolbar(
+    BuildContext context,
+    List<_Layer> layers,
+    _Layer active,
+  ) => Row(
+    children: [
+      if (layers.length > 1)
+        Expanded(
+          child: GlazeTabBar(
+            style: GlazeTabBarStyle.underline,
+            tabs: [
+              for (final layer in layers)
+                GlazeTabItem(label: _label(layer), icon: _icon(layer)),
+            ],
+            activeIndex: layers.indexOf(active),
+            onChanged: (i) => setState(() => _layer = layers[i]),
+          ),
+        )
+      else
+        Expanded(
+          child: Text(
+            _label(active),
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: context.cs.onSurfaceVariant,
             ),
           ),
-        ],
-      );
+        ),
+      if (active == _Layer.lorebook)
+        IconButton(
+          visualDensity: VisualDensity.compact,
+          tooltip: 'action_refresh'.tr(),
+          icon: const Icon(Icons.refresh_rounded, size: 18),
+          onPressed: () =>
+              ref.invalidate(lorebookCoverageProvider(widget.charId)),
+        ),
+      IconButton(
+        visualDensity: VisualDensity.compact,
+        tooltip: 'coverage_open_inspector'.tr(),
+        icon: const Icon(Icons.open_in_full_rounded, size: 16),
+        onPressed: () => showPromptInspectorSheet(
+          context,
+          widget.charId,
+          initialTabId: active == _Layer.lorebook
+              ? PromptInspectorSheet.coverageTabId
+              : PromptInspectorSheet.contextTabId,
+        ),
+      ),
+    ],
+  );
 
   String _label(_Layer layer) => switch (layer) {
     _Layer.memory => 'coverage_tab_memory'.tr(),

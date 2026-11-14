@@ -79,7 +79,10 @@ void main() {
     });
 
     test('the alternates cannot be written through', () {
-      final result = normalizeGreetings(primary: 'a', others: ['b']);
+      final result = normalizeGreetings(
+        primary: 'a',
+        others: ['b'],
+      );
       expect(() => result.alternates.add('c'), throwsUnsupportedError);
     });
   });
@@ -98,7 +101,9 @@ void main() {
     });
 
     test('the prompt turn is the fallback for a withheld greeting', () {
-      final result = normalizeExtractedGreetings(captured: 'the opening line');
+      final result = normalizeExtractedGreetings(
+        captured: 'the opening line',
+      );
       expect(result.firstMes, 'the opening line');
       expect(result.alternates, isEmpty);
     });
@@ -138,16 +143,7 @@ void main() {
     });
 
     test('ignores what is not a string, rather than throwing on it', () {
-      expect(
-        greetingList([
-          'a',
-          1,
-          null,
-          {'b': 'c'},
-          'd',
-        ]),
-        ['a', 'd'],
-      );
+      expect(greetingList(['a', 1, null, {'b': 'c'}, 'd']), ['a', 'd']);
     });
 
     test('a null, an empty list and a non-list are all nothing', () {

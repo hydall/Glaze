@@ -42,36 +42,21 @@ void main() {
   });
 
   group('InfoBlocksRepository.getRecentBlocks', () {
-    test(
-      'returns newest-first, filtered by block id, limited to count',
-      () async {
-        await repo.insert(
-          _block(id: 'a', messageId: 'm1', name: 'Status', createdAt: 100),
-        );
-        await repo.insert(
-          _block(id: 'b', messageId: 'm2', name: 'Status', createdAt: 200),
-        );
-        await repo.insert(
-          _block(id: 'c', messageId: 'm3', name: 'Status', createdAt: 300),
-        );
-        // Different block id — must be excluded.
-        await repo.insert(
-          _block(id: 'x', messageId: 'm2', name: 'Other', createdAt: 250),
-        );
+    test('returns newest-first, filtered by block id, limited to count', () async {
+      await repo.insert(_block(id: 'a', messageId: 'm1', name: 'Status', createdAt: 100));
+      await repo.insert(_block(id: 'b', messageId: 'm2', name: 'Status', createdAt: 200));
+      await repo.insert(_block(id: 'c', messageId: 'm3', name: 'Status', createdAt: 300));
+      // Different block id — must be excluded.
+      await repo.insert(_block(id: 'x', messageId: 'm2', name: 'Other', createdAt: 250));
 
-        final recent = await repo.getRecentBlocks('s1', 'cfg-Status', 2);
+      final recent = await repo.getRecentBlocks('s1', 'cfg-Status', 2);
 
-        expect(recent.map((b) => b.id).toList(), ['c', 'b']);
-      },
-    );
+      expect(recent.map((b) => b.id).toList(), ['c', 'b']);
+    });
 
     test('returns all matching when count exceeds available', () async {
-      await repo.insert(
-        _block(id: 'a', messageId: 'm1', name: 'Status', createdAt: 100),
-      );
-      await repo.insert(
-        _block(id: 'b', messageId: 'm2', name: 'Status', createdAt: 200),
-      );
+      await repo.insert(_block(id: 'a', messageId: 'm1', name: 'Status', createdAt: 100));
+      await repo.insert(_block(id: 'b', messageId: 'm2', name: 'Status', createdAt: 200));
 
       final recent = await repo.getRecentBlocks('s1', 'cfg-Status', 10);
 
@@ -79,9 +64,7 @@ void main() {
     });
 
     test('does not mix blocks that share a name but differ by id', () async {
-      await repo.insert(
-        _block(id: 'a', messageId: 'm1', name: 'Same', createdAt: 100),
-      );
+      await repo.insert(_block(id: 'a', messageId: 'm1', name: 'Same', createdAt: 100));
       await repo.insert(
         InfoBlock(
           id: 'b',
@@ -101,9 +84,7 @@ void main() {
     });
 
     test('returns empty when no block matches the id', () async {
-      await repo.insert(
-        _block(id: 'a', messageId: 'm1', name: 'Status', createdAt: 100),
-      );
+      await repo.insert(_block(id: 'a', messageId: 'm1', name: 'Status', createdAt: 100));
 
       final recent = await repo.getRecentBlocks('s1', 'cfg-Missing', 5);
 
@@ -112,30 +93,20 @@ void main() {
   });
 
   group('InfoBlocksRepository.deleteByMessageIds', () {
-    test(
-      'drops every block of the listed messages and keeps the rest',
-      () async {
-        await repo.insert(
-          _block(id: 'a', messageId: 'm1', name: 'Status', createdAt: 100),
-        );
-        await repo.insert(
-          _block(id: 'b', messageId: 'm2', name: 'Status', createdAt: 200),
-        );
-        await repo.insert(
-          _block(id: 'c', messageId: 'm3', name: 'Status', createdAt: 300),
-        );
+    test('drops every block of the listed messages and keeps the rest',
+        () async {
+      await repo.insert(_block(id: 'a', messageId: 'm1', name: 'Status', createdAt: 100));
+      await repo.insert(_block(id: 'b', messageId: 'm2', name: 'Status', createdAt: 200));
+      await repo.insert(_block(id: 'c', messageId: 'm3', name: 'Status', createdAt: 300));
 
-        await repo.deleteByMessageIds('s1', {'m2', 'm3'});
+      await repo.deleteByMessageIds('s1', {'m2', 'm3'});
 
-        final remaining = await repo.getBySessionId('s1');
-        expect(remaining.map((b) => b.id).toList(), ['a']);
-      },
-    );
+      final remaining = await repo.getBySessionId('s1');
+      expect(remaining.map((b) => b.id).toList(), ['a']);
+    });
 
     test('is a no-op for an empty set', () async {
-      await repo.insert(
-        _block(id: 'a', messageId: 'm1', name: 'Status', createdAt: 100),
-      );
+      await repo.insert(_block(id: 'a', messageId: 'm1', name: 'Status', createdAt: 100));
 
       await repo.deleteByMessageIds('s1', const {});
 
@@ -143,9 +114,7 @@ void main() {
     });
 
     test('does not touch another session', () async {
-      await repo.insert(
-        _block(id: 'a', messageId: 'm1', name: 'Status', createdAt: 100),
-      );
+      await repo.insert(_block(id: 'a', messageId: 'm1', name: 'Status', createdAt: 100));
       await repo.insert(
         InfoBlock(
           id: 'other',

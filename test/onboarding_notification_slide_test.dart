@@ -13,30 +13,27 @@ import 'package:glaze_flutter/features/onboarding/onboarding_models.dart';
 /// cover the two halves of that move: the slide exists where there is a
 /// permission to ask for, and nowhere else.
 void main() {
-  test(
-    'the notifications slide sits between the layout and the last slide',
-    () {
-      final slides = buildOnboardingSlides(
-        includeNotifications: true,
-      ).map((s) => s.type).toList();
+  test('the notifications slide sits between the layout and the last slide', () {
+    final slides = buildOnboardingSlides(includeNotifications: true)
+        .map((s) => s.type)
+        .toList();
 
-      expect(slides, contains(OnboardingSlideType.notifications));
-      expect(
-        slides.indexOf(OnboardingSlideType.notifications),
-        slides.indexOf(OnboardingSlideType.layout) + 1,
-        reason: 'the ask belongs after the flow is otherwise configured',
-      );
-      expect(slides.last, OnboardingSlideType.allSet);
-    },
-  );
+    expect(slides, contains(OnboardingSlideType.notifications));
+    expect(
+      slides.indexOf(OnboardingSlideType.notifications),
+      slides.indexOf(OnboardingSlideType.layout) + 1,
+      reason: 'the ask belongs after the flow is otherwise configured',
+    );
+    expect(slides.last, OnboardingSlideType.allSet);
+  });
 
   test('a platform with nothing to ask for gets no slide at all', () {
-    final withIt = buildOnboardingSlides(
-      includeNotifications: true,
-    ).map((s) => s.type).toList();
-    final withoutIt = buildOnboardingSlides(
-      includeNotifications: false,
-    ).map((s) => s.type).toList();
+    final withIt = buildOnboardingSlides(includeNotifications: true)
+        .map((s) => s.type)
+        .toList();
+    final withoutIt = buildOnboardingSlides(includeNotifications: false)
+        .map((s) => s.type)
+        .toList();
 
     expect(withoutIt, isNot(contains(OnboardingSlideType.notifications)));
     expect(
@@ -68,8 +65,7 @@ void main() {
           reachedNotificationsSlide: false,
         ),
         isTrue,
-        reason:
-            'the slide is the only ask, so skipping past it must not '
+        reason: 'the slide is the only ask, so skipping past it must not '
             'leave notifications permanently silent',
       );
     });
@@ -81,8 +77,7 @@ void main() {
           reachedNotificationsSlide: true,
         ),
         isFalse,
-        reason:
-            'reaching the slide is the reader answering — declining by '
+        reason: 'reaching the slide is the reader answering — declining by '
             'skipping past it, or granting outright',
       );
     });

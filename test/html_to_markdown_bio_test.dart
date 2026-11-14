@@ -52,8 +52,7 @@ void main() {
     });
 
     test('list item keeps inline formatting as markdown', () {
-      const html =
-          '<ul><li><strong>bold</strong> and <em>italic</em></li></ul>';
+      const html = '<ul><li><strong>bold</strong> and <em>italic</em></li></ul>';
       final md = htmlToMarkdown(html);
       expect(md, contains('- **bold** and *italic*'));
     });
@@ -120,10 +119,7 @@ void main() {
         expect(s.text.contains('\x02'), isFalse, reason: 'leak in: ${s.text}');
         expect(s.text.contains('\x1f'), isFalse, reason: 'leak in: ${s.text}');
       }
-      expect(
-        segs.map((s) => s.align),
-        containsAllInOrder(['right', 'left', 'justify']),
-      );
+      expect(segs.map((s) => s.align), containsAllInOrder(['right', 'left', 'justify']));
     });
   });
 }

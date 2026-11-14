@@ -12,16 +12,14 @@ void main() {
     return SharedPreferences.getInstance();
   }
 
-  test(
-    'clears a dev mode flag left over from the old channel defaults',
-    () async {
-      final prefs = await prefsWith({DevModeNotifier.prefsKey: true});
+  test('clears a dev mode flag left over from the old channel defaults',
+      () async {
+    final prefs = await prefsWith({DevModeNotifier.prefsKey: true});
 
-      await resetLegacyDevModeFlag(preferences: prefs);
+    await resetLegacyDevModeFlag(preferences: prefs);
 
-      expect(prefs.containsKey(DevModeNotifier.prefsKey), isFalse);
-    },
-  );
+    expect(prefs.containsKey(DevModeNotifier.prefsKey), isFalse);
+  });
 
   test('runs once — a later unlock survives the next startup', () async {
     final prefs = await prefsWith({DevModeNotifier.prefsKey: true});

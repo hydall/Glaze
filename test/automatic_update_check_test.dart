@@ -24,15 +24,12 @@ void main() {
     clock = DateTime.utc(2026, 9, 14, 12);
   });
 
-  test(
-    'starting checks immediately rather than waiting out the interval',
-    () async {
-      final controller = build()..start();
-      await Future<void>.delayed(Duration.zero);
-      expect(calls, hasLength(1));
-      controller.dispose();
-    },
-  );
+  test('starting checks immediately rather than waiting out the interval', () async {
+    final controller = build()..start();
+    await Future<void>.delayed(Duration.zero);
+    expect(calls, hasLength(1));
+    controller.dispose();
+  });
 
   test('#137 — coming back to the foreground re-checks', () async {
     final controller = build()..start();

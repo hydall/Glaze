@@ -42,12 +42,7 @@ void main() {
 
   AgentConfigResolver buildResolver(PipelineSettings pipeline) {
     return AgentConfigResolver(
-      loadApiConfigs: () async => const [
-        activeApi,
-        expensiveApi,
-        cheapApi,
-        cleanerApi,
-      ],
+      loadApiConfigs: () async => const [activeApi, expensiveApi, cheapApi, cleanerApi],
       readActiveApiConfig: () => activeApi,
       readPipelineSettings: () => pipeline,
     );
@@ -67,12 +62,7 @@ void main() {
           id: 'p',
           expensiveApiConfigId: 'expensive',
           agents: [
-            StudioAgent(
-              id: 'final',
-              controllerId: 'final',
-              order: 0,
-              phase: 'final',
-            ),
+            StudioAgent(id: 'final', controllerId: 'final', order: 0, phase: 'final'),
           ],
         ),
         pipelineSettings: pipeline,
@@ -81,12 +71,7 @@ void main() {
       );
 
       final resolved = await resolver.resolveAgentConfig(
-        const StudioAgent(
-          id: 'final',
-          controllerId: 'final',
-          order: 0,
-          phase: 'final',
-        ),
+        const StudioAgent(id: 'final', controllerId: 'final', order: 0, phase: 'final'),
         activeApi,
         's',
         isFinalResponse: true,
@@ -107,12 +92,7 @@ void main() {
           id: 'p',
           expensiveApiConfigId: 'expensive',
           agents: [
-            StudioAgent(
-              id: 'final',
-              controllerId: 'final',
-              order: 0,
-              phase: 'final',
-            ),
+            StudioAgent(id: 'final', controllerId: 'final', order: 0, phase: 'final'),
           ],
         ),
         pipelineSettings: pipeline,
@@ -121,12 +101,7 @@ void main() {
       );
 
       final resolved = await resolver.resolveAgentConfig(
-        const StudioAgent(
-          id: 'final',
-          controllerId: 'final',
-          order: 0,
-          phase: 'final',
-        ),
+        const StudioAgent(id: 'final', controllerId: 'final', order: 0, phase: 'final'),
         activeApi,
         's',
         isFinalResponse: true,
@@ -145,12 +120,7 @@ void main() {
         preset: const StudioPreset(
           id: 'p',
           agents: [
-            StudioAgent(
-              id: 'final',
-              controllerId: 'final',
-              order: 0,
-              phase: 'final',
-            ),
+            StudioAgent(id: 'final', controllerId: 'final', order: 0, phase: 'final'),
           ],
         ),
         pipelineSettings: pipeline,
@@ -159,12 +129,7 @@ void main() {
       );
 
       final resolved = await resolver.resolveAgentConfig(
-        const StudioAgent(
-          id: 'final',
-          controllerId: 'final',
-          order: 0,
-          phase: 'final',
-        ),
+        const StudioAgent(id: 'final', controllerId: 'final', order: 0, phase: 'final'),
         activeApi,
         's',
         isFinalResponse: true,
@@ -362,56 +327,50 @@ void main() {
   });
 
   group('StudioTurnConfigSnapshot does not replace pipeline settings', () {
-    test(
-      'global pipelineSettings passes through unchanged when Studio enabled',
-      () {
-        final pipeline = const PipelineSettings(
-          studioAgent: StudioAgentSettings(
-            studioFinalModelOverride: 'global-final',
-          ),
-          cleaner: CleanerSettings(postCleanerModel: 'global-cleaner'),
-        );
-        final snapshot = StudioTurnConfigSnapshot(
-          config: const StudioConfig(sessionId: 's', enabled: true),
-          preset: const StudioPreset(id: 'p'),
-          pipelineSettings: pipeline,
-          apiConfigs: const [],
-          activeApiConfig: null,
-        );
+    test('global pipelineSettings passes through unchanged when Studio enabled', () {
+      final pipeline = const PipelineSettings(
+        studioAgent: StudioAgentSettings(
+          studioFinalModelOverride: 'global-final',
+        ),
+        cleaner: CleanerSettings(postCleanerModel: 'global-cleaner'),
+      );
+      final snapshot = StudioTurnConfigSnapshot(
+        config: const StudioConfig(sessionId: 's', enabled: true),
+        preset: const StudioPreset(id: 'p'),
+        pipelineSettings: pipeline,
+        apiConfigs: const [],
+        activeApiConfig: null,
+      );
 
-        expect(
-          snapshot.pipelineSettings.studioAgent.studioFinalModelOverride,
-          'global-final',
-        );
-        expect(
-          snapshot.pipelineSettings.cleaner.postCleanerModel,
-          'global-cleaner',
-        );
-      },
-    );
+      expect(
+        snapshot.pipelineSettings.studioAgent.studioFinalModelOverride,
+        'global-final',
+      );
+      expect(
+        snapshot.pipelineSettings.cleaner.postCleanerModel,
+        'global-cleaner',
+      );
+    });
 
-    test(
-      'global pipelineSettings passes through unchanged when Studio disabled',
-      () {
-        final pipeline = const PipelineSettings(
-          studioAgent: StudioAgentSettings(
-            studioControllerModelOverride: 'global-controller',
-          ),
-        );
-        final snapshot = StudioTurnConfigSnapshot(
-          config: null,
-          preset: null,
-          pipelineSettings: pipeline,
-          apiConfigs: const [],
-          activeApiConfig: null,
-        );
+    test('global pipelineSettings passes through unchanged when Studio disabled', () {
+      final pipeline = const PipelineSettings(
+        studioAgent: StudioAgentSettings(
+          studioControllerModelOverride: 'global-controller',
+        ),
+      );
+      final snapshot = StudioTurnConfigSnapshot(
+        config: null,
+        preset: null,
+        pipelineSettings: pipeline,
+        apiConfigs: const [],
+        activeApiConfig: null,
+      );
 
-        expect(
-          snapshot.pipelineSettings.studioAgent.studioControllerModelOverride,
-          'global-controller',
-        );
-      },
-    );
+      expect(
+        snapshot.pipelineSettings.studioAgent.studioControllerModelOverride,
+        'global-controller',
+      );
+    });
   });
 
   group('post_clean toggle disables cleaner stage', () {
@@ -439,7 +398,10 @@ void main() {
       );
       final snapshot = StudioTurnConfigSnapshot(
         config: const StudioConfig(sessionId: 's', enabled: true),
-        preset: const StudioPreset(id: 'p', agentEnabled: {'post_clean': true}),
+        preset: const StudioPreset(
+          id: 'p',
+          agentEnabled: {'post_clean': true},
+        ),
         pipelineSettings: pipeline,
         apiConfigs: const [],
         activeApiConfig: null,

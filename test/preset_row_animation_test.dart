@@ -25,15 +25,14 @@ void main() {
       tester.getSize(find.byType(AnimatedPresetRow)).height;
 
   /// The innermost fade — the one that plays when the row is mounted.
-  FadeTransition entryFade(WidgetTester tester) =>
-      tester.widget<FadeTransition>(
-        find
-            .descendant(
-              of: find.byType(AnimatedPresetRow),
-              matching: find.byType(FadeTransition),
-            )
-            .last,
-      );
+  FadeTransition entryFade(WidgetTester tester) => tester.widget<FadeTransition>(
+    find
+        .descendant(
+          of: find.byType(AnimatedPresetRow),
+          matching: find.byType(FadeTransition),
+        )
+        .last,
+  );
 
   testWidgets('a new row fades in at its full height', (tester) async {
     await tester.pumpWidget(host(exiting: false));

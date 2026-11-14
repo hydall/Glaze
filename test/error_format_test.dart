@@ -84,36 +84,31 @@ void main() {
     expect(message.split('\n').last, 'Context length exceeds model limit');
   });
 
-  test(
-    'keeps the status line alone when the body carries no message',
-    () async {
-      final decoded = await streamingError(500, '{"foo":"bar"}');
+  test('keeps the status line alone when the body carries no message', () async {
+    final decoded = await streamingError(500, '{"foo":"bar"}');
 
-      final message = formatError(decoded);
+    final message = formatError(decoded);
 
-      expectStatusLine(message, 500);
-      expect(message, isNot(contains('\n')));
-    },
-  );
+    expectStatusLine(message, 500);
+    expect(message, isNot(contains('\n')));
+  });
 
-  test(
-    'does not repeat a provider message that echoes the status text',
-    () async {
-      final options = RequestOptions(path: '/chat/completions');
-      final error = DioException.badResponse(
-        statusCode: 418,
+  test('does not repeat a provider message that echoes the status text',
+      () async {
+    final options = RequestOptions(path: '/chat/completions');
+    final error = DioException.badResponse(
+      statusCode: 418,
+      requestOptions: options,
+      response: Response<dynamic>(
         requestOptions: options,
-        response: Response<dynamic>(
-          requestOptions: options,
-          statusCode: 418,
-          statusMessage: "I'm a teapot",
-          data: "i'm a teapot",
-        ),
-      );
+        statusCode: 418,
+        statusMessage: "I'm a teapot",
+        data: "i'm a teapot",
+      ),
+    );
 
-      expect(formatError(error), "HTTP 418 - I'm a teapot");
-    },
-  );
+    expect(formatError(error), "HTTP 418 - I'm a teapot");
+  });
 
   test('falls back to the server reason phrase for unmapped codes', () async {
     final options = RequestOptions(path: '/chat/completions');
@@ -361,7 +356,10 @@ void main() {
   group('a rejected request that carried an image', () {
     /// Nothing tells Glaze whether the active model is multimodal, so the only
     /// evidence is the rejection itself plus the body that was sent.
-    String formatRejection({required int status, required Object? body}) {
+    String formatRejection({
+      required int status,
+      required Object? body,
+    }) {
       final options = RequestOptions(path: '/chat/completions', data: body);
       return formatError(
         DioException.badResponse(
@@ -394,10 +392,7 @@ void main() {
     };
 
     test('names images as a possible cause', () {
-      final lines = formatRejection(
-        status: 400,
-        body: openAiBody(),
-      ).split('\n');
+      final lines = formatRejection(status: 400, body: openAiBody()).split('\n');
 
       expect(lines, hasLength(3));
       expectStatusLine(lines.first, 400);
@@ -479,12 +474,15 @@ void main() {
   });
 
   test('every message key this file names has an EN and RU string', () {
-    final source = File('lib/core/utils/error_format.dart').readAsStringSync();
+    final source = File(
+      'lib/core/utils/error_format.dart',
+    ).readAsStringSync();
     // Every key, not just the status descriptions: a hint added to the status
     // line is as visible to the reader as the line itself.
-    final keys = RegExp(
-      r"'(error_[a-z0-9_]+)'",
-    ).allMatches(source).map((match) => match.group(1)!).toSet();
+    final keys = RegExp(r"'(error_[a-z0-9_]+)'")
+        .allMatches(source)
+        .map((match) => match.group(1)!)
+        .toSet();
     final en = loadTranslations('assets/translations/en.json');
     final ru = loadTranslations('assets/translations/ru.json');
 

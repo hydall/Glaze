@@ -14,10 +14,7 @@ void main() {
 
   group('negative prompt resolution', () {
     test('appends the active style negative to the provider one', () {
-      const settings = ImageGenSettings(
-        styles: [animeNeg],
-        activeStyleId: 's2',
-      );
+      const settings = ImageGenSettings(styles: [animeNeg], activeStyleId: 's2');
       expect(
         resolveEffectiveNegativePrompt('watermark', settings),
         'watermark, lowres, bad hands',
@@ -25,19 +22,16 @@ void main() {
     });
 
     test('uses the style negative alone when the provider has none', () {
-      const settings = ImageGenSettings(
-        styles: [animeNeg],
-        activeStyleId: 's2',
+      const settings = ImageGenSettings(styles: [animeNeg], activeStyleId: 's2');
+      expect(
+        resolveEffectiveNegativePrompt('', settings),
+        'lowres, bad hands',
       );
-      expect(resolveEffectiveNegativePrompt('', settings), 'lowres, bad hands');
     });
 
     test('leaves the provider negative alone without an active style', () {
       const settings = ImageGenSettings(styles: [animeNeg]);
-      expect(
-        resolveEffectiveNegativePrompt('watermark', settings),
-        'watermark',
-      );
+      expect(resolveEffectiveNegativePrompt('watermark', settings), 'watermark');
     });
   });
 

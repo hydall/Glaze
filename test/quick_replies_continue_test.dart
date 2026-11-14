@@ -66,19 +66,17 @@ void main() {
 
       await notifier.remove(kContinueQuickReplyId);
       expect(
-        container
-            .read(quickRepliesProvider)
-            .value!
-            .any((r) => r.isContinueAction),
+        container.read(quickRepliesProvider).value!.any(
+          (r) => r.isContinueAction,
+        ),
         isTrue,
       );
 
       await notifier.remove('tell-more');
       expect(
-        container
-            .read(quickRepliesProvider)
-            .value!
-            .any((r) => r.id == 'tell-more'),
+        container.read(quickRepliesProvider).value!.any(
+          (r) => r.id == 'tell-more',
+        ),
         isFalse,
       );
     });

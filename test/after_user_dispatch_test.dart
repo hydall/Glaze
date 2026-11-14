@@ -33,8 +33,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/db/repositories/character_repo.dart';
 import 'package:glaze_flutter/core/models/character.dart';
-import 'package:glaze_flutter/core/models/chat_message.dart'
-    show ChatMessage, ChatSession;
+import 'package:glaze_flutter/core/models/chat_message.dart' show ChatMessage, ChatSession;
 import 'package:glaze_flutter/features/extensions/models/block_config.dart';
 import 'package:glaze_flutter/features/extensions/models/extension_preset.dart';
 import 'package:glaze_flutter/features/extensions/services/extension_post_gen_service.dart';
@@ -46,8 +45,13 @@ AppDatabase _testDb() => AppDatabase.forTesting(NativeDatabase.memory());
 /// engine. The real chain additionally processes the blocks; for
 /// dispatch-path characterization we only care about *which* blocks
 /// would be selected.
-List<BlockConfig> _chainFilter(ExtensionPreset preset, BlockTrigger trigger) {
-  return preset.blocks.where((b) => b.enabled && b.trigger == trigger).toList()
+List<BlockConfig> _chainFilter(
+  ExtensionPreset preset,
+  BlockTrigger trigger,
+) {
+  return preset.blocks
+      .where((b) => b.enabled && b.trigger == trigger)
+      .toList()
     ..sort((a, b) => a.order.compareTo(b.order));
 }
 
@@ -58,7 +62,12 @@ ChatSession _userMessageSession() {
     sessionIndex: 0,
     sessionVars: {},
     messages: [
-      ChatMessage(id: 'm1', role: 'user', content: 'hi', timestamp: 1),
+      ChatMessage(
+        id: 'm1',
+        role: 'user',
+        content: 'hi',
+        timestamp: 1,
+      ),
     ],
   );
 }
@@ -115,10 +124,10 @@ void main() {
         ],
       );
 
-      expect(_chainFilter(preset, BlockTrigger.afterUser).map((b) => b.id), [
-        'a-user',
-        'd-user',
-      ]);
+      expect(
+        _chainFilter(preset, BlockTrigger.afterUser).map((b) => b.id),
+        ['a-user', 'd-user'],
+      );
     });
 
     test('skips disabled blocks and orders by `order`', () {
@@ -153,10 +162,10 @@ void main() {
         ],
       );
 
-      expect(_chainFilter(preset, BlockTrigger.afterUser).map((b) => b.id), [
-        'first',
-        'second',
-      ]);
+      expect(
+        _chainFilter(preset, BlockTrigger.afterUser).map((b) => b.id),
+        ['first', 'second'],
+      );
     });
   });
 

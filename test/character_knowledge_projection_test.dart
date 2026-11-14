@@ -94,7 +94,11 @@ void main() {
           object: 'rough scenarios',
         ),
         for (var i = 0; i < 10; i++)
-          fact(id: 'rel$i', subject: 'NPC$i', importance: 0.5),
+          fact(
+            id: 'rel$i',
+            subject: 'NPC$i',
+            importance: 0.5,
+          ),
       ], maxFacts: 2);
 
       // All three canon-critical facts survive despite maxFacts=2.
@@ -102,9 +106,8 @@ void main() {
       expect(content, contains('[commitment:maisie]'));
       expect(content, contains('[identity_development:maisie]'));
       // Only top 2 of 10 relationship facts fit the cap.
-      final relMatches = RegExp(
-        r'\[relationship:npc\d+\]',
-      ).allMatches(content ?? '');
+      final relMatches =
+          RegExp(r'\[relationship:npc\d+\]').allMatches(content ?? '');
       expect(relMatches.length, 2);
     },
   );
@@ -112,12 +115,14 @@ void main() {
   test('subjects relationship facts to the cap when no tier A is present', () {
     final content = compileCharacterKnowledgeProjection([
       for (var i = 0; i < 5; i++)
-        fact(id: 'rel$i', subject: 'NPC$i', importance: 0.5 + i * 0.05),
+        fact(
+          id: 'rel$i',
+          subject: 'NPC$i',
+          importance: 0.5 + i * 0.05,
+        ),
     ], maxFacts: 2);
 
-    final matches = RegExp(
-      r'\[relationship:npc\d+\]',
-    ).allMatches(content ?? '');
+    final matches = RegExp(r'\[relationship:npc\d+\]').allMatches(content ?? '');
     expect(matches.length, 2);
     // Highest-importance two win.
     expect(content, contains('[relationship:npc4]'));
@@ -125,3 +130,4 @@ void main() {
     expect(content, isNot(contains('[relationship:npc0]')));
   });
 }
+

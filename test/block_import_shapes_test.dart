@@ -70,17 +70,14 @@ void main() {
       expect(blocks.map((b) => b.order), [5, 6]);
     });
 
-    test(
-      'skips entries that are neither shape instead of failing the file',
-      () {
-        final blocks = blocksFromJson([
-          upstreamBlock('good'),
-          'nonsense',
-          {'totally': 'unrelated'},
-        ]);
-        expect(blocks.map((b) => b.name), contains('good'));
-      },
-    );
+    test('skips entries that are neither shape instead of failing the file', () {
+      final blocks = blocksFromJson([
+        upstreamBlock('good'),
+        'nonsense',
+        {'totally': 'unrelated'},
+      ]);
+      expect(blocks.map((b) => b.name), contains('good'));
+    });
 
     test('returns nothing for a document that holds no blocks', () {
       expect(blocksFromJson('just a string'), isEmpty);

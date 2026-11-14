@@ -157,9 +157,7 @@ void main() {
       // the column still holds the text. `ChatState` is not evidence about
       // the row, so the clear has to go through anyway.
       AsyncValue<ChatState> state = AsyncData(
-        ChatState(
-          session: sessionA.copyWith(id: 'live', draft: ''),
-        ),
+        ChatState(session: sessionA.copyWith(id: 'live', draft: '')),
       );
 
       await controllerFor(() => state).saveDraft('');
@@ -167,53 +165,50 @@ void main() {
       expect((await liveRepo.getById('live'))?.draft, '');
     });
 
-    test(
-      'a draft typed during a send commits against the appended row',
-      () async {
-        await liveRepo.put(sessionA.copyWith(id: 'live'));
-        final appendStarted = Completer<void>();
-        final releaseAppend = Completer<void>();
-        AsyncValue<ChatState> state = AsyncData(
-          ChatState(session: sessionA.copyWith(id: 'live')),
-        );
+    test('a draft typed during a send commits against the appended row', () async {
+      await liveRepo.put(sessionA.copyWith(id: 'live'));
+      final appendStarted = Completer<void>();
+      final releaseAppend = Completer<void>();
+      AsyncValue<ChatState> state = AsyncData(
+        ChatState(session: sessionA.copyWith(id: 'live')),
+      );
 
-        // Stands in for the send's durable append: already on the queue, and
-        // slow, the way encoding a long chat is slow.
-        final append = writes.run(() async {
-          appendStarted.complete();
-          await releaseAppend.future;
-          await liveRepo.mutateMessages(
-            sessionId: 'live',
-            mutate: (messages) => [
-              ...messages,
+      // Stands in for the send's durable append: already on the queue, and
+      // slow, the way encoding a long chat is slow.
+      final append = writes.run(() async {
+        appendStarted.complete();
+        await releaseAppend.future;
+        await liveRepo.mutateMessages(
+          sessionId: 'live',
+          mutate: (messages) => [
+            ...messages,
+            const ChatMessage(id: 'u1', role: 'user', content: 'sent'),
+          ],
+          updatedAt: 2,
+        );
+      });
+      await appendStarted.future;
+
+      // The composer is empty again, so the user starts the next message while
+      // the send is still being written. The optimistic paint already counts
+      // the sent message.
+      state = AsyncData(
+        ChatState(
+          session: sessionA.copyWith(
+            id: 'live',
+            messages: [
+              message,
               const ChatMessage(id: 'u1', role: 'user', content: 'sent'),
             ],
-            updatedAt: 2,
-          );
-        });
-        await appendStarted.future;
-
-        // The composer is empty again, so the user starts the next message while
-        // the send is still being written. The optimistic paint already counts
-        // the sent message.
-        state = AsyncData(
-          ChatState(
-            session: sessionA.copyWith(
-              id: 'live',
-              messages: [
-                message,
-                const ChatMessage(id: 'u1', role: 'user', content: 'sent'),
-              ],
-            ),
           ),
-        );
-        final saved = controllerFor(() => state).saveDraft('the next one');
-        releaseAppend.complete();
-        await append;
-        await saved;
+        ),
+      );
+      final saved = controllerFor(() => state).saveDraft('the next one');
+      releaseAppend.complete();
+      await append;
+      await saved;
 
-        expect((await liveRepo.getById('live'))?.draft, 'the next one');
-      },
-    );
+      expect((await liveRepo.getById('live'))?.draft, 'the next one');
+    });
   });
 }

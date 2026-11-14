@@ -88,14 +88,16 @@ void main() {
             isStatic: true,
           ),
         ],
-        regexes: const [PresetRegex(id: 'rx1', name: 'Trim', regex: r'\s+$')],
+        regexes: const [
+          PresetRegex(id: 'rx1', name: 'Trim', regex: r'\s+$'),
+        ],
         createdAt: _now,
       ),
     );
 
-    await PersonaRepo(
-      db,
-    ).put(const Persona(id: 'persona_1', name: 'User', prompt: 'A traveller.'));
+    await PersonaRepo(db).put(
+      const Persona(id: 'persona_1', name: 'User', prompt: 'A traveller.'),
+    );
 
     final characters = CharacterRepo(db);
     await characters.put(
@@ -159,11 +161,7 @@ void main() {
           msg('m2', 'assistant', 'I am Alice.').copyWith(
             swipes: ['I am Alice.', 'Alice, nice to meet you.'],
             agentSwipes: const [
-              AgentSwipe(
-                kind: 'cleaned',
-                content: 'I am Alice.',
-                parentSwipeId: 0,
-              ),
+              AgentSwipe(kind: 'cleaned', content: 'I am Alice.', parentSwipeId: 0),
             ],
             agentSwipeId: 1,
           ),
@@ -197,9 +195,9 @@ void main() {
         ],
       ),
     );
-    await LorebookRepo(
-      db,
-    ).put(const Lorebook(id: 'lore_global', name: 'Global', updatedAt: _now));
+    await LorebookRepo(db).put(
+      const Lorebook(id: 'lore_global', name: 'Global', updatedAt: _now),
+    );
 
     await StudioPresetRepo(db).upsert(
       const StudioPreset(
@@ -283,24 +281,8 @@ void main() {
       "INSERT INTO info_blocks (id, session_id, message_id, swipe_id, agent_swipe_id, block_id, block_name, block_type, content, created_at, \"order\", status) VALUES ('ib_1', 'char_alice_0', 'm2', 0, 1, 'status', 'Status', 'html', '<b>ok</b>', $_now, 0, 'done')",
       "INSERT INTO embeddings (entry_id, source_type, source_id, vectors_blob, text_hash, updated_at) VALUES ('lore_world_e1', 'lorebook_entry', 'lore_world', x'0000803f00000040', 'hash', $_now)",
       "INSERT INTO memory_book_rows (session_id, entries_json, pending_drafts_json, settings_json, last_processed_message_count, updated_at) VALUES ('char_alice_0', ${_q(jsonEncode([
-        {
-          'id': 'mem_1',
-          'title': 'Meeting',
-          'content': 'Alice met the user.',
-          'keys': ['meeting'],
-          'messageIds': ['m1', 'm2'],
-          'source': 'manual',
-          'enabled': true,
-        },
-        {
-          'id': 'mem_2',
-          'title': 'Agentic',
-          'content': 'Retired agentic fact.',
-          'keys': [],
-          'messageIds': ['m2'],
-          'source': 'agentic',
-          'enabled': true,
-        },
+        {'id': 'mem_1', 'title': 'Meeting', 'content': 'Alice met the user.', 'keys': ['meeting'], 'messageIds': ['m1', 'm2'], 'source': 'manual', 'enabled': true},
+        {'id': 'mem_2', 'title': 'Agentic', 'content': 'Retired agentic fact.', 'keys': [], 'messageIds': ['m2'], 'source': 'agentic', 'enabled': true},
       ]))}, '[]', '{\"enabled\":true}', 3, $_now)",
       "INSERT INTO memory_catalog_rows (id, chat_session_id, memory_entry_id, title, created_at, updated_at) VALUES ('cat_1', 'char_alice_0', 'mem_1', 'Meeting', $_now, $_now)",
       "INSERT INTO memory_entity_rows (id, chat_session_id, memory_entry_id, name, created_at, updated_at) VALUES ('ent_1', 'char_alice_0', 'mem_1', 'Alice', $_now, $_now)",

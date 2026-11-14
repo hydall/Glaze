@@ -186,15 +186,11 @@ class ChatDrawerController extends ChangeNotifier {
     return false;
   }
 
-  double computeTargetBottomPanelInset(
-    double keyboardHeight,
-    double safeBottom,
-  ) {
+  double computeTargetBottomPanelInset(double keyboardHeight, double safeBottom) {
     final targetDrawerInset = (_drawerOpen || _switchingToDrawer)
         ? _activeDrawerHeight
         : 0.0;
-    final isIdle =
-        keyboardHeight == 0 &&
+    final isIdle = keyboardHeight == 0 &&
         !_drawerOpen &&
         !_switchingToDrawer &&
         _drawerAnimController.value == 0;

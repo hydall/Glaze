@@ -99,10 +99,7 @@ Done.''';
   group('repairJson', () {
     test('passes through valid JSON unchanged (modulo whitespace)', () {
       const input = '{"a": 1, "b": ["x", "y"]}';
-      expect(jsonDecode(repairJson(input)), {
-        'a': 1,
-        'b': ['x', 'y'],
-      });
+      expect(jsonDecode(repairJson(input)), {'a': 1, 'b': ['x', 'y']});
     });
 
     test('strips line comments outside strings', () {
@@ -191,15 +188,12 @@ Done.''';
       expect(result['example'], '{"x": 1, }');
     });
 
-    test(
-      'strips real trailing comma but keeps an in-string one in same doc',
-      () {
-        const input = '{"rule": "drop a, ]", "items": [1, 2,]}';
-        final result = jsonDecode(repairJson(input)) as Map<String, dynamic>;
-        expect(result['rule'], 'drop a, ]');
-        expect(result['items'], [1, 2]);
-      },
-    );
+    test('strips real trailing comma but keeps an in-string one in same doc', () {
+      const input = '{"rule": "drop a, ]", "items": [1, 2,]}';
+      final result = jsonDecode(repairJson(input)) as Map<String, dynamic>;
+      expect(result['rule'], 'drop a, ]');
+      expect(result['items'], [1, 2]);
+    });
 
     test('handles escaped quotes inside strings correctly', () {
       const input = '{"text": "he said \\"hi\\" // not a comment"}';

@@ -50,7 +50,10 @@ void main() {
 
     test('a highlight too transparent to be a background defers', () {
       // The text is sitting on the surface, so it has to read against that.
-      expect(readableOn(const Color(0x10FFFFFF), fallback: fallback), fallback);
+      expect(
+        readableOn(const Color(0x10FFFFFF), fallback: fallback),
+        fallback,
+      );
       expect(readableOn(Colors.transparent, fallback: fallback), fallback);
     });
 

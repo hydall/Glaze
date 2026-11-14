@@ -598,17 +598,12 @@ void main() {
       );
       final writeBlock = _extractWriteShadowContent(rendererJs);
       final insertion = writeBlock.indexOf('root.innerHTML =');
-      final report = writeBlock.indexOf(
-        'reportCssErrors(root, cssPolicyNotes(',
-      );
+      final report = writeBlock.indexOf('reportCssErrors(root, cssPolicyNotes(');
       expect(insertion, isNonNegative);
       expect(report, greaterThan(insertion));
       // A reply still arriving is half a stylesheet: every unclosed brace in it
       // is on its way to being closed, so only a settled message is reported.
-      expect(
-        writeBlock,
-        contains('if (!isTyping && !window.bridge?.isGenerating) {'),
-      );
+      expect(writeBlock, contains('if (!isTyping && !window.bridge?.isGenerating) {'));
       expect(
         writeBlock,
         contains(
@@ -1052,7 +1047,10 @@ void main() {
         formatterProtectJs,
         contains(r'(?<!\*)\*(?=[^*\n]*[^ \t*\n])[^*\n]+?\*(?!\*)'),
       );
-      expect(formatterInlineSyntaxJs, contains(r'.replace(/\*([^*\n]+?)\*/g'));
+      expect(
+        formatterInlineSyntaxJs,
+        contains(r'.replace(/\*([^*\n]+?)\*/g'),
+      );
     });
 
     test('orphan emphasis markers cannot consume the next action segment', () {
@@ -1075,9 +1073,7 @@ void main() {
         formatterDomFormatJs,
         formatterDomFormatJs.indexOf('function formatRun('),
       );
-      final masked = body.indexOf(
-        r'`${SENTINEL}E_${kept.length - 1}${SENTINEL}`',
-      );
+      final masked = body.indexOf(r'`${SENTINEL}E_${kept.length - 1}${SENTINEL}`');
       final markers = body.indexOf('extractMarkers(masked, markers)');
       final block = body.indexOf('applyBlockSyntax(staged');
       expect(masked, isNonNegative);
@@ -1147,25 +1143,12 @@ void main() {
       // `<source>` inside a `<video>` is written once and never closed. The
       // parser knows that; the old orphan rule had to be told, tag by tag.
       for (final name in [
-        'area',
-        'base',
-        'br',
-        'col',
-        'embed',
-        'hr',
-        'img',
-        'input',
-        'link',
-        'meta',
-        'param',
-        'source',
-        'track',
-        'wbr',
+        'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link',
+        'meta', 'param', 'source', 'track', 'wbr',
       ]) {
         expect(
-          RegExp(
-            '(?<![A-Za-z-])$name(?![A-Za-z-])',
-          ).hasMatch(formatterHtmlScanJs),
+          RegExp('(?<![A-Za-z-])$name(?![A-Za-z-])')
+              .hasMatch(formatterHtmlScanJs),
           isTrue,
           reason: '$name must be in the element vocabulary',
         );
@@ -1191,13 +1174,7 @@ void main() {
     });
 
     test('markdown never reaches inside code, style or an attribute', () {
-      for (final name in [
-        "'script'",
-        "'style'",
-        "'pre'",
-        "'code'",
-        "'textarea'",
-      ]) {
+      for (final name in ["'script'", "'style'", "'pre'", "'code'", "'textarea'"]) {
         expect(formatterHtmlScanJs, contains(name));
       }
       expect(formatterHtmlScanJs, contains('RAW_TEXT_ELEMENTS'));
@@ -1321,9 +1298,7 @@ void main() {
         contains("data-action=\"img-variant-next\""),
       );
       expect(
-        RegExp(
-          r'variants\.length > 1',
-        ).allMatches(formatterImageBlocksJs).length,
+        RegExp(r'variants\.length > 1').allMatches(formatterImageBlocksJs).length,
         greaterThanOrEqualTo(3),
       );
       expect(formatterImageBlocksJs, contains('data-variants='));
@@ -1336,10 +1311,7 @@ void main() {
         contains('export function parseImageResultPayload('),
       );
       expect(formatterImageBlocksJs, contains("IMG_VARIANT_SEPARATOR = ';;'"));
-      expect(
-        formatterImageBlocksJs,
-        contains("IMG_VARIANT_ACTIVE_MARKER = '*'"),
-      );
+      expect(formatterImageBlocksJs, contains("IMG_VARIANT_ACTIVE_MARKER = '*'"));
     });
 
     test('the stored <img data-iig-…> block renders as an image block', () {
@@ -1422,9 +1394,8 @@ void main() {
       );
       // The bare `<img src="[IMG:GEN…]">` element has to be consumed whole,
       // before the pass that would take only the payload out of its src.
-      final srcElementIdx = formatterImageBlocksJs.indexOf(
-        'out.replace(IMG_SRC_GEN_ELEMENT_REGEX',
-      );
+      final srcElementIdx =
+          formatterImageBlocksJs.indexOf('out.replace(IMG_SRC_GEN_ELEMENT_REGEX');
       final bareTagIdx = formatterImageBlocksJs.indexOf(
         r'out.replace(/\[IMG:GEN(?::(.*?))?\]/g',
       );
@@ -1448,9 +1419,9 @@ void main() {
       );
       // All three pending spellings fall through to the inert text collector.
       expect(
-        RegExp(
-          'if [(]inReasoning[)] return inert[(]match[)];',
-        ).allMatches(formatterImageBlocksJs).length,
+        RegExp('if [(]inReasoning[)] return inert[(]match[)];')
+            .allMatches(formatterImageBlocksJs)
+            .length,
         3,
       );
       expect(formatterProtectJs, contains("inert: (raw) => store.hold("));
@@ -1459,16 +1430,16 @@ void main() {
       expect(
         formatterFormatterJs,
         contains(r'const key = `${text}:${isUser}:${inReasoning}`'),
-        reason:
-            'the format cache must not serve a body render to a '
+        reason: 'the format cache must not serve a body render to a '
             'reasoning panel, or the other way round',
       );
-      expect(rendererMessageJs, contains("isReasoning: true"));
       expect(
         rendererMessageJs,
-        contains(
-          'this._writeShadowContent(shadowHost, reasoning, isUser, false, {',
-        ),
+        contains("isReasoning: true"),
+      );
+      expect(
+        rendererMessageJs,
+        contains('this._writeShadowContent(shadowHost, reasoning, isUser, false, {'),
       );
       expect(
         rendererJs,
@@ -1525,7 +1496,10 @@ void main() {
       );
       // The clock has to measure the generation, not the wait before it: the
       // block was stamped when it rendered, possibly a whole reply ago.
-      expect(imgGenPlaceholderJs, contains('function restartTimer(block)'));
+      expect(
+        imgGenPlaceholderJs,
+        contains('function restartTimer(block)'),
+      );
       expect(
         imgGenPlaceholderJs,
         contains('timer.dataset.start = String(start)'),
@@ -1533,23 +1507,27 @@ void main() {
       // The start belongs to the generation, not to the element showing
       // it: every render replaces the placeholder, and the formatter
       // memoizes the stamp baked into its HTML, so neither can hold it.
-      expect(imgGenPlaceholderJs, contains('const clockStarts = new Map()'));
+      expect(
+        imgGenPlaceholderJs,
+        contains('const clockStarts = new Map()'),
+      );
       expect(
         imgGenPlaceholderJs,
         contains('function resumeTimer(block, messageId)'),
-        reason:
-            'a re-render mid-generation must find the clock it left '
+        reason: 'a re-render mid-generation must find the clock it left '
             'running, not start a new one',
       );
       expect(
         imgGenPlaceholderJs,
         contains('function pruneClocks()'),
-        reason:
-            'and a retry must start from zero, so the entry has to go '
+        reason: 'and a retry must start from zero, so the entry has to go '
             'once the block stops being pending',
       );
       // The flip carries no re-render of its own, so the bridge drives it.
-      expect(bridgeControllerJs, contains('refreshImgGenPlaceholderState()'));
+      expect(
+        bridgeControllerJs,
+        contains('refreshImgGenPlaceholderState()'),
+      );
       expect(bridgeControllerJs, contains('setImageGenerating(value)'));
       // A hidden clock must not hold the ticker's interval open.
       expect(
@@ -1578,9 +1556,9 @@ void main() {
       );
       // Both render paths re-isolate: a search pass rewrites innerHTML too.
       expect(
-        RegExp(
-          r'isolateImgGenPlaceholders\(root(, [A-Za-z.]+)?\)',
-        ).allMatches(rendererJs).length,
+        RegExp(r'isolateImgGenPlaceholders\(root(, [A-Za-z.]+)?\)')
+            .allMatches(rendererJs)
+            .length,
         greaterThanOrEqualTo(2),
       );
       // The id is passed, not looked up: a section is built and written
@@ -1598,7 +1576,10 @@ void main() {
       // once the placeholder is isolated, so a flat query never sees them.
       expect(imgGenTimerJs, contains('_updateIn(root, now)'));
       expect(imgGenTimerJs, contains('block.shadowRoot'));
-      expect(imgGenTimerJs, contains(r"querySelectorAll('.imggen-loading')"));
+      expect(
+        imgGenTimerJs,
+        contains(r"querySelectorAll('.imggen-loading')"),
+      );
     });
 
     test('a failed local image re-requests itself', () {
@@ -1638,9 +1619,7 @@ void main() {
       expect(formatterProtectJs, contains('function markdownImageCard('));
       expect(
         formatterProtectJs,
-        contains(
-          "store.hold({ kind: 'html', html: markdownImageCard(alt, url) })",
-        ),
+        contains("store.hold({ kind: 'html', html: markdownImageCard(alt, url) })"),
       );
     });
 
@@ -1886,7 +1865,9 @@ void main() {
       expect(wheelSection, contains('_scaledWheelDelta(e, textarea)'));
       expect(
         editControllerJs,
-        contains('if (e.deltaMode === 0) return e.deltaY * WHEEL_PIXEL_SCALE'),
+        contains(
+          'if (e.deltaMode === 0) return e.deltaY * WHEEL_PIXEL_SCALE',
+        ),
       );
       expect(
         editControllerJs,
@@ -2006,14 +1987,8 @@ void main() {
       // A quick flick rarely travels THRESHOLD px; without a velocity check it
       // snapped back and stayed on the same greeting / swipe.
       expect(swipeHandlerJs, contains('FLICK_VELOCITY'));
-      expect(
-        swipeHandlerJs,
-        contains('const goNext = dx < -THRESHOLD || flick < 0;'),
-      );
-      expect(
-        swipeHandlerJs,
-        contains('const goPrev = dx > THRESHOLD || flick > 0;'),
-      );
+      expect(swipeHandlerJs, contains('const goNext = dx < -THRESHOLD || flick < 0;'));
+      expect(swipeHandlerJs, contains('const goPrev = dx > THRESHOLD || flick > 0;'));
       expect(swipeHandlerJs, isNot(contains('if (dx < -THRESHOLD')));
     });
   });
@@ -2258,9 +2233,7 @@ void main() {
       final embedJs = _rendererAsset('image_embed.js');
       expect(
         embedJs,
-        contains(
-          "wrap.className = 'msg-image-attachment tavo-message-attachments'",
-        ),
+        contains("wrap.className = 'msg-image-attachment tavo-message-attachments'"),
       );
       expect(
         rendererMessageJs,
@@ -2390,22 +2363,15 @@ void main() {
           "} from './message_document.js';",
         ),
       );
-      expect(
-        markdownJs,
-        contains('installMessageDocument(root, { allowMessageScripts })'),
-      );
+      expect(markdownJs, contains('installMessageDocument(root, { allowMessageScripts })'));
       expect(
         messageDocumentJs,
-        contains(
-          "import { rewriteTargetSelectors } from './target_toggle.js';",
-        ),
+        contains("import { rewriteTargetSelectors } from './target_toggle.js';"),
       );
       expect(messageDocumentJs, contains('rewriteTargetSelectors(root);'));
       expect(
         rendererMessageJs,
-        contains(
-          "import { rewriteTargetSelectors } from './target_toggle.js';",
-        ),
+        contains("import { rewriteTargetSelectors } from './target_toggle.js';"),
       );
       expect(rendererMessageJs, contains('rewriteTargetSelectors(root);'));
     });
@@ -2422,21 +2388,19 @@ void main() {
       );
     });
 
-    test(
-      'a fragment link toggles in its own root; other links reach Flutter',
-      () {
-        expect(interactionDispatchJs, contains("href.startsWith('#')"));
-        expect(
-          interactionDispatchJs,
-          contains('_toggleFragmentTarget(link, href.slice(1))'),
-        );
-        expect(interactionDispatchJs, contains('link.getRootNode()'));
-        expect(
-          interactionDispatchJs,
-          contains("_sendToFlutter('onLinkClick', [link.href])"),
-        );
-      },
-    );
+    test('a fragment link toggles in its own root; other links reach Flutter',
+        () {
+      expect(interactionDispatchJs, contains("href.startsWith('#')"));
+      expect(
+        interactionDispatchJs,
+        contains('_toggleFragmentTarget(link, href.slice(1))'),
+      );
+      expect(interactionDispatchJs, contains('link.getRootNode()'));
+      expect(
+        interactionDispatchJs,
+        contains("_sendToFlutter('onLinkClick', [link.href])"),
+      );
+    });
   });
 
   // ─── What a card may rely on inside a message shadow root ─────────────────
@@ -2456,8 +2420,7 @@ void main() {
       expect(
         body,
         contains('REAL_HEAD.appendChild(element)'),
-        reason:
-            'document.head is the message root while the scope is on, and '
+        reason: 'document.head is the message root while the scope is on, and '
             'a script appended to a shadow root never runs',
       );
     });
@@ -2474,9 +2437,7 @@ void main() {
       );
       expect(
         body,
-        contains(
-          'for (const { target, name } of defined) delete target[name];',
-        ),
+        contains('for (const { target, name } of defined) delete target[name];'),
       );
     });
 
@@ -2519,15 +2480,10 @@ void main() {
       // message's stylesheet instead of rendering naked in the app chrome.
       expect(
         messageDocumentJs,
-        contains(
-          "define(document, 'body', { get: () => messageOverlay(root) })",
-        ),
+        contains("define(document, 'body', { get: () => messageOverlay(root) })"),
       );
       expect(messageDocumentJs, contains('export function appBody()'));
-      expect(
-        rendererJs,
-        contains('.glaze-message-overlay { display: contents; }'),
-      );
+      expect(rendererJs, contains('.glaze-message-overlay { display: contents; }'));
       // App chrome appended during a message event has to say so, or it lands
       // inside somebody's card.
       expect(selectionManagerJs, contains('appBody().appendChild'));
@@ -2558,10 +2514,7 @@ void main() {
       // It ends as the event reaches the shadow host, so the app's own
       // listeners after it see the app's document; the microtask and the
       // browser's own timeout are the backstops.
-      expect(
-        messageDocumentJs,
-        contains('host.addEventListener(type, finish)'),
-      );
+      expect(messageDocumentJs, contains('host.addEventListener(type, finish)'));
       expect(messageDocumentJs, contains('queueMicrotask(finish)'));
       expect(messageDocumentJs, contains('REAL_SET_TIMEOUT(finish, 0)'));
       // …and only for a message whose own code has actually run, so the app's
@@ -2600,11 +2553,8 @@ void main() {
       expect(cssDiagnosticsJs, contains('@(page|namespace)'));
       expect(
         cssSanitizerJs,
-        contains(
-          '// @import, @font-face, @page, @namespace, @charset and anything unknown.',
-        ),
-        reason:
-            'the sanitizer still strips the rule from message CSS itself; '
+        contains('// @import, @font-face, @page, @namespace, @charset and anything unknown.'),
+        reason: 'the sanitizer still strips the rule from message CSS itself; '
             'the hoist reads the source before it runs',
       );
     });
@@ -2613,10 +2563,7 @@ void main() {
       // INV-MR5: Chromium ignores @font-face inside a shadow root. A rule
       // whose sources are all data:, https: or local() is copied into the
       // document head; anything else is refused and reported.
-      expect(
-        messageDocumentJs,
-        contains('export function hoistStyleFontFaces('),
-      );
+      expect(messageDocumentJs, contains('export function hoistStyleFontFaces('));
       final body = _extractBlockBody(
         messageDocumentJs,
         messageDocumentJs.indexOf(
@@ -2634,6 +2581,7 @@ void main() {
       );
     });
   });
+
 
   // ─── GenTimer extraction (Phase 3.5) ───────────────────────────────────────
   group('GenTimer (bridge.js)', () {
@@ -2969,9 +2917,7 @@ void main() {
     test('renderer always creates the actions button', () {
       expect(
         rendererMessageJs,
-        contains(
-          "actions.className = 'msg-actions-btn tavo-action-bar-button'",
-        ),
+        contains("actions.className = 'msg-actions-btn tavo-action-bar-button'"),
       );
       expect(rendererMessageJs, isNot(contains('shouldHideActions()')));
     });
@@ -3097,10 +3043,7 @@ void main() {
       expect(setIdx, isNot(-1));
       final setBody = _extractBlockBody(bridgeControllerJs, setIdx);
       expect(setBody, contains('this._parkedPlaceholder'));
-      expect(
-        setBody,
-        contains('_reattachStreamingPlaceholder(carriedPlaceholder)'),
-      );
+      expect(setBody, contains('_reattachStreamingPlaceholder(carriedPlaceholder)'));
     });
 
     test('a leftover bubble can be retired without an exit animation', () {
@@ -3152,15 +3095,11 @@ void main() {
       // and it outlives the run that produced it.
       expect(guard, contains('this._placeholderActive'));
 
-      final removeIdx = bridgeControllerJs.indexOf(
-        'removeMessage(messageId) {',
-      );
+      final removeIdx = bridgeControllerJs.indexOf('removeMessage(messageId) {');
       expect(removeIdx, isNot(-1));
       expect(
         _extractBlockBody(bridgeControllerJs, removeIdx),
-        contains(
-          'if (messageId === STREAMING_ID) this._placeholderActive = false',
-        ),
+        contains('if (messageId === STREAMING_ID) this._placeholderActive = false'),
       );
 
       final setIdx = bridgeControllerJs.indexOf(

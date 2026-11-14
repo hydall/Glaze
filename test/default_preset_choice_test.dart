@@ -50,7 +50,10 @@ void main() {
   test('the default is a preset the app actually ships', () {
     // It is chosen by id before the featured seeding has necessarily run, so
     // nothing at runtime would catch a typo here.
-    expect(featuredPresets.map((f) => f.id), contains(defaultPresetId));
+    expect(
+      featuredPresets.map((f) => f.id),
+      contains(defaultPresetId),
+    );
   });
 
   group('applyFirstRunPresetChoice', () {

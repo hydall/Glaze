@@ -102,7 +102,11 @@ class _StubChat extends ChatNotifier {
 
   @override
   Future<ChatState> build() async => const ChatState(
-    session: ChatSession(id: _sessionId, characterId: _charId, sessionIndex: 0),
+    session: ChatSession(
+      id: _sessionId,
+      characterId: _charId,
+      sessionIndex: 0,
+    ),
   );
 }
 
@@ -117,16 +121,25 @@ Future<AppDatabase> _seedDb() async {
     book.copyWith(
       entries: [
         _entry('e1', 'Переезд в Кестрел', '14–28', ['кестрел', 'дорога']),
-        _entry('e2', 'Договор с гильдией', '29–41', [
-          'гильдия',
-          'печать',
-        ], status: 'needs_rebuild'),
+        _entry(
+          'e2',
+          'Договор с гильдией',
+          '29–41',
+          ['гильдия', 'печать'],
+          status: 'needs_rebuild',
+        ),
         _entry('e3', 'Первая встреча с Аллой', '1–13', ['алла', 'таверна']),
         _entry('e4', 'Кража в порту', '42–55', ['порт', 'ключ'], messages: 13),
       ],
       pendingDrafts: [
         _draft('d1', 'Ночной разговор у костра', '56–68'),
-        _draft('d2', '', '69–80', status: 'pending_generation', content: ''),
+        _draft(
+          'd2',
+          '',
+          '69–80',
+          status: 'pending_generation',
+          content: '',
+        ),
       ],
     ),
   );
@@ -298,4 +311,5 @@ void main() {
       reason: 'the memory sheet keeps rebuilding after it has settled',
     );
   });
+
 }

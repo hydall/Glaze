@@ -11,8 +11,12 @@ import 'package:glaze_flutter/features/chat/widgets/chat_webview_build_listeners
 /// duplicate full render of every first open — a large chat shows that as the
 /// chat reloading a moment after it opens.
 void main() {
-  PresetRegex regex(String id, {bool disabled = false}) =>
-      PresetRegex(id: id, name: id, regex: 'x', disabled: disabled);
+  PresetRegex regex(String id, {bool disabled = false}) => PresetRegex(
+    id: id,
+    name: id,
+    regex: 'x',
+    disabled: disabled,
+  );
 
   group('displayRegexResyncNeeded', () {
     test('the list\'s first load is not a stale render', () {

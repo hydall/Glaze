@@ -6,16 +6,13 @@ import 'package:glaze_flutter/core/llm/lorebook_scanner.dart';
 ChatMessage _message(String id, String content) =>
     ChatMessage(id: id, role: 'user', content: content);
 
-LorebookEntry _entry(
-  String id, {
-  required List<String> keys,
-  String? content,
-}) => LorebookEntry(
-  id: id,
-  keys: keys,
-  content: content ?? 'content of $id',
-  order: 0,
-);
+LorebookEntry _entry(String id, {required List<String> keys, String? content}) =>
+    LorebookEntry(
+      id: id,
+      keys: keys,
+      content: content ?? 'content of $id',
+      order: 0,
+    );
 
 Lorebook _book(List<LorebookEntry> entries, {LorebookSettings? settings}) =>
     Lorebook(
@@ -124,9 +121,7 @@ void main() {
         history: [_message('m1', 'nothing relevant')],
         textToScan: 'tell me about the kingdom',
         lorebooks: [
-          _book([
-            _entry('realm', keys: ['kingdom']),
-          ]),
+          _book([_entry('realm', keys: ['kingdom'])]),
         ],
       );
 
@@ -159,17 +154,13 @@ void main() {
       final shallow = _scan(
         history: history,
         lorebooks: [
-          _book([
-            _entry('queen', keys: ['Alicia']).copyWith(scanDepth: 2),
-          ]),
+          _book([_entry('queen', keys: ['Alicia']).copyWith(scanDepth: 2)]),
         ],
       );
       final deep = _scan(
         history: history,
         lorebooks: [
-          _book([
-            _entry('queen', keys: ['Alicia']).copyWith(scanDepth: 40),
-          ]),
+          _book([_entry('queen', keys: ['Alicia']).copyWith(scanDepth: 40)]),
         ],
       );
 

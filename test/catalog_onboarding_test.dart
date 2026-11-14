@@ -85,30 +85,29 @@ void main() {
     expect(find.text('Start browsing'), findsOneWidget);
   });
 
-  testWidgets(
-    'Chub only: NSFL is the third step and there is no Janitor step',
-    (tester) async {
-      await pumpSheet(
-        tester,
-        prefs: {
-          'gz_disabled_third_party_providers': disabled(
-            chub: true,
-            janitor: false,
-          ),
-        },
-      );
+  testWidgets('Chub only: NSFL is the third step and there is no Janitor step', (
+    tester,
+  ) async {
+    await pumpSheet(
+      tester,
+      prefs: {
+        'gz_disabled_third_party_providers': disabled(
+          chub: true,
+          janitor: false,
+        ),
+      },
+    );
 
-      await tapNext(tester);
-      expect(find.text('Choose your catalogs'), findsOneWidget);
-      expect(find.text('Chub'), findsOneWidget);
+    await tapNext(tester);
+    expect(find.text('Choose your catalogs'), findsOneWidget);
+    expect(find.text('Chub'), findsOneWidget);
 
-      await tapNext(tester);
-      expect(find.text('Unlock NSFL on Chub'), findsOneWidget);
-      expect(find.text('Sign in to Chub'), findsOneWidget);
-      expect(find.text('Reading JanitorAI cards'), findsNothing);
-      expect(find.text('Start browsing'), findsOneWidget);
-    },
-  );
+    await tapNext(tester);
+    expect(find.text('Unlock NSFL on Chub'), findsOneWidget);
+    expect(find.text('Sign in to Chub'), findsOneWidget);
+    expect(find.text('Reading JanitorAI cards'), findsNothing);
+    expect(find.text('Start browsing'), findsOneWidget);
+  });
 
   testWidgets('Chub and Janitor: NSFL is step three, the source follows', (
     tester,

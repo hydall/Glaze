@@ -418,9 +418,8 @@ void main() {
           stampVolatileState: false,
         )
         .identity;
-    await (db.update(db.rewriteJobs)..where((t) => t.id.equals('job'))).write(
-      RewriteJobsCompanion(canonStamp: Value(stableStamp)),
-    );
+    await (db.update(db.rewriteJobs)..where((t) => t.id.equals('job')))
+        .write(RewriteJobsCompanion(canonStamp: Value(stableStamp)));
     return stableStamp;
   }
 

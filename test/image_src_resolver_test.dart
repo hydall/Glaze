@@ -21,23 +21,22 @@ void main() {
     test('decodes percent-encoded data URIs', () {
       final provider = imageProviderForSrc('data:image/svg+xml,%3Csvg%3E');
       expect(provider, isA<MemoryImage>());
-      expect(String.fromCharCodes((provider as MemoryImage).bytes), '<svg>');
+      expect(
+        String.fromCharCodes((provider as MemoryImage).bytes),
+        '<svg>',
+      );
     });
 
     test('returns null for a malformed data URI instead of throwing', () {
-      expect(
-        imageProviderForSrc('data:image/png;base64,!!!not-base64!!!'),
-        isNull,
-      );
+      expect(imageProviderForSrc('data:image/png;base64,!!!not-base64!!!'),
+          isNull);
     });
 
     test('remote URLs go through the shared network image cache', () {
       final provider = imageProviderForSrc('https://example.com/a.png');
       expect(provider, isA<CachedNetworkImageProvider>());
-      expect(
-        (provider as CachedNetworkImageProvider).url,
-        'https://example.com/a.png',
-      );
+      expect((provider as CachedNetworkImageProvider).url,
+          'https://example.com/a.png');
       expect(provider.headers?['User-Agent'], isNotNull);
     });
 
@@ -46,10 +45,8 @@ void main() {
       // happily serving the WebView, which always fetches as a sub-resource
       // of a real page and so always sends one.
       final provider = imageProviderForSrc('https://cdn.example.com/a.webp');
-      expect(
-        (provider as CachedNetworkImageProvider).headers?['Referer'],
-        'https://cdn.example.com/',
-      );
+      expect((provider as CachedNetworkImageProvider).headers?['Referer'],
+          'https://cdn.example.com/');
     });
 
     test('surrounding whitespace does not turn a URL into a file path', () {
@@ -60,12 +57,11 @@ void main() {
     });
 
     test('loopback __glaze_file__ URLs read the file directly', () {
-      final path = Platform.isWindows
-          ? r'C:\Glaze\avatars\a.png'
-          : '/tmp/a.png';
-      final url = Uri.parse('http://127.0.0.1:51234/')
-          .replace(path: '/__glaze_file__', queryParameters: {'path': path})
-          .toString();
+      final path = Platform.isWindows ? r'C:\Glaze\avatars\a.png' : '/tmp/a.png';
+      final url = Uri.parse('http://127.0.0.1:51234/').replace(
+        path: '/__glaze_file__',
+        queryParameters: {'path': path},
+      ).toString();
 
       final provider = imageProviderForSrc(url);
       expect(provider, isA<FileImage>());
@@ -74,9 +70,7 @@ void main() {
 
     test('file:// URLs resolve to a FileImage', () {
       final provider = imageProviderForSrc(
-        Uri.file(
-          Platform.isWindows ? r'C:\tmp\a.png' : '/tmp/a.png',
-        ).toString(),
+        Uri.file(Platform.isWindows ? r'C:\tmp\a.png' : '/tmp/a.png').toString(),
       );
       expect(provider, isA<FileImage>());
       expect((provider as FileImage).file.path, endsWith('a.png'));

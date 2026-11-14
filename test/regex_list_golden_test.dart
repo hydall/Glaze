@@ -105,11 +105,9 @@ Future<ProviderContainer> _container(
             _rx('p1', 'Narration colour', r'/\*(.+?)\*/g'),
             _rx('p2', 'Dialogue quotes', r'/"(.+?)"/g'),
             _rx('p3', 'Scene break', r'/^---$/gm', off: true),
-            _rx(
-              'p4',
-              'Bold names',
-              r'/\b([A-Z]\w+):/g',
-            ).copyWith(folderId: 'pf1'),
+            _rx('p4', 'Bold names', r'/\b([A-Z]\w+):/g').copyWith(
+              folderId: 'pf1',
+            ),
             _rx('p5', 'Em dashes', r'/--/g').copyWith(folderId: 'pf1'),
           ],
         ),
@@ -231,9 +229,8 @@ void main() {
     };
     container.read(routerProvider).go('/characters');
     await pumpNavigation(tester);
-    container.read(rightSidebarPanelProvider.notifier).state = sidebarToolPanel(
-      'regex',
-    );
+    container.read(rightSidebarPanelProvider.notifier).state =
+        sidebarToolPanel('regex');
     await pumpNavigation(tester);
     FlutterError.onError = onError;
     await _settle(tester);

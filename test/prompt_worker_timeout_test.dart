@@ -41,7 +41,10 @@ void main() {
   group('the budget scales with the payload', () {
     test('an ordinary chat keeps the ordinary budget', () {
       expect(timeoutForPayload(0, base: base, cap: cap), base);
-      expect(timeoutForPayload(64 * 1024, base: base, cap: cap).inSeconds, 60);
+      expect(
+        timeoutForPayload(64 * 1024, base: base, cap: cap).inSeconds,
+        60,
+      );
     });
 
     test('a megabyte buys fifteen seconds', () {
@@ -76,7 +79,11 @@ void main() {
       // `PromptWorker.requestTimeout` is the documented override; scaling has
       // to be relative to it, not to a hard-coded minute.
       expect(
-        timeoutForPayload(0, base: const Duration(milliseconds: 150), cap: cap),
+        timeoutForPayload(
+          0,
+          base: const Duration(milliseconds: 150),
+          cap: cap,
+        ),
         const Duration(milliseconds: 150),
       );
     });

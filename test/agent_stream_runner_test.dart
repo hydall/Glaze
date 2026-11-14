@@ -160,32 +160,26 @@ void main() {
 
     expect(request.messages, messages);
     expect(request.messages.single['content'], contains('<think>'));
-    expect(
-      request.messages.single['content'],
-      isNot(contains('hidden reasoning')),
-    );
+    expect(request.messages.single['content'], isNot(contains('hidden reasoning')));
   });
 
-  test(
-    'final request still neutralizes think tags without a configured pair',
-    () {
-      final request = AgentStreamRunner.buildRequest(
-        agent: _agent,
-        messages: const [
-          {
-            'role': 'system',
-            'content': 'Use <think>reasoning</think> before the response.',
-          },
-        ],
-        resolved: _resolved,
-        sessionId: 'session',
-        isFinalResponse: true,
-      );
+  test('final request still neutralizes think tags without a configured pair', () {
+    final request = AgentStreamRunner.buildRequest(
+      agent: _agent,
+      messages: const [
+        {
+          'role': 'system',
+          'content': 'Use <think>reasoning</think> before the response.',
+        },
+      ],
+      resolved: _resolved,
+      sessionId: 'session',
+      isFinalResponse: true,
+    );
 
-      expect(request.messages.single['content'], contains('hidden reasoning'));
-      expect(request.messages.single['content'], isNot(contains('<think>')));
-    },
-  );
+    expect(request.messages.single['content'], contains('hidden reasoning'));
+    expect(request.messages.single['content'], isNot(contains('<think>')));
+  });
 
   test(
     'non-streaming inline reasoning tags are split out of the reply',

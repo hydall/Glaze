@@ -50,6 +50,8 @@ void main() {
   test('the main window is never released', () {
     surfaces().release(kDesktopMainSurface);
 
-    expect(container.read(desktopActiveSurfaceProvider), [kDesktopMainSurface]);
+    expect(container.read(desktopActiveSurfaceProvider), [
+      kDesktopMainSurface,
+    ]);
   });
 }

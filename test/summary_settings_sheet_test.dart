@@ -461,7 +461,9 @@ void main() {
       );
       // The summary itself is untouched by the switch.
       expect(
-        (await container.read(summaryServiceProvider).getBlocks(_sessionId))
+        (await container
+                .read(summaryServiceProvider)
+                .getBlocks(_sessionId))
             .single
             .content,
         'They reached the pass after dark.',

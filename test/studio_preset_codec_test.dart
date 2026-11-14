@@ -155,9 +155,9 @@ void main() {
 
     expect(structured.prefillStyle, 'structured');
     expect(
-      StudioPresetCodec.canonicalizeBlockJson(
-        structured.toJson(),
-      )['prefillStyle'],
+      StudioPresetCodec.canonicalizeBlockJson(structured.toJson())[
+        'prefillStyle'
+      ],
       'structured',
     );
     expect(legacy.prefillStyle, 'tool');

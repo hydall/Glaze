@@ -11,11 +11,7 @@ void main() {
     firstChunkTimeoutMs: 240000,
   );
   // A connection whose provider caps output well below the default.
-  const capped = ApiConfig(
-    id: 'capped',
-    model: 'capped-model',
-    maxTokens: 6000,
-  );
+  const capped = ApiConfig(id: 'capped', model: 'capped-model', maxTokens: 6000);
 
   test('uses selected Memory Books connection without changing active', () {
     const resolver = MemoryBookApiConfigResolver(

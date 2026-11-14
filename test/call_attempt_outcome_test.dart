@@ -62,39 +62,27 @@ void main() {
 
   test('a timeout, a closed connection and a dead socket each say so', () {
     expect(callAttemptStatus(TimeoutException('idle')), 'timeout');
-    expect(
-      callAttemptStatus(const HttpException('closed')),
-      'connection_closed',
-    );
-    expect(
-      callAttemptStatus(const SocketException('no route')),
-      'socket_error',
-    );
+    expect(callAttemptStatus(const HttpException('closed')), 'connection_closed');
+    expect(callAttemptStatus(const SocketException('no route')), 'socket_error');
   });
 
-  test(
-    'a failure with no response, and anything unrecognised, carry code 0',
-    () {
-      expect(callAttemptStatus(dioWith(null)), 'error');
-      expect(callAttemptStatusCode(dioWith(null)), 0);
-      expect(callAttemptStatus(Exception('something else')), 'error');
-      expect(callAttemptStatusCode(Exception('something else')), 0);
-    },
-  );
+  test('a failure with no response, and anything unrecognised, carry code 0', () {
+    expect(callAttemptStatus(dioWith(null)), 'error');
+    expect(callAttemptStatusCode(dioWith(null)), 0);
+    expect(callAttemptStatus(Exception('something else')), 'error');
+    expect(callAttemptStatusCode(Exception('something else')), 0);
+  });
 
-  test(
-    'error text is bounded, so an HTML error page is not stored per attempt',
-    () {
-      final attempt = describeCallAttempt(
-        attempt: 1,
-        startedAtMs: 0,
-        elapsedMs: 1,
-        error: Exception('x' * 5000),
-      );
-      expect(attempt.error!.length, lessThanOrEqualTo(501));
-      expect(attempt.error, endsWith('…'));
-    },
-  );
+  test('error text is bounded, so an HTML error page is not stored per attempt', () {
+    final attempt = describeCallAttempt(
+      attempt: 1,
+      startedAtMs: 0,
+      elapsedMs: 1,
+      error: Exception('x' * 5000),
+    );
+    expect(attempt.error!.length, lessThanOrEqualTo(501));
+    expect(attempt.error, endsWith('…'));
+  });
 
   test('a short error is kept whole', () {
     expect(boundedAttemptError(Exception('brief')), isNot(endsWith('…')));

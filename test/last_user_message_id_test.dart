@@ -26,11 +26,7 @@ void main() {
     });
 
     test('returns the id when the trailing message is a user message', () {
-      final msgs = [
-        _msg('u1', 'user'),
-        _msg('c1', 'assistant'),
-        _msg('u2', 'user'),
-      ];
+      final msgs = [_msg('u1', 'user'), _msg('c1', 'assistant'), _msg('u2', 'user')];
       expect(lastUserMessageId(msgs), 'u2');
     });
 

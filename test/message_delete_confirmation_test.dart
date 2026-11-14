@@ -63,9 +63,8 @@ Future<void> _pumpButton(
 }
 
 void main() {
-  testWidgets('plain chat warns only about the messages themselves', (
-    tester,
-  ) async {
+  testWidgets('plain chat warns only about the messages themselves',
+      (tester) async {
     bool? result;
     await _pumpButton(
       tester,
@@ -78,9 +77,18 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('delete_messages_title'), findsOneWidget);
-    expect(find.textContaining('delete_messages_warning_base'), findsOneWidget);
-    expect(find.textContaining('delete_messages_warning_agents'), findsNothing);
-    expect(find.textContaining('delete_messages_warning_memory'), findsNothing);
+    expect(
+      find.textContaining('delete_messages_warning_base'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('delete_messages_warning_agents'),
+      findsNothing,
+    );
+    expect(
+      find.textContaining('delete_messages_warning_memory'),
+      findsNothing,
+    );
     expect(
       find.textContaining('delete_messages_warning_confirm'),
       findsOneWidget,

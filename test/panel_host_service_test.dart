@@ -12,15 +12,12 @@ class _FakeBridge implements ChatBridgeController {
   String? openThrows;
 
   @override
-  void Function(String panelId, String messageId, double height)? onPanelResize;
+  void Function(String panelId, String messageId, double height)?
+      onPanelResize;
   @override
-  void Function(
-    String panelId,
-    String messageId,
-    String event,
-    Map<String, dynamic> payload,
-  )?
-  onPanelEvent;
+  void Function(String panelId, String messageId, String event,
+          Map<String, dynamic> payload)?
+      onPanelEvent;
 
   /// Returns a fresh remote id for every call. Tests that expect
   /// `null` should set [nextPanelId] explicitly to null before calling.
@@ -59,7 +56,8 @@ class _FakeBridge implements ChatBridgeController {
     required String panelId,
     required String method,
     Map<String, dynamic> params = const {},
-  }) async => true;
+  }) async =>
+      true;
 
   // ── Unused members — throw to surface accidental calls during tests.
   @override

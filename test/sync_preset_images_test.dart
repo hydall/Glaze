@@ -49,8 +49,7 @@ class FakeAdapter implements CloudAdapter {
   Future<String> download(String path) => throw UnimplementedError('download');
 
   @override
-  Future<void> deleteFile(String path) =>
-      throw UnimplementedError('deleteFile');
+  Future<void> deleteFile(String path) => throw UnimplementedError('deleteFile');
 
   @override
   Future<void> deleteFolder(String path) =>
@@ -217,11 +216,9 @@ void main() {
 
   group('pullPresetImages', () {
     test('downloads a cover this device does not have yet', () async {
-      adapter.binaries[presetImageCloudPath('p1', 'png')] = Uint8List.fromList([
-        4,
-        5,
-        6,
-      ]);
+      adapter.binaries[presetImageCloudPath('p1', 'png')] = Uint8List.fromList(
+        [4, 5, 6],
+      );
       presets.data['p1'] = const Preset(
         id: 'p1',
         name: 'P1',
@@ -254,11 +251,9 @@ void main() {
       // Another device replaced the image: the version suffix changed, so the
       // old local file no longer satisfies the preset.
       writeCover('avatars/preset_p1_10.png', [1, 2, 3]);
-      adapter.binaries[presetImageCloudPath('p1', 'png')] = Uint8List.fromList([
-        9,
-        9,
-        9,
-      ]);
+      adapter.binaries[presetImageCloudPath('p1', 'png')] = Uint8List.fromList(
+        [9, 9, 9],
+      );
       presets.data['p1'] = const Preset(
         id: 'p1',
         name: 'P1',

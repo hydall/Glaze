@@ -6,8 +6,7 @@ void main() {
   const loomConfig = BlockConfig(
     id: '1',
     name: 'loomledger',
-    template:
-        '<loomledger>\n<details><summary>Title</summary>\n\n</details>\n</loomledger>',
+    template: '<loomledger>\n<details><summary>Title</summary>\n\n</details>\n</loomledger>',
   );
 
   test('extracts inner HTML without re-wrapping outer tag', () {
@@ -24,27 +23,18 @@ void main() {
   });
 
   test('empty tag pair returns null for fallback', () {
-    expect(
-      extractBlockInnerContent('<loomledger></loomledger>', 'loomledger'),
-      isNull,
-    );
-    expect(
-      extractBlockInnerContent('<loomledger>   </loomledger>', 'loomledger'),
-      isNull,
-    );
+    expect(extractBlockInnerContent('<loomledger></loomledger>', 'loomledger'), isNull);
+    expect(extractBlockInnerContent('<loomledger>   </loomledger>', 'loomledger'), isNull);
   });
 
-  test(
-    'resolveBlockContent rejects empty tags even when outer string is non-empty',
-    () {
-      final result = resolveBlockContent(
-        rawResponse: '<loomledger></loomledger>',
-        blockConfig: loomConfig,
-        resolvedTemplate: loomConfig.template,
-      );
-      expect(result, isNull);
-    },
-  );
+  test('resolveBlockContent rejects empty tags even when outer string is non-empty', () {
+    final result = resolveBlockContent(
+      rawResponse: '<loomledger></loomledger>',
+      blockConfig: loomConfig,
+      resolvedTemplate: loomConfig.template,
+    );
+    expect(result, isNull);
+  });
 
   test('resolveBlockContent falls back to raw when tags missing', () {
     const raw = '<details><summary>X</summary><p>Body</p></details>';
@@ -73,8 +63,7 @@ void main() {
       name: 'image_lite',
       template: '<image_lite>\n...\n</image_lite>',
     );
-    const raw =
-        '<image_lite>\n'
+    const raw = '<image_lite>\n'
         '<img data-iig-instruction=\'{"prompt":"x"}\' src="[IMG:GEN]" />\n'
         '</image_lite>';
     final result = resolveBlockContent(
@@ -99,10 +88,7 @@ void main() {
       template: '<loomledger></loomledger>',
     );
     expect(
-      extractBlockInnerContent(
-        '<loomledger>ok</loomledger>',
-        blockTagName(cfg, cfg.template),
-      ),
+      extractBlockInnerContent('<loomledger>ok</loomledger>', blockTagName(cfg, cfg.template)),
       'ok',
     );
   });

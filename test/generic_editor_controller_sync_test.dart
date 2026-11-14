@@ -72,7 +72,10 @@ void main() {
 
       expect(tester.takeException(), isNull);
       expect(key.currentState!.onChangedCalls, 0);
-      expect(find.text('a summary that was already saved'), findsOneWidget);
+      expect(
+        find.text('a summary that was already saved'),
+        findsOneWidget,
+      );
     },
   );
 }

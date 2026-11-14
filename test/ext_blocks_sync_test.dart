@@ -1017,7 +1017,9 @@ void main() {
       final world = SyncWorld();
 
       await world.extensionPresets.put(makeExtPreset('ep1', name: 'My Preset'));
-      await world.extensionsSettings.put(makeSettings(activePresetId: 'ep1'));
+      await world.extensionsSettings.put(
+        makeSettings(activePresetId: 'ep1'),
+      );
       await world.infoBlocks.insert(makeInfoBlock('ib1', 'session1'));
 
       final manifest = await world.manifestProvider.buildLocalManifest();

@@ -80,11 +80,10 @@ void main() {
       });
 
       test('keeps the user data it started with', () async {
-        Future<int> count(String table) async =>
-            (await upgraded
-                    .customSelect('SELECT COUNT(*) AS c FROM $table')
-                    .getSingle())
-                .read<int>('c');
+        Future<int> count(String table) async => (await upgraded
+                .customSelect('SELECT COUNT(*) AS c FROM $table')
+                .getSingle())
+            .read<int>('c');
 
         expect(await count('characters'), 3);
         expect(await count('chat_sessions'), 2);
@@ -131,17 +130,13 @@ Future<Map<String, Object>> _schemaOf(AppDatabase db) async {
         final columns = await db
             .customSelect("PRAGMA table_info('$name')")
             .get();
-        schema['table $name'] =
-            (columns
-                .map(
-                  (c) =>
-                      '${c.read<String>('name')} ${c.read<String>('type')} '
-                      'notnull=${c.read<int>('notnull')} '
-                      'default=${c.readNullable<String>('dflt_value')} '
-                      'pk=${c.read<int>('pk')}',
-                )
-                .toList()
-              ..sort());
+        schema['table $name'] = (columns.map(
+          (c) =>
+              '${c.read<String>('name')} ${c.read<String>('type')} '
+              'notnull=${c.read<int>('notnull')} '
+              'default=${c.readNullable<String>('dflt_value')} '
+              'pk=${c.read<int>('pk')}',
+        ).toList()..sort());
         schema['checks $name'] = _checks(object.read<String>('sql'));
       case 'index':
         final sql = object.readNullable<String>('sql');

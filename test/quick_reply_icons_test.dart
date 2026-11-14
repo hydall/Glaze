@@ -140,7 +140,10 @@ void main() {
     test('the catalog is a set of distinct glyphs', () {
       // Two ids drawing the same icon would give the picker two swatches that
       // look and behave identically.
-      expect(kQuickReplyIcons.values.toSet().length, kQuickReplyIcons.length);
+      expect(
+        kQuickReplyIcons.values.toSet().length,
+        kQuickReplyIcons.length,
+      );
       expect(kQuickReplyIcons, contains('bolt'));
     });
   });

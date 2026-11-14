@@ -55,7 +55,11 @@ void main() {
         TargetPlatform.linux,
       ]) {
         debugDefaultTargetPlatformOverride = platform;
-        expect(chatWebViewTransparentBackground(), isTrue, reason: '$platform');
+        expect(
+          chatWebViewTransparentBackground(),
+          isTrue,
+          reason: '$platform',
+        );
       }
     });
   });

@@ -5,9 +5,7 @@ import 'package:glaze_flutter/core/llm/converters/structured_response.dart';
 void main() {
   test('unwrapStructuredResponse joins prefix and content', () {
     expect(
-      unwrapStructuredResponse(
-        '{"prefix":"<thinking>","content":"hello there"}',
-      ),
+      unwrapStructuredResponse('{"prefix":"<thinking>","content":"hello there"}'),
       '<thinking>hello there',
     );
   });

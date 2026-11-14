@@ -81,10 +81,7 @@ void main() {
 
       await chubSearch(apiKey: '');
 
-      expect(
-        adapter.requests.single.headers.containsKey('CH-API-KEY'),
-        isFalse,
-      );
+      expect(adapter.requests.single.headers.containsKey('CH-API-KEY'), isFalse);
     });
 
     test('the character detail carries the key too', () async {
@@ -270,37 +267,37 @@ void main() {
       container.read(chubAccountProvider);
       await Future<void>.delayed(const Duration(milliseconds: 20));
 
-      await container.read(chubAccountProvider.notifier).setUserName('trinity');
+      await container
+          .read(chubAccountProvider.notifier)
+          .setUserName('trinity');
 
       expect(container.read(chubAccountProvider).apiKey, 'abc');
       expect(container.read(chubAccountProvider).userName, 'trinity');
     });
 
-    test(
-      'the NSFL opt-in persists, survives a key change, clears on logout',
-      () async {
-        SharedPreferences.setMockInitialValues({});
-        final container = ProviderContainer();
-        addTearDown(container.dispose);
-        container.read(chubAccountProvider);
-        await Future<void>.delayed(const Duration(milliseconds: 20));
-        final notifier = container.read(chubAccountProvider.notifier);
-        final prefs = await SharedPreferences.getInstance();
+    test('the NSFL opt-in persists, survives a key change, clears on logout',
+        () async {
+      SharedPreferences.setMockInitialValues({});
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      container.read(chubAccountProvider);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      final notifier = container.read(chubAccountProvider.notifier);
+      final prefs = await SharedPreferences.getInstance();
 
-        await notifier.setApiKey('abc');
-        await notifier.setNsfl(true);
+      await notifier.setApiKey('abc');
+      await notifier.setNsfl(true);
 
-        expect(container.read(chubAccountProvider).nsfl, isTrue);
-        expect(prefs.getBool('gz_chub_nsfl'), isTrue);
+      expect(container.read(chubAccountProvider).nsfl, isTrue);
+      expect(prefs.getBool('gz_chub_nsfl'), isTrue);
 
-        // Replacing the key must not drop the account-level preference.
-        await notifier.setApiKey('def');
-        expect(container.read(chubAccountProvider).nsfl, isTrue);
+      // Replacing the key must not drop the account-level preference.
+      await notifier.setApiKey('def');
+      expect(container.read(chubAccountProvider).nsfl, isTrue);
 
-        await notifier.logout();
-        expect(container.read(chubAccountProvider).nsfl, isFalse);
-        expect(prefs.getBool('gz_chub_nsfl'), isNull);
-      },
-    );
+      await notifier.logout();
+      expect(container.read(chubAccountProvider).nsfl, isFalse);
+      expect(prefs.getBool('gz_chub_nsfl'), isNull);
+    });
   });
 }

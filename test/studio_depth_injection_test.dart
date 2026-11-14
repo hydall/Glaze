@@ -68,7 +68,11 @@ void main() {
         isFinalResponse: true,
       );
 
-      expect(messages.map((m) => m['content']), ['First', 'Second', 'DEPTH0']);
+      expect(messages.map((m) => m['content']), [
+        'First',
+        'Second',
+        'DEPTH0',
+      ]);
     });
 
     test('depth partway through history interleaves at the right spot', () {
@@ -120,9 +124,17 @@ void main() {
       () {
         final context = _context(const [
           PromptMessage(role: 'user', content: 'First', isHistory: true),
-          PromptMessage(role: 'assistant', content: 'Second', isHistory: true),
+          PromptMessage(
+            role: 'assistant',
+            content: 'Second',
+            isHistory: true,
+          ),
           PromptMessage(role: 'user', content: 'Third', isHistory: true),
-          PromptMessage(role: 'assistant', content: 'Fourth', isHistory: true),
+          PromptMessage(
+            role: 'assistant',
+            content: 'Fourth',
+            isHistory: true,
+          ),
         ]);
 
         final messages = builder.buildAgentMessages(
@@ -255,82 +267,91 @@ void main() {
       ]);
     });
 
-    test('depth interleaving keeps reasoning_content on the correct original '
-        'history message after indices shift', () {
-      final context = _context(const [
-        PromptMessage(
-          role: 'assistant',
-          content: 'A1',
-          reasoningContent: 'R1',
-          isHistory: true,
-        ),
-        PromptMessage(role: 'user', content: 'U1', isHistory: true),
-        PromptMessage(
-          role: 'assistant',
-          content: 'A2',
-          reasoningContent: 'R2',
-          isHistory: true,
-        ),
-        PromptMessage(role: 'user', content: 'U2', isHistory: true),
-      ]);
+    test(
+      'depth interleaving keeps reasoning_content on the correct original '
+      'history message after indices shift',
+      () {
+        final context = _context(const [
+          PromptMessage(
+            role: 'assistant',
+            content: 'A1',
+            reasoningContent: 'R1',
+            isHistory: true,
+          ),
+          PromptMessage(role: 'user', content: 'U1', isHistory: true),
+          PromptMessage(
+            role: 'assistant',
+            content: 'A2',
+            reasoningContent: 'R2',
+            isHistory: true,
+          ),
+          PromptMessage(role: 'user', content: 'U2', isHistory: true),
+        ]);
 
-      final messages = builder.buildAgentMessages(
-        agent: const StudioAgent(id: 'final'),
-        context: context,
-        config: config,
-        studioPreset: const StudioPreset(
-          id: 'depth-reasoning',
-          blocks: [
-            StudioPresetBlock(
-              id: 'chat_history',
-              type: StudioBlockType.history,
-              injectionPoint: 'final',
-              order: 0,
-            ),
-            StudioPresetBlock(
-              id: 'depth1',
-              content: 'DEPTH1',
-              insertionMode: 'depth',
-              depth: 1,
-              injectionPoint: 'final',
-              order: 1,
-            ),
-          ],
-        ),
-        priorBriefs: const [],
-        isFinalResponse: true,
-        reasoningHistoryCount: 1,
-      );
+        final messages = builder.buildAgentMessages(
+          agent: const StudioAgent(id: 'final'),
+          context: context,
+          config: config,
+          studioPreset: const StudioPreset(
+            id: 'depth-reasoning',
+            blocks: [
+              StudioPresetBlock(
+                id: 'chat_history',
+                type: StudioBlockType.history,
+                injectionPoint: 'final',
+                order: 0,
+              ),
+              StudioPresetBlock(
+                id: 'depth1',
+                content: 'DEPTH1',
+                insertionMode: 'depth',
+                depth: 1,
+                injectionPoint: 'final',
+                order: 1,
+              ),
+            ],
+          ),
+          priorBriefs: const [],
+          isFinalResponse: true,
+          reasoningHistoryCount: 1,
+        );
 
-      // reasoningHistoryCount: 1 selects only the nearest assistant turn
-      // with non-empty reasoning (A2), scanned against the RAW pre-interleave
-      // history — so it must still be A2 that carries reasoning_content
-      // after DEPTH1 shifts every later index by one.
-      expect(messages.map((m) => m['content']), [
-        'A1',
-        'U1',
-        'A2',
-        'DEPTH1',
-        'U2',
-      ]);
-      final a1 = messages.firstWhere((m) => m['content'] == 'A1');
-      final a2 = messages.firstWhere((m) => m['content'] == 'A2');
-      final depthMsg = messages.firstWhere((m) => m['content'] == 'DEPTH1');
-      expect(a1, isNot(contains('reasoning_content')));
-      expect(a2['reasoning_content'], 'R2');
-      expect(depthMsg, isNot(contains('reasoning_content')));
-      expect(
-        messages.where((m) => m.containsKey('reasoning_content')),
-        hasLength(1),
-      );
-    });
+        // reasoningHistoryCount: 1 selects only the nearest assistant turn
+        // with non-empty reasoning (A2), scanned against the RAW pre-interleave
+        // history — so it must still be A2 that carries reasoning_content
+        // after DEPTH1 shifts every later index by one.
+        expect(messages.map((m) => m['content']), [
+          'A1',
+          'U1',
+          'A2',
+          'DEPTH1',
+          'U2',
+        ]);
+        final a1 = messages.firstWhere((m) => m['content'] == 'A1');
+        final a2 = messages.firstWhere((m) => m['content'] == 'A2');
+        final depthMsg = messages.firstWhere(
+          (m) => m['content'] == 'DEPTH1',
+        );
+        expect(a1, isNot(contains('reasoning_content')));
+        expect(a2['reasoning_content'], 'R2');
+        expect(depthMsg, isNot(contains('reasoning_content')));
+        expect(
+          messages.where((m) => m.containsKey('reasoning_content')),
+          hasLength(1),
+        );
+      },
+    );
 
     test(
       'a depth insertionMode on the history-type block itself is ignored',
       () {
         final context = _context(const [
           PromptMessage(role: 'user', content: 'First', isHistory: true),
-          PromptMessage(role: 'assistant', content: 'Second', isHistory: true),
+          PromptMessage(
+            role: 'assistant',
+            content: 'Second',
+            isHistory: true,
+          ),
         ]);
 
         final messages = builder.buildAgentMessages(
@@ -361,43 +382,50 @@ void main() {
       },
     );
 
-    test('a depth block whose expanded content is empty is skipped entirely', () {
-      final context = _context(const [
-        PromptMessage(role: 'user', content: 'First', isHistory: true),
-        PromptMessage(role: 'assistant', content: 'Second', isHistory: true),
-      ]);
+    test(
+      'a depth block whose expanded content is empty is skipped entirely',
+      () {
+        final context = _context(const [
+          PromptMessage(role: 'user', content: 'First', isHistory: true),
+          PromptMessage(
+            role: 'assistant',
+            content: 'Second',
+            isHistory: true,
+          ),
+        ]);
 
-      final messages = builder.buildAgentMessages(
-        agent: const StudioAgent(id: 'final'),
-        context: context,
-        config: config,
-        studioPreset: const StudioPreset(
-          id: 'depth-empty-content',
-          blocks: [
-            StudioPresetBlock(
-              id: 'chat_history',
-              type: StudioBlockType.history,
-              injectionPoint: 'final',
-              order: 0,
-            ),
-            StudioPresetBlock(
-              id: 'depth_empty',
-              // {{arc}} expands to an empty string with no arc context var
-              // seeded — matches the empty-macro pattern already exercised
-              // by the group-boundary tests in studio_typed_message_builder_test.dart.
-              content: '{{arc}}',
-              insertionMode: 'depth',
-              depth: 0,
-              injectionPoint: 'final',
-              order: 1,
-            ),
-          ],
-        ),
-        priorBriefs: const [],
-        isFinalResponse: true,
-      );
+        final messages = builder.buildAgentMessages(
+          agent: const StudioAgent(id: 'final'),
+          context: context,
+          config: config,
+          studioPreset: const StudioPreset(
+            id: 'depth-empty-content',
+            blocks: [
+              StudioPresetBlock(
+                id: 'chat_history',
+                type: StudioBlockType.history,
+                injectionPoint: 'final',
+                order: 0,
+              ),
+              StudioPresetBlock(
+                id: 'depth_empty',
+                // {{arc}} expands to an empty string with no arc context var
+                // seeded — matches the empty-macro pattern already exercised
+                // by the group-boundary tests in studio_typed_message_builder_test.dart.
+                content: '{{arc}}',
+                insertionMode: 'depth',
+                depth: 0,
+                injectionPoint: 'final',
+                order: 1,
+              ),
+            ],
+          ),
+          priorBriefs: const [],
+          isFinalResponse: true,
+        );
 
-      expect(messages.map((m) => m['content']), ['First', 'Second']);
-    });
+        expect(messages.map((m) => m['content']), ['First', 'Second']);
+      },
+    );
   });
 }

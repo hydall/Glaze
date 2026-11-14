@@ -85,11 +85,7 @@ void main() {
             text: 'dropped',
             disabled: true,
           ),
-          const BlockContextItem(
-            id: '2',
-            type: ContextItemType.text,
-            text: 'kept',
-          ),
+          const BlockContextItem(id: '2', type: ContextItemType.text, text: 'kept'),
         ]),
         messages: const [],
       );
@@ -121,7 +117,10 @@ void main() {
       );
 
       expect(out, [
-        {'role': 'user', 'content': 'hi there\n\nPLAYER: bye'},
+        {
+          'role': 'user',
+          'content': 'hi there\n\nPLAYER: bye',
+        },
       ]);
     });
 
@@ -176,16 +175,8 @@ void main() {
     test('merges consecutive same-role items and splits on role change', () {
       final out = _build(
         blockConfig: _block([
-          const BlockContextItem(
-            id: '1',
-            type: ContextItemType.text,
-            text: 'a',
-          ),
-          const BlockContextItem(
-            id: '2',
-            type: ContextItemType.text,
-            text: 'b',
-          ),
+          const BlockContextItem(id: '1', type: ContextItemType.text, text: 'a'),
+          const BlockContextItem(id: '2', type: ContextItemType.text, text: 'b'),
           const BlockContextItem(
             id: '3',
             type: ContextItemType.text,
@@ -227,10 +218,7 @@ void main() {
         },
       );
 
-      expect(
-        out.single['content'],
-        '<state>\nA\n</state>\n\n<state>\nB\n</state>',
-      );
+      expect(out.single['content'], '<state>\nA\n</state>\n\n<state>\nB\n</state>');
     });
 
     test('an empty block name produces nothing', () {
@@ -413,7 +401,10 @@ void main() {
 
     final out = _build(
       blockConfig: config,
-      messages: [_msg('u1', 'user', 'Hi.'), _msg('a1', 'assistant', 'Hello.')],
+      messages: [
+        _msg('u1', 'user', 'Hi.'),
+        _msg('a1', 'assistant', 'Hello.'),
+      ],
       anchorMessageId: 'a1',
       character: const Character(
         id: 'c1',

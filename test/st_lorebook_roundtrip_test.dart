@@ -35,10 +35,7 @@ void main() {
       delay: 2,
       group: 'rulers',
       groupProminence: 250,
-      characterFilter: LorebookCharacterFilter(
-        names: ['Alicia'],
-        isExclude: true,
-      ),
+      characterFilter: LorebookCharacterFilter(names: ['Alicia'], isExclude: true),
       ignoreBudget: true,
       vectorSearch: true,
       useKeywordSearch: false,
@@ -47,7 +44,11 @@ void main() {
     );
 
     final exported = glazeLorebookToSTJson(
-      Lorebook(id: 'lb1', name: 'Kingdom lore', entries: [entry]),
+      Lorebook(
+        id: 'lb1',
+        name: 'Kingdom lore',
+        entries: [entry],
+      ),
     );
 
     final imported = importSTLorebook(
@@ -242,10 +243,7 @@ void main() {
         'data': {
           'character_book': {
             'entries': [
-              {
-                'keys': ['k'],
-                'content': 'c',
-              },
+              {'keys': ['k'], 'content': 'c'},
             ],
           },
         },
@@ -259,17 +257,11 @@ void main() {
       final result = importSTLorebook({
         'name': 'World',
         'entries': {
-          '0': {
-            'key': ['k'],
-            'content': 'c',
-          },
+          '0': {'key': ['k'], 'content': 'c'},
         },
         'character_book': {
           'entries': [
-            {
-              'keys': ['ignored'],
-              'content': 'should not win',
-            },
+            {'keys': ['ignored'], 'content': 'should not win'},
           ],
         },
       });

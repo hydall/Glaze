@@ -18,14 +18,14 @@ import 'package:glaze_flutter/core/models/studio_config.dart';
 /// called by these tests.
 class _FakeAgentRunner extends AgentRunner {
   _FakeAgentRunner()
-    : super(
-        configResolver: AgentConfigResolver(
-          loadApiConfigs: () async => const [],
-          readActiveApiConfig: () => null,
+      : super(
+          configResolver: AgentConfigResolver(
+            loadApiConfigs: () async => const [],
+            readActiveApiConfig: () => null,
+            readPipelineSettings: () => const PipelineSettings(),
+          ),
           readPipelineSettings: () => const PipelineSettings(),
-        ),
-        readPipelineSettings: () => const PipelineSettings(),
-      );
+        );
 
   @override
   Future<ResolvedAgentConfig> resolveAgentConfig(
@@ -73,10 +73,7 @@ void main() {
         'post_processing',
       );
       expect(
-        StudioAgent.normalizeAgentPhaseForType(
-          'prose-guardian',
-          'pre_generation',
-        ),
+        StudioAgent.normalizeAgentPhaseForType('prose-guardian', 'pre_generation'),
         'pre_generation',
       );
       expect(
@@ -144,12 +141,7 @@ void main() {
       // become the generator.
       final agents = [
         StudioAgent(id: 'gen', name: 'Gen', order: 0, phase: 'pre_generation'),
-        StudioAgent(
-          id: 'rewriter',
-          name: 'Rewriter',
-          order: 1,
-          phase: 'post_processing',
-        ),
+        StudioAgent(id: 'rewriter', name: 'Rewriter', order: 1, phase: 'post_processing'),
       ];
       final split = MemoryStudioService.splitAgentsByPhase(agents);
       expect(split.preGenTrackers, isEmpty);
@@ -157,23 +149,20 @@ void main() {
       expect(split.finalAgent?.id, 'gen');
     });
 
-    test(
-      'fallback: all post-gen → last agent is generator, removed from post-gen',
-      () {
-        // No pre-gen agent at all. The last enabled agent becomes the generator
-        // regardless of phase, and is removed from the post-gen list so it is
-        // not run twice.
-        final agents = [
-          StudioAgent(id: 'p1', name: 'P1', order: 0, phase: 'post_processing'),
-          StudioAgent(id: 'p2', name: 'P2', order: 1, phase: 'post_processing'),
-        ];
-        final split = MemoryStudioService.splitAgentsByPhase(agents);
-        expect(split.preGenTrackers, isEmpty);
-        // p2 was pulled out to be the generator.
-        expect(split.postGenTrackers.map((a) => a.id), ['p1']);
-        expect(split.finalAgent?.id, 'p2');
-      },
-    );
+    test('fallback: all post-gen → last agent is generator, removed from post-gen', () {
+      // No pre-gen agent at all. The last enabled agent becomes the generator
+      // regardless of phase, and is removed from the post-gen list so it is
+      // not run twice.
+      final agents = [
+        StudioAgent(id: 'p1', name: 'P1', order: 0, phase: 'post_processing'),
+        StudioAgent(id: 'p2', name: 'P2', order: 1, phase: 'post_processing'),
+      ];
+      final split = MemoryStudioService.splitAgentsByPhase(agents);
+      expect(split.preGenTrackers, isEmpty);
+      // p2 was pulled out to be the generator.
+      expect(split.postGenTrackers.map((a) => a.id), ['p1']);
+      expect(split.finalAgent?.id, 'p2');
+    });
   });
 
   group('ControllerBatcher.groupAgents — postProcessingDataKey (phase)', () {
@@ -184,105 +173,92 @@ void main() {
       addTearDown(container.dispose);
     });
 
-    test(
-      'pre-gen and post-gen agents on same model → separate groups',
-      () async {
-        // Two agents on the same (protocol, model) but different phases must
-        // NOT be batched together — the post-gen one needs mainResponse in
-        // its context, the pre-gen one does not. The `|<phase>` suffix in the
-        // grouping key separates them.
-        final runner = _FakeAgentRunner();
-        final batcher = ControllerBatcher(runner);
+    test('pre-gen and post-gen agents on same model → separate groups', () async {
+      // Two agents on the same (protocol, model) but different phases must
+      // NOT be batched together — the post-gen one needs mainResponse in
+      // its context, the pre-gen one does not. The `|<phase>` suffix in the
+      // grouping key separates them.
+            final runner = _FakeAgentRunner();
+      final batcher = ControllerBatcher(runner);
 
-        final apiConfig = _stubApiConfig(model: 'same-model');
-        final agents = [
-          StudioAgent(
-            id: 'pre1',
-            name: 'PreTracker',
-            order: 0,
-            phase: 'pre_generation',
-          ),
-          StudioAgent(
-            id: 'post1',
-            name: 'PostTracker',
-            order: 1,
-            phase: 'post_processing',
-          ),
-        ];
+      final apiConfig = _stubApiConfig(model: 'same-model');
+      final agents = [
+        StudioAgent(
+          id: 'pre1',
+          name: 'PreTracker',
+          order: 0,
+          phase: 'pre_generation',
+        ),
+        StudioAgent(
+          id: 'post1',
+          name: 'PostTracker',
+          order: 1,
+          phase: 'post_processing',
+        ),
+      ];
 
-        final grouping = await batcher.groupAgents(
-          agents: agents,
-          apiConfig: apiConfig,
-          sessionId: 's1',
-        );
+      final grouping = await batcher.groupAgents(
+        agents: agents,
+        apiConfig: apiConfig,
+        sessionId: 's1',
+      );
 
-        expect(
-          grouping.batchGroups.length,
-          2,
-          reason:
-              'pre-gen and post-gen on the same model must NOT batch together',
-        );
-        expect(grouping.individualAgents, isEmpty);
+      expect(grouping.batchGroups.length, 2,
+          reason: 'pre-gen and post-gen on the same model must NOT batch together');
+      expect(grouping.individualAgents, isEmpty);
 
-        // Each group has exactly one agent.
-        final preGroup = grouping.batchGroups.firstWhere(
-          (g) => g.agents.any((a) => a.id == 'pre1'),
-        );
-        final postGroup = grouping.batchGroups.firstWhere(
-          (g) => g.agents.any((a) => a.id == 'post1'),
-        );
-        expect(preGroup.agents.length, 1);
-        expect(postGroup.agents.length, 1);
-        // The keys differ by the phase suffix.
-        expect(preGroup.key, contains('pre_generation'));
-        expect(postGroup.key, contains('post_processing'));
-        expect(preGroup.key, isNot(postGroup.key));
-      },
-    );
+      // Each group has exactly one agent.
+      final preGroup = grouping.batchGroups.firstWhere(
+        (g) => g.agents.any((a) => a.id == 'pre1'),
+      );
+      final postGroup = grouping.batchGroups.firstWhere(
+        (g) => g.agents.any((a) => a.id == 'post1'),
+      );
+      expect(preGroup.agents.length, 1);
+      expect(postGroup.agents.length, 1);
+      // The keys differ by the phase suffix.
+      expect(preGroup.key, contains('pre_generation'));
+      expect(postGroup.key, contains('post_processing'));
+      expect(preGroup.key, isNot(postGroup.key));
+    });
 
-    test(
-      'two pre-gen agents on same model → one group (unchanged behavior)',
-      () async {
-        // Backward compat: pre-gen agents on the same model still batch together
-        // (the `|pre_generation` suffix is uniform, so it does not split them).
-        final runner = _FakeAgentRunner();
-        final batcher = ControllerBatcher(runner);
+    test('two pre-gen agents on same model → one group (unchanged behavior)', () async {
+      // Backward compat: pre-gen agents on the same model still batch together
+      // (the `|pre_generation` suffix is uniform, so it does not split them).
+            final runner = _FakeAgentRunner();
+      final batcher = ControllerBatcher(runner);
 
-        final apiConfig = _stubApiConfig(model: 'same-model');
-        final agents = [
-          StudioAgent(
-            id: 'pre1',
-            name: 'PreA',
-            order: 0,
-            phase: 'pre_generation',
-          ),
-          StudioAgent(
-            id: 'pre2',
-            name: 'PreB',
-            order: 1,
-            phase: 'pre_generation',
-          ),
-        ];
+      final apiConfig = _stubApiConfig(model: 'same-model');
+      final agents = [
+        StudioAgent(
+          id: 'pre1',
+          name: 'PreA',
+          order: 0,
+          phase: 'pre_generation',
+        ),
+        StudioAgent(
+          id: 'pre2',
+          name: 'PreB',
+          order: 1,
+          phase: 'pre_generation',
+        ),
+      ];
 
-        final grouping = await batcher.groupAgents(
-          agents: agents,
-          apiConfig: apiConfig,
-          sessionId: 's1',
-        );
+      final grouping = await batcher.groupAgents(
+        agents: agents,
+        apiConfig: apiConfig,
+        sessionId: 's1',
+      );
 
-        expect(
-          grouping.batchGroups.length,
-          1,
-          reason: 'two pre-gen agents on the same model batch together',
-        );
-        expect(grouping.batchGroups.first.agents.length, 2);
-      },
-    );
+      expect(grouping.batchGroups.length, 1,
+          reason: 'two pre-gen agents on the same model batch together');
+      expect(grouping.batchGroups.first.agents.length, 2);
+    });
 
     test('two post-gen agents on same model → one group', () async {
       // Two post-gen agents on the same model DO batch together (they both
       // receive mainResponse; uniform phase suffix keeps them in one group).
-      final runner = _FakeAgentRunner();
+            final runner = _FakeAgentRunner();
       final batcher = ControllerBatcher(runner);
 
       final apiConfig = _stubApiConfig(model: 'same-model');
@@ -323,19 +299,9 @@ void main() {
     // integration testing (see docs/PLAN_AGENTIC_STUDIO.md Feature 6).
     test('1 pre-gen + 1 generator + 1 post-gen → correct split', () {
       final agents = [
-        StudioAgent(
-          id: 'tracker',
-          name: 'T',
-          order: 0,
-          phase: 'pre_generation',
-        ),
+        StudioAgent(id: 'tracker', name: 'T', order: 0, phase: 'pre_generation'),
         StudioAgent(id: 'gen', name: 'G', order: 1, phase: 'pre_generation'),
-        StudioAgent(
-          id: 'rewriter',
-          name: 'R',
-          order: 2,
-          phase: 'post_processing',
-        ),
+        StudioAgent(id: 'rewriter', name: 'R', order: 2, phase: 'post_processing'),
       ];
       final split = MemoryStudioService.splitAgentsByPhase(agents);
       expect(split.preGenTrackers.map((a) => a.id), ['tracker']);

@@ -11,10 +11,7 @@ void main() {
 
     test('classifies continuity blocks correctly', () {
       expect(PromptBlockRouter.classifyBlock('Continuity Check'), 'continuity');
-      expect(
-        PromptBlockRouter.classifyBlock('Relationship State'),
-        'continuity',
-      );
+      expect(PromptBlockRouter.classifyBlock('Relationship State'), 'continuity');
       expect(PromptBlockRouter.classifyBlock('Tracker'), 'continuity');
     });
 
@@ -36,10 +33,7 @@ void main() {
 
     test('classifies intimacy/violence blocks correctly', () {
       expect(PromptBlockRouter.classifyBlock('Intimacy Rules'), 'intimacy');
-      expect(
-        PromptBlockRouter.classifyBlock('Violence Guidelines'),
-        'violence',
-      );
+      expect(PromptBlockRouter.classifyBlock('Violence Guidelines'), 'violence');
     });
 
     test('classifies utility/OOC blocks correctly', () {

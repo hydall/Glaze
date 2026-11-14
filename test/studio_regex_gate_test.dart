@@ -48,9 +48,9 @@ void main() {
   setUp(() async {
     SharedPreferences.setMockInitialValues({'feature_studio_enabled': true});
     db = AppDatabase.forTesting(NativeDatabase.memory());
-    await PresetRepo(
-      db,
-    ).put(const Preset(id: 'p1', name: 'Preset', regexes: [_presetDisplay]));
+    await PresetRepo(db).put(
+      const Preset(id: 'p1', name: 'Preset', regexes: [_presetDisplay]),
+    );
     container = ProviderContainer(
       overrides: [
         appDbProvider.overrideWithValue(db),
@@ -75,7 +75,10 @@ void main() {
   test('the settled switch is what a resolver can branch on', () async {
     // The middle link: if this passes and the two below fail, the resolver is
     // reading the switch wrong rather than the switch reading itself wrong.
-    expect(await container.read(studioFeatureSettledProvider.future), isTrue);
+    expect(
+      await container.read(studioFeatureSettledProvider.future),
+      isTrue,
+    );
   });
 
   test('a runtime toggle re-resolves the settled switch', () async {
@@ -98,21 +101,19 @@ void main() {
     expect(await toggled.read(studioFeatureSettledProvider.future), isTrue);
   });
 
-  test(
-    'Studio drops the chat preset scripts and keeps the global ones',
-    () async {
-      final active = await container.read(activeRegexesProvider.future);
+  test('Studio drops the chat preset scripts and keeps the global ones',
+      () async {
+    final active = await container.read(activeRegexesProvider.future);
 
-      expect(
-        active.map((r) => r.id),
-        isNot(contains('preset-display')),
-        reason:
-            'an agentic preset replaces the chat preset, so its scripts belong '
-            'to a prompt this turn never builds',
-      );
-      expect(active.map((r) => r.id), contains('global-display'));
-    },
-  );
+    expect(
+      active.map((r) => r.id),
+      isNot(contains('preset-display')),
+      reason:
+          'an agentic preset replaces the chat preset, so its scripts belong '
+          'to a prompt this turn never builds',
+    );
+    expect(active.map((r) => r.id), contains('global-display'));
+  });
 
   test('the resolved list waits for the switch to be read', () async {
     // The switch is a StateNotifier that starts at `false` and flips once

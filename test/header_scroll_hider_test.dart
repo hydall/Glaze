@@ -2,11 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/shared/shell/header_scroll_hider.dart';
 
-ScrollUpdateNotification _scrollTo(
-  BuildContext context,
-  double pixels, {
-  double maxExtent = 5000,
-}) {
+ScrollUpdateNotification _scrollTo(BuildContext context, double pixels, {double maxExtent = 5000}) {
   return ScrollUpdateNotification(
     metrics: FixedScrollMetrics(
       minScrollExtent: 0,
@@ -25,9 +21,7 @@ void main() {
     late HeaderScrollHider hider;
     late List<bool> emitted;
 
-    testWidgets('hides on downward scroll and reveals on upward scroll', (
-      tester,
-    ) async {
+    testWidgets('hides on downward scroll and reveals on upward scroll', (tester) async {
       await tester.pumpWidget(const MaterialApp(home: SizedBox()));
       final context = tester.element(find.byType(SizedBox));
 
@@ -43,31 +37,26 @@ void main() {
       expect(hider.hidden, isFalse);
     });
 
-    testWidgets(
-      'reset clears the hidden state so the next hide is not swallowed',
-      (tester) async {
-        await tester.pumpWidget(const MaterialApp(home: SizedBox()));
-        final context = tester.element(find.byType(SizedBox));
+    testWidgets('reset clears the hidden state so the next hide is not swallowed', (tester) async {
+      await tester.pumpWidget(const MaterialApp(home: SizedBox()));
+      final context = tester.element(find.byType(SizedBox));
 
-        hider = HeaderScrollHider();
-        emitted = <bool>[];
+      hider = HeaderScrollHider();
+      emitted = <bool>[];
 
-        hider.handle(_scrollTo(context, 400), emitted.add);
-        expect(hider.hidden, isTrue);
+      hider.handle(_scrollTo(context, 400), emitted.add);
+      expect(hider.hidden, isTrue);
 
-        hider.reset();
-        expect(hider.hidden, isFalse);
+      hider.reset();
+      expect(hider.hidden, isFalse);
 
-        emitted.clear();
-        hider.handle(_scrollTo(context, 400), emitted.add);
-        hider.handle(_scrollTo(context, 600), emitted.add);
-        expect(emitted, [true]);
-      },
-    );
+      emitted.clear();
+      hider.handle(_scrollTo(context, 400), emitted.add);
+      hider.handle(_scrollTo(context, 600), emitted.add);
+      expect(emitted, [true]);
+    });
 
-    testWidgets('reset absorbs the jump to a different view scroll offset', (
-      tester,
-    ) async {
+    testWidgets('reset absorbs the jump to a different view scroll offset', (tester) async {
       await tester.pumpWidget(const MaterialApp(home: SizedBox()));
       final context = tester.element(find.byType(SizedBox));
 

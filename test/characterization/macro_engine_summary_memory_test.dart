@@ -12,20 +12,24 @@ import 'package:glaze_flutter/core/llm/macro_engine.dart';
 /// * `{{memory}}` resolves to `MacroContext.memoryContent` ONLY.
 /// * `summaryContent` and `memoryContent` are independent.
 void main() {
-  MacroContext ctx({String? summary, String? memory}) => MacroContext(
-    charName: 'Alice',
-    charId: 'c1',
-    sessionId: 's1',
-    summaryContent: summary,
-    memoryContent: memory,
-  );
+  MacroContext ctx({
+    String? summary,
+    String? memory,
+  }) =>
+      MacroContext(
+        charName: 'Alice',
+        charId: 'c1',
+        sessionId: 's1',
+        summaryContent: summary,
+        memoryContent: memory,
+      );
 
   group('{{summary}} resolution', () {
     test('returns summary content when both summary and memory present', () {
-      final result = replaceMacros(
-        'Summary: {{summary}}',
-        ctx(summary: 'hello world', memory: 'memory bytes'),
-      );
+      final result = replaceMacros('Summary: {{summary}}', ctx(
+        summary: 'hello world',
+        memory: 'memory bytes',
+      ));
       expect(result.text, 'Summary: hello world');
     });
 
@@ -40,20 +44,14 @@ void main() {
       // This is the very behaviour that caused the double-count in the
       // tokenizer UI.
       final result = replaceMacros('{{summary}}', ctx(memory: 'mem'));
-      expect(
-        result.text,
-        isEmpty,
-        reason: '{{summary}} must NOT include memory content',
-      );
+      expect(result.text, isEmpty,
+          reason: '{{summary}} must NOT include memory content');
     });
   });
 
   group('{{memory}} resolution', () {
     test('returns memory content when present', () {
-      final result = replaceMacros(
-        'Memory: {{memory}}',
-        ctx(memory: 'mem text'),
-      );
+      final result = replaceMacros('Memory: {{memory}}', ctx(memory: 'mem text'));
       expect(result.text, 'Memory: mem text');
     });
 
@@ -63,15 +61,12 @@ void main() {
     });
 
     test('independent of summary content', () {
-      final result = replaceMacros(
-        '{{memory}}',
-        ctx(summary: 'summary text', memory: 'memory text'),
-      );
-      expect(
-        result.text,
-        'memory text',
-        reason: '{{memory}} must NOT include summary content',
-      );
+      final result = replaceMacros('{{memory}}', ctx(
+        summary: 'summary text',
+        memory: 'memory text',
+      ));
+      expect(result.text, 'memory text',
+          reason: '{{memory}} must NOT include summary content');
     });
   });
 
@@ -86,14 +81,8 @@ void main() {
 
     test('tokens do not leak between {{summary}} and {{memory}}', () {
       // Replaces only summary, not memory. And vice versa.
-      final result1 = replaceMacros(
-        '{{summary}}',
-        ctx(summary: 'a', memory: 'b'),
-      );
-      final result2 = replaceMacros(
-        '{{memory}}',
-        ctx(summary: 'a', memory: 'b'),
-      );
+      final result1 = replaceMacros('{{summary}}', ctx(summary: 'a', memory: 'b'));
+      final result2 = replaceMacros('{{memory}}', ctx(summary: 'a', memory: 'b'));
       expect(result1.text, 'a');
       expect(result2.text, 'b');
     });

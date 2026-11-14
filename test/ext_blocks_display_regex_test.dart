@@ -30,8 +30,7 @@ void main() {
       globalVars: const {},
       displayRegexes: [
         displayRegex(
-          regex:
-              r'/<fandom_guide_state>(?<fandom>[^<]*)<\/fandom_guide_state>/g',
+          regex: r'/<fandom_guide_state>(?<fandom>[^<]*)<\/fandom_guide_state>/g',
           replacement: r'<div class="card">$<fandom></div>',
           markdownOnly: true,
         ),

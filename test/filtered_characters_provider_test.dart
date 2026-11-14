@@ -36,9 +36,10 @@ void main() {
       sortDir: SortDir.asc,
     );
 
-    expect(container.read(filteredCharactersProvider(query)).map((c) => c.id), [
-      'match',
-    ]);
+    expect(
+      container.read(filteredCharactersProvider(query)).map((c) => c.id),
+      ['match'],
+    );
   });
 
   test('favorites still sort first and favOnly remains independent', () async {
@@ -71,10 +72,10 @@ void main() {
       sortDir: SortDir.asc,
     );
 
-    expect(container.read(filteredCharactersProvider(all)).map((c) => c.id), [
-      'fav',
-      'plain',
-    ]);
+    expect(
+      container.read(filteredCharactersProvider(all)).map((c) => c.id),
+      ['fav', 'plain'],
+    );
     expect(
       container.read(filteredCharactersProvider(favorites)).map((c) => c.id),
       ['fav'],

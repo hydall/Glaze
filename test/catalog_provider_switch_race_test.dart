@@ -40,9 +40,10 @@ void main() {
       'gz_catalog_provider': 'chub',
       'gz_disabled_third_party_providers': <String>[],
     });
-    testCatalogProvider = StateNotifierProvider<CatalogNotifier, CatalogState>(
-      (ref) => CatalogNotifier(ref, fetchOverride: makeFetcher()),
-    );
+    testCatalogProvider =
+        StateNotifierProvider<CatalogNotifier, CatalogState>(
+          (ref) => CatalogNotifier(ref, fetchOverride: makeFetcher()),
+        );
     container = ProviderContainer();
     // Let the third-party provider loader settle so enabledCatalogProvidersProvider
     // sees the saved (all-enabled) set before the catalog notifier queries it.
@@ -148,9 +149,10 @@ void main() {
       CatalogSearchResult(characters: [item('chub-1')], total: 1),
     );
     await pumpEventQueue();
-    expect(container.read(testCatalogProvider).results.map((c) => c.id), [
-      'chub-1',
-    ]);
+    expect(
+      container.read(testCatalogProvider).results.map((c) => c.id),
+      ['chub-1'],
+    );
   });
 
   test('a saved provider that is now disabled is not restored', () async {
@@ -204,18 +206,15 @@ void main() {
     expect(state.results.map((c) => c.id), ['chub-1', 'chub-2']);
   });
 
-  test(
-    'a Chub account key arriving triggers a fresh anonymous-then-keyed fetch',
-    () async {
-      await startedNotifier();
+  test('a Chub account key arriving triggers a fresh anonymous-then-keyed fetch', () async {
+    await startedNotifier();
 
-      // The stored key loads from prefs after the first search went out
-      // anonymously; the catalog must reload with it instead of staying anonymous.
-      await container.read(chubAccountProvider.notifier).setApiKey('abc');
-      await pumpEventQueue();
+    // The stored key loads from prefs after the first search went out
+    // anonymously; the catalog must reload with it instead of staying anonymous.
+    await container.read(chubAccountProvider.notifier).setApiKey('abc');
+    await pumpEventQueue();
 
-      expect(pending.length, 2);
-      expect(pending[1].$1, CatalogProvider.chub);
-    },
-  );
+    expect(pending.length, 2);
+    expect(pending[1].$1, CatalogProvider.chub);
+  });
 }

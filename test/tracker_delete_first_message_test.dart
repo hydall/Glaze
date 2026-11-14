@@ -52,94 +52,82 @@ void main() {
     await db.close();
   });
 
-  test(
-    'first-message deletion: clearForSession when no committed snapshot',
-    () async {
-      const sessionId = 's1';
-      const messageId = 'msg_1';
+  test('first-message deletion: clearForSession when no committed snapshot',
+      () async {
+    const sessionId = 's1';
+    const messageId = 'msg_1';
 
-      // 1. Agent writes trackers + uncommitted snapshot (first message).
-      await trackerRepo.upsert(
-        _tracker(sessionId: sessionId, name: 'mood', value: 'happy'),
-      );
-      await snapshotRepo.upsertTrackers(
-        sessionId: sessionId,
-        messageId: messageId,
-        swipeId: 0,
-        agentSwipeId: 0,
-        trackers: [
-          _tracker(sessionId: sessionId, name: 'mood', value: 'happy'),
-        ],
-        committed: false,
-      );
+    // 1. Agent writes trackers + uncommitted snapshot (first message).
+    await trackerRepo.upsert(_tracker(sessionId: sessionId, name: 'mood', value: 'happy'));
+    await snapshotRepo.upsertTrackers(
+      sessionId: sessionId,
+      messageId: messageId,
+      swipeId: 0,
+      agentSwipeId: 0,
+      trackers: [_tracker(sessionId: sessionId, name: 'mood', value: 'happy')],
+      committed: false,
+    );
 
-      // Sanity: tracker_rows has the written value.
-      expect((await trackerRepo.getBySessionId(sessionId)).length, 1);
-      // Sanity: no committed snapshot exists yet.
-      expect(await snapshotRepo.getLatestCommitted(sessionId), isNull);
+    // Sanity: tracker_rows has the written value.
+    expect((await trackerRepo.getBySessionId(sessionId)).length, 1);
+    // Sanity: no committed snapshot exists yet.
+    expect(await snapshotRepo.getLatestCommitted(sessionId), isNull);
 
-      // 2. User deletes the message: deleteForMessage + getLatestCommitted.
-      await snapshotRepo.deleteForMessage(sessionId, messageId);
-      final latest = await snapshotRepo.getLatestCommitted(sessionId);
+    // 2. User deletes the message: deleteForMessage + getLatestCommitted.
+    await snapshotRepo.deleteForMessage(sessionId, messageId);
+    final latest = await snapshotRepo.getLatestCommitted(sessionId);
 
-      // 3. BUG (pre-fix): snapshot is null → service skipped replaceForSession
-      //    → tracker_rows retained the orphan. FIX: clearForSession.
-      if (latest == null) {
-        await trackerRepo.clearForSession(sessionId);
-      } else {
-        await trackerRepo.replaceForSession(sessionId, latest.trackers);
-      }
-
-      // 4. After the fix: tracker_rows is empty.
-      expect(await trackerRepo.getBySessionId(sessionId), isEmpty);
-      // And no snapshots remain.
-      expect(await snapshotRepo.getLatest(sessionId), isNull);
-    },
-  );
-
-  test(
-    'second-message deletion: replaceForSession rolls back to first',
-    () async {
-      const sessionId = 's1';
-
-      // First message: trackers + COMMITTED snapshot (user sent a follow-up).
-      await snapshotRepo.upsertTrackers(
-        sessionId: sessionId,
-        messageId: 'msg_1',
-        swipeId: 0,
-        agentSwipeId: 0,
-        trackers: [_tracker(sessionId: sessionId, name: 'mood', value: 'calm')],
-        committed: true,
-      );
-      // Second message: more trackers, uncommitted snapshot.
-      await trackerRepo.upsert(
-        _tracker(sessionId: sessionId, name: 'mood', value: 'tense'),
-      );
-      await snapshotRepo.upsertTrackers(
-        sessionId: sessionId,
-        messageId: 'msg_2',
-        swipeId: 0,
-        agentSwipeId: 0,
-        trackers: [
-          _tracker(sessionId: sessionId, name: 'mood', value: 'tense'),
-        ],
-        committed: false,
-      );
-
-      // Delete the second message.
-      await snapshotRepo.deleteForMessage(sessionId, 'msg_2');
-      final latest = await snapshotRepo.getLatestCommitted(sessionId);
-
-      // A committed snapshot exists (msg_1) → roll back to it.
-      expect(latest, isNotNull);
-      expect(latest!.trackers.first.value, 'calm');
+    // 3. BUG (pre-fix): snapshot is null → service skipped replaceForSession
+    //    → tracker_rows retained the orphan. FIX: clearForSession.
+    if (latest == null) {
+      await trackerRepo.clearForSession(sessionId);
+    } else {
       await trackerRepo.replaceForSession(sessionId, latest.trackers);
+    }
 
-      // tracker_rows reflects the rolled-back (first-message) state.
-      final rows = await trackerRepo.getBySessionId(sessionId);
-      expect(rows.length, 1);
-      expect(rows.first.name, 'mood');
-      expect(rows.first.value, 'calm');
-    },
-  );
+    // 4. After the fix: tracker_rows is empty.
+    expect(await trackerRepo.getBySessionId(sessionId), isEmpty);
+    // And no snapshots remain.
+    expect(await snapshotRepo.getLatest(sessionId), isNull);
+  });
+
+  test('second-message deletion: replaceForSession rolls back to first',
+      () async {
+    const sessionId = 's1';
+
+    // First message: trackers + COMMITTED snapshot (user sent a follow-up).
+    await snapshotRepo.upsertTrackers(
+      sessionId: sessionId,
+      messageId: 'msg_1',
+      swipeId: 0,
+      agentSwipeId: 0,
+      trackers: [_tracker(sessionId: sessionId, name: 'mood', value: 'calm')],
+      committed: true,
+    );
+    // Second message: more trackers, uncommitted snapshot.
+    await trackerRepo.upsert(_tracker(sessionId: sessionId, name: 'mood', value: 'tense'));
+    await snapshotRepo.upsertTrackers(
+      sessionId: sessionId,
+      messageId: 'msg_2',
+      swipeId: 0,
+      agentSwipeId: 0,
+      trackers: [_tracker(sessionId: sessionId, name: 'mood', value: 'tense')],
+      committed: false,
+    );
+
+    // Delete the second message.
+    await snapshotRepo.deleteForMessage(sessionId, 'msg_2');
+    final latest = await snapshotRepo.getLatestCommitted(sessionId);
+
+    // A committed snapshot exists (msg_1) → roll back to it.
+    expect(latest, isNotNull);
+    expect(latest!.trackers.first.value, 'calm');
+    await trackerRepo.replaceForSession(sessionId, latest.trackers);
+
+    // tracker_rows reflects the rolled-back (first-message) state.
+    final rows = await trackerRepo.getBySessionId(sessionId);
+    expect(rows.length, 1);
+    expect(rows.first.name, 'mood');
+    expect(rows.first.value, 'calm');
+  });
 }

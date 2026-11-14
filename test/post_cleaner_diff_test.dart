@@ -58,13 +58,9 @@ void main() {
       final result = computeLineDiff('a\nold\nc', 'a\nnew\nc');
       expect(result.removedLines, 1);
       expect(result.addedLines, 1);
-      final removedLeft = result.leftLines
-          .where((l) => l.type == DiffLineType.removed)
-          .first;
+      final removedLeft = result.leftLines.where((l) => l.type == DiffLineType.removed).first;
       expect(removedLeft.text, 'old');
-      final addedRight = result.rightLines
-          .where((l) => l.type == DiffLineType.added)
-          .first;
+      final addedRight = result.rightLines.where((l) => l.type == DiffLineType.added).first;
       expect(addedRight.text, 'new');
       // Word diff should be present
       expect(removedLeft.words, isNotNull);
@@ -97,9 +93,7 @@ void main() {
       expect(result.addedLines, 2);
       expect(result.leftLines[0].type, DiffLineType.same);
       expect(result.leftLines[1].type, DiffLineType.same);
-      final added = result.rightLines
-          .where((l) => l.type == DiffLineType.added)
-          .toList();
+      final added = result.rightLines.where((l) => l.type == DiffLineType.added).toList();
       expect(added.length, 2);
       expect(added[0].text, 'c');
       expect(added[1].text, 'd');
@@ -111,36 +105,23 @@ void main() {
     });
 
     test('multiline prose with changed paragraph', () {
-      final orig =
-          'First paragraph stays.\n\nSecond paragraph is old text.\n\nThird paragraph stays.';
-      final cleaned =
-          'First paragraph stays.\n\nSecond paragraph is new text.\n\nThird paragraph stays.';
+      final orig = 'First paragraph stays.\n\nSecond paragraph is old text.\n\nThird paragraph stays.';
+      final cleaned = 'First paragraph stays.\n\nSecond paragraph is new text.\n\nThird paragraph stays.';
       final result = computeLineDiff(orig, cleaned);
       expect(result.removedLines, 1);
       expect(result.addedLines, 1);
-      final removedLine = result.leftLines
-          .where((l) => l.type == DiffLineType.removed)
-          .first;
+      final removedLine = result.leftLines.where((l) => l.type == DiffLineType.removed).first;
       expect(removedLine.text, 'Second paragraph is old text.');
-      final addedLine = result.rightLines
-          .where((l) => l.type == DiffLineType.added)
-          .first;
+      final addedLine = result.rightLines.where((l) => l.type == DiffLineType.added).first;
       expect(addedLine.text, 'Second paragraph is new text.');
     });
 
     test('word-level diff highlights only changed words within a line', () {
-      final result = computeLineDiff(
-        'The quick brown fox',
-        'The slow brown fox',
-      );
+      final result = computeLineDiff('The quick brown fox', 'The slow brown fox');
       expect(result.removedLines, 1);
       expect(result.addedLines, 1);
-      final removedLine = result.leftLines
-          .where((l) => l.type == DiffLineType.removed)
-          .first;
-      final addedLine = result.rightLines
-          .where((l) => l.type == DiffLineType.added)
-          .first;
+      final removedLine = result.leftLines.where((l) => l.type == DiffLineType.removed).first;
+      final addedLine = result.rightLines.where((l) => l.type == DiffLineType.added).first;
       expect(removedLine.words, isNotNull);
       expect(addedLine.words, isNotNull);
       // "quick" should be marked as changed on the left
@@ -150,36 +131,20 @@ void main() {
       final changedRight = addedLine.words!.where((w) => w.isChanged).toList();
       expect(changedRight.any((w) => w.text == 'slow'), true);
       // "The", "brown", "fox" should NOT be changed
-      final sameLeft = removedLine.words!
-          .where((w) => !w.isChanged)
-          .map((w) => w.text)
-          .toList();
+      final sameLeft = removedLine.words!.where((w) => !w.isChanged).map((w) => w.text).toList();
       expect(sameLeft.contains('The'), true);
       expect(sameLeft.contains('brown'), true);
       expect(sameLeft.contains('fox'), true);
     });
 
     test('word-level diff with multiple changed words', () {
-      final result = computeLineDiff(
-        'one two three four',
-        'five six three seven',
-      );
-      final removedLine = result.leftLines
-          .where((l) => l.type == DiffLineType.removed)
-          .first;
-      final addedLine = result.rightLines
-          .where((l) => l.type == DiffLineType.added)
-          .first;
+      final result = computeLineDiff('one two three four', 'five six three seven');
+      final removedLine = result.leftLines.where((l) => l.type == DiffLineType.removed).first;
+      final addedLine = result.rightLines.where((l) => l.type == DiffLineType.added).first;
       // "three" is common → not changed; others are changed
-      final sameLeft = removedLine.words!
-          .where((w) => !w.isChanged)
-          .map((w) => w.text)
-          .toList();
+      final sameLeft = removedLine.words!.where((w) => !w.isChanged).map((w) => w.text).toList();
       expect(sameLeft.contains('three'), true);
-      final sameRight = addedLine.words!
-          .where((w) => !w.isChanged)
-          .map((w) => w.text)
-          .toList();
+      final sameRight = addedLine.words!.where((w) => !w.isChanged).map((w) => w.text).toList();
       expect(sameRight.contains('three'), true);
     });
   });

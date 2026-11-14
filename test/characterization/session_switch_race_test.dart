@@ -54,10 +54,8 @@ class _StateBox {
 
 final _stateBoxProvider = Provider<_StateBox>((ref) => _StateBox());
 
-final _testCtrlProvider = Provider.family<ChatSessionController, String>((
-  ref,
-  charId,
-) {
+final _testCtrlProvider =
+    Provider.family<ChatSessionController, String>((ref, charId) {
   final box = ref.watch(_stateBoxProvider);
   return ChatSessionController(
     ref: ref,
@@ -103,11 +101,7 @@ Future<void> _seedData(
   final charRepo = container.read(characterRepoProvider);
   final chatRepo = container.read(chatRepoProvider);
   await charRepo.put(
-    Character(
-      id: charId,
-      name: 'Test',
-      currentSessionIndex: currentSessionIndex,
-    ),
+    Character(id: charId, name: 'Test', currentSessionIndex: currentSessionIndex),
   );
   for (int i = 0; i < sessionCount; i++) {
     await chatRepo.put(_makeSession(charId, i));
@@ -212,11 +206,8 @@ void main() {
         const ChatSession(id: 'c1_2', characterId: 'c1', sessionIndex: 2),
       );
       await Future.microtask(() {});
-      expect(
-        current.session?.sessionIndex,
-        2,
-        reason: 'After switch to 2 completes, state should be session 2',
-      );
+      expect(current.session?.sessionIndex, 2,
+          reason: 'After switch to 2 completes, state should be session 2');
 
       // Session 1 completes last — epoch guard prevents it from writing.
       completer1.complete(
@@ -226,16 +217,10 @@ void main() {
       await f2;
 
       // FIXED: state stays on session 2 — stale switch was ignored.
-      expect(
-        states,
-        [2],
-        reason: 'Only session 2 wrote state — stale switch 1 was suppressed',
-      );
-      expect(
-        current.session?.sessionIndex,
-        2,
-        reason: 'State stays on session 2 (the latest switch)',
-      );
+      expect(states, [2],
+          reason: 'Only session 2 wrote state — stale switch 1 was suppressed');
+      expect(current.session?.sessionIndex, 2,
+          reason: 'State stays on session 2 (the latest switch)');
     });
 
     test('triple switch — only the latest switch writes state', () async {
@@ -278,18 +263,11 @@ void main() {
       await Future.wait([f0, f1, f2]);
 
       // FIXED: state is on session 2 (the latest switch), not 0 (the oldest).
-      expect(
-        current.session?.sessionIndex,
-        2,
-        reason: 'State is on session 2 — only the latest switch writes',
-      );
-      expect(
-        states,
-        [2],
-        reason:
-            'Only session 2 wrote state — switches 0 and 1 were '
-            'suppressed by the epoch guard',
-      );
+      expect(current.session?.sessionIndex, 2,
+          reason: 'State is on session 2 — only the latest switch writes');
+      expect(states, [2],
+          reason: 'Only session 2 wrote state — switches 0 and 1 were '
+              'suppressed by the epoch guard');
     });
 
     test('error in stale switch does not restore old state', () async {
@@ -345,18 +323,11 @@ void main() {
 
       // FIXED: catch block checked epoch(1) != _switchEpoch(2) and bailed.
       // State stays on session 3 — no restore to session 2 happened.
-      expect(
-        current.session?.sessionIndex,
-        3,
-        reason: 'Stale error did not overwrite — state stays on session 3',
-      );
-      expect(
-        states,
-        [3],
-        reason:
-            'Only session 3 wrote state — stale error path was '
-            'suppressed by epoch guard in catch block',
-      );
+      expect(current.session?.sessionIndex, 3,
+          reason: 'Stale error did not overwrite — state stays on session 3');
+      expect(states, [3],
+          reason: 'Only session 3 wrote state — stale error path was '
+              'suppressed by epoch guard in catch block');
     });
   });
 
@@ -416,87 +387,69 @@ void main() {
       await f2;
 
       // FIXED: pending is false — f2 is the latest, so it clears pending.
-      expect(
-        sessionSwitchPending,
-        false,
-        reason: 'Pending cleared by f2 (the latest apply)',
-      );
+      expect(sessionSwitchPending, false,
+          reason: 'Pending cleared by f2 (the latest apply)');
 
       // Complete switch 1 — its finally block checks epoch != applyEpoch,
       // so it does NOT touch pending.
       switchCompleters[1]!.complete();
       await f1;
 
-      expect(switchLog, [
-        1,
-        2,
-      ], reason: 'Both switches ran — no cancellation of the async op');
+      expect(switchLog, [1, 2],
+          reason: 'Both switches ran — no cancellation of the async op');
       // pendingLog: [true (f1), true (f2), false (f2's finally)]
       // f1's finally does NOT fire because epoch(1) != applyEpoch(2).
-      expect(
-        pendingLog,
-        [true, true, false],
-        reason:
-            'Pending set twice, cleared once by f2 (the latest). '
-            'f1 finally was suppressed by epoch guard.',
-      );
+      expect(pendingLog, [true, true, false],
+          reason: 'Pending set twice, cleared once by f2 (the latest). '
+              'f1 finally was suppressed by epoch guard.');
     });
 
-    test(
-      'if first apply completes before second, pending stays true until second finishes',
-      () async {
-        var sessionSwitchPending = false;
-        var applyEpoch = 0;
+    test('if first apply completes before second, pending stays true until second finishes', () async {
+      var sessionSwitchPending = false;
+      var applyEpoch = 0;
 
-        final switchCompleters = <int, Completer<void>>{
-          1: Completer<void>(),
-          2: Completer<void>(),
-        };
+      final switchCompleters = <int, Completer<void>>{
+        1: Completer<void>(),
+        2: Completer<void>(),
+      };
 
-        Future<void> doSwitch(int index) => switchCompleters[index]!.future;
+      Future<void> doSwitch(int index) => switchCompleters[index]!.future;
 
-        Future<void> apply({int? sessionIndex}) async {
-          final epoch = ++applyEpoch;
+      Future<void> apply({int? sessionIndex}) async {
+        final epoch = ++applyEpoch;
+        if (sessionIndex != null) {
+          sessionSwitchPending = true;
+        }
+        try {
+          await Future<void>.delayed(Duration.zero);
           if (sessionIndex != null) {
-            sessionSwitchPending = true;
+            await doSwitch(sessionIndex);
           }
-          try {
-            await Future<void>.delayed(Duration.zero);
-            if (sessionIndex != null) {
-              await doSwitch(sessionIndex);
-            }
-          } finally {
-            if (epoch == applyEpoch && sessionSwitchPending) {
-              sessionSwitchPending = false;
-            }
+        } finally {
+          if (epoch == applyEpoch && sessionSwitchPending) {
+            sessionSwitchPending = false;
           }
         }
+      }
 
-        final f1 = apply(sessionIndex: 1);
-        final f2 = apply(sessionIndex: 2);
+      final f1 = apply(sessionIndex: 1);
+      final f2 = apply(sessionIndex: 2);
 
-        // Complete switch 1 first (it's the older one).
-        switchCompleters[1]!.complete();
-        await f1;
+      // Complete switch 1 first (it's the older one).
+      switchCompleters[1]!.complete();
+      await f1;
 
-        // FIXED: pending is still true — f1's finally was suppressed by epoch guard.
-        expect(
-          sessionSwitchPending,
-          true,
-          reason: 'Pending stays true — f1 (stale) did not clear it',
-        );
+      // FIXED: pending is still true — f1's finally was suppressed by epoch guard.
+      expect(sessionSwitchPending, true,
+          reason: 'Pending stays true — f1 (stale) did not clear it');
 
-        // Complete switch 2.
-        switchCompleters[2]!.complete();
-        await f2;
+      // Complete switch 2.
+      switchCompleters[2]!.complete();
+      await f2;
 
-        expect(
-          sessionSwitchPending,
-          false,
-          reason: 'Pending cleared by f2 (the latest apply)',
-        );
-      },
-    );
+      expect(sessionSwitchPending, false,
+          reason: 'Pending cleared by f2 (the latest apply)');
+    });
   });
 
   // ===========================================================================
@@ -525,84 +478,71 @@ void main() {
       await db.close();
     });
 
-    test(
-      'updateCache after put ensures switchToSession returns fresh data',
-      () async {
-        await _seedData(container, 'c1', sessionCount: 2);
-        final sessionSvc = container.read(_sessionSvcProvider);
-        final chatRepo = container.read(chatRepoProvider);
+    test('updateCache after put ensures switchToSession returns fresh data', () async {
+      await _seedData(container, 'c1', sessionCount: 2);
+      final sessionSvc = container.read(_sessionSvcProvider);
+      final chatRepo = container.read(chatRepoProvider);
 
-        // First switch to session 1 — populates the cache.
-        final session1 = await sessionSvc.switchToSession('c1', 1);
-        expect(session1.messages.first.content, 'Session 1 message');
+      // First switch to session 1 — populates the cache.
+      final session1 = await sessionSvc.switchToSession('c1', 1);
+      expect(session1.messages.first.content, 'Session 1 message');
 
-        // Modify session 1 and properly call updateCache.
-        final modified = session1.copyWith(
-          messages: [
-            ChatMessage(
-              id: 'm_1_edited',
-              role: 'assistant',
-              content: 'EDITED content',
-              timestamp: 1,
-            ),
-          ],
-        );
-        await chatRepo.put(modified);
-        ChatSessionService.updateCache(modified);
+      // Modify session 1 and properly call updateCache.
+      final modified = session1.copyWith(
+        messages: [
+          ChatMessage(
+            id: 'm_1_edited',
+            role: 'assistant',
+            content: 'EDITED content',
+            timestamp: 1,
+          ),
+        ],
+      );
+      await chatRepo.put(modified);
+      ChatSessionService.updateCache(modified);
 
-        // Switch away to session 0, then back to session 1.
-        await sessionSvc.switchToSession('c1', 0);
-        final cachedAgain = await sessionSvc.switchToSession('c1', 1);
+      // Switch away to session 0, then back to session 1.
+      await sessionSvc.switchToSession('c1', 0);
+      final cachedAgain = await sessionSvc.switchToSession('c1', 1);
 
-        // FIXED: cache returns the updated session.
-        expect(
-          cachedAgain.messages.first.content,
-          'EDITED content',
-          reason: 'Cache returns fresh data — updateCache was called',
-        );
-      },
-    );
+      // FIXED: cache returns the updated session.
+      expect(cachedAgain.messages.first.content, 'EDITED content',
+          reason: 'Cache returns fresh data — updateCache was called');
+    });
 
-    test(
-      'external put without updateCache leaves stale cache (known gap)',
-      () async {
-        await _seedData(container, 'c1', sessionCount: 2);
-        final sessionSvc = container.read(_sessionSvcProvider);
-        final chatRepo = container.read(chatRepoProvider);
+    test('external put without updateCache leaves stale cache (known gap)', () async {
+      await _seedData(container, 'c1', sessionCount: 2);
+      final sessionSvc = container.read(_sessionSvcProvider);
+      final chatRepo = container.read(chatRepoProvider);
 
-        // First switch to session 1 — populates the cache.
-        final session1 = await sessionSvc.switchToSession('c1', 1);
+      // First switch to session 1 — populates the cache.
+      final session1 = await sessionSvc.switchToSession('c1', 1);
 
-        // Modify session 1 in the DB directly WITHOUT calling updateCache.
-        // This simulates an external code path (e.g. sync pull) that writes
-        // to the DB but doesn't know about the static cache.
-        final modified = session1.copyWith(
-          messages: [
-            ChatMessage(
-              id: 'm_1_edited',
-              role: 'assistant',
-              content: 'EDITED content',
-              timestamp: 1,
-            ),
-          ],
-        );
-        await chatRepo.put(modified);
+      // Modify session 1 in the DB directly WITHOUT calling updateCache.
+      // This simulates an external code path (e.g. sync pull) that writes
+      // to the DB but doesn't know about the static cache.
+      final modified = session1.copyWith(
+        messages: [
+          ChatMessage(
+            id: 'm_1_edited',
+            role: 'assistant',
+            content: 'EDITED content',
+            timestamp: 1,
+          ),
+        ],
+      );
+      await chatRepo.put(modified);
 
-        // Switch away to session 0, then back to session 1.
-        await sessionSvc.switchToSession('c1', 0);
-        final cachedAgain = await sessionSvc.switchToSession('c1', 1);
+      // Switch away to session 0, then back to session 1.
+      await sessionSvc.switchToSession('c1', 0);
+      final cachedAgain = await sessionSvc.switchToSession('c1', 1);
 
-        // Known gap: external put without updateCache leaves stale cache.
-        // All INTERNAL call sites now call updateCache, but external paths
-        // (sync pull, import) must also call clearCache or updateCache.
-        expect(
-          cachedAgain.messages.first.content,
-          'Session 1 message',
-          reason:
-              'Known gap: external put without updateCache leaves stale cache',
-        );
-      },
-    );
+      // Known gap: external put without updateCache leaves stale cache.
+      // All INTERNAL call sites now call updateCache, but external paths
+      // (sync pull, import) must also call clearCache or updateCache.
+      expect(cachedAgain.messages.first.content, 'Session 1 message',
+          reason: 'Known gap: external put without updateCache leaves stale cache');
+    });
   });
 
   // ===========================================================================
@@ -629,88 +569,61 @@ void main() {
       await db.close();
     });
 
-    test(
-      'currentSessionIndex is persisted before switchToSession returns',
-      () async {
-        await _seedData(
-          container,
-          'c1',
-          sessionCount: 3,
-          currentSessionIndex: 0,
-        );
-        final sessionSvc = container.read(_sessionSvcProvider);
-        final charRepo = container.read(characterRepoProvider);
+    test('currentSessionIndex is persisted before switchToSession returns', () async {
+      await _seedData(container, 'c1', sessionCount: 3, currentSessionIndex: 0);
+      final sessionSvc = container.read(_sessionSvcProvider);
+      final charRepo = container.read(characterRepoProvider);
 
-        // Pre-populate cache so switchToSession takes the fast cache path.
-        ChatSessionService.updateCache(_makeSession('c1', 2));
+      // Pre-populate cache so switchToSession takes the fast cache path.
+      ChatSessionService.updateCache(_makeSession('c1', 2));
 
-        // Switch to session 2 via cache.
-        // FIXED: switchToSession now awaits saveCurrentSessionIndex, so the
-        // DB write completes before switchToSession returns.
-        // The _SlowCharacterRepo delays put by 200ms — switchToSession will
-        // wait for it.
-        final session = await sessionSvc.switchToSession('c1', 2);
-        expect(session.sessionIndex, 2);
+      // Switch to session 2 via cache.
+      // FIXED: switchToSession now awaits saveCurrentSessionIndex, so the
+      // DB write completes before switchToSession returns.
+      // The _SlowCharacterRepo delays put by 200ms — switchToSession will
+      // wait for it.
+      final session = await sessionSvc.switchToSession('c1', 2);
+      expect(session.sessionIndex, 2);
 
-        // findExistingSession reads currentSessionIndex from DB.
-        // FIXED: it should now read 2, not 0.
-        final found = await sessionSvc.findExistingSession('c1');
-        expect(
-          found?.sessionIndex,
-          2,
-          reason:
-              'FIXED: findExistingSession returns correct session 2 — '
-              'saveCurrentSessionIndex was awaited before switchToSession returned',
-        );
+      // findExistingSession reads currentSessionIndex from DB.
+      // FIXED: it should now read 2, not 0.
+      final found = await sessionSvc.findExistingSession('c1');
+      expect(found?.sessionIndex, 2,
+          reason: 'FIXED: findExistingSession returns correct session 2 — '
+              'saveCurrentSessionIndex was awaited before switchToSession returned');
 
-        // Verify DB state directly.
-        final char = await charRepo.getById('c1');
-        expect(
-          char?.currentSessionIndex,
-          2,
-          reason: 'DB reflects the persisted index',
-        );
-      },
-    );
+      // Verify DB state directly.
+      final char = await charRepo.getById('c1');
+      expect(char?.currentSessionIndex, 2,
+          reason: 'DB reflects the persisted index');
+    });
 
-    test(
-      'findExistingSession returns correct session immediately after switchToSession',
-      () async {
-        // With a fast DB (no slow repo), the race is now deterministic:
-        // saveCurrentSessionIndex is awaited, so the DB always has the
-        // correct index before switchToSession returns.
-        final fastContainer = ProviderContainer(
-          overrides: [appDbProvider.overrideWithValue(db)],
-        );
-        addTearDown(fastContainer.dispose);
+    test('findExistingSession returns correct session immediately after switchToSession', () async {
+      // With a fast DB (no slow repo), the race is now deterministic:
+      // saveCurrentSessionIndex is awaited, so the DB always has the
+      // correct index before switchToSession returns.
+      final fastContainer = ProviderContainer(
+        overrides: [appDbProvider.overrideWithValue(db)],
+      );
+      addTearDown(fastContainer.dispose);
 
-        await _seedData(
-          fastContainer,
-          'c1',
-          sessionCount: 3,
-          currentSessionIndex: 0,
-        );
-        final sessionSvc = fastContainer.read(_sessionSvcProvider);
+      await _seedData(fastContainer, 'c1', sessionCount: 3, currentSessionIndex: 0);
+      final sessionSvc = fastContainer.read(_sessionSvcProvider);
 
-        // Pre-populate cache for session 1.
-        ChatSessionService.updateCache(_makeSession('c1', 1));
+      // Pre-populate cache for session 1.
+      ChatSessionService.updateCache(_makeSession('c1', 1));
 
-        // Switch to session 1 via cache path.
-        await sessionSvc.switchToSession('c1', 1);
+      // Switch to session 1 via cache path.
+      await sessionSvc.switchToSession('c1', 1);
 
-        // Immediately call findExistingSession.
-        // FIXED: no race — saveCurrentSessionIndex was awaited.
-        final found = await sessionSvc.findExistingSession('c1');
-        expect(found, isNotNull);
-        expect(
-          found!.sessionIndex,
-          1,
-          reason:
-              'FIXED: findExistingSession returns session 1 — '
-              'saveCurrentSessionIndex completed before switchToSession returned',
-        );
-      },
-    );
+      // Immediately call findExistingSession.
+      // FIXED: no race — saveCurrentSessionIndex was awaited.
+      final found = await sessionSvc.findExistingSession('c1');
+      expect(found, isNotNull);
+      expect(found!.sessionIndex, 1,
+          reason: 'FIXED: findExistingSession returns session 1 — '
+              'saveCurrentSessionIndex completed before switchToSession returned');
+    });
   });
 
   // ===========================================================================
@@ -734,92 +647,72 @@ void main() {
       await db.close();
     });
 
-    test(
-      'two concurrent switchSession calls — only the latest writes state',
-      () async {
-        await _seedData(container, 'c1', sessionCount: 3);
-        final box = container.read(_stateBoxProvider);
-        final ctrl = container.read(_testCtrlProvider('c1'));
+    test('two concurrent switchSession calls — only the latest writes state', () async {
+      await _seedData(container, 'c1', sessionCount: 3);
+      final box = container.read(_stateBoxProvider);
+      final ctrl = container.read(_testCtrlProvider('c1'));
 
-        // Start two concurrent switches.
-        final f1 = ctrl.switchSession(1);
-        final f2 = ctrl.switchSession(2);
+      // Start two concurrent switches.
+      final f1 = ctrl.switchSession(1);
+      final f2 = ctrl.switchSession(2);
 
-        await Future.wait([f1, f2]);
+      await Future.wait([f1, f2]);
 
-        // FIXED: only one setState should fire — the second switch (epoch=2)
-        // supersedes the first (epoch=1). Even if both DB reads complete,
-        // only the latest epoch's result is written.
-        //
-        // With an in-memory DB, both reads may complete synchronously, so
-        // either 1 or 2 setState calls may fire. But the final state must
-        // be session 2 (the latest switch).
-        final lastIndex = box.log.isNotEmpty
-            ? box.log.last.session?.sessionIndex
-            : null;
-        expect(
-          lastIndex,
-          2,
-          reason:
-              'FIXED: final state is session 2 (the latest switch) — '
-              'stale switch 1 was suppressed by epoch guard',
-        );
-      },
-    );
+      // FIXED: only one setState should fire — the second switch (epoch=2)
+      // supersedes the first (epoch=1). Even if both DB reads complete,
+      // only the latest epoch's result is written.
+      //
+      // With an in-memory DB, both reads may complete synchronously, so
+      // either 1 or 2 setState calls may fire. But the final state must
+      // be session 2 (the latest switch).
+      final lastIndex = box.log.isNotEmpty
+          ? box.log.last.session?.sessionIndex
+          : null;
+      expect(lastIndex, 2,
+          reason: 'FIXED: final state is session 2 (the latest switch) — '
+              'stale switch 1 was suppressed by epoch guard');
+    });
 
-    test(
-      'switchSession to non-existent session does not corrupt state',
-      () async {
-        await _seedData(container, 'c1', sessionCount: 2);
-        final box = container.read(_stateBoxProvider);
-        final ctrl = container.read(_testCtrlProvider('c1'));
+    test('switchSession to non-existent session does not corrupt state', () async {
+      await _seedData(container, 'c1', sessionCount: 2);
+      final box = container.read(_stateBoxProvider);
+      final ctrl = container.read(_testCtrlProvider('c1'));
 
-        // Set initial state to session 0.
-        await ctrl.switchSession(0);
-        expect(box.value.value?.session?.sessionIndex, 0);
+      // Set initial state to session 0.
+      await ctrl.switchSession(0);
+      expect(box.value.value?.session?.sessionIndex, 0);
 
-        // Try to switch to a non-existent session (index 99).
-        // switchToSession will throw StateError.
-        await expectLater(ctrl.switchSession(99), throwsA(isA<StateError>()));
+      // Try to switch to a non-existent session (index 99).
+      // switchToSession will throw StateError.
+      await expectLater(ctrl.switchSession(99), throwsA(isA<StateError>()));
 
-        // The active state stays intact, and the failure is propagated so the
-        // caller can show an error instead of reporting a successful switch.
-        expect(
-          box.value.value?.session?.sessionIndex,
-          0,
-          reason: 'Session 0 remains active after the failed switch',
-        );
-      },
-    );
+      // The active state stays intact, and the failure is propagated so the
+      // caller can show an error instead of reporting a successful switch.
+      expect(box.value.value?.session?.sessionIndex, 0,
+          reason: 'Session 0 remains active after the failed switch');
+    });
 
-    test(
-      'switch then createNewSession — only the new session writes state',
-      () async {
-        await _seedData(container, 'c1', sessionCount: 2);
-        final box = container.read(_stateBoxProvider);
-        final ctrl = container.read(_testCtrlProvider('c1'));
+    test('switch then createNewSession — only the new session writes state', () async {
+      await _seedData(container, 'c1', sessionCount: 2);
+      final box = container.read(_stateBoxProvider);
+      final ctrl = container.read(_testCtrlProvider('c1'));
 
-        // Start a switch to session 1.
-        final f1 = ctrl.switchSession(1);
+      // Start a switch to session 1.
+      final f1 = ctrl.switchSession(1);
 
-        // Before it completes, start createNewSession — supersedes the switch.
-        final f2 = ctrl.createNewSession();
+      // Before it completes, start createNewSession — supersedes the switch.
+      final f2 = ctrl.createNewSession();
 
-        await Future.wait([f1, f2]);
+      await Future.wait([f1, f2]);
 
-        // FIXED: the switch to session 1 should be suppressed.
-        // The final state should be the new session (index 2, the next index).
-        final lastIndex = box.log.isNotEmpty
-            ? box.log.last.session?.sessionIndex
-            : null;
-        expect(
-          lastIndex,
-          2,
-          reason:
-              'FIXED: final state is the new session (index 2) — '
-              'stale switch to 1 was suppressed',
-        );
-      },
-    );
+      // FIXED: the switch to session 1 should be suppressed.
+      // The final state should be the new session (index 2, the next index).
+      final lastIndex = box.log.isNotEmpty
+          ? box.log.last.session?.sessionIndex
+          : null;
+      expect(lastIndex, 2,
+          reason: 'FIXED: final state is the new session (index 2) — '
+              'stale switch to 1 was suppressed');
+    });
   });
 }

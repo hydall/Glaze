@@ -10,10 +10,7 @@ void main() {
         {'role': 'user', 'content': 'Hi.'},
       ]);
       expect(result.system, hasLength(2));
-      expect(result.system[0], {
-        'type': 'text',
-        'text': 'You are a helpful AI.',
-      });
+      expect(result.system[0], {'type': 'text', 'text': 'You are a helpful AI.'});
       expect(result.system[1], {'type': 'text', 'text': 'Be terse.'});
       expect(result.messages, hasLength(1));
       expect(result.messages[0]['role'], 'user');
@@ -31,14 +28,8 @@ void main() {
       // user "hello" merged with the converted-to-user "mid-system".
       expect(result.messages[0]['role'], 'user');
       final parts = result.messages[0]['content'] as List;
-      expect(
-        parts.any((p) => p['type'] == 'text' && p['text'] == 'hello'),
-        isTrue,
-      );
-      expect(
-        parts.any((p) => p['type'] == 'text' && p['text'] == 'mid-system'),
-        isTrue,
-      );
+      expect(parts.any((p) => p['type'] == 'text' && p['text'] == 'hello'), isTrue);
+      expect(parts.any((p) => p['type'] == 'text' && p['text'] == 'mid-system'), isTrue);
       expect(result.messages[1]['role'], 'assistant');
     });
 
@@ -77,10 +68,13 @@ void main() {
     });
 
     test('extractPrefill=false leaves trailing assistant alone', () {
-      final result = convertClaudeMessages([
-        {'role': 'user', 'content': 'q'},
-        {'role': 'assistant', 'content': 'prefill text  '},
-      ], extractPrefill: false);
+      final result = convertClaudeMessages(
+        [
+          {'role': 'user', 'content': 'q'},
+          {'role': 'assistant', 'content': 'prefill text  '},
+        ],
+        extractPrefill: false,
+      );
       expect(result.prefill, isNull);
     });
 

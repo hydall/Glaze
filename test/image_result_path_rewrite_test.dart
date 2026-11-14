@@ -30,10 +30,7 @@ void main() {
         '[IMG:RESULT:/data/Glaze/generated/a.png|{"prompt":"a [tag] girl"}]',
         (path) => 'served:$path',
       );
-      expect(
-        out,
-        startsWith('[IMG:RESULT:served:/data/Glaze/generated/a.png|'),
-      );
+      expect(out, startsWith('[IMG:RESULT:served:/data/Glaze/generated/a.png|'));
       expect(out, isNot(contains('[IMG:RESULT:/data')));
     });
 
@@ -50,10 +47,7 @@ void main() {
         '[IMG:RESULT:/a.png] mid [IMG:RESULT:/b.png|{}]',
         (path) => 'served:$path',
       );
-      expect(
-        out,
-        '[IMG:RESULT:served:/a.png] mid [IMG:RESULT:served:/b.png|{}]',
-      );
+      expect(out, '[IMG:RESULT:served:/a.png] mid [IMG:RESULT:served:/b.png|{}]');
     });
 
     test('leaves pending and error tags alone', () {
