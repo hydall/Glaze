@@ -938,6 +938,59 @@ class ImageTagMarkup {
     );
   }
 
+  /// [after] with every block that had a finished image in [before] but came
+  /// back as an error card put back to its finished form, plus the error text
+  /// of each block put back.
+  ///
+  /// A redraw that fails must not take away the picture the reader already
+  /// had: the error card keeps the old path only inside its JSON, and a card
+  /// rendered in place of the picture reads as "the image was deleted". The
+  /// caller shows the returned errors some other way (a toast).
+  ///
+  /// Blocks are matched by position in [scanImageBlocks], which counts every
+  /// block once whatever state it is in, so a redraw never shifts the
+  /// numbering. When the counts differ the texts are not comparable and
+  /// [after] is returned as is.
+  static ({String text, List<String> errors}) restoreFailedRedraws(
+    String before,
+    String after,
+  ) {
+    final old = scanImageBlocks(before);
+    final current = scanImageBlocks(after);
+    if (old.length != current.length) return (text: after, errors: const []);
+
+    var result = after;
+    final errors = <String>[];
+    // Right to left: restoring one block must not move the spans of the rest.
+    for (var i = current.length - 1; i >= 0; i--) {
+      if (old[i].kind != ImageBlockKind.result ||
+          current[i].kind != ImageBlockKind.error) {
+        continue;
+      }
+      final card = after.substring(current[i].start, current[i].end);
+      errors.add(_errorTextOf(card));
+      result = result.replaceRange(
+        current[i].start,
+        current[i].end,
+        before.substring(old[i].start, old[i].end),
+      );
+    }
+    return (text: result, errors: errors.reversed.toList());
+  }
+
+  /// The `error` field of one `[IMG:ERROR:…]` card, or empty when it has none.
+  static String _errorTextOf(String card) {
+    final json = ImgGenPatterns.imgErrorRegex.firstMatch(card)?.group(1);
+    if (json == null) return '';
+    try {
+      final parsed = jsonDecode(json);
+      if (parsed is Map && parsed['error'] is String) {
+        return parsed['error'] as String;
+      }
+    } catch (_) {}
+    return '';
+  }
+
   /// The visible image of every finished block, in document order — both the
   /// stored `<img data-iig-…>` form and the `[IMG:RESULT:…]` of older messages.
   static List<String> extractImageResultPaths(String text) {
