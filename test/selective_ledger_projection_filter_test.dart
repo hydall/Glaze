@@ -425,7 +425,11 @@ void main() {
         final result = _select(
           _projection(
             trackers: [
-              _tracker('scene.location', 'the bath', provenance: 'message=mold'),
+              _tracker(
+                'scene.location',
+                'the bath',
+                provenance: 'message=mold',
+              ),
               _tracker(
                 'relationship:a:b.trust',
                 'fragile',
@@ -440,14 +444,11 @@ void main() {
           ),
           visible: [_message('mnew', 'recent exchange')],
         );
-        expect(
-          result.projection.trackers.map((t) => t.name),
-          [
-            'scene.location',
-            'relationship:a:b.trust',
-            'npc:gilda.current_goal',
-          ],
-        );
+        expect(result.projection.trackers.map((t) => t.name), [
+          'scene.location',
+          'relationship:a:b.trust',
+          'npc:gilda.current_goal',
+        ]);
       },
     );
 

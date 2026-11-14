@@ -52,7 +52,10 @@ void main() {
       lorebooks: const [book],
     );
 
-    expect(current.single.entries.single.content, 'The district is dangerous but lively.');
+    expect(
+      current.single.entries.single.content,
+      'The district is dangerous but lively.',
+    );
     expect(fresh.single.entries.single.content, source);
     expect(book.entries.single.content, source);
   });
@@ -102,6 +105,9 @@ void main() {
       sessionId: 'session-branch',
       lorebooks: const [book],
     );
-    expect(branch.single.entries.single.content, 'The district is dangerous but lively.');
+    expect(
+      branch.single.entries.single.content,
+      'The district is dangerous but lively.',
+    );
   });
 }

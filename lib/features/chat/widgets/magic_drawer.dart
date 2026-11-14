@@ -320,9 +320,9 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
   }
 
   Future<void> _showAddItemSheet() async {
-    final available = _visibleItems(context)
-        .where((item) => !_itemIds.contains(item.id))
-        .toList();
+    final available = _visibleItems(
+      context,
+    ).where((item) => !_itemIds.contains(item.id)).toList();
     if (available.isEmpty) return;
 
     await GlazeBottomSheet.show<MagicDrawerItemDef>(
@@ -563,10 +563,7 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
                     listRow: list,
                     child: card,
                   ),
-                  childWhenDragging: Opacity(
-                    opacity: 0.25,
-                    child: card,
-                  ),
+                  childWhenDragging: Opacity(opacity: 0.25, child: card),
                   child: card,
                 );
               },
@@ -592,10 +589,7 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
         if (canAdd)
           SizedBox(
             width: itemWidth,
-            child: AddMagicCard(
-              onTap: _showAddItemSheet,
-              listRow: list,
-            ),
+            child: AddMagicCard(onTap: _showAddItemSheet, listRow: list),
           ),
       ],
     );

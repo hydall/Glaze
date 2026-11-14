@@ -73,10 +73,7 @@ void main() {
   });
 
   test('deleting a folder removes its membership rows only', () async {
-    final folder = await repo.create(
-      domain: FolderDomain.regex,
-      name: 'Chat',
-    );
+    final folder = await repo.create(domain: FolderDomain.regex, name: 'Chat');
     await repo.addMember(folder.id, 'script-1');
 
     await repo.delete(folder.id);

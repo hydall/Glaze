@@ -80,26 +80,28 @@ void main() {
   });
 
   group('resolveGlazeFilePath', () {
-    test('leaves a URL alone instead of joining it onto the data root',
-        () async {
-      // The base has to be cached for this to mean anything — without one the
-      // function returns its input whatever it is.
-      await getAppDataDir();
-      expect(cachedAppDataDir, isNotNull);
+    test(
+      'leaves a URL alone instead of joining it onto the data root',
+      () async {
+        // The base has to be cached for this to mean anything — without one the
+        // function returns its input whatever it is.
+        await getAppDataDir();
+        expect(cachedAppDataDir, isNotNull);
 
-      expect(
-        resolveGlazeFilePath('https://example.test/a.png'),
-        'https://example.test/a.png',
-      );
-      expect(
-        resolveGlazeFilePath('data:image/png;base64,AA'),
-        'data:image/png;base64,AA',
-      );
-      // A genuine relative path still gets the base.
-      expect(
-        resolveGlazeFilePath('avatars/a.png'),
-        p.join(cachedAppDataDir!, 'avatars', 'a.png'),
-      );
-    });
+        expect(
+          resolveGlazeFilePath('https://example.test/a.png'),
+          'https://example.test/a.png',
+        );
+        expect(
+          resolveGlazeFilePath('data:image/png;base64,AA'),
+          'data:image/png;base64,AA',
+        );
+        // A genuine relative path still gets the base.
+        expect(
+          resolveGlazeFilePath('avatars/a.png'),
+          p.join(cachedAppDataDir!, 'avatars', 'a.png'),
+        );
+      },
+    );
   });
 }

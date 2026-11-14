@@ -62,8 +62,10 @@ void main() {
       final content = r[0]['content'] as List;
       // text from #1 merged with #2's string into a single text part, image
       // preserved at the end.
-      expect(content.where((p) => p is Map && p['type'] == 'image_url'),
-          hasLength(1));
+      expect(
+        content.where((p) => p is Map && p['type'] == 'image_url'),
+        hasLength(1),
+      );
     });
 
     test('empty input returns empty list', () {

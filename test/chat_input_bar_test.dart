@@ -168,22 +168,21 @@ void main() {
       });
 
       for (final platform in [TargetPlatform.android, TargetPlatform.iOS]) {
-        testWidgets(
-          'a soft keyboard Enter on ${platform.name} does not send',
-          (tester) async {
-            debugDefaultTargetPlatformOverride = platform;
-            addTearDown(() => debugDefaultTargetPlatformOverride = null);
-            tester.view.viewInsets = const FakeViewPadding(bottom: 300);
-            addTearDown(tester.view.resetViewInsets);
+        testWidgets('a soft keyboard Enter on ${platform.name} does not send', (
+          tester,
+        ) async {
+          debugDefaultTargetPlatformOverride = platform;
+          addTearDown(() => debugDefaultTargetPlatformOverride = null);
+          tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+          addTearDown(tester.view.resetViewInsets);
 
-            await pumpFocused(tester, enterToSend: true);
-            // Samsung Keyboard reports its Enter as a key event.
-            await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-            await tester.pump();
-            expect(sentMessages, isEmpty);
-            debugDefaultTargetPlatformOverride = null;
-          },
-        );
+          await pumpFocused(tester, enterToSend: true);
+          // Samsung Keyboard reports its Enter as a key event.
+          await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+          await tester.pump();
+          expect(sentMessages, isEmpty);
+          debugDefaultTargetPlatformOverride = null;
+        });
 
         testWidgets(
           'a hardware Enter on ${platform.name} still sends with no IME up',

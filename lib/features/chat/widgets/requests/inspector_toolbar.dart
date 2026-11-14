@@ -95,42 +95,45 @@ class InspectorViewToggle extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = context.cs;
 
-    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
-      onTap: () => onChanged(!isRaw),
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        height: _segment,
-        decoration: BoxDecoration(
-          color: cs.onSurface.withValues(alpha: 0.06),
-          border: Border.all(color: cs.outlineVariant),
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Stack(
-          children: [
-            AnimatedPositioned(
-              duration: const Duration(milliseconds: 250),
-              curve: Curves.easeOutCubic,
-              left: isRaw ? _segment : 0,
-              top: 0,
-              bottom: 0,
-              width: _segment,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: cs.primary,
-                  borderRadius: BorderRadius.circular(20),
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: () => onChanged(!isRaw),
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          height: _segment,
+          decoration: BoxDecoration(
+            color: cs.onSurface.withValues(alpha: 0.06),
+            border: Border.all(color: cs.outlineVariant),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Stack(
+            children: [
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 250),
+                curve: Curves.easeOutCubic,
+                left: isRaw ? _segment : 0,
+                top: 0,
+                bottom: 0,
+                width: _segment,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: cs.primary,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
                 ),
               ),
-            ),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _icon(context, Icons.visibility, active: !isRaw),
-                _icon(context, Icons.code, active: isRaw),
-              ],
-            ),
-          ],
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _icon(context, Icons.visibility, active: !isRaw),
+                  _icon(context, Icons.code, active: isRaw),
+                ],
+              ),
+            ],
+          ),
         ),
-      )),
+      ),
     );
   }
 

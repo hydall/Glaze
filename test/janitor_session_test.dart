@@ -143,12 +143,11 @@ void main() {
         ),
         isTrue,
       );
+      expect(janitorReadIsPublic('https://janitorai.com/hampter/tags'), isTrue);
       expect(
-        janitorReadIsPublic('https://janitorai.com/hampter/tags'),
-        isTrue,
-      );
-      expect(
-        janitorReadIsPublic('https://janitorai.com/hampter/reviews/abc123?page=1'),
+        janitorReadIsPublic(
+          'https://janitorai.com/hampter/reviews/abc123?page=1',
+        ),
         isTrue,
       );
     });

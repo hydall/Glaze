@@ -126,32 +126,38 @@ void main() {
       expect(tail[2]['tool_call_id'], 'toolu_2');
     });
 
-    test('becomes thinking + text + tool_use, then one user turn of results', () {
-      final converted = convertClaudeMessages(conversation()).messages;
-      expect(converted.length, 3);
+    test(
+      'becomes thinking + text + tool_use, then one user turn of results',
+      () {
+        final converted = convertClaudeMessages(conversation()).messages;
+        expect(converted.length, 3);
 
-      final assistant = converted[1];
-      expect(assistant['role'], 'assistant');
-      final blocks = (assistant['content'] as List).cast<Map<dynamic, dynamic>>();
-      expect(blocks.map((b) => b['type']), [
-        'thinking',
-        'text',
-        'tool_use',
-        'tool_use',
-      ]);
-      expect(blocks[0]['signature'], 'sig');
-      expect(blocks[2]['input'], {'query': 'ann'});
-      expect(assistant.containsKey('tool_calls'), isFalse);
-      expect(assistant.containsKey('thinking_blocks'), isFalse);
+        final assistant = converted[1];
+        expect(assistant['role'], 'assistant');
+        final blocks = (assistant['content'] as List)
+            .cast<Map<dynamic, dynamic>>();
+        expect(blocks.map((b) => b['type']), [
+          'thinking',
+          'text',
+          'tool_use',
+          'tool_use',
+        ]);
+        expect(blocks[0]['signature'], 'sig');
+        expect(blocks[2]['input'], {'query': 'ann'});
+        expect(assistant.containsKey('tool_calls'), isFalse);
+        expect(assistant.containsKey('thinking_blocks'), isFalse);
 
-      final results = converted[2];
-      expect(results['role'], 'user');
-      expect((results['content'] as List).cast<Map<dynamic, dynamic>>().map((b) => b['type']), [
-        'tool_result',
-        'tool_result',
-      ]);
-      expect((results['content'] as List).first['tool_use_id'], 'toolu_1');
-    });
+        final results = converted[2];
+        expect(results['role'], 'user');
+        expect(
+          (results['content'] as List).cast<Map<dynamic, dynamic>>().map(
+            (b) => b['type'],
+          ),
+          ['tool_result', 'tool_result'],
+        );
+        expect((results['content'] as List).first['tool_use_id'], 'toolu_1');
+      },
+    );
 
     test('a tool-call turn is not mistaken for a prefill', () {
       final result = convertClaudeMessages(conversation());

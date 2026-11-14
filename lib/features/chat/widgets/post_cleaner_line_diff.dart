@@ -21,6 +21,7 @@ class DiffWord {
 class DiffLine {
   final String text;
   final DiffLineType type;
+
   /// Word-level breakdown for inline highlighting. Null for unchanged lines.
   final List<DiffWord>? words;
 
@@ -41,10 +42,10 @@ class DiffResult {
   });
 
   const DiffResult.empty()
-      : leftLines = const [],
-        rightLines = const [],
-        removedLines = 0,
-        addedLines = 0;
+    : leftLines = const [],
+      rightLines = const [],
+      removedLines = 0,
+      addedLines = 0;
 }
 
 /// Computes a hybrid line+word diff between [original] and [cleaned].
@@ -67,9 +68,7 @@ DiffResult computeLineDiff(String original, String cleaned) {
       if (left[i] == right[j]) {
         dp[i][j] = dp[i + 1][j + 1] + 1;
       } else {
-        dp[i][j] = dp[i + 1][j] > dp[i][j + 1]
-            ? dp[i + 1][j]
-            : dp[i][j + 1];
+        dp[i][j] = dp[i + 1][j] > dp[i][j + 1] ? dp[i + 1][j] : dp[i][j + 1];
       }
     }
   }
@@ -140,12 +139,12 @@ DiffResult computeLineDiff(String original, String cleaned) {
       for (final pair in pairs) {
         if (pair.left != null && pair.right != null) {
           final wordDiff = _computeWordDiff(pair.left!, pair.right!);
-          leftLines.add(DiffLine(
-            pair.left!, DiffLineType.removed, words: wordDiff.left,
-          ));
-          rightLines.add(DiffLine(
-            pair.right!, DiffLineType.added, words: wordDiff.right,
-          ));
+          leftLines.add(
+            DiffLine(pair.left!, DiffLineType.removed, words: wordDiff.left),
+          );
+          rightLines.add(
+            DiffLine(pair.right!, DiffLineType.added, words: wordDiff.right),
+          );
           removed++;
           added++;
         } else if (pair.left != null) {
@@ -241,9 +240,7 @@ _WordDiffResult _computeWordDiff(String leftStr, String rightStr) {
       if (leftWords[i] == rightWords[j]) {
         dp[i][j] = dp[i + 1][j + 1] + 1;
       } else {
-        dp[i][j] = dp[i + 1][j] > dp[i][j + 1]
-            ? dp[i + 1][j]
-            : dp[i][j + 1];
+        dp[i][j] = dp[i + 1][j] > dp[i][j + 1] ? dp[i + 1][j] : dp[i][j + 1];
       }
     }
   }

@@ -1263,17 +1263,20 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
                 // Guidance was only dismissable from whichever button had
                 // opened it — a composer action that may be pinned anywhere,
                 // or the drawer.
-                MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
-                  onTap: widget.isEditingMessage ? null : _toggleGuidance,
-                  behavior: HitTestBehavior.opaque,
-                  child: Padding(
-                    padding: const EdgeInsets.all(6),
-                    child: Icon(
-                      Icons.close_rounded,
-                      size: 16,
-                      color: accent.withValues(alpha: 0.7),
+                MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: GestureDetector(
+                    onTap: widget.isEditingMessage ? null : _toggleGuidance,
+                    behavior: HitTestBehavior.opaque,
+                    child: Padding(
+                      padding: const EdgeInsets.all(6),
+                      child: Icon(
+                        Icons.close_rounded,
+                        size: 16,
+                        color: accent.withValues(alpha: 0.7),
+                      ),
                     ),
-                  )),
+                  ),
                 ),
               ],
             ),
@@ -1804,18 +1807,21 @@ class _AttachedImageThumb extends StatelessWidget {
           Positioned(
             top: 4,
             right: 4,
-            child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
-              onTap: onRemove,
-              child: Container(
-                width: 22,
-                height: 22,
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.6),
-                  shape: BoxShape.circle,
+            child: MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
+                onTap: onRemove,
+                child: Container(
+                  width: 22,
+                  height: 22,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.6),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.close, color: Colors.white, size: 14),
                 ),
-                child: const Icon(Icons.close, color: Colors.white, size: 14),
               ),
-            )),
+            ),
           ),
         ],
       ),
@@ -1893,42 +1899,45 @@ class _CircleBtnState extends ConsumerState<_CircleBtn>
   Widget build(BuildContext context) {
     final preset = ref.watch(themeProvider.select((s) => s.activePreset));
     final floating = widget.blurRegionId != null;
-    final btn = MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
-      onTap: widget.onTap,
-      onTapDown: (widget.onTap != null && !widget.batterySaver)
-          ? (_) => _press.forward()
-          : null,
-      onTapUp: (widget.onTap != null && !widget.batterySaver)
-          ? (_) => _press.reverse()
-          : null,
-      onTapCancel: (widget.onTap != null && !widget.batterySaver)
-          ? () => _press.reverse()
-          : null,
-      child: ScaleTransition(
-        scale: _scale,
-        child: SizedBox(
-          width: 40,
-          height: 40,
-          child: GlassSurface(
-            // Only the top-level circle buttons carry a blurRegionId (they
-            // float over the WebView); the ones nested inside the input pill
-            // always keep their own Flutter blur.
-            blurViaWebView: floating && widget.blurViaWebView,
-            backdropKey: floating ? widget.backdropKey : null,
-            borderRadius: BorderRadius.circular(20),
-            tint: context.cs.surface,
-            border: _uiBorder(context, preset),
-            child: Center(
-              child: ActionGlyph(
-                icon: widget.icon,
-                glyph: widget.glyph,
-                color: widget.color ?? context.cs.primary,
-                size: 20,
+    final btn = MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        onTapDown: (widget.onTap != null && !widget.batterySaver)
+            ? (_) => _press.forward()
+            : null,
+        onTapUp: (widget.onTap != null && !widget.batterySaver)
+            ? (_) => _press.reverse()
+            : null,
+        onTapCancel: (widget.onTap != null && !widget.batterySaver)
+            ? () => _press.reverse()
+            : null,
+        child: ScaleTransition(
+          scale: _scale,
+          child: SizedBox(
+            width: 40,
+            height: 40,
+            child: GlassSurface(
+              // Only the top-level circle buttons carry a blurRegionId (they
+              // float over the WebView); the ones nested inside the input pill
+              // always keep their own Flutter blur.
+              blurViaWebView: floating && widget.blurViaWebView,
+              backdropKey: floating ? widget.backdropKey : null,
+              borderRadius: BorderRadius.circular(20),
+              tint: context.cs.surface,
+              border: _uiBorder(context, preset),
+              child: Center(
+                child: ActionGlyph(
+                  icon: widget.icon,
+                  glyph: widget.glyph,
+                  color: widget.color ?? context.cs.primary,
+                  size: 20,
+                ),
               ),
             ),
           ),
         ),
-      )),
+      ),
     );
     final regionId = widget.blurRegionId;
     if (regionId == null || !widget.blurViaWebView) return btn;

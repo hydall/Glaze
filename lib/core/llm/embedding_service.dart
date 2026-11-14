@@ -130,11 +130,15 @@ class EmbeddingService {
   );
   final _EmbeddingCache _cache = _EmbeddingCache();
 
+  /// [foreground] marks a request someone is waiting on right now (a query
+  /// embedding for the current generation); it is let through before any
+  /// queued background indexing. See [EmbeddingRequestRateLimiter].
   Future<List<List<double>>> getEmbeddings(
     List<String> texts,
     EmbeddingConfig config, {
     CancelToken? cancelToken,
     LlmCaptureContext? captureContext,
+    bool foreground = false,
   }) async {
     final allChunks = <List<String>>[];
     final chunkMap = <int, int>{};
@@ -155,6 +159,7 @@ class EmbeddingService {
       config,
       cancelToken: cancelToken,
       captureContext: captureContext,
+      foreground: foreground,
     );
 
     final result = <List<double>>[];
@@ -173,11 +178,13 @@ class EmbeddingService {
     return result;
   }
 
+  /// [foreground]: see [getEmbeddings].
   Future<List<EmbeddingChunk>> getEmbeddingsWithChunks(
     List<String> texts,
     EmbeddingConfig config, {
     CancelToken? cancelToken,
     LlmCaptureContext? captureContext,
+    bool foreground = false,
   }) async {
     final allChunks = <String>[];
     final textChunkRanges = <_ChunkRange>[];
@@ -194,6 +201,7 @@ class EmbeddingService {
       config,
       cancelToken: cancelToken,
       captureContext: captureContext,
+      foreground: foreground,
     );
 
     final result = <EmbeddingChunk>[];
@@ -220,6 +228,7 @@ class EmbeddingService {
     EmbeddingConfig config, {
     CancelToken? cancelToken,
     LlmCaptureContext? captureContext,
+    bool foreground = false,
   }) async {
     const batchSize = 32;
     final allVectors = <List<double>>[];
@@ -254,6 +263,7 @@ class EmbeddingService {
         config,
         cancelToken: cancelToken,
         captureContext: captureContext,
+        foreground: foreground,
       );
       final batchVectors = List<List<double>?>.filled(batch.length, null);
       for (final entry in cached.entries) {
@@ -285,6 +295,7 @@ class EmbeddingService {
     EmbeddingConfig config, {
     CancelToken? cancelToken,
     LlmCaptureContext? captureContext,
+    bool foreground = false,
   }) async {
     if (texts.isEmpty) return [];
 
@@ -318,6 +329,7 @@ class EmbeddingService {
       await EmbeddingRequestRateLimiter.acquire(
         config.requestsPerMinute,
         requestToken,
+        foreground: foreground,
       );
       // Embeddings never touch a chat transport, so nothing captured them and
       // a turn's vector search was invisible in the Requests timeline. Only the

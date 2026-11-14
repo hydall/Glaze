@@ -144,12 +144,10 @@ void main() {
     await tester.pumpAndSettle();
 
     final written = presets.saved.last.regexes;
-    expect({for (final r in written) r.id: r.disabled}, {
-      'r1': true,
-      'r2': true,
-      'r3': false,
-      'r4': false,
-    });
+    expect(
+      {for (final r in written) r.id: r.disabled},
+      {'r1': true, 'r2': true, 'r3': false, 'r4': false},
+    );
     // Done: the selection is gone and the list is back to normal.
     expect(find.byType(GlazeSelectionBar), findsNothing);
     expect(find.byType(GlazeFab), findsOneWidget);

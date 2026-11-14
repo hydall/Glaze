@@ -33,35 +33,32 @@ void main() {
       }
     });
 
-    test('JS extension docs point at canonical architecture and invariants', () {
-      final claude = _read('CLAUDE.md');
-      expect(claude, contains('docs/ARCHITECTURE.md'));
-      expect(claude, contains('docs/INVARIANTS.md'));
-      expect(claude, contains('INV-EG1'));
-      expect(claude, contains('INV-JS1'));
+    test(
+      'JS extension docs point at canonical architecture and invariants',
+      () {
+        final claude = _read('CLAUDE.md');
+        expect(claude, contains('docs/ARCHITECTURE.md'));
+        expect(claude, contains('docs/INVARIANTS.md'));
+        expect(claude, contains('INV-EG1'));
+        expect(claude, contains('INV-JS1'));
 
-      final architecture = _read('docs/ARCHITECTURE.md');
-      expect(architecture, contains('INV-EG1'));
-      expect(architecture, contains('INV-JS1'));
-      expect(architecture, contains('assets/chat_webview/bridge/index.js'));
-      expect(architecture, contains('assets/chat_webview/renderer/index.js'));
-      expect(architecture, contains('assets/chat_webview/formatter/index.js'));
-    });
+        final architecture = _read('docs/ARCHITECTURE.md');
+        expect(architecture, contains('INV-EG1'));
+        expect(architecture, contains('INV-JS1'));
+        expect(architecture, contains('assets/chat_webview/bridge/index.js'));
+        expect(architecture, contains('assets/chat_webview/renderer/index.js'));
+        expect(
+          architecture,
+          contains('assets/chat_webview/formatter/index.js'),
+        );
+      },
+    );
 
     test('markdown marker guide references active module files', () {
       final guide = _read('docs/markdown-markers.md');
-      expect(
-        guide,
-        contains('assets/chat_webview/formatter/formatter.js'),
-      );
-      expect(
-        guide,
-        contains('assets/chat_webview/formatter/text_format.js'),
-      );
-      expect(
-        guide,
-        contains('assets/chat_webview/renderer/shadow_style.js'),
-      );
+      expect(guide, contains('assets/chat_webview/formatter/formatter.js'));
+      expect(guide, contains('assets/chat_webview/formatter/text_format.js'));
+      expect(guide, contains('assets/chat_webview/renderer/shadow_style.js'));
     });
   });
 }

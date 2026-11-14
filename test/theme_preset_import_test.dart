@@ -182,8 +182,9 @@ void main() {
         '#C42A4A',
       );
 
-      final persisted = (await SharedPreferences.getInstance())
-          .getString('theme_presets');
+      final persisted = (await SharedPreferences.getInstance()).getString(
+        'theme_presets',
+      );
       expect(persisted, contains('#C42A4A'));
       expect(persisted, isNot(contains('7996CE')));
     });

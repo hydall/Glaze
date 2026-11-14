@@ -113,9 +113,7 @@ void main() {
     });
 
     test('missing NovelAI sub-settings take their defaults', () {
-      final restored = ImageGenSettingsCodec.fromJson({
-        'apiType': 'novelai',
-      });
+      final restored = ImageGenSettingsCodec.fromJson({'apiType': 'novelai'});
 
       expect(restored.novelai, const NovelAIImageSettings());
     });

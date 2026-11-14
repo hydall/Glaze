@@ -14,9 +14,9 @@ void main() {
   void handleWith(Future<Object?>? Function(MethodCall call)? handler) {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
-      calls.add(call);
-      return handler == null ? null : await handler(call);
-    });
+          calls.add(call);
+          return handler == null ? null : await handler(call);
+        });
   }
 
   setUp(() {

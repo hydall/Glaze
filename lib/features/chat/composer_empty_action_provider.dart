@@ -32,8 +32,7 @@ class ComposerEmptyActionNotifier extends AsyncNotifier<ComposerPin?> {
   /// resting on the send button is reaching for; the row below is where those
   /// belong. Enforced here rather than only at the drop, so a stored id
   /// cannot outlive the rule.
-  static bool isAssignable(ComposerPin pin) =>
-      pin.kind != ComposerPinKind.tool;
+  static bool isAssignable(ComposerPin pin) => pin.kind != ComposerPinKind.tool;
 
   @override
   Future<ComposerPin?> build() async {

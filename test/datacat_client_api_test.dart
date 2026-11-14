@@ -117,7 +117,9 @@ _ScriptedAdapter _serve(
 
 void main() {
   setUp(() {
-    SharedPreferences.setMockInitialValues({'gz_dc_device': 'install-1234567890'});
+    SharedPreferences.setMockInitialValues({
+      'gz_dc_device': 'install-1234567890',
+    });
     setDatacatClientId('client-abc');
     resetDatacatCapabilities();
     resetDatacatTags();
@@ -128,7 +130,9 @@ void main() {
 
   group('every scoped request identifies the integration', () {
     test('the client id rides along, the installation id does not', () async {
-      final adapter = _serve((options, index) => (status: 200, body: _json(_page())));
+      final adapter = _serve(
+        (options, index) => (status: 200, body: _json(_page())),
+      );
       setCatalogHttpAdapter(adapter);
 
       await datacatFetchCharacters();
@@ -162,7 +166,9 @@ void main() {
 
   group('a listing asks for what the filters mean', () {
     test('browse and search are one endpoint', () async {
-      final adapter = _serve((options, index) => (status: 200, body: _json(_page())));
+      final adapter = _serve(
+        (options, index) => (status: 200, body: _json(_page())),
+      );
       setCatalogHttpAdapter(adapter);
 
       await datacatFetchCharacters(query: 'wizard of the north');
@@ -174,14 +180,13 @@ void main() {
     });
 
     test('NSFW off is the blocked adult tag, not a flag of our own', () async {
-      final adapter = _serve((options, index) => (status: 200, body: _json(_page())));
+      final adapter = _serve(
+        (options, index) => (status: 200, body: _json(_page())),
+      );
       setCatalogHttpAdapter(adapter);
 
       await datacatFetchCharacters(filters: const CatalogFilters(nsfw: false));
-      expect(
-        adapter.requests.last.uri.queryParameters['blockedTagIds'],
-        '2',
-      );
+      expect(adapter.requests.last.uri.queryParameters['blockedTagIds'], '2');
 
       await datacatFetchCharacters(filters: const CatalogFilters(nsfw: true));
       expect(
@@ -199,7 +204,10 @@ void main() {
             'sortBy': 'score',
             'windows': {
               'thisWeek': _page(),
-              'last24h': {'characters': <Object?>[], 'paging': <String, Object?>{}},
+              'last24h': {
+                'characters': <Object?>[],
+                'paging': <String, Object?>{},
+              },
             },
           }),
         ),
@@ -211,7 +219,11 @@ void main() {
         // NSFW on, so the windowed feed's own filtering keeps the fixture row:
         // what this test is about is where the request goes, not what is
         // dropped from it.
-        filters: const CatalogFilters(sort: 'score', window: 'week', nsfw: true),
+        filters: const CatalogFilters(
+          sort: 'score',
+          window: 'week',
+          nsfw: true,
+        ),
       );
 
       final uri = adapter.requests.last.uri;
@@ -248,7 +260,10 @@ void main() {
       // Sending tag parameters it does not document risks a 400 and filters
       // nothing even when it does not.
       final query = adapter.requests.last.uri.queryParameters;
-      expect(query.keys, unorderedEquals(<String>['sort', 'limit', 'offset24', 'offsetWeek']));
+      expect(
+        query.keys,
+        unorderedEquals(<String>['sort', 'limit', 'offset24', 'offsetWeek']),
+      );
     });
 
     test('a window the server cannot filter is filtered here', () async {
@@ -271,7 +286,11 @@ void main() {
       setCatalogHttpAdapter(adapter);
 
       final result = await datacatFetchCharacters(
-        filters: const CatalogFilters(sort: 'fresh', window: '24h', nsfw: false),
+        filters: const CatalogFilters(
+          sort: 'fresh',
+          window: '24h',
+          nsfw: false,
+        ),
       );
 
       // The reader turned adult content off; a feed the server will not filter
@@ -300,27 +319,31 @@ void main() {
   });
 
   group('a summary becomes a catalog row', () {
-    test('the adult chip comes from the flag, and the creator keeps its ref',
-        () async {
-      final adapter = _serve((options, index) => (status: 200, body: _json(_page())));
-      setCatalogHttpAdapter(adapter);
+    test(
+      'the adult chip comes from the flag, and the creator keeps its ref',
+      () async {
+        final adapter = _serve(
+          (options, index) => (status: 200, body: _json(_page())),
+        );
+        setCatalogHttpAdapter(adapter);
 
-      final item = (await datacatFetchCharacters()).characters.single;
+        final item = (await datacatFetchCharacters()).characters.single;
 
-      expect(item.name, 'Yixuan');
-      expect(item.tokens, 1200);
-      expect(item.chatCount, 7);
-      expect(item.messageCount, 42);
-      expect(item.nsfw, isTrue);
-      // Derived from `nsfw`, not prepended from a tag the row may not carry.
-      expect(item.tags, containsAll(<String>['NSFW', 'fantasy', 'noir']));
-      expect(item.tags, isNot(contains('SFW')));
-      // The creator screen is opened by ref; the raw id would lose the
-      // `saucepan:` prefix that says which library to look in.
-      expect(item.creatorRef, 'saucepan:creator-uuid');
-      expect(item.creatorId, 'creator-id');
-      expect(item.sourceKind, 'janitor');
-    });
+        expect(item.name, 'Yixuan');
+        expect(item.tokens, 1200);
+        expect(item.chatCount, 7);
+        expect(item.messageCount, 42);
+        expect(item.nsfw, isTrue);
+        // Derived from `nsfw`, not prepended from a tag the row may not carry.
+        expect(item.tags, containsAll(<String>['NSFW', 'fantasy', 'noir']));
+        expect(item.tags, isNot(contains('SFW')));
+        // The creator screen is opened by ref; the raw id would lose the
+        // `saucepan:` prefix that says which library to look in.
+        expect(item.creatorRef, 'saucepan:creator-uuid');
+        expect(item.creatorId, 'creator-id');
+        expect(item.sourceKind, 'janitor');
+      },
+    );
   });
 
   group('a sort a user saved before the migration still means something', () {
@@ -356,22 +379,25 @@ void main() {
       );
     });
 
-    test('a current field keeps its window even when a legacy key shares its name', () {
-      // `fresh` is both today's sort field and yesterday's windowless label.
-      // Read as the label it would pin the feed to all-time and throw away the
-      // window the user chose.
-      final resolved = DatacatSort.resolve(
-        const CatalogFilters(sort: 'fresh', window: '24h'),
-      );
-      expect(resolved.field, 'fresh');
-      expect(resolved.window, DatacatWindow.last24h);
-      expect(
-        DatacatSort.migrate(
+    test(
+      'a current field keeps its window even when a legacy key shares its name',
+      () {
+        // `fresh` is both today's sort field and yesterday's windowless label.
+        // Read as the label it would pin the feed to all-time and throw away the
+        // window the user chose.
+        final resolved = DatacatSort.resolve(
           const CatalogFilters(sort: 'fresh', window: '24h'),
-        ).window,
-        '24h',
-      );
-    });
+        );
+        expect(resolved.field, 'fresh');
+        expect(resolved.window, DatacatWindow.last24h);
+        expect(
+          DatacatSort.migrate(
+            const CatalogFilters(sort: 'fresh', window: '24h'),
+          ).window,
+          '24h',
+        );
+      },
+    );
   });
 
   group('a protected transfer spends a lease', () {
@@ -380,7 +406,11 @@ void main() {
         (options, index) => (
           status: 200,
           body: _json({
-            'data': {'name': 'Yixuan', 'description': 'a body', 'first_mes': 'hi'},
+            'data': {
+              'name': 'Yixuan',
+              'description': 'a body',
+              'first_mes': 'hi',
+            },
           }),
         ),
       );
@@ -404,33 +434,43 @@ void main() {
       );
     });
 
-    test('one lease covers the next character without verifying again',
-        () async {
-      var challenges = 0;
-      final adapter = _serve(
-        (options, index) => (
-          status: 200,
-          body: _json({
-            'data': {'name': 'Yixuan'},
-          }),
-        ),
-      );
-      setCatalogHttpAdapter(adapter);
-
-      Future<String?> obtain() async {
-        challenges++;
-        DatacatLeaseStore.instance.store(
-          'lease-1',
-          DateTime.now().add(const Duration(minutes: 5)),
+    test(
+      'one lease covers the next character without verifying again',
+      () async {
+        var challenges = 0;
+        final adapter = _serve(
+          (options, index) => (
+            status: 200,
+            body: _json({
+              'data': {'name': 'Yixuan'},
+            }),
+          ),
         );
-        return 'lease-1';
-      }
+        setCatalogHttpAdapter(adapter);
 
-      await datacatFetchCard('char-1', withAvatar: false, obtainLease: obtain);
-      await datacatFetchCard('char-2', withAvatar: false, obtainLease: obtain);
+        Future<String?> obtain() async {
+          challenges++;
+          DatacatLeaseStore.instance.store(
+            'lease-1',
+            DateTime.now().add(const Duration(minutes: 5)),
+          );
+          return 'lease-1';
+        }
 
-      expect(challenges, 1);
-    });
+        await datacatFetchCard(
+          'char-1',
+          withAvatar: false,
+          obtainLease: obtain,
+        );
+        await datacatFetchCard(
+          'char-2',
+          withAvatar: false,
+          obtainLease: obtain,
+        );
+
+        expect(challenges, 1);
+      },
+    );
 
     test('the budget is counted in characters, and runs out', () {
       final store = DatacatLeaseStore.instance;
@@ -550,7 +590,11 @@ void main() {
           isA<DatacatApiException>()
               .having((e) => e.status, 'status', 403)
               .having((e) => e.code, 'code', 'verification_required')
-              .having((e) => e.message, 'message', 'Human verification required')
+              .having(
+                (e) => e.message,
+                'message',
+                'Human verification required',
+              )
               .having(
                 (e) => e.verificationAction,
                 'action',
@@ -561,129 +605,138 @@ void main() {
       );
     });
 
-    test('a body that is not the documented shape still reports its status',
-        () async {
-      final adapter = _serve(
-        (options, index) => (status: 502, body: '<html>bad gateway</html>'),
-      );
-      setCatalogHttpAdapter(adapter);
+    test(
+      'a body that is not the documented shape still reports its status',
+      () async {
+        final adapter = _serve(
+          (options, index) => (status: 502, body: '<html>bad gateway</html>'),
+        );
+        setCatalogHttpAdapter(adapter);
 
-      await expectLater(
-        datacatFetchCharacters(),
-        throwsA(
-          isA<DatacatApiException>().having((e) => e.status, 'status', 502),
-        ),
-      );
-    });
+        await expectLater(
+          datacatFetchCharacters(),
+          throwsA(
+            isA<DatacatApiException>().having((e) => e.status, 'status', 502),
+          ),
+        );
+      },
+    );
   });
 
   group('the live deployment is not the vendored contract', () {
-    test('the challenge is started with the action capabilities advertises',
-        () async {
-      // The contract says `character_transfer`; the server rejects that and
-      // names its own. Reading the list is what survives the next rename.
-      final adapter = _ScriptedAdapter((options, index) {
-        if (options.uri.path.endsWith('/capabilities')) {
+    test(
+      'the challenge is started with the action capabilities advertises',
+      () async {
+        // The contract says `character_transfer`; the server rejects that and
+        // names its own. Reading the list is what survives the next rename.
+        final adapter = _ScriptedAdapter((options, index) {
+          if (options.uri.path.endsWith('/capabilities')) {
+            return (
+              status: 200,
+              body: _liveCapabilities.replaceFirst(
+                '"character-import"',
+                '"renamed-again"',
+              ),
+            );
+          }
           return (
-            status: 200,
-            body: _liveCapabilities.replaceFirst(
-              '"character-import"',
-              '"renamed-again"',
-            ),
-          );
-        }
-        return (
-          status: 201,
-          body: _json({
-            'verificationId': 'v-1',
-            'deviceCode': 'secret',
-            'verificationUriComplete': 'https://datacat.run/client-verify?id=v-1',
-            'expiresIn': 300,
-            'interval': 3,
-          }),
-        );
-      });
-      setCatalogHttpAdapter(adapter);
-
-      await startDatacatVerification();
-
-      final started = adapter.requests.last;
-      expect(started.uri.path, endsWith('/verifications'));
-      expect(jsonDecode(started.data as String)['action'], 'renamed-again');
-    });
-
-    test('an unsolved challenge answers 428, and the poll keeps waiting',
-        () async {
-      // The contract documents 409. Live uses 428 VERIFICATION_PENDING, which a
-      // 409-only check reads as fatal and throws the user's solve away.
-      final adapter = _ScriptedAdapter((options, index) {
-        if (options.uri.path.endsWith('/capabilities')) {
-          return (status: 200, body: _liveCapabilities);
-        }
-        if (index == 0) {
-          return (
-            status: 428,
+            status: 201,
             body: _json({
-              'success': false,
-              'error': 'VERIFICATION_PENDING',
-              'message': 'Waiting for the DataCat security check.',
+              'verificationId': 'v-1',
+              'deviceCode': 'secret',
+              'verificationUriComplete':
+                  'https://datacat.run/client-verify?id=v-1',
+              'expiresIn': 300,
+              'interval': 3,
             }),
           );
-        }
-        return (
-          status: 200,
-          body: _json({
-            'success': true,
-            'leaseToken': 'dcv1v_lease',
-            'expiresAt': DateTime.now()
-                .add(const Duration(minutes: 30))
-                .toUtc()
-                .toIso8601String(),
-            'maxUniqueCharacters': 20,
-          }),
+        });
+        setCatalogHttpAdapter(adapter);
+
+        await startDatacatVerification();
+
+        final started = adapter.requests.last;
+        expect(started.uri.path, endsWith('/verifications'));
+        expect(jsonDecode(started.data as String)['action'], 'renamed-again');
+      },
+    );
+
+    test(
+      'an unsolved challenge answers 428, and the poll keeps waiting',
+      () async {
+        // The contract documents 409. Live uses 428 VERIFICATION_PENDING, which a
+        // 409-only check reads as fatal and throws the user's solve away.
+        final adapter = _ScriptedAdapter((options, index) {
+          if (options.uri.path.endsWith('/capabilities')) {
+            return (status: 200, body: _liveCapabilities);
+          }
+          if (index == 0) {
+            return (
+              status: 428,
+              body: _json({
+                'success': false,
+                'error': 'VERIFICATION_PENDING',
+                'message': 'Waiting for the DataCat security check.',
+              }),
+            );
+          }
+          return (
+            status: 200,
+            body: _json({
+              'success': true,
+              'leaseToken': 'dcv1v_lease',
+              'expiresAt': DateTime.now()
+                  .add(const Duration(minutes: 30))
+                  .toUtc()
+                  .toIso8601String(),
+              'maxUniqueCharacters': 20,
+            }),
+          );
+        });
+        setCatalogHttpAdapter(adapter);
+
+        final lease = await awaitDatacatLease(
+          const DatacatDeviceFlow(
+            id: 'v-1',
+            deviceCode: 'secret',
+            uri: 'https://datacat.run/client-verify?id=v-1',
+            interval: Duration(milliseconds: 5),
+          ),
         );
-      });
-      setCatalogHttpAdapter(adapter);
 
-      final lease = await awaitDatacatLease(
-        const DatacatDeviceFlow(
-          id: 'v-1',
-          deviceCode: 'secret',
-          uri: 'https://datacat.run/client-verify?id=v-1',
-          interval: Duration(milliseconds: 5),
-        ),
-      );
+        expect(lease, 'dcv1v_lease');
+        expect(DatacatLeaseStore.instance.leaseFor('char-1'), 'dcv1v_lease');
+      },
+    );
 
-      expect(lease, 'dcv1v_lease');
-      expect(DatacatLeaseStore.instance.leaseFor('char-1'), 'dcv1v_lease');
-    });
+    test(
+      'a lease that states a duration rather than an instant still lives',
+      () async {
+        // The success body was never observed against live, so both spellings
+        // have to work — reading neither would leave the lease a 5-minute stub.
+        final adapter = _ScriptedAdapter((options, index) {
+          if (options.uri.path.endsWith('/capabilities')) {
+            return (status: 200, body: _liveCapabilities);
+          }
+          return (
+            status: 200,
+            body: _json({'leaseToken': 'dcv1v_lease', 'expiresIn': 1800}),
+          );
+        });
+        setCatalogHttpAdapter(adapter);
 
-    test('a lease that states a duration rather than an instant still lives',
-        () async {
-      // The success body was never observed against live, so both spellings
-      // have to work — reading neither would leave the lease a 5-minute stub.
-      final adapter = _ScriptedAdapter((options, index) {
-        if (options.uri.path.endsWith('/capabilities')) {
-          return (status: 200, body: _liveCapabilities);
-        }
-        return (
-          status: 200,
-          body: _json({'leaseToken': 'dcv1v_lease', 'expiresIn': 1800}),
+        await awaitDatacatLease(
+          const DatacatDeviceFlow(
+            id: 'v-1',
+            deviceCode: 'secret',
+            uri: 'https://datacat.run/client-verify?id=v-1',
+            interval: Duration(milliseconds: 5),
+          ),
         );
-      });
-      setCatalogHttpAdapter(adapter);
 
-      await awaitDatacatLease(
-        const DatacatDeviceFlow(
-          id: 'v-1',
-          deviceCode: 'secret',
-          uri: 'https://datacat.run/client-verify?id=v-1',
-          interval: Duration(milliseconds: 5),
-        ),
-      );
-
-      expect(DatacatLeaseStore.instance.leaseFor('char-1'), 'dcv1v_lease');
-    });
+        expect(DatacatLeaseStore.instance.leaseFor('char-1'), 'dcv1v_lease');
+      },
+    );
 
     test('a revoked client id is not answered by verifying again', () async {
       // Live reports an unapproved client id as a 403 — the same status a
@@ -714,8 +767,11 @@ void main() {
           },
         ),
         throwsA(
-          isA<DatacatApiException>()
-              .having((e) => e.isClientNotApproved, 'clientNotApproved', true),
+          isA<DatacatApiException>().having(
+            (e) => e.isClientNotApproved,
+            'clientNotApproved',
+            true,
+          ),
         ),
       );
       expect(asked, isFalse);

@@ -27,6 +27,7 @@ class _ControlledEmbeddingService extends EmbeddingService {
     EmbeddingConfig config, {
     CancelToken? cancelToken,
     captureContext,
+    bool foreground = false,
   }) async {
     if (!started.isCompleted) started.complete();
     await release.future;

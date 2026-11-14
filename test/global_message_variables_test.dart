@@ -22,9 +22,7 @@ void main() {
 
     test('update persists a nested object across instances', () async {
       Future<GlobalVariablesRepo> build() async =>
-          GlobalVariablesRepo.withPrefsLoader(
-            SharedPreferences.getInstance,
-          );
+          GlobalVariablesRepo.withPrefsLoader(SharedPreferences.getInstance);
 
       final repo1 = await build();
       await repo1.update((root) {
@@ -45,11 +43,13 @@ void main() {
       // Fire 20 concurrent updates that all increment a counter.
       final futures = <Future<void>>[];
       for (var i = 0; i < 20; i++) {
-        futures.add(repo.update((root) {
-          final n = (root['counter'] as int?) ?? 0;
-          root['counter'] = n + 1;
-          return root;
-        }));
+        futures.add(
+          repo.update((root) {
+            final n = (root['counter'] as int?) ?? 0;
+            root['counter'] = n + 1;
+            return root;
+          }),
+        );
       }
       await Future.wait(futures);
       expect((await repo.read())['counter'], 20);
@@ -150,8 +150,9 @@ void main() {
         root['k'] = 'v';
         return root;
       });
-      expect(container.read(messageVariablesProvider)['s1::m1']!.vars,
-          {'k': 'v'});
+      expect(container.read(messageVariablesProvider)['s1::m1']!.vars, {
+        'k': 'v',
+      });
     });
   });
 }

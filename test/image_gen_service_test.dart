@@ -64,9 +64,7 @@ void main() {
         isFalse,
       );
       expect(
-        ImageTagMarkup.hasImageGenTags(
-          '<THINK>maybe [IMG:GEN]</THINK> body',
-        ),
+        ImageTagMarkup.hasImageGenTags('<THINK>maybe [IMG:GEN]</THINK> body'),
         isFalse,
       );
     });
@@ -199,7 +197,7 @@ void main() {
       expect(
         result,
         'Hello <img data-iig-instruction=\'{"prompt":"test"}\' '
-            'src="/path/to/image.png">',
+        'src="/path/to/image.png">',
       );
       expect(result, isNot(contains('[IMG:GEN')));
       expect(result, isNot(contains('[IMG:RESULT')));
@@ -283,11 +281,7 @@ void main() {
           """[IMG:GEN:{"prompt":"three"}]""";
 
       final instructions = ImageTagMarkup.extractImageGenInstructions(text);
-      expect(instructions.map((i) => i['prompt']), [
-        'one',
-        'two',
-        'three',
-      ]);
+      expect(instructions.map((i) => i['prompt']), ['one', 'two', 'three']);
       expect(ImageTagMarkup.pendingImageGenTagCount(text), 3);
     });
   });
@@ -366,7 +360,10 @@ void main() {
       final result = ImageTagMarkup.resetErrorTags(
         '[IMG:RESULT:/path/to/img.png|{"prompt":"scene"}]',
       );
-      expect(result, contains('[IMG:GEN:@/path/to/img.png|{"prompt":"scene"}]'));
+      expect(
+        result,
+        contains('[IMG:GEN:@/path/to/img.png|{"prompt":"scene"}]'),
+      );
       expect(result, isNot(contains('[IMG:RESULT')));
     });
 

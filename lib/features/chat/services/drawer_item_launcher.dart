@@ -181,8 +181,10 @@ class DrawerItemLauncher {
       'regex' => (_) => const RegexSheet(startExpanded: true),
       'api' => (_) => const ApiSettingsScreen(startExpanded: true),
       'presets' => (_) => PresetListScreen(startExpanded: true, charId: charId),
-      'personas' => (_) =>
-          const PersonaListScreen(startExpanded: true, forChat: true),
+      'personas' => (_) => const PersonaListScreen(
+        startExpanded: true,
+        forChat: true,
+      ),
       'image-gen' => (_) => ImageGenSheet(charId: charId),
       'authors-note' => (_) => AuthorsNoteSheet(charId: charId),
       'glossary' => (_) => const GlossarySheet(startExpanded: true),

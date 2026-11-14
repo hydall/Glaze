@@ -148,6 +148,8 @@ class MemoryVectorSearcher {
             [queryText],
             config,
             cancelToken: cancelToken,
+            // A generation is waiting on this query: skip the indexing backlog.
+            foreground: true,
             // The session puts the request in that chat's Prompt Inspector;
             // without it the search was captured but listed nowhere.
             captureContext: LlmCaptureContext(

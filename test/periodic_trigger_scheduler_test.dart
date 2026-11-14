@@ -71,78 +71,93 @@ void main() {
   });
 
   test(
-      'scheduler starts a timer for the enabled periodic jsRunner and ticks it',
-      () async {
-    final container = ProviderContainer(
-      overrides: [
-        appDbProvider.overrideWith((ref) => db),
-        extensionPostGenServiceProvider.overrideWith((ref) => _FakePostGen(ref)),
-      ],
-    );
-    addTearDown(container.dispose);
+    'scheduler starts a timer for the enabled periodic jsRunner and ticks it',
+    () async {
+      final container = ProviderContainer(
+        overrides: [
+          appDbProvider.overrideWith((ref) => db),
+          extensionPostGenServiceProvider.overrideWith(
+            (ref) => _FakePostGen(ref),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
 
-    // Seed the active preset. SharedPreferences is the real platform plugin;
-    // we rely on it to persist across both tests and on setUp's pre-cleared
-    // state to keep them isolated. Use the notifier's API directly.
-    await container
-        .read(extensionsSettingsProvider.notifier)
-        .update(const ExtensionsSettings(activePresetId: 'p1'));
+      // Seed the active preset. SharedPreferences is the real platform plugin;
+      // we rely on it to persist across both tests and on setUp's pre-cleared
+      // state to keep them isolated. Use the notifier's API directly.
+      await container
+          .read(extensionsSettingsProvider.notifier)
+          .update(const ExtensionsSettings(activePresetId: 'p1'));
 
-    // Seed preset with one periodic + one afterAssistant jsRunner + one
-    // infoblock (which the scheduler must ignore).
-    final preset = ExtensionPreset(
-      id: 'p1',
-      name: 'Tick',
-      blocks: [
-        BlockConfig(
-          id: 'b1',
-          name: 'Tick',
-          type: BlockType.script,
-          enabled: true,
-          trigger: BlockTrigger.periodic,
-          prompt: '// js',
-          periodicIntervalSeconds: 1,
-        ),
-        BlockConfig(
-          id: 'b2',
-          name: 'After assistant',
-          type: BlockType.script,
-          enabled: true,
-          trigger: BlockTrigger.afterAssistant,
-          prompt: '// not run on tick',
-        ),
-        BlockConfig(
-          id: 'b3',
-          name: 'Infoblock',
-          type: BlockType.generated,
-          enabled: true,
-          trigger: BlockTrigger.periodic,
-          prompt: '// infoblock, not jsRunner — ignored',
-        ),
-      ],
-    );
-    await container.read(extensionPresetsProvider.notifier).add(preset);
-    GenerationNotificationService.instance.setActiveContext('c1', 's1');
+      // Seed preset with one periodic + one afterAssistant jsRunner + one
+      // infoblock (which the scheduler must ignore).
+      final preset = ExtensionPreset(
+        id: 'p1',
+        name: 'Tick',
+        blocks: [
+          BlockConfig(
+            id: 'b1',
+            name: 'Tick',
+            type: BlockType.script,
+            enabled: true,
+            trigger: BlockTrigger.periodic,
+            prompt: '// js',
+            periodicIntervalSeconds: 1,
+          ),
+          BlockConfig(
+            id: 'b2',
+            name: 'After assistant',
+            type: BlockType.script,
+            enabled: true,
+            trigger: BlockTrigger.afterAssistant,
+            prompt: '// not run on tick',
+          ),
+          BlockConfig(
+            id: 'b3',
+            name: 'Infoblock',
+            type: BlockType.generated,
+            enabled: true,
+            trigger: BlockTrigger.periodic,
+            prompt: '// infoblock, not jsRunner — ignored',
+          ),
+        ],
+      );
+      await container.read(extensionPresetsProvider.notifier).add(preset);
+      GenerationNotificationService.instance.setActiveContext('c1', 's1');
 
-    // Touch the scheduler — reading the provider forces `start()`.
-    final scheduler = container.read(periodicTriggerSchedulerProvider);
-    expect(scheduler.activeTimerCount, 1,
-        reason: 'only the enabled periodic jsRunner should have a timer');
+      // Touch the scheduler — reading the provider forces `start()`.
+      final scheduler = container.read(periodicTriggerSchedulerProvider);
+      expect(
+        scheduler.activeTimerCount,
+        1,
+        reason: 'only the enabled periodic jsRunner should have a timer',
+      );
 
-    // Read the fake from the container so we can wait for the first tick.
-    final fake = container.read(extensionPostGenServiceProvider) as _FakePostGen;
-    await fake.waitForFirstTick().timeout(const Duration(seconds: 5));
-    expect(fake.tickBlockIds, contains('b1'),
-        reason: 'periodic jsRunner should be dispatched at least once');
-    expect(fake.tickContexts, contains(('c1', 's1')),
-        reason: 'periodic execution uses the active chat character and session');
-  });
+      // Read the fake from the container so we can wait for the first tick.
+      final fake =
+          container.read(extensionPostGenServiceProvider) as _FakePostGen;
+      await fake.waitForFirstTick().timeout(const Duration(seconds: 5));
+      expect(
+        fake.tickBlockIds,
+        contains('b1'),
+        reason: 'periodic jsRunner should be dispatched at least once',
+      );
+      expect(
+        fake.tickContexts,
+        contains(('c1', 's1')),
+        reason: 'periodic execution uses the active chat character and session',
+      );
+    },
+  );
 
   test('scheduler executes only for active chat authority', () async {
     final container = ProviderContainer(
       overrides: [
         appDbProvider.overrideWith((ref) => db),
-        extensionPostGenServiceProvider.overrideWith((ref) => _FakePostGen(ref)),
+        extensionPostGenServiceProvider.overrideWith(
+          (ref) => _FakePostGen(ref),
+        ),
       ],
     );
     addTearDown(container.dispose);
@@ -155,7 +170,8 @@ void main() {
       trigger: BlockTrigger.periodic,
       prompt: '// js',
     );
-    final fake = container.read(extensionPostGenServiceProvider) as _FakePostGen;
+    final fake =
+        container.read(extensionPostGenServiceProvider) as _FakePostGen;
 
     await scheduler.debugTick(block);
     expect(fake.tickBlockIds, isEmpty);

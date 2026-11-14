@@ -41,46 +41,48 @@ void main() {
     return notifier;
   }
 
-  test('selecting Timeline clears the query and the unsupported filters',
-      () async {
-    final notifier = await started();
-    notifier.setQuery('dragon');
-    notifier.setFilters(
-      const CatalogFilters(
-        sort: 'popular',
-        nsfw: true,
-        nsfl: true,
-        tagIds: [7],
-        tagNames: ['Fantasy'],
-        minTokens: 500,
-        maxTokens: 7000,
-        nsfwOnly: true,
-        requireImages: true,
-        minAiRating: 4,
-        minTags: 3,
-      ),
-    );
-    await pumpEventQueue();
+  test(
+    'selecting Timeline clears the query and the unsupported filters',
+    () async {
+      final notifier = await started();
+      notifier.setQuery('dragon');
+      notifier.setFilters(
+        const CatalogFilters(
+          sort: 'popular',
+          nsfw: true,
+          nsfl: true,
+          tagIds: [7],
+          tagNames: ['Fantasy'],
+          minTokens: 500,
+          maxTokens: 7000,
+          nsfwOnly: true,
+          requireImages: true,
+          minAiRating: 4,
+          minTags: 3,
+        ),
+      );
+      await pumpEventQueue();
 
-    notifier.setSort('timeline');
-    await pumpEventQueue();
+      notifier.setSort('timeline');
+      await pumpEventQueue();
 
-    final state = container.read(provider);
-    expect(state.chubTimelineActive, isTrue);
-    expect(state.query, '');
-    // nsfw/nsfl are the only filters the feed accepts, so they survive.
-    expect(state.filters.nsfw, isTrue);
-    expect(state.filters.nsfl, isTrue);
-    expect(state.filters.tagIds, isEmpty);
-    expect(state.filters.tagNames, isEmpty);
-    expect(state.filters.excludeTagNames, isEmpty);
-    expect(state.filters.minTokens, 29);
-    expect(state.filters.maxTokens, 100000);
-    expect(state.filters.nsfwOnly, isFalse);
-    expect(state.filters.requireImages, isFalse);
-    expect(state.filters.minAiRating, 0);
-    expect(state.filters.minTags, 0);
-  });
+      final state = container.read(provider);
+      expect(state.chubTimelineActive, isTrue);
+      expect(state.query, '');
+      // nsfw/nsfl are the only filters the feed accepts, so they survive.
+      expect(state.filters.nsfw, isTrue);
+      expect(state.filters.nsfl, isTrue);
+      expect(state.filters.tagIds, isEmpty);
+      expect(state.filters.tagNames, isEmpty);
+      expect(state.filters.excludeTagNames, isEmpty);
+      expect(state.filters.minTokens, 29);
+      expect(state.filters.maxTokens, 100000);
+      expect(state.filters.nsfwOnly, isFalse);
+      expect(state.filters.requireImages, isFalse);
+      expect(state.filters.minAiRating, 0);
+      expect(state.filters.minTags, 0);
+    },
+  );
 
   test('unsupported filters are stripped while Timeline is active', () async {
     final notifier = await started();

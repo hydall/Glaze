@@ -183,6 +183,8 @@ class ApiConfigDraft {
       contextSize: parsedContextSize,
       firstChunkTimeoutMs:
           (int.tryParse(firstChunkTimeoutSeconds) ?? 120) * 1000,
+      firstChunkTimeoutOverridesNetwork:
+          normalized.firstChunkTimeoutOverridesNetwork,
       temperature: normalized.temperature,
       topP: normalized.topP,
       topK: normalized.topK,

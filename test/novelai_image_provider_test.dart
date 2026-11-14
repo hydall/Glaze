@@ -171,12 +171,12 @@ void main() {
       final body = jsonDecode(bodies.single) as Map<String, dynamic>;
       final params = body['parameters'] as Map<String, dynamic>;
       expect(params['director_reference_images'], ['aW1n', 'cG5n']);
-      expect(
-        (params['director_reference_descriptions'] as List).length,
-        2,
-      );
+      expect((params['director_reference_descriptions'] as List).length, 2);
       expect(params['director_reference_strength_values'], [1.0, 1.0]);
-      expect(params['director_reference_secondary_strength_values'], [0.0, 0.0]);
+      expect(params['director_reference_secondary_strength_values'], [
+        0.0,
+        0.0,
+      ]);
       expect(params['director_reference_information_extracted'], [1.0, 1.0]);
     });
 
@@ -324,8 +324,14 @@ void main() {
       expect(NovelAIConstants.isV4('nai-diffusion-4-5-full'), isTrue);
       expect(NovelAIConstants.isV5('nai-diffusion-5-curated'), isTrue);
       expect(NovelAIConstants.isV4('nai-diffusion-3'), isFalse);
-      expect(NovelAIConstants.supportsReferences('nai-diffusion-4-5-full'), isTrue);
-      expect(NovelAIConstants.supportsReferences('nai-diffusion-5-full'), isFalse);
+      expect(
+        NovelAIConstants.supportsReferences('nai-diffusion-4-5-full'),
+        isTrue,
+      );
+      expect(
+        NovelAIConstants.supportsReferences('nai-diffusion-5-full'),
+        isFalse,
+      );
       expect(NovelAIConstants.supportsReferences('nai-diffusion-3'), isFalse);
     });
 
@@ -371,7 +377,10 @@ void main() {
       );
       // The curated V4.5 model has no furry-focus preset.
       expect(
-        NovelAIConstants.ucPresetText('nai-diffusion-4-5-curated', 'furry_focus'),
+        NovelAIConstants.ucPresetText(
+          'nai-diffusion-4-5-curated',
+          'furry_focus',
+        ),
         '',
       );
       expect(

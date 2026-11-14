@@ -75,6 +75,13 @@ abstract class ApiConfig with _$ApiConfig {
 
     @Default(120000) int firstChunkTimeoutMs,
 
+    /// Also hand [firstChunkTimeoutMs] to the HTTP client as its receive
+    /// timeout for the chat model's reply. Off: the transport keeps its own
+    /// fixed limit (120 s for OpenAI-style, 180 s for Anthropic and Gemini),
+    /// which cuts a silent reply off there whatever the setting says. Off by
+    /// default because some providers and proxies misbehave on long waits.
+    @Default(false) bool firstChunkTimeoutOverridesNetwork,
+
     /// Send the leading run of system blocks in the provider's own field —
     /// Gemini's `system_instruction`, Anthropic's `system`. When off it stays
     /// inline and is delivered as user turns. Ignored by protocols that have
@@ -135,6 +142,17 @@ int clampMaxOutputTokens(int maxTokens, int contextSize) =>
     contextSize > 0 && maxTokens > contextSize ? contextSize : maxTokens;
 
 extension ApiConfigContextX on ApiConfig {
+  /// How long the chat model may stay silent before the reply is given up,
+  /// in ms. Falls back to two minutes when the setting is zero.
+  int get effectiveFirstChunkTimeoutMs =>
+      firstChunkTimeoutMs > 0 ? firstChunkTimeoutMs : 120000;
+
+  /// The receive timeout handed to the transport for the chat model's reply:
+  /// the reply timeout when [firstChunkTimeoutOverridesNetwork] is on, else
+  /// null so the transport keeps its own fixed limit.
+  int? get transportReceiveTimeoutMs =>
+      firstChunkTimeoutOverridesNetwork ? effectiveFirstChunkTimeoutMs : null;
+
   /// Every field that changes which messages survive into the prompt.
   ///
   /// Anything that reuses a cached [TokenBreakdown] — or shows a preview of the

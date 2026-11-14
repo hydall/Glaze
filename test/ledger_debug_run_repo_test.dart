@@ -16,57 +16,60 @@ void main() {
   });
   tearDown(() => db.close());
 
-  test('records a rejected response with the reason and repair payload', () async {
-    await repo.record(
-      LedgerDebugRun(
-        sessionId: 'session',
-        kind: LedgerDebugRunKind.normal,
-        status: 'error',
-        messageId: 'message',
-        swipeId: 2,
-        agentSwipeId: 1,
-        model: 'google/gemini-3.7-flash',
-        parseFailure: 'malformedJson',
-        rejectionReason: 'malformed JSON: unexpected end of input',
-        rejectedOps: const ['op[0] set: missing key'],
-        repairAttempted: true,
-        repairFailure: 'emptyExport',
-        responseText: 'first response',
-        repairResponseText: 'repair response',
-        attempts: const [
-          AgentOperationAttempt(
-            attempt: 1,
-            statusCode: 200,
-            status: 'ok',
-            startedAtMs: 5,
-            elapsedMs: 30,
-          ),
-        ],
-        error: 'export rejected',
-        elapsedMs: 1200,
-        promptChars: 900,
-        responseChars: 400,
-      ),
-    );
+  test(
+    'records a rejected response with the reason and repair payload',
+    () async {
+      await repo.record(
+        LedgerDebugRun(
+          sessionId: 'session',
+          kind: LedgerDebugRunKind.normal,
+          status: 'error',
+          messageId: 'message',
+          swipeId: 2,
+          agentSwipeId: 1,
+          model: 'google/gemini-3.7-flash',
+          parseFailure: 'malformedJson',
+          rejectionReason: 'malformed JSON: unexpected end of input',
+          rejectedOps: const ['op[0] set: missing key'],
+          repairAttempted: true,
+          repairFailure: 'emptyExport',
+          responseText: 'first response',
+          repairResponseText: 'repair response',
+          attempts: const [
+            AgentOperationAttempt(
+              attempt: 1,
+              statusCode: 200,
+              status: 'ok',
+              startedAtMs: 5,
+              elapsedMs: 30,
+            ),
+          ],
+          error: 'export rejected',
+          elapsedMs: 1200,
+          promptChars: 900,
+          responseChars: 400,
+        ),
+      );
 
-    final rows = await repo.recentForSession('session');
-    expect(rows, hasLength(1));
-    final row = rows.single;
-    expect(row.kind, 'normal');
-    expect(row.messageId, 'message');
-    expect(row.swipeId, 2);
-    expect(row.agentSwipeId, 1);
-    expect(row.parseFailure, 'malformedJson');
-    expect(row.rejectionReason, 'malformed JSON: unexpected end of input');
-    expect(jsonDecode(row.rejectedOpsJson), ['op[0] set: missing key']);
-    // The silent second call is the whole point of the journal.
-    expect(row.repairAttempted, isTrue);
-    expect(row.repairFailure, 'emptyExport');
-    expect(row.responseText, 'first response');
-    expect(row.repairResponseText, 'repair response');
-    expect(jsonDecode(row.attemptsJson), hasLength(1));
-    expect(row.error, 'export rejected');
-  });
+      final rows = await repo.recentForSession('session');
+      expect(rows, hasLength(1));
+      final row = rows.single;
+      expect(row.kind, 'normal');
+      expect(row.messageId, 'message');
+      expect(row.swipeId, 2);
+      expect(row.agentSwipeId, 1);
+      expect(row.parseFailure, 'malformedJson');
+      expect(row.rejectionReason, 'malformed JSON: unexpected end of input');
+      expect(jsonDecode(row.rejectedOpsJson), ['op[0] set: missing key']);
+      // The silent second call is the whole point of the journal.
+      expect(row.repairAttempted, isTrue);
+      expect(row.repairFailure, 'emptyExport');
+      expect(row.responseText, 'first response');
+      expect(row.repairResponseText, 'repair response');
+      expect(jsonDecode(row.attemptsJson), hasLength(1));
+      expect(row.error, 'export rejected');
+    },
+  );
 
   test('truncates oversized payloads instead of storing them whole', () async {
     final huge = 'x' * (LedgerDebugRunRepo.maxStoredTextChars + 500);

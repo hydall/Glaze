@@ -59,9 +59,7 @@ Map<String, dynamic> _geminiConfig(ChatTransportRequest r) =>
 void main() {
   group('edge values survive to the wire', () {
     test('OpenAI sends temperature 0 and top_p 1', () {
-      final body = OpenAiChatTransport.buildBody(
-        _req(temperature: 0, topP: 1),
-      );
+      final body = OpenAiChatTransport.buildBody(_req(temperature: 0, topP: 1));
 
       expect(body, containsPair('temperature', 0.0));
       expect(body, containsPair('top_p', 1.0));
@@ -123,11 +121,7 @@ void main() {
 
     test('Anthropic', () {
       final body = AnthropicChatTransport.buildRequest(
-        _req(
-          model: 'claude-3-5-sonnet',
-          omitTemperature: true,
-          omitTopP: true,
-        ),
+        _req(model: 'claude-3-5-sonnet', omitTemperature: true, omitTopP: true),
       ).body;
 
       expect(body, isNot(contains('temperature')));

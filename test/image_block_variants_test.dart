@@ -28,7 +28,10 @@ void main() {
         activeIndex: 1,
         instruction: '{"prompt":"cat"}',
       );
-      expect(payload.encodeResult(), '/a.png;;*/b.png;;/c.png|{"prompt":"cat"}');
+      expect(
+        payload.encodeResult(),
+        '/a.png;;*/b.png;;/c.png|{"prompt":"cat"}',
+      );
       final round = ImageBlockPayload.parseResult(payload.encodeResult());
       expect(round.paths, payload.paths);
       expect(round.activeIndex, 1);
@@ -62,8 +65,8 @@ void main() {
       expect(
         out,
         'x <img data-iig-instruction=\'{"prompt":"cat"}\' '
-            "data-iig-variants='/a.png;;/b.png' data-iig-index='1' "
-            'src="/b.png"> y',
+        "data-iig-variants='/a.png;;/b.png' data-iig-index='1' "
+        'src="/b.png"> y',
       );
 
       final block = ImageTagMarkup.scanImageBlocks(out).single;
@@ -77,12 +80,16 @@ void main() {
       final pending = ImageTagMarkup.resetImageBlockAt(text, 0);
       expect(pending, '[IMG:GEN:@/a.png;;*/b.png|{"prompt":"cat"}]');
 
-      final finished = ImageTagMarkup.replaceTagWithResult(pending, 0, '/c.png');
+      final finished = ImageTagMarkup.replaceTagWithResult(
+        pending,
+        0,
+        '/c.png',
+      );
       expect(
         finished,
         '<img data-iig-instruction=\'{"prompt":"cat"}\' '
-            "data-iig-variants='/a.png;;/b.png;;/c.png' data-iig-index='2' "
-            'src="/c.png">',
+        "data-iig-variants='/a.png;;/b.png;;/c.png' data-iig-index='2' "
+        'src="/c.png">',
       );
     });
 
@@ -94,18 +101,25 @@ void main() {
       final retried = ImageTagMarkup.resetImageErrorTags(failed);
       expect(ImageTagMarkup.scanImageBlocks(retried).single.paths, ['/a.png']);
 
-      final finished = ImageTagMarkup.replaceTagWithResult(retried, 0, '/b.png');
-      expect(
-        ImageTagMarkup.scanImageBlocks(finished).single.paths,
-        ['/a.png', '/b.png'],
+      final finished = ImageTagMarkup.replaceTagWithResult(
+        retried,
+        0,
+        '/b.png',
       );
+      expect(ImageTagMarkup.scanImageBlocks(finished).single.paths, [
+        '/a.png',
+        '/b.png',
+      ]);
     });
 
     test('only the addressed block is reset', () {
       const text =
           '[IMG:RESULT:/a.png|{"prompt":"one"}] [IMG:RESULT:/b.png|{"prompt":"two"}]';
       final out = ImageTagMarkup.resetImageBlockAt(text, 1);
-      expect(out, '[IMG:RESULT:/a.png|{"prompt":"one"}] [IMG:GEN:@/b.png|{"prompt":"two"}]');
+      expect(
+        out,
+        '[IMG:RESULT:/a.png|{"prompt":"one"}] [IMG:GEN:@/b.png|{"prompt":"two"}]',
+      );
     });
   });
 
@@ -117,8 +131,8 @@ void main() {
       expect(
         out,
         'a <img data-iig-instruction=\'{"prompt":"cat"}\' '
-            "data-iig-variants='/a.png;;/b.png;;/c.png' data-iig-index='2' "
-            'src="/c.png"> b',
+        "data-iig-variants='/a.png;;/b.png;;/c.png' data-iig-index='2' "
+        'src="/c.png"> b',
       );
       expect(ImageTagMarkup.scanImageBlocks(out).single.imagePath, '/c.png');
     });

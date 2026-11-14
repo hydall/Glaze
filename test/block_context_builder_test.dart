@@ -2,12 +2,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/features/extensions/services/block_context_builder.dart';
 
-ChatMessage _msg(String id, String role, String content) => ChatMessage(
-      id: id,
-      role: role,
-      content: content,
-      timestamp: 0,
-    );
+ChatMessage _msg(String id, String role, String content) =>
+    ChatMessage(id: id, role: role, content: content, timestamp: 0);
 
 void main() {
   final history = [

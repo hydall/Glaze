@@ -17,7 +17,10 @@ void main() {
     test('the built-in Chat screen is a declaration like any theme\'s', () {
       final schema = kDefaultChatSettingsSchema;
       expect(schema.errors, isEmpty);
-      expect([for (final t in schema.tabs) t.id], ['font', 'colors', 'general']);
+      expect(
+        [for (final t in schema.tabs) t.id],
+        ['font', 'colors', 'general'],
+      );
       final general = schema.tabs.last;
       final fields = [
         for (final g in general.groups)
@@ -59,7 +62,12 @@ void main() {
                 'items': [
                   {'field': 'apiKey'},
                   {'type': 'color', 'key': 'bad key', 'label': 'x'},
-                  {'type': 'color', 'key': 'ok', 'label': 'Ok', 'default': 'red'},
+                  {
+                    'type': 'color',
+                    'key': 'ok',
+                    'label': 'Ok',
+                    'default': 'red',
+                  },
                   {'type': 'switch', 'key': 'ok', 'label': 'Twice'},
                   {
                     'type': 'slider',
@@ -211,7 +219,10 @@ void main() {
         'vars': {'dense': '1'},
         'flags': ['dense'],
       });
-      expect(const ThemePreset(id: 'p', name: 'P').messageLayoutPayload, isNull);
+      expect(
+        const ThemePreset(id: 'p', name: 'P').messageLayoutPayload,
+        isNull,
+      );
     });
   });
 

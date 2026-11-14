@@ -19,9 +19,7 @@ void main() {
     });
 
     test('uses regenTargetId as anchor for regen', () {
-      final history = [
-        ChatMessage(id: 'msg1', role: 'user', content: 'hello'),
-      ];
+      final history = [ChatMessage(id: 'msg1', role: 'user', content: 'hello')];
       final key = MemoryProvenanceKeyBuilder.build(
         sessionId: 's1',
         regenTargetId: 'assistant_msg',
@@ -50,11 +48,7 @@ void main() {
     });
 
     test('uses book.updatedAt for memoryRevision', () {
-      final book = MemoryBook(
-        id: 'mb1',
-        sessionId: 's1',
-        updatedAt: 12345,
-      );
+      final book = MemoryBook(id: 'mb1', sessionId: 's1', updatedAt: 12345);
       final key = MemoryProvenanceKeyBuilder.build(
         sessionId: 's1',
         settings: const MemoryGlobalSettings(),

@@ -149,10 +149,7 @@ class _MemoryDraftCardState extends State<MemoryDraftCard> {
                 icon: _badgeIcon(),
                 color: _badgeColor(),
                 fontSize: 10,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 6,
-                  vertical: 3,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
               ),
             ],
           ),

@@ -19,6 +19,7 @@ class _FakeEmbeddingService extends EmbeddingService {
     EmbeddingConfig config, {
     CancelToken? cancelToken,
     captureContext,
+    bool foreground = false,
   }) async {
     requestedTexts.addAll(texts);
     contexts.add(captureContext);
@@ -34,16 +35,15 @@ void main() {
     final db = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(db.close);
     final embeddingService = _FakeEmbeddingService();
-    final service = LorebookEmbeddingService(EmbeddingRepo(db), embeddingService);
-
-    await service.indexLorebookEntries(
-      'book',
-      const [
-        LorebookEntry(id: 'a', content: 'first', vectorSearch: true),
-        LorebookEntry(id: 'b', content: 'second', vectorSearch: true),
-      ],
-      const EmbeddingConfig(endpoint: 'http://localhost/v1', model: 'test'),
+    final service = LorebookEmbeddingService(
+      EmbeddingRepo(db),
+      embeddingService,
     );
+
+    await service.indexLorebookEntries('book', const [
+      LorebookEntry(id: 'a', content: 'first', vectorSearch: true),
+      LorebookEntry(id: 'b', content: 'second', vectorSearch: true),
+    ], const EmbeddingConfig(endpoint: 'http://localhost/v1', model: 'test'));
 
     final contexts = embeddingService.contexts.whereType<LlmCaptureContext>();
     expect(contexts, hasLength(2));

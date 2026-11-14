@@ -90,10 +90,9 @@ void main() {
 
       late Color pixel;
       await tester.runAsync(() async {
-        final boundary =
-            tester.renderObject<RenderRepaintBoundary>(
-              find.byKey(boundaryKey),
-            );
+        final boundary = tester.renderObject<RenderRepaintBoundary>(
+          find.byKey(boundaryKey),
+        );
         final image = await boundary.toImage();
         final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
         // Two logical pixels in from the left edge, at mid-height: inside the

@@ -13,10 +13,11 @@ void main() {
   // away, so half the vocabulary was reachable only by knowing it already.
   group('parseTopCustomTags', () {
     test('reads bare strings in the order they were ranked', () {
-      expect(
-        parseTopCustomTags(['femboy', 'yandere', 'oc']),
-        ['femboy', 'yandere', 'oc'],
-      );
+      expect(parseTopCustomTags(['femboy', 'yandere', 'oc']), [
+        'femboy',
+        'yandere',
+        'oc',
+      ]);
     });
 
     test('reads objects by whichever name field they carry', () {
@@ -31,17 +32,26 @@ void main() {
     });
 
     test('drops duplicates without reordering the survivors', () {
-      expect(
-        parseTopCustomTags(['Femboy', 'oc', 'femboy', 'OC', 'vampire']),
-        ['Femboy', 'oc', 'vampire'],
-      );
+      expect(parseTopCustomTags(['Femboy', 'oc', 'femboy', 'OC', 'vampire']), [
+        'Femboy',
+        'oc',
+        'vampire',
+      ]);
     });
 
     test('skips what it cannot read instead of failing the search', () {
       // This runs inside the response parsing of every listing request, so a
       // surprise in one entry must not cost the reader their search results.
       expect(
-        parseTopCustomTags(['ok', '', '   ', 42, null, <String>[], <String, Object>{}]),
+        parseTopCustomTags([
+          'ok',
+          '',
+          '   ',
+          42,
+          null,
+          <String>[],
+          <String, Object>{},
+        ]),
         ['ok'],
       );
     });
@@ -62,12 +72,7 @@ void main() {
     test('appends after the curated tags, never among them', () {
       final merged = withPopularCustomTags(curated, ['femboy', 'oc']);
 
-      expect(merged.map((t) => t.name), [
-        'Action',
-        'Romance',
-        'femboy',
-        'oc',
-      ]);
+      expect(merged.map((t) => t.name), ['Action', 'Romance', 'femboy', 'oc']);
       // Selecting one has to land in `custom_tags[]`, and it is the absent id
       // that routes it there.
       expect(merged.last.id, isNull);
@@ -136,7 +141,10 @@ void main() {
     });
 
     test('and selecting one is sent as a custom tag, not a tag id', () {
-      expect(source, contains(r"&custom_tags[]=${Uri.encodeComponent(tagName)}"));
+      expect(
+        source,
+        contains(r"&custom_tags[]=${Uri.encodeComponent(tagName)}"),
+      );
     });
   });
 }

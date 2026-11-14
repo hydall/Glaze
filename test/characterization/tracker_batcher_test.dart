@@ -62,9 +62,7 @@ void main() {
       final group = ControllerBatchGroup(
         key: 'openai|gpt-4',
         resolved: _stubResolved(),
-        agents: [
-          StudioAgent(id: 'a<b>', name: 'Name & Co'),
-        ],
+        agents: [StudioAgent(id: 'a<b>', name: 'Name & Co')],
         batchMaxTokens: 1000,
         batchTemperature: 0.3,
         batchContextSize: 5,
@@ -92,9 +90,7 @@ void main() {
       final group = ControllerBatchGroup(
         key: 'anthropic|claude',
         resolved: _stubResolved(model: 'claude-3-5-sonnet'),
-        agents: [
-          StudioAgent(id: 'a1', name: 'Continuity'),
-        ],
+        agents: [StudioAgent(id: 'a1', name: 'Continuity')],
         batchMaxTokens: 1000,
         batchTemperature: 0.3,
         batchContextSize: 5,
@@ -113,7 +109,11 @@ void main() {
       final loreIdx = prompt.indexOf('<lore>');
       final agentsIdx = prompt.indexOf('<agents>');
       expect(roleIdx, lessThan(loreIdx), reason: '<role> must precede <lore>');
-      expect(loreIdx, lessThan(agentsIdx), reason: '<lore> must precede <agents>');
+      expect(
+        loreIdx,
+        lessThan(agentsIdx),
+        reason: '<lore> must precede <agents>',
+      );
       // Output-format block comes AFTER <agents> (tail) — never inside the
       // cached prefix.
       final formatIdx = prompt.indexOf('REQUIRED OUTPUT FORMAT');
@@ -202,9 +202,7 @@ Focus: anti-loop
       final group = ControllerBatchGroup(
         key: 'openai|gpt-4',
         resolved: _stubResolved(),
-        agents: [
-          StudioAgent(id: 'a1', name: 'A'),
-        ],
+        agents: [StudioAgent(id: 'a1', name: 'A')],
         batchMaxTokens: 1000,
         batchTemperature: 0.3,
         batchContextSize: 5,
@@ -273,74 +271,73 @@ Focus: anti-loop
 
     test('returns false for normal tracker names', () {
       expect(
-        batcher.shouldRunIndividually(
-          StudioAgent(id: 'x', name: 'Continuity'),
-        ),
+        batcher.shouldRunIndividually(StudioAgent(id: 'x', name: 'Continuity')),
         isFalse,
       );
       expect(
-        batcher.shouldRunIndividually(
-          StudioAgent(id: 'x', name: 'Director'),
-        ),
+        batcher.shouldRunIndividually(StudioAgent(id: 'x', name: 'Director')),
         isFalse,
       );
     });
   });
 
-  group('ControllerBatcher.normalizeMaxParallelJobs + splitGroupForParallelJobs', () {
-    late ControllerBatcher batcher;
-    setUp(() {
-      batcher = ControllerBatcher();
-    });
+  group(
+    'ControllerBatcher.normalizeMaxParallelJobs + splitGroupForParallelJobs',
+    () {
+      late ControllerBatcher batcher;
+      setUp(() {
+        batcher = ControllerBatcher();
+      });
 
-    test('clamps maxParallelJobs to [1, 16]', () {
-      expect(batcher.normalizeMaxParallelJobs(-1), 1);
-      expect(batcher.normalizeMaxParallelJobs(0), 1);
-      expect(batcher.normalizeMaxParallelJobs(1), 1);
-      expect(batcher.normalizeMaxParallelJobs(8), 8);
-      expect(batcher.normalizeMaxParallelJobs(16), 16);
-      expect(batcher.normalizeMaxParallelJobs(100), 16);
-    });
+      test('clamps maxParallelJobs to [1, 16]', () {
+        expect(batcher.normalizeMaxParallelJobs(-1), 1);
+        expect(batcher.normalizeMaxParallelJobs(0), 1);
+        expect(batcher.normalizeMaxParallelJobs(1), 1);
+        expect(batcher.normalizeMaxParallelJobs(8), 8);
+        expect(batcher.normalizeMaxParallelJobs(16), 16);
+        expect(batcher.normalizeMaxParallelJobs(100), 16);
+      });
 
-    test('returns group unchanged when maxParallelJobs=1 (MVP)', () {
-      final group = ControllerBatchGroup(
-        key: 'openai|gpt-4',
-        resolved: _stubResolved(),
-        agents: [
-          StudioAgent(id: 'a1', name: 'A', maxParallelJobs: 1),
-          StudioAgent(id: 'a2', name: 'B', maxParallelJobs: 1),
-        ],
-        batchMaxTokens: 1000,
-        batchTemperature: 0.3,
-        batchContextSize: 5,
-      );
-      final split = batcher.splitGroupForParallelJobs(group);
-      expect(split.length, 1);
-      expect(split.first, same(group));
-    });
+      test('returns group unchanged when maxParallelJobs=1 (MVP)', () {
+        final group = ControllerBatchGroup(
+          key: 'openai|gpt-4',
+          resolved: _stubResolved(),
+          agents: [
+            StudioAgent(id: 'a1', name: 'A', maxParallelJobs: 1),
+            StudioAgent(id: 'a2', name: 'B', maxParallelJobs: 1),
+          ],
+          batchMaxTokens: 1000,
+          batchTemperature: 0.3,
+          batchContextSize: 5,
+        );
+        final split = batcher.splitGroupForParallelJobs(group);
+        expect(split.length, 1);
+        expect(split.first, same(group));
+      });
 
-    test('splits into N sub-groups when maxParallelJobs>1', () {
-      final group = ControllerBatchGroup(
-        key: 'openai|gpt-4',
-        resolved: _stubResolved(),
-        agents: [
-          StudioAgent(id: 'a1', name: 'A', maxParallelJobs: 2),
-          StudioAgent(id: 'a2', name: 'B', maxParallelJobs: 2),
-          StudioAgent(id: 'a3', name: 'C', maxParallelJobs: 2),
-          StudioAgent(id: 'a4', name: 'D', maxParallelJobs: 2),
-        ],
-        batchMaxTokens: 8000,
-        batchTemperature: 0.3,
-        batchContextSize: 5,
-      );
-      final split = batcher.splitGroupForParallelJobs(group);
-      expect(split.length, 2);
-      expect(split[0].agents.length, 2);
-      expect(split[1].agents.length, 2);
-      // Sub-group keys are distinct.
-      expect(split[0].key, isNot(split[1].key));
-    });
-  });
+      test('splits into N sub-groups when maxParallelJobs>1', () {
+        final group = ControllerBatchGroup(
+          key: 'openai|gpt-4',
+          resolved: _stubResolved(),
+          agents: [
+            StudioAgent(id: 'a1', name: 'A', maxParallelJobs: 2),
+            StudioAgent(id: 'a2', name: 'B', maxParallelJobs: 2),
+            StudioAgent(id: 'a3', name: 'C', maxParallelJobs: 2),
+            StudioAgent(id: 'a4', name: 'D', maxParallelJobs: 2),
+          ],
+          batchMaxTokens: 8000,
+          batchTemperature: 0.3,
+          batchContextSize: 5,
+        );
+        final split = batcher.splitGroupForParallelJobs(group);
+        expect(split.length, 2);
+        expect(split[0].agents.length, 2);
+        expect(split[1].agents.length, 2);
+        // Sub-group keys are distinct.
+        expect(split[0].key, isNot(split[1].key));
+      });
+    },
+  );
 }
 
 ResolvedAgentConfig _stubResolved({String model = 'gpt-4'}) {
@@ -356,4 +353,3 @@ ResolvedAgentConfig _stubResolved({String model = 'gpt-4'}) {
 /// Pure prompt-building / parsing tests construct the batcher WITHOUT a
 /// runner — `ControllerBatcher()` is a no-arg constructor. Only `groupAgents` /
 /// `runPhase` require a runner; we don't touch them here.
-

@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -560,6 +561,49 @@ void main() {
       await expectLater(waiting, throwsA(isA<Object>()));
       EmbeddingRequestGate.endRequest(first);
       EmbeddingRequestGate.endRequest(second);
+    });
+
+    test('foreground requests go before queued background ones', () async {
+      final tokens = List.generate(4, (_) => CancelToken());
+      final order = <String>[];
+      await EmbeddingRequestRateLimiter.acquire(600, tokens[0]);
+
+      final background = [
+        EmbeddingRequestRateLimiter.acquire(
+          600,
+          tokens[1],
+        ).then((_) => order.add('bg1')),
+        EmbeddingRequestRateLimiter.acquire(
+          600,
+          tokens[2],
+        ).then((_) => order.add('bg2')),
+      ];
+      final foreground = EmbeddingRequestRateLimiter.acquire(
+        600,
+        tokens[3],
+        foreground: true,
+      ).then((_) => order.add('fg'));
+
+      await Future.wait([...background, foreground]);
+      expect(order, ['fg', 'bg1', 'bg2']);
+    });
+
+    test('a cancelled waiter frees its turn', () async {
+      final first = CancelToken();
+      final cancelled = CancelToken();
+      final next = CancelToken();
+      await EmbeddingRequestRateLimiter.acquire(60, first);
+
+      final dropped = EmbeddingRequestRateLimiter.acquire(60, cancelled);
+      final waiting = EmbeddingRequestRateLimiter.acquire(600, next);
+      cancelled.cancel('cancelled');
+      await expectLater(dropped, throwsA(isA<Object>()));
+
+      // The next waiter is charged its own 100 ms interval, not the cancelled
+      // waiter's full second on top of it.
+      final stopwatch = Stopwatch()..start();
+      await waiting;
+      expect(stopwatch.elapsedMilliseconds, lessThan(900));
     });
   });
 }

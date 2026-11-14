@@ -74,31 +74,34 @@ void main() {
     test('an edit survives the save, instead of being read off the preset', () {
       // Both save paths used `widget.preset?.guidedGenerationPrompt`, so
       // whatever the editor did was overwritten by the stored value.
-      expect(editor, contains('guidedGenerationPrompt: _guidedGenerationPrompt'));
+      expect(
+        editor,
+        contains('guidedGenerationPrompt: _guidedGenerationPrompt'),
+      );
       expect(
         editor,
         contains('guidedImpersonationPrompt: _guidedImpersonationPrompt'),
       );
-      expect(
-        editor,
-        isNot(contains('guidedGenerationPrompt: widget.preset?')),
-      );
+      expect(editor, isNot(contains('guidedGenerationPrompt: widget.preset?')));
     });
 
-    test('an empty field falls back to the shipped default, not to nothing', () {
-      // A preset that never set one shows the wording the pipeline actually
-      // uses, so the editor is not lying about what will be sent.
-      expect(
-        editor,
-        contains('_guidedGenerationPrompt ?? kDefaultGuidedGenerationPrompt'),
-      );
-      expect(
-        editor,
-        contains(
-          '_guidedImpersonationPrompt ?? kDefaultGuidedImpersonationPrompt',
-        ),
-      );
-    });
+    test(
+      'an empty field falls back to the shipped default, not to nothing',
+      () {
+        // A preset that never set one shows the wording the pipeline actually
+        // uses, so the editor is not lying about what will be sent.
+        expect(
+          editor,
+          contains('_guidedGenerationPrompt ?? kDefaultGuidedGenerationPrompt'),
+        );
+        expect(
+          editor,
+          contains(
+            '_guidedImpersonationPrompt ?? kDefaultGuidedImpersonationPrompt',
+          ),
+        );
+      },
+    );
   });
 
   // The Vue composer had two guidance modes, each with its own header and

@@ -270,9 +270,7 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
                               final incoming = details.data;
                               if (incoming.kind != ComposerPinKind.reply ||
                                   incoming.refId == reply.id ||
-                                  !replies.any(
-                                    (r) => r.id == incoming.refId,
-                                  )) {
+                                  !replies.any((r) => r.id == incoming.refId)) {
                                 return false;
                               }
                               setState(() => _hoverIndex = index);
@@ -539,7 +537,8 @@ class _QuickReplyEditFormState extends State<_QuickReplyEditForm> {
             // Tapping the selected glyph clears it, so the built-in default is
             // reachable without a "none" swatch that would have to explain
             // itself.
-            onSelect: (id) => setState(() => _iconId = _iconId == id ? null : id),
+            onSelect: (id) =>
+                setState(() => _iconId = _iconId == id ? null : id),
           ),
           const SizedBox(height: 12),
           if (widget.builtIn)

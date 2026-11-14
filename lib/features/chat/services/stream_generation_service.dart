@@ -796,9 +796,7 @@ class StreamGenerationService {
         // Idle timeout: cancel the timer on the first chunk (text OR reasoning)
         // so a long (but progressing) generation is never cut off. Mirrors
         // AgentStreamRunner and AuxLlmClient patterns.
-        final idleTimeoutMs = apiConfig.firstChunkTimeoutMs > 0
-            ? apiConfig.firstChunkTimeoutMs
-            : 120000;
+        final idleTimeoutMs = apiConfig.effectiveFirstChunkTimeoutMs;
         bool idleTimedOut = false;
         final idleGuard = IdleTimeoutGuard(idleTimeoutMs, () {
           idleTimedOut = true;
@@ -835,6 +833,7 @@ class StreamGenerationService {
           apiConfig,
           messages: requestMessages,
           sessionId: session.id,
+          receiveTimeoutMs: apiConfig.transportReceiveTimeoutMs,
           previousMessages: previousApiMessages,
           charName: inputs.character.name,
           userName: inputs.persona?.name ?? 'User',

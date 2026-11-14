@@ -24,10 +24,7 @@ String _bodyOf(String source, String signature) {
   final start = source.indexOf(signature);
   expect(start, greaterThan(-1), reason: 'missing $signature');
   final first = _braceGroup(source, start);
-  final between = source.substring(
-    first.end,
-    source.indexOf('{', first.end),
-  );
+  final between = source.substring(first.end, source.indexOf('{', first.end));
   return between.contains(')')
       ? _braceGroup(source, first.end).text
       : first.text;
@@ -74,20 +71,23 @@ void main() {
       // The hold is a thin wrapper rather than a try/finally around a body
       // that returns from four places; this is what keeps them separate.
       expect(extractor, contains('Future<CommitResult> _commit('));
-      expect(_bodyOf(extractor, 'Future<CommitResult> _commit('),
-          isNot(contains('acquireWorkHold(')));
+      expect(
+        _bodyOf(extractor, 'Future<CommitResult> _commit('),
+        isNot(contains('acquireWorkHold(')),
+      );
     });
   });
 
   group('the hold itself', () {
-    test('is handed out on every platform, so callers need no branch', () async {
-      final hold = await GenerationNotificationService.instance.acquireWorkHold(
-        title: 'Glaze',
-        text: 'test',
-      );
-      expect(hold, isA<ForegroundWorkHold>());
-      await hold.release();
-    });
+    test(
+      'is handed out on every platform, so callers need no branch',
+      () async {
+        final hold = await GenerationNotificationService.instance
+            .acquireWorkHold(title: 'Glaze', text: 'test');
+        expect(hold, isA<ForegroundWorkHold>());
+        await hold.release();
+      },
+    );
 
     test('releasing twice is safe', () async {
       // Both phases release from a `finally`, and a caller that also releases
@@ -106,7 +106,10 @@ void main() {
       final service = File(
         'lib/core/services/generation_notification_service.dart',
       ).readAsStringSync();
-      final body = _bodyOf(service, 'Future<ForegroundWorkHold> acquireWorkHold(');
+      final body = _bodyOf(
+        service,
+        'Future<ForegroundWorkHold> acquireWorkHold(',
+      );
 
       expect(body, isNot(contains('_generationLeaseCount')));
     });

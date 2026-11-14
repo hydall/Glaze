@@ -71,16 +71,14 @@ class MagicDrawerLayoutService {
     }
 
     final migrated = _migrateIds(savedOrder);
-    final filteredSaved =
-        migrated.where((id) => allItems.any((item) => item.id == id)).toList();
+    final filteredSaved = migrated
+        .where((id) => allItems.any((item) => item.id == id))
+        .toList();
     final missing = defaultIds
         .where((id) => !filteredSaved.contains(id) && !deletedIds.contains(id))
         .toList();
 
-    return (
-      itemIds: [...filteredSaved, ...missing],
-      deletedIds: deletedIds,
-    );
+    return (itemIds: [...filteredSaved, ...missing], deletedIds: deletedIds);
   }
 
   Future<void> saveLayout(List<String> itemIds, Set<String> deletedIds) async {

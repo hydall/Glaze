@@ -28,11 +28,7 @@ void main() {
 
     test('all widget files exist on disk', () {
       for (final path in widgetFiles) {
-        expect(
-          File(path).existsSync(),
-          isTrue,
-          reason: '$path should exist',
-        );
+        expect(File(path).existsSync(), isTrue, reason: '$path should exist');
       }
     });
 
@@ -56,7 +52,8 @@ void main() {
         // Check that files don't directly use repo providers for data access
         // Note: Some files may still import db_provider.dart for other providers
         // like imageStorageProvider or characterImporterProvider
-        final hasDirectRepoUsage = source.contains('ref.read(characterRepoProvider)') ||
+        final hasDirectRepoUsage =
+            source.contains('ref.read(characterRepoProvider)') ||
             source.contains('ref.watch(characterRepoProvider)') ||
             source.contains('ref.read(chatRepoProvider)') ||
             source.contains('ref.watch(chatRepoProvider)') ||
@@ -66,11 +63,12 @@ void main() {
             source.contains('ref.watch(personaRepoProvider)') ||
             source.contains('ref.read(lorebookRepoProvider)') ||
             source.contains('ref.watch(lorebookRepoProvider)');
-        
+
         expect(
           hasDirectRepoUsage,
           isFalse,
-          reason: '$path should not directly call *RepoProvider (use higher-level providers instead)',
+          reason:
+              '$path should not directly call *RepoProvider (use higher-level providers instead)',
         );
       }
     });
@@ -80,8 +78,7 @@ void main() {
     });
 
     test('no .put() calls on repos in widget code', () async {
-      final mutationPattern =
-          RegExp(r'ref\.read\(\w+RepoProvider\)\s*\.put\(');
+      final mutationPattern = RegExp(r'ref\.read\(\w+RepoProvider\)\s*\.put\(');
       var foundMutations = 0;
       for (final path in widgetFiles) {
         final source = File(path).readAsStringSync();
@@ -89,22 +86,29 @@ void main() {
           foundMutations++;
         }
       }
-      expect(foundMutations, 0,
-          reason: 'No widget files should call .put() directly on repos');
+      expect(
+        foundMutations,
+        0,
+        reason: 'No widget files should call .put() directly on repos',
+      );
     });
 
     test('no .delete() calls on repos in widget code', () async {
       var foundDelete = false;
       for (final path in widgetFiles) {
         final source = File(path).readAsStringSync();
-        if (RegExp(r'ref\.read\(\w+RepoProvider\)\s*\.delete\(')
-            .hasMatch(source)) {
+        if (RegExp(
+          r'ref\.read\(\w+RepoProvider\)\s*\.delete\(',
+        ).hasMatch(source)) {
           foundDelete = true;
           break;
         }
       }
-      expect(foundDelete, isFalse,
-          reason: 'No widget files should call .delete() directly on repos');
+      expect(
+        foundDelete,
+        isFalse,
+        reason: 'No widget files should call .delete() directly on repos',
+      );
     });
   });
 

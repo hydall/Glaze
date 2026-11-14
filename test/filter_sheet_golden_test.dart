@@ -28,25 +28,117 @@ import 'package:shared_preferences/shared_preferences.dart';
 final bool _runGoldens = Platform.environment['GLAZE_GOLDENS'] == '1';
 
 const _chubTags = [
-  'female', 'male', 'oc', 'fantasy', 'romance', 'anime', 'roleplay',
-  'english', 'scenario', 'submissive', 'dominant', 'monster girl', 'furry',
-  'drama', 'comedy', 'horror', 'sci-fi', 'game characters', 'villain',
-  'love', 'tsundere', 'yandere', 'kuudere', 'dandere', 'milf', 'mommy',
-  'elf', 'demon', 'vampire', 'werewolf', 'angel', 'goddess', 'robot',
-  'android', 'cyberpunk', 'post-apocalyptic', 'medieval', 'modern',
-  'school', 'office', 'military', 'magic', 'adventure', 'mystery',
-  'slice of life', 'action', 'historical', 'western', 'pirate', 'ninja',
-  'samurai', 'knight', 'princess', 'queen', 'king', 'maid', 'butler',
-  'teacher', 'student', 'nurse', 'doctor', 'detective', 'assassin',
-  'mercenary', 'witch', 'wizard', 'necromancer', 'dragon', 'kemonomimi',
-  'catgirl', 'foxgirl', 'bunny girl', 'tomboy', 'gyaru', 'shy', 'bully',
-  'rivals', 'enemies to lovers', 'friends to lovers', 'childhood friend',
-  'roommate', 'neighbor', 'boss', 'coworker', 'stepfamily', 'multiple',
-  'rpg', 'simulator', 'narrator', 'utility', 'non-english', 'japanese',
-  'chinese', 'korean', 'russian', 'spanish', 'genshin impact',
-  'honkai star rail', 'blue archive', 'pokemon', 'naruto', 'one piece',
-  'my hero academia', 'jujutsu kaisen', 'chainsaw man', 'vtuber',
-  'hololive', 'touhou', 'league of legends', 'overwatch', 'fnaf',
+  'female',
+  'male',
+  'oc',
+  'fantasy',
+  'romance',
+  'anime',
+  'roleplay',
+  'english',
+  'scenario',
+  'submissive',
+  'dominant',
+  'monster girl',
+  'furry',
+  'drama',
+  'comedy',
+  'horror',
+  'sci-fi',
+  'game characters',
+  'villain',
+  'love',
+  'tsundere',
+  'yandere',
+  'kuudere',
+  'dandere',
+  'milf',
+  'mommy',
+  'elf',
+  'demon',
+  'vampire',
+  'werewolf',
+  'angel',
+  'goddess',
+  'robot',
+  'android',
+  'cyberpunk',
+  'post-apocalyptic',
+  'medieval',
+  'modern',
+  'school',
+  'office',
+  'military',
+  'magic',
+  'adventure',
+  'mystery',
+  'slice of life',
+  'action',
+  'historical',
+  'western',
+  'pirate',
+  'ninja',
+  'samurai',
+  'knight',
+  'princess',
+  'queen',
+  'king',
+  'maid',
+  'butler',
+  'teacher',
+  'student',
+  'nurse',
+  'doctor',
+  'detective',
+  'assassin',
+  'mercenary',
+  'witch',
+  'wizard',
+  'necromancer',
+  'dragon',
+  'kemonomimi',
+  'catgirl',
+  'foxgirl',
+  'bunny girl',
+  'tomboy',
+  'gyaru',
+  'shy',
+  'bully',
+  'rivals',
+  'enemies to lovers',
+  'friends to lovers',
+  'childhood friend',
+  'roommate',
+  'neighbor',
+  'boss',
+  'coworker',
+  'stepfamily',
+  'multiple',
+  'rpg',
+  'simulator',
+  'narrator',
+  'utility',
+  'non-english',
+  'japanese',
+  'chinese',
+  'korean',
+  'russian',
+  'spanish',
+  'genshin impact',
+  'honkai star rail',
+  'blue archive',
+  'pokemon',
+  'naruto',
+  'one piece',
+  'my hero academia',
+  'jujutsu kaisen',
+  'chainsaw man',
+  'vtuber',
+  'hololive',
+  'touhou',
+  'league of legends',
+  'overwatch',
+  'fnaf',
 ];
 
 class _ChubAdapter implements HttpClientAdapter {
@@ -58,7 +150,8 @@ class _ChubAdapter implements HttpClientAdapter {
   ) async {
     String body;
     if (options.path.endsWith('/tags') && options.method == 'POST') {
-      final q = (jsonDecode(options.data as String) as Map)['search'] as String?;
+      final q =
+          (jsonDecode(options.data as String) as Map)['search'] as String?;
       // The unfiltered index only hands back the head of the list, so a
       // search can surface tags the grid does not hold.
       final names = q == null
@@ -126,9 +219,11 @@ Future<void> _loadFonts() async {
 
 /// The sheet's own list — single-line text fields carry horizontal
 /// Scrollables of their own, so match on the axis.
-final _sheetList = find.byWidgetPredicate(
-  (w) => w is Scrollable && w.axisDirection == AxisDirection.down,
-).last;
+final _sheetList = find
+    .byWidgetPredicate(
+      (w) => w is Scrollable && w.axisDirection == AxisDirection.down,
+    )
+    .last;
 
 void main() {
   setUpAll(() async {
@@ -191,14 +286,16 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 50));
     });
     await tester.pump();
-    unawaited(showGlazeSheet<void>(
-      context: host,
-      isScrollControlled: true,
-      useRootNavigator: true,
-      useSafeArea: true,
-      backgroundColor: Colors.transparent,
-      builder: sheet,
-    ));
+    unawaited(
+      showGlazeSheet<void>(
+        context: host,
+        isScrollControlled: true,
+        useRootNavigator: true,
+        useSafeArea: true,
+        backgroundColor: Colors.transparent,
+        builder: sheet,
+      ),
+    );
     await settle(tester);
   }
 
@@ -228,11 +325,7 @@ void main() {
     await shoot('chub_top');
 
     final showAll = find.textContaining('Показать все');
-    await tester.scrollUntilVisible(
-      showAll,
-      300,
-      scrollable: _sheetList,
-    );
+    await tester.scrollUntilVisible(showAll, 300, scrollable: _sheetList);
     await settle(tester);
     await scrollBy(tester, 200);
     await shoot('chub_tags');

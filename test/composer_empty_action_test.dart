@@ -95,8 +95,10 @@ void main() {
       await notifier.assign(ComposerPin.action(ComposerAction.guidance));
       await notifier.assign(ComposerPin.reply('qr-2'));
 
-      expect(container.read(composerEmptyActionProvider).value,
-          ComposerPin.reply('qr-2'));
+      expect(
+        container.read(composerEmptyActionProvider).value,
+        ComposerPin.reply('qr-2'),
+      );
       final prefs = await SharedPreferences.getInstance();
       expect(
         prefs.getString(ComposerEmptyActionNotifier.storageKey),
@@ -114,10 +116,7 @@ void main() {
 
       expect(container.read(composerEmptyActionProvider).value, isNull);
       final prefs = await SharedPreferences.getInstance();
-      expect(
-        prefs.getString(ComposerEmptyActionNotifier.storageKey),
-        isNull,
-      );
+      expect(prefs.getString(ComposerEmptyActionNotifier.storageKey), isNull);
     });
 
     test('an assignment does not touch the composer row', () async {

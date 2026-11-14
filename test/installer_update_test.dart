@@ -360,7 +360,8 @@ void main() {
       'target_commitish': head,
       'prerelease': true,
       'created_at': '2026-10-29T12:00:00Z',
-      'html_url': 'https://github.com/$_owner/$_repo/releases/tag/nightly-build',
+      'html_url':
+          'https://github.com/$_owner/$_repo/releases/tag/nightly-build',
       'assets': [
         {
           'name': 'Glaze-nightly-windows-setup.exe',

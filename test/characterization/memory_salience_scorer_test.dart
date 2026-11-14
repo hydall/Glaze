@@ -27,18 +27,21 @@ void main() {
       expect(MemorySalienceScorer.isCore(salience), isTrue);
     });
 
-    test('high emotional content (grief/betrayal) adds emotional component', () {
-      final entry = MemoryEntry(
-        id: 'm3',
-        title: 'Betrayal at dawn',
-        content: 'The grief of betrayal hung heavy. She felt the tension.',
-      );
-      final salience = MemorySalienceScorer.score(entry, sessionId: 's1');
-      expect(salience.emotionalTags, contains('grief'));
-      expect(salience.emotionalTags, contains('betrayal'));
-      expect(salience.emotionalTags, contains('tension'));
-      expect(salience.score, greaterThan(0.3));
-    });
+    test(
+      'high emotional content (grief/betrayal) adds emotional component',
+      () {
+        final entry = MemoryEntry(
+          id: 'm3',
+          title: 'Betrayal at dawn',
+          content: 'The grief of betrayal hung heavy. She felt the tension.',
+        );
+        final salience = MemorySalienceScorer.score(entry, sessionId: 's1');
+        expect(salience.emotionalTags, contains('grief'));
+        expect(salience.emotionalTags, contains('betrayal'));
+        expect(salience.emotionalTags, contains('tension'));
+        expect(salience.score, greaterThan(0.3));
+      },
+    );
 
     test('low-importance mundane content has low salience', () {
       final entry = MemoryEntry(
@@ -95,10 +98,7 @@ void main() {
     });
 
     test('wordCount computed from content', () {
-      final entry = MemoryEntry(
-        id: 'm9',
-        content: 'one two three four five',
-      );
+      final entry = MemoryEntry(id: 'm9', content: 'one two three four five');
       final salience = MemorySalienceScorer.score(entry, sessionId: 's1');
       expect(salience.wordCount, 5);
     });

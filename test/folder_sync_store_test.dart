@@ -89,10 +89,7 @@ void main() {
       FolderRepo(target),
       PresetFolderRepo(target),
     );
-    await FolderRepo(target).create(
-      domain: FolderDomain.regex,
-      name: 'Stale',
-    );
+    await FolderRepo(target).create(domain: FolderDomain.regex, name: 'Stale');
 
     await targetStore.applyAll(await store.getAll());
 

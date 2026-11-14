@@ -86,10 +86,16 @@ class ChatWebViewThemeBuilder {
       // Full bubble background: either a solid rgba (element-opacity applied) or
       // a 2-stop linear gradient. Always emitted so toggling gradient → solid
       // overwrites the previously-set CSS variable.
-      'user-bubble-bg':
-          _bubbleBg(input.userBubbleGradient, glaze.userBubble, opacity),
-      'char-bubble-bg':
-          _bubbleBg(input.charBubbleGradient, glaze.charBubble, opacity),
+      'user-bubble-bg': _bubbleBg(
+        input.userBubbleGradient,
+        glaze.userBubble,
+        opacity,
+      ),
+      'char-bubble-bg': _bubbleBg(
+        input.charBubbleGradient,
+        glaze.charBubble,
+        opacity,
+      ),
       'user-text-color': _colorHex(glaze.userText ?? cs.onSurface),
       'char-text-color': _colorHex(glaze.charText ?? cs.onSurface),
       'user-quote-color': _colorHex(glaze.userQuote ?? cs.primary),

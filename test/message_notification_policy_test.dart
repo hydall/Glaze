@@ -124,10 +124,13 @@ void main() {
     expect(presenter.cancelled, contains(postedId));
   });
 
-  test('the test notification ignores the on-screen-chat suppression', () async {
-    service.setActiveContext('char-a', 'sess-1');
-    final sent = await service.sendTestNotification('Glaze', 'ping');
-    expect(sent, isTrue);
-    expect(presenter.shown, hasLength(1));
-  });
+  test(
+    'the test notification ignores the on-screen-chat suppression',
+    () async {
+      service.setActiveContext('char-a', 'sess-1');
+      final sent = await service.sendTestNotification('Glaze', 'ping');
+      expect(sent, isTrue);
+      expect(presenter.shown, hasLength(1));
+    },
+  );
 }

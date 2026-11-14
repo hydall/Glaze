@@ -90,39 +90,33 @@ void main() {
   });
 
   test('the global entry cap reports a budget cut-off', () {
-    final result = run(
-      const [
-        Lorebook(
-          id: 'b',
-          name: 'Book',
-          entries: [
-            LorebookEntry(id: 'a', keys: ['castle'], order: 1, content: 'A'),
-            LorebookEntry(id: 'b', keys: ['castle'], order: 2, content: 'B'),
-          ],
-        ),
-      ],
-      settings: const LorebookGlobalSettings(maxInjectedEntries: 1),
-    );
+    final result = run(const [
+      Lorebook(
+        id: 'b',
+        name: 'Book',
+        entries: [
+          LorebookEntry(id: 'a', keys: ['castle'], order: 1, content: 'A'),
+          LorebookEntry(id: 'b', keys: ['castle'], order: 2, content: 'B'),
+        ],
+      ),
+    ], settings: const LorebookGlobalSettings(maxInjectedEntries: 1));
 
     expect(entryNamed(result, 'a').cutOff, isNull);
     expect(entryNamed(result, 'b').cutOff, CoverageCutOff.budget);
   });
 
   test('constant entries bypass the entry cap', () {
-    final result = run(
-      const [
-        Lorebook(
-          id: 'b',
-          name: 'Book',
-          entries: [
-            LorebookEntry(id: 'c1', constant: true, content: 'always'),
-            LorebookEntry(id: 'c2', constant: true, content: 'always too'),
-            LorebookEntry(id: 'k', keys: ['castle'], content: 'K'),
-          ],
-        ),
-      ],
-      settings: const LorebookGlobalSettings(maxInjectedEntries: 1),
-    );
+    final result = run(const [
+      Lorebook(
+        id: 'b',
+        name: 'Book',
+        entries: [
+          LorebookEntry(id: 'c1', constant: true, content: 'always'),
+          LorebookEntry(id: 'c2', constant: true, content: 'always too'),
+          LorebookEntry(id: 'k', keys: ['castle'], content: 'K'),
+        ],
+      ),
+    ], settings: const LorebookGlobalSettings(maxInjectedEntries: 1));
 
     expect(entryNamed(result, 'c1').cutOff, isNull);
     expect(entryNamed(result, 'c2').cutOff, isNull);
@@ -167,7 +161,9 @@ void main() {
         Lorebook(
           id: 'b',
           name: 'Book',
-          entries: [LorebookEntry(id: 'k', keys: ['castle'], content: 'K')],
+          entries: [
+            LorebookEntry(id: 'k', keys: ['castle'], content: 'K'),
+          ],
         ),
       ],
       globalSettings: const LorebookGlobalSettings(),
@@ -178,25 +174,22 @@ void main() {
   });
 
   test('an entry that ignores the budget is never cut off', () {
-    final result = run(
-      const [
-        Lorebook(
-          id: 'b',
-          name: 'Book',
-          entries: [
-            LorebookEntry(id: 'a', keys: ['castle'], order: 1, content: 'A'),
-            LorebookEntry(
-              id: 'free',
-              keys: ['castle'],
-              order: 2,
-              content: 'F',
-              ignoreBudget: true,
-            ),
-          ],
-        ),
-      ],
-      settings: const LorebookGlobalSettings(maxInjectedEntries: 1),
-    );
+    final result = run(const [
+      Lorebook(
+        id: 'b',
+        name: 'Book',
+        entries: [
+          LorebookEntry(id: 'a', keys: ['castle'], order: 1, content: 'A'),
+          LorebookEntry(
+            id: 'free',
+            keys: ['castle'],
+            order: 2,
+            content: 'F',
+            ignoreBudget: true,
+          ),
+        ],
+      ),
+    ], settings: const LorebookGlobalSettings(maxInjectedEntries: 1));
 
     expect(entryNamed(result, 'a').cutOff, isNull);
     expect(entryNamed(result, 'free').cutOff, isNull);
@@ -262,7 +255,9 @@ void main() {
       char: null,
       textToScan: message,
       chatId: null,
-      lorebooks: const [Lorebook(id: 'b', name: 'Book', entries: [entry])],
+      lorebooks: const [
+        Lorebook(id: 'b', name: 'Book', entries: [entry]),
+      ],
       globalSettings: const LorebookGlobalSettings(searchType: 'both'),
       activations: const LorebookActivations(),
       vectorEntries: const [entry],

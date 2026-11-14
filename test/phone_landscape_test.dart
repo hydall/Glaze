@@ -288,7 +288,9 @@ void main() {
       await _go(tester, container, '/characters');
       await expectLater(
         find.byType(MaterialApp),
-        matchesGoldenFile('goldens/landscape/landscape_characters_rail_left.png'),
+        matchesGoldenFile(
+          'goldens/landscape/landscape_characters_rail_left.png',
+        ),
       );
     }, skip: !_runGoldens);
 

@@ -192,9 +192,7 @@ void main() {
 
   test('vector entries beyond vectorTopK are not reported as triggered', () {
     final result = resolver.resolve(
-      history: const [
-        ChatMessage(id: 'user', role: 'user', content: 'alpha'),
-      ],
+      history: const [ChatMessage(id: 'user', role: 'user', content: 'alpha')],
       character: character,
       sessionId: 'session',
       lorebooks: const [
@@ -212,11 +210,7 @@ void main() {
             ),
           ],
         ),
-        Lorebook(
-          id: 'bookV',
-          name: 'Book V',
-          entries: const [],
-        ),
+        Lorebook(id: 'bookV', name: 'Book V', entries: const []),
       ],
       settings: const LorebookGlobalSettings(
         maxInjectedEntries: 10,

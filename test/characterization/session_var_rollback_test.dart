@@ -31,20 +31,20 @@ void main() {
   }
 
   group('INV-C5: session vars preserved on error paths', () {
-    test('writeError: keeps original sessionVars (no pendingSessionVars write)',
-        () {
-      final session = makeSession(
-        sessionVars: {'x': '1', 'y': '2'},
-      );
+    test(
+      'writeError: keeps original sessionVars (no pendingSessionVars write)',
+      () {
+        final session = makeSession(sessionVars: {'x': '1', 'y': '2'});
 
-      final result = writer.writeError(
-        errorText: 'API timed out',
-        currentSession: session,
-      );
+        final result = writer.writeError(
+          errorText: 'API timed out',
+          currentSession: session,
+        );
 
-      // Original session vars must be preserved as-is.
-      expect(result.session?.sessionVars, {'x': '1', 'y': '2'});
-    });
+        // Original session vars must be preserved as-is.
+        expect(result.session?.sessionVars, {'x': '1', 'y': '2'});
+      },
+    );
 
     test('writeError: empty sessionVars stay empty', () {
       final session = makeSession();
@@ -63,10 +63,7 @@ void main() {
         role: 'assistant',
         content: 'original',
       );
-      final session = makeSession(
-        sessionVars: {'a': '1'},
-        messages: [target],
-      );
+      final session = makeSession(sessionVars: {'a': '1'}, messages: [target]);
 
       final result = writer.writeRegenError(
         errorText: 'stream error',
@@ -77,18 +74,20 @@ void main() {
       expect(result.session?.sessionVars, {'a': '1'});
     });
 
-    test('writeRegenError: with missing regenTargetId falls back to writeError',
-        () {
-      final session = makeSession(sessionVars: {'k': 'v'});
+    test(
+      'writeRegenError: with missing regenTargetId falls back to writeError',
+      () {
+        final session = makeSession(sessionVars: {'k': 'v'});
 
-      final result = writer.writeRegenError(
-        errorText: 'no target found',
-        saveSession: session,
-        regenTargetId: 'does-not-exist',
-      );
+        final result = writer.writeRegenError(
+          errorText: 'no target found',
+          saveSession: session,
+          regenTargetId: 'does-not-exist',
+        );
 
-      expect(result.session?.sessionVars, {'k': 'v'});
-    });
+        expect(result.session?.sessionVars, {'k': 'v'});
+      },
+    );
   });
 
   group('INV-C5: session vars persisted on success path', () {
@@ -107,18 +106,20 @@ void main() {
       expect(result.session?.sessionVars, {'new': '2'});
     });
 
-    test('writeAssistant: keeps original vars when pendingSessionVars null',
-        () {
-      final session = makeSession(sessionVars: {'keep': '1'});
+    test(
+      'writeAssistant: keeps original vars when pendingSessionVars null',
+      () {
+        final session = makeSession(sessionVars: {'keep': '1'});
 
-      final result = writer.writeAssistant(
-        text: 'Hello',
-        reasoning: null,
-        currentSession: session,
-        isAborted: () => false,
-      );
+        final result = writer.writeAssistant(
+          text: 'Hello',
+          reasoning: null,
+          currentSession: session,
+          isAborted: () => false,
+        );
 
-      expect(result.session?.sessionVars, {'keep': '1'});
-    });
+        expect(result.session?.sessionVars, {'keep': '1'});
+      },
+    );
   });
 }

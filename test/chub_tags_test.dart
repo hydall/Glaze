@@ -80,30 +80,32 @@ void main() {
       expect(jsonDecode(req.data as String), containsPair('limit', 500));
     });
 
-    test('falls back to sampling search results when the index fails',
-        () async {
-      final adapter = _Adapter((o) {
-        if (o.uri.path == '/tags') return (status: 500, body: '{}');
-        return (
-          status: 200,
-          body: jsonEncode({
-            'nodes': [
-              {
-                'topics': ['Elf', 'female'],
-              },
-              {
-                'topics': ['female'],
-              },
-            ],
-          }),
-        );
-      });
-      setCatalogHttpAdapter(adapter);
+    test(
+      'falls back to sampling search results when the index fails',
+      () async {
+        final adapter = _Adapter((o) {
+          if (o.uri.path == '/tags') return (status: 500, body: '{}');
+          return (
+            status: 200,
+            body: jsonEncode({
+              'nodes': [
+                {
+                  'topics': ['Elf', 'female'],
+                },
+                {
+                  'topics': ['female'],
+                },
+              ],
+            }),
+          );
+        });
+        setCatalogHttpAdapter(adapter);
 
-      final tags = await fetchChubTags();
+        final tags = await fetchChubTags();
 
-      expect(tags.map((t) => t.name), ['female', 'elf']);
-    });
+        expect(tags.map((t) => t.name), ['female', 'elf']);
+      },
+    );
 
     test('does not cache an empty result', () async {
       setCatalogHttpAdapter(_Adapter((o) => (status: 500, body: '{}')));
@@ -193,8 +195,9 @@ void main() {
       expect(find.text('orc'), findsOneWidget);
     });
 
-    testWidgets('search shows tags only the remote index knows',
-        (tester) async {
+    testWidgets('search shows tags only the remote index knows', (
+      tester,
+    ) async {
       FilterTag? picked;
       await pump(tester, [
         tagsSection(
@@ -213,8 +216,9 @@ void main() {
       expect(picked?.name, 'genshin impact');
     });
 
-    testWidgets('a number commits as it is typed, without Enter',
-        (tester) async {
+    testWidgets('a number commits as it is typed, without Enter', (
+      tester,
+    ) async {
       var value = 0;
       await pump(tester, [
         FilterNumberSection(

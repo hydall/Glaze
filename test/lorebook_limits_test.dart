@@ -41,41 +41,44 @@ void main() {
   group('resolveGlobalEntryCap', () {
     test('keeps a value the settings screen could have produced', () {
       expect(
-        resolveGlobalEntryCap(const LorebookGlobalSettings(
-          maxInjectedEntries: 7,
-        )),
+        resolveGlobalEntryCap(
+          const LorebookGlobalSettings(maxInjectedEntries: 7),
+        ),
         7,
       );
     });
 
     test('clamps a value a restore or a sync payload could smuggle in', () {
       expect(
-        resolveGlobalEntryCap(const LorebookGlobalSettings(
-          maxInjectedEntries: 0,
-        )),
+        resolveGlobalEntryCap(
+          const LorebookGlobalSettings(maxInjectedEntries: 0),
+        ),
         1,
       );
       expect(
-        resolveGlobalEntryCap(const LorebookGlobalSettings(
-          maxInjectedEntries: -4,
-        )),
+        resolveGlobalEntryCap(
+          const LorebookGlobalSettings(maxInjectedEntries: -4),
+        ),
         1,
       );
       expect(
-        resolveGlobalEntryCap(const LorebookGlobalSettings(
-          maxInjectedEntries: 5000,
-        )),
+        resolveGlobalEntryCap(
+          const LorebookGlobalSettings(maxInjectedEntries: 5000),
+        ),
         100,
       );
     });
   });
 
   group('resolvePerBookEntryCap', () {
-    test('zero and below mean "defer to the global cap", not "inject none"', () {
-      expect(resolvePerBookEntryCap(null), isNull);
-      expect(resolvePerBookEntryCap(0), isNull);
-      expect(resolvePerBookEntryCap(-2), isNull);
-    });
+    test(
+      'zero and below mean "defer to the global cap", not "inject none"',
+      () {
+        expect(resolvePerBookEntryCap(null), isNull);
+        expect(resolvePerBookEntryCap(0), isNull);
+        expect(resolvePerBookEntryCap(-2), isNull);
+      },
+    );
 
     test('a real cap is passed through', () {
       expect(resolvePerBookEntryCap(3), 3);

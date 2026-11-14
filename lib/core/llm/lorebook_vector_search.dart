@@ -235,6 +235,8 @@ class LorebookVectorSearch {
         [query],
         config,
         cancelToken: cancelToken,
+        // A generation is waiting on this query: skip the indexing backlog.
+        foreground: true,
         captureContext: LlmCaptureContext(
           stage: 'embedding.lorebook',
           sessionId: chatId,

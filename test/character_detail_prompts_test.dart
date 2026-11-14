@@ -13,8 +13,9 @@ void main() {
     );
   }
 
-  List<int> numbers(List<({int number, String text})> messages) =>
-      [for (final m in messages) m.number];
+  List<int> numbers(List<({int number, String text})> messages) => [
+    for (final m in messages) m.number,
+  ];
 
   group('characterFirstMessages', () {
     test('numbers the first message 1 and the alternates after it', () {
@@ -23,11 +24,7 @@ void main() {
       );
 
       expect(numbers(messages), [1, 2, 3]);
-      expect([for (final m in messages) m.text], [
-        'hello',
-        'second',
-        'third',
-      ]);
+      expect([for (final m in messages) m.text], ['hello', 'second', 'third']);
     });
 
     test('an empty slot is dropped without renumbering the ones after it', () {
@@ -43,9 +40,7 @@ void main() {
     });
 
     test('an alternate keeps its slot when there is no first message', () {
-      final messages = characterFirstMessages(
-        char(alternates: ['second']),
-      );
+      final messages = characterFirstMessages(char(alternates: ['second']));
 
       expect(numbers(messages), [2]);
     });

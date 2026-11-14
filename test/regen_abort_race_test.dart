@@ -9,6 +9,7 @@
 //     stream never fires onComplete for that generation.
 //
 library;
+
 ///  2. isAborted closure — the lambda captures _activeGenId by reference;
 ///     incrementing the counter must make every in-flight isAborted() call
 ///     return true, regardless of how many generations have been started.
@@ -116,10 +117,16 @@ void main() {
       final staleToken = CancelToken();
       n.setCancelToken(staleToken, genId: 3); // stale
 
-      expect(staleToken.isCancelled, isTrue,
-          reason: 'Token from a stale generation must be cancelled immediately');
-      expect(n.cancelToken, isNull,
-          reason: 'Stale token must not overwrite the active slot');
+      expect(
+        staleToken.isCancelled,
+        isTrue,
+        reason: 'Token from a stale generation must be cancelled immediately',
+      );
+      expect(
+        n.cancelToken,
+        isNull,
+        reason: 'Stale token must not overwrite the active slot',
+      );
     });
 
     test('current generation token is stored', () {
@@ -193,118 +200,152 @@ void main() {
   });
 
   group('rapid regen → abort cycles (async simulation)', () {
-    test('only the last generation completes; earlier ones report aborted=true',
-        () async {
-      final n = _FakeNotifier();
-      final results = <(int genId, bool aborted)>[];
+    test(
+      'only the last generation completes; earlier ones report aborted=true',
+      () async {
+        final n = _FakeNotifier();
+        final results = <(int genId, bool aborted)>[];
 
-      // Launch gen1 with a small delay so it reaches setCancelToken after gen2 is aborted
-      final gen1Future = n.startGeneration(
-        delay: const Duration(milliseconds: 20),
-        onDone: (aborted) => results.add((1, aborted)),
-      );
+        // Launch gen1 with a small delay so it reaches setCancelToken after gen2 is aborted
+        final gen1Future = n.startGeneration(
+          delay: const Duration(milliseconds: 20),
+          onDone: (aborted) => results.add((1, aborted)),
+        );
 
-      // Immediately abort gen1 and start gen2
-      await n.abortAndWait();
-      final gen2Future = n.startGeneration(
-        delay: const Duration(milliseconds: 20),
-        onDone: (aborted) => results.add((2, aborted)),
-      );
-
-      // Abort gen2 and start gen3 (no delay — wins the race)
-      await n.abortAndWait();
-      final gen3Future = n.startGeneration(
-        delay: Duration.zero,
-        onDone: (aborted) => results.add((3, aborted)),
-      );
-
-      await Future.wait([gen1Future, gen2Future, gen3Future]);
-
-      final abortedResults = results.where((r) => r.$2).map((r) => r.$1).toList();
-      final completedResults = results.where((r) => !r.$2).map((r) => r.$1).toList();
-
-      expect(abortedResults, containsAll([1, 2]),
-          reason: 'gen1 and gen2 must report aborted=true');
-      expect(completedResults, equals([3]),
-          reason: 'only gen3 (last) must complete successfully');
-    });
-
-    test('token from stale generation arriving late does not override active token',
-        () async {
-      final n = _FakeNotifier();
-
-      // gen1 starts with a long delay before setCancelToken
-      final gen1Future = n.startGeneration(
-        delay: const Duration(milliseconds: 30),
-        onDone: (_) {},
-      );
-
-      // Abort gen1, start gen2 with no delay (sets its token first)
-      await n.abortAndWait();
-      final gen2Token = CancelToken();
-      n.activeGenId++; // simulate gen2 acquiring id
-      n.setCancelToken(gen2Token, genId: n.activeGenId);
-
-      // Now gen1 finally arrives at setCancelToken (simulated by calling it with genId=1)
-      final staleToken = CancelToken();
-      n.setCancelToken(staleToken, genId: 1); // stale genId
-
-      expect(staleToken.isCancelled, isTrue,
-          reason: 'Late-arriving stale token must be cancelled');
-      expect(n.cancelToken, same(gen2Token),
-          reason: 'Active token (gen2) must not be overwritten by stale gen');
-
-      await gen1Future;
-    });
-
-    test('abortAndWait does not hang when completer is already completed',
-        () async {
-      final n = _FakeNotifier();
-      final c = Completer<void>()..complete();
-      n.activeCompleter = c;
-
-      // Should return immediately, not hang
-      await n.abortAndWait().timeout(
-        const Duration(milliseconds: 100),
-        onTimeout: () => throw StateError('abortAndWait hung on completed completer'),
-      );
-    });
-
-    test('3× regen→abort in quick succession: no response leaks through', () async {
-      final n = _FakeNotifier();
-      int leakedCompletions = 0;
-
-      Future<void> regenAbortCycle(int delayMs) async {
+        // Immediately abort gen1 and start gen2
         await n.abortAndWait();
-        unawaited(n.startGeneration(
-          delay: Duration(milliseconds: delayMs),
+        final gen2Future = n.startGeneration(
+          delay: const Duration(milliseconds: 20),
+          onDone: (aborted) => results.add((2, aborted)),
+        );
+
+        // Abort gen2 and start gen3 (no delay — wins the race)
+        await n.abortAndWait();
+        final gen3Future = n.startGeneration(
+          delay: Duration.zero,
+          onDone: (aborted) => results.add((3, aborted)),
+        );
+
+        await Future.wait([gen1Future, gen2Future, gen3Future]);
+
+        final abortedResults = results
+            .where((r) => r.$2)
+            .map((r) => r.$1)
+            .toList();
+        final completedResults = results
+            .where((r) => !r.$2)
+            .map((r) => r.$1)
+            .toList();
+
+        expect(
+          abortedResults,
+          containsAll([1, 2]),
+          reason: 'gen1 and gen2 must report aborted=true',
+        );
+        expect(
+          completedResults,
+          equals([3]),
+          reason: 'only gen3 (last) must complete successfully',
+        );
+      },
+    );
+
+    test(
+      'token from stale generation arriving late does not override active token',
+      () async {
+        final n = _FakeNotifier();
+
+        // gen1 starts with a long delay before setCancelToken
+        final gen1Future = n.startGeneration(
+          delay: const Duration(milliseconds: 30),
+          onDone: (_) {},
+        );
+
+        // Abort gen1, start gen2 with no delay (sets its token first)
+        await n.abortAndWait();
+        final gen2Token = CancelToken();
+        n.activeGenId++; // simulate gen2 acquiring id
+        n.setCancelToken(gen2Token, genId: n.activeGenId);
+
+        // Now gen1 finally arrives at setCancelToken (simulated by calling it with genId=1)
+        final staleToken = CancelToken();
+        n.setCancelToken(staleToken, genId: 1); // stale genId
+
+        expect(
+          staleToken.isCancelled,
+          isTrue,
+          reason: 'Late-arriving stale token must be cancelled',
+        );
+        expect(
+          n.cancelToken,
+          same(gen2Token),
+          reason: 'Active token (gen2) must not be overwritten by stale gen',
+        );
+
+        await gen1Future;
+      },
+    );
+
+    test(
+      'abortAndWait does not hang when completer is already completed',
+      () async {
+        final n = _FakeNotifier();
+        final c = Completer<void>()..complete();
+        n.activeCompleter = c;
+
+        // Should return immediately, not hang
+        await n.abortAndWait().timeout(
+          const Duration(milliseconds: 100),
+          onTimeout: () =>
+              throw StateError('abortAndWait hung on completed completer'),
+        );
+      },
+    );
+
+    test(
+      '3× regen→abort in quick succession: no response leaks through',
+      () async {
+        final n = _FakeNotifier();
+        int leakedCompletions = 0;
+
+        Future<void> regenAbortCycle(int delayMs) async {
+          await n.abortAndWait();
+          unawaited(
+            n.startGeneration(
+              delay: Duration(milliseconds: delayMs),
+              onDone: (aborted) {
+                if (!aborted) leakedCompletions++;
+              },
+            ),
+          );
+        }
+
+        // Three rapid cycles
+        await regenAbortCycle(30);
+        await regenAbortCycle(30);
+        await regenAbortCycle(30);
+
+        // Start final gen that we do NOT abort — it should complete
+        await n.abortAndWait();
+        await n.startGeneration(
+          delay: Duration.zero,
           onDone: (aborted) {
             if (!aborted) leakedCompletions++;
           },
-        ));
-      }
+        );
 
-      // Three rapid cycles
-      await regenAbortCycle(30);
-      await regenAbortCycle(30);
-      await regenAbortCycle(30);
+        // Wait for all stragglers
+        await Future<void>.delayed(const Duration(milliseconds: 150));
 
-      // Start final gen that we do NOT abort — it should complete
-      await n.abortAndWait();
-      await n.startGeneration(
-        delay: Duration.zero,
-        onDone: (aborted) {
-          if (!aborted) leakedCompletions++;
-        },
-      );
-
-      // Wait for all stragglers
-      await Future<void>.delayed(const Duration(milliseconds: 150));
-
-      // Only the final generation should have leaked (completed), all others aborted
-      expect(leakedCompletions, equals(1),
-          reason: 'Exactly one generation (the last) should complete; '
-              'all others must be aborted');
-    });
+        // Only the final generation should have leaked (completed), all others aborted
+        expect(
+          leakedCompletions,
+          equals(1),
+          reason:
+              'Exactly one generation (the last) should complete; '
+              'all others must be aborted',
+        );
+      },
+    );
   });
 }

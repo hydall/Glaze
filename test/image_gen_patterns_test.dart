@@ -58,8 +58,9 @@ void main() {
       });
 
       test('matches [IMG:GEN:json] and captures json', () {
-        final match =
-            ImgGenPatterns.imgGenRegex.firstMatch('[IMG:GEN:{"prompt":"sunset"}]');
+        final match = ImgGenPatterns.imgGenRegex.firstMatch(
+          '[IMG:GEN:{"prompt":"sunset"}]',
+        );
         expect(match, isNotNull);
         expect(match!.group(1), '{"prompt":"sunset"}');
       });
@@ -71,8 +72,9 @@ void main() {
 
     group('imgResultRegex', () {
       test('matches and captures URL', () {
-        final match =
-            ImgGenPatterns.imgResultRegex.firstMatch('[IMG:RESULT:https://x.png]');
+        final match = ImgGenPatterns.imgResultRegex.firstMatch(
+          '[IMG:RESULT:https://x.png]',
+        );
         expect(match, isNotNull);
         expect(match!.group(1), 'https://x.png');
       });
@@ -80,8 +82,9 @@ void main() {
 
     group('imgErrorRegex', () {
       test('matches and captures error message', () {
-        final match =
-            ImgGenPatterns.imgErrorRegex.firstMatch('[IMG:ERROR:timeout]');
+        final match = ImgGenPatterns.imgErrorRegex.firstMatch(
+          '[IMG:ERROR:timeout]',
+        );
         expect(match, isNotNull);
         expect(match!.group(1), 'timeout');
       });
@@ -147,8 +150,9 @@ void main() {
 
       test('no match for short data', () {
         expect(
-          ImgGenPatterns.base64DataUrlRegex
-              .hasMatch('data:image/png;base64,SHORT'),
+          ImgGenPatterns.base64DataUrlRegex.hasMatch(
+            'data:image/png;base64,SHORT',
+          ),
           isFalse,
         );
       });
@@ -167,7 +171,9 @@ void main() {
 
       test('stops at the first close, so two blocks stay two', () {
         expect(
-          ImgGenPatterns.reasoningSpans('<think>a</think> mid <think>b</think>'),
+          ImgGenPatterns.reasoningSpans(
+            '<think>a</think> mid <think>b</think>',
+          ),
           [(0, 16), (21, 37)],
         );
       });

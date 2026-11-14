@@ -102,16 +102,17 @@ void main() {
           );
         await request.response.close();
       });
-      await ImageGenService(ImageStorageService(Directory.systemTemp.path))
-          .generateImage(
-            settings: build('http://127.0.0.1:${server.port}'),
-            prompt: 'a walk in the rain',
-            llmEndpoint: '',
-            llmApiKey: '',
-            llmModel: '',
-            character: character,
-            persona: persona,
-          );
+      await ImageGenService(
+        ImageStorageService(Directory.systemTemp.path),
+      ).generateImage(
+        settings: build('http://127.0.0.1:${server.port}'),
+        prompt: 'a walk in the rain',
+        llmEndpoint: '',
+        llmApiKey: '',
+        llmModel: '',
+        character: character,
+        persona: persona,
+      );
       return prompt;
     }
 

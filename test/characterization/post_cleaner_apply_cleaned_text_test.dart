@@ -87,7 +87,7 @@ void main() {
       ]);
       expect(snapshotRepo.readAnchor, ('session', 'message', 3, 1));
       expect(snapshotRepo.writtenAnchor, ('session', 'message', 3, 2));
-    expect(snapshotRepo.writtenTrackers, snapshotRepo.parent!.trackers);
+      expect(snapshotRepo.writtenTrackers, snapshotRepo.parent!.trackers);
       expect(chatRepo.appended, (
         'session',
         'message',

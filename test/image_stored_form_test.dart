@@ -20,7 +20,7 @@ void main() {
       expect(
         ImageTagMarkup.encodeResultElement(payload),
         '<img data-iig-instruction=\'{"prompt":"cat"}\' '
-            'src="generated/a.jpg">',
+        'src="generated/a.jpg">',
       );
     });
 
@@ -33,8 +33,8 @@ void main() {
       expect(
         ImageTagMarkup.encodeResultElement(payload),
         '<img data-iig-instruction=\'{"prompt":"cat"}\' '
-            "data-iig-variants='generated/a.jpg;;generated/b.jpg' "
-            "data-iig-index='1' src=\"generated/b.jpg\">",
+        "data-iig-variants='generated/a.jpg;;generated/b.jpg' "
+        "data-iig-index='1' src=\"generated/b.jpg\">",
       );
     });
 
@@ -122,24 +122,28 @@ void main() {
       final out = ImageTagMarkup.resetImageBlockAt(text, 1);
       expect(
         out,
-        contains('[IMG:GEN:@generated/b.jpg;;*generated/c.jpg|'
-            '{"prompt":"two"}]'),
+        contains(
+          '[IMG:GEN:@generated/b.jpg;;*generated/c.jpg|'
+          '{"prompt":"two"}]',
+        ),
       );
       expect(out, contains('[IMG:RESULT:/old.png|{"prompt":"one"}]'));
       expect(out, isNot(contains('data-iig-instruction')));
     });
 
-    test('a legacy block switched to another variant is stored as an element',
-        () {
-      final out = ImageTagMarkup.setImageBlockVariant(
-        '[IMG:RESULT:/a.png;;*/b.png|{"prompt":"cat"}]',
-        0,
-        0,
-      );
-      expect(out, startsWith('<img data-iig-instruction='));
-      expect(out, contains('src="/a.png"'));
-      expect(ImageTagMarkup.scanImageBlocks(out).single.imagePath, '/a.png');
-    });
+    test(
+      'a legacy block switched to another variant is stored as an element',
+      () {
+        final out = ImageTagMarkup.setImageBlockVariant(
+          '[IMG:RESULT:/a.png;;*/b.png|{"prompt":"cat"}]',
+          0,
+          0,
+        );
+        expect(out, startsWith('<img data-iig-instruction='));
+        expect(out, contains('src="/a.png"'));
+        expect(ImageTagMarkup.scanImageBlocks(out).single.imagePath, '/a.png');
+      },
+    );
 
     test('resetErrorTags sends every finished block back to pending', () {
       final out = ImageTagMarkup.resetErrorTags(text);
@@ -162,7 +166,10 @@ void main() {
         (path) => 'served:$path',
       );
       final payload = ImageTagMarkup.scanResultElements(out).single.payload;
-      expect(payload.paths, ['served:generated/a.jpg', 'served:generated/b.jpg']);
+      expect(payload.paths, [
+        'served:generated/a.jpg',
+        'served:generated/b.jpg',
+      ]);
       expect(payload.activeIndex, 1);
       expect(out, contains('src="served:generated/b.jpg"'));
     });
@@ -227,15 +234,19 @@ void main() {
         'generated/a.jpg',
       );
       expect(
-        relativeGlazeFilePath('/home/u/.local/share/Glaze-nightly/avatars/a.png'),
+        relativeGlazeFilePath(
+          '/home/u/.local/share/Glaze-nightly/avatars/a.png',
+        ),
         'avatars/a.png',
       );
     });
 
     test('leaves a relative path, a URL and an outside path alone', () {
       expect(relativeGlazeFilePath('generated/a.jpg'), 'generated/a.jpg');
-      expect(relativeGlazeFilePath('data:image/png;base64,AA'),
-          'data:image/png;base64,AA');
+      expect(
+        relativeGlazeFilePath('data:image/png;base64,AA'),
+        'data:image/png;base64,AA',
+      );
       expect(relativeGlazeFilePath('/etc/passwd'), '/etc/passwd');
     });
 

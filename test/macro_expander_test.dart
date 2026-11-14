@@ -43,11 +43,11 @@ void main() {
     });
 
     test('replaces {{personality}} with character personality', () {
-      final ctx = MacroContext(
-        character: _character(personality: 'outgoing'),
+      final ctx = MacroContext(character: _character(personality: 'outgoing'));
+      expect(
+        expand('Personality: {{personality}}', ctx),
+        'Personality: outgoing',
       );
-      expect(expand('Personality: {{personality}}', ctx),
-          'Personality: outgoing');
     });
 
     test('replaces {{scenario}} with character scenario', () {
@@ -80,10 +80,7 @@ void main() {
         'meeting {{user}}.',
         ctx,
       );
-      expect(
-        out,
-        'Alise is a witch, reserved in festival, meeting Иван.',
-      );
+      expect(out, 'Alise is a witch, reserved in festival, meeting Иван.');
     });
 
     test('missing character fields expand to empty string', () {
@@ -103,12 +100,18 @@ void main() {
       expect(expand('{{user}}', ctx), 'a.b.c');
     });
 
-    test('text containing only the same braces as placeholder is preserved', () {
-      // The placeholder is "{{user}}", not just "{user}". We must not
-      // strip user-typed text that contains single braces.
-      final ctx = MacroContext(persona: 'Иван');
-      expect(expand('The formula is {x} + {y}.', ctx), 'The formula is {x} + {y}.');
-    });
+    test(
+      'text containing only the same braces as placeholder is preserved',
+      () {
+        // The placeholder is "{{user}}", not just "{user}". We must not
+        // strip user-typed text that contains single braces.
+        final ctx = MacroContext(persona: 'Иван');
+        expect(
+          expand('The formula is {x} + {y}.', ctx),
+          'The formula is {x} + {y}.',
+        );
+      },
+    );
   });
 
   group('MacroContext.empty', () {
@@ -118,7 +121,10 @@ void main() {
     });
 
     test('expands to empty strings for all known placeholders', () {
-      final out = expand('{{char}}/{{user}}/{{description}}', MacroContext.empty);
+      final out = expand(
+        '{{char}}/{{user}}/{{description}}',
+        MacroContext.empty,
+      );
       expect(out, '//');
     });
   });

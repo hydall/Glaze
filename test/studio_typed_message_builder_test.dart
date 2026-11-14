@@ -208,75 +208,81 @@ void main() {
     expect(tool['content'], '<thinking>\nSafety audit passed.\n</thinking>');
   });
 
-  test('structured functionPrefill emits a JSON schema instead of a tool call', () {
-    final schema = <String, dynamic>{};
-    final messages = builder.buildAgentMessages(
-      agent: const StudioAgent(id: 'final'),
-      context: context,
-      config: config,
-      studioPreset: const StudioPreset(
-        id: 'studio',
-        blocks: [
-          StudioPresetBlock(
-            id: 'audit_prefill',
-            mode: 'functionPrefill',
-            prefillStyle: 'structured',
-            content: '<thinking>',
-            injectionPoint: 'final',
-            order: 0,
-          ),
-        ],
-      ),
-      priorBriefs: const [],
-      isFinalResponse: true,
-      responseJsonSchema: schema,
-    );
+  test(
+    'structured functionPrefill emits a JSON schema instead of a tool call',
+    () {
+      final schema = <String, dynamic>{};
+      final messages = builder.buildAgentMessages(
+        agent: const StudioAgent(id: 'final'),
+        context: context,
+        config: config,
+        studioPreset: const StudioPreset(
+          id: 'studio',
+          blocks: [
+            StudioPresetBlock(
+              id: 'audit_prefill',
+              mode: 'functionPrefill',
+              prefillStyle: 'structured',
+              content: '<thinking>',
+              injectionPoint: 'final',
+              order: 0,
+            ),
+          ],
+        ),
+        priorBriefs: const [],
+        isFinalResponse: true,
+        responseJsonSchema: schema,
+      );
 
-    expect(messages, isEmpty);
-    expect(schema, {
-      'type': 'object',
-      'properties': {
-        'prefix': {
-          'type': 'string',
-          'enum': ['<thinking>'],
+      expect(messages, isEmpty);
+      expect(schema, {
+        'type': 'object',
+        'properties': {
+          'prefix': {
+            'type': 'string',
+            'enum': ['<thinking>'],
+          },
+          'content': {'type': 'string'},
         },
-        'content': {'type': 'string'},
-      },
-      'required': ['prefix', 'content'],
-      'additionalProperties': false,
-    });
-  });
+        'required': ['prefix', 'content'],
+        'additionalProperties': false,
+      });
+    },
+  );
 
-  test('two-pass functionPrefill collects the prefill instead of a tool call', () {
-    final prefills = <String>[];
-    final schema = <String, dynamic>{};
-    final messages = builder.buildAgentMessages(
-      agent: const StudioAgent(id: 'final'),
-      context: context,
-      config: config,
-      studioPreset: const StudioPreset(
-        id: 'studio',
-        blocks: [
-          StudioPresetBlock(
-            id: 'audit_prefill',
-            mode: 'functionPrefill',
-            prefillStyle: 'two-pass',
-            content: '<thinking>\nSafety audit passed.\n</thinking>',
-            injectionPoint: 'final',
-            order: 0,
-          ),
-        ],
-      ),
-      priorBriefs: const [],
-      isFinalResponse: true,
-      responseJsonSchema: schema,
-      twoPassPrefills: prefills,
-    );
+  test(
+    'two-pass functionPrefill collects the prefill instead of a tool call',
+    () {
+      final prefills = <String>[];
+      final schema = <String, dynamic>{};
+      final messages = builder.buildAgentMessages(
+        agent: const StudioAgent(id: 'final'),
+        context: context,
+        config: config,
+        studioPreset: const StudioPreset(
+          id: 'studio',
+          blocks: [
+            StudioPresetBlock(
+              id: 'audit_prefill',
+              mode: 'functionPrefill',
+              prefillStyle: 'two-pass',
+              content: '<thinking>\nSafety audit passed.\n</thinking>',
+              injectionPoint: 'final',
+              order: 0,
+            ),
+          ],
+        ),
+        priorBriefs: const [],
+        isFinalResponse: true,
+        responseJsonSchema: schema,
+        twoPassPrefills: prefills,
+      );
 
-    expect(messages, isEmpty);
-    expect(schema, isEmpty);
-    expect(prefills, ['<thinking>\nSafety audit passed.\n</thinking>']);
-  });
+      expect(messages, isEmpty);
+      expect(schema, isEmpty);
+      expect(prefills, ['<thinking>\nSafety audit passed.\n</thinking>']);
+    },
+  );
 
   test('instruction blocks pass through author-set user/assistant roles', () {
     final messages = builder.buildAgentMessages(
@@ -511,76 +517,83 @@ void main() {
     ]);
   });
 
-  test('appendToLastMessage merges expanded content into the last user turn', () {
-    final messages = builder.buildAgentMessages(
-      agent: const StudioAgent(id: 'final'),
-      context: context,
-      config: config,
-      studioPreset: const StudioPreset(
-        id: 'studio',
-        blocks: [
-          StudioPresetBlock(
-            id: 'chat_history',
-            type: StudioBlockType.history,
-            mode: 'direct',
-            injectionPoint: 'final',
-            order: 1,
-          ),
-          StudioPresetBlock(
-            id: 'memory',
-            appendToLastMessage: true,
-            content: '<memory>{{char}}</memory>',
-            injectionPoint: 'final',
-            order: 2,
-          ),
-        ],
-      ),
-      priorBriefs: const [],
-      isFinalResponse: true,
-    );
+  test(
+    'appendToLastMessage merges expanded content into the last user turn',
+    () {
+      final messages = builder.buildAgentMessages(
+        agent: const StudioAgent(id: 'final'),
+        context: context,
+        config: config,
+        studioPreset: const StudioPreset(
+          id: 'studio',
+          blocks: [
+            StudioPresetBlock(
+              id: 'chat_history',
+              type: StudioBlockType.history,
+              mode: 'direct',
+              injectionPoint: 'final',
+              order: 1,
+            ),
+            StudioPresetBlock(
+              id: 'memory',
+              appendToLastMessage: true,
+              content: '<memory>{{char}}</memory>',
+              injectionPoint: 'final',
+              order: 2,
+            ),
+          ],
+        ),
+        priorBriefs: const [],
+        isFinalResponse: true,
+      );
 
-    expect(messages.map((message) => message['role']), ['user', 'assistant']);
-    expect(messages.first['content'], 'First\n\n<memory>Lucy</memory>');
-  });
+      expect(messages.map((message) => message['role']), ['user', 'assistant']);
+      expect(messages.first['content'], 'First\n\n<memory>Lucy</memory>');
+    },
+  );
 
-  test('appendToLastMessage is silently dropped when history has no user turn',
-      () {
-        final messages = builder.buildAgentMessages(
-          agent: const StudioAgent(id: 'final'),
-          context: const StudioContext(
-            slots: {},
-            history: [
-              PromptMessage(role: 'assistant', content: 'Only assistant'),
-            ],
-            sessionVars: {},
-            globalVars: {},
-            macroContext: MacroContext(charName: 'Lucy', charId: 'char', sessionId: 's'),
-            diagnostics: StudioContextDiagnostics(),
+  test(
+    'appendToLastMessage is silently dropped when history has no user turn',
+    () {
+      final messages = builder.buildAgentMessages(
+        agent: const StudioAgent(id: 'final'),
+        context: const StudioContext(
+          slots: {},
+          history: [
+            PromptMessage(role: 'assistant', content: 'Only assistant'),
+          ],
+          sessionVars: {},
+          globalVars: {},
+          macroContext: MacroContext(
+            charName: 'Lucy',
+            charId: 'char',
+            sessionId: 's',
           ),
-          config: config,
-          studioPreset: const StudioPreset(
-            id: 'studio',
-            blocks: [
-              StudioPresetBlock(
-                id: 'chat_history',
-                type: StudioBlockType.history,
-                mode: 'direct',
-                injectionPoint: 'final',
-              ),
-              StudioPresetBlock(
-                id: 'memory',
-                appendToLastMessage: true,
-                content: '<memory>Lucy</memory>',
-                injectionPoint: 'final',
-              ),
-            ],
-          ),
-          priorBriefs: const [],
-          isFinalResponse: true,
-        );
+          diagnostics: StudioContextDiagnostics(),
+        ),
+        config: config,
+        studioPreset: const StudioPreset(
+          id: 'studio',
+          blocks: [
+            StudioPresetBlock(
+              id: 'chat_history',
+              type: StudioBlockType.history,
+              mode: 'direct',
+              injectionPoint: 'final',
+            ),
+            StudioPresetBlock(
+              id: 'memory',
+              appendToLastMessage: true,
+              content: '<memory>Lucy</memory>',
+              injectionPoint: 'final',
+            ),
+          ],
+        ),
+        priorBriefs: const [],
+        isFinalResponse: true,
+      );
 
-        expect(messages.map((message) => message['content']), [
-          'Only assistant',
-        ]);
-      });
+      expect(messages.map((message) => message['content']), ['Only assistant']);
+    },
+  );
 }

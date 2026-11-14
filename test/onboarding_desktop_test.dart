@@ -158,7 +158,8 @@ void main() {
       expect(
         window.chrome,
         isFalse,
-        reason: 'the explainer supplies its own chrome and dims the app behind '
+        reason:
+            'the explainer supplies its own chrome and dims the app behind '
             'it; a titled window would add a close button to a sheet that is '
             'deliberately non-dismissible for a few seconds',
       );
@@ -187,10 +188,7 @@ void main() {
       await settle(tester);
 
       expect(find.byType(GuideTourView), findsOneWidget);
-      expect(
-        find.text('Lorebooks this character carries'),
-        findsOneWidget,
-      );
+      expect(find.text('Lorebooks this character carries'), findsOneWidget);
     });
   });
 

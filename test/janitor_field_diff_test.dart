@@ -87,18 +87,20 @@ void main() {
 
     test('reports every field a single trigger wrote into', () {
       final before = PromptFields.fromPayload(payload());
-      final after = PromptFields.fromPayload(payload(
-        scenario: 'You meet Anna at the library.\n$_loreA',
-        firstMessage: '$_loreB\n\nAnna looks up from her book.',
-      ));
+      final after = PromptFields.fromPayload(
+        payload(
+          scenario: 'You meet Anna at the library.\n$_loreA',
+          firstMessage: '$_loreB\n\nAnna looks up from her book.',
+        ),
+      );
 
       final scan = scanInjectedFields(capture: after, probe: before);
 
       expect(scan.length, 2);
-      expect(
-        scan.fields,
-        {InjectionField.scenario, InjectionField.firstMessage},
-      );
+      expect(scan.fields, {
+        InjectionField.scenario,
+        InjectionField.firstMessage,
+      });
       expect(scan.text, contains(_loreA));
       expect(scan.text, contains(_loreB));
     });
@@ -297,10 +299,7 @@ void main() {
         withoutInjected(scenario, InjectionField.scenario, scan),
         'You meet Anna at the library.',
       );
-      expect(
-        withoutInjected(scenario, InjectionField.persona, scan),
-        scenario,
-      );
+      expect(withoutInjected(scenario, InjectionField.persona, scan), scenario);
     });
 
     test('an always-on entry recovered from the probe leaves the card', () {
@@ -322,8 +321,11 @@ void main() {
 
     test('an empty scan leaves the text alone', () {
       expect(
-        withoutInjected('Anna.\n\n\n\nBob.', InjectionField.persona,
-            InjectionScan.none),
+        withoutInjected(
+          'Anna.\n\n\n\nBob.',
+          InjectionField.persona,
+          InjectionScan.none,
+        ),
         'Anna.\n\n\n\nBob.',
       );
     });

@@ -54,7 +54,10 @@ void main() {
     final head = 'b' * 40;
 
     /// A Dio whose compare endpoint answers with [status].
-    Dio dioAnswering({required String status, List<String> subjects = const []}) {
+    Dio dioAnswering({
+      required String status,
+      List<String> subjects = const [],
+    }) {
       final dio = Dio(BaseOptions(validateStatus: (_) => true));
       dio.httpClientAdapter = _StubAdapter({
         'runs': {
@@ -83,26 +86,32 @@ void main() {
       return dio;
     }
 
-    test('#132 — a run older than the installed build is not offered', () async {
-      final result = await UpdateCheckService(
-        dio: dioAnswering(status: 'behind'),
-        installedCommit: installed,
-      ).check();
-      expect(result.status, UpdateStatus.upToDate);
-      expect(result.info, isNull);
-    });
+    test(
+      '#132 — a run older than the installed build is not offered',
+      () async {
+        final result = await UpdateCheckService(
+          dio: dioAnswering(status: 'behind'),
+          installedCommit: installed,
+        ).check();
+        expect(result.status, UpdateStatus.upToDate);
+        expect(result.info, isNull);
+      },
+    );
 
-    test('a run ahead of the installed build is offered, with its notes', () async {
-      final result = await UpdateCheckService(
-        dio: dioAnswering(status: 'ahead', subjects: ['first', 'second']),
-        installedCommit: installed,
-      ).check();
-      expect(result.status, UpdateStatus.available);
-      expect(result.info!.dismissId, head);
-      expect(result.info!.label, '#412');
-      // Newest first: the endpoint answers oldest-first.
-      expect(result.info!.notes, ['second', 'first']);
-    });
+    test(
+      'a run ahead of the installed build is offered, with its notes',
+      () async {
+        final result = await UpdateCheckService(
+          dio: dioAnswering(status: 'ahead', subjects: ['first', 'second']),
+          installedCommit: installed,
+        ).check();
+        expect(result.status, UpdateStatus.available);
+        expect(result.info!.dismissId, head);
+        expect(result.info!.label, '#412');
+        // Newest first: the endpoint answers oldest-first.
+        expect(result.info!.notes, ['second', 'first']);
+      },
+    );
 
     test('an identical run is up to date, not an update', () async {
       final result = await UpdateCheckService(

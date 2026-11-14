@@ -46,12 +46,12 @@ Future<void> _loadFonts() async {
 final bool _runGoldens = Platform.environment['GLAZE_GOLDENS'] == '1';
 
 Future<AppDatabase> _seedDb(ProviderContainer container) async {
-  await container.read(personaRepoProvider).put(
-    const Persona(id: 'p-demo', name: 'Alice'),
-  );
-  await container.read(presetRepoProvider).put(
-    const Preset(id: 'pr-demo', name: 'Storyteller'),
-  );
+  await container
+      .read(personaRepoProvider)
+      .put(const Persona(id: 'p-demo', name: 'Alice'));
+  await container
+      .read(presetRepoProvider)
+      .put(const Preset(id: 'pr-demo', name: 'Storyteller'));
   container.read(activePersonaIdProvider.notifier).state = 'p-demo';
   container.read(activePresetIdProvider.notifier).state = 'pr-demo';
   return container.read(appDbProvider);

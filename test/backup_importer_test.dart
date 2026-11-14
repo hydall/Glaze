@@ -1365,10 +1365,12 @@ void main() {
       archive.addFile(
         ArchiveFile.bytes(
           'tables/characters.jsonl',
-          utf8.encode([
-            for (var i = 0; i < rowCount; i++)
-              jsonEncode({'char_id': 'char_$i', 'name': 'Card $i'}),
-          ].join('\n')),
+          utf8.encode(
+            [
+              for (var i = 0; i < rowCount; i++)
+                jsonEncode({'char_id': 'char_$i', 'name': 'Card $i'}),
+            ].join('\n'),
+          ),
         ),
       );
 
@@ -1389,14 +1391,16 @@ void main() {
       archive.addFile(
         ArchiveFile.bytes(
           'tables/characters.jsonl',
-          utf8.encode([
-            for (var i = 0; i < rowCount; i++)
-              jsonEncode({
-                'char_id': 'big_$i',
-                'name': 'Big $i',
-                'description': filler,
-              }),
-          ].join('\n')),
+          utf8.encode(
+            [
+              for (var i = 0; i < rowCount; i++)
+                jsonEncode({
+                  'char_id': 'big_$i',
+                  'name': 'Big $i',
+                  'description': filler,
+                }),
+            ].join('\n'),
+          ),
         ),
       );
 
@@ -1533,88 +1537,106 @@ void main() {
       }
     });
 
-    test('restores the active persona from settings.json user_avatar',
-        () async {
-      final archive = Archive()
-        ..addFile(
-          ArchiveFile.bytes('User Avatars/Alice.png', Uint8List.fromList([1])),
-        )
-        ..addFile(
-          ArchiveFile.bytes(
-            'settings.json',
-            utf8.encode(
-              jsonEncode({
-                'user_avatar': 'Alice.png',
-                'power_user': {
-                  'personas': {'Alice.png': 'Alice', 'Bob.png': 'Bob'},
-                  'persona_descriptions': {
-                    'Alice.png': {'description': 'Alice desc'},
-                  },
-                },
-              }),
+    test(
+      'restores the active persona from settings.json user_avatar',
+      () async {
+        final archive = Archive()
+          ..addFile(
+            ArchiveFile.bytes(
+              'User Avatars/Alice.png',
+              Uint8List.fromList([1]),
             ),
-          ),
-        );
-
-      final result = await _importArchive(archive, db, imageStorage);
-
-      expect(result.errors, isEmpty);
-      expect(result.personas, 2);
-      final alice = (await db.select(db.personas).get())
-          .firstWhere((p) => p.name == 'Alice');
-
-      final prefs = await SharedPreferences.getInstance();
-      expect(prefs.getString('activePersonaId'), equals(alice.personaId));
-    });
-
-    test('falls back to default_persona and restores character connections',
-        () async {
-      final archive = Archive()
-        ..addFile(
-          ArchiveFile.bytes('characters/Seraphina.png', _characterPng('Seraphina')),
-        )
-        ..addFile(
-          ArchiveFile.bytes('User Avatars/Alice.png', Uint8List.fromList([1])),
-        )
-        ..addFile(
-          ArchiveFile.bytes(
-            'settings.json',
-            utf8.encode(
-              jsonEncode({
-                'power_user': {
-                  'default_persona': 'Alice.png',
-                  'personas': {'Alice.png': 'Alice'},
-                  'persona_descriptions': {
-                    'Alice.png': {
-                      'description': 'Alice desc',
-                      'connections': [
-                        {'type': 'character', 'id': 'Seraphina.png'},
-                        {'type': 'group', 'id': 'some-group-id'},
-                      ],
+          )
+          ..addFile(
+            ArchiveFile.bytes(
+              'settings.json',
+              utf8.encode(
+                jsonEncode({
+                  'user_avatar': 'Alice.png',
+                  'power_user': {
+                    'personas': {'Alice.png': 'Alice', 'Bob.png': 'Bob'},
+                    'persona_descriptions': {
+                      'Alice.png': {'description': 'Alice desc'},
                     },
                   },
-                },
-              }),
+                }),
+              ),
             ),
-          ),
+          );
+
+        final result = await _importArchive(archive, db, imageStorage);
+
+        expect(result.errors, isEmpty);
+        expect(result.personas, 2);
+        final alice = (await db.select(db.personas).get()).firstWhere(
+          (p) => p.name == 'Alice',
         );
 
-      final result = await _importArchive(archive, db, imageStorage);
+        final prefs = await SharedPreferences.getInstance();
+        expect(prefs.getString('activePersonaId'), equals(alice.personaId));
+      },
+    );
 
-      expect(result.errors, isEmpty);
-      final persona = (await db.select(db.personas).get()).single;
-      final character = (await db.select(db.characters).get()).single;
+    test(
+      'falls back to default_persona and restores character connections',
+      () async {
+        final archive = Archive()
+          ..addFile(
+            ArchiveFile.bytes(
+              'characters/Seraphina.png',
+              _characterPng('Seraphina'),
+            ),
+          )
+          ..addFile(
+            ArchiveFile.bytes(
+              'User Avatars/Alice.png',
+              Uint8List.fromList([1]),
+            ),
+          )
+          ..addFile(
+            ArchiveFile.bytes(
+              'settings.json',
+              utf8.encode(
+                jsonEncode({
+                  'power_user': {
+                    'default_persona': 'Alice.png',
+                    'personas': {'Alice.png': 'Alice'},
+                    'persona_descriptions': {
+                      'Alice.png': {
+                        'description': 'Alice desc',
+                        'connections': [
+                          {'type': 'character', 'id': 'Seraphina.png'},
+                          {'type': 'group', 'id': 'some-group-id'},
+                        ],
+                      },
+                    },
+                  },
+                }),
+              ),
+            ),
+          );
 
-      final prefs = await SharedPreferences.getInstance();
-      expect(prefs.getString('activePersonaId'), equals(persona.personaId));
+        final result = await _importArchive(archive, db, imageStorage);
 
-      final connections =
-          jsonDecode(prefs.getString('personaConnections')!) as Map<String, dynamic>;
-      final characterConnections =
-          connections['character'] as Map<String, dynamic>;
-      expect(characterConnections[character.charId], equals(persona.personaId));
-      expect(characterConnections, hasLength(1));
-    });
+        expect(result.errors, isEmpty);
+        final persona = (await db.select(db.personas).get()).single;
+        final character = (await db.select(db.characters).get()).single;
+
+        final prefs = await SharedPreferences.getInstance();
+        expect(prefs.getString('activePersonaId'), equals(persona.personaId));
+
+        final connections =
+            jsonDecode(prefs.getString('personaConnections')!)
+                as Map<String, dynamic>;
+        final characterConnections =
+            connections['character'] as Map<String, dynamic>;
+        expect(
+          characterConnections[character.charId],
+          equals(persona.personaId),
+        );
+        expect(characterConnections, hasLength(1));
+      },
+    );
   });
 }
 
@@ -1652,16 +1674,32 @@ Uint8List _characterPng(String name) {
   final textData = <int>[...utf8.encode('chara'), 0, ...utf8.encode(card)];
   final length = textData.length;
   return Uint8List.fromList([
-    137, 80, 78, 71, 13, 10, 26, 10,
+    137,
+    80,
+    78,
+    71,
+    13,
+    10,
+    26,
+    10,
     (length >> 24) & 0xff,
     (length >> 16) & 0xff,
     (length >> 8) & 0xff,
     length & 0xff,
     ...utf8.encode('tEXt'),
     ...textData,
-    0, 0, 0, 0,
-    0, 0, 0, 0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
     ...utf8.encode('IEND'),
-    0, 0, 0, 0,
+    0,
+    0,
+    0,
+    0,
   ]);
 }

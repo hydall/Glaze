@@ -57,9 +57,9 @@ String? _header(RequestOptions options, String name) =>
 
 Map<String, dynamic> _query(RequestOptions options) =>
     ((jsonDecode(options.data as String) as Map<String, dynamic>)['queries']
-            as List)
-        .first
-    as Map<String, dynamic>;
+                as List)
+            .first
+        as Map<String, dynamic>;
 
 void main() {
   // Only URL extraction still runs on the anonymous session token; everything
@@ -91,25 +91,28 @@ void main() {
       expect(prefs.getString('gz_dc_token'), 'fresh');
     });
 
-    test('the avatar lookup recovers too, with no probe request first', () async {
-      SharedPreferences.setMockInitialValues({'gz_dc_token': 'stale'});
-      final adapter = _ScriptedAdapter((options, index) {
-        if (options.path.contains('/liberator/identify')) {
-          return (status: 200, body: '{"sessionToken":"fresh"}');
-        }
-        return _header(options, 'X-Session-Token') == 'fresh'
-            ? (status: 200, body: _card)
-            : (status: 401, body: 'unauthorized');
-      });
-      setCatalogHttpAdapter(adapter);
+    test(
+      'the avatar lookup recovers too, with no probe request first',
+      () async {
+        SharedPreferences.setMockInitialValues({'gz_dc_token': 'stale'});
+        final adapter = _ScriptedAdapter((options, index) {
+          if (options.path.contains('/liberator/identify')) {
+            return (status: 200, body: '{"sessionToken":"fresh"}');
+          }
+          return _header(options, 'X-Session-Token') == 'fresh'
+              ? (status: 200, body: _card)
+              : (status: 401, body: 'unauthorized');
+        });
+        setCatalogHttpAdapter(adapter);
 
-      await datacatGetCharacterAvatar('uuid-1');
+        await datacatGetCharacterAvatar('uuid-1');
 
-      // Three requests: the real one, the re-identify, the retry. The first is
-      // the call itself — nothing is spent asking whether the token is alive.
-      expect(adapter.requests, hasLength(3));
-      expect(adapter.requests.first.uri.path, '/api/characters/uuid-1');
-    });
+        // Three requests: the real one, the re-identify, the retry. The first is
+        // the call itself — nothing is spent asking whether the token is alive.
+        expect(adapter.requests, hasLength(3));
+        expect(adapter.requests.first.uri.path, '/api/characters/uuid-1');
+      },
+    );
 
     test('bot protection a fresh session cannot cure is asked once', () async {
       SharedPreferences.setMockInitialValues({'gz_dc_token': 'stale'});

@@ -126,7 +126,8 @@ void main() {
     const message = ChatMessage(
       id: 'a',
       role: 'assistant',
-      content: '*She tilts her head.* "You *really* asked me that?" '
+      content:
+          '*She tilts her head.* "You *really* asked me that?" '
           '***Very*** **bold**.',
     );
 

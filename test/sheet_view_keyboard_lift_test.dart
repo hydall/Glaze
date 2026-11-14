@@ -77,7 +77,10 @@ void main() {
     // exactly what the keyboard covers, so the visible body is unchanged.
     showKeyboard(tester, 50);
     await tester.pump();
-    expect(sheetHeight(tester), moreOrLessEquals(collapsed + 50, epsilon: 0.01));
+    expect(
+      sheetHeight(tester),
+      moreOrLessEquals(collapsed + 50, epsilon: 0.01),
+    );
 
     // The lift stops at fullscreen — it never overshoots the screen.
     showKeyboard(tester, 300);

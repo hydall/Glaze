@@ -21,6 +21,7 @@ class _FakeEmbeddingService extends EmbeddingService {
     EmbeddingConfig config, {
     cancelToken,
     captureContext,
+    bool foreground = false,
   }) async {
     requests++;
     texts += input.length;
@@ -172,89 +173,103 @@ void main() {
     );
   }
 
-  test('reconciles representative chat sizes with stable operation counts', () async {
-    for (final messageCount in [25, 100]) {
-      final sessionId = 'baseline-$messageCount';
-      final original = messages(messageCount);
-      final chunkCount = messageCount ~/ ChatMessageEmbeddingService.defaultChunkSize;
-
-      await reconcile(
-        label: '$messageCount initial',
-        sessionId: sessionId,
-        input: original,
-      );
-      expect(
-        counts(),
-        isA<_OperationCounts>()
-            .having((value) => value.sourceLoads, 'source loads', 1)
-            .having((value) => value.vectorWrites, 'vector writes', chunkCount)
-            .having(
-              (value) => value.embeddingRequests,
-              'embedding requests',
-              chunkCount,
-            )
-            .having((value) => value.embeddedTexts, 'embedded texts', chunkCount)
-            .having((value) => value.bulkDeleteCalls, 'bulk delete calls', 0),
-      );
-
-      await reconcile(
-        label: '$messageCount warm',
-        sessionId: sessionId,
-        input: original,
-      );
-      expect(counts().sourceLoads, 1);
-      expect(counts().vectorWrites, 0);
-      expect(counts().embeddingRequests, 0);
-      expect(counts().bulkDeleteCalls, 0);
-
-      for (final index in [0, messageCount ~/ 2, messageCount - 1]) {
-        final modified = List<ChatMessage>.of(original);
-        modified[index] = modified[index].copyWith(
-          content: '${modified[index].content} (changed)',
-        );
+  test(
+    'reconciles representative chat sizes with stable operation counts',
+    () async {
+      for (final messageCount in [25, 100]) {
+        final sessionId = 'baseline-$messageCount';
+        final original = messages(messageCount);
+        final chunkCount =
+            messageCount ~/ ChatMessageEmbeddingService.defaultChunkSize;
 
         await reconcile(
-          label: '$messageCount modified-$index',
-          sessionId: sessionId,
-          input: modified,
-        );
-        expect(counts().sourceLoads, 1);
-        expect(counts().vectorWrites, 1);
-        expect(counts().embeddingRequests, 1);
-        expect(counts().embeddedTexts, 1);
-        expect(counts().bulkDeleteCalls, 0);
-
-        // Restore the same baseline before measuring the next position.
-        await reconcile(
-          label: '$messageCount restore-$index',
+          label: '$messageCount initial',
           sessionId: sessionId,
           input: original,
         );
-        expect(counts().vectorWrites, 1);
-        expect(counts().embeddingRequests, 1);
-      }
+        expect(
+          counts(),
+          isA<_OperationCounts>()
+              .having((value) => value.sourceLoads, 'source loads', 1)
+              .having(
+                (value) => value.vectorWrites,
+                'vector writes',
+                chunkCount,
+              )
+              .having(
+                (value) => value.embeddingRequests,
+                'embedding requests',
+                chunkCount,
+              )
+              .having(
+                (value) => value.embeddedTexts,
+                'embedded texts',
+                chunkCount,
+              )
+              .having((value) => value.bulkDeleteCalls, 'bulk delete calls', 0),
+        );
 
-      final truncatedCount = messageCount - 5;
-      await reconcile(
-        label: '$messageCount truncated-$truncatedCount',
-        sessionId: sessionId,
-        input: original.take(truncatedCount).toList(),
-      );
-      final remainingChunks = truncatedCount ~/ ChatMessageEmbeddingService.defaultChunkSize;
-      expect(counts().sourceLoads, 1);
-      expect(counts().vectorWrites, 0);
-      expect(counts().embeddingRequests, 0);
-      expect(counts().bulkDeleteCalls, 1);
-      expect(counts().bulkDeletedEntryIds, chunkCount - remainingChunks);
-      expect(
-        (await repo.getBySource('chat_message', sessionId))
-            .map((row) => row.entryId)
-            .toSet(),
-        {
-          for (var index = 0; index < remainingChunks; index++)
-            '${sessionId}_$index',
-        },
-      );
-    }
-  });
+        await reconcile(
+          label: '$messageCount warm',
+          sessionId: sessionId,
+          input: original,
+        );
+        expect(counts().sourceLoads, 1);
+        expect(counts().vectorWrites, 0);
+        expect(counts().embeddingRequests, 0);
+        expect(counts().bulkDeleteCalls, 0);
+
+        for (final index in [0, messageCount ~/ 2, messageCount - 1]) {
+          final modified = List<ChatMessage>.of(original);
+          modified[index] = modified[index].copyWith(
+            content: '${modified[index].content} (changed)',
+          );
+
+          await reconcile(
+            label: '$messageCount modified-$index',
+            sessionId: sessionId,
+            input: modified,
+          );
+          expect(counts().sourceLoads, 1);
+          expect(counts().vectorWrites, 1);
+          expect(counts().embeddingRequests, 1);
+          expect(counts().embeddedTexts, 1);
+          expect(counts().bulkDeleteCalls, 0);
+
+          // Restore the same baseline before measuring the next position.
+          await reconcile(
+            label: '$messageCount restore-$index',
+            sessionId: sessionId,
+            input: original,
+          );
+          expect(counts().vectorWrites, 1);
+          expect(counts().embeddingRequests, 1);
+        }
+
+        final truncatedCount = messageCount - 5;
+        await reconcile(
+          label: '$messageCount truncated-$truncatedCount',
+          sessionId: sessionId,
+          input: original.take(truncatedCount).toList(),
+        );
+        final remainingChunks =
+            truncatedCount ~/ ChatMessageEmbeddingService.defaultChunkSize;
+        expect(counts().sourceLoads, 1);
+        expect(counts().vectorWrites, 0);
+        expect(counts().embeddingRequests, 0);
+        expect(counts().bulkDeleteCalls, 1);
+        expect(counts().bulkDeletedEntryIds, chunkCount - remainingChunks);
+        expect(
+          (await repo.getBySource(
+            'chat_message',
+            sessionId,
+          )).map((row) => row.entryId).toSet(),
+          {
+            for (var index = 0; index < remainingChunks; index++)
+              '${sessionId}_$index',
+          },
+        );
+      }
+    },
+  );
 }

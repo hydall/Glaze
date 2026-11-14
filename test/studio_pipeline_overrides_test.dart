@@ -61,14 +61,18 @@ void main() {
       effectiveCardRewriterSettings(globals, preset).apiConfigId,
       'preset-api',
     );
-    expect(effectiveCleanerSettings(globals, preset).postCleanerModel,
-        'global-cleaner');
+    expect(
+      effectiveCleanerSettings(globals, preset).postCleanerModel,
+      'global-cleaner',
+    );
     expect(
       effectiveLedgerSettings(globals, preset).studioLedgerModel,
       'global-ledger',
     );
-    expect(effectiveCardRewriterSettings(globals, null).apiConfigId,
-        'global-api');
+    expect(
+      effectiveCardRewriterSettings(globals, null).apiConfigId,
+      'global-api',
+    );
   });
 
   group('StudioTurnConfigSnapshot', () {
@@ -87,8 +91,10 @@ void main() {
         activeApiConfig: null,
       );
 
-      expect(snapshot.pipelineSettings.cleaner.postCleanerModel,
-          'preset-cleaner');
+      expect(
+        snapshot.pipelineSettings.cleaner.postCleanerModel,
+        'preset-cleaner',
+      );
       expect(snapshot.pipelineSettings.cardRewriter.enabled, isFalse);
       expect(
         snapshot.pipelineSettings.ledger.studioLedgerModel,

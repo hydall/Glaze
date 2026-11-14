@@ -209,6 +209,8 @@
   "tokenizer_inspector_failed": "Couldn't download {}; counting with {}",
   "label_first_chunk_timeout": "Model response timeout",
   "desc_first_chunk_timeout": "How long Glaze waits for the provider to reply before dropping the connection",
+  "label_timeout_overrides_network": "Apply to the network limit",
+  "desc_timeout_overrides_network": "Off: the connection still drops after 120 s of silence (180 s for Anthropic and Gemini), whatever the timeout above says. On: the timeout above replaces that limit. Some providers and proxies close long silent connections on their own",
   "section_advanced": "Advanced",
   "section_sampling": "Sampling",
   "section_cache": "Cache",

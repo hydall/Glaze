@@ -4,11 +4,13 @@ import 'package:glaze_flutter/core/models/studio_config.dart';
 import 'package:glaze_flutter/features/presets/preset_entry.dart';
 import 'package:glaze_flutter/features/presets/preset_sort.dart';
 
-PresetItem _plain(String id, String name, int createdAt) =>
-    PresetItem(preset: Preset(id: id, name: name, createdAt: createdAt));
+PresetItem _plain(String id, String name, int createdAt) => PresetItem(
+  preset: Preset(id: id, name: name, createdAt: createdAt),
+);
 
-PresetItem _agentic(String id, String name, {int updatedAt = 0}) =>
-    PresetItem(studioPreset: StudioPreset(id: id, name: name, updatedAt: updatedAt));
+PresetItem _agentic(String id, String name, {int updatedAt = 0}) => PresetItem(
+  studioPreset: StudioPreset(id: id, name: name, updatedAt: updatedAt),
+);
 
 List<String> _ids(List<PresetItem> items) => [for (final e in items) e.id];
 

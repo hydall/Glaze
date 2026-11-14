@@ -21,10 +21,7 @@ void main() {
 
     test('preserves single newlines inside content', () {
       final messages = [
-        {
-          'role': 'assistant',
-          'content': 'Line one\nLine two\nLine three',
-        },
+        {'role': 'assistant', 'content': 'Line one\nLine two\nLine three'},
       ];
       final result = ReasoningStripper.stripMessageReasoning(messages);
       expect(result[0]['content'], 'Line one\nLine two\nLine three');
@@ -43,21 +40,24 @@ void main() {
       expect(result[0]['content'], isNot(contains('</think>')));
     });
 
-    test('strips Plan internally directive and preserves surrounding newlines', () {
-      final messages = [
-        {
-          'role': 'system',
-          'content':
-              'Introduction.\n\nPlan internally before responding <think>secret</think> after.\n\nConclusion.',
-        },
-      ];
-      final result = ReasoningStripper.stripMessageReasoning(messages);
-      final content = result[0]['content'] as String;
-      expect(content, isNot(contains('Plan internally')));
-      expect(content, isNot(contains('secret')));
-      expect(content, contains('Introduction.'));
-      expect(content, contains('Conclusion.'));
-    });
+    test(
+      'strips Plan internally directive and preserves surrounding newlines',
+      () {
+        final messages = [
+          {
+            'role': 'system',
+            'content':
+                'Introduction.\n\nPlan internally before responding <think>secret</think> after.\n\nConclusion.',
+          },
+        ];
+        final result = ReasoningStripper.stripMessageReasoning(messages);
+        final content = result[0]['content'] as String;
+        expect(content, isNot(contains('Plan internally')));
+        expect(content, isNot(contains('secret')));
+        expect(content, contains('Introduction.'));
+        expect(content, contains('Conclusion.'));
+      },
+    );
 
     test('does not collapse non-directive whitespace in roleplay content', () {
       final rp =

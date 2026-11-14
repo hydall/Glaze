@@ -9,14 +9,13 @@ ChatMessage _msg({
   required String content,
   bool hidden = false,
   bool typing = false,
-}) =>
-    ChatMessage(
-      id: id,
-      role: role,
-      content: content,
-      isHidden: hidden,
-      isTyping: typing,
-    );
+}) => ChatMessage(
+  id: id,
+  role: role,
+  content: content,
+  isHidden: hidden,
+  isTyping: typing,
+);
 
 void main() {
   group('RetrievalQueryBuilder.build', () {

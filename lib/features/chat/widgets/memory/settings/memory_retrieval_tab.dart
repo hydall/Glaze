@@ -28,50 +28,50 @@ class MemoryRetrievalSections {
 
   List<Widget> matchingSections(BuildContext context) {
     return [
+      MenuGroup(
+        header: 'label_embedding_target'.tr(),
+        items: [
+          MenuSelectorItem(
+            label: 'label_embedding_target'.tr(),
+            currentValue: draft.injectionTarget == 'macro'
+                ? 'memory_injection_macro'.tr()
+                : 'memory_injection_hard_block'.tr(),
+            onTap: () => _pickInjectionTarget(context),
+          ),
+        ],
+      ),
+      if (vectorAvailable)
         MenuGroup(
-          header: 'label_embedding_target'.tr(),
+          header: 'memory_section_search'.tr(),
           items: [
-            MenuSelectorItem(
-              label: 'label_embedding_target'.tr(),
-              currentValue: draft.injectionTarget == 'macro'
-                  ? 'memory_injection_macro'.tr()
-                  : 'memory_injection_hard_block'.tr(),
-              onTap: () => _pickInjectionTarget(context),
+            MenuSwitchItem(
+              label: 'label_vector_search'.tr(),
+              value: draft.vectorSearchEnabled,
+              onChanged: (v) {
+                draft.vectorSearchEnabled = v;
+                onChanged();
+              },
             ),
-          ],
-        ),
-        if (vectorAvailable)
-          MenuGroup(
-            header: 'memory_section_search'.tr(),
-            items: [
-              MenuSwitchItem(
-                label: 'label_vector_search'.tr(),
-                value: draft.vectorSearchEnabled,
+            if (draft.vectorSearchEnabled) ...[
+              MenuRangeItem(
+                label: 'label_similarity_threshold'.tr(),
+                value: draft.vectorThreshold,
+                min: 0,
+                max: 1,
+                divisions: 20,
                 onChanged: (v) {
-                  draft.vectorSearchEnabled = v;
+                  draft.vectorThreshold = v;
                   onChanged();
                 },
               ),
-              if (draft.vectorSearchEnabled) ...[
-                MenuRangeItem(
-                  label: 'label_similarity_threshold'.tr(),
-                  value: draft.vectorThreshold,
-                  min: 0,
-                  max: 1,
-                  divisions: 20,
-                  onChanged: (v) {
-                    draft.vectorThreshold = v;
-                    onChanged();
-                  },
-                ),
-                MenuSelectorItem(
-                  label: 'label_search_type'.tr(),
-                  currentValue: _keyMatchLabel(draft.keyMatchMode),
-                  onTap: () => _pickKeyMatchMode(context),
-                ),
-              ],
+              MenuSelectorItem(
+                label: 'label_search_type'.tr(),
+                currentValue: _keyMatchLabel(draft.keyMatchMode),
+                onTap: () => _pickKeyMatchMode(context),
+              ),
             ],
-          ),
+          ],
+        ),
     ];
   }
 

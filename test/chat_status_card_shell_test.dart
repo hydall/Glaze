@@ -30,10 +30,7 @@ void main() {
     expect(find.byType(GlazeSpinner), findsOneWidget);
     expect(find.byIcon(Icons.sync), findsNothing);
     expect(find.byTooltip('Stop work'), findsOneWidget);
-    expect(
-      tester.getSize(find.byType(GlazeSpinner)),
-      const Size.square(18),
-    );
+    expect(tester.getSize(find.byType(GlazeSpinner)), const Size.square(18));
 
     final container = tester.widget<Container>(
       find.ancestor(of: find.text('Working'), matching: find.byType(Container)),

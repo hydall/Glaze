@@ -69,10 +69,7 @@ void main() {
     await tester.tap(find.text('Visible memory'));
     await tester.pump();
 
-    expect(
-      find.text('coverage_memory_reason_source_visible'),
-      findsOneWidget,
-    );
+    expect(find.text('coverage_memory_reason_source_visible'), findsOneWidget);
   });
 
   testWidgets('a selected row expands its own details', (tester) async {

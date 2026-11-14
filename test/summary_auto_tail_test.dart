@@ -89,7 +89,8 @@ Future<ProviderContainer> _container(
 }) async {
   SharedPreferences.setMockInitialValues({
     if (settings != null) 'summaryCompaction': jsonEncode(settings),
-  });  final db = AppDatabase.forTesting(NativeDatabase.memory());
+  });
+  final db = AppDatabase.forTesting(NativeDatabase.memory());
   final container = ProviderContainer(
     overrides: [
       appDbProvider.overrideWithValue(db),
@@ -210,22 +211,29 @@ void main() {
     );
   });
 
-  test('a lower line frees room under the trigger for the chat to grow', () async {
-    // Trigger 75 % (2325), compact to 50 % (1550): with a fixed part of
-    // 500 the run leaves 1050 raw where compacting to the trigger left
-    // 1825.
-    final container = await _container(
-      500,
-      settings: {'autoEnabled': true, 'triggerPercent': 75, 'compactToPercent': 50},
-    );
-    await container
-        .read(summaryGenerationServiceProvider)
-        .compact(charId: 'char', session: _session);
+  test(
+    'a lower line frees room under the trigger for the chat to grow',
+    () async {
+      // Trigger 75 % (2325), compact to 50 % (1550): with a fixed part of
+      // 500 the run leaves 1050 raw where compacting to the trigger left
+      // 1825.
+      final container = await _container(
+        500,
+        settings: {
+          'autoEnabled': true,
+          'triggerPercent': 75,
+          'compactToPercent': 50,
+        },
+      );
+      await container
+          .read(summaryGenerationServiceProvider)
+          .compact(charId: 'char', session: _session);
 
-    final tail = await _rawTail(container);
-    expect(tail, lessThanOrEqualTo(1550 - 500));
-    expect(tail, greaterThan(700));
-  });
+      final tail = await _rawTail(container);
+      expect(tail, lessThanOrEqualTo(1550 - 500));
+      expect(tail, greaterThan(700));
+    },
+  );
 
   test('what the trim dropped waits for a due run', () async {
     // Twelve messages, 1500 of history beside a fixed part of 500: 2000,
@@ -254,35 +262,38 @@ void main() {
     expect(result.created, 0);
   });
 
-  test('a run goes on to the line it compacts to, not just under the trigger', () async {
-    // 28 messages (3500) beside a fixed part of 300. Compacting to 20 %
-    // (620) leaves a tail of 320; the summarizer takes 2000 a step, so the
-    // first block leaves 1500 raw — under the 2325 trigger, but far above
-    // the line. The run goes on to the line.
-    final session = _sessionOf(28);
-    final container = await _container(
-      300,
-      settings: {
-        'autoEnabled': true,
-        'triggerPercent': 75,
-        'compactToPercent': 20,
-        'blockTargetTokens': 200,
-      },
-    );
-    final result = await container
-        .read(summaryGenerationServiceProvider)
-        .compact(charId: 'char', session: session);
-
-    expect(result.created, 2);
-    var raw = 0;
-    for (final id in await _rawIds(container, session)) {
-      raw += estimateTokens(
-        session.messages.firstWhere((m) => m.id == id).content,
+  test(
+    'a run goes on to the line it compacts to, not just under the trigger',
+    () async {
+      // 28 messages (3500) beside a fixed part of 300. Compacting to 20 %
+      // (620) leaves a tail of 320; the summarizer takes 2000 a step, so the
+      // first block leaves 1500 raw — under the 2325 trigger, but far above
+      // the line. The run goes on to the line.
+      final session = _sessionOf(28);
+      final container = await _container(
+        300,
+        settings: {
+          'autoEnabled': true,
+          'triggerPercent': 75,
+          'compactToPercent': 20,
+          'blockTargetTokens': 200,
+        },
       );
-    }
-    expect(raw, lessThanOrEqualTo(320 + perMessage));
-    expect(raw, greaterThan(0));
-  });
+      final result = await container
+          .read(summaryGenerationServiceProvider)
+          .compact(charId: 'char', session: session);
+
+      expect(result.created, 2);
+      var raw = 0;
+      for (final id in await _rawIds(container, session)) {
+        raw += estimateTokens(
+          session.messages.firstWhere((m) => m.id == id).content,
+        );
+      }
+      expect(raw, lessThanOrEqualTo(320 + perMessage));
+      expect(raw, greaterThan(0));
+    },
+  );
 
   test('the outlook says what a run would leave, and when only the floor', () {
     const settings = SummaryCompactionSettings(
@@ -323,19 +334,22 @@ void main() {
     expect(crowded.floorOnly, isTrue);
   });
 
-  test('a run with a small fixed part leaves the room under the trigger', () async {
-    final container = await _container(500);
-    final result = await container
-        .read(summaryGenerationServiceProvider)
-        .compact(charId: 'char', session: _session);
-    expect(result.created, greaterThan(0));
+  test(
+    'a run with a small fixed part leaves the room under the trigger',
+    () async {
+      final container = await _container(500);
+      final result = await container
+          .read(summaryGenerationServiceProvider)
+          .compact(charId: 'char', session: _session);
+      expect(result.created, greaterThan(0));
 
-    // 2325 − 500 − the blocks written: well over the 775 the rest of the
-    // window would have allowed.
-    final tail = await _rawTail(container);
-    expect(tail, lessThanOrEqualTo(2325 - 500));
-    expect(tail, greaterThan(1200));
-  });
+      // 2325 − 500 − the blocks written: well over the 775 the rest of the
+      // window would have allowed.
+      final tail = await _rawTail(container);
+      expect(tail, lessThanOrEqualTo(2325 - 500));
+      expect(tail, greaterThan(1200));
+    },
+  );
 
   test('a fixed part near the trigger leaves only the floor', () async {
     final container = await _container(2100);
@@ -352,10 +366,7 @@ void main() {
     final settings = await container.read(
       summaryCompactionSettingsProvider.future,
     );
-    expect(
-      tail,
-      lessThan(310 + settings.blockTargetTokens * 2 + perMessage),
-    );
+    expect(tail, lessThan(310 + settings.blockTargetTokens * 2 + perMessage));
     expect(
       tail,
       greaterThanOrEqualTo(SummaryChain.minTailMessages * perMessage),

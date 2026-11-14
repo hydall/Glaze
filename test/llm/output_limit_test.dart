@@ -59,11 +59,7 @@ void main() {
         'usage': {'completion_tokens': 500},
       });
       expect(
-        hitOutputTokenLimit(
-          text: 'x' * 4000,
-          rawResponse: raw,
-          maxTokens: 500,
-        ),
+        hitOutputTokenLimit(text: 'x' * 4000, rawResponse: raw, maxTokens: 500),
         isFalse,
       );
     });

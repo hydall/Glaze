@@ -131,14 +131,18 @@ void main() {
   group('decodeUpstreamBlock — context items', () {
     late List<BlockContextItem> context;
 
-    setUp(() => context = decodeUpstreamBlock(upstreamImageLiteExport()).context);
+    setUp(
+      () => context = decodeUpstreamBlock(upstreamImageLiteExport()).context,
+    );
 
     test('keeps every item in the original order', () {
       expect(context, hasLength(4));
-      expect(
-        context.map((item) => item.name),
-        ['chat', 'block', '{{user}}', '{{char}}'],
-      );
+      expect(context.map((item) => item.name), [
+        'chat',
+        'block',
+        '{{user}}',
+        '{{char}}',
+      ]);
     });
 
     test('reads a last_messages item', () {
@@ -186,10 +190,9 @@ void main() {
       final source = upstreamImageLiteExport();
       final encoded = encodeUpstreamBlock(decodeUpstreamBlock(source));
 
-      expect(
-        encoded.keys.toSet().difference(source.keys.toSet()),
-        {'apply_regex'},
-      );
+      expect(encoded.keys.toSet().difference(source.keys.toSet()), {
+        'apply_regex',
+      });
     });
 
     test('writes context items with their own type keys only', () {

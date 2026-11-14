@@ -65,12 +65,7 @@ void main() {
       content: 'hidden reply',
       isHidden: true,
     ),
-    ChatMessage(
-      id: 'u2',
-      role: 'user',
-      content: 'hidden ask',
-      isHidden: true,
-    ),
+    ChatMessage(id: 'u2', role: 'user', content: 'hidden ask', isHidden: true),
     ChatMessage(id: 's1', role: 'system', content: 'a system note'),
     ChatMessage(id: 'a2', role: 'assistant', content: 'visible reply'),
   ];
@@ -79,11 +74,13 @@ void main() {
     final exported = await exportMessages(conversation);
 
     expect(exported.length, conversation.length);
-    expect(
-      exported.map((m) => m['mes']),
-      ['visible ask', 'hidden reply', 'hidden ask', 'a system note',
-        'visible reply'],
-    );
+    expect(exported.map((m) => m['mes']), [
+      'visible ask',
+      'hidden reply',
+      'hidden ask',
+      'a system note',
+      'visible reply',
+    ]);
   });
 
   test('a hidden message is marked the way SillyTavern marks one', () async {
@@ -106,7 +103,11 @@ void main() {
 
     expect(imported.length, conversation.length);
     for (var i = 0; i < conversation.length; i++) {
-      expect(imported[i].content, conversation[i].content, reason: 'content $i');
+      expect(
+        imported[i].content,
+        conversation[i].content,
+        reason: 'content $i',
+      );
       expect(imported[i].role, conversation[i].role, reason: 'role $i');
       expect(
         imported[i].isHidden,

@@ -124,9 +124,7 @@ void main() {
     // toggle. The locked child's switch is the one with onChanged == null.
     final switches = tester.widgetList<Switch>(find.byType(Switch)).toList();
     expect(switches, hasLength(2));
-    final lockedChildSwitch = switches.singleWhere(
-      (s) => s.onChanged == null,
-    );
+    final lockedChildSwitch = switches.singleWhere((s) => s.onChanged == null);
     expect(lockedChildSwitch.value, isTrue);
     expect(toggled, isFalse);
   });

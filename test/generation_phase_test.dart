@@ -23,11 +23,7 @@ void main() {
 
     for (final phase in GenerationPhase.values) {
       final key = phase.translationKey;
-      expect(
-        en,
-        contains(key),
-        reason: '$phase has no English label ($key)',
-      );
+      expect(en, contains(key), reason: '$phase has no English label ($key)');
       expect(ru, contains(key), reason: '$phase has no Russian label ($key)');
       expect(
         en[key],

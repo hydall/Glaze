@@ -96,7 +96,9 @@ void main() {
         genTime: '4.0s',
         tokens: 120,
         swipes: ['First'],
-        swipesMeta: [<String, dynamic>{'genTime': '4.0s', 'tokens': 120}],
+        swipesMeta: [
+          <String, dynamic>{'genTime': '4.0s', 'tokens': 120},
+        ],
       );
       const generated = ChatMessage(
         id: 'temporary',
@@ -172,7 +174,10 @@ void main() {
         merged.content.substring(merged.continuationOffset!),
         'The continuation.',
       );
-      expect(merged.swipesMeta[0]['continuationOffset'], merged.continuationOffset);
+      expect(
+        merged.swipesMeta[0]['continuationOffset'],
+        merged.continuationOffset,
+      );
     });
 
     test('a continuation that produced nothing keeps the old boundary', () {
@@ -188,7 +193,10 @@ void main() {
         content: '',
       );
 
-      expect(mergeContinuationMessage(original, generated).continuationOffset, 5);
+      expect(
+        mergeContinuationMessage(original, generated).continuationOffset,
+        5,
+      );
     });
 
     test('a message that is entirely the continuation has no boundary', () {

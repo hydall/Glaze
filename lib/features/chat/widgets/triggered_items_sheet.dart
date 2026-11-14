@@ -126,9 +126,13 @@ class _TriggeredCard extends StatelessWidget {
 
     // keyword / vector retrieval badge (lorebook entries only).
     Widget? badge;
-    if (!isRegex && !isMemory && (e.source == 'keyword' || e.source == 'vector')) {
+    if (!isRegex &&
+        !isMemory &&
+        (e.source == 'keyword' || e.source == 'vector')) {
       final isVector = e.source == 'vector';
-      final color = isVector ? const Color(0xFFBF5AF2) : const Color(0xFF34C759);
+      final color = isVector
+          ? const Color(0xFFBF5AF2)
+          : const Color(0xFF34C759);
       badge = Container(
         margin: const EdgeInsets.only(left: 6),
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),

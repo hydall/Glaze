@@ -81,12 +81,13 @@ void main() {
     await db.close();
   });
 
-  test('scheduler pauses on paused lifecycle and resumes on resumed',
-      () async {
+  test('scheduler pauses on paused lifecycle and resumes on resumed', () async {
     final container = ProviderContainer(
       overrides: [
         appDbProvider.overrideWith((ref) => db),
-        extensionPostGenServiceProvider.overrideWith((ref) => _FakePostGen(ref)),
+        extensionPostGenServiceProvider.overrideWith(
+          (ref) => _FakePostGen(ref),
+        ),
       ],
     );
     addTearDown(container.dispose);
@@ -112,32 +113,49 @@ void main() {
     await container.read(extensionPresetsProvider.notifier).add(preset);
 
     final scheduler = container.read(periodicTriggerSchedulerProvider);
-    expect(scheduler.activeTimerCount, 1,
-        reason: 'timer is created when the app is resumed');
+    expect(
+      scheduler.activeTimerCount,
+      1,
+      reason: 'timer is created when the app is resumed',
+    );
     expect(scheduler.currentLifecycle, AppLifecycleState.resumed);
 
     scheduler.debugLifecycleState(AppLifecycleState.paused);
-    expect(scheduler.activeTimerCount, 0,
-        reason: 'paused lifecycle cancels all timers');
+    expect(
+      scheduler.activeTimerCount,
+      0,
+      reason: 'paused lifecycle cancels all timers',
+    );
 
     scheduler.debugLifecycleState(AppLifecycleState.inactive);
-    expect(scheduler.activeTimerCount, 0,
-        reason: 'inactive lifecycle also cancels all timers');
+    expect(
+      scheduler.activeTimerCount,
+      0,
+      reason: 'inactive lifecycle also cancels all timers',
+    );
 
     scheduler.debugLifecycleState(AppLifecycleState.hidden);
-    expect(scheduler.activeTimerCount, 0,
-        reason: 'hidden lifecycle also cancels all timers');
+    expect(
+      scheduler.activeTimerCount,
+      0,
+      reason: 'hidden lifecycle also cancels all timers',
+    );
 
     scheduler.debugLifecycleState(AppLifecycleState.resumed);
-    expect(scheduler.activeTimerCount, 1,
-        reason: 'resumed lifecycle rebuilds timers from the current preset');
+    expect(
+      scheduler.activeTimerCount,
+      1,
+      reason: 'resumed lifecycle rebuilds timers from the current preset',
+    );
   });
 
   test('scheduler survives a paused → detached → resumed cycle', () async {
     final container = ProviderContainer(
       overrides: [
         appDbProvider.overrideWith((ref) => db),
-        extensionPostGenServiceProvider.overrideWith((ref) => _FakePostGen(ref)),
+        extensionPostGenServiceProvider.overrideWith(
+          (ref) => _FakePostGen(ref),
+        ),
       ],
     );
     addTearDown(container.dispose);

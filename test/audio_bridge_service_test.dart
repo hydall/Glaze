@@ -77,8 +77,9 @@ void main() {
     });
 
     test('http(s) URL routes to UrlSource', () {
-      final routed =
-          AudioBridgeService.routeSource('https://example.com/sound.mp3');
+      final routed = AudioBridgeService.routeSource(
+        'https://example.com/sound.mp3',
+      );
       expect(routed, isA<UrlSource>());
       expect((routed as UrlSource).url, 'https://example.com/sound.mp3');
 
@@ -100,16 +101,18 @@ void main() {
 
     test('data: URI routes to BytesSource with the decoded payload', () {
       // 4-byte payload `0x00 0x01 0x02 0x03` → `AAECAw==`.
-      final routed =
-          AudioBridgeService.routeSource('data:audio/wav;base64,AAECAw==');
+      final routed = AudioBridgeService.routeSource(
+        'data:audio/wav;base64,AAECAw==',
+      );
       expect(routed, isA<BytesSource>());
       expect((routed as BytesSource).bytes, [0x00, 0x01, 0x02, 0x03]);
     });
 
     test('data: URI with missing padding still decodes', () {
       // `AAECAw` (no `=`) — the decoder tolerates missing padding.
-      final routed =
-          AudioBridgeService.routeSource('data:audio/wav;base64,AAECAw');
+      final routed = AudioBridgeService.routeSource(
+        'data:audio/wav;base64,AAECAw',
+      );
       expect(routed, isA<BytesSource>());
       expect((routed as BytesSource).bytes, [0x00, 0x01, 0x02, 0x03]);
     });
@@ -117,17 +120,11 @@ void main() {
     test('data: URI without base64 encoding returns null', () {
       // `data:text/plain,Hello` — not a base64 data URI; we don't
       // support plain-text data URIs, so this is a no-op.
-      expect(
-        AudioBridgeService.routeSource('data:text/plain,Hello'),
-        isNull,
-      );
+      expect(AudioBridgeService.routeSource('data:text/plain,Hello'), isNull);
     });
 
     test('malformed data: URI (no comma) returns null', () {
-      expect(
-        AudioBridgeService.routeSource('data:audio/wav;base64'),
-        isNull,
-      );
+      expect(AudioBridgeService.routeSource('data:audio/wav;base64'), isNull);
     });
 
     test('bare relative path falls through to DeviceFileSource (non-web)', () {
@@ -140,8 +137,9 @@ void main() {
     test('roundtrips arbitrary bytes', () {
       final payload = List<int>.generate(32, (i) => i % 256);
       final encoded = base64UrlEncode(payload).replaceAll('=', '');
-      final decoded =
-          AudioBridgeService.decodeDataUri('data:audio/wav;base64,$encoded');
+      final decoded = AudioBridgeService.decodeDataUri(
+        'data:audio/wav;base64,$encoded',
+      );
       expect(decoded, isNotNull);
       expect(decoded!.toList(), payload);
     });
