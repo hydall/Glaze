@@ -116,11 +116,19 @@ class ChatMessageOpsController {
       tagStart: tagStart,
       tagEnd: tagEnd,
     );
+    // A save with the text left as it was still runs the "run on edit"
+    // scripts: saving is how the reader applies them to a message. Only a
+    // save that neither the text nor a script changed is nothing to write.
+    // The publication is claimed before the script pass when the text
+    // changed, as every edit did, and only once there is something to commit
+    // otherwise, so a no-op save never claims a turn it does not publish.
+    final textChanged = !identical(edited, current.session);
+    final claimed = textChanged ? _writes.beginPublication() : null;
+    edited = await _applyRunOnEditRegexes(edited, index);
     if (identical(edited, current.session)) {
       return MessageEditOutcome.unchanged;
     }
-    final token = _writes.beginPublication();
-    edited = await _applyRunOnEditRegexes(edited, index);
+    final token = claimed ?? _writes.beginPublication();
     final updated = await _writes.run(
       () => _messageSvc.commitMessageMutation(current.session!, index, (
         latest,

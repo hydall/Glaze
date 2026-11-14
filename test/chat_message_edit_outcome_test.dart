@@ -5,6 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
+import 'package:glaze_flutter/core/models/preset.dart';
+import 'package:glaze_flutter/core/state/active_regex_provider.dart';
 import 'package:glaze_flutter/core/state/db_provider.dart';
 import 'package:glaze_flutter/features/chat/chat_state.dart';
 import 'package:glaze_flutter/features/chat/controllers/chat_message_ops_controller.dart';
@@ -36,12 +38,17 @@ void main() {
   late AsyncValue<ChatState> state;
   late List<ChatSession> published;
   late Provider<ChatMessageOpsController> controllerProvider;
+  late List<PresetRegex> regexes;
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
     db = AppDatabase.forTesting(NativeDatabase.memory());
+    regexes = const [];
     container = ProviderContainer(
-      overrides: [appDbProvider.overrideWithValue(db)],
+      overrides: [
+        appDbProvider.overrideWithValue(db),
+        activeRegexesProvider.overrideWith((ref) async => regexes),
+      ],
     );
     await container.read(chatRepoProvider).put(session);
     state = const AsyncData(ChatState(session: session));
@@ -95,6 +102,41 @@ void main() {
   });
 
   test('the text the message already has is nothing to save', () async {
+    final outcome = await controller().editMessage(0, 'Hello');
+
+    expect(outcome, MessageEditOutcome.unchanged);
+    expect(published, isEmpty);
+  });
+
+  test('a save without changes still applies run-on-edit scripts', () async {
+    regexes = const [
+      PresetRegex(
+        id: 'r1',
+        name: 'Greeting',
+        regex: 'Hello',
+        replacement: 'Hi',
+        runOnEdit: true,
+      ),
+    ];
+
+    final outcome = await controller().editMessage(0, 'Hello');
+
+    expect(outcome, MessageEditOutcome.saved);
+    expect((await stored()).messages.first.content, 'Hi');
+    expect(published.last.messages.first.content, 'Hi');
+  });
+
+  test('a script that changes nothing leaves the save unchanged', () async {
+    regexes = const [
+      PresetRegex(
+        id: 'r1',
+        name: 'No match',
+        regex: 'Goodbye',
+        replacement: 'Bye',
+        runOnEdit: true,
+      ),
+    ];
+
     final outcome = await controller().editMessage(0, 'Hello');
 
     expect(outcome, MessageEditOutcome.unchanged);
