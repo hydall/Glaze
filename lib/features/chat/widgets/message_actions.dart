@@ -9,6 +9,7 @@ import '../../../core/models/chat_message.dart';
 import '../../../core/state/character_provider.dart';
 import '../../../core/state/persona_resolution.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/glaze_toast.dart';
 import '../../extensions/services/extension_post_gen_service.dart';
 import '../../settings/api_list_provider.dart';
 import '../chat_provider.dart';
@@ -90,6 +91,19 @@ void showMessageContextMenu({
                 state.isGenerating ||
                 state.isGeneratingImage ||
                 state.isPostGenRunning) {
+              // Said, not swallowed: a flag left up after a run is how
+              // editing "stops working" for good, and a silent return hid
+              // which one.
+              debugPrint(
+                '[edit] not opened: busy (generating=${state?.isGenerating} '
+                'image=${state?.isGeneratingImage} '
+                'postGen=${state?.isPostGenRunning})',
+              );
+              GlazeToast.showWithoutContext(
+                'edit_unavailable_busy'.tr(),
+                isWarning: true,
+                duration: 4000,
+              );
               return;
             }
             final editing = ref.read(editingMessageIdProvider(charId).notifier);

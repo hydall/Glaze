@@ -12,7 +12,7 @@ import '../initial_message_builder.dart';
 import '../state/chat_session_write_queue.dart';
 
 class ChatSwipeController {
-  final Ref _ref;
+  Ref _ref;
   final String _charId;
   final void Function(AsyncValue<ChatState>) _setState;
   final AsyncValue<ChatState> Function() _getState;
@@ -40,6 +40,9 @@ class ChatSwipeController {
        _getState = getState,
        _invalidateHistory = invalidateHistory,
        _writes = writes;
+
+  /// See [ChatMessageOpsController.rebind].
+  void rebind(Ref ref) => _ref = ref;
 
   ChatMessageService get _messageSvc => ChatMessageService(_ref);
 
