@@ -115,6 +115,11 @@ export class Bridge {
     this._personaAvatarUrl = null;
     this.batterySaver = false;
     this.disableSwipeRegeneration = false;
+    // Settings → Chat → "Auto-scroll while streaming", stored inverted. Only
+    // the follow during a generation is gated; a send still jumps down.
+    this.disableStreamAutoScroll = false;
+    virtualList.isFollowSuppressed = () =>
+      this.disableStreamAutoScroll && !!this.isGenerating;
     // One "a message tried to run JS" report per WebView load — see
     // notifyMessageScriptBlocked().
     this._messageScriptBlockedNotified = false;
@@ -514,6 +519,9 @@ export class Bridge {
       lastShowScrollToBottom = show;
       this._sendToFlutter('onScrollToBottomVisibility', [show]);
     };
+    // A reply that grows below a reader who turned the streaming follow off
+    // fires no scroll event, so updateMessage re-checks the button itself.
+    this._emitScrollToBottomVisibility = emitScrollToBottomVisibility;
 
     // Content that grows or shrinks *above* the reader moves `scrollTop` with
     // it — a page of older messages prepended, rows mounting above the viewport
@@ -1244,6 +1252,7 @@ export class Bridge {
     // yanking a user who scrolled up.
     if (msg.isTyping && !(this.renderer && this.renderer.searchQuery)) {
       this.virtualList.smartScroll();
+      if (this.disableStreamAutoScroll) this._emitScrollToBottomVisibility?.();
     }
   }
 
@@ -1805,6 +1814,7 @@ export class Bridge {
     catch (_) { s = {}; }
     this.batterySaver = !!s.batterySaver;
     this.disableSwipeRegeneration = !!s.disableSwipeRegeneration;
+    this.disableStreamAutoScroll = !!s.disableStreamAutoScroll;
     applyMessageSettingsClasses(s);
     this.translationEnabled = !!s.translationEnabled;
     const container = document.getElementById('chat-container') || document.body;

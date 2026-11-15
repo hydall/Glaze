@@ -73,6 +73,7 @@ class LayoutBridgeCommands {
     required bool disableSwipeRegeneration,
     required bool studioEnabled,
     bool translationEnabled = false,
+    bool disableStreamAutoScroll = false,
   }) {
     final json = jsonEncode({
       'batterySaver': batterySaver,
@@ -80,6 +81,7 @@ class LayoutBridgeCommands {
       'hideGenerationTime': hideGenerationTime,
       'hideTokenCount': hideTokenCount,
       'disableSwipeRegeneration': disableSwipeRegeneration,
+      'disableStreamAutoScroll': disableStreamAutoScroll,
       'studioEnabled': studioEnabled,
       'translationEnabled': translationEnabled,
     });

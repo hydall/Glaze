@@ -86,6 +86,15 @@ class ChatGroup extends SettingsGroup {
           ).save(settings.copyWith(disableSwipeRegeneration: !v)),
         ),
         toggle(
+          id: 'stream_auto_scroll',
+          label: 'menu_stream_auto_scroll'.tr(),
+          description: 'desc_stream_auto_scroll'.tr(),
+          value: !settings.disableStreamAutoScroll,
+          onChanged: (v) => notifierOf(
+            ref,
+          ).save(settings.copyWith(disableStreamAutoScroll: !v)),
+        ),
+        toggle(
           id: 'show_msg_id',
           label: 'menu_show_msg_id'.tr(),
           description: 'desc_show_msg_id'.tr(),

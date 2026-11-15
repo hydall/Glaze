@@ -47,6 +47,7 @@ class ChatWebViewInitInput {
     required this.disableSwipeRegeneration,
     required this.studioEnabled,
     this.translationEnabled = false,
+    this.disableStreamAutoScroll = false,
     required this.messages,
     required this.visibleStartIndex,
     required this.memoryEntries,
@@ -88,6 +89,7 @@ class ChatWebViewInitInput {
   final bool disableSwipeRegeneration;
   final bool studioEnabled;
   final bool translationEnabled;
+  final bool disableStreamAutoScroll;
   final List<ChatMessage> messages;
   final int visibleStartIndex;
   final List<dynamic> memoryEntries;
@@ -196,6 +198,7 @@ class ChatWebViewInitializer {
       disableSwipeRegeneration: input.disableSwipeRegeneration,
       studioEnabled: input.studioEnabled,
       translationEnabled: input.translationEnabled,
+      disableStreamAutoScroll: input.disableStreamAutoScroll,
     );
     // Persona/char identity can resolve while theme and assets load above.
     await _setIdentity();
