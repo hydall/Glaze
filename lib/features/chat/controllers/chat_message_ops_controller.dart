@@ -20,8 +20,27 @@ import '../../../shared/widgets/glaze_toast.dart';
 import '../../extensions/state/message_variables_notifier.dart';
 import '../../personas/persona_list_provider.dart';
 
+/// What became of an edit the reader saved
+/// ([ChatMessageOpsController.editMessage]). Said, not swallowed: an edit
+/// refused in silence closed the editor over the old text, and the reader
+/// could not tell a lost edit from a saved one.
+enum MessageEditOutcome {
+  /// The new text is in the chat.
+  saved,
+
+  /// The text was the message's text already: nothing to write.
+  unchanged,
+
+  /// A reply, an image or post-generation work is in flight and the edit
+  /// would race it. The reader's text is for the editor to keep.
+  busy,
+
+  /// The message is no longer in the chat, or the chat moved on.
+  gone,
+}
+
 class ChatMessageOpsController {
-  final Ref _ref;
+  Ref _ref;
   final String _charId;
   final void Function(AsyncValue<ChatState>) _setState;
   final AsyncValue<ChatState> Function() _getState;
@@ -49,25 +68,47 @@ class ChatMessageOpsController {
        _invalidateHistory = invalidateHistory,
        _writes = writes;
 
+  /// Hands over the Ref of the provider build under way. The chat notifier
+  /// outlives a rebuild of its provider — an invalidation: the author's note
+  /// saved, the history screen, cloud sync — and the Ref it was built on does
+  /// not: every operation on the stale one found it unmounted and returned in
+  /// silence, until the app was restarted. Called from every build.
+  void rebind(Ref ref) => _ref = ref;
+
   ChatMessageService get _messageSvc => ChatMessageService(_ref);
 
-  Future<void> editMessage(
+  /// Puts [newContent] in the message at [index] — reasoning between
+  /// [tagStart] and [tagEnd] set apart — and says what became of it. A
+  /// refusal is logged with its reason, so a chat where saving stopped
+  /// working leaves a trace in the session log.
+  Future<MessageEditOutcome> editMessage(
     int index,
     String newContent, {
     String? tagStart,
     String? tagEnd,
   }) async {
-    if (!_ref.mounted) return;
+    if (!_ref.mounted) return MessageEditOutcome.gone;
     final current = _getState().value;
-    if (current == null ||
-        current.session == null ||
-        current.isGenerating ||
+    if (current == null || current.session == null) {
+      debugPrint('[edit] refused: no chat is open');
+      return MessageEditOutcome.gone;
+    }
+    if (current.isGenerating ||
         current.isGeneratingImage ||
         current.isPostGenRunning) {
-      return;
+      debugPrint(
+        '[edit] refused: busy (generating=${current.isGenerating} '
+        'image=${current.isGeneratingImage} '
+        'postGen=${current.isPostGenRunning})',
+      );
+      return MessageEditOutcome.busy;
     }
-    if (index < 0 || index >= current.session!.messages.length) return;
-    final token = _writes.beginPublication();
+    final messages = current.session!.messages;
+    if (index < 0 || index >= messages.length) {
+      debugPrint('[edit] refused: index $index of ${messages.length}');
+      return MessageEditOutcome.gone;
+    }
+    final messageId = messages[index].id;
     var edited = _messageSvc.editMessage(
       current.session!,
       index,
@@ -75,6 +116,10 @@ class ChatMessageOpsController {
       tagStart: tagStart,
       tagEnd: tagEnd,
     );
+    if (identical(edited, current.session)) {
+      return MessageEditOutcome.unchanged;
+    }
+    final token = _writes.beginPublication();
     edited = await _applyRunOnEditRegexes(edited, index);
     final updated = await _writes.run(
       () => _messageSvc.commitMessageMutation(current.session!, index, (
@@ -95,10 +140,18 @@ class ChatMessageOpsController {
         return result;
       }),
     );
-    if (!_ref.mounted) return;
+    if (!_ref.mounted) return MessageEditOutcome.gone;
+    // The row read back without the message: deleted under the editor, or
+    // the chat it was in is gone. Nothing was written for it.
+    if (identical(updated, current.session) ||
+        !updated.messages.any((m) => m.id == messageId)) {
+      debugPrint('[edit] refused: $messageId is no longer in the chat');
+      return MessageEditOutcome.gone;
+    }
     _ref.read(cachedTokenBreakdownProvider(_charId).notifier).state = null;
     _ref.read(lastVectorLoreTokensProvider(_charId).notifier).state = 0;
     _publish(updated, token: token);
+    return MessageEditOutcome.saved;
   }
 
   /// Replaces the text of [messageId] (and its active swipe) with [text] on
@@ -216,7 +269,9 @@ class ChatMessageOpsController {
     _invalidateHistory();
 
     try {
-      await _writes.run(() => svc.commitDeleteMessages(original, plan));
+      // The service of the build under way, not [svc]: a rebuild while this
+      // waits its turn leaves the one above on an unmounted Ref.
+      await _writes.run(() => _messageSvc.commitDeleteMessages(original, plan));
     } catch (e) {
       debugPrint('[ChatMessageOps] delete failed, restoring messages: $e');
       if (!_ref.mounted) return;
@@ -457,6 +512,9 @@ class ChatMessageOpsController {
     if (!_writes.isCurrentPublication(token)) return;
     _ref.read(messageVariablesProvider.notifier).clearSession(cleared.id);
     _invalidateHistory();
+    // The chat moved on while the clear was committing: the cleared session
+    // is not the one on screen.
+    if (_getState().value?.session?.id != current.session!.id) return;
     _setState(AsyncData(ChatState(session: cleared)));
   }
 }

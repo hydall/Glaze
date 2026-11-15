@@ -19,6 +19,7 @@ import '../../core/utils/image_src.dart';
 import '../../core/utils/error_format.dart';
 import '../../core/utils/platform_paths.dart';
 import '../../shared/widgets/glaze_spinner.dart';
+import 'controllers/chat_message_ops_controller.dart';
 import 'editing_message_provider.dart';
 
 import '../../core/state/character_provider.dart';
@@ -2280,11 +2281,29 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                         ),
                         editActions: EditActionsCallbacks(
                           onEditSave: (id, text) async {
+                            // Every way the edit can fail to land is said to
+                            // the reader: a refusal that only closed the
+                            // editor looked like a save that lost the text.
                             final idx = widget.state.messages.indexWhere(
                               (m) => m.id == id,
                             );
-                            if (idx >= 0 && text.isNotEmpty) {
-                              await ref
+                            MessageEditOutcome outcome;
+                            String? notice;
+                            if (idx < 0) {
+                              debugPrint(
+                                '[edit] save refused: $id not in chat',
+                              );
+                              outcome = MessageEditOutcome.gone;
+                            } else if (text.isEmpty) {
+                              // The page found no text to send: an emptied
+                              // editor, or none left in the row.
+                              debugPrint(
+                                '[edit] save refused: no text for $id',
+                              );
+                              outcome = MessageEditOutcome.unchanged;
+                              notice = 'edit_refused_empty';
+                            } else {
+                              outcome = await ref
                                   .read(chatProvider(widget.charId).notifier)
                                   .editMessage(
                                     idx,
@@ -2294,11 +2313,36 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                   );
                             }
                             if (!mounted ||
+                                !context.mounted ||
                                 ref.read(
                                       editingMessageIdProvider(widget.charId),
                                     ) !=
                                     id) {
                               return;
+                            }
+                            switch (outcome) {
+                              case MessageEditOutcome.busy:
+                                // The editor stays open with the text in it.
+                                GlazeToast.show(
+                                  context,
+                                  'edit_refused_busy'.tr(),
+                                  isWarning: true,
+                                  duration: 4000,
+                                );
+                                return;
+                              case MessageEditOutcome.gone:
+                                notice = 'edit_refused_gone';
+                              case MessageEditOutcome.saved:
+                              case MessageEditOutcome.unchanged:
+                                break;
+                            }
+                            if (notice != null) {
+                              GlazeToast.show(
+                                context,
+                                notice.tr(),
+                                isWarning: true,
+                                duration: 4000,
+                              );
                             }
                             ref
                                     .read(
