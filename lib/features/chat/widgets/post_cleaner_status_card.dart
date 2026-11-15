@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/post_cleaner_state_provider.dart';
 import '../state/studio_cycle_state_provider.dart';
+import '../chrome/chat_chrome_channel.dart';
 import 'chat_status_card_shell.dart';
 
 /// Floating card shown at the top of the chat while the POST-cleaner is
@@ -15,7 +16,10 @@ import 'chat_status_card_shell.dart';
 /// as the `3/3 - Cleaning` step inside [StudioStatusCard] instead, and this
 /// card hides itself to avoid duplication.
 class PostCleanerStatusCard extends ConsumerStatefulWidget {
-  const PostCleanerStatusCard({super.key});
+  const PostCleanerStatusCard({super.key, required this.channel});
+
+  /// The chat chrome the card is drawn in.
+  final ChatChromeChannel channel;
 
   @override
   ConsumerState<PostCleanerStatusCard> createState() =>
@@ -84,22 +88,23 @@ class _PostCleanerStatusCardState extends ConsumerState<PostCleanerStatusCard> {
     }
 
     return ChatStatusCardShell(
+      channel: widget.channel,
+      slot: 'statusCleaner',
       label: label,
       icon: icon,
       accent: accent,
       showSpinner: isFactChecking || isRunning,
       action: isFactChecking || isRunning
-          ? IconButton(
+          ? ChatStatusCardAction(
               onPressed: () {
                 final token = ref.read(cleanerCancelTokenProvider);
                 if (token != null && !token.isCancelled) {
                   token.cancel('User aborted post-cleaner');
                 }
               },
-              icon: const Icon(Icons.stop_circle_outlined, size: 18),
+              icon: Icons.stop_circle_outlined,
               tooltip: 'Stop cleaner',
-              visualDensity: VisualDensity.compact,
-              style: IconButton.styleFrom(foregroundColor: cs.error),
+              color: cs.error,
             )
           : null,
     );

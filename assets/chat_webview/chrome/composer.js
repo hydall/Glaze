@@ -824,6 +824,10 @@ export function createComposer(ctx) {
     },
     render,
     stripVisible,
+    /** Whether the field fills the screen above the keyboard (or is leaving it). */
+    isFull() {
+      return shown;
+    },
     /** Re-renders when the keyboard coming or going changes typing(). */
     placeTyping() {
       if (typing() !== full) render();

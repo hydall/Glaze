@@ -728,11 +728,36 @@ export class Bridge {
     };
     window.addEventListener('scroll', pin, { passive: true });
     document.addEventListener('scroll', pin, { passive: true });
+    // The events above miss a pan now and then: between the tap that focuses
+    // the composer and the keyboard settling, the browser can pan in a frame
+    // that fires no visual viewport scroll of its own (or fires it before the
+    // offset reads back), and the composer is then lifted to the top of the
+    // screen until the keyboard closes. So for a short while after a field
+    // takes focus or the viewport resizes, the lock also checks every frame.
+    // Outside that window it costs nothing.
+    let watchUntil = 0;
+    let watching = false;
+    const watchFrame = () => {
+      pin();
+      if (performance.now() < watchUntil) {
+        requestAnimationFrame(watchFrame);
+      } else {
+        watching = false;
+      }
+    };
+    const watch = () => {
+      watchUntil = performance.now() + 1500;
+      if (watching) return;
+      watching = true;
+      requestAnimationFrame(watchFrame);
+    };
+    this._watchDocumentScrollLock = watch;
+    document.addEventListener('focusin', watch, true);
     if (vv) {
       vv.addEventListener('scroll', pin, { passive: true });
       // The keyboard arriving is a resize; a pan made in the same step may not
       // announce itself with a scroll of its own.
-      vv.addEventListener('resize', pin, { passive: true });
+      vv.addEventListener('resize', () => { pin(); watch(); }, { passive: true });
     }
   }
 
@@ -1528,6 +1553,12 @@ export class Bridge {
     const insetDiff = next - this._bottomInsetPx;
     this._bottomInsetPx = next;
     if (viewportHeight != null) this._viewportFullH = Number(viewportHeight) || 0;
+    // A moving inset is the keyboard (or drawer) on its way: the one window in
+    // which the browser pans the page, even when the keyboard overlays the
+    // WebView and the visual viewport never reports a resize.
+    if (Math.abs(insetDiff) >= 0.1 && this._watchDocumentScrollLock) {
+      this._watchDocumentScrollLock();
+    }
     this._reconcileBottomInset(insetDiff);
   }
 

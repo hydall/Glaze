@@ -3,14 +3,15 @@ import 'package:flutter/material.dart';
 
 import '../../../shared/theme/app_colors.dart';
 import '../state/memory_activity_provider.dart';
-import 'context_coverage/coverage_reasons.dart';
+import 'context_coverage/memory_candidate_view.dart';
 import 'memory_graph_panel.dart';
 
-/// The memory half of the context card under the chat header.
+/// The memory half of a coverage surface: the requests screen's memory block.
+/// (The card under the chat header is drawn by the chat page, from the same
+/// [MemoryCandidateView]s — see `context_coverage_card.dart`.)
 ///
-/// Body only: the card owns the surface, the title row and the expand state, so
-/// this renders the warning, the run's stat chips and the candidate list and
-/// nothing else.
+/// Body only: the host owns the surface and the title row, so this renders the
+/// warning, the run's stat chips and the candidate list and nothing else.
 class MemoryActivitySection extends StatefulWidget {
   final MemoryActivityState activity;
   final String? sessionId;
@@ -64,25 +65,11 @@ class _MemoryActivitySectionState extends State<MemoryActivitySection> {
                 spacing: 6,
                 runSpacing: 6,
                 children: [
-                  _MemoryActivityChip(
-                    label: 'memory_chip_skipped'.tr(
-                      args: ['${summary.skippedCount}'],
-                    ),
-                  ),
-                  if (summary.sourceVisibleCount > 0)
-                    _MemoryActivityChip(
-                      label: 'memory_chip_source_visible'.tr(
-                        args: ['${summary.sourceVisibleCount}'],
-                      ),
-                    ),
-                  _MemoryActivityChip(
-                    label: 'memory_chip_latency'.tr(
-                      args: ['${summary.latencyMs}'],
-                    ),
-                  ),
-                  _MemoryActivityChip(
-                    label: _budgetLabel(diagnostics['budget']),
-                  ),
+                  for (final chip in MemoryCandidateView.chipsOf(
+                    summary,
+                    diagnostics,
+                  ))
+                    _MemoryActivityChip(label: chip),
                 ],
               ),
             ),
@@ -104,25 +91,13 @@ class _MemoryActivitySectionState extends State<MemoryActivitySection> {
     );
   }
 
-  static String _budgetLabel(Object? raw) {
-    if (raw is! Map) return 'memory_chip_budget_none'.tr();
-    final source = '${raw['source'] ?? 'none'}';
-    final tokens = raw['effectiveTokens'];
-    return tokens is int
-        ? 'memory_chip_budget'.tr(args: ['$tokens', source])
-        : 'memory_chip_budget_source'.tr(args: [source]);
-  }
-
   Widget _candidateList(
     BuildContext context,
     Map<String, dynamic> diagnostics,
   ) {
-    final raw = diagnostics['candidates'];
-    if (raw is! List) return const SizedBox.shrink();
-    final rows = raw
-        .whereType<Map<String, dynamic>>()
-        .map((candidate) => _candidateTile(context, candidate))
-        .toList(growable: false);
+    final rows = MemoryCandidateView.listOf(
+      diagnostics,
+    ).map((view) => _candidateTile(context, view)).toList(growable: false);
     if (rows.isEmpty) return const SizedBox.shrink();
     // Cap the list height so a large memory book (dozens of entries) scrolls
     // inside the card instead of expanding into one giant screen-tall panel.
@@ -143,77 +118,10 @@ class _MemoryActivitySectionState extends State<MemoryActivitySection> {
     );
   }
 
-  static List<String> _stringList(Object? raw) {
-    if (raw is! List) return const [];
-    return raw
-        .whereType<String>()
-        .map((s) => s.trim())
-        .where((s) => s.isNotEmpty)
-        .toList(growable: false);
-  }
-
-  static bool _isPositive(Object? raw) => raw is num && raw > 0;
-
-  static String _chunkLabel(Map<String, dynamic> candidate) {
-    final injected = candidate['excerptChunksInjected'] as int? ?? 0;
-    final total = candidate['excerptChunksTotal'] as int? ?? 0;
-    if (injected > 0 && total > 0) {
-      return 'memory_chunks_of'.tr(args: ['$injected', '$total']);
-    }
-    final indexes = candidate['excerptChunkIndexes'];
-    if (indexes is List && indexes.isNotEmpty) {
-      return 'memory_chunks_count'.tr(args: ['${indexes.length}']);
-    }
-    return '';
-  }
-
-  /// One wrapped line of an expanded record. Nothing is rendered when the run
-  /// did not record that detail — hence the nullable return, spread into the
-  /// column as a null-aware element.
-  static Widget? _detailLine(BuildContext context, String? text) {
-    if (text == null || text.isEmpty) return null;
-    return Text(
-      text,
-      style: TextStyle(
-        fontSize: 11,
-        height: 1.3,
-        color: context.cs.onSurfaceVariant,
-      ),
-    );
-  }
-
-  Widget _candidateTile(BuildContext context, Map<String, dynamic> candidate) {
-    final title = (candidate['title'] as String?)?.trim();
-    final entryId = candidate['entryId'] as String? ?? '';
-    final messageRange = (candidate['messageRange'] as String?)?.trim() ?? '';
-    final label = title == null || title.isEmpty
-        ? (messageRange.isNotEmpty ? messageRange : entryId)
-        : (title == messageRange || messageRange.isEmpty ? title : title);
-    final selected = candidate['selected'] == true;
-    final reason = candidate['reason'] as String? ?? 'not_selected';
-    final tokens = candidate['tokenCost'] as int? ?? 0;
-    final originalTokens = candidate['originalTokenCost'] as int? ?? tokens;
-    final injectionType = candidate['injectionType'] as String? ?? 'none';
-    final score = candidate['score'];
-    final scoreText = score is num ? score.toStringAsFixed(2) : '0.00';
-    final chunkLabel = _chunkLabel(candidate);
-    final matchedKeys = _stringList(candidate['matchedKeys']);
-    final catalogTerms = _stringList(candidate['catalogMatchedTerms']);
-    final keywordScore = candidate['keywordScore'];
-    final vectorScore = candidate['vectorScore'];
-    final catalogScore = candidate['catalogScore'];
-    // Which retrieval layer actually fired for this entry. Keyword-triggered
-    // entries previously had no visible marker (only vector excerpt overlap
-    // terms were rendered), making it look like the badge "only shows vectors".
-    final hasKeyword = matchedKeys.isNotEmpty || _isPositive(keywordScore);
-    final hasVector = _isPositive(vectorScore);
-    final hasCatalog = catalogTerms.isNotEmpty || _isPositive(catalogScore);
-    final matchedTerms = candidate['excerptMatchedTerms'];
-    final chunkIndexes = candidate['excerptChunkIndexes'];
-    // Every row opens, selected or not: the expanded record carries the full
-    // sentence, the chunk detail and the matched terms. The row itself only
-    // shows the short form, and only when the candidate missed.
-    final shortReason = selected ? null : memoryReasonShortLabel(reason);
+  Widget _candidateTile(BuildContext context, MemoryCandidateView view) {
+    final entryId = view.entryId;
+    final selected = view.selected;
+    final verdictColor = selected ? Colors.greenAccent : Colors.orangeAccent;
     final expanded = _expandedEntryIds.contains(entryId);
 
     return Padding(
@@ -243,9 +151,7 @@ class _MemoryActivitySectionState extends State<MemoryActivitySection> {
                       selected
                           ? Icons.check_circle_outline
                           : Icons.cancel_outlined,
-                      color: selected
-                          ? Colors.greenAccent
-                          : Colors.orangeAccent,
+                      color: verdictColor,
                       size: 16,
                     ),
                     const SizedBox(width: 7),
@@ -255,7 +161,7 @@ class _MemoryActivitySectionState extends State<MemoryActivitySection> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            label,
+                            view.label,
                             maxLines: expanded ? 4 : 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(fontSize: 12),
@@ -263,9 +169,9 @@ class _MemoryActivitySectionState extends State<MemoryActivitySection> {
                           // Why it was left out, in a couple of words, right on
                           // the row: a list of skipped candidates used to look
                           // identical until each one was opened.
-                          if (shortReason != null)
+                          if (view.shortReason != null)
                             Text(
-                              shortReason,
+                              view.shortReason!,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
@@ -285,10 +191,7 @@ class _MemoryActivitySectionState extends State<MemoryActivitySection> {
                       color: context.cs.onSurfaceVariant,
                     ),
                     const SizedBox(width: 4),
-                    Text(
-                      '$tokens tok · $scoreText',
-                      style: const TextStyle(fontSize: 11),
-                    ),
+                    Text(view.trailing, style: const TextStyle(fontSize: 11)),
                   ],
                 ),
               ),
@@ -300,103 +203,26 @@ class _MemoryActivitySectionState extends State<MemoryActivitySection> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // The verdict first, in words. It used to be the raw
-                  // diagnostic code appended to the row's title, where it was
-                  // untranslated and clipped by the single line.
-                  Text(
-                    memoryReasonLabel(reason),
-                    style: TextStyle(
-                      fontSize: 11,
-                      height: 1.3,
-                      fontWeight: FontWeight.w600,
-                      color: selected
-                          ? Colors.greenAccent
-                          : Colors.orangeAccent,
-                    ),
-                  ),
-                  ?_detailLine(context, memoryInjectionLabel(injectionType)),
-                  ?_detailLine(
-                    context,
-                    memoryTriggerLabel(
-                      keyword: hasKeyword,
-                      vector: hasVector,
-                      catalog: hasCatalog,
-                    ),
-                  ),
-                  if (chunkLabel.isNotEmpty)
-                    Text(
-                      'memory_detail_chunks'.tr(args: [chunkLabel]),
-                      style: TextStyle(
-                        fontSize: 11,
-                        height: 1.3,
-                        color: context.cs.onSurfaceVariant,
-                      ),
-                    ),
-                  if (injectionType == 'excerpt' &&
-                      chunkIndexes is List &&
-                      chunkIndexes.isNotEmpty)
-                    Text(
-                      'memory_detail_indexes'.tr(
-                        args: [
-                          chunkIndexes.map((index) => '#$index').join(', '),
-                        ],
-                      ),
-                      style: TextStyle(
-                        fontSize: 11,
-                        height: 1.3,
-                        color: context.cs.onSurfaceVariant,
-                      ),
-                    ),
-                  if (injectionType == 'full_entry')
-                    Text(
-                      'memory_detail_full_entry'.tr(
-                        args: ['$tokens', '$originalTokens'],
-                      ),
-                      style: TextStyle(
-                        fontSize: 11,
-                        height: 1.3,
-                        color: context.cs.onSurfaceVariant,
-                      ),
-                    ),
-                  if (matchedKeys.isNotEmpty)
+                  for (final line in view.details)
                     Padding(
-                      padding: const EdgeInsets.only(top: 2),
+                      padding: EdgeInsets.only(top: line.spaced ? 2 : 0),
                       child: Text(
-                        'memory_detail_keys'.tr(args: [matchedKeys.join(', ')]),
+                        line.text,
                         style: TextStyle(
                           fontSize: 11,
                           height: 1.3,
-                          color: context.cs.onSurfaceVariant,
-                        ),
-                      ),
-                    ),
-                  if (catalogTerms.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Text(
-                        'memory_detail_catalog'.tr(
-                          args: [catalogTerms.join(', ')],
-                        ),
-                        style: TextStyle(
-                          fontSize: 11,
-                          height: 1.3,
-                          color: context.cs.onSurfaceVariant,
-                        ),
-                      ),
-                    ),
-                  if (matchedTerms is List && matchedTerms.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Text(
-                        'memory_detail_matched'.tr(
-                          args: [matchedTerms.whereType<String>().join(', ')],
-                        ),
-                        style: TextStyle(
-                          fontSize: 11,
-                          height: 1.3,
-                          color: context.cs.onSurfaceVariant.withValues(
-                            alpha: 0.85,
-                          ),
+                          fontWeight: line.tone == MemoryDetailTone.verdict
+                              ? FontWeight.w600
+                              : null,
+                          color: switch (line.tone) {
+                            MemoryDetailTone.verdict => verdictColor,
+                            MemoryDetailTone.normal =>
+                              context.cs.onSurfaceVariant,
+                            MemoryDetailTone.dim =>
+                              context.cs.onSurfaceVariant.withValues(
+                                alpha: 0.85,
+                              ),
+                          },
                         ),
                       ),
                     ),

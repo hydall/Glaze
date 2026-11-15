@@ -107,6 +107,10 @@ Map<String, Object?> chromeTheme(
     'outlineVariant': chromeColor(cs.outlineVariant),
     'outline': chromeColor(cs.outline),
     'surfaceHigh': chromeColor(cs.surfaceContainerHighest),
+    // The cards under the header and the scroll buttons paint the plain
+    // surface, nearly opaque, as the Flutter widgets they replaced did.
+    'surface': chromeColor(cs.surface),
+    'error': chromeColor(cs.error),
     'text': chromeColor(preset.uiTextParsed ?? cs.onSurface),
     'text2': chromeColor(preset.uiTextGrayParsed ?? cs.onSurfaceVariant),
     'uiBorder': {

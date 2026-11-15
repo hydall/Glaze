@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/post_cleaner_state_provider.dart';
 import '../state/studio_cycle_state_provider.dart';
+import '../chrome/chat_chrome_channel.dart';
 import 'chat_status_card_shell.dart';
 
 /// Floating card shown at the top of the chat while the Studio controller-cycle
@@ -22,7 +23,10 @@ import 'chat_status_card_shell.dart';
 ///
 /// Auto-dismisses 2.5s after the cycle finishes.
 class StudioStatusCard extends ConsumerStatefulWidget {
-  const StudioStatusCard({super.key});
+  const StudioStatusCard({super.key, required this.channel});
+
+  /// The chat chrome the card is drawn in.
+  final ChatChromeChannel channel;
 
   @override
   ConsumerState<StudioStatusCard> createState() => _StudioStatusCardState();
@@ -138,6 +142,8 @@ class _StudioStatusCardState extends ConsumerState<StudioStatusCard> {
     }
 
     return ChatStatusCardShell(
+      channel: widget.channel,
+      slot: 'statusStudio',
       label: label,
       icon: icon,
       accent: accent,

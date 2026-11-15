@@ -8,6 +8,14 @@ import 'coverage_badges.dart';
 import 'coverage_reasons.dart';
 import 'coverage_tone.dart';
 
+/// The line under an entry's title: its lorebook, and the message its keys
+/// fired in. Empty when neither is known.
+String coverageEntrySubtitle(CoverageEntry e) => <String>[
+  if (e.lorebookName.isNotEmpty) e.lorebookName,
+  if (e.matchMessageIndex != null)
+    'lorebook_matched_in_message'.tr(args: ['${e.matchMessageIndex! + 1}']),
+].join(' · ');
+
 /// One lorebook entry in a coverage list.
 ///
 /// Collapsed it is a single line — status rail, title, token cost — so twenty
@@ -43,11 +51,7 @@ class _CoverageEntryTileState extends State<CoverageEntryTile> {
     final e = widget.entry;
     final tone = CoverageTone.of(context);
     final statusColor = tone.forEntry(e);
-    final subtitle = <String>[
-      if (e.lorebookName.isNotEmpty) e.lorebookName,
-      if (e.matchMessageIndex != null)
-        'lorebook_matched_in_message'.tr(args: ['${e.matchMessageIndex! + 1}']),
-    ].join(' · ');
+    final subtitle = coverageEntrySubtitle(e);
 
     final shortStatus = lorebookStatusShortLabel(e);
 
