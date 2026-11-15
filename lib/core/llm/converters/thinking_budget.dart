@@ -96,13 +96,17 @@ Object? calculateGoogleBudgetTokens({
   if (RegExp(r'gemini-3[.\d]*-pro').hasMatch(model)) {
     return _gemini3Symbolic(
       reasoningEffort,
-      lowForMedium: true,
+      // Gemini 3 Pro has `low` and `high` only; 3.1 Pro added `medium`.
+      hasMedium: !RegExp(r'gemini-3-pro').hasMatch(model),
+      hasMinimal: false,
     );
   }
   if (RegExp(r'gemini-3[.\d]*-flash').hasMatch(model)) {
     return _gemini3Symbolic(
       reasoningEffort,
-      lowForMedium: false,
+      hasMedium: true,
+      // 3.7 and 3.8 Flash reject `minimal` with an error.
+      hasMinimal: !RegExp(r'gemini-3\.[78]-flash').hasMatch(model),
     );
   }
   if (model.contains('flash-lite')) {
@@ -129,17 +133,18 @@ Object? calculateGoogleBudgetTokens({
 
 Object? _gemini3Symbolic(
   String effort, {
-  required bool lowForMedium,
+  required bool hasMedium,
+  required bool hasMinimal,
 }) {
   switch (effort) {
     case ReasoningEffort.auto:
       return null;
     case ReasoningEffort.min:
-      return lowForMedium ? 'low' : 'minimal';
+      return hasMinimal ? 'minimal' : 'low';
     case ReasoningEffort.low:
       return 'low';
     case ReasoningEffort.medium:
-      return lowForMedium ? 'low' : 'medium';
+      return hasMedium ? 'medium' : 'low';
     case ReasoningEffort.high:
     case ReasoningEffort.max:
       return 'high';

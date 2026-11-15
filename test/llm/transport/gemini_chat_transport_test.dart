@@ -293,6 +293,32 @@ void main() {
       expect(tc['thinkingBudget'], 2500); // 25% of 10000
     });
 
+    test('gemini-3.8-flash min → low, the model rejects minimal', () {
+      final built = GeminiChatTransport.buildRequest(
+        _req(
+          model: 'gemini-3.8-flash',
+          requestReasoning: true,
+          reasoningEffort: 'min',
+        ),
+      );
+      final cfg = built.body['generationConfig'] as Map;
+      final tc = cfg['thinkingConfig'] as Map;
+      expect(tc['thinkingLevel'], 'low');
+    });
+
+    test('gemini-3.1-pro-preview medium → medium', () {
+      final built = GeminiChatTransport.buildRequest(
+        _req(
+          model: 'gemini-3.1-pro-preview',
+          requestReasoning: true,
+          reasoningEffort: 'medium',
+        ),
+      );
+      final cfg = built.body['generationConfig'] as Map;
+      final tc = cfg['thinkingConfig'] as Map;
+      expect(tc['thinkingLevel'], 'medium');
+    });
+
     test('gemini-3-pro medium → thinkingLevel symbolic', () {
       final built = GeminiChatTransport.buildRequest(
         _req(
