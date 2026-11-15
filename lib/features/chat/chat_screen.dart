@@ -1096,6 +1096,9 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
     _drawerListenable = Listenable.merge([
       widget.drawerCtrl.drawerAnim,
       widget.drawerCtrl,
+      // The scroll buttons hide while the composer fills the screen sideways,
+      // which turns on the composer's focus.
+      widget.drawerCtrl.inputFocus,
     ]);
   }
 
@@ -1944,10 +1947,21 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
             targetPanelHeight +
             (safeBottom * (1 - targetFactor));
         _lastMessageListBottom = webViewBottomInset;
+        // Typing on a phone held sideways: the page's composer fills all the
+        // room above the keyboard (composer.js `typing()`). The scroll buttons
+        // are Flutter widgets over the WebView, so no stacking order in the
+        // page can put the composer on top of them; they stand down instead.
+        final isTypingSideways =
+            strip != null &&
+            widget.drawerCtrl.inputFocus.hasFocus &&
+            widget.keyboardHeight > 0 &&
+            (defaultTargetPlatform == TargetPlatform.android ||
+                defaultTargetPlatform == TargetPlatform.iOS);
         final showScrollBtn =
             _showScrollToBottom &&
             !widget.search.showSearch &&
-            !isEditingMessage;
+            !isEditingMessage &&
+            !isTypingSideways;
         // JS arms this once the reader scrolls up away from the first message;
         // the header gate takes it away again on a downward scroll, matching
         // the header's own hide-on-scroll.
@@ -1955,7 +1969,8 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
             _showScrollToTop &&
             !widget.isHeaderHidden &&
             !widget.search.showSearch &&
-            !isEditingMessage;
+            !isEditingMessage &&
+            !isTypingSideways;
 
         final animatedBottomPanelInset =
             panelHeight + (safeBottom * (1 - factor));
