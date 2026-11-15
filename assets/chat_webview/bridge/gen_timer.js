@@ -53,6 +53,9 @@ export class GenTimer {
     const timeStr = this._format(this._start);
     const streamingEl = this._findBubble();
     if (!streamingEl) return false;
+    // The run already failed: the error card replaced the bubble, and a tick
+    // landing before the generation flag drops must not put a clock back.
+    if (streamingEl.classList.contains('error')) return true;
 
     let wrapper = streamingEl.querySelector('.gen-time-wrapper');
 

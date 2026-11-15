@@ -676,6 +676,7 @@
   "error_request_cancelled": "Отменено",
   "error_connection_timed_out": "Время ожидания соединения истекло",
   "error_server_too_long": "Сервер слишком долго отвечает",
+  "error_server_silent": "Сервер ничего не присылал {seconds}с — соединение прервано. Проверьте сеть, VPN или endpoint. Если модель думает дольше, увеличьте таймаут в настройках API и включите «Применять к сетевому лимиту».",
   "error_upload_timed_out": "Время отправки истекло",
   "error_first_chunk_timeout": "Нет ответа от модели за {seconds}с — соединение прервано. Проверьте endpoint или увеличьте таймаут в настройках API.",
   "error_connection_failed_check_network": "Не удалось подключиться - проверьте эндпоинт и сеть",

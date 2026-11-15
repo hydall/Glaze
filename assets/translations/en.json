@@ -672,6 +672,7 @@
   "error_request_cancelled": "Cancelled",
   "error_connection_timed_out": "Connection timed out",
   "error_server_too_long": "Server took too long to respond",
+  "error_server_silent": "The server sent nothing for {seconds}s — the connection was dropped. Check your network, VPN or endpoint. For a model that thinks longer, raise the timeout in the API settings and turn on \"Apply to the network limit\".",
   "error_upload_timed_out": "Upload timed out",
   "error_first_chunk_timeout": "No response from the model for {seconds}s — the connection was aborted. Check the endpoint or raise the timeout in the API settings.",
   "error_connection_failed_check_network": "Connection failed - check endpoint and network",

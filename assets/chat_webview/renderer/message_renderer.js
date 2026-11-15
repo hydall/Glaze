@@ -599,6 +599,20 @@ if (messageData.isEditing) classes.push('editing');
     stat.insertBefore(this._buildGenTime(genTime, clockMargin), stat.firstChild);
   }
 
+  /* Drops the clock icon and badge from the gen-stat row in `meta`, and the
+     row itself when nothing else is left in it. */
+  _removeGenTime(meta) {
+    const stat = meta?.querySelector('.gen-stat:not(.msg-index)');
+    const wrapper = stat?.querySelector('.gen-time-wrapper');
+    if (!wrapper) return;
+    const icon = wrapper.previousElementSibling;
+    if (icon && icon.tagName.toLowerCase() === 'svg') icon.remove();
+    wrapper.remove();
+    const tokens = stat.querySelector('.token-count-inline');
+    if (tokens) tokens.style.marginLeft = '';
+    if (!stat.firstElementChild) stat.remove();
+  }
+
   /* ----- Bubble meta (inside body) ----- */
   _createBubbleMeta(m) {
     const meta = document.createElement('div');
@@ -1054,6 +1068,16 @@ if (messageData.isEditing) classes.push('editing');
 
     let bubbleMeta = sectionEl.querySelector('.bubble-meta');
     let footerMeta = sectionEl.querySelector('.msg-meta');
+
+    // A full message map (`role` present) that is no longer typing and carries
+    // no time has no clock to show. The one left on the row is the live
+    // GenTimer's, frozen wherever it last ticked — WebView timers stop while
+    // the app is in the background, so a request that failed there left
+    // "49.6s" on an error card that had waited two minutes.
+    if (msg.role !== undefined && !msg.isTyping && !hasGen) {
+      this._removeGenTime(bubbleMeta);
+      this._removeGenTime(footerMeta);
+    }
 
     if (hasGen || hasTokens) {
       // `:not(.msg-index)`: the bubble meta's `#N` chip shares the gen-stat
