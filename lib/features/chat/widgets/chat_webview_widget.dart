@@ -166,6 +166,9 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
   /// button beside each message's menu button.
   final bool translationEnabled;
 
+  /// Whether the page stops following a streaming reply down.
+  final bool disableStreamAutoScroll;
+
   // Callback objects
   final MessageActionsCallbacks messageActions;
   final EditActionsCallbacks editActions;
@@ -241,6 +244,7 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
     this.disableSwipeRegeneration = false,
     this.studioEnabled = false,
     this.translationEnabled = false,
+    this.disableStreamAutoScroll = false,
     this.messageActions = const MessageActionsCallbacks(),
     this.editActions = const EditActionsCallbacks(),
     this.imageGenActions = const ImageGenCallbacks(),
@@ -548,6 +552,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
           disableSwipeRegeneration: widget.disableSwipeRegeneration,
           studioEnabled: widget.studioEnabled,
           translationEnabled: widget.translationEnabled,
+          disableStreamAutoScroll: widget.disableStreamAutoScroll,
           messages: widget.messages,
           visibleStartIndex: widget.visibleStartIndex,
           memoryEntries: widget.memoryEntries,
@@ -1224,6 +1229,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       disableSwipeRegeneration: w.disableSwipeRegeneration,
       studioEnabled: w.studioEnabled,
       translationEnabled: w.translationEnabled,
+      disableStreamAutoScroll: w.disableStreamAutoScroll,
       memoryEntries: w.memoryEntries,
       memoryDrafts: w.memoryDrafts,
       sessionId: w.sessionId,

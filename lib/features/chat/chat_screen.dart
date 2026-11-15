@@ -2114,6 +2114,8 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                             (appSettings?.hideTokenCount ?? false),
                         disableSwipeRegeneration:
                             appSettings?.disableSwipeRegeneration ?? false,
+                        disableStreamAutoScroll:
+                            appSettings?.disableStreamAutoScroll ?? false,
                         studioEnabled:
                             ref
                                 .watch(

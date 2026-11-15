@@ -131,6 +131,21 @@ List<MenuSearchEntry> buildSettingsSearchIndex() {
       groupKey: 'settings_group_chat',
     ),
     row(
+      'stream_auto_scroll',
+      'menu_stream_auto_scroll',
+      'desc_stream_auto_scroll',
+      Icons.vertical_align_bottom_rounded,
+      const [
+        'scroll',
+        'autoscroll',
+        'streaming',
+        'прокрутка',
+        'автопрокрутка',
+        'стриминг',
+      ],
+      groupKey: 'settings_group_chat',
+    ),
+    row(
       'show_msg_id',
       'menu_show_msg_id',
       'desc_show_msg_id',

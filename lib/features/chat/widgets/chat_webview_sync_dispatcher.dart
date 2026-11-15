@@ -437,7 +437,8 @@ class ChatWebViewSyncDispatcher {
         current.hideTokenCount != old.hideTokenCount ||
         current.disableSwipeRegeneration != old.disableSwipeRegeneration ||
         current.studioEnabled != old.studioEnabled ||
-        current.translationEnabled != old.translationEnabled) {
+        current.translationEnabled != old.translationEnabled ||
+        current.disableStreamAutoScroll != old.disableStreamAutoScroll) {
       bridge.setMessageSettings(
         batterySaver: current.batterySaver,
         hideMessageId: current.hideMessageId,
@@ -446,6 +447,7 @@ class ChatWebViewSyncDispatcher {
         disableSwipeRegeneration: current.disableSwipeRegeneration,
         studioEnabled: current.studioEnabled,
         translationEnabled: current.translationEnabled,
+        disableStreamAutoScroll: current.disableStreamAutoScroll,
       );
     }
   }
@@ -770,6 +772,7 @@ class ChatWebViewWidgetFields {
     required this.disableSwipeRegeneration,
     required this.studioEnabled,
     this.translationEnabled = false,
+    this.disableStreamAutoScroll = false,
     required this.memoryEntries,
     required this.memoryDrafts,
     required this.sessionId,
@@ -851,6 +854,7 @@ class ChatWebViewWidgetFields {
   final bool disableSwipeRegeneration;
   final bool studioEnabled;
   final bool translationEnabled;
+  final bool disableStreamAutoScroll;
   final List<dynamic> memoryEntries;
   final List<dynamic> memoryDrafts;
   final String? sessionId;

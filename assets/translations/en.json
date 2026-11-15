@@ -1209,6 +1209,8 @@
   "desc_show_token_count": "Shows the token usage attached to each message",
   "menu_swipe_regeneration": "Swipe to Regenerate",
   "desc_swipe_regeneration": "Regenerate a message by swiping it left",
+  "menu_stream_auto_scroll": "Auto-scroll While Streaming",
+  "desc_stream_auto_scroll": "Keep the chat scrolled to the bottom as a reply comes in",
   "desc_chat_layout": "Switch between bubbles or classic message layout",
   "settings_reset_title": "Reset Glaze Settings",
   "settings_reset_hint": "Returns app settings to their defaults and switches back to the default theme",

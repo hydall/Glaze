@@ -1024,6 +1024,7 @@ class ChatBridgeController {
     required bool disableSwipeRegeneration,
     required bool studioEnabled,
     bool translationEnabled = false,
+    bool disableStreamAutoScroll = false,
   }) => layout.setMessageSettings(
     batterySaver: batterySaver,
     hideMessageId: hideMessageId,
@@ -1032,6 +1033,7 @@ class ChatBridgeController {
     disableSwipeRegeneration: disableSwipeRegeneration,
     studioEnabled: studioEnabled,
     translationEnabled: translationEnabled,
+    disableStreamAutoScroll: disableStreamAutoScroll,
   );
 
   // Display-only translation. None of these touch the section's stored text:
