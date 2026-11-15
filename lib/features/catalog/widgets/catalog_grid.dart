@@ -277,15 +277,16 @@ class _CfChallengeWebViewState extends State<_CfChallengeWebView> {
     // picks.
     try {
       final origin = WebUri('https://janitorai.com');
-      final before = await CookieManager.instance().getCookies(url: origin);
+      final before = await webViewCookieManager()
+          .getCookies(url: origin, webViewController: controller);
       debugPrint('[CF] Cookies before wipe: ${before.map((c) => c.name).join(', ')}');
       final authCookies =
           before.where((c) => isJanitorAuthCookie(c.name)).toList();
-      await CookieManager.instance().deleteAllCookies();
+      await webViewCookieManager().deleteAllCookies();
       final nowMs = DateTime.now().millisecondsSinceEpoch;
       for (final c in authCookies) {
         try {
-          await CookieManager.instance().setCookie(
+          await webViewCookieManager().setCookie(
             url: origin,
             name: c.name,
             value: c.value.toString(),
@@ -293,12 +294,14 @@ class _CfChallengeWebViewState extends State<_CfChallengeWebView> {
             expiresDate: janitorAuthCookieExpiry(c.expiresDate, nowMs: nowMs),
             isSecure: true,
             sameSite: HTTPCookieSameSitePolicy.LAX,
+            webViewController: controller,
           );
         } catch (e) {
           debugPrint('[CF] auth cookie restore error (${c.name}): $e');
         }
       }
-      final after = await CookieManager.instance().getCookies(url: origin);
+      final after = await webViewCookieManager()
+          .getCookies(url: origin, webViewController: controller);
       debugPrint('[CF] Cookies after wipe: ${after.map((c) => c.name).join(', ')} '
           '(${after.length} left, ${authCookies.length} auth restored)');
     } catch (e) {
@@ -318,8 +321,10 @@ class _CfChallengeWebViewState extends State<_CfChallengeWebView> {
       if (!mounted) return;
       pollCount++;
       try {
-        final cookies = await CookieManager.instance()
-            .getCookies(url: WebUri('https://janitorai.com'));
+        final cookies = await webViewCookieManager().getCookies(
+          url: WebUri('https://janitorai.com'),
+          webViewController: controller,
+        );
         final names = cookies.map((c) => c.name).join(', ');
         if (pollCount % 6 == 1) {
           debugPrint('[CF] Poll #$pollCount cookies: $names');
@@ -365,8 +370,10 @@ class _CfChallengeWebViewState extends State<_CfChallengeWebView> {
       onLoadStop: (controller, url) async {
         debugPrint('[CF] onLoadStop: $url');
         try {
-          final cookies = await CookieManager.instance()
-              .getCookies(url: WebUri('https://janitorai.com'));
+          final cookies = await webViewCookieManager().getCookies(
+            url: WebUri('https://janitorai.com'),
+            webViewController: controller,
+          );
           debugPrint('[CF] Cookies at onLoadStop: ${cookies.map((c) => c.name).join(', ')}');
         } catch (_) {}
       },

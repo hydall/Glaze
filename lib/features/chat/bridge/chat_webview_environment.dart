@@ -27,6 +27,21 @@ WebUri? _chatWebViewLocalFileBaseUrl;
 /// initialized before creating WebViews. Mobile platforms do not use this.
 WebViewEnvironment? get chatWebViewEnvironment => _chatWebViewEnvironment;
 
+/// The cookie store the app's WebViews actually use.
+///
+/// On Windows a bare `CookieManager.instance()` makes the plugin spin up its
+/// own default WebView2 environment, and every call that names no WebView
+/// creates a throwaway hidden WebView2 for one DevTools request and closes it
+/// a second later. Polling cookies that way creates dozens of them in a few
+/// seconds, and closing them is a known WebView2 crash point. Callers with a live
+/// controller should also pass it as `webViewController`, so the request runs
+/// on that WebView and no throwaway is created at all.
+CookieManager webViewCookieManager() => CookieManager.instance(
+      webViewEnvironment: defaultTargetPlatform == TargetPlatform.windows
+          ? _chatWebViewEnvironment
+          : null,
+    );
+
 /// Cleaned-up User-Agent for the janitorai WebViews, or `null` to keep the
 /// native UA (no override).
 ///

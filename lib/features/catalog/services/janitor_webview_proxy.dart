@@ -1810,13 +1810,14 @@ class JanitorWebViewProxy {
   static Future<void> flushCookies() async {
     try {
       final url = WebUri('https://glaze-cookie-flush.invalid/');
-      await CookieManager.instance().setCookie(
+      final cookies = webViewCookieManager();
+      await cookies.setCookie(
         url: url,
         name: 'gz_flush',
         value: '1',
         path: '/',
       );
-      await CookieManager.instance().deleteCookie(url: url, name: 'gz_flush');
+      await cookies.deleteCookie(url: url, name: 'gz_flush');
     } catch (e) {
       _log('cookie flush error: $e');
     }
@@ -1892,7 +1893,7 @@ class JanitorWebViewProxy {
       } catch (_) {}
     }
     try {
-      await CookieManager.instance().deleteAllCookies();
+      await webViewCookieManager().deleteAllCookies();
     } catch (_) {}
     await _reload();
   }
@@ -2270,7 +2271,12 @@ class JanitorWebViewProxy {
     final deadline = DateTime.now().add(timeout);
     while (DateTime.now().isBefore(deadline)) {
       try {
-        final cookies = await CookieManager.instance().getCookies(url: _origin);
+        // Ask through the proxy's own WebView: without it Windows builds a
+        // throwaway WebView2 per call, ~30 of them over this loop.
+        final cookies = await webViewCookieManager().getCookies(
+          url: _origin,
+          webViewController: _controller,
+        );
         for (final c in cookies) {
           if (c.name == 'cf_clearance') {
             final value = c.value?.toString() ?? '';
