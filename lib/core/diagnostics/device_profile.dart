@@ -153,7 +153,12 @@ class DeviceProfile {
       _reg([_ntKey]),
       _reg([_biosKey]),
       _reg([_cpuKey, '/v', 'ProcessorNameString']),
-      _reg([_gpuClassKey, '/s']),
+      // Its own, shorter limit: a slow GPU lookup must not push the whole
+      // probe past [collect]'s timeout and cost the report every other line.
+      _windowsGpus().timeout(
+        const Duration(seconds: 2),
+        onTimeout: () => const {},
+      ),
     ]);
     return fromWindows(
       nt: _firstKey(results[0]),
@@ -226,6 +231,19 @@ class DeviceProfile {
       ?_clean(nt['DisplayVersion'] ?? nt['ReleaseId']),
       if (build != null) '(build $build${ubr != null ? '.$ubr' : ''})',
     ].join(' ');
+  }
+
+  /// The display adapters' own keys (`…\0000`, `…\0001`), each read without
+  /// its subkeys. A recursive `reg query /s` of the class key walks every
+  /// driver's settings tree and takes 20+ seconds on a machine with a
+  /// discrete GPU, which timed the whole profile out.
+  static Future<Map<String, Map<String, String>>> _windowsGpus() async {
+    final classKey = await _reg([_gpuClassKey]);
+    final adapters = classKey.keys.where(
+      (key) => RegExp(r'\\\d{4}$').hasMatch(key),
+    );
+    final read = await Future.wait(adapters.map((key) => _reg([key])));
+    return {for (final keys in read) ...keys};
   }
 
   static Future<Map<String, Map<String, String>>> _reg(
