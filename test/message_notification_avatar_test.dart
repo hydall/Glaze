@@ -61,6 +61,51 @@ void main() {
     });
   });
 
+  group('copyNotificationAttachment', () {
+    // iOS and macOS move an attached file into the system's own store. The
+    // stored avatar was attached directly, so every notification took a
+    // character's picture out of the library.
+    test('hands out a copy and leaves the stored avatar in place', () async {
+      final source = thumbnail('aria');
+      File(source).writeAsBytesSync(const [1, 2, 3]);
+
+      final copy = await copyNotificationAttachment(source, tempRoot: root);
+
+      expect(copy, isNotNull);
+      expect(copy, isNot(source));
+      expect(p.extension(copy!), '.jpg');
+      expect(File(copy).readAsBytesSync(), const [1, 2, 3]);
+      // What the system does with an attachment.
+      File(copy).deleteSync();
+      expect(File(source).readAsBytesSync(), const [1, 2, 3]);
+    });
+
+    test('sweeps copies an earlier failed post left behind', () async {
+      final source = avatar('aria');
+      write(source);
+      final dir = Directory(p.join(root.path, kNotificationAttachmentDirName))
+        ..createSync();
+      final stale = File(p.join(dir.path, '1000.png'))..writeAsBytesSync([0]);
+      final fresh = File(
+        p.join(dir.path, '${DateTime.now().microsecondsSinceEpoch - 1}.png'),
+      )..writeAsBytesSync([0]);
+
+      final copy = await copyNotificationAttachment(source, tempRoot: root);
+
+      expect(copy, isNotNull);
+      expect(stale.existsSync(), isFalse);
+      expect(fresh.existsSync(), isTrue);
+      expect(File(source).existsSync(), isTrue);
+    });
+
+    test('a source that cannot be copied yields no attachment', () async {
+      expect(
+        await copyNotificationAttachment(avatar('missing'), tempRoot: root),
+        isNull,
+      );
+    });
+  });
+
   group('androidIconCandidates', () {
     test('the envelope is what a new message wears', () {
       expect(

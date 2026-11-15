@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:path/path.dart' as p;
 
 import '../../constants/build_channel.dart';
 import '../../utils/platform_paths.dart';
@@ -29,6 +30,58 @@ String? notificationAvatarPath(String? avatarPath) {
     }
   }
   return null;
+}
+
+/// Folder under the system temp directory that holds the throwaway copies
+/// made by [copyNotificationAttachment].
+const String kNotificationAttachmentDirName = 'glaze_notification_attachments';
+
+/// A throwaway copy of [source] to hand to an iOS/macOS notification, or null
+/// when it could not be made.
+///
+/// `UNNotificationAttachment` does not read the file it is given — the system
+/// *moves* it into its own attachment store. Attaching the stored avatar
+/// therefore took the file out of the Glaze data folder: the first
+/// notification from a character consumed its thumbnail, the next one the
+/// full-size card, and from the following app start (once the decoded image
+/// had left the image cache) the character had no picture anywhere. Only a
+/// copy may ever be attached.
+///
+/// The copy keeps the source's extension, which is how the system tells the
+/// image type. Copies an earlier, failed post left behind are swept on the
+/// way; the age is read off the file name, because a copy can inherit the
+/// source's modification time.
+Future<String?> copyNotificationAttachment(
+  String source, {
+  Directory? tempRoot,
+}) async {
+  try {
+    final dir = Directory(
+      p.join(
+        (tempRoot ?? Directory.systemTemp).path,
+        kNotificationAttachmentDirName,
+      ),
+    );
+    await dir.create(recursive: true);
+
+    final now = DateTime.now().microsecondsSinceEpoch;
+    const maxAgeMicros = Duration.microsecondsPerHour;
+    await for (final entity in dir.list()) {
+      if (entity is! File) continue;
+      final stamp = int.tryParse(p.basenameWithoutExtension(entity.path));
+      if (stamp != null && now - stamp < maxAgeMicros) continue;
+      try {
+        await entity.delete();
+      } catch (_) {
+        // Already taken by the system, or gone.
+      }
+    }
+
+    final target = p.join(dir.path, '$now${p.extension(source)}');
+    return (await File(source).copy(target)).path;
+  } catch (_) {
+    return null;
+  }
 }
 
 /// Platform half of the "new message from <character>" notification.
@@ -322,7 +375,13 @@ class MessageNotificationPresenter {
   }) async {
     if (!isSupported) return false;
 
-    final avatar = _existingAvatarPath(avatarPath);
+    final stored = _existingAvatarPath(avatarPath);
+    // iOS and macOS take the attached file away (see
+    // [copyNotificationAttachment]), so they only ever get a copy. A copy that
+    // cannot be made costs the picture, never the stored avatar.
+    final avatar = stored != null && _isDarwin
+        ? await copyNotificationAttachment(stored)
+        : stored;
     // Built on demand, not up front: an attempt can mark the small icon
     // rejected, and a later step has to be constructed after that to leave the
     // icon out rather than repeat the rejection.
