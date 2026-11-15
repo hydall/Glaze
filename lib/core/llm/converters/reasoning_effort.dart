@@ -14,8 +14,9 @@
 ///   `xhigh` on Hydrogen).
 /// - The UI's `min` step becomes `minimal` on the GPT-5 family or `low` on
 ///   older models.
-/// - Anthropic and Gemini read the raw step as a share of the thinking budget
-///   (`thinking_budget.dart`), so all six pass through untouched.
+/// - Anthropic and Gemini turn the raw step into a budget share or a thinking
+///   level themselves (`thinking_budget.dart`), so all six pass through
+///   untouched.
 library;
 
 import '../transport/llm_protocol.dart';
