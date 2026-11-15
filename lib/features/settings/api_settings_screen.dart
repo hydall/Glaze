@@ -153,6 +153,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   bool _customUseResponsesApi = false;
   bool _useSystemInstruction = true;
   bool _toolCalling = false;
+  bool _timeoutOverridesNetwork = false;
   List<String> _disabledToolGroups = const [];
   bool _showNativeReasoning = true;
   bool _excludeReasoningFromContextBudget = false;
@@ -480,6 +481,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       _customUseResponsesApi = values.useResponsesApi;
       _useSystemInstruction = values.useSystemInstruction;
       _toolCalling = values.toolCalling;
+      _timeoutOverridesNetwork = values.firstChunkTimeoutOverridesNetwork;
       _disabledToolGroups = values.disabledToolGroups;
       _showNativeReasoning = values.showNativeReasoning;
       _excludeReasoningFromContextBudget =
@@ -565,6 +567,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
         useSystemInstruction: _useSystemInstruction,
         toolCalling: _toolCalling,
         disabledToolGroups: _disabledToolGroups,
+        firstChunkTimeoutOverridesNetwork: _timeoutOverridesNetwork,
         showNativeReasoning: _showNativeReasoning,
         excludeReasoningFromContextBudget: _excludeReasoningFromContextBudget,
         reasoningEffort: _reasoningEffort,
@@ -1082,6 +1085,15 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
           controller: _firstChunkTimeoutCtrl,
           placeholder: '60',
           keyboardType: TextInputType.number,
+        ),
+        MenuSwitchItem(
+          label: 'label_timeout_overrides_network'.tr(),
+          description: 'desc_timeout_overrides_network'.tr(),
+          value: _timeoutOverridesNetwork,
+          onChanged: (v) {
+            setState(() => _timeoutOverridesNetwork = v);
+            _scheduleSave();
+          },
         ),
       ],
     );

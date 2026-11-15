@@ -106,6 +106,7 @@ class ApiConfigRepo implements SyncApiConfigStore {
     sessionIdMode: c.sessionIdMode,
     promptPostProcessing: c.promptPostProcessing,
     firstChunkTimeoutMs: c.firstChunkTimeoutMs,
+    firstChunkTimeoutOverridesNetwork: c.firstChunkTimeoutOverridesNetwork,
     useSystemInstruction: c.useSystemInstruction,
     tokenizer: c.tokenizer,
     toolCalling: c.toolCalling,
@@ -171,6 +172,9 @@ class ApiConfigRepo implements SyncApiConfigStore {
     sessionIdMode: Value(m.sessionIdMode),
     promptPostProcessing: Value(m.promptPostProcessing),
     firstChunkTimeoutMs: Value(m.firstChunkTimeoutMs),
+    firstChunkTimeoutOverridesNetwork: Value(
+      m.firstChunkTimeoutOverridesNetwork,
+    ),
     useSystemInstruction: Value(m.useSystemInstruction),
     tokenizer: Value(m.tokenizer),
     toolCalling: Value(m.toolCalling),

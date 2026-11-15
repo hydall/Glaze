@@ -16,6 +16,7 @@ extension _AppDatabaseUpgradeV136 on AppDatabase {
     await _ensureApiConfigTokenizerColumn(m); // v137
     await _ensureApiConfigNoAssistantColumns(m); // v139
     await _ensureApiConfigToolCallingColumns(m); // v145
+    await _ensureApiConfigTimeoutOverrideColumn(m); // v146
     await m.alterTable(TableMigration(apiConfigs));
   }
 }

@@ -168,6 +168,8 @@ class ApiConfigs extends Table {
       text().withDefault(const Constant('openrouter'))();
   IntColumn get firstChunkTimeoutMs =>
       integer().withDefault(const Constant(120000))();
+  BoolColumn get firstChunkTimeoutOverridesNetwork =>
+      boolean().withDefault(const Constant(false))();
   TextColumn get promptPostProcessing =>
       text().withDefault(const Constant('none'))();
   // NoAssistant moved back onto the preset, where Vue kept it. The v139

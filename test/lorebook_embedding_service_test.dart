@@ -19,6 +19,7 @@ class _FakeEmbeddingService extends EmbeddingService {
     EmbeddingConfig config, {
     CancelToken? cancelToken,
     captureContext,
+    bool foreground = false,
   }) async {
     requestedTexts.addAll(texts);
     contexts.add(captureContext);
