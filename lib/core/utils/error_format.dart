@@ -25,7 +25,7 @@ String formatError(Object err) {
 
     return switch (err.type) {
       DioExceptionType.connectionTimeout => 'error_connection_timed_out'.tr(),
-      DioExceptionType.receiveTimeout => 'error_server_too_long'.tr(),
+      DioExceptionType.receiveTimeout => _receiveTimeoutMessage(err),
       DioExceptionType.sendTimeout => 'error_upload_timed_out'.tr(),
       DioExceptionType.connectionError =>
         'error_connection_failed_check_network'.tr(),
@@ -34,6 +34,39 @@ String formatError(Object err) {
     };
   }
   return err.toString();
+}
+
+/// Names how long the server stayed silent, so the reader can tell a stalled
+/// connection from a slow model — the bare "took too long" read as the model
+/// thinking hard, when no byte at all had arrived for the whole window.
+String _receiveTimeoutMessage(DioException err) {
+  final seconds = err.requestOptions.receiveTimeout?.inSeconds ?? 0;
+  if (seconds <= 0) return 'error_server_too_long'.tr();
+  return 'error_server_silent'.tr(namedArgs: {'seconds': '$seconds'});
+}
+
+/// One line describing [err] for the diagnostic log: the Dio failure kind,
+/// status and timeout rather than the localized text, and never the request
+/// URL or headers, which can carry a key.
+String describeErrorForLog(Object err) {
+  if (err is DioException) {
+    final parts = <String>['dio:${err.type.name}'];
+    final status = err.response?.statusCode;
+    if (status != null) parts.add('status=$status');
+    if (err.type == DioExceptionType.receiveTimeout) {
+      final timeout = err.requestOptions.receiveTimeout;
+      if (timeout != null) parts.add('timeout=${timeout.inSeconds}s');
+    }
+    final inner = err.error;
+    if (inner != null) parts.add('cause=${_clipForLog('$inner')}');
+    return parts.join(' ');
+  }
+  return '${err.runtimeType}: ${_clipForLog('$err')}';
+}
+
+String _clipForLog(String text) {
+  final oneLine = text.replaceAll(RegExp(r'\s+'), ' ').trim();
+  return oneLine.length <= 200 ? oneLine : '${oneLine.substring(0, 200)}…';
 }
 
 /// Decodes an error body left as a byte stream by `ResponseType.stream`.

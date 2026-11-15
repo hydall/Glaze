@@ -189,6 +189,41 @@ test('bubble layout: the count returns to the stat row, not the #N chip', async 
   expect(meta.stat).toBe('99t');
 });
 
+test('an error that replaces a timed reply drops the frozen clock', async ({
+  page,
+}) => {
+  await boot(page);
+  // The live clock stops ticking while the app is in the background, so the
+  // badge a failed run leaves behind is wherever it froze, not how long the
+  // request took. The error map carries no time, and the row must show none.
+  await finishedReply(page, { genTime: '49.6s' });
+  await update(page, { isTyping: true, genTime: '49.6s' });
+  await update(page, {
+    text: 'Server took too long to respond',
+    isTyping: false,
+    isError: true,
+  });
+
+  expect(
+    await page.evaluate(
+      () => document.querySelectorAll('[data-message-id="a1"] .gen-time-badge').length,
+    ),
+  ).toBe(0);
+});
+
+test('a clock-less row keeps its token count', async ({ page }) => {
+  await boot(page);
+  await finishedReply(page, { genTime: '4.0s', tokens: 120 });
+  await update(page, { isTyping: false, tokens: 120 });
+
+  expect(
+    await page.evaluate(() => document.querySelectorAll('.gen-time-badge').length),
+  ).toBe(0);
+  const badges = await tokenBadges(page);
+  expect(badges.length).toBeGreaterThan(0);
+  for (const badge of badges) expect(badge).toBe('120t');
+});
+
 test('the clock leads the row it is rebuilt into', async ({ page }) => {
   await boot(page);
   // A reply with a count but no measurable time: the row exists without a
