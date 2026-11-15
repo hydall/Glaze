@@ -6,6 +6,7 @@ import '../../../../core/models/api_config.dart';
 import '../../../../core/utils/error_format.dart';
 import '../../../image_gen/image_gen_provider.dart';
 import '../../../image_gen/services/image_tag_markup.dart';
+import '../../../../shared/widgets/glaze_toast.dart';
 import '../../../settings/api_list_provider.dart';
 import '../../models/block_run_status.dart';
 import '../../models/info_block.dart';
@@ -120,11 +121,25 @@ class BlockImageRenderer {
     );
     ref.read(infoBlocksProvider(context.sessionId).notifier).addOrReplace(running);
 
-    final rendered = await render(context: context, sourceContent: pending);
+    final drawn = await render(context: context, sourceContent: pending);
 
     if (context.cancelToken.isCancelled) {
       await repo.updateStatus(context.placeholderId, BlockRunStatus.stopped);
       return running.copyWith(status: BlockRunStatus.stopped);
+    }
+
+    // A picture that was already there stays when its redraw fails; the
+    // error goes to a toast instead of replacing it (issue #825).
+    final (text: rendered, :errors) = ImageTagMarkup.restoreFailedRedraws(
+      existing,
+      drawn,
+    );
+    for (final error in errors) {
+      GlazeToast.showWithoutContext(
+        error.isEmpty ? 'Image gen failed' : 'Image gen: $error',
+        isError: true,
+        duration: 4000,
+      );
     }
 
     await repo.updateContent(context.placeholderId, rendered);
